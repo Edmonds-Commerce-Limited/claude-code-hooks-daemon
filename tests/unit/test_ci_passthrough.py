@@ -28,6 +28,7 @@ controlled config files, verifying real end-to-end behaviour.
 import json
 import os
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -127,14 +128,26 @@ def _create_project_structure(
 def _create_installed_stub(project_path: Path) -> None:
     """Create a fake venv python binary so _is_daemon_installed() returns true.
 
-    The test script template hardcodes PYTHON_CMD to {project}/nonexistent/python.
-    Creating that file makes the daemon appear 'installed' (dir + venv both present),
-    so ensure_daemon() falls through to the 'installed but not running' error path.
+    The test script template hardcodes PYTHON_CMD to
+    {project}/nonexistent/bin/python. "Installed" is judged by the clone's
+    venv_python_usable gate, which runs the interpreter and compares the
+    major.minor in pyvenv.cfg, so the fixture is a real interpreter (a symlink
+    to the running one) plus a pyvenv.cfg recording the running major.minor.
+    A shell stub that merely exists and is executable is the hazard the gate
+    exists to refuse. With the gate satisfied, ensure_daemon() falls through to
+    the 'installed but not running' error path.
     """
-    stub = project_path / "nonexistent" / "python"
+    # A real install ships the gate library; the gate is sourced from the clone.
+    lib_dir = project_path / ".claude" / "hooks-daemon" / "scripts"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    (lib_dir / "lib").symlink_to(_REPO_ROOT / "scripts" / "lib")
+    venv_dir = project_path / "nonexistent"
+    stub = venv_dir / "bin" / "python"
     stub.parent.mkdir(parents=True, exist_ok=True)
-    stub.write_text("#!/bin/bash\nexit 1\n")
-    stub.chmod(0o755)
+    stub.symlink_to(os.path.realpath(sys.executable))
+    (venv_dir / "pyvenv.cfg").write_text(
+        f"version = {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}\n"
+    )
 
 
 def _write_launcher(directory: Path) -> None:
@@ -217,7 +230,7 @@ def _run_hook_via_forwarder(
         HOOKS_DAEMON_ROOT_DIR="{project_path}/.claude/hooks-daemon"
         SOCKET_PATH="{project_path}/nonexistent.sock"
         PID_PATH="{project_path}/nonexistent.pid"
-        PYTHON_CMD="{project_path}/nonexistent/python"
+        PYTHON_CMD="{project_path}/nonexistent/bin/python"
 
         if ! ensure_daemon; then
             emit_hook_error "{event_name}" "daemon_startup_failed" \

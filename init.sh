@@ -2194,7 +2194,18 @@ _is_ci_enforced() {
 #   1 if daemon directory or venv Python is absent
 #
 _is_daemon_installed() {
-    [[ -d "$HOOKS_DAEMON_ROOT_DIR" ]] && [[ -f "$PYTHON_CMD" ]]
+    # "Venv Python present" is the clone's gate (scripts/lib/resolve_venv.sh),
+    # not a file test: a venv whose interpreter now runs another Python
+    # major.minor than its pyvenv.cfg records is not installed in any useful
+    # sense, and must reach the VENV_MISSING self-heal (Plan 00555).
+    [[ -d "$HOOKS_DAEMON_ROOT_DIR" ]] && [[ -n "$PYTHON_CMD" ]] || return 1
+    # PYTHON_CMD can be set without _resolve_python_cmd having sourced the
+    # library, so load the gate here when it is not yet defined.
+    if ! declare -F venv_python_usable > /dev/null; then
+        # shellcheck disable=SC1091  # path is computed at runtime
+        source "$HOOKS_DAEMON_ROOT_DIR/scripts/lib/resolve_venv.sh" 2> /dev/null || return 1
+    fi
+    venv_python_usable "$PYTHON_CMD"
 }
 
 #

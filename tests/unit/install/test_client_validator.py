@@ -1129,21 +1129,19 @@ class TestValidateDaemonCanStartVenvResolution:
         fingerprint-keyed ``untracked/venv-{fp}/bin/python`` does. The
         verifier must pick the fingerprint-keyed one.
         """
-        import stat as _stat
-
         from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
 
         project_root = tmp_path / "project"
         daemon_dir = project_root / ".claude" / "hooks-daemon"
         venv_bin = daemon_dir / "untracked" / f"venv-{python_venv_fingerprint()}" / "bin"
         venv_bin.mkdir(parents=True)
-        fake_python = venv_bin / "python"
-        # Script that exits non-zero so import check fails but *existence* passes.
-        # This proves the verifier found the fingerprint-keyed path instead of
-        # falling through to the missing legacy path.
-        fake_python.write_text("#!/bin/sh\nexit 1\n")
-        fake_python.chmod(
-            fake_python.stat().st_mode | _stat.S_IXUSR | _stat.S_IXGRP | _stat.S_IXOTH
+        # A real base interpreter whose venv records its own major.minor, so the
+        # resolver's usability gate (Plan 00555) accepts it; the daemon package
+        # is not importable under it, so the import check fails, but only after
+        # the fingerprint-keyed path was found rather than the missing legacy one.
+        (venv_bin / "python").symlink_to(os.path.realpath(sys.executable))
+        (venv_bin.parent / "pyvenv.cfg").write_text(
+            f"version_info = {sys.version_info.major}.{sys.version_info.minor}.0\n"
         )
 
         result = ClientInstallValidator.validate_daemon_can_start(project_root)

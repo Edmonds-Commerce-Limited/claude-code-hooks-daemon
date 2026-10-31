@@ -58,9 +58,10 @@ never be the reason the session cannot repair the daemon.
 
 ### Phase 1: Reproduce and diagnose
 
-- [ ] ⬜ **Task 1.1**: Failing test. Build a venv whose `pyvenv.cfg`
+- [x] ✅ **Task 1.1**: Failing test. Build a venv whose `pyvenv.cfg`
   `version_info` differs from the running interpreter. Assert that the
-  resolver reports it stale, not live and not missing.
+  resolver reports it stale, not live and not missing. See
+  [DBF-REPORT.md](DBF-REPORT.md), "The original defect".
 - [x] ✅ **Task 1.2**: Trace the background build during the drift. No hook
   build ran. A venv that resolves but will not start was reported as "missing"
   whenever any process held the build lock (`init.sh:2901-2911`). Even a build
@@ -75,10 +76,13 @@ never be the reason the session cannot repair the daemon.
 
 - [ ] ⬜ **Task 2.1**: One venv-resolution SSoT, used by the wrapper, the
   hooks, the builder and `repair` (folds into 00100's scope where it overlaps).
-- [ ] ⬜ **Task 2.2**: Interpreter-drift detection: a `pyvenv.cfg` version that
+- [x] ✅ **Task 2.2**: Interpreter-drift detection: a `pyvenv.cfg` version that
   differs from the runtime version means a stale venv. Rebuild it with the
   current interpreter, editable-install the repo plus the dev extras on a
-  self-install, and re-key the directory name to the real version.
+  self-install, and re-key the directory name to the real version. A drifted
+  venv no longer resolves, so self-heal rebuilds under a fingerprint keyed to
+  the running version. The class is defended by `venv_interpreter_trust`
+  ([DBF-REPORT.md](DBF-REPORT.md)). The dev extras are Task 3.1.
 - [ ] ⬜ **Task 2.3**: `repair` must not need a working venv to rebuild one
   (extends 00456).
 - [ ] ⬜ **Task 2.4**: On a start failure, print the diagnosis: interpreter
@@ -104,7 +108,7 @@ never be the reason the session cannot repair the daemon.
 
 ## Success Criteria
 
-- [ ] A test reproduces the drift and passes after the fix.
+- [x] A test reproduces the drift and passes after the fix.
 - [ ] Simulated drift on a scratch self-install self-heals with no human
   command.
 - [ ] With the daemon down, Read and `git log` succeed and

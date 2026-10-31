@@ -498,12 +498,6 @@
       "reason": "Plan 00200 Task 5.4: version-probe command inside an explicit if/exit-code check within the same function as the &>/dev/null presence probes above."
     },
     {
-      "file": "scripts/install/venv.sh",
-      "function": "verify_venv",
-      "rule": "shell-discard-both-streams",
-      "reason": "Plan 00200 Task 5.4: `if ! \"$venv_python\" --version > /dev/null 2>&1; then print_error \"Virtual environment Python failed to run...\"` -- exit code explicitly checked and a specific error printed on failure."
-    },
-    {
       "file": "scripts/qa/run_shell_check.sh",
       "lines": [
         30

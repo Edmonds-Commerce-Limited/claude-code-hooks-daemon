@@ -67,7 +67,7 @@ NC='\033[0m' # No Colour
 # Check if venv exists
 #
 venv_exists() {
-    [[ -d "${VENV_DIR}" ]] && [[ -f "${VENV_PYTHON}" ]]
+    [[ -d "${VENV_DIR}" ]] && venv_python_usable "${VENV_PYTHON}"
 }
 
 #
@@ -154,8 +154,8 @@ ensure_venv() {
     # Create venv
     "${venv_base_python}" -m venv "${VENV_DIR}"
 
-    if [[ ! -f "${VENV_PYTHON}" ]]; then
-        echo -e "${RED}✗${NC} Failed to create venv at ${VENV_DIR}" >&2
+    if ! venv_python_usable "${VENV_PYTHON}"; then
+        echo -e "${RED}✗${NC} Failed to create a usable venv at ${VENV_DIR}" >&2
         return 1
     fi
 
@@ -301,6 +301,13 @@ venv_tool() {
     shift
 
     ensure_venv || return 1
+
+    # A venv tool runs under the venv's interpreter (its shebang), so a venv
+    # whose interpreter drifted cannot run any of them (Plan 00555).
+    if ! venv_python_usable "${VENV_PYTHON}"; then
+        echo -e "${RED}✗${NC} Venv interpreter not usable: ${VENV_PYTHON}" >&2
+        return 1
+    fi
 
     local tool_path="${VENV_DIR}/bin/${tool}"
 

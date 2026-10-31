@@ -47,7 +47,9 @@ def _discovery_snippet() -> str:
         if "daemon socket" in line and line.lstrip().startswith("#")
     )
     end = next(
-        i for i, line in enumerate(lines[start:], start) if 'if [[ ! -f "$VENV_PYTHON"' in line
+        i
+        for i, line in enumerate(lines[start:], start)
+        if 'if ! venv_python_usable "$VENV_PYTHON"' in line
     )
     return "\n".join(lines[start:end])
 

@@ -387,6 +387,54 @@ def test_deduplicates_same_binary_on_multiple_path_entries(
     assert len(probes) == 1, f"duplicate PATH entries must dedupe to one probe, got {probes!r}"
 
 
+# ----- _probe_python_version: a venv interpreter on PATH is a base only if usable -----
+
+_FAKE_VENV_PYTHON = (
+    "#!/bin/sh\n" 'if [ "$1" = "-c" ]; then echo 3.13; else echo "Python 3.13.0"; fi\n'
+)
+
+
+def _fake_venv_on_path(tmp_path: Path, cfg_version: str | None) -> Path:
+    """A venv whose bin/python runs 3.13, with the given pyvenv.cfg record, on PATH."""
+    venv = tmp_path / "venv"
+    bin_dir = venv / "bin"
+    bin_dir.mkdir(parents=True)
+    fake = bin_dir / "python3.13"
+    fake.write_text(_FAKE_VENV_PYTHON)
+    fake.chmod(0o755)
+    if cfg_version is not None:
+        (venv / "pyvenv.cfg").write_text(f"version_info = {cfg_version}\n")
+    return bin_dir
+
+
+def test_probe_rejects_a_drifted_venv_interpreter_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A venv whose pyvenv.cfg records 3.11 but whose bin/python runs 3.13 is
+    not a sound base interpreter: its site-packages is invisible to it.
+    """
+    _isolate_env(monkeypatch, _fake_venv_on_path(tmp_path, "3.11.2"))
+
+    assert find_latest_python((3, 11)) is None
+
+
+def test_probe_accepts_a_venv_interpreter_whose_version_matches_its_cfg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate_env(monkeypatch, _fake_venv_on_path(tmp_path, "3.13.0"))
+
+    assert find_latest_python((3, 11)) == tmp_path / "venv" / "bin" / "python3.13"
+
+
+def test_probe_accepts_an_interpreter_that_is_not_in_a_venv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No pyvenv.cfg beside the interpreter: not a venv, so the gate is not asked."""
+    _isolate_env(monkeypatch, _fake_venv_on_path(tmp_path, None))
+
+    assert find_latest_python((3, 11)) is not None
+
+
 # ----- _probe_python_version edge branches -----
 
 

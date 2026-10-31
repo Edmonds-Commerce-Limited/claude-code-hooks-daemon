@@ -84,6 +84,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     cleanup_stale_session_dirs,
     current_venv_dir,
     find_uv,
+    fingerprint_major_minor,
     gather_venv_evidence,
     get_pid_path,
     get_socket_path,
@@ -100,6 +101,8 @@ from claude_code_hooks_daemon.daemon.paths import (
     resolve_hostname,
     sweep_dead_runtime_sets,
     unproven_report_lines,
+    venv_cfg_major_minor,
+    venv_interpreter_usable,
     venv_lock_drift,
     venv_lock_drift_lines,
     write_cleanup_status,
@@ -2920,10 +2923,27 @@ def _repair_venv_locked(daemon_dir: Path, venv_path: Path, env: dict[str, str]) 
             print(result.stderr)
         return 1
 
+    # Plan 00555: the venv is keyed on a fingerprint whose py{MM} tag names the
+    # interpreter that computed it. A sync that built the venv with another
+    # minor (uv honours .python-version / requires-python, not our tag) would
+    # leave a venv whose directory name lies about its interpreter, and the
+    # drift would reappear on the next system upgrade unnoticed.
+    expected = fingerprint_major_minor(venv_path.name.removeprefix(_VENV_DIR_PREFIX + "-"))
+    built = venv_cfg_major_minor(venv_path)
+    if expected is not None and built is not None and built != expected:
+        print(
+            f"ERROR: uv sync built {venv_path} with Python {built[0]}.{built[1]}, but its "
+            f"fingerprint names Python {expected[0]}.{expected[1]}; refusing to call it repaired"
+        )
+        return 1
+
     print("Venv repaired successfully.")
 
     # Verify the repair worked
     venv_python = venv_path / "bin" / "python"
+    if venv_python.is_file() and not venv_interpreter_usable(venv_python):
+        print(f"ERROR: venv repaired but its interpreter is unusable: {venv_python}")
+        return 1
     try:
         verify = subprocess.run(  # nosec B603 - venv python with hardcoded import check
             [str(venv_python), "-c", "import claude_code_hooks_daemon; print('OK')"],
@@ -3315,11 +3335,9 @@ def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict
         else:
             continue
 
-        python_bin = child / "bin" / "python"
-        if not python_bin.exists():
-            python_alt = child / "bin" / "python3"
-            if not python_alt.exists():
-                continue
+        # pyvenv.cfg is the file that defines a venv; an interpreter file proves nothing.
+        if not (child / "pyvenv.cfg").is_file():
+            continue
 
         real_path = child.resolve()
         is_symlink = child.is_symlink()
@@ -3896,8 +3914,11 @@ def _write_venv_metadata(
     if not venv_path.is_dir():
         return f"venv path does not exist: {venv_path}"
     python_binary = venv_path / "bin" / "python"
-    if not python_binary.is_file():
-        return f"no bin/python inside venv: {venv_path}"
+    if not venv_interpreter_usable(python_binary):
+        return (
+            f"bin/python inside venv is missing or unusable (cannot run, or runs another "
+            f"Python major.minor than pyvenv.cfg records): {venv_path}"
+        )
 
     try:
         lock_hash = compute_project_lock_hash(project_root)

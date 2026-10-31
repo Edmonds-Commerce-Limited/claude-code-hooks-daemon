@@ -30,6 +30,7 @@ def _make_venv(path: Path, stamp_version: str | None = None, lock_hash: str | No
     (path / "bin").mkdir(parents=True)
     (path / "bin" / "python").write_text('#!/bin/sh\nexec /usr/bin/python3 "$@"\n')
     (path / "bin" / "python").chmod(0o755)
+    (path / "pyvenv.cfg").write_text("home = /usr/bin\n")  # what makes a directory a venv
     if stamp_version is not None:
         (path / ".daemon-version").write_text(stamp_version)
     if lock_hash is not None:
@@ -281,19 +282,25 @@ class TestEnumerateAndHelpers:
             rc = cli.cmd_list_venvs(_args(tmp_path, json_output=True))
         assert rc == 0
 
-    def test_enumerate_skips_venv_without_python_binary(self, tmp_path: Path) -> None:
+    def test_enumerate_skips_directory_without_pyvenv_cfg(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A directory is a venv by its ``pyvenv.cfg``; an interpreter file alone is not."""
         _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
-        broken = untracked / "venv-py311-badbadba"
-        (broken / "bin").mkdir(parents=True)
-        # No bin/python or bin/python3 — should be skipped
+        impostor = untracked / "venv-py311-badbadba"
+        (impostor / "bin").mkdir(parents=True)
+        (impostor / "bin" / "python").write_text("#!/bin/sh\n")
+        (impostor / "bin" / "python").chmod(0o755)
         fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
             rc = cli.cmd_list_venvs(_args(tmp_path, json_output=True))
         assert rc == 0
+        listed = json.loads(capsys.readouterr().out)
+        assert [Path(e["path"]).name for e in listed] == [f"venv-{fp}"]
 
     def test_human_bytes_covers_all_units(self) -> None:
         assert "B" in cli._human_bytes(100)

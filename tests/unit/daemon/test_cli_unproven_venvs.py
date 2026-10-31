@@ -25,6 +25,9 @@ from claude_code_hooks_daemon.daemon.paths import project_path_slug, python_venv
 STALE_HASH = "sha256:" + "0" * 64
 _CLI = "claude_code_hooks_daemon.daemon.cli"
 _RESOLVER = "claude_code_hooks_daemon.daemon.paths.resolve_existing_venv_python"
+# The fixture's bin/python IS the running interpreter, so its pyvenv.cfg must
+# record that version or the venv reads as interpreter-drifted (Plan 00555).
+_CFG_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}.2"
 
 
 def _args(project_root: Path, **overrides: object) -> argparse.Namespace:
@@ -46,7 +49,7 @@ def _venv(path: Path, lock_hash: str | None = None) -> Path:
     """A venv whose bin/python is a symlink to the real interpreter."""
     (path / "bin").mkdir(parents=True)
     (path / "bin" / "python").symlink_to(Path(sys.executable).resolve())
-    (path / "pyvenv.cfg").write_text("home = /usr/bin\nversion = 3.11.2\n")
+    (path / "pyvenv.cfg").write_text(f"home = /usr/bin\nversion = {_CFG_VERSION}\n")
     if lock_hash is not None:
         (path / ".daemon-metadata.json").write_text(
             json.dumps({"python_path": str(path / "bin" / "python"), "lock_hash": lock_hash})
@@ -100,7 +103,7 @@ class TestListVenvsShowsEvidence:
         assert "UNPROVEN" in out
         assert str(orphan) in out
         assert "no process found using it" in out
-        assert "interpreter: /usr/bin (python 3.11.2)" in out
+        assert f"interpreter: /usr/bin (python {_CFG_VERSION})" in out
         assert "last modified:" in out
         assert "belongs to: this view" in out
         assert f"prune-venvs --unproven {orphan} --force" in out

@@ -24,13 +24,16 @@ from claude_code_hooks_daemon.handlers.session_start.unproven_venv_advisor impor
 )
 
 STALE_HASH = "sha256:" + "0" * 64
+# The fixture's bin/python IS the running interpreter, so its pyvenv.cfg must
+# record that version or the venv reads as interpreter-drifted (Plan 00555).
+_CFG_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}.2"
 _RESOLVER = "claude_code_hooks_daemon.daemon.paths.resolve_existing_venv_python"
 
 
 def _venv(path: Path, lock_hash: str | None = None) -> Path:
     (path / "bin").mkdir(parents=True)
     (path / "bin" / "python").symlink_to(Path(sys.executable).resolve())
-    (path / "pyvenv.cfg").write_text("home = /usr/bin\nversion = 3.11.2\n")
+    (path / "pyvenv.cfg").write_text(f"home = /usr/bin\nversion = {_CFG_VERSION}\n")
     if lock_hash is not None:
         (path / ".daemon-metadata.json").write_text(
             json.dumps({"python_path": str(path / "bin" / "python"), "lock_hash": lock_hash})

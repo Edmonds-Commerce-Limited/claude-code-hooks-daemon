@@ -2222,7 +2222,11 @@ class TestTheStartupPollIsBoundedByTheClock:
         )
         (fake_bin / "sleep").chmod(0o755)
         script = (
-            f"source .claude/init.sh\nPYTHON_CMD={fake_python}\n{prelude}\n"
+            # The fixture clone ships no scripts/lib; PYTHON_CMD is preset here,
+            # so the resolver library (home of the venv_python_usable gate that
+            # _is_daemon_installed asks) is sourced by hand, as the resolver would.
+            f"source .claude/init.sh\nsource {INIT_SH.parent}/scripts/lib/resolve_venv.sh\n"
+            f"PYTHON_CMD={fake_python}\n{prelude}\n"
             "_is_ci_environment() { return 1; }\n_is_ci_enforced() { return 1; }\n"
             f"DAEMON_STARTUP_TIMEOUT={self._BUDGET}\nPATH={fake_bin}:$PATH\n{_FORWARDER_BODY}"
         )

@@ -70,6 +70,7 @@ WALKERS: dict[str, tuple[str, str]] = {
     "check_skill_references.py": ("skill_references.json", "files_scanned"),
     "check_skip_list_substring.py": ("skip_list_substring.json", "files_scanned"),
     "check_unreachable_handle_branch.py": ("unreachable_handle_branch.json", "files_scanned"),
+    "check_venv_interpreter_trust.py": ("venv_interpreter_trust.json", "files_scanned"),
 }
 
 #: Checks that read a fixed input (and fail when it is missing), or report no
@@ -273,7 +274,7 @@ def test_a_self_guarded_walker_never_passes_having_collected_nothing(
 
 
 #: The option each walker takes to name its scan root. check_magic_values and
-#: check_signal_targets have none -- both scan a fixed set of trees relative
+#: check_signal_targets and check_venv_interpreter_trust have none -- all scan a fixed set of trees relative
 #: to the repo root rather than one overridable root -- and the gutted
 #: checkout above is their missing-root case.
 ROOT_OPTIONS: dict[str, str] = {
@@ -344,6 +345,7 @@ def test_every_walker_names_its_root_option() -> None:
     assert set(ROOT_OPTIONS) == walkers - {
         "check_magic_values.py",
         "check_signal_targets.py",
+        "check_venv_interpreter_trust.py",
         "audit_error_hiding.py",
     }
 

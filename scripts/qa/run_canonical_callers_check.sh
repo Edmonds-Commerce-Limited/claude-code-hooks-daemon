@@ -40,8 +40,8 @@ if ! PYTHON_BIN="$(resolve_venv_python "${PROJECT_ROOT}")"; then
     echo "run_canonical_callers_check: canonical resolver could not locate a venv python; cannot emit JSON" >&2
     exit 2
 fi
-if [ ! -x "${PYTHON_BIN}" ]; then
-    echo "run_canonical_callers_check: resolved python is not executable: ${PYTHON_BIN}" >&2
+if ! venv_python_usable "${PYTHON_BIN}"; then
+    echo "run_canonical_callers_check: resolved python is not usable: ${PYTHON_BIN}" >&2
     exit 2
 fi
 

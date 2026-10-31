@@ -304,7 +304,7 @@ echo -e "${GREEN}✓${NC} Worktree created"
 DAEMON_VERSION="$(_read_daemon_version "${WORKTREE_DIR}/src/claude_code_hooks_daemon/version.py")"
 echo -e "${YELLOW}→${NC} Creating Python venv (fingerprint-keyed)..."
 WT_VENV_PATH="$(ensure_venv "${WORKTREE_DIR}" "v${DAEMON_VERSION}" "${SETUP_PYTHON}")"
-if [[ -z "${WT_VENV_PATH}" ]] || [[ ! -x "${WT_VENV_PATH}/bin/python" ]]; then
+if [[ -z "${WT_VENV_PATH}" ]] || ! venv_python_usable "${WT_VENV_PATH}/bin/python"; then
     echo -e "${RED}✗${NC} Failed to create venv via ensure_venv"
     exit 1
 fi

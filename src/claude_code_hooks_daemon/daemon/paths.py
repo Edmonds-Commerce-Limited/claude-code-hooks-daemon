@@ -224,6 +224,20 @@ def python_venv_fingerprint(root: str | Path | None = None) -> str:
     return f"{project_path_slug(root)}-{py_fp}"
 
 
+_FINGERPRINT_TAG_RE = re.compile(r"(?:^|-)py(\d)(\d+)-[0-9a-f]{8}$")
+
+
+def fingerprint_major_minor(fingerprint: str) -> tuple[int, int] | None:
+    """The ``major.minor`` encoded in a venv fingerprint's ``py{MM}`` tag, or ``None``.
+
+    ``py313-956ed987`` and ``workspace-py313-956ed987`` both give ``(3, 13)``.
+    """
+    match = _FINGERPRINT_TAG_RE.search(fingerprint)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
 def _parse_venv_dir_slug(venv_dir_name: str) -> str | None:
     """Return the project-root slug embedded in a ``venv-*`` directory name.
 
@@ -399,6 +413,12 @@ def _probe_python_version(candidate: Path) -> ProbeResult | None:
     import subprocess  # nosec B404 — trusted: probing a PATH-resolved python
 
     if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        return None
+    # A venv interpreter on PATH whose version drifted from its pyvenv.cfg is not
+    # a sound base: its own site-packages is invisible to it.
+    if (candidate.parent.parent / _PYVENV_CFG_NAME).exists() and not venv_interpreter_usable(
+        candidate
+    ):
         return None
     try:
         result = subprocess.run(  # nosec B603 — fixed argv, no shell
@@ -940,32 +960,140 @@ def get_venv_path(project_dir: Path | str) -> Path:
 _VENV_RUN_PROBE_TIMEOUT_SECS = 5.0
 
 
-def _venv_interpreter_runs(candidate: Path) -> bool:
-    """Return True iff ``candidate`` can actually execute on this host.
+def venv_interpreter_usable(python_path: Path) -> bool:
+    """THE gate: return True iff the venv interpreter ``python_path`` is usable.
 
-    The executable bit alone does not prove a venv interpreter can run: it
-    can be present and ``+x`` and still fail at exec time -- wrong
-    architecture/libc from a container build, or a symlink into a
-    container-only path (Plan 00466 N1, first observed in #55). Launches
-    the candidate on a tiny stdlib-only probe and requires a clean exit,
-    bounded by :data:`_VENV_RUN_PROBE_TIMEOUT_SECS` so a hung or crashing
-    interpreter cannot stall resolution. A dangling symlink or a binary
-    the kernel cannot load raises ``OSError`` before a process even
-    starts; both are treated as "does not run", same as a clean non-zero
-    exit.
+    The single place a venv interpreter is judged usable (Plan 00555); every
+    caller that runs, reuses or selects one goes through here instead of
+    testing the executable bit. Bash twin: ``venv_python_usable`` in
+    ``scripts/lib/resolve_venv.sh``. Both are named in the detector's GATES
+    (``scripts/qa/check_venv_interpreter_trust.py``).
+
+    Usable means two things. It can execute on this host: the exec bit alone
+    does not prove that (wrong architecture/libc from a container build, a
+    symlink into a container-only path -- Plan 00466 N1, first observed in
+    #55), so it is launched on a tiny stdlib-only probe and must exit cleanly
+    within :data:`_VENV_RUN_PROBE_TIMEOUT_SECS`; a missing or unloadable binary
+    raises ``OSError``, treated like a non-zero exit. And it runs the
+    ``major.minor`` the venv's ``pyvenv.cfg`` records (Plan 00555): after a
+    system Python upgrade a symlinked ``bin/python`` starts fine, but the
+    venv's ``lib/pythonX.Y/site-packages`` is invisible to it.
+
+    "Cannot tell" (no ``pyvenv.cfg``, no recorded version, a probe that printed
+    no version) passes. An interpreter that is not there (or a dangling
+    symlink) fails without a probe: ``cmd_start`` enumerates candidate venvs on
+    every start, and absence is proof enough of unusability. Never raises.
     """
     import subprocess  # nosec B404 — trusted: probing a resolved venv path, no user input
 
+    if not python_path.exists():
+        return False
+    venv_dir = python_path.parent.parent
+    pyvenv_cfg = venv_dir / _PYVENV_CFG_NAME
     try:
         result = subprocess.run(  # nosec B603 — fixed argv, no shell, no user input
-            [str(candidate), "-c", "import sys"],
+            [str(python_path), "-c", _VENV_VERSION_PROBE_CODE],
             capture_output=True,
+            text=True,
             timeout=_VENV_RUN_PROBE_TIMEOUT_SECS,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return False
-    return result.returncode == 0
+    if result.returncode != 0:
+        return False
+    recorded_version = venv_cfg_major_minor(venv_dir) if pyvenv_cfg.is_file() else None
+    running_version = _parse_running_major_minor(result.stdout)
+    if recorded_version is None or running_version is None:
+        return True
+    return running_version == recorded_version
+
+
+# Prints "<major>.<minor>" on stdout's last line; the bash twin
+# (scripts/lib/resolve_venv.sh ``_rv_candidate_runs``) runs the same code.
+_VENV_VERSION_PROBE_CODE = 'import sys; print("%d.%d" % sys.version_info[:2])'
+
+_PYVENV_CFG_NAME = "pyvenv.cfg"
+_PYVENV_CFG_VERSION_RE = re.compile(r"^(?:version_info|version)\s*=\s*(\d+)\.(\d+)", re.MULTILINE)
+_MAJOR_MINOR_RE = re.compile(r"^(\d+)\.(\d+)$")
+
+
+def venv_cfg_major_minor(venv_dir: Path) -> tuple[int, int] | None:
+    """The ``major.minor`` ``pyvenv.cfg`` records, or ``None`` when it records none.
+
+    uv writes ``version_info``, the stdlib ``venv`` writes ``version``; the
+    first such line in the file wins (the bash twin reads it the same way).
+    """
+    cfg = venv_dir / _PYVENV_CFG_NAME
+    # Precondition checks, not a swallowed exception: this file runs standalone
+    # during bootstrap, where the sanctioned log_and_continue helper's package
+    # source is not on disk, and a missing cfg is the ordinary "no record" case.
+    if not cfg.is_file() or not os.access(cfg, os.R_OK):
+        return None
+    match = _PYVENV_CFG_VERSION_RE.search(cfg.read_text())
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _parse_running_major_minor(probe_stdout: str) -> tuple[int, int] | None:
+    """The ``major.minor`` on the last line of a version probe's stdout, or ``None``."""
+    lines = probe_stdout.strip().splitlines()
+    match = _MAJOR_MINOR_RE.match(lines[-1].strip()) if lines else None
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _drift_reason(venv_dir: Path, probe_stdout: str) -> str | None:
+    """Why the probed interpreter drifted from ``venv_dir``'s recorded version, or ``None``."""
+    recorded = venv_cfg_major_minor(venv_dir)
+    running = _parse_running_major_minor(probe_stdout)
+    if recorded is None or running is None or running == recorded:
+        return None
+    return (
+        f"interpreter drift: {venv_dir / _PYVENV_CFG_NAME} records Python "
+        f"{recorded[0]}.{recorded[1]} but {venv_dir / 'bin' / 'python'} now runs "
+        f"{running[0]}.{running[1]}, so the venv's site-packages is invisible"
+    )
+
+
+def venv_interpreter_drift(venv_dir: Path) -> str | None:
+    """Return why ``venv_dir``'s interpreter drifted from its recorded version, else ``None``.
+
+    ``None`` also covers "cannot tell": no ``pyvenv.cfg`` version, or no
+    interpreter that runs. An interpreter that does not run at all is a
+    different defect, reported by :func:`venv_interpreter_usable`.
+    """
+    if venv_cfg_major_minor(venv_dir) is None:
+        return None
+    for name in ("python", "python3"):
+        stdout = _probe_version_stdout(venv_dir / "bin" / name)
+        if stdout:
+            return _drift_reason(venv_dir, stdout)
+    return None
+
+
+def _probe_version_stdout(candidate: Path) -> str:
+    """Stdout of the version probe run by ``candidate``; ``""`` when it does not run.
+
+    An empty answer means "this interpreter could not be asked", which the
+    caller treats as "try the next name". An interpreter that does not run at
+    all is reported by :func:`venv_interpreter_usable`, not here.
+    """
+    import subprocess  # nosec B404 — trusted: probing a resolved venv path, no user input
+
+    try:
+        result = subprocess.run(  # nosec B603 — fixed argv, no shell, no user input
+            [str(candidate), "-c", _VENV_VERSION_PROBE_CODE],
+            capture_output=True,
+            text=True,
+            timeout=_VENV_RUN_PROBE_TIMEOUT_SECS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout if result.returncode == 0 else ""
 
 
 _SCAN_RANK_LOCK_HASH_MATCH = 0
@@ -976,27 +1104,27 @@ _SCAN_RANK_LEGACY = 2
 def _best_ranked_scan_candidate(daemon_path: Path, untracked: Path) -> Path | None:
     """Return the best usable ``venv-*/bin/python`` under ``untracked``, or ``None``.
 
-    Candidates must be slug-eligible (:func:`_venv_slug_eligible`) with an
-    executable ``bin/python``. They are ranked, best first:
+    Candidates must be slug-eligible (:func:`_venv_slug_eligible`) with a
+    ``bin/python`` that passes :func:`venv_interpreter_usable`. They are ranked,
+    best first:
 
     1. metadata ``lock_hash`` equal to the current source's lock hash
        (:func:`_compute_project_lock_hash_stdlib`) — the venv built for THIS source;
     2. other slugged candidates;
     3. legacy un-slugged candidates (``venv-py{MM}-{hex}``).
 
-    Ties keep the sorted-name order. Stdlib hashing and one JSON read per
-    candidate only: no subprocess, because the caller is on the per-turn hot path.
+    Ties keep the sorted-name order. Ranking costs stdlib hashing and one JSON
+    read per candidate; the usability gate (one probe subprocess) runs only on
+    candidates in rank order, until the first one passes.
     """
     current_slug = project_path_slug(daemon_path)
     current_hash = _compute_project_lock_hash_stdlib(daemon_path)
-    best: tuple[int, Path] | None = None
+    ranked: list[tuple[int, Path]] = []
     for candidate_dir in sorted(untracked.glob("venv-*")):
         eligible, _skip_reason = _venv_slug_eligible(candidate_dir, current_slug)
         if not eligible:
             continue
         candidate = candidate_dir / "bin" / "python"
-        if not (candidate.is_file() and os.access(candidate, os.X_OK)):
-            continue
         metadata = _read_venv_metadata_stdlib(candidate_dir)
         if (
             current_hash is not None
@@ -1008,9 +1136,11 @@ def _best_ranked_scan_candidate(daemon_path: Path, untracked: Path) -> Path | No
             rank = _SCAN_RANK_SLUGGED
         else:
             rank = _SCAN_RANK_LEGACY
-        if best is None or rank < best[0]:
-            best = (rank, candidate)
-    return best[1] if best is not None else None
+        ranked.append((rank, candidate))
+    for _rank, candidate in sorted(ranked, key=lambda entry: entry[0]):
+        if venv_interpreter_usable(candidate):
+            return candidate
+    return None
 
 
 def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
@@ -1050,17 +1180,14 @@ def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
     path (relevant for brand-new installs where nothing has been
     provisioned yet).
 
-    **Deliberately does not run-probe its candidates** (unlike
-    :func:`resolve_existing_venv_python_with_diagnostics`, Plan 00466 N1).
-    This function is called on hot paths, so a subprocess spawn here would
-    land where the diagnostics resolver is kept off. Its current callers
-    never execute the returned interpreter --
-    ``client_validator.validate_daemon_can_start`` runs its own
-    explicit ``subprocess.run(..., timeout=...)`` probe before invoking
-    whatever this returns. If a future caller of this function DOES need
-    to execute the result, it must probe before doing so -- do not add a
-    probe here to "fix" that; add it at the call site closest to the exec,
-    the way ``validate_daemon_can_start`` already does.
+    Steps 2 and 3 judge each candidate through :func:`venv_interpreter_usable`
+    (Plan 00555): the callers include shell scripts that EXECUTE the result
+    (``health_check.sh``, ``upgrade_version.sh``, ``qa/run_all.sh``), and a
+    venv whose interpreter now runs a different ``major.minor`` than its
+    ``pyvenv.cfg`` records cannot see its own site-packages. The cost is one
+    bounded probe per candidate tried, in rank order, stopping at the first
+    usable one. The explicit override (step 1) is returned as given, and so is
+    the step 4 fallback.
 
     Args:
         daemon_dir: Daemon installation directory (holds ``untracked/``).
@@ -1079,7 +1206,7 @@ def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
     untracked = daemon_path / "untracked"
 
     keyed = untracked / f"venv-{python_venv_fingerprint(daemon_path)}" / "bin" / "python"
-    if keyed.is_file() and os.access(keyed, os.X_OK):
+    if venv_interpreter_usable(keyed):
         return keyed
 
     if untracked.is_dir():
@@ -1163,7 +1290,7 @@ def resolve_existing_venv_python_with_diagnostics(
         caller agrees on whether a venv is usable.
 
         Plan 00466 N1: the executable bit alone does not prove a candidate
-        can run on this host (see :func:`_venv_interpreter_runs`). A
+        can run on this host (see :func:`venv_interpreter_usable`). A
         candidate that is present and ``+x`` but fails the run probe is
         appended to ``unrunnable`` (when given) so the caller can name it
         in its own diagnostic, instead of silently looking identical to
@@ -1173,7 +1300,7 @@ def resolve_existing_venv_python_with_diagnostics(
             candidate = venv_dir / "bin" / name
             if not candidate.is_file() or not os.access(candidate, os.X_OK):
                 continue
-            if _venv_interpreter_runs(candidate):
+            if venv_interpreter_usable(candidate):
                 return candidate
             if unrunnable is not None:
                 unrunnable.append(str(candidate))
@@ -1233,7 +1360,7 @@ def resolve_existing_venv_python_with_diagnostics(
             usable = (
                 python_path.is_file()
                 and os.access(python_path, os.X_OK)
-                and _venv_interpreter_runs(python_path)
+                and venv_interpreter_usable(python_path)
             )
             if usable:
                 steps.append(
@@ -2889,6 +3016,10 @@ def _cli_check_venv_fresh(args: argparse.Namespace) -> int:
     a different one; exit 1 when nothing is proven (no venv, no usable
     metadata, no pyproject.toml — callers fall back to stamp comparison).
 
+    A venv whose interpreter fails :func:`venv_interpreter_usable` (Plan 00555:
+    drifted ``major.minor``, or cannot run) is stale whatever its ``lock_hash``
+    says: an unchanged lock does not make a venv usable.
+
     ``lock_hash`` is the authoritative freshness signal; the legacy
     ``.daemon-version`` stamp only tracks daemon SemVer and must not
     trigger a rebuild when dependencies are unchanged.
@@ -2919,6 +3050,19 @@ def _cli_check_venv_fresh(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+
+    interpreters = [
+        venv_path / "bin" / name
+        for name in ("python", "python3")
+        if os.path.lexists(venv_path / "bin" / name)
+    ]
+    if interpreters and not any(venv_interpreter_usable(path) for path in interpreters):
+        print(
+            f"check-venv-fresh: no interpreter in {venv_path / 'bin'} is usable "
+            "(cannot run, or runs another Python major.minor than pyvenv.cfg records)",
+            file=sys.stderr,
+        )
+        return CHECK_VENV_FRESH_EXIT_STALE
 
     if metadata["lock_hash"] == current_lock_hash:
         return 0
@@ -2970,11 +3114,13 @@ def live_venv_realpaths(daemon_dir: Path | str) -> frozenset[Path]:
 
     ``resolve_existing_venv_python`` never raises and returns a best-effort
     path without an existence check on its override and legacy branches, so a
-    non-existent result IS the "no venv provisioned yet" signal.
+    result that is not a usable interpreter (:func:`venv_interpreter_usable`:
+    missing, unable to run, or running another ``major.minor`` than its venv
+    records) IS the "nothing live is provisioned" signal.
     """
     live: set[Path] = {Path(sys.prefix).resolve()}
     python_path = resolve_existing_venv_python(daemon_dir)
-    if python_path.exists():
+    if venv_interpreter_usable(python_path):
         live.add(python_path.parent.parent.resolve())
     return frozenset(live)
 
@@ -2990,7 +3136,9 @@ def classify_venv(
     - ``keep``: the venv is live (``live`` holds real directories), or its
       ``lock_hash`` matches the current source, or the current ``lock_hash``
       cannot be computed so nothing can be judged.
-    - ``stale``: the legacy bare ``venv/`` directory, or a venv whose slug is
+    - ``stale``: a venv whose interpreter now runs a ``major.minor`` other than
+      the one its ``pyvenv.cfg`` records (Plan 00555), checked once the slug is
+      this view's (or absent); the legacy bare ``venv/`` directory, or a venv whose slug is
       this view's (or absent), whose metadata is readable and whose
       ``lock_hash`` differs from ``current_hash``.
     - ``unproven``: the code cannot prove it stale, because its slug belongs to
@@ -3006,6 +3154,9 @@ def classify_venv(
     eligible, skip_reason = _venv_slug_eligible(venv_dir, current_slug)
     if not eligible:
         return VENV_UNPROVEN, skip_reason or "slug belongs to another view"
+    drift = venv_interpreter_drift(venv_dir)
+    if drift is not None:
+        return VENV_STALE, drift
     metadata = _read_venv_metadata_stdlib(venv_dir)
     if metadata is None:
         return VENV_UNPROVEN, f"no usable {_DAEMON_METADATA_FILENAME}"

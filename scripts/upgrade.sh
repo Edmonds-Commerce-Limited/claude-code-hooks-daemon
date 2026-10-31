@@ -342,7 +342,11 @@ Recovery options:
     fi
     HOOKS_DAEMON_PYTHON="$found"
     export HOOKS_DAEMON_PYTHON
-    _ok "Compatible Python found: $HOOKS_DAEMON_PYTHON ($("$HOOKS_DAEMON_PYTHON" --version 2>&1))"
+    # The discovery library already parsed this interpreter's version; ask its helper
+    # rather than probing the interpreter a second time here.
+    local found_version
+    found_version="$(_pd_probe_version "$found" || printf 'unknown')"
+    _ok "Compatible Python found: $HOOKS_DAEMON_PYTHON (Python $found_version)"
     return 0
 }
 
@@ -915,21 +919,41 @@ fi
 #
 # canonical-resolver-exempt: metadata emission runs at the tail of an upgrade
 # while DAEMON_DIR is on an arbitrary checked-out target tag; it must stay
-# dependency-light and non-fatal (no sourcing scripts/lib/resolve_venv.sh, no
-# paths.py spawn) — a best-effort glob is intentional here, matching the
-# pre-Plan-00124 behaviour that used a bare 'venv-py*' glob for the same reason.
-_metadata_venv_python=""
-for _candidate in "$DAEMON_DIR"/untracked/venv-*py3*/bin/python; do
-    if [ -x "$_candidate" ]; then
-        _metadata_venv_python="$_candidate"
+# dependency-light and non-fatal (no paths.py spawn) — a best-effort glob is
+# intentional here, matching the pre-Plan-00124 behaviour that used a bare
+# 'venv-py*' glob for the same reason.
+#
+# The glob hit is only recorded when venv_python_usable (scripts/lib/resolve_venv.sh)
+# accepts it: the resolver later trusts this metadata, so it must never name a
+# venv whose bin/python no longer runs the major.minor its pyvenv.cfg records.
+# The library is sourced non-fatally from the daemon dir, else beside this
+# script; with no gate available nothing is recorded rather than an unverified path.
+for _gate_lib in "$DAEMON_DIR/scripts/lib/resolve_venv.sh" \
+    "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/resolve_venv.sh"; do
+    if [ -f "$_gate_lib" ]; then
+        # shellcheck source=lib/resolve_venv.sh
+        if ! . "$_gate_lib" > /dev/null; then
+            _info "Could not load $_gate_lib; trying the next venv gate location"
+        fi
+    fi
+    if declare -F venv_python_usable > /dev/null; then
         break
     fi
 done
+_metadata_venv_python=""
+if declare -F venv_python_usable > /dev/null; then
+    for _candidate in "$DAEMON_DIR"/untracked/venv-*py3*/bin/python; do
+        if venv_python_usable "$_candidate"; then
+            _metadata_venv_python="$_candidate"
+            break
+        fi
+    done
+fi
 
 _metadata_python_version=""
 _metadata_python_path=""
 _metadata_venv_path=""
-if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+if [ -n "$_metadata_venv_python" ]; then
     if _pv_out="$("$_metadata_venv_python" -c 'import sys; print(".".join(str(x) for x in sys.version_info[:3]))' 2>/dev/null)"; then
         _metadata_python_version="$_pv_out"
     fi
@@ -995,7 +1019,7 @@ if [ -n "$_metadata_config_backup" ] && [ -f "$_metadata_config_file" ]; then
     # count. The audit compares the backup with the written config. It exits
     # 1 when stale keys REMAIN, which is not a failure here — the JSON is
     # still complete — so the rc is recorded and only rc 2 (error) skips.
-    if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+    if [ -n "$_metadata_venv_python" ]; then
         _audit_rc=0
         _audit_json=""
         if _audit_json="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
@@ -1049,7 +1073,7 @@ fi
 if [ -z "$FROM_VERSION" ]; then
     _metadata_venv_python=""
 fi
-if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+if [ -n "$_metadata_venv_python" ]; then
     # check-truth-changes exits 1 when changes exist (normal!), 0 when none,
     # 2 on error. `set -euo pipefail` is active, so capture rc via the
     # `if cmd; then ... else _rc=$?` idiom: the command substitution runs
@@ -1103,7 +1127,7 @@ fi
 # following upgrade.md step 5. Printed to stdout BEFORE the UPGRADE_METADATA
 # sentinel so it never pollutes the machine-parsed block. Config path is passed
 # explicitly so resolution does not depend on cwd.
-if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+if [ -n "$_metadata_venv_python" ]; then
     # check-config-migrations exits 1 when there are suggestions (normal!),
     # 0 when none, 2 on error. Same `if cmd; then ... else _rc=$?` idiom as
     # above so `set -euo pipefail` does not trip on the expected non-zero rc.
@@ -1155,7 +1179,7 @@ fi
 echo ""
 _info "${_BOLD}Daemon version: ${FROM_VERSION:-unknown} -> ${TARGET_DISPLAY}${_NC}"
 _metadata_handler_changes=""
-if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+if [ -n "$_metadata_venv_python" ]; then
     _run_effective_handlers() {
         "$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
             check-effective-handlers \
@@ -1250,7 +1274,7 @@ fi
 # reports every task the upgrade crossed, with the call sites each task's
 # detection finds, and upgrade.md step 6 carries them out. A branch install's
 # CLI includes the UNRELEASED tasks by itself, from its own install stamp.
-if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+if [ -n "$_metadata_venv_python" ]; then
     # Exit 1 means tasks exist (normal!), 0 none, 2 on error or an older
     # target that has no such command; same idiom as above.
     _tasks_rc=0
@@ -1286,7 +1310,7 @@ fi
 # worktree ought to carry. The answer comes from scanning the repository, which
 # is why the same command an operator runs by hand runs here — one scan, one
 # implementation. Reports only; the daemon never edits the config.
-if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+if [ -n "$_metadata_venv_python" ]; then
     _seed_rc=0
     if _seed_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
         check-worktree-seed \
