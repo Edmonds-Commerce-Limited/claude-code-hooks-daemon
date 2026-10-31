@@ -648,3 +648,57 @@ class TestDaemonRuntimeArtefactsStayDenied:
         target.parent.mkdir(parents=True)
         target.write_text("log\n")
         assert _bash(project, "tail -n 5 untracked/logs/daemon.log") is True
+
+
+class TestLexicalPathMustAlsoStayInsideTheProject:
+    """Plan 00555 Task 2.8 N1: Node resolves `..` lexically, so a Read that passes
+    on its realpath must also pass with `..` applied textually."""
+
+    @pytest.fixture
+    def planted(self, project: Path) -> Path:
+        (project / "a" / "b" / "c" / "d").mkdir(parents=True)
+        (project / "a" / "b" / "decoy.txt").write_text("decoy\n")
+        (project / "dl").symlink_to(project / "a" / "b" / "c" / "d")
+        return project
+
+    def test_read_leaving_the_project_lexically_is_denied(self, planted: Path) -> None:
+        assert _read(planted, f"{planted}/dl/../../../../../decoy.txt") is False
+        assert _read(planted, f"{planted}/dl/../../decoy.txt") is False
+
+    def test_bash_operand_leaving_the_project_lexically_is_denied(self, planted: Path) -> None:
+        assert _bash(planted, "cat dl/../../../../../decoy.txt") is False
+
+    def test_a_plain_inside_dotdot_is_allowed(self, planted: Path) -> None:
+        assert _read(planted, f"{planted}/a/../README.md") is True
+
+    def test_lexical_form_reaching_a_protected_glob_is_denied(self, planted: Path) -> None:
+        (planted / "secrets").mkdir()
+        (planted / "secrets" / "db.txt").write_text("s\n")
+        (planted / "elsewhere" / "deep").mkdir(parents=True)
+        (planted / "elsewhere" / "db.txt").write_text("e\n")
+        (planted / "lk").symlink_to(planted / "elsewhere" / "deep")
+        _snapshot(planted, "secrets/**")
+        # realpath is elsewhere/db.txt (allowed); the lexical form is secrets/db.txt.
+        assert _read(planted, f"{planted}/lk/../../secrets/db.txt") is False
+
+
+class TestSnapshotCarriedQuarantineAndCaptureDir:
+    """Plan 00555 Task 2.8 N2: globs the snapshot carries for the extra quarantine
+    globs and a relocated capture dir are denied; an absent snapshot fails closed."""
+
+    def test_extra_quarantine_glob_and_capture_dir_are_denied(self, project: Path) -> None:
+        (project / "reports").mkdir()
+        (project / "reports" / "x-RAW.md").write_text("raw\n")
+        capture = project / ".claude" / "hooks-daemon" / "untracked" / "my-capture"
+        capture.mkdir()
+        (capture / "Pre.jsonl").write_text("{}\n")
+        _snapshot(project, "reports/*-RAW*", f"{capture}/**")
+        assert _bash(project, "cat reports/x-RAW.md") is False
+        assert _read(project, str(project / "reports" / "x-RAW.md")) is False
+        assert _read(project, str(capture / "Pre.jsonl")) is False
+        assert _bash(project, f"cat {capture}/Pre.jsonl") is False
+        assert _bash(project, "cat README.md") is True
+
+    def test_absent_snapshot_still_fails_closed(self, project: Path) -> None:
+        (project / ".claude" / "hooks-daemon" / "untracked" / SNAPSHOT_NAME).unlink()
+        assert _bash(project, "cat .claude/notes.txt") is False

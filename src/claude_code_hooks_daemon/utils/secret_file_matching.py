@@ -238,8 +238,46 @@ def resolve_configured_patterns() -> tuple[str, ...]:
 PROTECTED_PATHS_SNAPSHOT_NAME: Final[str] = ".protected-paths.snapshot"
 
 
+def _snapshot_extra_globs() -> tuple[str, ...]:
+    """Globs beyond ``secret_file_guard`` that ``init.sh`` must also deny.
+
+    The project's extra ``quarantine_artefact_read_guard`` globs and the payload
+    capture directory (anchored, absolute, both as configured and resolved).
+    Empty when the config cannot be read; the shipped seed globs and the default
+    capture directory are then still protected by ``init.sh`` itself.
+    """
+    from claude_code_hooks_daemon.config.models import Config, handler_options
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.daemon.payload_capture import resolve_capture_dir
+
+    if not ProjectContext.is_initialized():
+        return ()
+    try:
+        config = Config.load_or_default(ProjectContext.config_path())
+        guard = config.handlers.pre_tool_use.get("quarantine_artefact_read_guard")
+        configured = handler_options(guard).get("quarantine_artefact_globs") or []
+        capture_dir = resolve_capture_dir(
+            config.daemon.payload_capture.dir, ProjectContext.daemon_untracked_dir()
+        )
+    except (OSError, RuntimeError, ValueError, yaml.YAMLError) as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unreadable config leaves the snapshot with the secret_file_guard globs only; init.sh still protects the seed globs and the default capture directory",
+            level=logging.DEBUG,
+        )
+        return ()
+    extras = [str(entry) for entry in configured if str(entry).strip()]
+    for form in dict.fromkeys((capture_dir.absolute(), capture_dir.resolve())):
+        extras.append(f"{form}/**")
+    return tuple(extras)
+
+
 def write_protected_paths_snapshot() -> Path:
     """Write the effective protected globs, one per line, for ``init.sh``.
+
+    Besides the ``secret_file_guard`` globs this carries the extra quarantine
+    globs and the payload capture directory (see ``_snapshot_extra_globs``).
 
     ``init.sh`` cannot load the daemon's config while the daemon is down, so it
     reads this file from the daemon untracked directory instead. The write is
@@ -251,7 +289,11 @@ def write_protected_paths_snapshot() -> Path:
     target = ProjectContext.daemon_untracked_dir() / PROTECTED_PATHS_SNAPSHOT_NAME
     temp = target.with_name(target.name + f".{os.getpid()}.tmp")
     try:
-        temp.write_text("".join(f"{glob}\n" for glob in resolve_configured_patterns()))
+        temp.write_text(
+            "".join(
+                f"{glob}\n" for glob in (*resolve_configured_patterns(), *_snapshot_extra_globs())
+            )
+        )
         temp.replace(target)
     except OSError:
         temp.unlink(missing_ok=True)
