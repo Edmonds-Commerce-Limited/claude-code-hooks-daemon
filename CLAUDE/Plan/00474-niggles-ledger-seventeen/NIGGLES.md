@@ -124,6 +124,25 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N565 — a venv self-heal leaves the old-key venv behind, and `untracked/lsp-venv` is not repointed until the daemon starts
+
+**Source**: dogfood, 2026-10-31. Plan 00555's drift self-heal demonstration
+(`../00555-self-install-venv-python-version-lockout/subagent-reports/261031-drift-self-heal-demo.md`),
+followed up in `261031-fresh-check-drift-fix.md`, finding 4.
+
+**Evidence**: after a hook self-heals a drifted py311 venv by building a py313 one, the py311
+directory stays under `untracked/`. `untracked/lsp-venv` is maintained only by
+`_ensure_self_install_lsp_venv_symlink` (`core/project_context.py:75`) at daemon start, so it keeps
+naming the old venv until the daemon next starts. The follow-up could not reproduce a stale link
+once the daemon had started. The demo most likely read `/workspace`'s link rather than the scratch
+tree's.
+
+**Fix direction**: decide whether a successful self-heal build should repoint `lsp-venv` and
+classify the replaced venv for pruning, or whether the next daemon start, which repoints the link,
+is enough. Prune already keeps any venv a running process uses.
+
+**Status**: ⬜ open (low severity).
+
 ### N564 — playbook probe #120 fails whenever the acceptance gate runs in a linked worktree
 
 **Source**: dogfood, 2026-10-31. Found in Plan 00555's final full gate, which ran in
