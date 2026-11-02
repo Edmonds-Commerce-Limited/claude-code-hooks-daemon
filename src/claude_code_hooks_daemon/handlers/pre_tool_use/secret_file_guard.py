@@ -1449,7 +1449,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # that stopped matching once fed stripped words) -- so each
             # consumer decodes separately for correctness, same as before.
             shared_words = sfm.bash_route_word_stream(command, deadline=deadline)
-            index = self._index(patterns) if _MAY_GLOB.search(command) else None
+            # A bare dotted word is a mention only when it names an existing or
+            # indexed file, so such a command needs the index too.
+            needs_index = _MAY_GLOB.search(command) or sfm.has_bare_dotted_word(command)
+            index = self._index(patterns) if needs_index else None
             # A glob is expanded against the index of protected files; with none
             # it goes unjudged, and the agent is told so (never a silent allow).
             glob_unjudged = index is None and sfm.has_name_agnostic_glob(command)
