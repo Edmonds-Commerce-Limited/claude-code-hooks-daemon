@@ -57,17 +57,22 @@ Related plans, not merged:
     of the one-hour cache TTL (about 54 minutes idle) in interactive sessions,
     when context is at least `CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS` (default
     200000).
-  - These switch it off: `autoCompactEnabled: false`, `DISABLE_AUTO_COMPACT`,
-    `DISABLE_COMPACT` and `FORCE_PROMPT_CACHING_5M`.
+  - These switch it off: `autoCompactEnabled: false`, `DISABLE_AUTO_COMPACT`
+    and `DISABLE_COMPACT`. The evidence for `DISABLE_COMPACT` is the binary
+    only. `FORCE_PROMPT_CACHING_5M` also switches it off, indirectly, because
+    idle compaction needs the one-hour cache.
   - **Rollout:** it works from 2.1.290 and was announced in 2.1.299. 2.1.314
-    took it to VS Code, Desktop, subscribers with telemetry off, and
-    Bedrock/Vertex/Foundry. The live env-var docs still say it depends on
+    took it to VS Code, Desktop and subscribers with telemetry off. It also
+    reached Bedrock/Vertex/Foundry and LLM gateways, but only where the
+    one-hour cache is on. The live env-var docs still say it depends on
     feature-flag fetching, and the flag name is unverified. It is broadly
     rolled out but not proven universal.
   - PreCompact fires with `trigger: "auto"`, so an idle compaction cannot be
     told apart from a normal auto-compact.
-- [x] ✅ **Task 1.2**: Enforcement shape. This was a clear call, so it was not
-  raised with the owner:
+- [x] ✅ **Task 1.2**: Enforcement shape. The owner asked for the setting to be
+  enforced as enabled, which settles whether it may be auto-written. Writing
+  only an absent key matches the default and respects the Plan 00466 N47
+  policy of never overriding an owner's explicit setting:
   - a new `_check_idle_compaction` in `optimal_config_checker` reports
     whether idle compaction is in effect and names any disabler;
   - `_enforce_settings_sync` writes `idleCompaction: true` only when the key
