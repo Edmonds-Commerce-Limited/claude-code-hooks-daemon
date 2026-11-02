@@ -1,6 +1,6 @@
 # Plan 00557: Claude Code idle compact enforcement
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-02
 **Owner**: dev
 **Priority**: Medium
@@ -82,21 +82,26 @@ Related plans, not merged:
 
 ### Phase 2: Enforce
 
-- [ ] ⬜ **Task 2.1**: Write a failing test, then add the check to the
-  existing Claude Code config checker or checkers. The report from Task 1.1
-  names the location.
-- [ ] ⬜ **Task 2.2**: Add the setting to the `optimise` checklist and to
-  the docs.
-- [ ] ⬜ **Task 2.3**: Add a release note in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] ✅ **Task 2.1**: Wrote a failing test, then added the check
+  `_check_idle_compaction` to `optimal_config_checker` as the seventh check,
+  "Idle Compaction". It is merged in 5577aee1d. An unreadable project settings
+  file is reported as a cause that cannot be ruled out, as
+  `_check_effort_source` does. Report:
+  [261102-task-2-build.md](subagent-reports/261102-task-2-build.md).
+- [x] ✅ **Task 2.2**: The checklist of `check` (`skills/hooks-daemon/check.md`)
+  now lists the check. That page is the only list of these checks, and the
+  guidance text is unchanged, so no regeneration was needed.
+- [x] ✅ **Task 2.3**: Release note
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/011-idle-compaction-config-check.md`.
 
 ## Success Criteria
 
-- [ ] The research report answers "is it fully rolled out?" with evidence.
-- [ ] A session without idle compact enabled is told so, with the exact fix.
-  A test proves this.
-- [ ] A release note is recorded in `CLAUDE/UPGRADES/UNRELEASED/` (the
-  pending-release holding area).
+- [x] The research report answers "is it fully rolled out?" with evidence.
+- [x] A session without idle compact enabled is told so, with the exact fix.
+  A test proves this (`TestIdleCompactionCheck`). On this host,
+  `hooks-daemon check` reports `[OK] Idle Compaction: In effect`.
+- [x] A release note is recorded in `CLAUDE/UPGRADES/UNRELEASED/` (the
+  pending-release holding area): `011-idle-compaction-config-check.md`.
 
 ## Delivery & Milestones
 
