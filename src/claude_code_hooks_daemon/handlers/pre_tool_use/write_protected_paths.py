@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.utils.shell_expansion import (
     iter_normalised_shell_words,
     shell_word_spellings,
 )
+from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
 from claude_code_hooks_daemon.utils.simple_commands import (
     SHELL_INTERPRETERS,
     SimpleCommand,
@@ -546,6 +547,24 @@ def _name_pattern(glob: str) -> re.Pattern[str] | None:
     return re.compile(f"{before}{re.escape(fragment)}{after}")
 
 
+def _directory_pattern(glob: str) -> re.Pattern[str] | None:
+    """A pattern finding the longest run of literal directories above ``glob``'s
+    wildcard-only last component in free text, as whole names (`protected/`,
+    `./protected/x`, `"protected"/x`, `/root/protected/x`); ``None`` when no
+    directory above it is literal (`**`, `*/**`), which stays fail-closed."""
+    runs: list[list[str]] = [[]]
+    for part in _segments(glob)[:-1]:
+        if part == _RECURSIVE or _WILDCARDS.search(part):
+            runs.append([])
+        else:
+            runs[-1].append(part)
+    chain = max(runs, key=len)
+    if not chain:
+        return None
+    joined = "[\"']*/[\"']*".join(re.escape(part) for part in chain)
+    return re.compile(f"(?<!{_NAME_CHARACTER}){joined}(?!{_NAME_CHARACTER})")
+
+
 def _split_sequence(command: str) -> list[str] | None:
     """``command`` cut at the separators that run its parts one after another
     (`;`, `&&`, `||`, a newline), outside quotes; ``None`` if a quote never closes."""
@@ -698,10 +717,22 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
                         return glob
         return None
 
-    def _text_naming(self, text: str) -> str | None:
-        """The glob that command text we could not read visibly names, else None."""
+    def _text_naming(self, text: str, *, computed_destination: bool = False) -> str | None:
+        """The glob that command text we could not read visibly names, else None.
+
+        A glob whose last component is wildcard-only (`dir/**`) is named by its
+        literal directory chain. A glob with no literal part at all (`**`) is
+        named by any text: nothing can be told from it, so it stays fail-closed.
+
+        ``computed_destination`` is for text that is a WRITING program whose
+        destination it computes (an awk `print > $1`): what it names says
+        nothing about where it writes, so a wildcard-only glob is named by it
+        whatever it mentions, as it was before the directory chain was read.
+        """
         for glob in self._globs():
             pattern = _name_pattern(glob)
+            if pattern is None and not computed_destination:
+                pattern = _directory_pattern(glob)
             if pattern is None or pattern.search(text):
                 return glob
         return None
@@ -826,7 +857,9 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         directory, so a body repeated by each spelling of an outer group is
         read once.
         """
-        command = _DECLARATION_PREFIX_RE.sub(r"\1", command)
+        # A quoted-delimiter body fed to a command that only reads it is data:
+        # bash never brace-expands it. A body a shell or interpreter runs stays.
+        command = strip_quoted_heredoc_bodies(_DECLARATION_PREFIX_RE.sub(r"\1", command))
         try:
             variants = list(brace_variants(command))
         except TooManyToEnumerateError:
@@ -1175,7 +1208,7 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
                 )
             for operand in files:
                 if _awk_program_writes(operand):
-                    glob = self._text_naming(operand)
+                    glob = self._text_naming(operand, computed_destination=True)
                     if glob is not None:
                         return glob
         return None
