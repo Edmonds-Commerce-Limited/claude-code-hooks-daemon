@@ -112,7 +112,12 @@ acquire_lock() {
     done
     lock_held="$lock_dir"
     lock_owner_pid="${BASHPID:-$$}"
-    trap release_lock EXIT INT TERM
+    # INT/TERM must EXIT (which runs the EXIT trap). A trap that only released
+    # the lock would return into the critical section, unlocked, and let a
+    # second runner allocate the same number (Plan 00474).
+    trap release_lock EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 }
 
 # Write the counter to the local git config. Git does not retry its own
