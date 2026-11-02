@@ -30,7 +30,6 @@ import itertools
 import logging
 import os
 import re
-import shlex
 import time
 import urllib.parse
 from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -1919,12 +1918,105 @@ _REDIRECT_TAIL: Final = re.compile(r"[<>]\s*$")
 _SUBSTITUTION_OPENERS_IN_QUOTES: Final = ("$(", "`", "<(", ">(")
 # Commands that open, execute, copy, parse or create their operands.
 _FILE_OPENING_COMMANDS: Final = frozenset(
-    "cat tac nl less more head tail bat view vi vim nvim nano emacs ed cp mv ln install rsync scp "
-    "dd tee source . bash sh zsh dash ksh perl ruby node php lua awk gawk mawk sed grep egrep "
-    "fgrep rg ag ack find xargs sort uniq cut paste join comm diff cmp wc od xxd hexdump strings "
-    "base64 file stat tar zip unzip gzip gunzip zcat bzip2 xz 7z curl wget jq yq openssl gpg "
-    "ssh-add ssh-keygen touch rm chmod chown tr rev fold fmt split shuf truncate md5sum sha1sum "
-    "sha256sum sha512sum cksum b2sum".split()
+    [
+        "cat",
+        "tac",
+        "nl",
+        "less",
+        "more",
+        "head",
+        "tail",
+        "bat",
+        "view",
+        "vi",
+        "vim",
+        "nvim",
+        "nano",
+        "emacs",
+        "ed",
+        "cp",
+        "mv",
+        "ln",
+        "install",
+        "rsync",
+        "scp",
+        "dd",
+        "tee",
+        "source",
+        ".",
+        "bash",
+        "sh",
+        "zsh",
+        "dash",
+        "ksh",
+        "perl",
+        "ruby",
+        "node",
+        "php",
+        "lua",
+        "awk",
+        "gawk",
+        "mawk",
+        "sed",
+        "grep",
+        "egrep",
+        "fgrep",
+        "rg",
+        "ag",
+        "ack",
+        "find",
+        "xargs",
+        "sort",
+        "uniq",
+        "cut",
+        "paste",
+        "join",
+        "comm",
+        "diff",
+        "cmp",
+        "wc",
+        "od",
+        "xxd",
+        "hexdump",
+        "strings",
+        "base64",
+        "file",
+        "stat",
+        "tar",
+        "zip",
+        "unzip",
+        "gzip",
+        "gunzip",
+        "zcat",
+        "bzip2",
+        "xz",
+        "7z",
+        "curl",
+        "wget",
+        "jq",
+        "yq",
+        "openssl",
+        "gpg",
+        "ssh-add",
+        "ssh-keygen",
+        "touch",
+        "rm",
+        "chmod",
+        "chown",
+        "tr",
+        "rev",
+        "fold",
+        "fmt",
+        "split",
+        "shuf",
+        "truncate",
+        "md5sum",
+        "sha1sum",
+        "sha256sum",
+        "sha512sum",
+        "cksum",
+        "b2sum",
+    ]
 )
 _FILE_OPENING_PREFIXES: Final = ("python", "ansible")
 _PATTERN_FIRST_COMMANDS: Final = frozenset({"grep", "egrep", "fgrep", "rg", "ag", "ack"})
@@ -1994,7 +2086,7 @@ def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
     if not chain:
         return True
     try:
-        words = shlex.split(segment)
+        words = linear_shlex.split(segment)
     except ValueError:
         return True
     names = [word.rsplit("/", 1)[-1] for word in words]
@@ -2022,7 +2114,7 @@ def _grep_pattern_word_is_token(words_after_command: list[str]) -> bool:
 def _first_positional_is_last(segment: str) -> bool:
     """Whether the segment's last word is its command's first non-option operand."""
     try:
-        words = shlex.split(segment)
+        words = linear_shlex.split(segment)
     except ValueError:
         return False
     chain = segment_command_chain(segment)
@@ -2057,7 +2149,7 @@ def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
             word_start, word_end = quote_index, end
     before = command[word_start - 1] if word_start > 0 else ""
     after_char = command[word_end] if word_end < len(command) else ""
-    if before and not before.isspace() and not (before in _COMMAND_SEPARATOR_CHARS):
+    if before and not before.isspace() and before not in _COMMAND_SEPARATOR_CHARS:
         return True
     if after_char and after_char not in _AFTER_WORD_CHARS:
         return True
@@ -2110,7 +2202,7 @@ def _bare_dotted_counts(
 ) -> bool:
     """Whether a bare dotted ``token`` that matched a pattern is a real mention."""
     bases = {base for base in (*cwds, cwd, project_root) if base}
-    if any(os.path.lexists(os.path.join(base, token)) for base in bases):
+    if any(os.path.lexists(Path(base) / token) for base in bases):
         return True
     if index is not None and _is_indexed_name(token, index, cwds):
         return True

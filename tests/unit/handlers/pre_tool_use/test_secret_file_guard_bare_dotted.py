@@ -46,7 +46,11 @@ def project(tmp_path: Path) -> Iterator[Path]:
 
 
 def _decide(root: Path, tool_name: str, tool_input: dict[str, Any]) -> Decision:
-    hook_input: dict[str, Any] = {"tool_name": tool_name, "tool_input": tool_input, "cwd": str(root)}
+    hook_input: dict[str, Any] = {
+        "tool_name": tool_name,
+        "tool_input": tool_input,
+        "cwd": str(root),
+    }
     handler = SecretFileGuardHandler()
     if not handler.matches(hook_input):
         return Decision.ALLOW

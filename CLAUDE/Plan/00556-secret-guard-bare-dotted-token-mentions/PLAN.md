@@ -116,7 +116,7 @@ time.
   [261102-task-3.3-issue-142.md](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/worktree-issue-142/CLAUDE/Plan/00556-secret-guard-bare-dotted-token-mentions/subagent-reports/261102-task-3.3-issue-142.md)
   (branch `worktree-issue-142`).
 
-- [ ] ⬜ **Task 3.4** (#143): a dotted module path in a Python string literal
+- [x] ✅ **Task 3.4** (#143): a dotted module path in a Python string literal
   is treated as a file mention.
 
 - [ ] ⬜ **Task 3.5** (#144): the grep-pattern-only exemption is lost on a
@@ -124,14 +124,14 @@ time.
 
 ### Phase 2: Build (#145)
 
-- [ ] ⬜ **Task 2.1**: Write red tests. Cover the reported setting-key shape in
+- [x] ✅ **Task 2.1**: Write red tests. Cover the reported setting-key shape in
   a Bash command and in an authored script. Also cover the real-file shapes
   that must stay denied: a relative bare name, a path, a glob, a variable and
   a file-opening operand.
-- [ ] ⬜ **Task 2.2**: Implement the choice in `find_protected_mention` and the
+- [x] ✅ **Task 2.2**: Implement the choice in `find_protected_mention` and the
   script-content route. Update the handler guidance's "accepted cost"
   paragraph to match.
-- [ ] ⬜ **Task 2.3**: Write a release note in the pending-release holding area.
+- [x] ✅ **Task 2.3**: Write a release note in the pending-release holding area.
 
 ## Success Criteria
 
@@ -141,6 +141,8 @@ time.
 - [ ] If behaviour changes, a release note is in `CLAUDE/UPGRADES/UNRELEASED/`
   (the pending-release holding area). If it does not, the plan records that it
   has no release-bound consequences.
+  Holding-area artefact for #145 and #143:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/012-secret-guard-bare-dotted-tokens.md`.
 
 ## Delivery & Milestones
 
