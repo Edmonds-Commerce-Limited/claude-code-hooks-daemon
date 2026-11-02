@@ -1449,7 +1449,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # that stopped matching once fed stripped words) -- so each
             # consumer decodes separately for correctness, same as before.
             shared_words = sfm.bash_route_word_stream(command, deadline=deadline)
-            index = self._index(patterns) if _MAY_GLOB.search(command) else None
+            # A bare dotted word is a mention only when it names an existing or
+            # indexed file, so such a command needs the index too.
+            needs_index = _MAY_GLOB.search(command) or sfm.has_bare_dotted_word(command)
+            index = self._index(patterns) if needs_index else None
             # A glob is expanded against the index of protected files; with none
             # it goes unjudged, and the agent is told so (never a silent allow).
             glob_unjudged = index is None and sfm.has_name_agnostic_glob(command)
@@ -1847,8 +1850,17 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "truly guarantee that; set them too.\n\n"
             "**`*.secret*` is intentionally broad** (a deliberate project "
             "decision): any Bash token merely CONTAINING `.secret` trips it, "
-            "so a repo-wide grep for the string `.secret` can be denied. That "
-            "is the accepted cost. To work around a false positive: ask the "
+            "so a repo-wide grep for the string `.secret` can be denied. "
+            "Path-like tokens (a `/`, a leading `.`, `~` or `$`), globs and "
+            "variables are still judged by the pattern alone. A BARE dotted "
+            "word (`app.secret.key`, a setting key or a module-name string "
+            'such as `logging.getLogger("pkg.x_secret_guard")`) counts only '
+            "when it names a file that exists, is in the protected-file "
+            "index, or is the operand of a file-opening command or call "
+            "(`cat`, `cp`, `source`, a redirect target, `open(...)`, "
+            "`Path(...)`). Recorded residual risk: a file that does not exist, "
+            "is not indexed and is read by a command outside the opening list "
+            "is allowed. To work around a false positive: ask the "
             "user, scope the search to exclude the protected file, or have a "
             "human narrow the config (`mode: replace` with a tighter list).\n\n"
             "**Authoring a script that references a protected path is also "

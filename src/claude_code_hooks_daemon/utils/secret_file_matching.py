@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.utils.realpath import resolve_checking_loop
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     UnplaceableSubstitutionError,
     mask_quoted,
+    segment_command_chain,
     segment_command_word,
     shell_word_spans,
     split_unquoted_spans,
@@ -1905,6 +1906,314 @@ class _GlobExpansionGate:
         return token not in set(self._tokenise(mask_quoted(self._command, keep_double=False)))
 
 
+# ── Bare dotted tokens (#145, #143) ──────────────────────────────────────────
+# A word such as ``vpn.secrets`` (a setting key) or ``pkg.secret_x`` (a module
+# path) matches ``*.secret*`` without naming a file. It still counts when it is
+# path-like (kept out of this gate by its shape), exists or is indexed, or is
+# the operand of a file-opening command or call; every other occurrence is
+# allowed. Anything this gate cannot place with certainty counts.
+_BARE_DOTTED_TOKEN: Final = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)+")
+_COMMAND_SEPARATOR_CHARS: Final = ";|&\n`("
+_AFTER_WORD_CHARS: Final = " \t\n;|&"
+_REDIRECT_TAIL: Final = re.compile(r"[<>]\s*$")
+_SUBSTITUTION_OPENERS_IN_QUOTES: Final = ("$(", "`", "<(", ">(")
+# Commands that open, execute, copy, parse or create their operands.
+_FILE_OPENING_COMMANDS: Final = frozenset(
+    [
+        "cat",
+        "tac",
+        "nl",
+        "less",
+        "more",
+        "head",
+        "tail",
+        "bat",
+        "view",
+        "vi",
+        "vim",
+        "nvim",
+        "nano",
+        "emacs",
+        "ed",
+        "cp",
+        "mv",
+        "ln",
+        "install",
+        "rsync",
+        "scp",
+        "dd",
+        "tee",
+        "source",
+        ".",
+        "bash",
+        "sh",
+        "zsh",
+        "dash",
+        "ksh",
+        "perl",
+        "ruby",
+        "node",
+        "php",
+        "lua",
+        "awk",
+        "gawk",
+        "mawk",
+        "sed",
+        "grep",
+        "egrep",
+        "fgrep",
+        "rg",
+        "ag",
+        "ack",
+        "find",
+        "xargs",
+        "sort",
+        "uniq",
+        "cut",
+        "paste",
+        "join",
+        "comm",
+        "diff",
+        "cmp",
+        "wc",
+        "od",
+        "xxd",
+        "hexdump",
+        "strings",
+        "base64",
+        "file",
+        "stat",
+        "tar",
+        "zip",
+        "unzip",
+        "gzip",
+        "gunzip",
+        "zcat",
+        "bzip2",
+        "xz",
+        "7z",
+        "curl",
+        "wget",
+        "jq",
+        "yq",
+        "openssl",
+        "gpg",
+        "ssh-add",
+        "ssh-keygen",
+        "touch",
+        "rm",
+        "chmod",
+        "chown",
+        "tr",
+        "rev",
+        "fold",
+        "fmt",
+        "split",
+        "shuf",
+        "truncate",
+        "md5sum",
+        "sha1sum",
+        "sha256sum",
+        "sha512sum",
+        "cksum",
+        "b2sum",
+    ]
+)
+_FILE_OPENING_PREFIXES: Final = ("python", "ansible")
+_PATTERN_FIRST_COMMANDS: Final = frozenset({"grep", "egrep", "fgrep", "rg", "ag", "ack"})
+_PATTERN_FILE_OPTIONS: Final = frozenset({"-f", "--file", "-e", "--regexp"})
+# A module-name API whose first argument is a dotted module path, not a file.
+_MODULE_API_BEFORE_STRING: Final = re.compile(
+    r"\b(?:import_module|find_spec|run_module|patch|getLogger)\(\s*$"
+)
+_MODULE_SHAPED: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*")
+_QUOTE_CHARS: Final = "'\"`"
+_TOKEN_PUNCTUATION: Final = ",;:()'\"`"
+_CONTENT_PATH_PRECEDERS: Final = "/\\~$:=@"
+
+
+_DOTTED_WORD_ANYWHERE: Final = re.compile(r"[A-Za-z0-9_]\.[A-Za-z0-9_]")
+
+
+def has_bare_dotted_word(text: str) -> bool:
+    """Whether ``text`` holds anything shaped like a bare dotted word."""
+    return _DOTTED_WORD_ANYWHERE.search(text) is not None
+
+
+def _is_bare_dotted(token: str) -> bool:
+    """True for a plain dotted word: no path, glob, variable or option shape."""
+    return _BARE_DOTTED_TOKEN.fullmatch(token) is not None
+
+
+def _is_spaced_word(token: str) -> bool:
+    """True for a multi-word string with no path separator in it."""
+    return len(token.split()) > 1 and "/" not in token and "\\" not in token
+
+
+def _scan_shell_prefix(prefix: str) -> tuple[int, int | None]:
+    """``(segment_start, open_quote_index)`` for the end of ``prefix``.
+
+    ``segment_start`` follows the last unquoted command separator;
+    ``open_quote_index`` is where the quote still open at the end began.
+    """
+    segment_start = 0
+    quote_index: int | None = None
+    quote_char = ""
+    index = 0
+    while index < len(prefix):
+        char = prefix[index]
+        if quote_index is not None:
+            if char == "\\" and quote_char == '"':
+                index += 1
+            elif char == quote_char:
+                quote_index = None
+        elif char == "\\":
+            index += 1
+        elif char in "'\"":
+            quote_index, quote_char = index, char
+        elif char in _COMMAND_SEPARATOR_CHARS:
+            segment_start = index + 1
+        index += 1
+    return segment_start, quote_index
+
+
+def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
+    """Whether the command in ``segment`` may open an operand placed after it.
+
+    Fails closed: an unreadable segment, or one with no command word (the token
+    IS the command), opens files.
+    """
+    chain = segment_command_chain(segment)
+    if not chain:
+        return True
+    try:
+        words = linear_shlex.split(segment)
+    except ValueError:
+        return True
+    names = [word.rsplit("/", 1)[-1] for word in words]
+    for name in (chain_word.rsplit("/", 1)[-1] for chain_word in chain):
+        if name == "git":
+            rest = names[names.index("git") + 1 :] if "git" in names else []
+            first = next((word for word in rest if not word.startswith("-")), "")
+            if first != "config":
+                return True
+        elif name in _PATTERN_FIRST_COMMANDS:
+            rest = names[names.index(name) + 1 :] if name in names else []
+            if _grep_pattern_word_is_token(rest) and token_is_first_pattern_word:
+                continue
+            return True
+        elif name in _FILE_OPENING_COMMANDS or name.startswith(_FILE_OPENING_PREFIXES):
+            return True
+    return False
+
+
+def _grep_pattern_word_is_token(words_after_command: list[str]) -> bool:
+    """False when the grep-family words use an option that names files or patterns."""
+    return not any(word in _PATTERN_FILE_OPTIONS for word in words_after_command)
+
+
+def _first_positional_is_last(segment: str) -> bool:
+    """Whether the segment's last word is its command's first non-option operand."""
+    try:
+        words = linear_shlex.split(segment)
+    except ValueError:
+        return False
+    chain = segment_command_chain(segment)
+    if not chain or not words:
+        return False
+    command_name = chain[-1].rsplit("/", 1)[-1]
+    names = [word.rsplit("/", 1)[-1] for word in words]
+    if command_name not in names:
+        return False
+    operands = [w for w in words[names.index(command_name) + 1 :] if not w.startswith("-")]
+    return not operands
+
+
+def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
+    """Whether the occurrence at ``command[start:end]`` may be an opened file."""
+    segment_start, quote_index = _scan_shell_prefix(command[:start])
+    if quote_index is None:
+        word_start, word_end = start, end
+    else:
+        quote_char = command[quote_index]
+        inside = command[quote_index + 1 : start]
+        if any(opener in inside for opener in _SUBSTITUTION_OPENERS_IN_QUOTES):
+            return True
+        whole = quote_index + 1 == start and command[end : end + 1] == quote_char
+        if whole:
+            word_start, word_end = quote_index, end + 1
+        else:
+            before_ok = start == quote_index + 1 or command[start - 1].isspace()
+            after = command[end : end + 1]
+            if not (before_ok and (after == "" or after.isspace() or after == quote_char)):
+                return True
+            word_start, word_end = quote_index, end
+    before = command[word_start - 1] if word_start > 0 else ""
+    after_char = command[word_end] if word_end < len(command) else ""
+    if before and not before.isspace() and before not in _COMMAND_SEPARATOR_CHARS:
+        return True
+    if after_char and after_char not in _AFTER_WORD_CHARS:
+        return True
+    segment = command[segment_start:word_start]
+    if _REDIRECT_TAIL.search(segment):
+        return True
+    return _opens_files(segment, _first_positional_is_last(segment))
+
+
+def _is_quote(char: str) -> bool:
+    """Whether ``char`` is one quote character (an empty string is not)."""
+    return len(char) == 1 and char in _QUOTE_CHARS
+
+
+def _content_occurrence_counts(command: str, start: int, end: int) -> bool:
+    """Whether the occurrence in non-shell source may name a file."""
+    before = command[start - 1] if start > 0 else ""
+    after = command[end] if end < len(command) else ""
+    quoted = _is_quote(before) or _is_quote(after)
+    if not quoted:
+        if before != "" and before in _CONTENT_PATH_PRECEDERS:
+            return True
+        # Shell-looking text (a comment, a docstring, a heredoc line): the word
+        # before it is a command that opens its operand.
+        line_words = command[command.rfind("\n", 0, start) + 1 : start].split()
+        previous = line_words[-1].rsplit("/", 1)[-1] if line_words else ""
+        return previous in _FILE_OPENING_COMMANDS or previous.startswith(_FILE_OPENING_PREFIXES)
+    token = command[start:end]
+    if before != after or _MODULE_SHAPED.fullmatch(token) is None:
+        return True
+    return _MODULE_API_BEFORE_STRING.search(command[: start - 1]) is None
+
+
+def _is_indexed_name(token: str, index: "ProtectedFileIndex", cwds: tuple[str, ...]) -> bool:
+    """Whether ``token`` names an indexed protected file, here or by its file name."""
+    if index.glob_matches(token, cwds) is not None:
+        return True
+    return any(entry.relpath.rsplit("/", 1)[-1] == token for entry in index.files)
+
+
+def _bare_dotted_counts(
+    token: str,
+    command: str,
+    *,
+    context: MentionContext,
+    index: "ProtectedFileIndex | None",
+    cwds: tuple[str, ...],
+    cwd: str | None,
+    project_root: str | None,
+) -> bool:
+    """Whether a bare dotted ``token`` that matched a pattern is a real mention."""
+    bases = {base for base in (*cwds, cwd, project_root) if base}
+    if any(os.path.lexists(Path(base) / token) for base in bases):
+        return True
+    if index is not None and _is_indexed_name(token, index, cwds):
+        return True
+    check = _bash_occurrence_counts if context == "bash" else _content_occurrence_counts
+    occurrences = [m.span() for m in re.finditer(re.escape(token), command)]
+    if not occurrences:
+        return True
+    return any(check(command, start, end) for start, end in occurrences)
+
+
 def iter_protected_mentions(
     command: str,
     patterns: tuple[str, ...],
@@ -2053,23 +2362,49 @@ def iter_protected_mentions(
     # genuinely repeating a word -- changes no verdict it computes.
     mention_cache: dict[str, str | None] = {}
     yielded_tokens: set[str] = set()
+
+    def judge(word: str) -> str | None:
+        """The pattern ``word`` mentions once the bare-dotted gate has judged it."""
+        found = _token_mention(
+            word,
+            patterns,
+            stem_pairs,
+            project_root,
+            context=context,
+            expands_globs=functools.partial(glob_gate.expands, word),
+            is_quoted_literal=functools.partial(glob_gate.is_quoted_literal, word),
+            effective_cwds=effective,
+            index=index,
+        )
+        core = word.strip(_TOKEN_PUNCTUATION)
+        if (
+            found is not None
+            and _is_bare_dotted(core)
+            and not _bare_dotted_counts(
+                core,
+                command,
+                context=context,
+                index=index,
+                cwds=effective,
+                cwd=cwd,
+                project_root=project_root,
+            )
+        ):
+            return None
+        return found
+
     for token in tokens:
         if deadline is not None and time.monotonic() > deadline:
             raise TimeoutError("secret_file_guard mention scan exceeded its deadline")
         if token in mention_cache:
             pattern = mention_cache[token]
         else:
-            pattern = _token_mention(
-                token,
-                patterns,
-                stem_pairs,
-                project_root,
-                context=context,
-                expands_globs=functools.partial(glob_gate.expands, token),
-                is_quoted_literal=functools.partial(glob_gate.is_quoted_literal, token),
-                effective_cwds=effective,
-                index=index,
-            )
+            pattern = judge(token)
+            if pattern is not None and _is_spaced_word(token):
+                # A quoted multi-word argument: its words are judged one by one
+                # (the ordinary stream yields them too), so one that names no
+                # file does not make the whole string a mention.
+                pattern = next((p for p in map(judge, token.split()) if p is not None), None)
             mention_cache[token] = pattern
         if pattern is not None and token not in yielded_tokens:
             yielded_tokens.add(token)

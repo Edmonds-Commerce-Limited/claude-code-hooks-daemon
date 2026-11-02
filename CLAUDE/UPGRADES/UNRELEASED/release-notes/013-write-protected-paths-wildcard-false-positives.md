@@ -1,4 +1,4 @@
-# Fix: write_protected_paths no longer denies read-only commands under a wildcard-only glob
+# Callout: write_protected_paths no longer denies read-only commands under a wildcard-only glob
 
 **Plan**: 00556
 **Issue**: #141
