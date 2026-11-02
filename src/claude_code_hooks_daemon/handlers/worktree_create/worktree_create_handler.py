@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.core.worktree_seed import (
     SeedEntry,
     parse_seed_config,
 )
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
 from claude_code_hooks_daemon.utils.worktree_seeding import seed_worktree, validate_seed_sources
 
@@ -290,7 +291,7 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             "\n\nSeeding happens ONCE, at creation; a re-fired event never "
             "re-seeds over an agent's own edits. A configured path that has since "
             "disappeared ABORTS creation rather than handing you a quietly "
-            "under-seeded worktree — run `bin/hooks-daemon check-worktree-seed` to "
+            f"under-seeded worktree — run `{daemon_cli_command_for_docs('check-worktree-seed')}` to "
             "see which entries are stale and which local files are not yet covered."
         )
         return "".join(lines)

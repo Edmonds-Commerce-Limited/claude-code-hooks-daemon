@@ -36,6 +36,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.blockage_marker import write_json_atomically
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 
 logger = logging.getLogger(__name__)
 
@@ -316,12 +317,14 @@ def render_rebrief(records: list[WorkRecord], *, now: float, project_root: Path)
         "check its worktree (`git -C <worktree> status`, `git -C <worktree> log -1`) "
         "against the last sha, then re-dispatch it from its brief if the work is not "
         "finished, or close the record "
-        "(`bin/hooks-daemon work-queue done NAME` / `update NAME --status abandoned`).",
+        f"(`{daemon_cli_command_for_docs('work-queue', 'done', 'NAME')}` / "
+        "`update NAME --status abandoned`).",
         "",
     ]
     for record in records:
         lines += _render_record(record, now, project_root)
-    lines += ["", "Full briefs: `bin/hooks-daemon work-queue list --json`."]
+    full_briefs = daemon_cli_command_for_docs("work-queue", "list", "--json")
+    lines += ["", f"Full briefs: `{full_briefs}`."]
     return lines
 
 

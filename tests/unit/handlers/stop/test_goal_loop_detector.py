@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.handlers.stop.goal_loop_detector import (
     MAX_TRACKED_SESSIONS,
     GoalLoopDetectorHandler,
 )
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.session_modes import ModeLabel
 from claude_code_hooks_daemon.utils.session_signal_paths import SIGNAL_SUBDIR
 
@@ -1144,7 +1145,7 @@ class TestLoopPersisting:
     ) -> None:
         _batches(tmp_path / "t.jsonl", watcher, 5)
         (line,) = modes.take_lines(SESSION)
-        assert "run `bin/hooks-daemon clear-goal`" in line
+        assert f"run `{daemon_cli_command_for_docs('clear-goal')}`" in line
         assert "mkplan.bash --journal" in line
         assert "stop with the real blocker stated" in line
         assert "human's decision" not in line

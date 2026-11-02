@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.core.data_layer import latest_usage
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
 from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_enforcement import (
     FAILSAFE_CRON_SCHEDULE_HINT,
@@ -454,7 +455,7 @@ def render_lift_not_recorded_note(*, expires_at: float) -> str:
         "USAGE PAUSE: usage is back under the ceiling, but the pause record could NOT be "
         f"removed, so the pause is NOT lifted yet: tools other than {_ALLOWED_TOOLS_TEXT} "
         f"stay denied until it expires ({until}) or a human runs "
-        "`! bin/hooks-daemon usage-pause clear`. Do not start new work."
+        f"`! {daemon_cli_command_for_docs('usage-pause', 'clear')}`. Do not start new work."
     )
 
 

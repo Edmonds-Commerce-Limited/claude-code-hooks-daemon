@@ -60,6 +60,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.github_issue_validity import (
@@ -82,8 +83,15 @@ from claude_code_hooks_daemon.utils.plan_trigger import plan_dir_for
 
 _LOGGER = logging.getLogger(__name__)
 
-#: The CLI that judges and claims. One home for the command the deny names.
-CLAIM_COMMAND_TEMPLATE: Final[str] = "bin/hooks-daemon issue-validity {number} --claim"
+
+def claim_command(number: int | str) -> str:
+    """The CLI that judges and claims, in the wrapper spelling of the install mode.
+
+    One home for the command the deny names; rendered per call because the
+    wrapper path differs between a client install and a self-install.
+    """
+    return daemon_cli_command_for_docs("issue-validity", str(number), "--claim")
+
 
 AUTO_CLAIM_OPTION: Final[str] = "auto_claim"
 
@@ -98,21 +106,25 @@ _PLAN_REFERENCE: Final[re.Pattern[str]] = re.compile(r"\bPlan\s+(\d{1,5})\b")
 _GIT_COMMIT: Final[re.Pattern[str]] = re.compile(GIT_INVOCATION + r"commit\b")
 _PLAN_NUMBER_WIDTH: Final[int] = 5
 
-_RULE_UNASSIGNED: Final[Rule] = Rule(
-    rule_id=RuleID.GH_ISSUE_UNASSIGNED,
-    blocked="work tied to a GitHub issue that is assigned to nobody",
-    why="Unclaimed issue work can collide with someone else picking the same issue up",
-    fix="Run `bin/hooks-daemon issue-validity N --claim`, then retry",
-    verbose=(
-        "WHY BLOCKED:\n"
-        "Work tied to a GitHub issue must be on an issue assigned to the account this\n"
-        "session is signed in as. This issue is assigned to nobody.\n\n"
-        "DO INSTEAD:\n"
-        "  Run the claim command named below. It is deterministic code: it checks\n"
-        "  the issue, claims it for the signed-in account, and prints the result.\n"
-        "  Then retry the call you were making.\n"
-    ),
-)
+
+def _rule_unassigned() -> Rule:
+    """The unassigned-issue rule, built per call so the wrapper follows the install mode."""
+    return Rule(
+        rule_id=RuleID.GH_ISSUE_UNASSIGNED,
+        blocked="work tied to a GitHub issue that is assigned to nobody",
+        why="Unclaimed issue work can collide with someone else picking the same issue up",
+        fix=f"Run `{claim_command('N')}`, then retry",
+        verbose=(
+            "WHY BLOCKED:\n"
+            "Work tied to a GitHub issue must be on an issue assigned to the account this\n"
+            "session is signed in as. This issue is assigned to nobody.\n\n"
+            "DO INSTEAD:\n"
+            "  Run the claim command named below. It is deterministic code: it checks\n"
+            "  the issue, claims it for the signed-in account, and prints the result.\n"
+            "  Then retry the call you were making.\n"
+        ),
+    )
+
 
 _RULE_ELSEWHERE: Final[Rule] = Rule(
     rule_id=RuleID.GH_ISSUE_ASSIGNED_ELSEWHERE,
@@ -311,8 +323,8 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
             return _RULE_AUTHOR, f"Issue #{number}:\n{details}"
         if report.verdict is Verdict.BLOCKED:
             return _RULE_ELSEWHERE, f"Issue #{number}:\n{details}"
-        command = CLAIM_COMMAND_TEMPLATE.format(number=number)
-        return _RULE_UNASSIGNED, f"Issue #{number}:\n{details}\n\nRun: {command}\nThen retry."
+        command = claim_command(number)
+        return _rule_unassigned(), f"Issue #{number}:\n{details}\n\nRun: {command}\nThen retry."
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Judge each tied issue; deny on a settled problem, advise on an unknown."""
@@ -344,7 +356,7 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
 
     def get_rules(self) -> list[Rule]:
         """The three Rules backing this handler's denials."""
-        return [_RULE_UNASSIGNED, _RULE_ELSEWHERE, _RULE_AUTHOR]
+        return [_rule_unassigned(), _RULE_ELSEWHERE, _RULE_AUTHOR]
 
     def get_acceptance_tests(self) -> list[Any]:
         """A near-miss that must allow, and the deny declared as undrivable.
@@ -375,8 +387,8 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
                 title="github issue assignment guard - edit of a plan tied to an unclaimed issue",
                 command="Edit a PLAN.md whose header names an issue assigned to nobody",
                 description=(
-                    "Denied with the claim command `bin/hooks-daemon issue-validity N "
-                    "--claim`; the retry after claiming is allowed."
+                    f"Denied with the claim command `{claim_command('N')}`; "
+                    "the retry after claiming is allowed."
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"issue-validity", r"--claim"],
@@ -402,7 +414,7 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
             "denied unless the issue is assigned to the signed-in GitHub account"
             " and, when `approved_issue_authors` is configured, opened by an approved "
             "author.\n\n"
-            "- **Unassigned**: run `bin/hooks-daemon issue-validity N --claim`, then "
+            f"- **Unassigned**: run `{claim_command('N')}`, then "
             "retry. The claim SWITCHES the assignee to you and verifies you are the only "
             "one; it never adds a second assignee. The CLI does the lookup and the claim; "
             "do not run `gh` lookups yourself.\n"

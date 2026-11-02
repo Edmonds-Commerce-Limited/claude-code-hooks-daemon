@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.limit_events import (
     KIND_AGENT_KILLED,
     RESUME_KINDS,
@@ -106,15 +107,18 @@ _RESUME_MEANING: Final[dict[str, str]] = {
     ),
 }
 
+
 #: Where to look for what was in flight, in the order to look. The durable work queue
 #: (Plan 00470 Task 3.3) heads it: it holds the brief, which no other place does.
-_REBRIEF_PLACES: Final[tuple[str, ...]] = (
-    "`bin/hooks-daemon work-queue list`, the durable queue of dispatched agents "
-    "(worktree, branch, brief, last sha) listed below",
-    "`git worktree list`, then `git status` and `git log -1` inside each worktree that "
-    "held in-flight work",
-    "the newest entry files of the active plan's JOURNAL/ (newest date folder)",
-)
+def _rebrief_places() -> tuple[str, ...]:
+    """Where to look for what was in flight, rendered per call for the install mode."""
+    return (
+        f"`{daemon_cli_command_for_docs('work-queue', 'list')}`, the durable queue of "
+        "dispatched agents (worktree, branch, brief, last sha) listed below",
+        "`git worktree list`, then `git status` and `git log -1` inside each worktree that "
+        "held in-flight work",
+        "the newest entry files of the active plan's JOURNAL/ (newest date folder)",
+    )
 
 
 def _is_limit_text(text: str) -> bool:
@@ -183,7 +187,7 @@ def _rebrief(
         "Anything running when the limit hit may have died with it, and nothing "
         "re-dispatches it for you. Before carrying on, rebuild the picture from disk:",
     ]
-    lines += [f"{number}. {place}" for number, place in enumerate(_REBRIEF_PLACES, start=1)]
+    lines += [f"{number}. {place}" for number, place in enumerate(_rebrief_places(), start=1)]
     if queue_lines:
         lines += ["", *queue_lines]
     if agents:

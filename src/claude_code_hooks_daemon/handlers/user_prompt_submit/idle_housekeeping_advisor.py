@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerB
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptMessage, TranscriptReader
 from claude_code_hooks_daemon.daemon.housekeeping import report_only_steps
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.stale_checkouts import (
     DEFAULT_MAX_IDLE_DAYS,
     SCAN_BUDGET_SECONDS,
@@ -358,8 +359,8 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
             "consecutive no-op failsafe-recovery ticks. Rather than re-stopping, "
             "spend this idle time on useful, LOW-priority, REPORT-ONLY housekeeping.\n\n"
             "HOW (protect main-thread context — do NOT run the audits inline):\n"
-            "  • Run `bin/hooks-daemon housekeeping` (under `.claude/hooks-daemon/` "
-            "on a client install) and follow the procedure it prints: one "
+            f"  • Run `{daemon_cli_command_for_docs('housekeeping')}` "
+            "and follow the procedure it prints: one "
             "SUB-AGENT per step, each writing a detailed **markdown report "
             f"file** under `{self._reports_dir}/` (e.g. `YYYY-MM-DD-<step>.md`) "
             "and replying with only its verdict, report path and what it "
@@ -386,7 +387,7 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
             "specialist housekeeping sub-agents that run read-only audits and write "
             "shareable **markdown report files** (default `untracked/reports/`). The "
             "audits are the report-only steps of the housekeeping pass that "
-            "`bin/hooks-daemon housekeeping` prints in full (the same pass the "
+            f"`{daemon_cli_command_for_docs('housekeeping')}` prints in full (the same pass the "
             "hooks-daemon skill runs on `housekeeping`). It is "
             "REPORT-ONLY — never auto-fix or auto-commit — and strictly lower priority "
             "than real work (a real user prompt aborts it). Off by default; enable via "

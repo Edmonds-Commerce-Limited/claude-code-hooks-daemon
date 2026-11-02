@@ -107,6 +107,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.plan_qa.model import GOAL_DROPPING_STATUSES, PlanDoc, PlanStatus
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger, LivePlanRef
@@ -1715,7 +1716,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             "completing write is detected via the "
             "persisted ledger, not the in-memory latch, so it also survives a "
             "daemon restart (review M2). Manual fallback / debug tool: "
-            "`bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` "
+            f"`{daemon_cli_command_for_docs('inject-goal', 'NNNNN')}` (requires `CLAUDE_CODE_SESSION_ID` "
             "in the environment, i.e. run it from the session to be targeted).\n\n"
             "**An injected goal is machine-generated** — it always opens with the "
             "machine-origin marker and a 'NOT human authorisation' clause, and can "

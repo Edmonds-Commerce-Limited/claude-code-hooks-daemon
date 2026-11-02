@@ -10,8 +10,8 @@ import pytest
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.user_prompt_submit.limit_rebrief import (
-    _REBRIEF_PLACES,
     LimitRebriefHandler,
+    _rebrief_places,
 )
 from claude_code_hooks_daemon.utils.limit_events import (
     KIND_AGENT_KILLED,
@@ -108,7 +108,7 @@ class TestWorkQueueRebrief:
     """Plan 00470 Task 3.3: the re-brief after a resume lists the durable work queue."""
 
     def test_the_queue_heads_the_places_to_look(self) -> None:
-        assert "work-queue list" in _REBRIEF_PLACES[0]
+        assert "work-queue list" in _rebrief_places()[0]
 
     def test_running_agents_are_listed_with_their_respawn_facts(self, tmp_path: Path) -> None:
         events, queue = tmp_path / "e.json", tmp_path / "q.json"

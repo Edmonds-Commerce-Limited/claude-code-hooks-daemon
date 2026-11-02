@@ -57,6 +57,7 @@ from claude_code_hooks_daemon.handlers.utils.initial_thread_exemption import (
     InitialThreadExemption,
 )
 from claude_code_hooks_daemon.utils.autonomy import session_policy
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -244,7 +245,8 @@ class IdleWorkableIssueStopGateHandler(InitialThreadExemption, StopHandlerBase):
             f"The `{self._job_id}` "
             "cron is a safety net, not a scheduler: it exists to restart a session that "
             "has stopped, not to hand out the next issue. Do not wait for the tick.\n\n"
-            f"Start #{first} now (claim it with `bin/hooks-daemon issue-validity {first} --claim`, "
+            f"Start #{first} now (claim it with "
+            f"`{daemon_cli_command_for_docs('issue-validity', str(first), '--claim')}`, "
             "then follow the runbook). If a real blocker prevents it, stop again and name that "
             "blocker; if only a human can unblock it, say `[awaiting-human]` after "
             "`STOPPING BECAUSE:`."

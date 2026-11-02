@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.daemon.controller import get_controller
 from claude_code_hooks_daemon.daemon.install_layout import is_self_install_mode
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 psutil: ModuleType | None
@@ -168,7 +169,7 @@ class DaemonStatsHandler(StatusLineHandlerBase):
             current_value=(
                 "Off by default (opt-in, developer diagnostics), overridable via config. "
                 "Live values require the separately-running daemon; see "
-                "`bin/hooks-daemon status`."
+                f"`{daemon_cli_command_for_docs('status')}`."
             ),
         )
 
