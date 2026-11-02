@@ -31,7 +31,7 @@ pattern sure, dont disclose the match."
 So option (c) applies, with no per-pattern switch: no public pattern ever echoes its match, on any surface. The deny
 reason may name the pattern, the path, the line, the git field (commit message, tag name, branch name, author identity,
 merge message) and the `gh` body (inline, or the body-file path). It never names the matched characters, a snippet of
-them, or a recoverable redaction. This reverses Plan 00201's "public patterns are safe to name".
+them, or a recoverable redaction. This reverses Plan 00201's "public patterns are safe to name in messages".
 
 ## Goals
 
@@ -57,7 +57,7 @@ them, or a recoverable redaction. This reverses Plan 00201's "public patterns ar
 
 ### Phase 2: Merge
 
-- [x] ✅ **Task 2.1**: The coordinator merges the branch, runs the full QA gate and closes this plan. Merged at `17184f376`; targeted QA 6275 passed, 0 failed; the full QA gate runs as part of the imminent release's CI gate, by the owner's release authorisation of 2 November 2026.
+- [x] ✅ **Task 2.1**: The coordinator merges the branch and closes this plan. Only targeted QA ran here; the full QA gate is deferred to the release's CI gate. Merged at `17184f376`; targeted QA 6275 passed, 0 failed; the full QA gate runs as part of the imminent release's CI gate, by the owner's release authorisation of 2 November 2026.
 
 ## Success Criteria
 
