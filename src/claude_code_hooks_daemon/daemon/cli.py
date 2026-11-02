@@ -144,6 +144,7 @@ from claude_code_hooks_daemon.daemon.validation import (
 from claude_code_hooks_daemon.daemon.venv_lock import (
     VenvLockTimeout,
     build_log_path,
+    daemon_down_stop_lines,
     last_build_lines,
     venv_lock,
     write_build_result,
@@ -1632,6 +1633,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         _print_install_stamp_line()
         for line in last_build_lines(_daemon_untracked_dir(project_path).parent):
             print(line)
+        for line in daemon_down_stop_lines(_daemon_untracked_dir(project_path).parent):
+            print(line)
         _print_transport_status_warnings(project_path, transport)
         return 1
 
@@ -1643,6 +1646,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Socket: {socket_path} ({'exists' if socket_exists else 'MISSING'})")
     print(f"PID file: {pid_path}")
     _print_install_stamp_line()
+    for line in daemon_down_stop_lines(_daemon_untracked_dir(project_path).parent):
+        print(line)
 
     # Plan 00290: name active per-event listeners when the transport config
     # needs them. Silent when the transport is disabled (relay_enabled: false,

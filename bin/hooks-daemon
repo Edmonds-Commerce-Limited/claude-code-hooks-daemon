@@ -358,7 +358,7 @@ _diagnose_venv_free() {
     elif [ "$ran" -eq 0 ]; then
         echo "no venv interpreter could run the diagnosis"
     fi
-    _print_last_build 2>&1
+    _print_last_build tail 2>&1
     _print_daemon_state
     if [ "$healthy" -eq 1 ]; then
         echo "healthy: a venv can start the daemon"
@@ -413,6 +413,21 @@ _print_last_build() {
     [ -n "$result" ] || return 0
     echo "   Last venv build: $result at ${finished:-unknown time}" >&2
     echo "   Build log: ${log:-unknown}" >&2
+    if [ "${1:-}" = "tail" ] && [ -n "$log" ]; then
+        if [ -f "$log" ]; then
+            echo "   Last 20 lines of the build log:" >&2
+            # Pure bash: the wrapper may run with a PATH that lacks coreutils.
+            local -a ring=()
+            local text
+            while IFS= read -r text || [ -n "$text" ]; do
+                ring+=("$text")
+                [ "${#ring[@]}" -gt 20 ] && ring=("${ring[@]:1}")
+            done < "$log"
+            [ "${#ring[@]}" -eq 0 ] || printf '%s\n' "${ring[@]}" >&2
+        else
+            echo "   Build log not found: $log" >&2
+        fi
+    fi
 }
 
 # `diagnose` is answered before venv resolution: its job is to explain why a

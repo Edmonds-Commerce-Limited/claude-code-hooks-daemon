@@ -727,6 +727,8 @@ class TestDaemonRuntimeArtefactsStayDenied:
             "untracked/payload-capture/p.json",
             "untracked/logs/hooks/verdicts.jsonl",
             "untracked/stop-events.jsonl",
+            "untracked/hook-errors.log",
+            "untracked/hook-errors.log.1",
         ],
     )
     def test_denied(self, project: Path, rel: str) -> None:
