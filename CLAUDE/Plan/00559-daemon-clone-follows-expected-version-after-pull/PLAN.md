@@ -51,6 +51,14 @@ built.
    enqueue a prompt, not a shell action). Build a host-scoped scheduled shell
    check, or leave it out?
 
+Related plans that constrain the design (the dedupe check found no duplicate):
+
+- Plan 00535 (upgrade handover without a live daemon rebuild). A re-provision
+  set off by a hook must stop or hand over the running daemon before it
+  rebuilds, or it hits that plan's mixed old/new tree.
+- Plan 00473 (post-merge handlers judge the command's repository). A git
+  post-merge trigger needs the same repository resolution.
+
 ## Goals
 
 - Record the owner's answers, then build them with TDD.
