@@ -57,7 +57,9 @@ Related plans that constrain the design (the dedupe check found no duplicate):
   set off by a hook must stop or hand over the running daemon before it
   rebuilds, or it hits that plan's mixed old/new tree.
 - Plan 00473 (post-merge handlers judge the command's repository). A git
-  post-merge trigger needs the same repository resolution.
+  post-merge trigger needs the same repository resolution, and should reuse
+  `merge_directory` (`utils/merge_scope.py`), which `daemon_sync_after_merge`
+  already calls.
 
 ## Goals
 
