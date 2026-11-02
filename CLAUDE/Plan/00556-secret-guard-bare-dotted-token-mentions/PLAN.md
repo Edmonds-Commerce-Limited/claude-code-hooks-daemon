@@ -119,8 +119,11 @@ time.
 - [x] ✅ **Task 3.4** (#143): a dotted module path in a Python string literal
   is treated as a file mention.
 
-- [ ] ⬜ **Task 3.5** (#144): the grep-pattern-only exemption is lost on a
-  compound command. Judge each statement separately; `grep 'id_rsa' d; cat id_rsa` must stay denied.
+- [x] ✅ **Task 3.5** (#144): the grep-pattern-only exemption was lost on a
+  compound command. Each statement is now judged separately, and
+  `grep 'id_rsa' d; cat id_rsa` stays denied. Merged from 4bd6ce8f2, with
+  release note 016, and the issue is closed. Report:
+  [261102-task-3.5-issue-144.md](subagent-reports/261102-task-3.5-issue-144.md).
 
 ### Phase 2: Build (#145)
 
@@ -135,10 +138,10 @@ time.
 
 ## Success Criteria
 
-- [ ] The owner's ruling is recorded, and #145 is answered and closed.
-- [ ] If behaviour changes, the reported shape is allowed (or advised) and
+- [x] The owner's ruling is recorded, and #145 is answered and closed.
+- [x] If behaviour changes, the reported shape is allowed (or advised) and
   every real-file shape is still denied, each proven by a test.
-- [ ] If behaviour changes, a release note is in `CLAUDE/UPGRADES/UNRELEASED/`
+- [x] If behaviour changes, a release note is in `CLAUDE/UPGRADES/UNRELEASED/`
   (the pending-release holding area). If it does not, the plan records that it
   has no release-bound consequences.
   Holding-area artefact for #145 and #143:
