@@ -399,6 +399,26 @@ class TestHardBand:
         assert result.context
 
 
+class TestSoftAdviceWithoutHardLimit:
+    def test_no_hard_limit_says_continuing_is_permitted(
+        self, handler, tmp_path, project, transcript
+    ) -> None:
+        write_transcript(transcript, 200_000)
+        text = str(handler.handle(event(tmp_path, project)).context)
+        assert "then stop" not in text
+        assert "continuing is permitted" in text
+        assert "advised, not required" in text
+
+    def test_hard_limit_set_keeps_the_stop_instruction(
+        self, handler, tmp_path, project, transcript
+    ) -> None:
+        handler._hard_tokens = 250_000
+        write_transcript(transcript, 200_000)
+        text = str(handler.handle(event(tmp_path, project)).context)
+        assert "then stop" in text
+        assert "continuing is permitted" not in text
+
+
 class TestOverride:
     def test_named_dispatch_budget_raises_the_band(
         self, handler, tmp_path, project, transcript

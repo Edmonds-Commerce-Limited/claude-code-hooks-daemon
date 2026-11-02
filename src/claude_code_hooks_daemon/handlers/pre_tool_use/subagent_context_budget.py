@@ -433,18 +433,25 @@ class SubagentContextBudgetHandler(PreToolUseHandlerBase):
 
     @staticmethod
     def _soft_advice(context: int, bands: Bands, target: Path) -> str:
-        hard = (
-            f" At {bands.hard:,} every tool but those steps is denied."
-            if bands.hard is not None
-            else ""
-        )
-        return (
+        head = (
             f"CONTEXT BUDGET: this subagent's context is {context:,} tokens, past the "
             f"{bands.soft or 0:,} soft budget. Every tool call re-reads all of it, so a fresh "
-            "agent from a short handoff is cheaper than continuing. At your next natural "
-            f"break: (1) write a handoff to {target} (done, left, where the state is); "
+            "agent from a short handoff is cheaper than continuing. "
+        )
+        steps = (
+            f"(1) write a handoff to {target} (done, left, where the state is); "
             "(2) git add and commit your work in progress; (3) SendMessage the lead with the "
-            f"handoff path, then stop.{hard} This advice is given once."
+            "handoff path"
+        )
+        if bands.hard is None:
+            return (
+                f"{head}No hard limit is set, so continuing is permitted and the handoff is "
+                f"advised, not required. At a natural break, if you choose to hand off: "
+                f"{steps}. This advice is given once."
+            )
+        return (
+            f"{head}At your next natural break: {steps}, then stop. "
+            f"At {bands.hard:,} every tool but those steps is denied. This advice is given once."
         )
 
     # ------------------------------------------------------------------

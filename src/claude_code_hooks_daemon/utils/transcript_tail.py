@@ -90,12 +90,44 @@ def as_int(raw: object) -> int:
     return int(raw)
 
 
+#: The ``usage.iterations`` entry type of one executor request.
+_MESSAGE_ITERATION: Final[str] = "message"
+
+
+def _request_usage(usage: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The usage of the LAST executor request of a turn.
+
+    A turn that used a server-side tool (the advisor) holds several requests:
+    its top-level fields are the SUM of the ``message`` entries of
+    ``usage.iterations``, so they count the context once per request. The last
+    ``message`` entry is the request that carries the context now;
+    ``advisor_message`` entries are another model's request and never count.
+    Without ``iterations``, or with none of type ``message``, the top-level
+    fields are the only reading there is.
+    """
+    iterations = usage.get("iterations")
+    if not isinstance(iterations, list) or not iterations:
+        return usage
+    for entry in reversed(iterations):
+        if isinstance(entry, dict) and entry.get("type") == _MESSAGE_ITERATION:
+            return entry
+    logger.debug(
+        "usage.iterations holds no message iteration, so the top-level usage is read as the context"
+    )
+    return usage
+
+
 def context_of(usage: Mapping[str, Any]) -> int:
-    """The context size one request carried: input plus both cache fields."""
+    """The context size the last request carried: input plus both cache fields.
+
+    Spend (summed tokens) is a different question; it reads the top-level
+    fields directly, never this.
+    """
+    request = _request_usage(usage)
     return (
-        as_int(usage.get("input_tokens"))
-        + as_int(usage.get("cache_read_input_tokens"))
-        + as_int(usage.get("cache_creation_input_tokens"))
+        as_int(request.get("input_tokens"))
+        + as_int(request.get("cache_read_input_tokens"))
+        + as_int(request.get("cache_creation_input_tokens"))
     )
 
 
