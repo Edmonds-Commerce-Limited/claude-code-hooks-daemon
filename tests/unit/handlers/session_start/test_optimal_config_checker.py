@@ -680,6 +680,95 @@ class TestBashMaintainWorkingDirCheck:
             assert bash_dir[0]["passed"] is False
 
 
+_IDLE_DISABLER_ENV = ("DISABLE_AUTO_COMPACT", "DISABLE_COMPACT", "FORCE_PROMPT_CACHING_5M")
+
+
+class TestIdleCompactionCheck:
+    """Idle compaction must be in effect (Plan 00557)."""
+
+    @pytest.fixture
+    def handler(self) -> Any:
+        from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (
+            OptimalConfigCheckerHandler,
+        )
+
+        return OptimalConfigCheckerHandler()
+
+    @pytest.fixture(autouse=True)
+    def _no_ambient_disabler(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name in _IDLE_DISABLER_ENV:
+            monkeypatch.delenv(name, raising=False)
+
+    @staticmethod
+    def _idle(handler: Any, user: dict[str, Any], project_root: Path = _NO_PROJECT) -> Any:
+        with patch.object(handler, "_read_global_settings", return_value=user):
+            checks = handler._run_checks(project_root)
+        return next(c for c in checks if c["name"] == "Idle Compaction")
+
+    def test_absent_key_passes(self, handler: Any) -> None:
+        assert self._idle(handler, {})["passed"] is True
+
+    def test_explicit_true_passes(self, handler: Any) -> None:
+        assert self._idle(handler, {"idleCompaction": True})["passed"] is True
+
+    def test_idle_compaction_false_fails_and_names_cause(self, handler: Any) -> None:
+        check = self._idle(handler, {"idleCompaction": False})
+        assert check["passed"] is False
+        assert "idleCompaction" in check["current"]
+        assert "idleCompaction" in check["fix"]
+
+    def test_auto_compact_disabled_fails(self, handler: Any) -> None:
+        check = self._idle(handler, {"autoCompactEnabled": False})
+        assert check["passed"] is False
+        assert "autoCompactEnabled" in check["current"]
+
+    @pytest.mark.parametrize("name", _IDLE_DISABLER_ENV)
+    def test_env_disabler_fails(
+        self, handler: Any, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        monkeypatch.setenv(name, "1")
+        check = self._idle(handler, {})
+        assert check["passed"] is False
+        assert name in check["current"]
+
+    @pytest.mark.parametrize("value", ["", "0", "false"])
+    def test_env_falsy_value_passes(
+        self, handler: Any, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        monkeypatch.setenv("DISABLE_AUTO_COMPACT", value)
+        assert self._idle(handler, {})["passed"] is True
+
+    def test_env_section_of_user_settings_fails(self, handler: Any) -> None:
+        check = self._idle(handler, {"env": {"DISABLE_COMPACT": "1"}})
+        assert check["passed"] is False
+        assert "DISABLE_COMPACT" in check["current"]
+
+    @pytest.mark.parametrize("name", ["settings.json", "settings.local.json"])
+    def test_project_settings_disabler_fails(self, handler: Any, tmp_path: Path, name: str) -> None:
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / name).write_text(json.dumps({"idleCompaction": False}))
+        check = self._idle(handler, {}, tmp_path)
+        assert check["passed"] is False
+        assert name in check["current"]
+
+    def test_project_env_section_fails(self, handler: Any, tmp_path: Path) -> None:
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "settings.json").write_text(
+            json.dumps({"env": {"FORCE_PROMPT_CACHING_5M": "1"}})
+        )
+        assert self._idle(handler, {}, tmp_path)["passed"] is False
+
+    def test_unreadable_project_settings_do_not_fail(self, handler: Any, tmp_path: Path) -> None:
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "settings.json").write_text("{not json")
+        assert self._idle(handler, {}, tmp_path)["passed"] is True
+
+    def test_why_states_scope_and_version(self, handler: Any) -> None:
+        why = self._idle(handler, {})["why"]
+        assert "interactive" in why
+        assert "2.1.290" in why
+
+
 class TestHandleOutput:
     """Test handle() output formatting."""
 
@@ -895,7 +984,7 @@ class TestEnforceSettingsSync:
         with patch.object(handler, "_get_settings_path", return_value=settings_path):
             written = handler._enforce_settings_sync()
 
-        assert written == ["alwaysThinkingEnabled=true"]
+        assert written == ["alwaysThinkingEnabled=true", "idleCompaction=true"]
         updated = json.loads(settings_path.read_text())
         assert "effortLevel" not in updated
         assert updated["alwaysThinkingEnabled"] is True
@@ -907,7 +996,7 @@ class TestEnforceSettingsSync:
 
         settings_path = tmp_path / ".claude" / "settings.json"
         settings_path.parent.mkdir(parents=True)
-        original = {"effortLevel": "medium", "alwaysThinkingEnabled": False}
+        original = {"effortLevel": "medium", "alwaysThinkingEnabled": False, "idleCompaction": True}
         settings_path.write_text(json.dumps(original))
 
         with patch.object(handler, "_get_settings_path", return_value=settings_path):
@@ -924,7 +1013,11 @@ class TestEnforceSettingsSync:
 
         settings_path = tmp_path / ".claude" / "settings.json"
         settings_path.parent.mkdir(parents=True)
-        settings_path.write_text(json.dumps({"effortLevel": "low", "alwaysThinkingEnabled": False}))
+        settings_path.write_text(
+            json.dumps(
+                {"effortLevel": "low", "alwaysThinkingEnabled": False, "idleCompaction": False}
+            )
+        )
 
         with patch.object(handler, "_get_settings_path", return_value=settings_path):
             written = handler._enforce_settings_sync()
@@ -941,7 +1034,7 @@ class TestEnforceSettingsSync:
         with patch.object(handler, "_get_settings_path", return_value=settings_path):
             written = handler._enforce_settings_sync()
 
-        assert written == ["alwaysThinkingEnabled=true"]
+        assert written == ["alwaysThinkingEnabled=true", "idleCompaction=true"]
 
     def test_aborts_on_read_error_to_avoid_clobbering(self, handler: Any, tmp_path: Any) -> None:
         """Should NOT write when settings file read fails (avoids clobbering)."""
@@ -986,6 +1079,42 @@ class TestEnforceSettingsSync:
             written = handler._enforce_settings_sync()
 
         assert written == []
+
+    def test_writes_idle_compaction_when_absent(self, handler: Any, tmp_path: Any) -> None:
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"alwaysThinkingEnabled": True}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            written = handler._enforce_settings_sync()
+
+        assert written == ["idleCompaction=true"]
+        assert json.loads(settings_path.read_text())["idleCompaction"] is True
+
+    def test_never_overwrites_explicit_idle_compaction_false(
+        self, handler: Any, tmp_path: Any
+    ) -> None:
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        original = {"alwaysThinkingEnabled": True, "idleCompaction": False}
+        settings_path.write_text(json.dumps(original))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            written = handler._enforce_settings_sync()
+
+        assert written == []
+        assert json.loads(settings_path.read_text()) == original
+
+    def test_read_error_writes_no_idle_compaction(self, handler: Any, tmp_path: Any) -> None:
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text("{invalid json{{")
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            written = handler._enforce_settings_sync()
+
+        assert written == []
+        assert settings_path.read_text() == "{invalid json{{"
 
     def test_handle_reports_enforced_settings(self, handler: Any, tmp_path: Any) -> None:
         """Handle output should include CONFIG SYNC line when settings are written."""
