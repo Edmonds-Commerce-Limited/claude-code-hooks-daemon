@@ -193,7 +193,7 @@ _DECLARING_STOP_TEXT: dict[str, str] = {
         "STOPPING BECAUSE: blocked only on human input — the schema decision is theirs."
     ),
     "a legacy phrasing in a later sentence": (
-        "STOPPING BECAUSE: everything I can do is done. Waiting on the user's "
+        "STOPPING BECAUSE: everything I can do is done. Waiting only on the user's "
         "decision about release scope."
     ),
 }
