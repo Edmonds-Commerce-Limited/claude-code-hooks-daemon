@@ -4,7 +4,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00556: secret guard bare dotted token mentions](00556-secret-guard-bare-dotted-token-mentions/PLAN.md) - Not Started, BLOCKED ON THE OWNER (#145: a bare dotted word such as an nmcli secrets setting key matches `*.secret*` and is denied although no file is read; the glob's breadth is a recorded owner decision, so narrowing what counts as a mention is the owner's call)
+- [00557: Claude Code idle compact enforcement](00557-claude-code-idle-compact-enforcement/PLAN.md) - In Progress (owner request: establish how Claude Code's idle compact works, how it is configured and whether it is fully rolled out, then enforce it through the daemon's Claude Code config checks)
+
+- [00556: secret guard bare dotted token mentions](00556-secret-guard-bare-dotted-token-mentions/PLAN.md) - Not Started (#145; the owner approved fixing the secret-guard false positives, with every true-positive test still denying)
 
 - [00555: self install venv python version lockout](00555-self-install-venv-python-version-lockout/PLAN.md) - In Progress, High (dogfooding incident: system Python moved 3.11→3.13 under the self-install venv, every start failed `ModuleNotFoundError`, and the fail-closed guard, `repair`, the background build and the stop hook together locked the session out for hours; evidence in INCIDENT.md)
 
@@ -324,11 +326,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 556 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 557 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 471 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 62 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 63 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
