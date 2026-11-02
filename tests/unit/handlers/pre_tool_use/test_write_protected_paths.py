@@ -284,6 +284,65 @@ class TestFailClosed:
         assert handler.matches(_bash(root, command)) is True
 
 
+_OVERFLOW_LINE = (
+    "\"3. For each command, call `handler.handle({'tool_name': 'Bash', "
+    "'tool_input': {'command': cmd}, 'cwd': <fixture root>})`: \""
+)
+_WRITES_BRACED = "echo hi > protected/{a,b}"
+
+
+class TestWildcardOnlyGlobAndHeredocBodies:
+    """Issue 141 faults 2 and 3: a wildcard-only last component, heredoc data."""
+
+    @pytest.fixture
+    def guard(self, root: Path) -> WriteProtectedPathsHandler:
+        (root / "protected").mkdir()
+        return _make(root, ["protected/**"])
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"cat > notes.txt <<'EOF'\n{_OVERFLOW_LINE}\nEOF",
+            f"python3 -I - <<'EOF'\n{_OVERFLOW_LINE}\nEOF",
+            "echo hello",
+            'true\necho "never closed',
+        ],
+    )
+    def test_text_that_does_not_mention_the_directory_is_allowed(
+        self, guard: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        assert guard.matches(_bash(root, command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo hi > protected/x",
+            "cp a protected/x",
+            """awk '{print > "protected/x"}'""",
+            f"bash <<'EOF'\n{_WRITES_BRACED}\nEOF",
+            f"cat <<'EOF' | sh\n{_WRITES_BRACED}\nEOF",
+            f"bash <<'EOF'\n{_OVERFLOW_LINE}\n{_WRITES_BRACED}\nEOF",
+            "echo hi > prot{e,}cted/x",
+            "echo hi > ./protected/x",
+            'echo hi > "protected"/x',
+            "echo hi > {root}/protected/x",
+            f"python3 -I - <<'EOF'\n{_OVERFLOW_LINE}\nopen('protected/x','w')\nEOF",
+            'true\necho "never closed protected/x',
+        ],
+    )
+    def test_a_write_into_the_directory_stays_denied(
+        self, guard: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        assert guard.matches(_bash(root, command.replace("{root}", str(root)))) is True
+
+    @pytest.mark.parametrize("glob", ["**", "*"])
+    def test_a_glob_with_no_literal_directory_stays_fail_closed(
+        self, root: Path, glob: str
+    ) -> None:
+        guard = _make(root, [glob])
+        assert guard.matches(_bash(root, 'true\necho "never closed')) is True
+
+
 class TestWildcardsFollowTheShell:
     """An unresolved wildcard names the file only if the shell could expand it to it."""
 
