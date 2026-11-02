@@ -97,8 +97,14 @@ time.
   `_AWK_WRITING_PROGRAM_RE` reads `>=` and the regex `|` as a redirect or a
   pipe. The issue also reports a second fault feeding the same fallback, in
   `_text_naming`.
-- [ ] ⬜ **Task 3.3** (#142): a bare `**` is judged as a recursive globstar
-  that matches dot-files. `*` and `**/*` get inconsistent verdicts.
+- [ ] 🚫 **Task 3.3** (#142): a bare `**` is judged as a recursive globstar
+  that matches dot-files. `*` and `**/*` get inconsistent verdicts. **Blocked
+  on the owner.** Option (c) from N556 cannot identify the session's own shell
+  snapshot, and the consistency-only fix would force option (b) or revert
+  tested behaviour. The three remaining options are on #142, and the
+  coordinator recommends "every readable snapshot agrees". Report:
+  [261102-task-3.3-issue-142.md](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/worktree-issue-142/CLAUDE/Plan/00556-secret-guard-bare-dotted-token-mentions/subagent-reports/261102-task-3.3-issue-142.md)
+  (branch `worktree-issue-142`).
 - [ ] ⬜ **Task 3.4** (#143): a dotted module path in a Python string literal
   is treated as a file mention.
 - [ ] ⬜ **Task 3.5** (#144): the grep-pattern-only exemption is lost on a
