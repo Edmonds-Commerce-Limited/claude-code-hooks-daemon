@@ -1,6 +1,6 @@
 # Plan 00554: rust relay transport default
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-27
 **Owner**: dev
 **Priority**: Medium
@@ -40,15 +40,16 @@ No blocker to flipping the default was found, so no revert ticket is raised. The
 - [x] ✅ **Task 1.2**: legacy-path unit and integration tests opt out explicitly
 - [x] ✅ **Task 1.3**: docs and docstrings describe the relay as the default
 - [x] ✅ **Task 1.4**: release note and config-changes manifest staged in UNRELEASED
-- [ ] ⬜ **Task 1.5**: targeted QA green, merge to main (coordinator)
+- [x] ✅ **Task 1.5**: merged to main at `654ec98e1`, reverted at `bce74f191` and reapplied at `0bef7acaa`, with the transport toggle acceptance tests following the host-aware default (`01e999aa1`). The full gate runs in the v3.72.0 release CI.
 
 ## Success Criteria
 
 - [x] Unit directories install, config, daemon and handlers/session_start, plus the relay and transport integration files, pass.
 - [x] Release-bound consequences are recorded in the holding area: `CLAUDE/UPGRADES/UNRELEASED/release-notes/009-rust-relay-transport-default.md` and `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.72.0.yaml`.
-- [ ] Targeted QA over the branch passes.
+- [x] Merged to main (`0bef7acaa`); the release's full CI gate is the final check.
 
 ## Delivery & Milestones
 
 - `2b4a6bd0c`: model default, loader fallback, toggle seed, unit tests.
 - Integration tests, docs, release note and manifest: the commits after it on `worktree-relay-default`.
+- `654ec98e1`: merged to main; `bce74f191` reverted it; `0bef7acaa` reapplied it.

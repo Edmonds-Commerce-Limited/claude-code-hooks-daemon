@@ -8,8 +8,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00558: git branch hygiene sweep](00558-git-branch-hygiene-sweep/PLAN.md) - Not Started (owner request: surface unmerged, forgotten branches and worktrees, with their size, age, drift behind main and plan link, at SessionStart and on demand; report-only)
 
-- [00554: rust relay transport default](00554-rust-relay-transport-default/PLAN.md) - In Progress (owner request: the Rust relay becomes the default hook transport when `relay_enabled` is absent, legacy bash and python3 stays as the explicit `relay_enabled: false` opt-in)
-
 - [00550: per command bash task budget](00550-per-command-bash-task-budget/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #137: a `CLAUDE_CODE_SHELL_PREFIX` wrapper giving each Bash tool call its own task budget so one runaway fork chain cannot kill the session; it wraps every Bash call and hook, so shipping it and its default are owner decisions)
 
 - [00548: python entry point shebang detector](00548-python-entry-point-shebang-detector/PLAN.md) - Not Started (follow-up to 00546 Q2: a detector for client-run Python entry points that do 3.11-only work before any floor guard; probe results recorded as a known gap)
@@ -213,7 +211,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00556: secret guard bare dotted token mentions](Completed/00556-secret-guard-bare-dotted-token-mentions/PLAN.md) - Complete at merges `209c8d334`, `88d63f4b7`, `3b65a47dc`, `ef9a9042d`, `3ba274408` and the #145/#143 merges + the archiving commit (#141–#146, owner-approved: the secret-guard and write-protected-paths false positives fixed with every true-positive test still denying; release notes 012, 013, 014, 016, 018)
 
-- [00514: sensitive content withheld match text](Completed/00514-sensitive-content-withheld-match-text/PLAN.md) - Complete at merge `17184f376` + the archiving commit (#92, owner ruling: a public-pattern deny names the pattern and where it matched, never the matched text; reverses Plan 00201's disclosure; release note 017)
+- [00554: rust relay transport default](Completed/00554-rust-relay-transport-default/PLAN.md) - Complete at merge `654ec98e1`, reverted `bce74f191`, reapplied `0bef7acaa` + the archiving commit (owner request: the Rust relay is the default hook transport where the host can run it when `relay_enabled` is absent; `relay_enabled: false` is the legacy opt-in; release note 009)
 
 - [00555: self install venv python version lockout](Completed/00555-self-install-venv-python-version-lockout/PLAN.md) - Complete at merge `ed18bf779` + the archiving commit (the self-install venv was locked out after a system Python moved under it; venv checks compare the `pyvenv.cfg` major.minor, daemon-down access is read-only, Stops are bounded; release note 010)
 
@@ -324,9 +322,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 559 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 475 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 476 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
