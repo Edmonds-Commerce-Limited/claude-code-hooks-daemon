@@ -1758,7 +1758,8 @@ records the related limit that an unquoted description still arms, because it ca
 a real declaration. The suppressor is `handlers/user_prompt_submit/failsafe_cron_blockage_suppressor.py`. Options: add `\b` (narrow), or leave it and
 rely on the sentinel. Either is a coordinator call at fix time.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (fac9caa70, GitHub #149). Pattern 4 now requires "only" before or after its target, so a
+bare mention of waiting on an owner's decision no longer arms the marker; release note 019.
 
 ### N450 — a `full_words`-only pattern in subagent_full_qa_blocker also applies the PATH rules to every operand
 
