@@ -1,6 +1,6 @@
 # Plan 00556: secret guard bare dotted token mentions
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-31
 **Owner**: dev
 **Priority**: Medium
@@ -18,10 +18,10 @@ Issue #145 reports this for a NetworkManager setting key whose name ends in
 default `*.secret*` glob matches the word. The reporter's client worked around
 it by building the key from its parts at runtime.
 
-This is a safety control, and its breadth is a recorded project decision. The
-handler's guidance (`secret_file_guard.py:1814-1819`) says "`*.secret*` is
-intentionally broad (a deliberate project decision) … That is the accepted
-cost". Plan 00356's Non-Goals likewise keep "the deliberate breadth of
+This is a safety control, and its breadth is a recorded project decision. When
+this plan was filed, the handler's guidance in `secret_file_guard.py` said
+"`*.secret*` is intentionally broad (a deliberate project decision) … That is
+the accepted cost". Task 2.2 rewrote that paragraph. Plan 00356's Non-Goals likewise keep "the deliberate breadth of
 `*.secret*`". Narrowing which tokens count as a mention therefore reopens an
 owner ruling. This plan records the question and the options. Building starts
 only after the owner decides.
@@ -112,7 +112,7 @@ time.
   `shopt` or `set -O`, keep the conservative reading. Done in
   `utils/shell_snapshot.py` (cached by mtimes, newest 200 read) and
   `ProtectedFileIndex.glob_matches(default_expansion=...)`, with release note
-  018\. The earlier blocker report:
+  018\. Merged in 3ba274408 and the issue is closed. The earlier blocker report:
   [261102-task-3.3-issue-142.md](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/worktree-issue-142/CLAUDE/Plan/00556-secret-guard-bare-dotted-token-mentions/subagent-reports/261102-task-3.3-issue-142.md).
   Result report:
   [3.3b](subagent-reports/261102-task-3.3b-issue-142.md).
@@ -122,7 +122,7 @@ time.
 
 - [x] ✅ **Task 3.5** (#144): the grep-pattern-only exemption was lost on a
   compound command. Each statement is now judged separately, and
-  `grep 'id_rsa' d; cat id_rsa` stays denied. Merged from 4bd6ce8f2, with
+  `grep 'id_rsa' d; cat id_rsa` stays denied. Branch commit 4bd6ce8f2, merged in ef9a9042d, with
   release note 016, and the issue is closed. Report:
   [261102-task-3.5-issue-144.md](subagent-reports/261102-task-3.5-issue-144.md).
 
@@ -147,6 +147,9 @@ time.
   has no release-bound consequences.
   Holding-area artefact for #145 and #143:
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/012-secret-guard-bare-dotted-tokens.md`.
+  The rest of the cluster is in the same holding area: release notes 013
+  (#141), 014 (#146), 016 (#144) and 018 (#142).
+- [x] Every issue in the cluster (#141–#146) is merged and closed.
 
 ## Delivery & Milestones
 

@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00558: git branch hygiene sweep](00558-git-branch-hygiene-sweep/PLAN.md) - Not Started (owner request: surface unmerged, forgotten branches and worktrees, with their size, age, drift behind main and plan link, at SessionStart and on demand; report-only)
 
-- [00556: secret guard bare dotted token mentions](00556-secret-guard-bare-dotted-token-mentions/PLAN.md) - In Progress (#145; the owner approved fixing the secret-guard false positives, with every true-positive test still denying)
-
 - [00554: rust relay transport default](00554-rust-relay-transport-default/PLAN.md) - In Progress (owner request: the Rust relay becomes the default hook transport when `relay_enabled` is absent, legacy bash and python3 stays as the explicit `relay_enabled: false` opt-in)
 
 - [00550: per command bash task budget](00550-per-command-bash-task-budget/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #137: a `CLAUDE_CODE_SHELL_PREFIX` wrapper giving each Bash tool call its own task budget so one runaway fork chain cannot kill the session; it wraps every Bash call and hook, so shipping it and its default are owner decisions)
@@ -211,6 +209,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00556: secret guard bare dotted token mentions](Completed/00556-secret-guard-bare-dotted-token-mentions/PLAN.md) - Complete at merges `209c8d334`, `88d63f4b7`, `3b65a47dc`, `ef9a9042d`, `3ba274408` and the #145/#143 merges + the archiving commit (#141–#146, owner-approved: the secret-guard and write-protected-paths false positives fixed with every true-positive test still denying; release notes 012, 013, 014, 016, 018)
+
 - [00514: sensitive content withheld match text](Completed/00514-sensitive-content-withheld-match-text/PLAN.md) - Complete at merge `17184f376` + the archiving commit (#92, owner ruling: a public-pattern deny names the pattern and where it matched, never the matched text; reverses Plan 00201's disclosure; release note 017)
 
 - [00555: self install venv python version lockout](Completed/00555-self-install-venv-python-version-lockout/PLAN.md) - Complete at merge `ed18bf779` + the archiving commit (the self-install venv was locked out after a system Python moved under it; venv checks compare the `pyvenv.cfg` major.minor, daemon-down access is read-only, Stops are bounded; release note 010)
@@ -269,8 +269,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00518: full qa blocker exempt agent types](Completed/00518-full-qa-blocker-exempt-agent-types/PLAN.md) - Complete at merges `980d4fb67`, `7ff8cdcf1`, `7cb84135a` + the archiving commit (ledger 00474 N457: `exempt_agent_types` with a one-at-a-time lock, dogfooded with `qa-full-runner`; release note 053)
 
-- [00512: worktree events outlive the chain deadline](Completed/00512-worktree-events-outlive-the-chain-deadline/PLAN.md) - Complete at merge `5d1b83d00` + the archiving commit (#82: WorktreeCreate and WorktreeRemove get their own budget, longer than their git call, so a slow add yields its path; a failed add leaves no orphan; guard events keep 20s; release note 035 in UNRELEASED)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -324,9 +322,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 558 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 474 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 475 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

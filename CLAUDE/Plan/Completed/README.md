@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00512: worktree events outlive the chain deadline](00512-worktree-events-outlive-the-chain-deadline/PLAN.md) - Complete at merge `5d1b83d00` + the archiving commit (#82: WorktreeCreate and WorktreeRemove get their own budget, longer than their git call, so a slow add yields its path; a failed add leaves no orphan; guard events keep 20s; release note 035 in UNRELEASED)
+
 - [00511: deny suffix batched calls not cancelled](00511-deny-suffix-batched-calls-not-cancelled/PLAN.md) - Complete at merge `2704ef5bd` + the archiving commit (#81: the PreToolUse DENY suffix says batched calls may already have run, not that they were cancelled, which is false since Claude Code 2.1.161; same fix in two linters' guidance; release note 034 in UNRELEASED)
 
 - [00510: docs qa edit stage skips nested and ignored checkouts](00510-docs-qa-edit-stage-skips-nested-and-ignored-checkouts/PLAN.md) - Complete at merge `5a963a367` + the archiving commit (#80: the docs QA edit stage drops nested separate checkouts and gitignored paths, matching the sweep; one shared `owning_checkout` rule; release note 033 in UNRELEASED)
