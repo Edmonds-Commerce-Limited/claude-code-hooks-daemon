@@ -1,0 +1,3 @@
+## 17:08 · decision · —   — Owner input: git hook trigger (client-side hooks, not post-receive)
+
+Owner input on question 1 (2 November 2026), in their words: "post recieve hook might be an idea yes?". Coordinator's reply: `post-receive` is server-side and never runs on the pulling checkout; the client-side equivalents are `post-merge` (pull, fast-forward or merge), `post-rewrite` (`pull --rebase`) and `post-checkout` (branch switch). Read as the owner leaning to option (a), git hooks installed by provision, with option (b), the `init.sh` version check, suggested as a backstop for changes that bypass git. Not yet a final ruling; questions 2 (retry rule) and 3 (scheduled host check) remain open.
