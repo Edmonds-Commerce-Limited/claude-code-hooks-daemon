@@ -1,12 +1,12 @@
 # Plan 00556: secret guard bare dotted token mentions
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-31
 **Owner**: dev
 **Priority**: Medium
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Sub-Agent Orchestration
-**GitHub Issue**: #145
+**GitHub Issue**: #145, #146, #141, #142, #143, #144
 
 ## Overview
 
@@ -69,10 +69,34 @@ would then pass.
 
 ### Phase 1: Decide
 
-- [ ] ⬜ **Task 1.1**: Owner chooses (a), (b), (c) or (d) above. Record the
-  choice in the journal.
+- [x] ✅ **Task 1.1**: The owner approved fixing every secret-guard false
+  positive (#141–#146). The condition: every existing true-positive test
+  still denies (journal `122834Z-decision-0dbcad.md`). For #145 that means
+  option **(b)**: a mention is a token that is path-like, or that exists or is
+  indexed, or that is a file-opening operand. Option (b) allows the false
+  positive. The existence/index/operand conditions keep `cat app.secret`
+  denied.
 
-### Phase 2: Build (only if the choice is not (a))
+### Phase 3: The rest of the secret-guard false-positive cluster
+
+Issues #141–#146 now share this plan, because all of them land in
+`secret_file_matching.py` / `secret_file_guard.py`. They are worked in turn
+on one worktree branch, with one commit per issue and a red test first each
+time.
+
+- [ ] ⬜ **Task 3.1** (#146): a trusted consumer command that redirects with
+  `2>&1` is denied, while a plain `>` is allowed.
+- [ ] ⬜ **Task 3.2** (#141): read-only awk is denied under a wildcard-only
+  `write_protected_paths` glob. The awk write check reads `>=` and the regex
+  `|` as a redirect or a pipe.
+- [ ] ⬜ **Task 3.3** (#142): a bare `**` is judged as a recursive globstar
+  that matches dot-files. `*` and `**/*` get inconsistent verdicts.
+- [ ] ⬜ **Task 3.4** (#143): a dotted module path in a Python string literal
+  is treated as a file mention.
+- [ ] ⬜ **Task 3.5** (#144): the grep-pattern-only exemption is lost on a
+  compound command. Judge each statement separately; `grep 'id_rsa' d; cat id_rsa` must stay denied.
+
+### Phase 2: Build (#145)
 
 - [ ] ⬜ **Task 2.1**: Write red tests. Cover the reported setting-key shape in
   a Bash command and in an authored script. Also cover the real-file shapes
