@@ -784,6 +784,7 @@ handlers:
           - edmondscommerce
           - lts-bob
           - ballidev
+          - joseph-uk  # Approved by the owner on 2026-11-02
 
     global_npm_advisor:    # Advises against global npm installs
       enabled: true
