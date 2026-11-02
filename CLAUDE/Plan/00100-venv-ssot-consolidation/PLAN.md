@@ -22,7 +22,7 @@ by the H-1 acceptance gate. Full task-level detail for every shipped phase:
   names the missing condition when one fails, and never suggests `--force`.
   This phase is no longer residue here.
 - **Phase 2 leftover (Python precedence and build judge)**: carried by
-  [Plan 00555](../00555-self-install-venv-python-version-lockout/PLAN.md)
+  [Plan 00555](../Completed/00555-self-install-venv-python-version-lockout/PLAN.md)
   Task 2.1 (merged at `af9e0282e`).
   - `resolve_existing_venv_python` now delegates to the diagnostics
     resolver, so Python has one precedence. The TODO that named this plan's

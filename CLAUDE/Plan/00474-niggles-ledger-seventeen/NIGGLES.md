@@ -168,7 +168,7 @@ that the evaluator itself prevents. The alternative is for the goal-loop block t
 ### N565 — a venv self-heal leaves the old-key venv behind, and `untracked/lsp-venv` is not repointed until the daemon starts
 
 **Source**: dogfood, 2026-10-31. Plan 00555's drift self-heal demonstration
-(`../00555-self-install-venv-python-version-lockout/subagent-reports/261031-drift-self-heal-demo.md`),
+(`../Completed/00555-self-install-venv-python-version-lockout/subagent-reports/261031-drift-self-heal-demo.md`),
 followed up in `261031-fresh-check-drift-fix.md`, finding 4.
 
 **Evidence**: after a hook self-heals a drifted py311 venv by building a py313 one, the py311

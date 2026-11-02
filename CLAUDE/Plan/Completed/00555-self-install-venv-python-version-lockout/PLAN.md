@@ -1,6 +1,6 @@
 # Plan 00555: self install venv python version lockout
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-29
 **Owner**: dev
 **Priority**: High
@@ -198,8 +198,12 @@ decision, so none went back to the owner
   fail-open, so the build log is readable when it matters. The same directory
   also holds payload captures and the hook-verdict log.
 
-- [ ] ⬜ **Task 4.3**: Close the follow-ups the decisions surfaced. Each one
-  starts with a failing test.
+- [x] ✅ **Task 4.3**: Close the follow-ups the decisions surfaced. Each one
+  starts with a failing test. Merged in ed18bf779, and release note 010 is
+  extended to cover it. Report:
+  [261102-task-4.3-build.md](subagent-reports/261102-task-4.3-build.md).
+  `diagnose` reads only the last finished build's result record, not the
+  holder record that exists only during a live build.
 
   - `status` (or SessionStart) reports `.daemon-down-stops.log`, as stand-in
     ruling 1 intended. Today it is written and nothing reads it.

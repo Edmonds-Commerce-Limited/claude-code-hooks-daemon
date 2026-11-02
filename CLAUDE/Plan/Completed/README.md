@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00510: docs qa edit stage skips nested and ignored checkouts](00510-docs-qa-edit-stage-skips-nested-and-ignored-checkouts/PLAN.md) - Complete at merge `5a963a367` + the archiving commit (#80: the docs QA edit stage drops nested separate checkouts and gitignored paths, matching the sweep; one shared `owning_checkout` rule; release note 033 in UNRELEASED)
+
 - [00509: markdown formatter honours exclusions and nested checkouts](00509-markdown-formatter-honours-exclusions-and-nested-checkouts/PLAN.md) - Complete at merge `52fd716f4` + `4c30051d8` + the archiving commit (#79: `exclude_paths` and `daemon.exclude_paths` honoured, nested separate checkouts skipped, and the advisory never narrower than the change; release note 032 in UNRELEASED)
 
 - [00508: operator signal reaches a busy agent](00508-operator-signal-reaches-a-busy-agent/PLAN.md) - Complete at merge `a948217b4` + the archiving commit (#77: a pending reboot/shutdown warning reaches a busy agent as hook context at its next tool call, once per agent thread; the supervisor stays the signal's only consumer; release note 030 in UNRELEASED)

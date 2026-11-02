@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00556: secret guard bare dotted token mentions](00556-secret-guard-bare-dotted-token-mentions/PLAN.md) - In Progress (#145; the owner approved fixing the secret-guard false positives, with every true-positive test still denying)
 
-- [00555: self install venv python version lockout](00555-self-install-venv-python-version-lockout/PLAN.md) - In Progress, High (dogfooding incident: system Python moved 3.11→3.13 under the self-install venv, every start failed `ModuleNotFoundError`, and the fail-closed guard, `repair`, the background build and the stop hook together locked the session out for hours; evidence in INCIDENT.md)
-
 - [00554: rust relay transport default](00554-rust-relay-transport-default/PLAN.md) - In Progress (owner request: the Rust relay becomes the default hook transport when `relay_enabled` is absent, legacy bash and python3 stays as the explicit `relay_enabled: false` opt-in)
 
 - [00550: per command bash task budget](00550-per-command-bash-task-budget/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #137: a `CLAUDE_CODE_SHELL_PREFIX` wrapper giving each Bash tool call its own task budget so one runaway fork chain cannot kill the session; it wraps every Bash call and hook, so shipping it and its default are owner decisions)
@@ -213,6 +211,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00555: self install venv python version lockout](Completed/00555-self-install-venv-python-version-lockout/PLAN.md) - Complete at merge `ed18bf779` + the archiving commit (the self-install venv was locked out after a system Python moved under it; venv checks compare the `pyvenv.cfg` major.minor, daemon-down access is read-only, Stops are bounded; release note 010)
+
 - [00557: Claude Code idle compact enforcement](Completed/00557-claude-code-idle-compact-enforcement/PLAN.md) - Complete at merge `5577aee1d` + the archiving commit (owner request: idle compaction defaults on and only autoCompactEnabled:false, DISABLE_AUTO_COMPACT, DISABLE_COMPACT and FORCE_PROMPT_CACHING_5M switch it off; the optimal config check reports any disabler and the SessionStart sync writes idleCompaction:true only when absent; release note 011)
 
 - [00553: supervisor indicator scoped to session](Completed/00553-supervisor-indicator-scoped-to-session/PLAN.md) - Complete at `2234dc879` (green CI run 40424574049) + the archiving commit (#140: the green top hat counts only a supervisor whose own process tree holds the session; release note 004)
@@ -271,8 +271,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00511: deny suffix batched calls not cancelled](Completed/00511-deny-suffix-batched-calls-not-cancelled/PLAN.md) - Complete at merge `2704ef5bd` + the archiving commit (#81: the PreToolUse DENY suffix says batched calls may already have run, not that they were cancelled, which is false since Claude Code 2.1.161; same fix in two linters' guidance; release note 034 in UNRELEASED)
 
-- [00510: docs qa edit stage skips nested and ignored checkouts](Completed/00510-docs-qa-edit-stage-skips-nested-and-ignored-checkouts/PLAN.md) - Complete at merge `5a963a367` + the archiving commit (#80: the docs QA edit stage drops nested separate checkouts and gitignored paths, matching the sweep; one shared `owning_checkout` rule; release note 033 in UNRELEASED)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -326,9 +324,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 557 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 472 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 473 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 62 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
