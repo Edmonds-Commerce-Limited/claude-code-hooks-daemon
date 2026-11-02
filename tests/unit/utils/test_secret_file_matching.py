@@ -1470,6 +1470,58 @@ class TestExemptions:
             )
 
 
+class TestRedirectionAmpersandDoesNotMakeACommandCompound:
+    """Issue #146: the `&` of an fd duplication (`2>&1`) is part of a
+    redirection, not a background marker, so a single trusted-consumer
+    command carrying one stays exempt. A REAL background `&` still voids it."""
+
+    CONSUMER = "ansible-playbook site.yml --vault-password-file .vault-pass"
+
+    def _exempt(self, command: str) -> bool:
+        return sfm.is_exempt_invocation(command, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_plain_redirect_control_is_exempt(self) -> None:
+        assert self._exempt(f"{self.CONSUMER} > out.log")
+
+    @pytest.mark.parametrize(
+        "redirect",
+        [
+            "> out.log 2>&1",
+            "2>&1",
+            ">&2",
+            "1>&2",
+            "&> out.log",
+            "&>out.log",
+            "&>> out.log",
+            ">& out.log",
+            "2>&1 < in.txt",
+            "<&0",
+        ],
+    )
+    def test_every_redirection_form_keeps_the_consumer_exempt(self, redirect: str) -> None:
+        assert self._exempt(f"{self.CONSUMER} {redirect}")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "ansible-playbook site.yml --vault-password-file .vault-pass & cat .vault-pass",
+            "ansible-playbook site.yml --vault-password-file .vault-pass 2>&1 & cat .vault-pass",
+            "ansible-playbook site.yml --vault-password-file .vault-pass &",
+            "ansible-playbook site.yml --vault-password-file .vault-pass 2>&1 && cat .vault-pass",
+            "ansible-playbook site.yml --vault-password-file .vault-pass 2>&1; cat .vault-pass",
+            "ansible-playbook site.yml --vault-password-file .vault-pass 2>&1 | cat",
+            "ansible-playbook site.yml --vault-password-file .vault-pass > .vault-pass",
+            "ansible-playbook site.yml --vault-password-file .vault-pass 2> .vault-pass",
+            "ansible-playbook site.yml --vault-password-file .vault-pass &> .vault-pass",
+            "ansible-playbook site.yml --vault-password-file .vault-pass &>.vault-pass",
+            "ansible-playbook site.yml --vault-password-file .vault-pass >&.vault-pass",
+            "ansible-vault view --vault-password-file .vault-pass secrets.yml 2>&1",
+        ],
+    )
+    def test_real_compounds_and_protected_targets_stay_denied(self, command: str) -> None:
+        assert not self._exempt(command)
+
+
 class TestLeadingCdPrefix:
     """Client report: a trusted consumer stopped being exempt the moment it
     was reached via ``cd <dir> && ...``.
