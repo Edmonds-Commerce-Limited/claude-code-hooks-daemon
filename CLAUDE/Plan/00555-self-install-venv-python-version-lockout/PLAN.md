@@ -192,8 +192,9 @@ decision, so none went back to the owner
 
 - [x] ✅ **Task 4.2**: Both stand-in rulings are **confirmed**: Tasks 2.5/2.6,
   and Task 2.8 S1/S2/S4/S5. A client install **may not** read the daemon's
-  logs while the daemon is down. The daemon writes no log file to disk (its
-  output goes to `/dev/null`, `cli.py:939-948`). A failed build is already
+  logs while the daemon is down. The daemon's own process log is not written
+  to disk: its output goes to `/dev/null` and its logs are kept in memory
+  (`cli.py:939-948`). A failed build is already
   fail-open, so the build log is readable when it matters. The same directory
   also holds payload captures and the hook-verdict log.
 
@@ -202,8 +203,11 @@ decision, so none went back to the owner
 
   - `status` (or SessionStart) reports `.daemon-down-stops.log`, as stand-in
     ruling 1 intended. Today it is written and nothing reads it.
-  - The self-install daemon-down read rule also denies
-    `untracked/hook-errors.log`. Today this is latent: nothing writes the file.
+  - The self-install daemon-down read rule must also deny
+    `untracked/hook-errors.log`. It is a gap today: `_is_protected`
+    (`init.sh:463-499`) has no entry for it. `log_error_to_file`
+    (`core/front_controller.py:256`) writes the file whenever a hook crashes,
+    so it can hold hook input.
   - `diagnose` prints the tail of the venv build log.
 
 ## Success Criteria
