@@ -1,4 +1,4 @@
-# Fix: a trusted consumer command that redirects stderr with `2>&1` is no longer denied
+# Callout: a trusted consumer command that redirects stderr with `2>&1` is no longer denied
 
 **Plan**: 00556
 **Issue**: #146
