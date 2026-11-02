@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 if TYPE_CHECKING:
@@ -51,7 +52,11 @@ HEALTH_KEY_CONFIG_FINGERPRINT: Final[str] = "config_fingerprint"
 CONFIG_PARSE_FAILED_FINGERPRINT: Final[str] = "config-parse-failed"
 
 _FINGERPRINT_DISPLAY_CHARS: Final[int] = 12
-_RESTART_ADVICE: Final[str] = "Restart it with `bin/hooks-daemon restart` and retry."
+
+
+def _restart_advice() -> str:
+    """Restart advice naming the wrapper for this install mode (issue #147)."""
+    return f"Restart it with `{daemon_cli_command_for_docs('restart')}` and retry."
 
 
 @dataclass(frozen=True)
@@ -198,7 +203,7 @@ def _describe_config_drift(running: str, current: str) -> str:
             f"the config it bound at startup ({HEALTH_KEY_CONFIG_FINGERPRINT} "
             f"{running[:_FINGERPRINT_DISPLAY_CHARS]}) has since been edited, and the "
             f"config on disk now does not parse -- fix it first "
-            f"(`bin/hooks-daemon config-validate`), because a daemon will not start on it"
+            f"(`{daemon_cli_command_for_docs('config-validate')}`), because a daemon will not start on it"
         )
     return (
         f"the config it bound at startup ({HEALTH_KEY_CONFIG_FINGERPRINT} "
@@ -229,7 +234,7 @@ def describe_daemon_staleness(
         return (
             "Could not verify the running daemon matches the working tree (no "
             "health response -- the daemon may be down or unreachable). "
-            f"{_RESTART_ADVICE}"
+            f"{_restart_advice()}"
         )
     running_source = _reported(health, HEALTH_KEY_SOURCE_FINGERPRINT)
     running_config = _reported(health, HEALTH_KEY_CONFIG_FINGERPRINT)
@@ -245,7 +250,7 @@ def describe_daemon_staleness(
         return (
             "Could not verify the running daemon matches the working tree (no "
             f"{' or '.join(missing)} in its health response -- the daemon may "
-            f"predate Plan 00371/00415). {_RESTART_ADVICE}"
+            f"predate Plan 00371/00415). {_restart_advice()}"
         )
 
     drifted: list[str] = []
@@ -262,5 +267,5 @@ def describe_daemon_staleness(
     return (
         f"STALE DAEMON: {'; and '.join(drifted)}. A live-dispatch result graded "
         f"against it would be judging what it bound at startup, not what is on "
-        f"disk. {_RESTART_ADVICE}"
+        f"disk. {_restart_advice()}"
     )

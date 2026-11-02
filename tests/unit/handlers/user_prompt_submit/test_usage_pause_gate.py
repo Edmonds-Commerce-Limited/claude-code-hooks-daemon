@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.handlers.user_prompt_submit.usage_pause_gate impor
     UsagePauseGateHandler,
 )
 from claude_code_hooks_daemon.utils import usage_pause_gate as gate
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.usage_pause import (
     WINDOW_FIVE_HOUR,
     UsagePause,
@@ -776,7 +777,7 @@ class TestOwnerEscapeIsDocumented:
     def test_the_rule_gives_the_paste_ready_bang_form(self) -> None:
         """The owner typed ``! <command>`` in a paused session and the pause lifted."""
         verbose = " ".join(UsagePauseGateHandler().get_rules()[0].verbose.split())
-        assert "! bin/hooks-daemon usage-pause clear" in verbose
+        assert "! " + daemon_cli_command_for_docs("usage-pause", "clear") in verbose
         assert "may or may not" not in verbose
 
     def test_the_hold_reason_gives_the_paste_ready_bang_form(self, tmp_path: Path) -> None:
@@ -784,7 +785,7 @@ class TestOwnerEscapeIsDocumented:
         handler = _handler(tmp_path, snapshot=_snapshot(five=91.0))
         result = _run(handler, tmp_path, _input("an owner prompt"))
         assert result.reason is not None
-        assert "! bin/hooks-daemon usage-pause clear" in result.reason
+        assert "! " + daemon_cli_command_for_docs("usage-pause", "clear") in result.reason
 
     def test_the_hold_reason_names_the_cli(self, tmp_path: Path) -> None:
         _record(tmp_path)

@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.pre_tool_use.usage_pause_tool_gate import (
     UsagePauseToolGateHandler,
 )
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.usage_pause import (
     WINDOW_FIVE_HOUR,
     UsagePause,
@@ -144,7 +145,7 @@ class TestMetadata:
     def test_the_rule_gives_the_paste_ready_bang_form(self) -> None:
         """The owner's override is typed in the session, so it carries Claude Code's ``!``."""
         verbose = " ".join(UsagePauseToolGateHandler().get_rules()[0].verbose.split())
-        assert "! bin/hooks-daemon usage-pause clear" in verbose
+        assert f"! {daemon_cli_command_for_docs('usage-pause', 'clear')}" in verbose
 
 
 class TestToolSearchIsAllowed:

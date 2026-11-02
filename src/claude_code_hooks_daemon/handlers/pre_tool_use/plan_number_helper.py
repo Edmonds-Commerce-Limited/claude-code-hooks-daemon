@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     next_plan_number_for_target,
 )
 from claude_code_hooks_daemon.install.plan_workflow import MKPLAN_SCRIPT_NAME
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.command_evasion import remove_word_quoting
 from claude_code_hooks_daemon.utils.command_position import (
     command_position_segments,
@@ -696,7 +697,7 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
             # guard with an equally partial glob.
             message += (
                 "\n\nLooking for an EXISTING plan rather than the next number?"
-                "\n  bin/hooks-daemon find-plan <number|name|words>"
+                f"\n  {daemon_cli_command_for_docs('find-plan')} <number|name|words>"
                 "\nIt searches the archives too, which is exactly what a folder"
                 " scan misses."
             )
@@ -780,8 +781,8 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
             "**To FIND an existing plan** — a different question from the next "
             "number, and the one a folder scan is usually reaching for:\n\n"
             "```\n"
-            "bin/hooks-daemon find-plan 412\n"
-            'bin/hooks-daemon find-plan "jobs"\n'
+            f"{daemon_cli_command_for_docs('find-plan')} 412\n"
+            f'{daemon_cli_command_for_docs("find-plan")} "jobs"\n'
             "```\n\n"
             "It searches the WHOLE tree including `Completed/`, which is "
             "precisely what a folder scan misses, and prints each plan's "

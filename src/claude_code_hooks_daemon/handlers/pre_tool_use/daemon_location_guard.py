@@ -21,19 +21,23 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     strip_inert_spans,
 )
 
-_RULE = Rule(
-    rule_id=RuleID.DAEMON_DIR_CD,
-    blocked="`cd`/`pushd` into `.claude/hooks-daemon/`",
-    why="Daemon CLI commands must be run from PROJECT ROOT, causing path confusion otherwise",
-    fix="Run daemon commands from project root, e.g. `bin/hooks-daemon status`",
-    verbose=(
-        "WHY BLOCKED:\n"
-        "  - Daemon CLI commands must be run from PROJECT ROOT, not from "
-        ".claude/hooks-daemon/\n"
-        "  - Running commands from hooks-daemon directory causes path confusion\n"
-        "  - All daemon operations expect to be run from project root"
-    ),
-)
+
+def _rule() -> Rule:
+    """The deny rule, built per call so the wrapper follows the install mode."""
+    return Rule(
+        rule_id=RuleID.DAEMON_DIR_CD,
+        blocked="`cd`/`pushd` into `.claude/hooks-daemon/`",
+        why="Daemon CLI commands must be run from PROJECT ROOT, causing path confusion otherwise",
+        fix=f"Run daemon commands from project root, e.g. `{daemon_cli_command_for_docs('status')}`",
+        verbose=(
+            "WHY BLOCKED:\n"
+            "  - Daemon CLI commands must be run from PROJECT ROOT, not from "
+            ".claude/hooks-daemon/\n"
+            "  - Running commands from hooks-daemon directory causes path confusion\n"
+            "  - All daemon operations expect to be run from project root"
+        ),
+    )
+
 
 # Match a `cd` whose TARGET is the .claude/hooks-daemon/ directory (or a path
 # inside it). The target is a single token that contains no whitespace or
@@ -163,7 +167,7 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""
-        return [_RULE]
+        return [_rule()]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block cd into hooks-daemon with a verbose-first/terse-after explanation.
@@ -179,13 +183,14 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
         formatter = RuleFormatter()
+        rule = _rule()
 
         if transcript_path and tracker.was_disclosed(transcript_path, RuleID.DAEMON_DIR_CD):
-            reason = formatter.terse(_RULE) + f"\n\nCOMMAND: {command}"
+            reason = formatter.terse(rule) + f"\n\nCOMMAND: {command}"
         else:
             if transcript_path:
                 tracker.mark_disclosed(transcript_path, RuleID.DAEMON_DIR_CD)
-            reason = formatter.verbose(_RULE) + f"\n\nCOMMAND: {command}"
+            reason = formatter.verbose(rule) + f"\n\nCOMMAND: {command}"
 
         guidance = (
             "✅ CORRECT USAGE:\n"

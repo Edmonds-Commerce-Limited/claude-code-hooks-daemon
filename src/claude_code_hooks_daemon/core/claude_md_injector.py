@@ -402,9 +402,10 @@ class ClaudeMdInjector:
             logger.info(
                 "ClaudeMdInjector: %s is a linked git worktree — leaving %s as its branch has "
                 "it, so the auto-committed regeneration cannot conflict with the main "
-                "checkout's on merge. `bin/hooks-daemon regenerate-docs` writes it on request.",
+                "checkout's on merge. `%s` writes it on request.",
                 self._workspace_root,
                 claude_md_path,
+                daemon_cli_command_for_docs("regenerate-docs"),
             )
             return
 

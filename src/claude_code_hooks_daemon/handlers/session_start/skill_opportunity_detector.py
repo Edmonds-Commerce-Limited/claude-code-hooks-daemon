@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.skill_scan.constants import STATE_FILE_NAME
 from claude_code_hooks_daemon.skill_scan.models import SkillScanOptions
 from claude_code_hooks_daemon.skill_scan.state import is_advisory_due, load_state
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,7 @@ class SkillOpportunityDetectorHandler(SessionStartHandlerBase):
             context = [
                 "🔍 A skill-opportunity scan is due "
                 f"(cadence: every {options.check_interval_days} days).",
-                "1. Run `bin/hooks-daemon skill-scan` — mines recent transcripts",
+                f"1. Run `{daemon_cli_command_for_docs('skill-scan')}` — mines recent transcripts",
                 "and writes a report under untracked/reports/ with a judging",
                 "prompt embedded.",
                 "2. Dispatch a subagent at that report: it answers the prompt",
@@ -141,7 +142,7 @@ class SkillOpportunityDetectorHandler(SessionStartHandlerBase):
         return [
             AcceptanceTest(
                 title="skill-scan dry run",
-                command="bin/hooks-daemon skill-scan --dry-run",
+                command=daemon_cli_command_for_docs("skill-scan", "--dry-run"),
                 description=(
                     "CLI pipeline runs stages 1-2 and prints the redacted digest "
                     "without calling the model or writing a report"

@@ -113,8 +113,8 @@ from claude_code_hooks_daemon.core.session_mode_log import (
     TransitionLogError,
 )
 from claude_code_hooks_daemon.core.session_mode_registry import (
-    GOAL_LOOP_SELF_CLEAR_INSTRUCTION,
     SessionModeRegistry,
+    goal_loop_self_clear_instruction,
 )
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     _STOP_EXPLANATION_PREFIX,
@@ -389,7 +389,7 @@ class GoalLoopDetectorHandler(StopHandlerBase):
                 session_id,
                 f"GOAL-LOOP PERSISTING: the goal evaluator has rejected {loop.cycles} of this "
                 f"session's stops since {since} (loop {fingerprint}) with no human prompt "
-                f"between them, and it keeps rejecting them. {GOAL_LOOP_SELF_CLEAR_INSTRUCTION}",
+                f"between them, and it keeps rejecting them. {goal_loop_self_clear_instruction()}",
             )
         except (OSError, RuntimeError) as error:
             log_and_continue(

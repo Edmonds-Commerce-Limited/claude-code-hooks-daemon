@@ -49,6 +49,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import in_subagent
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.usage_pause_gate import (
     PAUSE_ALLOWED_TOOLS,
     PauseEnvironment,
@@ -65,28 +66,31 @@ _STOP_REASON: Final[str] = (
     "allowed until the resume cron fires."
 )
 
-_RULE: Final[Rule] = Rule(
-    rule_id=RuleID.USAGE_PAUSE_TOOL,
-    blocked=f"any tool except {_ALLOWED_TEXT} while the session is paused on its usage ceiling",
-    why="The session stopped taking on work to keep the account under its usage ceiling",
-    fix="Replace the session's crons with the one resume cron, then stop; the session resumes at the window reset",
-    verbose=(
-        "WHY BLOCKED:\n"
-        "This session is PAUSED (Plan 00479): a usage window reached the ceiling\n"
-        "configured for this host. Until it resumes, the only tools allowed are\n"
-        f"{_ALLOWED_TEXT}. The turn is halted so it cannot keep spending usage.\n\n"
-        "DO INSTEAD:\n"
-        "  0. The cron tools are deferred: load them with ToolSearch if needed.\n"
-        "  1. CronList, then CronDelete every cron listed.\n"
-        "  2. CronCreate ONE recurring resume cron, exactly as the pause directive\n"
-        "     gave it (its prompt starts [tick:usage-resume]).\n"
-        "  3. Do not start new subagents; let running ones finish.\n"
-        "  4. Stop. The session resumes by itself after the window reset.\n\n"
-        "A human can type `! bin/hooks-daemon usage-pause clear` in the session: it removes\n"
-        "the pause and no pause is started for this session again until the latest reset\n"
-        "among the windows over the ceiling (at most 8 days)."
-    ),
-)
+
+def _rule() -> Rule:
+    """The deny rule, built per call so the wrapper name follows the install mode."""
+    return Rule(
+        rule_id=RuleID.USAGE_PAUSE_TOOL,
+        blocked=f"any tool except {_ALLOWED_TEXT} while the session is paused on its usage ceiling",
+        why="The session stopped taking on work to keep the account under its usage ceiling",
+        fix="Replace the session's crons with the one resume cron, then stop; the session resumes at the window reset",
+        verbose=(
+            "WHY BLOCKED:\n"
+            "This session is PAUSED (Plan 00479): a usage window reached the ceiling\n"
+            "configured for this host. Until it resumes, the only tools allowed are\n"
+            f"{_ALLOWED_TEXT}. The turn is halted so it cannot keep spending usage.\n\n"
+            "DO INSTEAD:\n"
+            "  0. The cron tools are deferred: load them with ToolSearch if needed.\n"
+            "  1. CronList, then CronDelete every cron listed.\n"
+            "  2. CronCreate ONE recurring resume cron, exactly as the pause directive\n"
+            "     gave it (its prompt starts [tick:usage-resume]).\n"
+            "  3. Do not start new subagents; let running ones finish.\n"
+            "  4. Stop. The session resumes by itself after the window reset.\n\n"
+            f"A human can type `! {daemon_cli_command_for_docs('usage-pause', 'clear')}` in the session: it removes\n"
+            "the pause and no pause is started for this session again until the latest reset\n"
+            "among the windows over the ceiling (at most 8 days)."
+        ),
+    )
 
 
 class UsagePauseToolGateHandler(PreToolUseHandlerBase):
@@ -139,7 +143,7 @@ class UsagePauseToolGateHandler(PreToolUseHandlerBase):
         * Every later main-thread call is denied and halts the turn.
         """
         session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
-        reason = RuleFormatter().verbose(_RULE)
+        reason = RuleFormatter().verbose(_rule())
         pause = active_usage_pause(session_id, now=self._env.clock())
         if pause is not None:
             reason = f"{reason}\n\n{render_pause_directive(pause)}"
@@ -150,7 +154,7 @@ class UsagePauseToolGateHandler(PreToolUseHandlerBase):
 
     def get_rules(self) -> list[Rule]:
         """The single Rule backing this handler's deny."""
-        return [_RULE]
+        return [_rule()]
 
     def get_claude_md(self) -> str | None:
         """Resident guidance for the active-handler block."""

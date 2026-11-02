@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.core.session_mode_log import (
     TransitionLog,
 )
 from claude_code_hooks_daemon.utils.blockage_marker import read_marker
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_modes import (
     FOCUS_TTL_SECONDS,
@@ -103,12 +104,15 @@ _EXPIRY_EVIDENCE: Final[str] = "its expiry time passed"
 #: session's goal (it removes the goal-intent file and writes the goal-clear
 #: trigger the ccy supervisor types ``/goal clear`` from, at its next idle); it
 #: is idempotent and ends no session mode.
-GOAL_LOOP_SELF_CLEAR_INSTRUCTION: Final[str] = (
-    "The goal cannot be satisfied from inside this session: run `bin/hooks-daemon clear-goal` "
-    "(it retracts this session's goal and is safe to repeat), journal why the goal cannot be "
-    "satisfied with `CLAUDE/Plan/mkplan.bash --journal <plan> decision <body-file>`, then "
-    "stop with the real blocker stated in your `STOPPING BECAUSE:` line."
-)
+def goal_loop_self_clear_instruction() -> str:
+    """The self-clear instruction, naming the wrapper for this install mode."""
+    return (
+        "The goal cannot be satisfied from inside this session: run "
+        f"`{daemon_cli_command_for_docs('clear-goal')}` "
+        "(it retracts this session's goal and is safe to repeat), journal why the goal cannot be "
+        "satisfied with `CLAUDE/Plan/mkplan.bash --journal <plan> decision <body-file>`, then "
+        "stop with the real blocker stated in your `STOPPING BECAUSE:` line."
+    )
 
 
 class NoticeKind(StrEnum):
@@ -150,7 +154,7 @@ class ModeNotice:
         return (
             "GOAL-LOOP BLOCKED: this session is goal-blocked by the goal-loop detector, "
             f"which saw it stop repeatedly on a goal that stayed unmet.{goal} "
-            f"{GOAL_LOOP_SELF_CLEAR_INSTRUCTION} The block ends "
+            f"{goal_loop_self_clear_instruction()} The block ends "
             f"after {hours:g} h, at the next message the human types, on a repository "
             "change, or with `hooks-daemon session-mode unblock`."
         )

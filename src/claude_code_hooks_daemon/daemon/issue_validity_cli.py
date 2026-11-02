@@ -32,6 +32,7 @@ from typing import Any, Final, TextIO
 from claude_code_hooks_daemon.config.models import handler_options
 from claude_code_hooks_daemon.constants import HandlerID
 from claude_code_hooks_daemon.daemon.validation import load_config_safe
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.github_issue_validity import (
     CLAIM_FIX_NAME,
     AssigneeCheck,
@@ -67,7 +68,10 @@ _VERDICT_EXIT: Final[dict[Verdict, int]] = {
 #: Applied by ``--park``: triaged, and waiting on the owner.
 PARK_LABELS: Final[str] = f"agent-triaged,{NEEDS_HUMAN_LABEL}"
 
-_CLAIM_COMMAND: Final[str] = "bin/hooks-daemon issue-validity {number} --claim"
+
+def _claim_command(number: int) -> str:
+    """The claim command for this install mode (issue #147)."""
+    return daemon_cli_command_for_docs("issue-validity", str(number), "--claim")
 
 
 def load_approved_authors(project_root: Path) -> tuple[str, ...] | None:
@@ -94,7 +98,7 @@ def _describe(report: ValidityReport) -> list[str]:
     for result in report.results:
         lines.append(f"  [{result.status.value}] {result.check}: {result.message}")
     if report.verdict is Verdict.FIXABLE:
-        lines.append(f"  to claim it: {_CLAIM_COMMAND.format(number=report.number)}")
+        lines.append(f"  to claim it: {_claim_command(report.number)}")
     return lines
 
 

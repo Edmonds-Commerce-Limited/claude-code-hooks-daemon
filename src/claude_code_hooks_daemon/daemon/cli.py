@@ -164,7 +164,10 @@ from claude_code_hooks_daemon.issue_report.upstream import filing_command
 from claude_code_hooks_daemon.qa.full_qa_lock import host_lock_path as qa_host_lock_path
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, is_in_claude_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
-from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.cli_command import (
+    daemon_cli_command,
+    daemon_cli_command_for_docs,
+)
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     git_visible_ancestor_dirs,
@@ -1993,7 +1996,7 @@ def cmd_check_source_fresh(args: argparse.Namespace) -> int:
     pid = read_pid_file(str(pid_path))
     if pid is None:
         print("Daemon: NOT RUNNING — cannot verify source freshness")
-        print("Start it with: bin/hooks-daemon restart")
+        print(f"Start it with: {daemon_cli_command_for_docs('restart')}")
         return 1
 
     request = {"event": "_system", "hook_input": {"action": "health"}}
@@ -6089,7 +6092,7 @@ def cmd_usage_pause(args: argparse.Namespace) -> int:
             return 0
         print(f"Session {session_id} is PAUSED: {pause.reason}")
         print(f"Resumes at {resume_time_text(pause.resume_at)}.")
-        print("Override it with: bin/hooks-daemon usage-pause clear")
+        print(f"Override it with: {daemon_cli_command_for_docs('usage-pause', 'clear')}")
         return 0
 
     # The override runs to the latest reset among the windows over the ceiling: the pause
@@ -9210,17 +9213,15 @@ def _remote_docs_check(
             print(
                 f"{drift.document.path}: recorded `{drift.recorded}`, declared `{drift.expected}`"
             )
-        print(
-            "  fix: bin/hooks-daemon remote-docs add --force <source_url>  "
-            "(re-derives frontmatter)"
-        )
+        add_force = daemon_cli_command_for_docs("remote-docs", "add", "--force", "<source_url>")
+        print(f"  fix: {add_force}  (re-derives frontmatter)")
 
     if index_unreadable:
         print(f"\n{INDEX_RELATIVE_PATH}: could not be read, so freshness cannot be confirmed")
-        print("  fix: bin/hooks-daemon remote-docs index")
+        print(f"  fix: {daemon_cli_command_for_docs('remote-docs', 'index')}")
     elif index_stale:
         print(f"\n{INDEX_RELATIVE_PATH}: out of date with the vendored tree")
-        print("  fix: bin/hooks-daemon remote-docs index")
+        print(f"  fix: {daemon_cli_command_for_docs('remote-docs', 'index')}")
 
     # The index is not a document, so it must never inflate this count --
     # a summary line that miscounts it would itself be the same kind of lie
@@ -12738,7 +12739,7 @@ def build_parser() -> argparse.ArgumentParser:
         "usage-pause",
         help=(
             "Show or lift a session's usage-ceiling pause "
-            "(run `! bin/hooks-daemon usage-pause clear` to lift it at once)"
+            f"(run `! {daemon_cli_command_for_docs('usage-pause', 'clear')}` to lift it at once)"
         ),
     )
     parser_usage_pause.add_argument(

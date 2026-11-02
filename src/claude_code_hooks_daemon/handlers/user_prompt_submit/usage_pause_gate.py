@@ -68,6 +68,7 @@ from claude_code_hooks_daemon.handlers.user_prompt_submit.focus_mode_trigger imp
 from claude_code_hooks_daemon.handlers.utils.initial_thread_exemption import (
     InitialThreadExemption,
 )
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_modes import UsagePauseView
@@ -97,39 +98,44 @@ logger = logging.getLogger(__name__)
 
 _RECOVERY_ADVISOR_EVENT: Final[str] = "post_tool_use"
 
-#: The command a human runs to lift a pause by hand.
-CLEAR_COMMAND: Final[str] = "bin/hooks-daemon usage-pause clear"
 
-#: The same, paste-ready for the paused session's own prompt: Claude Code's `!`
-#: prefix runs it as a shell command there.
-CLEAR_IN_SESSION: Final[str] = f"! {CLEAR_COMMAND}"
+def clear_in_session() -> str:
+    """The clear command, paste-ready for the paused session's own prompt.
 
-_RULE: Final[Rule] = Rule(
-    rule_id=RuleID.USAGE_PAUSE_PROMPT,
-    blocked="A prompt, cron tick or supervisor message while the session is paused on its usage ceiling",
-    why="The session stopped taking on work to keep the account under its usage ceiling, and each prompt would cost a full model turn",
-    fix=f"Nothing to do -- the session resumes by itself at the window reset; a human can override it by typing `{CLEAR_IN_SESSION}` in the session",
-    verbose=(
-        "This session is PAUSED (Plan 00479): a usage window reached the ceiling\n"
-        "configured for this host. The prompt was dropped before reaching the model,\n"
-        "so it cost no turn. The session's crons were replaced by ONE resume cron,\n"
-        "which fires after the window resets, re-reads usage, and either resumes the\n"
-        "work or pauses again.\n\n"
-        "The ceiling is re-checked on every prompt, so the pause lifts by itself as\n"
-        "soon as this host has no ceiling (edit `hosts:` in .claude/hooks-daemon.yaml;\n"
-        "the daemon reads it on its next config load) or every window is back under\n"
-        "it or past its reset.\n\n"
-        "A human can also type, in this session's prompt:\n\n"
-        f"    {CLEAR_IN_SESSION}\n\n"
-        "It removes the pause record AND records an override that lasts until the\n"
-        "latest reset among the windows over the ceiling (at most 8 days): while the\n"
-        "override is valid no pause is started for this session, even though usage is\n"
-        "still over the ceiling. It then ends by itself and the ceiling applies again.\n"
-        "The `!` makes Claude Code run it as a shell command; without it, run it in a\n"
-        "terminal at the project root. `usage-pause status` shows the record. The\n"
-        "record also expires on its own an hour after the resume time."
-    ),
-)
+    Claude Code's `!` prefix runs it as a shell command there. Rendered per call
+    because the wrapper path differs between a client install and a self-install.
+    """
+    return f"! {daemon_cli_command_for_docs('usage-pause', 'clear')}"
+
+
+def _rule() -> Rule:
+    """The deny rule, built per call so the wrapper follows the install mode."""
+    return Rule(
+        rule_id=RuleID.USAGE_PAUSE_PROMPT,
+        blocked="A prompt, cron tick or supervisor message while the session is paused on its usage ceiling",
+        why="The session stopped taking on work to keep the account under its usage ceiling, and each prompt would cost a full model turn",
+        fix=f"Nothing to do -- the session resumes by itself at the window reset; a human can override it by typing `{clear_in_session()}` in the session",
+        verbose=(
+            "This session is PAUSED (Plan 00479): a usage window reached the ceiling\n"
+            "configured for this host. The prompt was dropped before reaching the model,\n"
+            "so it cost no turn. The session's crons were replaced by ONE resume cron,\n"
+            "which fires after the window resets, re-reads usage, and either resumes the\n"
+            "work or pauses again.\n\n"
+            "The ceiling is re-checked on every prompt, so the pause lifts by itself as\n"
+            "soon as this host has no ceiling (edit `hosts:` in .claude/hooks-daemon.yaml;\n"
+            "the daemon reads it on its next config load) or every window is back under\n"
+            "it or past its reset.\n\n"
+            "A human can also type, in this session's prompt:\n\n"
+            f"    {clear_in_session()}\n\n"
+            "It removes the pause record AND records an override that lasts until the\n"
+            "latest reset among the windows over the ceiling (at most 8 days): while the\n"
+            "override is valid no pause is started for this session, even though usage is\n"
+            "still over the ceiling. It then ends by itself and the ceiling applies again.\n"
+            "The `!` makes Claude Code run it as a shell command; without it, run it in a\n"
+            "terminal at the project root. `usage-pause status` shows the record. The\n"
+            "record also expires on its own an hour after the resume time."
+        ),
+    )
 
 
 def _pending_mode_news(
@@ -232,9 +238,7 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
             logger.warning("usage_pause_gate: the ceiling no longer applies, lifting the pause")
             return self._lift(hook_input, session_id, held, env, verified_under_ceiling=True)
         until = resume_time_text(held.resume_at)
-        reason = (
-            f"{RuleFormatter().verbose(_RULE)}\n\nPaused on: {held.reason}. Resumes about {until}."
-        )
+        reason = f"{RuleFormatter().verbose(_rule())}\n\nPaused on: {held.reason}. Resumes about {until}."
         logger.info("usage_pause_gate: dropping a prompt while paused until %s", until)
         return BlockingResult(decision=Decision.DENY, reason=reason)
 
@@ -291,7 +295,7 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
         return BlockingResult(
             decision=Decision.DENY,
             reason=f"Usage pause: the resume cron fired before {until}; the pause holds.",
-        ).under_rule(_RULE, blocked="a resume cron tick that fired before the pause is due")
+        ).under_rule(_rule(), blocked="a resume cron tick that fired before the pause is due")
 
     def _lift(
         self,
@@ -335,7 +339,7 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
 
     def get_rules(self) -> list[Rule]:
         """The Rule backing the held-prompt block."""
-        return [_RULE]
+        return [_rule()]
 
     def get_claude_md(self) -> str | None:
         """Resident guidance for the active-handler block."""
@@ -363,7 +367,7 @@ class UsagePauseGateHandler(InitialThreadExemption, UserPromptSubmitHandlerBase)
             "account than the one that paused), otherwise the tick is dropped.\n\n"
             "The ceiling is re-checked on every held prompt, so the pause lifts by itself "
             "when it no longer applies. A human can type "
-            f"`{CLEAR_IN_SESSION}` in the session: it removes the record and records an "
+            f"`{clear_in_session()}` in the session: it removes the record and records an "
             "override until the latest reset among the windows over the ceiling (at most "
             "8 days), during which no pause is started for the session; each prompt then "
             "carries a `USAGE CEILING SUPPRESSED` line while a window is over its ceiling. "

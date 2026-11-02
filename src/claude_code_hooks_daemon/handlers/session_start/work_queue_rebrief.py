@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.work_queue import default_queue_path, queue_briefing
 
 _SOURCE_FIELD: Final[str] = "source"
@@ -90,7 +91,7 @@ class WorkQueueRebriefHandler(SessionStartHandlerBase):
             AcceptanceTest(
                 title="work queue rebrief lists the agents a resumed session had dispatched",
                 command=(
-                    "Record an agent with `bin/hooks-daemon work-queue add`, then resume or "
+                    f"Record an agent with `{daemon_cli_command_for_docs('work-queue', 'add')}`, then resume or "
                     "compact the session and verify a WORK QUEUE advisory naming it is injected."
                 ),
                 harness_cannot_produce=(

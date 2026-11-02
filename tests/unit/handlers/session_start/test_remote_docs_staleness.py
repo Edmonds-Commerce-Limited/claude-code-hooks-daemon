@@ -138,7 +138,11 @@ class TestReport:
         ):
             client = handler.handle(_STARTUP).context
 
-        assert maintainer == client
+        # Only the wrapper spelling follows the install mode (issue #147); the advice
+        # itself is identical.
+        assert [line.replace("bin/hooks-daemon", "WRAPPER") for line in maintainer] == [
+            line.replace(".claude/hooks-daemon/bin/hooks-daemon", "WRAPPER") for line in client
+        ]
         assert not any("upgrade" in line.lower() for line in client)
 
     def test_the_remote_tree_is_not_classified_as_vendored(self) -> None:

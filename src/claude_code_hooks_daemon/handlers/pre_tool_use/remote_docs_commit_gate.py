@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.commit_location import commit_runs_in_foreign_repo
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
@@ -57,28 +58,31 @@ _FALLBACK_REMOTE_DOCS_DIR: Final[str] = "remote-docs"
 # Added, Copied, Modified: a Deleted path is not a document being introduced.
 _INTRODUCED_STATUSES: Final[str] = "ACM"
 
-_RULE_STAGED_PROVENANCE: Final[Rule] = Rule(
-    rule_id=RuleID.REMOTE_DOCS_STAGED_PROVENANCE,
-    blocked="a commit staging a remote-docs file without valid provenance frontmatter",
-    why=(
-        "An unattributed vendored document that reaches history needs a rewrite "
-        "to remove, and cannot be refreshed, dated or trusted meanwhile"
-    ),
-    fix="Capture with `hooks-daemon remote-docs add <url>` and re-stage",
-    verbose=(
-        "The write-time gate (`remote_docs_provenance`) inspects `Write` and "
-        "`Edit`. A file authored through Bash -- a heredoc, `>`, `>>`, `tee` "
-        "-- never reaches it, so this gate checks the INDEX instead: whatever "
-        "route a file took to disk, it cannot be committed without saying "
-        "where it came from.\n\n"
-        "Every offending file is named at once rather than one per retry, so "
-        "a bulk import is one fix rather than a slog.\n\n"
-        "Capture properly instead of hand-authoring:\n"
-        "  bin/hooks-daemon remote-docs add <url>\n\n"
-        "Deleting a vendored document is never blocked -- removing a bad one "
-        "must not be harder than adding it."
-    ),
-)
+
+def _rule_staged_provenance() -> Rule:
+    """Rule built per call so the wrapper name follows the install mode (issue #147)."""
+    return Rule(
+        rule_id=RuleID.REMOTE_DOCS_STAGED_PROVENANCE,
+        blocked="a commit staging a remote-docs file without valid provenance frontmatter",
+        why=(
+            "An unattributed vendored document that reaches history needs a rewrite "
+            "to remove, and cannot be refreshed, dated or trusted meanwhile"
+        ),
+        fix="Capture with `hooks-daemon remote-docs add <url>` and re-stage",
+        verbose=(
+            "The write-time gate (`remote_docs_provenance`) inspects `Write` and "
+            "`Edit`. A file authored through Bash -- a heredoc, `>`, `>>`, `tee` "
+            "-- never reaches it, so this gate checks the INDEX instead: whatever "
+            "route a file took to disk, it cannot be committed without saying "
+            "where it came from.\n\n"
+            "Every offending file is named at once rather than one per retry, so "
+            "a bulk import is one fix rather than a slog.\n\n"
+            "Capture properly instead of hand-authoring:\n"
+            f"  {daemon_cli_command_for_docs()} remote-docs add <url>\n\n"
+            "Deleting a vendored document is never blocked -- removing a bad one "
+            "must not be harder than adding it."
+        ),
+    )
 
 
 class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
@@ -142,7 +146,7 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
             staged = self.staged_reader(reading, cwd if isinstance(cwd, str) else None)
         except SimulationIncompleteError as incomplete:
             return GatingResult(decision=Decision.DENY, reason=str(incomplete)).under_rule(
-                _RULE_STAGED_PROVENANCE, blocked=INCOMPLETE_SIMULATION_BLOCKED
+                _rule_staged_provenance(), blocked=INCOMPLETE_SIMULATION_BLOCKED
             )
         except OSError as exc:
             # A gate that cannot read the index must not block every commit.
@@ -188,14 +192,14 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
                 "A file authored through Bash never reaches the write-time gate, "
                 "which is why this one checks the index.\n\n"
                 "This tree is CAPTURED, not authored:\n"
-                "  bin/hooks-daemon remote-docs add <url>\n\n"
+                f"  {daemon_cli_command_for_docs()} remote-docs add <url>\n\n"
                 "Then re-stage. Deleting a vendored document is never blocked."
             ),
-        ).under_rule(_RULE_STAGED_PROVENANCE)
+        ).under_rule(_rule_staged_provenance())
 
     def get_rules(self) -> list[Rule]:
         """The Rule backing this handler's denial."""
-        return [_RULE_STAGED_PROVENANCE]
+        return [_rule_staged_provenance()]
 
     def get_claude_md(self) -> str | None:
         """No resident guidance: the write-time gate's section covers this."""
