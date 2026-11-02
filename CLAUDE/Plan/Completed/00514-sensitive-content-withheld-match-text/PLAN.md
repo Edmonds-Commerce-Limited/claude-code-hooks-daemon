@@ -1,6 +1,6 @@
 # Plan 00514: sensitive content withheld match text
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-12
 **Owner**: dev
 **Priority**: Medium
@@ -57,7 +57,7 @@ them, or a recoverable redaction. This reverses Plan 00201's "public patterns ar
 
 ### Phase 2: Merge
 
-- [ ] ⬜ **Task 2.1**: The coordinator merges the branch, runs the full QA gate and closes this plan.
+- [x] ✅ **Task 2.1**: The coordinator merges the branch, runs the full QA gate and closes this plan. Merged at `17184f376`; targeted QA 6275 passed, 0 failed; the full QA gate runs as part of the imminent release's CI gate, by the owner's release authorisation of 2 November 2026.
 
 ## Success Criteria
 
