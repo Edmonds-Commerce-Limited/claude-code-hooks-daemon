@@ -3698,8 +3698,14 @@ def is_grep_pattern_only_mention(
     Scoped the same way :func:`is_encrypted_target_invocation` is (and
     reusing its exact primitives): no expansion character anywhere in
     ``command`` (glob, substitution, tilde -- keeping this to the simple,
-    fully-literal case), one parseable simple command (no separator, pipe,
-    or redirection-that-isn't-a-redirect), head is a bare grep/egrep/fgrep.
+    fully-literal case, so a pattern assigned in one statement and expanded
+    in another still fails closed).
+
+    A compound command (``;``, ``&&``, ``||``; an unquoted newline counts as
+    ``;`` unless the command has a heredoc, issue #144) is judged statement
+    by statement: exempt only when every statement is a bare grep/egrep/fgrep
+    whose file targets are unprotected, or carries no protected mention at
+    all. A pipe, ``&`` or subshell voids the exemption.
 
     Only ``-e``/``--regexp`` supplies a PATTERN. ``-f``/``--file`` and
     ``--exclude-from`` name a FILE that grep itself opens and reads (GNU
@@ -3725,15 +3731,129 @@ def is_grep_pattern_only_mention(
     ``deadline`` (Plan 00466 review 8 L1) is forwarded to
     :func:`iter_protected_mentions`.
     """
-    if any(char in _EXPANSION_CHARS for char in _without_single_quoted_content(command)):
+    normalised = _newlines_as_statement_separators(command)
+    if normalised is None:
         return False
-    words = _shell_words(strip_transparent_reserved_words(command))
-    if not words or not _is_single_simple_command(words):
+    if any(char in _EXPANSION_CHARS for char in _without_single_quoted_content(normalised)):
         return False
-    head = words[0]
-    if head not in _GREP_FAMILY_COMMANDS:
+    statements = _split_statements(normalised)
+    if statements is None:
         return False
 
+    mentions = list(iter_protected_mentions(normalised, patterns, deadline=deadline))
+    if not mentions:
+        return False
+
+    project_root = resolve_project_root()
+    stem_pairs = _pattern_literal_stems(patterns)
+    # Team-lead's memoisation cut: the file-target loop calls `_token_mention`
+    # directly, outside `iter_protected_mentions`'s own per-scan
+    # `mention_cache`, so a file-target word repeated across several
+    # arguments would otherwise pay for a fresh `os.path.realpath` syscall
+    # every occurrence. LOCAL to this one call, never module-level (N23).
+    realpath_cache: dict[str, str | None] = {}
+    for text, words in statements:
+        if words[0] in _GREP_FAMILY_COMMANDS:
+            targets = _grep_file_target_words(words)
+            if targets is None:
+                return False
+            if any(
+                _token_mention(
+                    target, patterns, stem_pairs, project_root, realpath_cache=realpath_cache
+                )
+                is not None
+                for target in targets
+            ):
+                return False
+        elif next(iter_protected_mentions(text, patterns, deadline=deadline), None) is not None:
+            return False
+    return True
+
+
+def _newlines_as_statement_separators(command: str) -> str | None:
+    """``command`` with each unquoted newline read as ``;``, or ``None``.
+
+    ``None`` (fail closed) when a heredoc could swallow the newlines as a body
+    (`<<` anywhere in a multi-line command) or a newline sits inside quotes.
+    A newline after a list operator or a `;` continues the line, so no
+    separator is added there; a carriage return is left for the expansion
+    check to refuse.
+    """
+    if "\n" not in command:
+        return command
+    if "<<" in command:
+        return None
+    out: list[str] = []
+    quote: str | None = None
+    for char in command:
+        if quote is not None:
+            if char == "\n":
+                return None
+            if char == quote:
+                quote = None
+        elif char in "'\"":
+            quote = char
+        elif char == "\n":
+            tail = "".join(out).rstrip()
+            out.append(" " if not tail or tail.endswith((";", "&&", "||")) else ";")
+            continue
+        out.append(char)
+    return "".join(out)
+
+
+def _split_statement_texts(command: str) -> list[str]:
+    """``command`` cut at each unquoted ``;``, ``&&`` and ``||``.
+
+    Quote tracking is the same as :func:`_newlines_as_statement_separators`; a
+    backslash never reaches here (an expansion character, refused earlier).
+    """
+    texts: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if quote is not None:
+            if char == quote:
+                quote = None
+        elif char in "'\"":
+            quote = char
+        elif char == ";" or command.startswith(("&&", "||"), index):
+            texts.append("".join(current))
+            current = []
+            index += 1 if char == ";" else 2
+            continue
+        current.append(char)
+        index += 1
+    texts.append("".join(current))
+    return texts
+
+
+def _split_statements(command: str) -> list[tuple[str, list[str]]] | None:
+    """``(text, words)`` for each non-empty statement of ``command``, or ``None``.
+
+    The statement's own text is kept (not re-quoted from its words) so the
+    mention scan reads exactly what the shell would, redirections included.
+    ``None`` when a statement will not parse or carries an operator other than
+    a redirection (a pipe, a background `&`, a subshell).
+    """
+    statements: list[tuple[str, list[str]]] = []
+    for text in _split_statement_texts(command):
+        if not text.strip():
+            continue
+        words = _shell_words(strip_transparent_reserved_words(text))
+        if not words or not _is_single_simple_command(words):
+            return None
+        statements.append((text, words))
+    return statements or None
+
+
+def _grep_file_target_words(words: list[str]) -> list[str] | None:
+    """The FILE-TARGET words of one grep-family statement, or ``None``.
+
+    ``None`` when an option falls outside the closed grammar, so the
+    statement's pattern slot cannot be told from its file targets.
+    """
     saw_explicit_pattern_source = False
     file_target_values: list[str] = []
     positional_indices: list[int] = []
@@ -3774,7 +3894,7 @@ def is_grep_pattern_only_mention(
                 (long_flag in _GREP_ATTACHED_VALUE_LONG_OPTIONS and has_eq)
                 or (long_flag in _GREP_FLAG_LONG_OPTIONS and not has_eq)
             ):
-                return False
+                return None
             cursor += 1
             continue
         # Short-option cluster: GNU grep's getopt claims the rest of the
@@ -3784,7 +3904,7 @@ def is_grep_pattern_only_mention(
         for position, letter in enumerate(word[1:], start=1):
             if letter not in _GREP_SHORT_VALUE_OPTS:
                 if letter not in _GREP_SHORT_FLAG_OPTS:
-                    return False
+                    return None
                 continue
             attached_value = word[position + 1 :]
             value: str | None
@@ -3808,32 +3928,7 @@ def is_grep_pattern_only_mention(
     if not saw_explicit_pattern_source and positional_indices:
         positional_indices = positional_indices[1:]
 
-    mentions = list(iter_protected_mentions(command, patterns, deadline=deadline))
-    if not mentions:
-        return False
-
-    project_root = resolve_project_root()
-    stem_pairs = _pattern_literal_stems(patterns)
-    # Team-lead's memoisation cut: this loop calls `_token_mention` directly,
-    # outside `iter_protected_mentions`'s own per-scan `mention_cache`, so a
-    # file-target word repeated across several positional arguments would
-    # otherwise pay for a fresh `os.path.realpath` syscall every occurrence.
-    # LOCAL to this one call, never module-level (N23).
-    realpath_cache: dict[str, str | None] = {}
-    file_target_words = [words[index] for index in positional_indices] + file_target_values
-    for target_word in file_target_words:
-        if (
-            _token_mention(
-                target_word,
-                patterns,
-                stem_pairs,
-                project_root,
-                realpath_cache=realpath_cache,
-            )
-            is not None
-        ):
-            return False
-    return True
+    return [words[index] for index in positional_indices] + file_target_values
 
 
 def _mention_is_encrypted(
