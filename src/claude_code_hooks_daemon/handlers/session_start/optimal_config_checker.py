@@ -14,6 +14,11 @@ The full audit (``_run_checks()``) covers:
 4. Max Output Tokens (CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000)
 5. Auto Memory (CLAUDE_CODE_DISABLE_AUTO_MEMORY should NOT be "1")
 6. Bash Working Directory (CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1)
+7. Idle Compaction (idleCompaction not false, and no disabler; Plan 00557)
+
+``handle()`` also writes ``alwaysThinkingEnabled: true`` and
+``idleCompaction: true`` to the user settings when those keys are ABSENT; an
+explicit value, including ``idleCompaction: false``, is never overwritten.
 """
 
 import json
@@ -60,6 +65,53 @@ _EFFORT_CHECK_WHERE = (
     "in .claude/settings.json or .claude/settings.local.json. Not checked: a managed "
     "settings file, and --settings"
 )
+
+# ── Idle compaction check (Plan 00557) ───────────────────────────────────────
+_IDLE_COMPACTION_CHECK_NAME = "Idle Compaction"
+# Env vars that switch idle compaction off when set truthy.
+_IDLE_COMPACTION_DISABLER_ENV = (
+    "DISABLE_AUTO_COMPACT",
+    "DISABLE_COMPACT",
+    "FORCE_PROMPT_CACHING_5M",
+)
+_ENV_FALSY_VALUES = frozenset({"", "0", "false", "no", "off"})
+_IDLE_COMPACTION_CHECK_WHY = (
+    "Idle compaction compacts a long idle session just before its one-hour prompt "
+    "cache expires, so the next turn does not re-read the whole context uncached. "
+    "Applies only to interactive sessions on the one-hour cache; needs Claude Code 2.1.290 or later."
+)
+_IDLE_COMPACTION_CHECK_FIX = (
+    'Remove what disables it: set {"idleCompaction": true} (or delete the key) and '
+    'delete {"autoCompactEnabled": false} in settings.json, and unset '
+    "DISABLE_AUTO_COMPACT, DISABLE_COMPACT and FORCE_PROMPT_CACHING_5M"
+)
+_IDLE_COMPACTION_CHECK_WHERE = (
+    "environment (~/.bashrc, ~/.zshrc), the env section of any settings file, and "
+    "idleCompaction / autoCompactEnabled in ~/.claude/settings.json, "
+    ".claude/settings.json or .claude/settings.local.json"
+)
+
+
+def _env_truthy(value: object) -> bool:
+    """True if an env-style value is set to something other than a falsy word."""
+    return str(value).strip().lower() not in _ENV_FALSY_VALUES
+
+
+def _idle_compaction_disablers(data: dict[str, Any], location: str) -> list[str]:
+    """Return what in one settings dict (``location``) turns idle compaction off."""
+    causes: list[str] = []
+    if data.get("idleCompaction") is False:
+        causes.append(f"{location} idleCompaction=false")
+    if data.get("autoCompactEnabled") is False:
+        causes.append(f"{location} autoCompactEnabled=false")
+    env_obj = data.get("env")
+    if isinstance(env_obj, dict):
+        causes.extend(
+            f"{location} env.{name}={env_obj[name]!r}"
+            for name in _IDLE_COMPACTION_DISABLER_ENV
+            if name in env_obj and _env_truthy(env_obj[name])
+        )
+    return causes
 
 
 def _read_env_effort_pin(data: dict[str, Any], location: str) -> str | None:
@@ -457,6 +509,50 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
             "docs": DOCS_URL,
         }
 
+    def _check_idle_compaction(self, project_root: Path) -> dict[str, Any]:
+        """Check that idle compaction is in effect (Plan 00557).
+
+        The default is on, so an absent ``idleCompaction`` passes. It fails when
+        anything disables it: ``idleCompaction: false``, ``autoCompactEnabled:
+        false``, or a truthy ``DISABLE_AUTO_COMPACT``, ``DISABLE_COMPACT`` or
+        ``FORCE_PROMPT_CACHING_5M`` -- in the shell or a settings file's ``env``
+        section. Reads the user file and the project's own settings files; a
+        project file that cannot be read, or is not a JSON object, is reported
+        as a cause that cannot be ruled out, as ``_check_effort_source`` does.
+        """
+        causes = [
+            f"{name}={os.environ[name]!r}"
+            for name in _IDLE_COMPACTION_DISABLER_ENV
+            if name in os.environ and _env_truthy(os.environ[name])
+        ]
+        causes.extend(
+            _idle_compaction_disablers(self._read_global_settings(), "~/.claude/settings.json")
+        )
+        for name in _PROJECT_SETTINGS_FILES:
+            relative = f".claude/{name}"
+            path = project_root / ".claude" / name
+            if not path.exists():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as e:
+                logger.debug("Cannot read %s for the idle compaction check: %s", path, e)
+                causes.append(f"{relative} is unreadable, so a disabler cannot be ruled out")
+                continue
+            if not isinstance(data, dict):
+                causes.append(f"{relative} is not a JSON object, so it cannot be checked")
+                continue
+            causes.extend(_idle_compaction_disablers(data, relative))
+        return {
+            "name": _IDLE_COMPACTION_CHECK_NAME,
+            "passed": not causes,
+            "current": "; ".join(causes) if causes else "In effect (default on, no disabler found)",
+            "why": _IDLE_COMPACTION_CHECK_WHY,
+            "fix": _IDLE_COMPACTION_CHECK_FIX,
+            "where": _IDLE_COMPACTION_CHECK_WHERE,
+            "docs": DOCS_URL,
+        }
+
     def _run_checks(self, project_root: Path) -> list[dict[str, Any]]:
         """Run all configuration checks.
 
@@ -476,6 +572,7 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
             self._check_max_output_tokens(),
             self._check_auto_memory(),
             self._check_bash_working_dir(),
+            self._check_idle_compaction(project_root),
         ]
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -493,7 +590,10 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
         """Ensure critical settings exist in ~/.claude/settings.json.
 
         When alwaysThinkingEnabled is missing from settings, writes the
-        optimal default so the statusline and config stay in sync.
+        optimal default so the statusline and config stay in sync. Likewise
+        writes ``idleCompaction: true`` when that key is absent (Plan 00557);
+        an explicit value, ``false`` included, is the user's choice and is
+        never overwritten (``_check_idle_compaction`` reports it instead).
 
         Effort is deliberately NOT written here (Plan 00466 N47): the ccy
         supervisor redesign removed the supervisor as a second, silent opinion
@@ -535,6 +635,10 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
             settings["alwaysThinkingEnabled"] = True
             written.append("alwaysThinkingEnabled=true")
 
+        if "idleCompaction" not in settings:
+            settings["idleCompaction"] = True
+            written.append("idleCompaction=true")
+
         if written:
             self._write_global_settings(settings)
 
@@ -545,7 +649,8 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
 
         Also enforces that alwaysThinkingEnabled is explicitly set in
         ~/.claude/settings.json so the statusline stays in sync with actual
-        configuration. Effort is never auto-written (Plan 00466 N47).
+        configuration, and idleCompaction when absent (never overwriting an
+        explicit false). Effort is never auto-written (Plan 00466 N47).
 
         Args:
             hook_input: SessionStart hook input
