@@ -51,12 +51,29 @@ Related plans, not merged:
 
 ### Phase 1: Understand the feature
 
-- [ ] ⬜ **Task 1.1**: Research report covering mechanism, configuration,
-  rollout status and hook interaction. The report goes in
-  `subagent-reports/261102-idle-compact-research.md`.
-- [ ] ⬜ **Task 1.2**: Decide the enforcement shape from the findings. It is
-  either a hard requirement, or advisory only while the feature is still
-  rolling out. Present that choice to the owner if it is not clear-cut.
+- [x] ✅ **Task 1.1**: Research report:
+  [261102-idle-compact-research.md](subagent-reports/261102-idle-compact-research.md).
+  - The `idleCompaction` setting defaults to `true`. It compacts at about 0.9
+    of the one-hour cache TTL (about 54 minutes idle) in interactive sessions,
+    when context is at least `CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS` (default
+    200000).
+  - These switch it off: `autoCompactEnabled: false`, `DISABLE_AUTO_COMPACT`,
+    `DISABLE_COMPACT` and `FORCE_PROMPT_CACHING_5M`.
+  - **Rollout:** it works from 2.1.290 and was announced in 2.1.299. 2.1.314
+    took it to VS Code, Desktop, subscribers with telemetry off, and
+    Bedrock/Vertex/Foundry. The live env-var docs still say it depends on
+    feature-flag fetching, and the flag name is unverified. It is broadly
+    rolled out but not proven universal.
+  - PreCompact fires with `trigger: "auto"`, so an idle compaction cannot be
+    told apart from a normal auto-compact.
+- [x] ✅ **Task 1.2**: Enforcement shape. This was a clear call, so it was not
+  raised with the owner:
+  - a new `_check_idle_compaction` in `optimal_config_checker` reports
+    whether idle compaction is in effect and names any disabler;
+  - `_enforce_settings_sync` writes `idleCompaction: true` only when the key
+    is absent, following the existing `alwaysThinkingEnabled` pattern;
+  - an explicit `false` is the user's choice, so it is reported and never
+    overwritten.
 
 ### Phase 2: Enforce
 
