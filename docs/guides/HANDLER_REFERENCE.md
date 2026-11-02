@@ -4593,7 +4593,7 @@ handlers:
 Two routes arm it, and only the first is the supported one:
 
 - **The declaration token** — `STOPPING BECAUSE: [awaiting-human] <reason>`. Matched as a literal immediately after the prefix, so any wording after it works. Anchoring to that position is deliberate: matched anywhere in the text, a stop message merely *discussing* the token would arm suppression on a session that is not blocked, and the symptom would be ticks silently not arriving.
-- **The legacy prose patterns** — a short enumerated set of exactly four ("blocked only on human input", "blocked only on the owner's input", "need user input", "waiting on the user's decision"), never a broad "input" substring match. These are a compatibility fallback and are **closed to extension**: a phrasing they miss is handled by the token, not by adding a fifth pattern. Two rounds of widening (Plan 00298 → Plan 00314) each ended in another miss, which is why the mechanism moved to an exact declaration.
+- **The legacy prose patterns** — a short enumerated set of exactly four ("blocked only on human input", "blocked only on the owner's input", "need user input", "waiting only on the user's decision"; the last requires "only", before or after the target, so an incidental "waiting for the owner's decision" does not arm), never a broad "input" substring match. These are a compatibility fallback and are **closed to extension**: a phrasing they miss is handled by the token, not by adding a fifth pattern. Two rounds of widening (Plan 00298 → Plan 00314) each ended in another miss, which is why the mechanism moved to an exact declaration.
 
 **Options:**
 
