@@ -56,6 +56,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils import protected_file_index
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils import secret_redaction as sr
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.encrypted_at_rest import AtRestFormat, classify_at_rest
 from claude_code_hooks_daemon.utils.git_file_states import (
     GitFileStates,
@@ -121,7 +122,7 @@ _ABSENCE_PROBLEM_HEADING: Final[str] = (
 )
 _CONFIG_UNLOADABLE: Final[str] = (
     "the config does not load ({error}), so no declared protected path was "
-    "checked -- run `bin/hooks-daemon config-validate`"
+    "checked -- run `{validate}`"
 )
 _TOLD_KEY_UNREADABLE: Final[str] = (
     "the record of what was already told is unreadable ({error}), so any "
@@ -331,7 +332,11 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
         try:
             config = self._load_config()
         except (OSError, ValueError) as exc:
-            problems.append(_CONFIG_UNLOADABLE.format(error=_describe(exc)))
+            problems.append(
+                _CONFIG_UNLOADABLE.format(
+                    error=_describe(exc), validate=daemon_cli_command_for_docs("config-validate")
+                )
+            )
             return _AbsenceReport(absent=[], problems=problems)
         declared, absent = self._declared_absent(project_root, config)
         if not declared:

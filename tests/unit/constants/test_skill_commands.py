@@ -11,7 +11,7 @@ Plan 00330: the pointer names the CLI verb (`explain-rule`), because
 from __future__ import annotations
 
 from claude_code_hooks_daemon.constants.skill_commands import CliCommand, SkillCommand
-from claude_code_hooks_daemon.core.rule import _EXPLAIN_SUFFIX
+from claude_code_hooks_daemon.core.rule import _EXPLAIN_SUFFIX, Rule, RuleFormatter
 
 
 class TestCliCommand:
@@ -24,11 +24,14 @@ class TestCliCommand:
     def test_explain_suffix_uses_the_cli_verb(self) -> None:
         """core/rule.py's pointer is built from the constant, not a literal, and
         names the CLI form a human can paste."""
-        assert CliCommand.EXPLAIN_RULE in _EXPLAIN_SUFFIX
-        assert "rule-explain" not in _EXPLAIN_SUFFIX
+        rule = Rule(rule_id="R-X", blocked="b", why="w", fix="f", verbose="v")
+        terse = RuleFormatter().terse(rule)
+        assert f" {CliCommand.EXPLAIN_RULE} R-X" in terse
+        assert "rule-explain" not in terse
         # Slash-command syntax reads as a bash command to Claude (skill_refs QA).
-        assert " /hooks-daemon" not in _EXPLAIN_SUFFIX
-        assert "bin/hooks-daemon" in _EXPLAIN_SUFFIX
+        assert " /hooks-daemon" not in terse
+        assert "bin/hooks-daemon" in terse
+        assert "{wrapper}" in _EXPLAIN_SUFFIX
 
 
 class TestSkillCommand:
