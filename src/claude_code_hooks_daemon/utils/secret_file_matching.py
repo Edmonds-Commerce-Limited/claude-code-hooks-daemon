@@ -2690,6 +2690,17 @@ _AND_SEPARATOR: Final[str] = "&&"
 # not, and that difference is the whole basis for stripping the prefix.
 _COMPOUND_MARKERS: Final[tuple[str, ...]] = ("&", "$(", "`")
 _SUBSTITUTION_MARKERS: Final[tuple[str, ...]] = ("$(", "`", "${", _PROCESS_SUBSTITUTION)
+# The `&` of a redirection operator (`2>&1`, `>&2`, `&>f`, `&>>f`, `>&f`,
+# `<&0`) duplicates or redirects a descriptor; it neither backgrounds nor joins
+# commands. Only the operator is rewritten (to a plain `>`), so a redirection
+# TARGET stays in the command as a word and is still judged by the flag-position
+# check: `&> <protected>` becomes `> <protected>`, which is denied.
+_REDIRECTION_AMPERSAND: Final[re.Pattern[str]] = re.compile(r"\d*>&|&>>?|\d*<&")
+
+
+def _without_redirection_ampersands(command: str) -> str:
+    """``command`` with every redirection operator's ``&`` rewritten away."""
+    return _REDIRECTION_AMPERSAND.sub(">", command)
 
 
 def _strip_leading_cd(command: str, patterns: tuple[str, ...]) -> str | None:
@@ -2782,7 +2793,8 @@ def is_exempt_invocation(
         return False
     if any(separator in stripped for separator in _COMMAND_SEPARATORS):
         return False
-    if any(marker in stripped for marker in _COMPOUND_MARKERS):
+    unredirected = _without_redirection_ampersands(stripped)
+    if any(marker in unredirected for marker in _COMPOUND_MARKERS):
         return False
 
     words = stripped.split()
