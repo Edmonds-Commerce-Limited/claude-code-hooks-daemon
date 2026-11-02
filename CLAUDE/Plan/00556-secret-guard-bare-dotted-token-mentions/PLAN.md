@@ -105,16 +105,17 @@ time.
   [3.2](subagent-reports/261102-task-3.2-issue-141.md) and
   [3.2b](subagent-reports/261102-task-3.2b-issue-141.md).
 
-- [ ] 🚫 **Task 3.3** (#142): a bare `**` is judged as a recursive globstar
-  that matches dot-files. `*` and `**/*` get inconsistent verdicts. **Blocked
-  on the owner.** N556's option (c) in Plan 00474 (judge by the session shell
-  snapshot's `shopt` state; not this plan's #145 option (c)) cannot identify the
-  session's own snapshot. The consistency-only fix would force N556's option
-  (b) or revert tested behaviour. The three remaining options are in the #142
-  issue comment, where the coordinator recommends "every readable snapshot
-  agrees". The branch report records the blocker. Report:
-  [261102-task-3.3-issue-142.md](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/worktree-issue-142/CLAUDE/Plan/00556-secret-guard-bare-dotted-token-mentions/subagent-reports/261102-task-3.3-issue-142.md)
-  (branch `worktree-issue-142`).
+- [x] ✅ **Task 3.3** (#142): a bare `**` was judged as a recursive globstar
+  that matches dot-files. Owner ruling (2 November 2026), option 2: judge `**`
+  by bash's default expansion (like `*`) only when EVERY readable shell snapshot
+  records `globstar` and `dotglob` as off; otherwise, and when the command runs
+  `shopt` or `set -O`, keep the conservative reading. Done in
+  `utils/shell_snapshot.py` (cached by mtimes, newest 200 read) and
+  `ProtectedFileIndex.glob_matches(default_expansion=...)`, with release note
+  018\. The earlier blocker report:
+  [261102-task-3.3-issue-142.md](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/worktree-issue-142/CLAUDE/Plan/00556-secret-guard-bare-dotted-token-mentions/subagent-reports/261102-task-3.3-issue-142.md).
+  Result report:
+  [3.3b](subagent-reports/261102-task-3.3b-issue-142.md).
 
 - [x] ✅ **Task 3.4** (#143): a dotted module path in a Python string literal
   is treated as a file mention.

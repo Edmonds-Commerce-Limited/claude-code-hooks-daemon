@@ -146,12 +146,16 @@ class ProtectedFileIndex:
             return entry.pattern
         return None
 
-    def glob_matches(self, token: str, bases: Sequence[str] = ()) -> str | None:
+    def glob_matches(
+        self, token: str, bases: Sequence[str] = (), *, default_expansion: bool = False
+    ) -> str | None:
         """The protected glob of the first indexed file the shell glob ``token`` matches.
 
         A relative ``token`` is read from each of ``bases``. Matching follows the
         shell: ``*`` and ``?`` stay inside one path component and never match a
-        leading dot, and ``**`` spans directories. A glob that starts, below the
+        leading dot, and ``**`` spans directories. ``default_expansion`` says the
+        shell runs with ``globstar`` and ``dotglob`` off (bash's defaults), where a
+        ``**`` component is read like ``*``: one level, no dot names. A glob that starts, below the
         directory it is read from, with a wildcard-only component and has another
         after it (``*/*``, ``**/*``, ``*/dir/*``) names no place: reading whatever
         sits that deep is not reading a protected file, and judging it would deny
@@ -170,6 +174,8 @@ class ProtectedFileIndex:
             if self._names_no_place(token, absolute_token):
                 continue
             glob_parts = _components(absolute_token)
+            if default_expansion:
+                glob_parts = ["*" if part == _RECURSIVE_COMPONENT else part for part in glob_parts]
             for entry in self.files:
                 for root in self._roots():
                     if _segments_match(_components(f"{root}/{entry.relpath}"), glob_parts):

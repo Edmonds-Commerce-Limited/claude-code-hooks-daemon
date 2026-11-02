@@ -66,6 +66,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     strip_inert_spans,
     substitution_inner_spans,
 )
+from claude_code_hooks_daemon.utils.shell_snapshot import default_glob_semantics
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 if TYPE_CHECKING:
@@ -2184,6 +2185,11 @@ def _content_occurrence_counts(command: str, start: int, end: int) -> bool:
     return _MODULE_API_BEFORE_STRING.search(command[: start - 1]) is None
 
 
+def _default_globs_for(command: str) -> Callable[[], bool]:
+    """A memoised, lazy answer to whether ``command`` runs under bash's default globbing (#142)."""
+    return functools.cache(lambda: default_glob_semantics(command))
+
+
 def _is_indexed_name(token: str, index: "ProtectedFileIndex", cwds: tuple[str, ...]) -> bool:
     """Whether ``token`` names an indexed protected file, here or by its file name."""
     if index.glob_matches(token, cwds) is not None:
@@ -2362,6 +2368,7 @@ def iter_protected_mentions(
     # genuinely repeating a word -- changes no verdict it computes.
     mention_cache: dict[str, str | None] = {}
     yielded_tokens: set[str] = set()
+    default_globs = _default_globs_for(command)
 
     def judge(word: str) -> str | None:
         """The pattern ``word`` mentions once the bare-dotted gate has judged it."""
@@ -2375,6 +2382,7 @@ def iter_protected_mentions(
             is_quoted_literal=functools.partial(glob_gate.is_quoted_literal, word),
             effective_cwds=effective,
             index=index,
+            default_globs=default_globs,
         )
         core = word.strip(_TOKEN_PUNCTUATION)
         if (
@@ -2664,8 +2672,13 @@ def _token_mention(
     effective_cwds: tuple[str, ...] = (),
     is_quoted_literal: Callable[[], bool] = lambda: False,
     index: "ProtectedFileIndex | None" = None,
+    default_globs: Callable[[], bool] = lambda: False,
 ) -> str | None:
     """The first protected glob ``token`` names (or could glob-expand to), else None.
+
+    ``default_globs`` answers whether the shell expands by bash's defaults
+    (:func:`shell_snapshot.default_glob_semantics`); it is asked only when an
+    index lookup is about to be made.
 
     ``effective_cwds`` (:func:`effective_cwds`) are the directories a relative
     ``token`` may be read from: a directory or absolute-path pattern is matched
@@ -2821,7 +2834,9 @@ def _token_mention(
             if index is not None and not is_quoted_literal():
                 for form in expansions:
                     if _is_glob_shaped(form):
-                        match = index.glob_matches(form, effective_cwds)
+                        match = index.glob_matches(
+                            form, effective_cwds, default_expansion=default_globs()
+                        )
                         if match is not None:
                             return match
     # Own live finding (team-lead's 1 MB timing follow-up to review 3): the
@@ -2909,6 +2924,7 @@ def find_protected_mention_strict(
     project_root = resolve_project_root()
     unquoted = mask_quoted(command, keep_double=False)
     bases = effective_cwds(command, cwd) if index is not None else ()
+    default_globs = _default_globs_for(command)
     for token, start in _tokenise_with_offsets(command):
         globbed = any(char in _GLOB_CHARACTERS for char in unquoted[start : start + len(token)])
         for form in _normalised_token_forms(token):
@@ -2916,7 +2932,7 @@ def find_protected_mention_strict(
             if matched is not None:
                 return matched
             if index is not None and globbed and _is_glob_shaped(form):
-                match = index.glob_matches(form, bases)
+                match = index.glob_matches(form, bases, default_expansion=default_globs())
                 if match is not None:
                     return match
         real = _realpath_if_resolvable(token)
