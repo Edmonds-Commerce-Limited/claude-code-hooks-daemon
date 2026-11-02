@@ -99,10 +99,12 @@ time.
   `_text_naming`.
 - [ ] 🚫 **Task 3.3** (#142): a bare `**` is judged as a recursive globstar
   that matches dot-files. `*` and `**/*` get inconsistent verdicts. **Blocked
-  on the owner.** Option (c) from N556 cannot identify the session's own shell
-  snapshot, and the consistency-only fix would force option (b) or revert
-  tested behaviour. The three remaining options are on #142, and the
-  coordinator recommends "every readable snapshot agrees". Report:
+  on the owner.** N556's option (c) in Plan 00474 (judge by the session shell
+  snapshot's `shopt` state; not this plan's #145 option (c)) cannot identify the
+  session's own snapshot. The consistency-only fix would force N556's option
+  (b) or revert tested behaviour. The three remaining options are in the #142
+  issue comment, where the coordinator recommends "every readable snapshot
+  agrees". The branch report records the blocker. Report:
   [261102-task-3.3-issue-142.md](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/worktree-issue-142/CLAUDE/Plan/00556-secret-guard-bare-dotted-token-mentions/subagent-reports/261102-task-3.3-issue-142.md)
   (branch `worktree-issue-142`).
 - [ ] ⬜ **Task 3.4** (#143): a dotted module path in a Python string literal
