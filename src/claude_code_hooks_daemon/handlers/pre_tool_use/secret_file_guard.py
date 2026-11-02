@@ -60,6 +60,7 @@ from claude_code_hooks_daemon.utils import (
     shell_expansion,
 )
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
@@ -80,10 +81,12 @@ _WHY: Final[str] = (
     "The file's contents must NEVER be read into context by any route — "
     "not Read, not Bash, not an interpreter one-liner, not a copy"
 )
-_FIX: Final[str] = "Use `bin/hooks-daemon secret-meta <path>` for metadata, or ask the user"
-_VERBOSE: Final[str] = (
+_SECRET_META_PLACEHOLDER: Final[str] = "{secret_meta}"
+_EXPLAIN_HANDLER_PLACEHOLDER: Final[str] = "{explain_handler}"
+_FIX_TEMPLATE: Final[str] = f"Use `{_SECRET_META_PLACEHOLDER} <path>` for metadata, or ask the user"
+_VERBOSE_TEMPLATE: Final[str] = (
     "What you CAN do instead:\n"
-    "- Presence/metadata: `bin/hooks-daemon secret-meta <path>` returns "
+    f"- Presence/metadata: `{_SECRET_META_PLACEHOLDER} <path>` returns "
     "existence, bucketed size, mtime, permissions and a keyed digest — "
     "never content.\n"
     "- Trusted consumers keep working: pass the path in flag position, "
@@ -107,10 +110,33 @@ _VERBOSE: Final[str] = (
     # prints the EFFECTIVE list, and needs no protected glob on the command
     # line -- repeating one of those in Bash is itself denied.
     "To see which globs are actually in force, run "
-    "`bin/hooks-daemon explain-handler secret_file_guard` — it prints the "
+    f"`{_EXPLAIN_HANDLER_PLACEHOLDER} secret_file_guard` — it prints the "
     "effective list. Do NOT grep for the glob above: repeating it in a Bash "
     "command is itself a mention, and is denied."
 )
+
+
+def _wrapper(subcommand: str) -> str:
+    """The daemon wrapper invocation for this install mode (project-root relative).
+
+    ``bin/hooks-daemon`` on a self-install, ``.claude/hooks-daemon/bin/hooks-daemon``
+    on a client install, which has no root ``bin/`` (issue #147).
+    """
+    return daemon_cli_command_for_docs(subcommand)
+
+
+def _fix() -> str:
+    """The one-line remedy, naming the wrapper for this install mode."""
+    return _FIX_TEMPLATE.format(secret_meta=_wrapper("secret-meta"))
+
+
+def _verbose() -> str:
+    """The first-fire teaching text, naming the wrapper for this install mode."""
+    return _VERBOSE_TEMPLATE.format(
+        secret_meta=_wrapper("secret-meta"),
+        explain_handler=_wrapper("explain-handler"),
+    )
+
 
 # The route a recursive Bash search that reaches a protected file under its
 # roots is filed under (Plan 00483 D1). It is the `read` rule plus the way out:
@@ -146,29 +172,38 @@ _ADVISORY_CLOSING: Final[str] = (
     "enter context by any route."
 )
 
-_RULES_BY_ROUTE: Final[dict[str, Rule]] = {
-    "read": Rule(
-        rule_id=RuleID.SECRET_READ,
-        blocked="Read/Write/Edit/NotebookEdit/Grep targeting a protected path",
-        why=_WHY,
-        fix=_FIX,
-        verbose=_VERBOSE,
-    ),
-    "bash": Rule(
-        rule_id=RuleID.SECRET_BASH_MENTION,
-        blocked="a Bash command whose text mentions a protected path",
-        why=_WHY,
-        fix=_FIX,
-        verbose=_VERBOSE,
-    ),
-    "script": Rule(
-        rule_id=RuleID.SECRET_SCRIPT_AUTHOR,
-        blocked="a script authored via Write/Edit whose content references a protected path",
-        why=_WHY,
-        fix=_FIX,
-        verbose=_VERBOSE,
-    ),
-}
+
+def _rules_by_route() -> dict[str, Rule]:
+    """The three rules, built per call so the wrapper name follows the install mode.
+
+    Not a module constant: the install mode is only known once ProjectContext is
+    initialised, which is after this module is imported.
+    """
+    fix = _fix()
+    verbose = _verbose()
+    return {
+        "read": Rule(
+            rule_id=RuleID.SECRET_READ,
+            blocked="Read/Write/Edit/NotebookEdit/Grep targeting a protected path",
+            why=_WHY,
+            fix=fix,
+            verbose=verbose,
+        ),
+        "bash": Rule(
+            rule_id=RuleID.SECRET_BASH_MENTION,
+            blocked="a Bash command whose text mentions a protected path",
+            why=_WHY,
+            fix=fix,
+            verbose=verbose,
+        ),
+        "script": Rule(
+            rule_id=RuleID.SECRET_SCRIPT_AUTHOR,
+            blocked="a script authored via Write/Edit whose content references a protected path",
+            why=_WHY,
+            fix=fix,
+            verbose=verbose,
+        ),
+    }
 
 
 # Routes whose deny message names the matched token (Plan 00356). Both scan a
@@ -1654,7 +1689,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
 
     def get_rules(self) -> list[Rule]:
         """Return the 3 Rule objects backing this handler's blocking behaviour."""
-        return list(_RULES_BY_ROUTE.values())
+        return list(_rules_by_route().values())
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny a positive finding; allow with an advisory a call it could not judge.
@@ -1679,7 +1714,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             return self._build_deny_result(hook_input, matched)
         except Exception:
             logger.exception("secret_file_guard: could not build the explanation of a real match")
-            rule = _RULES_BY_ROUTE["read" if route == _SEARCH_ROUTE else route]
+            rule = _rules_by_route()["read" if route == _SEARCH_ROUTE else route]
             return GatingResult(
                 decision=Decision.DENY,
                 reason=f"BLOCKED [{rule.rule_id}]: {rule.blocked}\n\nMatched protected glob: `{pattern}`",
@@ -1692,7 +1727,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         """The deny message of a positive finding."""
         pattern, token, route = matched
         rule_route = "read" if route == _SEARCH_ROUTE else route
-        message = self._disclosed(hook_input, _RULES_BY_ROUTE[rule_route])
+        rule = _rules_by_route()[rule_route]
+        message = self._disclosed(hook_input, rule)
         message += f"\n\nMatched protected glob: `{pattern}`"
         if route == _SEARCH_ROUTE:
             message += f"\n{_SEARCH_REMEDY}"
@@ -1708,9 +1744,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         if route in _TOKEN_ECHO_ROUTES and token and token != pattern:
             message += f"\nMatched on this token from your input: `{token}`"
 
-        return GatingResult(
-            decision=Decision.DENY, reason=message, rule=_RULES_BY_ROUTE[rule_route].rule_id
-        )
+        return GatingResult(decision=Decision.DENY, reason=message, rule=rule.rule_id)
 
     @staticmethod
     def _disclosed(hook_input: dict[str, Any], rule: Rule) -> str:
@@ -1744,7 +1778,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "commit-message exemption.\n\n"
             "**Presence and metadata stay available** — that is the design, not a "
             "gap: `Glob` still finds the file, and "
-            "`bin/hooks-daemon secret-meta <path>` returns existence, bucketed "
+            f"`{_wrapper('secret-meta')} <path>` returns existence, bucketed "
             "size, mtime, permissions and a keyed digest (never content). Use it "
             "for existence tests instead of `test -f`/`ls`. **Run it as its own "
             "standalone Bash command** — the exemption applies only to a SINGLE "
@@ -1890,7 +1924,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="secret_file_guard - allows the secret-meta helper",
-                command="bin/hooks-daemon secret-meta /tmp/fixture.vault-password",
+                command=f"{_wrapper('secret-meta')} /tmp/fixture.vault-password",
                 dispatch_as_bash=True,
                 description=(
                     "The metadata helper is the sanctioned presence/metadata route and must pass."

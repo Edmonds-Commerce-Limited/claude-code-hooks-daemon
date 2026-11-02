@@ -26,12 +26,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from claude_code_hooks_daemon.constants.skill_commands import CliCommand
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 
 # Pointer suffix injected into terse reminders so agents can fetch full detail.
 # It names the CLI verb (Plan 00330: `rule-explain` is a documented capability,
 # not a routed skill subcommand), and never slash-command syntax, which Claude
 # reads as a bash command (skill_refs QA). The verb comes from CliCommand.
-_EXPLAIN_SUFFIX = f"Full detail: bin/hooks-daemon {CliCommand.EXPLAIN_RULE} {{rule_id}}"
+# The wrapper path follows the install mode (issue #147), so the pointer is
+# rendered per call: a client install has no project-root ``bin/``.
+_EXPLAIN_SUFFIX = "Full detail: {wrapper} {rule_id}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +112,9 @@ class RuleFormatter:
         Returns:
             A compact block message string for repeat fires.
         """
-        explain_pointer = _EXPLAIN_SUFFIX.format(rule_id=rule.rule_id)
+        explain_pointer = _EXPLAIN_SUFFIX.format(
+            wrapper=daemon_cli_command_for_docs(CliCommand.EXPLAIN_RULE), rule_id=rule.rule_id
+        )
         return (
             f"BLOCKED [{rule.rule_id}]: {rule.blocked} — {rule.why}. "
             f"Fix: {rule.fix}. {explain_pointer}"

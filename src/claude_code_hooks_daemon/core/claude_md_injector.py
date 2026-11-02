@@ -20,6 +20,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.conflict_markers import (
     describe_markers,
     find_conflict_markers_in_text,
@@ -86,28 +87,38 @@ _BASH_WRITE_BOUNDARY = (
     "re-deciding it."
 )
 
+
 # Explain-on-demand pointer (Plan 00116 Decision F), stated ONCE in the
 # shared intro alongside the meta-rule — never repeated per rule row, so the
 # progressive-disclosure table stays terse.
-_EXPLAIN_POINTER = "Full detail on any rule: `bin/hooks-daemon explain-rule <ID>`."
+#
+# The wrapper path follows the install mode (issue #147), so these are built per
+# render rather than held as module constants: the mode is unknown at import.
+def _section_intro() -> str:
+    """The shared intro of the block, with the explain pointer for this install."""
+    return (
+        "The handlers listed below are active in this project. "
+        "Read this section to avoid triggering unnecessary blocks.\n\n"
+        "**When a tool is blocked by a handler, do not stop working.** "
+        "Read the block reason, modify your approach, and continue with your task.\n\n"
+        f"{_BASH_WRITE_BOUNDARY}\n\n"
+        f"Full detail on any rule: `{daemon_cli_command_for_docs('explain-rule')} <ID>`."
+    )
 
-_SECTION_INTRO = (
-    "The handlers listed below are active in this project. "
-    "Read this section to avoid triggering unnecessary blocks.\n\n"
-    "**When a tool is blocked by a handler, do not stop working.** "
-    "Read the block reason, modify your approach, and continue with your task.\n\n"
-    f"{_BASH_WRITE_BOUNDARY}\n\n"
-    f"{_EXPLAIN_POINTER}"
-)
 
 # Tier headings (Plan 00116 Decision I — DESIGN-HYBRID-PROMOTION.md layout).
 _PROMOTED_TIER_HEADING = "## Frequently-triggered handler guidance\n"
 _PROGRESSIVE_TIER_HEADING = "## All other enforced rules\n"
-_FALLBACK_TIER_HEADING = (
-    "## Advisories and other active handlers\n\n"
-    "One line each; these fire with their own guidance when relevant. "
-    "Full text: `bin/hooks-daemon explain-handler <name>`.\n"
-)
+
+
+def _fallback_tier_heading() -> str:
+    """The advisories heading, with the explain pointer for this install."""
+    return (
+        "## Advisories and other active handlers\n\n"
+        "One line each; these fire with their own guidance when relevant. "
+        f"Full text: `{daemon_cli_command_for_docs('explain-handler')} <name>`.\n"
+    )
+
 
 _RULE_TABLE_HEADER = "| ID | Blocked | Why | Fix |\n| --- | --- | --- | --- |"
 
@@ -843,7 +854,7 @@ class ClaudeMdInjector:
 
         Layout (Plan 00116 Decision I, ``DESIGN-HYBRID-PROMOTION.md``): the
         shared meta-rule + explain pointer are stated once in
-        ``_SECTION_INTRO``, then PROMOTED prose, then the PROGRESSIVE rule
+        ``_section_intro()``, then PROMOTED prose, then the PROGRESSIVE rule
         table, then FALLBACK prose for handlers not yet migrated to
         ``get_rules()``.
         """
@@ -852,7 +863,7 @@ class ClaudeMdInjector:
             _AUTO_COMMENT,
             "",
             _SECTION_HEADER,
-            _SECTION_INTRO,
+            _section_intro(),
             "",
         ]
 
@@ -885,7 +896,7 @@ class ClaudeMdInjector:
             parts.append("")
 
         if fallback:
-            parts.append(_FALLBACK_TIER_HEADING)
+            parts.append(_fallback_tier_heading())
             for name, content in fallback:
                 parts.append(f"{_HANDLER_MARKER_PREFIX}{name}{_HANDLER_MARKER_SUFFIX}")
                 parts.append(f"- {_summary_line(content)}")
