@@ -89,8 +89,10 @@ Related plans, not merged:
   `_check_effort_source` does. Report:
   [261102-task-2-build.md](subagent-reports/261102-task-2-build.md).
 - [x] ✅ **Task 2.2**: The checklist of `check` (`skills/hooks-daemon/check.md`)
-  now lists the check. That page is the only list of these checks, and the
-  guidance text is unchanged, so no regeneration was needed.
+  now lists the check, in the source copy and the tracked deployed copy
+  (`.claude/skills/hooks-daemon/check.md`, synced after the completion
+  fact-check). The handler guidance text is unchanged, so no regeneration was
+  needed.
 - [x] ✅ **Task 2.3**: Release note
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/011-idle-compaction-config-check.md`.
 
