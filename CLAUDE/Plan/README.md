@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00559: daemon clone follows expected version after pull](00559-daemon-clone-follows-expected-version-after-pull/PLAN.md) - Not Started (#148, parked `agent-needs-human`: a pull that moves `expected_version` should re-provision from a trigger outside the stale daemon; owner to choose the trigger, the retry rule and whether to add a scheduled check)
+
 - [00558: git branch hygiene sweep](00558-git-branch-hygiene-sweep/PLAN.md) - Not Started (owner request: surface unmerged, forgotten branches and worktrees, with their size, age, drift behind main and plan link, at SessionStart and on demand; report-only)
 
 - [00554: rust relay transport default](00554-rust-relay-transport-default/PLAN.md) - In Progress (owner request: the Rust relay becomes the default hook transport when `relay_enabled` is absent, legacy bash and python3 stays as the explicit `relay_enabled: false` opt-in)
@@ -320,11 +322,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 558 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 559 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 475 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 60 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
