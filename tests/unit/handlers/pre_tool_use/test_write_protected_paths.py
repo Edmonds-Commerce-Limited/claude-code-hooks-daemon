@@ -1377,6 +1377,60 @@ class TestOrdinaryReadsAreNotDenied:
         assert "cat P | tool" in section
 
 
+WILDCARD_ONLY = "protected/**"
+
+
+class TestAwkReadsWithOperatorsAreNotWrites:
+    """Issue 141: under a wildcard-only glob an awk comparison, a regex
+    alternation or a quoted bar is a read, while real writes stay denied."""
+
+    @pytest.fixture
+    def wildcard_handler(self, root: Path) -> WriteProtectedPathsHandler:
+        return _make(root, [WILDCARD_ONLY])
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "awk 'NR>=1 && NR<=20' notes.txt",
+            "awk '$1 >= 5 {print $1}' notes.txt",
+            "awk '$1 > 5' notes.txt",
+            "awk '{ if ($1 > 5) print $1 }' notes.txt",
+            "awk '{ print ($1 > 5) }' notes.txt",
+            "awk '/foo|bar/ {print}' notes.txt",
+            "awk '$1 ~ /foo|bar/' notes.txt",
+            "awk '{ print \"a|b\" }' notes.txt",
+            "awk '$1 == \"a>b\"' notes.txt",
+            "awk '$1 > 1 || $2 < 3' notes.txt",
+            "cat notes.txt | awk '/a|b/ {print $1}'",
+        ],
+    )
+    def test_a_read_only_program_is_allowed(
+        self, wildcard_handler: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        assert wildcard_handler.matches(_bash(root, command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "awk '{print > \"out.txt\"}' notes.txt",
+            "awk '{print >> \"out.txt\"}' notes.txt",
+            "awk '$1 >= 5 {print $1 > \"out.txt\"}' notes.txt",
+            "awk '{print | \"sort\"}' notes.txt",
+            "awk '{print |& \"sort\"}' notes.txt",
+            "awk 'BEGIN{system(\"rm x\")}' notes.txt",
+            "awk 'BEGIN { \"date\" | getline d }' notes.txt",
+            "awk -i inplace '{print}' protected/a.txt",
+            "gawk -i inplace '{print}' protected/a.txt",
+            "echo hi > protected/a.txt",
+            "cat notes.txt >> protected/a.txt",
+        ],
+    )
+    def test_a_real_write_is_still_denied(
+        self, wildcard_handler: WriteProtectedPathsHandler, root: Path, command: str
+    ) -> None:
+        assert wildcard_handler.matches(_bash(root, command)) is True
+
+
 class TestReviewRound2:
     """Plan 00499 Phase 1b review round 2 (S1 to S4 and the read-only nits)."""
 
