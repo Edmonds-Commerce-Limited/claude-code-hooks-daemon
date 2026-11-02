@@ -517,8 +517,8 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
         false``, or a truthy ``DISABLE_AUTO_COMPACT``, ``DISABLE_COMPACT`` or
         ``FORCE_PROMPT_CACHING_5M`` -- in the shell or a settings file's ``env``
         section. Reads the user file and the project's own settings files; a
-        project file that cannot be read is skipped (logged), so it never fails
-        the check on a guess.
+        project file that cannot be read, or is not a JSON object, is reported
+        as a cause that cannot be ruled out, as ``_check_effort_source`` does.
         """
         causes = [
             f"{name}={os.environ[name]!r}"
@@ -529,6 +529,7 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
             _idle_compaction_disablers(self._read_global_settings(), "~/.claude/settings.json")
         )
         for name in _PROJECT_SETTINGS_FILES:
+            relative = f".claude/{name}"
             path = project_root / ".claude" / name
             if not path.exists():
                 continue
@@ -536,9 +537,12 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
                 data = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError) as e:
                 logger.debug("Cannot read %s for the idle compaction check: %s", path, e)
+                causes.append(f"{relative} is unreadable, so a disabler cannot be ruled out")
                 continue
-            if isinstance(data, dict):
-                causes.extend(_idle_compaction_disablers(data, f".claude/{name}"))
+            if not isinstance(data, dict):
+                causes.append(f"{relative} is not a JSON object, so it cannot be checked")
+                continue
+            causes.extend(_idle_compaction_disablers(data, relative))
         return {
             "name": _IDLE_COMPACTION_CHECK_NAME,
             "passed": not causes,

@@ -758,10 +758,15 @@ class TestIdleCompactionCheck:
         )
         assert self._idle(handler, {}, tmp_path)["passed"] is False
 
-    def test_unreadable_project_settings_do_not_fail(self, handler: Any, tmp_path: Path) -> None:
+    def test_unreadable_project_settings_cannot_be_confirmed(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        """Mirrors the effort check: an unreadable file is reported, never skipped."""
         (tmp_path / ".claude").mkdir()
         (tmp_path / ".claude" / "settings.json").write_text("{not json")
-        assert self._idle(handler, {}, tmp_path)["passed"] is True
+        result = self._idle(handler, {}, tmp_path)
+        assert result["passed"] is False
+        assert ".claude/settings.json is unreadable" in result["current"]
 
     def test_why_states_scope_and_version(self, handler: Any) -> None:
         why = self._idle(handler, {})["why"]
