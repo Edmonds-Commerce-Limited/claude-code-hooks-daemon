@@ -92,11 +92,19 @@ time.
   (test `TestRedirectionAmpersandDoesNotMakeACommandCompound`). Merged in 209c8d334 and the
   issue is closed. Report:
   [261102-task-3.1-issue-146.md](subagent-reports/261102-task-3.1-issue-146.md).
-- [ ] ⬜ **Task 3.2** (#141): read-only awk is denied under a wildcard-only
-  `write_protected_paths` glob. In `write_protected_paths.py`,
-  `_AWK_WRITING_PROGRAM_RE` reads `>=` and the regex `|` as a redirect or a
-  pipe. The issue also reports a second fault feeding the same fallback, in
-  `_text_naming`.
+
+- [x] ✅ **Task 3.2** (#141): read-only awk was denied under a wildcard-only
+  `write_protected_paths` glob. All three faults from N555 are fixed, with
+  release note 013, and the issue is closed:
+
+  - awk operators, merged in 88d63f4b7;
+  - the `_text_naming` fallback for a wildcard-only glob, merged in 3b65a47dc;
+  - heredoc bodies fed to brace enumeration, merged in 3b65a47dc.
+
+  Reports:
+  [3.2](subagent-reports/261102-task-3.2-issue-141.md) and
+  [3.2b](subagent-reports/261102-task-3.2b-issue-141.md).
+
 - [ ] 🚫 **Task 3.3** (#142): a bare `**` is judged as a recursive globstar
   that matches dot-files. `*` and `**/*` get inconsistent verdicts. **Blocked
   on the owner.** N556's option (c) in Plan 00474 (judge by the session shell
@@ -107,8 +115,10 @@ time.
   agrees". The branch report records the blocker. Report:
   [261102-task-3.3-issue-142.md](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/worktree-issue-142/CLAUDE/Plan/00556-secret-guard-bare-dotted-token-mentions/subagent-reports/261102-task-3.3-issue-142.md)
   (branch `worktree-issue-142`).
+
 - [ ] ⬜ **Task 3.4** (#143): a dotted module path in a Python string literal
   is treated as a file mention.
+
 - [ ] ⬜ **Task 3.5** (#144): the grep-pattern-only exemption is lost on a
   compound command. Judge each statement separately; `grep 'id_rsa' d; cat id_rsa` must stay denied.
 
