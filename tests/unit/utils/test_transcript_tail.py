@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.utils.transcript_tail import (
     MAX_WINDOW_BYTES,
     NoUsageInTail,
     TailReading,
+    context_of,
     find_agent_transcript,
     input_token_equivalents,
     read_tail,
@@ -280,6 +281,84 @@ class TestInputTokenEquivalents:
 
     def test_junk_counts_as_zero(self) -> None:
         assert input_token_equivalents({"input_tokens": "x", "output_tokens": True}) == 0.0
+
+
+def _server_tool_usage(iterations: list[dict[str, Any]]) -> dict[str, Any]:
+    """The issue's record: top-level fields are the SUM of the ``message`` iterations."""
+    return {
+        "input_tokens": 4,
+        "cache_read_input_tokens": 452_581,
+        "cache_creation_input_tokens": 3_903,
+        "output_tokens": 660,
+        "iterations": iterations,
+    }
+
+
+ISSUE_ITERATIONS: list[dict[str, Any]] = [
+    {
+        "type": "message",
+        "input_tokens": 2,
+        "cache_read_input_tokens": 225_311,
+        "cache_creation_input_tokens": 1_959,
+    },
+    {
+        "type": "advisor_message",
+        "input_tokens": 219_456,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+    },
+    {
+        "type": "message",
+        "input_tokens": 2,
+        "cache_read_input_tokens": 227_270,
+        "cache_creation_input_tokens": 1_944,
+    },
+]
+
+
+class TestServerToolTurn:
+    """Issue 150: a server-tool turn's top-level usage sums its executor requests."""
+
+    def test_context_is_the_last_message_iteration(self) -> None:
+        assert context_of(_server_tool_usage(ISSUE_ITERATIONS)) == 229_216
+
+    def test_advisor_message_is_never_counted(self) -> None:
+        iterations = [
+            ISSUE_ITERATIONS[0],
+            {"type": "advisor_message", "input_tokens": 900_000},
+        ]
+        assert context_of(_server_tool_usage(iterations)) == 2 + 225_311 + 1_959
+
+    def test_read_tail_reports_the_corrected_context(self, tmp_path: Path) -> None:
+        record = {
+            "type": "assistant",
+            "message": {
+                "model": "claude-opus-5-5",
+                "usage": _server_tool_usage(ISSUE_ITERATIONS),
+            },
+        }
+        reading = read_tail(write_lines(tmp_path / "t.jsonl", [user(), json.dumps(record)]))
+        assert reading is not None and reading.context_tokens == 229_216
+
+    def test_turn_without_iterations_is_unchanged(self) -> None:
+        usage = {
+            "input_tokens": 4,
+            "cache_read_input_tokens": 100,
+            "cache_creation_input_tokens": 6,
+        }
+        assert context_of(usage) == 110
+
+    def test_empty_iterations_list_is_unchanged(self) -> None:
+        usage = {"input_tokens": 4, "cache_read_input_tokens": 100, "iterations": []}
+        assert context_of(usage) == 104
+
+    def test_no_message_iteration_falls_back_to_top_level_and_logs(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        usage = _server_tool_usage([ISSUE_ITERATIONS[1]])
+        with caplog.at_level(logging.DEBUG):
+            assert context_of(usage) == 4 + 452_581 + 3_903
+        assert "no message iteration" in caplog.text
 
 
 class TestResolver:

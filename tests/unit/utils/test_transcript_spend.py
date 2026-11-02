@@ -89,6 +89,21 @@ class TestTotals:
         assert totals.mean_ctx == 2000
         assert totals.ite == pytest.approx(400 + 350)
 
+    def test_server_tool_turn_context_is_the_last_executor_request(
+        self, transcript: Path, tmp_path: Path
+    ) -> None:
+        """Issue 150: context is one request's, while the spend sums stay top-level."""
+        record = json.loads(assistant("r1", 452_581))
+        record["message"]["usage"]["iterations"] = [
+            {"type": "message", "cache_read_input_tokens": 225_311},
+            {"type": "advisor_message", "input_tokens": 219_456},
+            {"type": "message", "cache_read_input_tokens": 227_270},
+        ]
+        write(transcript, [json.dumps(record)])
+        totals = TranscriptSpendCache(tmp_path / "store").totals(transcript)
+        assert totals.max_ctx == totals.last_ctx == 227_270
+        assert totals.cache_read_tokens == 452_581
+
     def test_repeated_request_ids_across_generations_count_once(
         self, transcript: Path, tmp_path: Path
     ) -> None:
