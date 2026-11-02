@@ -124,6 +124,31 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N568 — a signalled scaffold-lock holder released the lock and carried on through the critical section
+
+**Source**: CI run 41488623264, job "QA (Python3.12)", 2026-11-02.
+`test_mkroutine_scaffolder.py::TestConcurrency::test_parallel_runs_get_distinct_numbers` failed with both runners
+exiting 0 and the routine dir holding `00001-first-sweep` AND `00001-second-sweep`. The second runner's collision
+guard would have died on the first runner's folder, so both were inside the critical section at once. Commit 63a58352d
+(the `BASHPID` owner check in `release_lock`) was an earlier attempt and did not fix it: bash never runs an inherited
+EXIT trap in a command substitution or `( )` subshell (verified on bash 5.2.37).
+
+**Root cause (defect)**: `acquire_lock` in `mkroutine.bash`, `mkplan.bash` and the deployed `mkplan.bash` template set
+`trap release_lock EXIT INT TERM`. On INT or TERM bash runs the function and then RESUMES the script, so the holder
+removed the lock and went on to allocate a number without it, exiting 0. That is the only path in either script that
+produces the observed signature (both exit 0, overlapping critical sections). **Fix**: EXIT keeps `release_lock`; INT
+and TERM now `exit 130` / `exit 143`, which runs the EXIT trap. Test: `tests/unit/scripts/test_scaffold_lock_signal.py`
+parks the holder inside the lock with a `git` shim that blocks on the counter read, signals it, and requires a non-zero
+exit, no folder and no lock left. It was red 4/4 (both scripts, both signals: exit 0 and `00001-signalled-run`
+created) and is green after the fix.
+
+**Not confirmed**: what signalled the runner on CI. The script is otherwise sound: 820 concurrent pairs (12 parallel
+harnesses on 2 CPUs, plus 100 pinned to one CPU) and 40 pairs under an inherited `SIGCHLD=SIG_IGN` produced no
+duplicate. Ruled out: the EXIT trap firing in subshells; anything run before `acquire_lock` touching the lock or the
+counter (only a read-only `rev-parse`); `git config` races (the guard proves overlap whatever the counter said); and
+the test itself (fresh `tmp_path`, no signals sent). Evidence that would settle it: the two runners' stderr on the
+next failure (the test prints it only when an exit code is non-zero), or a run of the suite with `strace -f -e trace=signal` on the scaffolder pair.
+
 ### N567 — `init.sh` aborts when it is sourced if `untracked/` cannot be created, before any fail-closed arm runs
 
 **Source**: dogfood, 2026-10-31. Found while building Plan 00555 Tasks 2.5/2.6 (branch

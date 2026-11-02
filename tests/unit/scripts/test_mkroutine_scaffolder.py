@@ -336,17 +336,17 @@ class TestConcurrency:
             )
             for name in ("first-sweep", "second-sweep")
         ]
-        for process in processes:
-            process.wait(timeout=_SHELL_TIMEOUT)
+        # Both runners' stderr is kept for EVERY failure, not only a non-zero
+        # exit: N568's duplicate numbers came with two exit-0 runs, and their
+        # output is the evidence that tells a signal from a lock defect.
+        stderrs = [process.communicate(timeout=_SHELL_TIMEOUT)[1] for process in processes]
 
-        assert all(process.returncode == 0 for process in processes), [
-            process.stderr.read() for process in processes if process.stderr is not None
-        ]
+        assert all(process.returncode == 0 for process in processes), stderrs
         created = sorted(path.name for path in (routine_repo / "CLAUDE" / "Routine").glob("0*-*"))
         assert created == ["00001-first-sweep", "00002-second-sweep"] or created == [
             "00001-second-sweep",
             "00002-first-sweep",
-        ]
+        ], (created, stderrs)
 
 
 class TestConfigLockContention:
