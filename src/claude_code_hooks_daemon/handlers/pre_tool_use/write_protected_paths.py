@@ -153,7 +153,66 @@ MAX_READ_OPERANDS: Final[dict[str, int]] = {"xxd": 1, "uniq": 1}
 #: ``awk`` options and program text that make it write.
 _AWK_VERBS: Final[frozenset[str]] = frozenset({"awk", "gawk", "mawk"})
 _AWK_IN_PLACE: Final[str] = "inplace"
-_AWK_WRITING_PROGRAM_RE: Final[re.Pattern[str]] = re.compile(r">|\|&?|system\s*\(")
+_AWK_SYSTEM_RE: Final[re.Pattern[str]] = re.compile(r"\bsystem\s*\(")
+#: A lone ``|`` (or ``|&``) is a pipe to or from a command; ``||`` is logical or.
+_AWK_PIPE_RE: Final[re.Pattern[str]] = re.compile(r"(?<!\|)\|(?!\|)")
+_AWK_PRINT_RE: Final[re.Pattern[str]] = re.compile(r"\bprintf?\b")
+#: Characters after which a ``/`` opens a regex literal rather than dividing.
+_AWK_REGEX_OPENERS: Final[str] = "{(,;!~&|=<>?:\n"
+
+
+def _awk_without_literals(program: str) -> str:
+    """``program`` with string and regex literals and comments blanked out, so an
+    operator inside one is not read as code. A literal that never closes is a
+    syntax error awk refuses to run, so the rest of it is blanked too."""
+    out: list[str] = []
+    index = 0
+    while index < len(program):
+        char = program[index]
+        previous = next((c for c in reversed(out) if not c.isspace() or c == "\n"), "\n")
+        if char == "#":
+            while index < len(program) and program[index] != "\n":
+                index += 1
+            continue
+        if char == '"' or (char == "/" and previous in _AWK_REGEX_OPENERS):
+            closer = char
+            index += 1
+            while index < len(program) and program[index] != closer:
+                if program[index] == "\n" and closer == "/":
+                    break
+                index += 2 if program[index] == "\\" else 1
+            out.append(closer * 2)
+            index += 1
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def _awk_program_writes(program: str) -> bool:
+    """Whether an awk program can write: an output redirect or pipe in a ``print``,
+    a pipe to or from a command, or ``system()``. A comparison (``>=``, ``>`` in
+    a condition or in parentheses), a regex alternation, a ``||`` and a quoted bar
+    are reads."""
+    code = _awk_without_literals(program)
+    if _AWK_SYSTEM_RE.search(code) or _AWK_PIPE_RE.search(code):
+        return True
+    for statement in _AWK_PRINT_RE.finditer(code):
+        depth = 0
+        position = statement.end()
+        while position < len(code):
+            char = code[position]
+            if char in "([":
+                depth += 1
+            elif char in ")]":
+                depth -= 1
+            elif depth <= 0 and char in ";}\n":
+                break
+            elif depth <= 0 and char == ">" and code[position + 1 : position + 2] != "=":
+                return True
+            position += 1
+    return False
+
 
 #: Options whose value is a file the command only READS, for any command.
 READ_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
@@ -1115,7 +1174,7 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
                     None,
                 )
             for operand in files:
-                if _AWK_WRITING_PROGRAM_RE.search(operand):
+                if _awk_program_writes(operand):
                     glob = self._text_naming(operand)
                     if glob is not None:
                         return glob
