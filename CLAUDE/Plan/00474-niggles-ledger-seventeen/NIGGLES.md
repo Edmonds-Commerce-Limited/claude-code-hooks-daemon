@@ -133,8 +133,8 @@ guard would have died on the first runner's folder, so both were inside the crit
 (the `BASHPID` owner check in `release_lock`) was an earlier attempt and did not fix it: bash never runs an inherited
 EXIT trap in a command substitution or `( )` subshell (verified on bash 5.2.37).
 
-**Root cause (defect)**: `acquire_lock` in `mkroutine.bash`, `mkplan.bash` and the deployed `mkplan.bash` template set
-`trap release_lock EXIT INT TERM`. On INT or TERM bash runs the function and then RESUMES the script, so the holder
+**Root cause (defect)**: `acquire_lock` in `mkroutine.bash`, `mkplan.bash` and the deployed `mkplan.bash` template
+used to set `trap release_lock EXIT INT TERM`. On INT or TERM bash runs the function and then RESUMES the script, so the holder
 removed the lock and went on to allocate a number without it, exiting 0. That is the only path in either script that
 produces the observed signature (both exit 0, overlapping critical sections). **Fix**: EXIT keeps `release_lock`; INT
 and TERM now `exit 130` / `exit 143`, which runs the EXIT trap. Test: `tests/unit/scripts/test_scaffold_lock_signal.py`
@@ -147,11 +147,12 @@ harnesses on 2 CPUs, plus 100 pinned to one CPU) and 40 pairs under an inherited
 duplicate. Ruled out: the EXIT trap firing in subshells; anything run before `acquire_lock` touching the lock or the
 counter (only a read-only `rev-parse`); `git config` races (the guard proves overlap whatever the counter said); and
 the test itself (fresh `tmp_path`, no signals sent). Evidence that would settle it: the two runners' stderr on the
-next failure (the test prints it only when an exit code is non-zero), or a run of the suite with `strace -f -e trace=signal` on the scaffolder pair.
+next failure (the test now reports both on every failure), or a run of the suite with `strace -f -e trace=signal` on the scaffolder pair.
 
 **Still open after the signal fix**: CI run 41512426302 (main at eb2aa1e52, which carries the fix above) failed the
-same test with the same signature, so the signal path is a real defect but NOT the CI cause. The truncated stderr shows
-a runner bootstrapping from an unset counter. `mkroutine.bash` now has an opt-in `MKROUTINE_TRACE=1` that logs every
+same test with the same signature, so the signal path is a real defect but NOT the CI cause. The truncated stderr, in
+that run's `qa-targeted-output` artifact (`changed_tests.json`, `pytest_output`), shows a runner bootstrapping from an
+unset counter. `mkroutine.bash` now has an opt-in `MKROUTINE_TRACE=1` that logs every
 lock and counter event with a timestamp and pid, and the test turns it on and reports both runners' full stderr as plain
 text, so the next CI failure carries its own interleaving.
 
