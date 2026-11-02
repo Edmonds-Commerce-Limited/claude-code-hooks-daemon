@@ -177,12 +177,19 @@ def _build_project(root: Path) -> None:
 def _controller(root: Path, handler_config: dict[str, Any] | None = None) -> DaemonController:
     """A controller over ``root`` at the default configuration (plus ``handler_config``)."""
     ProjectContext.reset()
-    with patch("subprocess.run") as mock_run:
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout=f"{root}\n"),
-            MagicMock(returncode=0, stdout="git@github.com:user/test-repo.git\n"),
-            MagicMock(returncode=0, stdout=f"{root}\n"),
-        ]
+    real_run = subprocess.run
+
+    def answer(argv: list[str], *args: Any, **kwargs: Any) -> Any:
+        # Answered by what is asked, not by call order: the patch is process-wide,
+        # so a background thread a previous controller started may call
+        # subprocess.run while it is active and must not consume an answer.
+        if argv[:1] == ["git"] and argv[-2:] == ["rev-parse", "--show-toplevel"]:
+            return MagicMock(returncode=0, stdout=f"{root}\n", stderr="")
+        if argv[:1] == ["git"] and argv[-3:] == ["remote", "get-url", "origin"]:
+            return MagicMock(returncode=0, stdout="git@github.com:user/test-repo.git\n", stderr="")
+        return real_run(argv, *args, **kwargs)
+
+    with patch("subprocess.run", side_effect=answer):
         ProjectContext.initialize(root / ".claude" / "hooks-daemon.yaml")
     controller = DaemonController()
     controller.initialise(
