@@ -303,10 +303,15 @@ class TestEnsureVenvInterpreterDriftIsNeverFresh:
     also requires ``venv_python_usable``.
     """
 
-    @staticmethod
-    def _drift(venv_dir: Path) -> None:
+    #: A recorded version whose major.minor differs from the running
+    #: interpreter on every Python, so "drift" never depends on which minor the
+    #: test runner happens to use (a fixed 3.11.2 was NOT drift on 3.11).
+    _DRIFTED_VERSION = f"{sys.version_info.major}.{sys.version_info.minor + 1}.2"
+
+    @classmethod
+    def _drift(cls, venv_dir: Path) -> None:
         (venv_dir / "pyvenv.cfg").write_text(
-            f"home = {Path(sys.executable).parent}\nversion_info = 3.11.2\n"
+            f"home = {Path(sys.executable).parent}\nversion_info = {cls._DRIFTED_VERSION}\n"
         )
 
     def _lock_matched_venv(self, daemon_dir: Path) -> Path:
@@ -358,7 +363,7 @@ class TestEnsureVenvInterpreterDriftIsNeverFresh:
         assert result.returncode == 0, result.stderr
         assert not sentinel.exists(), "drifted venv was reused instead of rebuilt"
         cfg = (venv_dir / "pyvenv.cfg").read_text()
-        assert "3.11.2" not in cfg
+        assert self._DRIFTED_VERSION not in cfg
 
 
 class TestEnsureVenvCIGate:

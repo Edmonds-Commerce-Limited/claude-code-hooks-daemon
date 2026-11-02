@@ -65,6 +65,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     strip_inert_spans,
     substitution_inner_spans,
 )
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 if TYPE_CHECKING:
     # Typing only: the index imports git_repo, which imports this module.
@@ -287,7 +288,7 @@ def write_protected_paths_snapshot() -> Path:
     from claude_code_hooks_daemon.core.project_context import ProjectContext
 
     target = ProjectContext.daemon_untracked_dir() / PROTECTED_PATHS_SNAPSHOT_NAME
-    temp = target.with_name(target.name + f".{os.getpid()}.tmp")
+    temp = unique_temp_path(target)
     try:
         temp.write_text(
             "".join(

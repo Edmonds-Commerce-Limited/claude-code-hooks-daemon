@@ -96,7 +96,9 @@ def routine_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    repo: Path, *args: str, timeout: float = _SHELL_TIMEOUT
+) -> subprocess.CompletedProcess[str]:
     """Invoke the scaffolder in ``repo`` from an unrelated working directory.
 
     Run from the repo root rather than the routine dir so a regression that
@@ -108,7 +110,7 @@ def _run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
         text=True,
         check=False,
         cwd=repo,
-        timeout=_SHELL_TIMEOUT,
+        timeout=timeout,
     )
 
 
@@ -368,7 +370,10 @@ class TestConfigLockContention:
         """A lock that never clears is reported by name, not as git's bare error."""
         (routine_repo / ".git" / "config.lock").touch()
 
-        result = _run(routine_repo, "stuck-sweep")
+        # The script waits out the lock by design (30 attempts of 0.1s plus a
+        # git spawn each), so on a loaded runner its worst case exceeds the
+        # 5s wedged-shell guard. The budget here must sit above that worst case.
+        result = _run(routine_repo, "stuck-sweep", timeout=Timeout.QA_TEST_TIMEOUT)
 
         assert result.returncode != 0
         assert "git config lock" in result.stderr

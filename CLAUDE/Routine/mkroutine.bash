@@ -52,6 +52,7 @@ readonly TEMPLATE_BASENAME="_TEMPLATE_.md"
 # Populated once the lock is held, so the EXIT trap only ever removes a lock
 # this process actually owns (never another runner's lock on a timeout-die).
 lock_held=""
+lock_owner_pid=""
 
 # --- helpers ---------------------------------------------------------------
 
@@ -86,7 +87,12 @@ USAGE
 # Release the routine-dir lock. Only removes the lock if THIS process took it
 # (lock_held set) and the dir is still present — never another runner's lock.
 release_lock() {
-    if [[ -n "$lock_held" && -d "$lock_held" ]]; then
+    # The EXIT trap can fire in a command-substitution subshell on some bash
+    # builds; that subshell shares lock_held but is not the owner, and removing
+    # the lock there would let a second runner in while the first still works.
+    # BASHPID is the current process (bash 4+); $$ is the fallback where it is
+    # unset, which keeps the old behaviour on bash 3.2.
+    if [[ -n "$lock_held" && "${BASHPID:-$$}" == "$lock_owner_pid" && -d "$lock_held" ]]; then
         rmdir "$lock_held"
     fi
 }
@@ -105,6 +111,7 @@ acquire_lock() {
         sleep "$LOCK_RETRY_SECONDS"
     done
     lock_held="$lock_dir"
+    lock_owner_pid="${BASHPID:-$$}"
     trap release_lock EXIT INT TERM
 }
 

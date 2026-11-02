@@ -189,7 +189,10 @@ def test_transport_reports_a_missing_socket_as_a_deny(old_env: tuple[Path, Path]
         f'export HOOKS_DAEMON_EVENTS_DIR="{checkout}/no-events"\n'
         f'send_request_stdin PreToolUse "" "" "" 2>"$PROJECT_PATH/stderr.txt"; '
         'cat "$PROJECT_PATH/stderr.txt" >&2',
-        '{"tool_name": "Bash", "tool_input": {"command": "ls"}}',
+        # `ls` is deliberately NOT used: it is in the read-only set that is
+        # allowed while the daemon is down (_is_daemon_down_permitted), so it
+        # gets context, not a deny. A mutating command takes the deny path.
+        '{"tool_name": "Bash", "tool_input": {"command": "touch somefile"}}',
     )
     _assert_clean(result)
     answer = json.loads(result.stdout)
