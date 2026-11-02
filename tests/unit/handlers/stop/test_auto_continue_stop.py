@@ -3827,7 +3827,7 @@ class TestHumanBlockedMarker:
     ) -> None:
         transcript = tmp_path / "t.jsonl"
         self._write_assistant_text(
-            transcript, "STOPPING BECAUSE: waiting on the owner's decision about deployment."
+            transcript, "STOPPING BECAUSE: waiting only on the owner's decision about deployment."
         )
         marker_dir = tmp_path / "untracked"
         hook_input = {
@@ -4095,7 +4095,7 @@ class TestHumanBlockedPatternWidening:
     ) -> None:
         transcript = tmp_path / "t.jsonl"
         self._write_assistant_text(
-            transcript, "STOPPING BECAUSE: waiting on human response before proceeding."
+            transcript, "STOPPING BECAUSE: waiting only on human response before proceeding."
         )
         marker_dir = tmp_path / "untracked"
         hook_input = {
@@ -4118,7 +4118,7 @@ class TestHumanBlockedPatternWidening:
     ) -> None:
         transcript = tmp_path / "t.jsonl"
         self._write_assistant_text(
-            transcript, "STOPPING BECAUSE: waiting for the human's decision on deployment."
+            transcript, "STOPPING BECAUSE: waiting only for the human's decision on deployment."
         )
         marker_dir = tmp_path / "untracked"
         hook_input = {
@@ -4178,7 +4178,7 @@ class TestCitingAPhraseIsNotDeclaringIt:
         [
             "STOPPING BECAUSE: a stop saying 'blocked only on human input' arms it.",
             'STOPPING BECAUSE: the phrase "need user input" is one of the four.',
-            "STOPPING BECAUSE: the docs list `waiting on the user's decision` as frozen.",
+            "STOPPING BECAUSE: the docs list `waiting only on the user's decision` as frozen.",
         ],
     )
     def test_a_quoted_phrase_does_not_declare(self, text: str) -> None:
@@ -4189,12 +4189,61 @@ class TestCitingAPhraseIsNotDeclaringIt:
         [
             "STOPPING BECAUSE: blocked only on human input for the schema call.",
             "STOPPING BECAUSE: blocked only on the owner's input.",
-            "STOPPING BECAUSE: everything else is done. Waiting on the user's decision.",
+            "STOPPING BECAUSE: everything else is done. Waiting only on the user's decision.",
             "STOPPING BECAUSE: need user input on which of A or B to build.",
         ],
     )
     def test_an_asserted_phrase_still_declares(self, text: str) -> None:
         assert _declares_human_blocked(text) is True
+
+
+class TestWaitingPatternRequiresOnly:
+    """GitHub #149: "waiting on <the human>" without "only" is an incidental mention.
+
+    Pattern 4 used to arm on any "waiting on/for the owner's decision", so a
+    stop that merely noted parked issues while other work (a running CI run)
+    remained was read as blocked-only-on-human. The claim the marker makes is
+    EXCLUSIVITY, so the pattern now requires "only", before or after the
+    target. No new pattern is added (Plan 00337 Phase 3 closed the set).
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "STOPPING BECAUSE: this issue tick has nothing to work on. Every open issue "
+            "is parked waiting for the owner's decision, and none is new. CI run 123 "
+            "is still running.",
+            "STOPPING BECAUSE: waiting on the owner's decision about deployment.",
+            "STOPPING BECAUSE: everything else is done. Waiting on the user's decision.",
+            "STOPPING BECAUSE: waiting for human response on one check, continuing.",
+        ],
+    )
+    def test_an_incidental_waiting_mention_does_not_declare(self, text: str) -> None:
+        assert _declares_human_blocked(text) is False
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "STOPPING BECAUSE: waiting only on the owner's decision.",
+            "STOPPING BECAUSE: waiting only for the user's input.",
+            "STOPPING BECAUSE: Waiting only on the user's decision.",
+            "STOPPING BECAUSE: waiting on human response only.",
+            "STOPPING BECAUSE: waiting for the owner's answer only.",
+            "STOPPING BECAUSE: [awaiting-human] parked, waiting for the owner's decision.",
+        ],
+    )
+    def test_an_exclusive_waiting_claim_still_declares(self, text: str) -> None:
+        assert _declares_human_blocked(text) is True
+
+    def test_every_advertised_example_still_declares(self) -> None:
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _HUMAN_BLOCKED_EXAMPLES,
+        )
+
+        assert "waiting only on the user's decision" in _HUMAN_BLOCKED_EXAMPLES
+        assert "waiting on the user's decision" not in _HUMAN_BLOCKED_EXAMPLES
+        for example in _HUMAN_BLOCKED_EXAMPLES:
+            assert _declares_human_blocked(f"STOPPING BECAUSE: {example}.") is True
 
     def test_an_apostrophe_never_opens_a_quoted_span(self) -> None:
         """The hazard that makes the single-quote arm subtle.

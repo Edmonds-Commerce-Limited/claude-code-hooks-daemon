@@ -174,8 +174,8 @@ _STOP_EXPLANATION_PREFIX = "STOPPING BECAUSE:"
 # only on human input", which pattern 1 already covers exactly, but a
 # natural variant like "waiting on human response" fell through both
 # pattern 1 (fixed wording, no "response") and the old pattern 4 (missing
-# "human"). Pattern 4 has never required "only" (unlike patterns 1/2), and
-# that stays unchanged here -- "blocked on human input" (no "only") was
+# "human"). Pattern 4 now requires "only" like patterns 1/2 (GitHub #149).
+# "blocked on human input" (no "only") was
 # considered and deliberately NOT added as a NEW pattern: a transient
 # mention of being blocked on human input ("blocked on human input for this
 # one check, continuing other work") is not the same claim as being blocked
@@ -185,9 +185,14 @@ _HUMAN_BLOCKED_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"blocked only on human input", re.IGNORECASE),
     re.compile(r"blocked only on (?:the )?(?:owner|user)('s)? input", re.IGNORECASE),
     re.compile(r"need(?:s|ed)? user input", re.IGNORECASE),
+    # GitHub #149: "only" is required, before ("waiting only on ...") or after
+    # ("waiting on ... response only"). Without it, "parked waiting for the
+    # owner's decision" beside other live work read as blocked-only-on-human.
     re.compile(
-        r"waiting (?:on|for) (?:the )?(?:owner|user|human)(?:'s)? "
-        r"(?:decision|input|response|answer)",
+        r"waiting (?:only (?:on|for) (?:the )?(?:owner|user|human)(?:'s)? "
+        r"(?:decision|input|response|answer)"
+        r"|(?:on|for) (?:the )?(?:owner|user|human)(?:'s)? "
+        r"(?:decision|input|response|answer) only\b)",
         re.IGNORECASE,
     ),
 )
@@ -202,7 +207,7 @@ _HUMAN_BLOCKED_EXAMPLES: tuple[str, ...] = (
     "blocked only on human input",
     "blocked only on the owner's input",
     "need user input",
-    "waiting on the user's decision",
+    "waiting only on the user's decision",
 )
 
 # Plan 00337 Phase 3: the EXPLICIT declaration, and the reason the patterns

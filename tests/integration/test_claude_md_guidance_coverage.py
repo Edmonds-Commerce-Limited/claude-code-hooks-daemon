@@ -1012,7 +1012,7 @@ class TestGuidanceActuallyReachesClaudeMd:
             encoding="utf-8"
         )
         # The vocabulary an arming phrase opens with, per _HUMAN_BLOCKED_EXAMPLES.
-        openers = ("blocked only on", "need user", "waiting on the")
+        openers = ("blocked only on", "need user", "waiting on the", "waiting only on")
         quoted = _re.findall(r'"([^"\n]{10,60})"', reference)
         arming_like = [q for q in quoted if q.lower().startswith(openers)]
         impostors = [q for q in arming_like if q not in _HUMAN_BLOCKED_EXAMPLES]
