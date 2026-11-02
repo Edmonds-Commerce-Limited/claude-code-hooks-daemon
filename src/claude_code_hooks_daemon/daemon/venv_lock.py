@@ -258,6 +258,32 @@ def last_build_lines(project_root: Path) -> list[str]:
     ]
 
 
+#: Written by init.sh when a daemon-down Stop is let through (tab separated:
+#: session, UTC stamp, count, reason class, event).
+DAEMON_DOWN_STOPS_LOG_NAME = ".daemon-down-stops.log"
+
+
+def daemon_down_stop_lines(project_root: Path) -> list[str]:
+    """Human lines reporting unguarded daemon-down stops; empty when none logged.
+
+    Read-only: names the entry count, the most recent entry and the log path.
+    """
+    path = project_root / "untracked" / DAEMON_DOWN_STOPS_LOG_NAME
+    if not path.is_file():
+        return []
+    try:
+        entries = [line for line in path.read_text().splitlines() if line.strip()]
+    except OSError as exc:
+        return [f"Unguarded daemon-down stops: log unreadable ({exc}): {path}"]
+    if not entries:
+        return []
+    return [
+        f"Unguarded daemon-down stops: {len(entries)} (protection was NOT active for them)",
+        f"Most recent: {entries[-1]}",
+        f"Stop log: {path}",
+    ]
+
+
 @contextmanager
 def _holder_record(project_root: Path, holder: str, log: Path | None) -> Iterator[None]:
     """Keep the holder record while the body runs; remove it only if still ours."""

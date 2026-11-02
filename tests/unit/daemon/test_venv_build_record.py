@@ -175,3 +175,29 @@ class TestStatusNamesTheLastBuild:
 
     def test_no_build_record_adds_nothing(self, tmp_path: Path, capsys: Any) -> None:
         assert "Last venv build" not in self._status(tmp_path, capsys)
+
+    def test_daemon_down_stop_log_is_reported(self, tmp_path: Path, capsys: Any) -> None:
+        untracked = tmp_path / ".claude" / "hooks-daemon" / "untracked"
+        untracked.mkdir(parents=True)
+        log = untracked / ".daemon-down-stops.log"
+        log.write_text(
+            "s1\t2026-11-01T01:00:00Z\t3\tdrift\tStop\ns2\t2026-11-02T02:00:00Z\t3\tdrift\tStop\n"
+        )
+
+        out = self._status(tmp_path, capsys)
+
+        assert "Unguarded daemon-down stops: 2" in out
+        assert "s2\t2026-11-02T02:00:00Z" in out
+        assert str(log) in out
+
+    def test_unreadable_stop_log_is_reported_not_hidden(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.daemon.venv_lock import daemon_down_stop_lines
+
+        (tmp_path / "untracked").mkdir()
+        (tmp_path / "untracked" / ".daemon-down-stops.log").write_text("x\n")
+        with patch.object(Path, "read_text", side_effect=OSError("denied")):
+            lines = daemon_down_stop_lines(tmp_path)
+        assert lines and "log unreadable" in lines[0]
+
+    def test_no_stop_log_adds_nothing(self, tmp_path: Path, capsys: Any) -> None:
+        assert "daemon-down stops" not in self._status(tmp_path, capsys)

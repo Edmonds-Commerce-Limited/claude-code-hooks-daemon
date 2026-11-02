@@ -486,9 +486,14 @@ def _is_protected(path, project_path, daemon_root):
         if len(parts) > 1 and parts[0] == "untracked" and parts[1].startswith("events"):
             return True
         # Known-sensitive daemon runtime output: raw hook payloads, the verdict
-        # log and the stop-event log (utils/private_io.py).
+        # log, the stop-event log (utils/private_io.py) and the legacy hook error
+        # log (hook input redacted only by the secret word list, plus a traceback).
         if len(parts) > 1 and parts[0] == "untracked":
-            if parts[1] == "payload-capture" or parts[1].startswith("stop-events"):
+            if (
+                parts[1] == "payload-capture"
+                or parts[1].startswith("stop-events")
+                or parts[1].startswith("hook-errors.log")
+            ):
                 return True
             if parts[1] == "logs" and len(parts) > 2 and parts[2] == "hooks":
                 return True

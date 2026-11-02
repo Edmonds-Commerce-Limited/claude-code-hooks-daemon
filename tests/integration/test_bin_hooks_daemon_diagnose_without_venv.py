@@ -72,6 +72,31 @@ class TestDriftedVenv:
         assert "Build log: /tmp/build-xyz.log" in output
 
 
+class TestBuildLogTail:
+    def test_prints_the_last_20_lines_of_the_recorded_log(self, sandbox: Sandbox) -> None:
+        log = sandbox.clone / "untracked" / "build.log"
+        log.write_text("".join(f"line {n}\n" for n in range(1, 31)))
+        (sandbox.clone / "untracked" / ".venv-bootstrap.result").write_text(
+            f"result=failed\nfinished_at=2026-10-31T01:02:03Z\nlog={log}\n"
+        )
+
+        result = sandbox.wrapper("diagnose")
+
+        output = result.stdout + result.stderr
+        assert "line 30" in output
+        assert "line 11" in output
+        assert "line 10\n" not in output
+
+    def test_says_so_when_the_log_is_absent(self, sandbox: Sandbox) -> None:
+        (sandbox.clone / "untracked" / ".venv-bootstrap.result").write_text(
+            "result=failed\nfinished_at=2026-10-31T01:02:03Z\nlog=/nonexistent/build.log\n"
+        )
+
+        result = sandbox.wrapper("diagnose")
+
+        assert "Build log not found: /nonexistent/build.log" in result.stdout + result.stderr
+
+
 class TestHealthyVenv:
     def test_exits_zero(self, sandbox: Sandbox) -> None:
         _venv(sandbox.clone / "untracked" / "venv-ok", _RUNNING)
