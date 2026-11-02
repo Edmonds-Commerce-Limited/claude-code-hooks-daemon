@@ -176,18 +176,35 @@ never be the reason the session cannot repair the daemon.
 
 ### Phase 4: Owner decisions
 
-- [ ] ⬜ **Task 4.1**: The owner makes [DBF-REPORT.md](DBF-REPORT.md)
-  decisions 1–3:
+The owner delegated this phase: "pick clear winners using sub agent, raise
+with me if its really not clear". The sub-agent found a clear winner for every
+decision, so none went back to the owner
+([report](subagent-reports/261102-phase4-winners.md)).
 
-  - accept that the class is only partly defended;
-  - decide whether to build the wider data-flow rule;
-  - confirm the calibrations.
+- [x] ✅ **Task 4.1**: [DBF-REPORT.md](DBF-REPORT.md) decisions 1–3:
 
-  These are reserved to the owner by DBF SPEC section 4.
+  - **Accept the partial defence.**
+  - **Do not build the wider data-flow rule now.** The only escape so far
+    ran no interpreter, and most instances are in shell, which CodeQL cannot
+    read. Revisit if a hand-built venv path escapes, or when Plan 00100 lands.
+  - **Confirm the calibrations:** `tests/` excluded, workflow YAML uncovered
+    (CI builds a fresh venv in every job), and "cannot tell" passes.
 
-- [ ] ⬜ **Task 4.2**: The owner confirms or overturns the two stand-in rulings
-  (Tasks 2.5/2.6 and Task 2.8 S1/S2/S4/S5). The owner also answers the
-  client-install log question.
+- [x] ✅ **Task 4.2**: Both stand-in rulings are **confirmed**: Tasks 2.5/2.6,
+  and Task 2.8 S1/S2/S4/S5. A client install **may not** read the daemon's
+  logs while the daemon is down. The daemon writes no log file to disk (its
+  output goes to `/dev/null`, `cli.py:939-948`). A failed build is already
+  fail-open, so the build log is readable when it matters. The same directory
+  also holds payload captures and the hook-verdict log.
+
+- [ ] ⬜ **Task 4.3**: Close the follow-ups the decisions surfaced. Each one
+  starts with a failing test.
+
+  - `status` (or SessionStart) reports `.daemon-down-stops.log`, as stand-in
+    ruling 1 intended. Today it is written and nothing reads it.
+  - The self-install daemon-down read rule also denies
+    `untracked/hook-errors.log`. Today this is latent: nothing writes the file.
+  - `diagnose` prints the tail of the venv build log.
 
 ## Success Criteria
 

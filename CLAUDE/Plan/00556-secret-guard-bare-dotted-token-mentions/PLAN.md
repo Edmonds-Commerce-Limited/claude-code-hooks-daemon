@@ -71,24 +71,29 @@ would then pass.
 
 - [x] ✅ **Task 1.1**: The owner approved fixing every secret-guard false
   positive (#141–#146). The condition: every existing true-positive test
-  still denies (journal `122834Z-decision-0dbcad.md`). For #145 that means
-  option **(b)**: a mention is a token that is path-like, or that exists or is
+  still denies (journal `122834Z-decision-0dbcad.md`). The owner did not name
+  an option for #145. The coordinator reads that approval as option **(b)**,
+  the narrowest option that removes the false positive: a mention is a token that is path-like, or that exists or is
   indexed, or that is a file-opening operand. Option (b) allows the false
   positive. The existence/index/operand conditions keep `cat app.secret`
   denied.
 
 ### Phase 3: The rest of the secret-guard false-positive cluster
 
-Issues #141–#146 now share this plan, because all of them land in
-`secret_file_matching.py` / `secret_file_guard.py`. They are worked in turn
-on one worktree branch, with one commit per issue and a red test first each
+Issues #141–#146 now share this plan, because all of them are false positives
+in a guard over protected paths. Every issue except #141 lands in
+`secret_file_matching.py` / `secret_file_guard.py`. #141 lands in
+`handlers/pre_tool_use/write_protected_paths.py`. They are worked in turn on
+one worktree branch, with one commit per issue and a red test first each
 time.
 
 - [ ] ⬜ **Task 3.1** (#146): a trusted consumer command that redirects with
   `2>&1` is denied, while a plain `>` is allowed.
 - [ ] ⬜ **Task 3.2** (#141): read-only awk is denied under a wildcard-only
-  `write_protected_paths` glob. The awk write check reads `>=` and the regex
-  `|` as a redirect or a pipe.
+  `write_protected_paths` glob. In `write_protected_paths.py`,
+  `_AWK_WRITING_PROGRAM_RE` reads `>=` and the regex `|` as a redirect or a
+  pipe. The issue also reports a second fault feeding the same fallback, in
+  `_text_naming`.
 - [ ] ⬜ **Task 3.3** (#142): a bare `**` is judged as a recursive globstar
   that matches dot-files. `*` and `**/*` get inconsistent verdicts.
 - [ ] ⬜ **Task 3.4** (#143): a dotted module path in a Python string literal
