@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 from claude_code_hooks_daemon.version import __version__
 
@@ -97,8 +98,8 @@ class ConfigOptimisationReminderHandler(SessionStartHandlerBase):
                     "not an optional to-do. If the user asked for other work "
                     "first, do that, then run the review before you stop.",
                     "Only if that step is genuinely unavailable in this "
-                    "project, silence this reminder with `bin/hooks-daemon "
-                    "record-config-optimisation-run` — that records a review "
+                    "project, silence this reminder with "
+                    f"`{daemon_cli_command_for_docs('record-config-optimisation-run')}` — that records a review "
                     "that did not happen.",
                 ]
             )

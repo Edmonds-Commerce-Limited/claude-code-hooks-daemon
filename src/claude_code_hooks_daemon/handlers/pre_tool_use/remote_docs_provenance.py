@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.remote_docs.provenance import parse_provenance
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 _FIELD_FILE_PATH: Final[str] = "file_path"
@@ -39,30 +40,33 @@ _FIELD_NEW_STRING: Final[str] = "new_string"
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _FALLBACK_REMOTE_DOCS_DIR: Final[str] = "remote-docs"
 
-_RULE_REMOTE_DOCS_PROVENANCE: Final[Rule] = Rule(
-    rule_id=RuleID.REMOTE_DOCS_PROVENANCE,
-    blocked="a write into the remote-docs tree without valid provenance frontmatter",
-    why=(
-        "A vendored document with no recorded source is indistinguishable from "
-        "something we wrote ourselves, and cannot be refreshed, dated or trusted"
-    ),
-    fix="Capture with `hooks-daemon remote-docs add <url>` instead of hand-authoring",
-    verbose=(
-        "The remote-docs tree holds documentation captured from upstream, not "
-        "written here. Every file carries provenance frontmatter: `source_url`, "
-        "`fetched_at`, `fidelity`, `source_sha256`, `licence` and `stale_after`.\n\n"
-        "Those fields are what make the corpus usable rather than merely present. "
-        "Without `source_url` nothing can be refreshed; without `source_sha256` "
-        "refresh cannot tell whether upstream actually changed; and without "
-        "`fidelity` a model's paraphrase is indistinguishable from the document "
-        "itself — which is the specific failure this tree exists to prevent, after "
-        "a summarising fetch layer fabricated API detail in this repository.\n\n"
-        "Capture: `bin/hooks-daemon remote-docs add <url>`\n"
-        "Refresh: `bin/hooks-daemon remote-docs refresh --path <file>`\n\n"
-        "Do not hand-edit a vendored document: rewording it silently falsifies "
-        "its recorded `fidelity`."
-    ),
-)
+
+def _rule_remote_docs_provenance() -> Rule:
+    """Rule built per call so the wrapper name follows the install mode (issue #147)."""
+    return Rule(
+        rule_id=RuleID.REMOTE_DOCS_PROVENANCE,
+        blocked="a write into the remote-docs tree without valid provenance frontmatter",
+        why=(
+            "A vendored document with no recorded source is indistinguishable from "
+            "something we wrote ourselves, and cannot be refreshed, dated or trusted"
+        ),
+        fix="Capture with `hooks-daemon remote-docs add <url>` instead of hand-authoring",
+        verbose=(
+            "The remote-docs tree holds documentation captured from upstream, not "
+            "written here. Every file carries provenance frontmatter: `source_url`, "
+            "`fetched_at`, `fidelity`, `source_sha256`, `licence` and `stale_after`.\n\n"
+            "Those fields are what make the corpus usable rather than merely present. "
+            "Without `source_url` nothing can be refreshed; without `source_sha256` "
+            "refresh cannot tell whether upstream actually changed; and without "
+            "`fidelity` a model's paraphrase is indistinguishable from the document "
+            "itself — which is the specific failure this tree exists to prevent, after "
+            "a summarising fetch layer fabricated API detail in this repository.\n\n"
+            f"Capture: `{daemon_cli_command_for_docs()} remote-docs add <url>`\n"
+            f"Refresh: `{daemon_cli_command_for_docs()} remote-docs refresh --path <file>`\n\n"
+            "Do not hand-edit a vendored document: rewording it silently falsifies "
+            "its recorded `fidelity`."
+        ),
+    )
 
 
 class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
@@ -157,15 +161,15 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
                     "There is no content that makes a hand edit correct here, "
                     "so nothing about your change was inspected.\n\n"
                     "To pick up what upstream now says:\n"
-                    "  bin/hooks-daemon remote-docs refresh --path <file>\n\n"
+                    f"  {daemon_cli_command_for_docs()} remote-docs refresh --path <file>\n\n"
                     "To re-capture from scratch — which also re-derives the "
                     "frontmatter from config, and is how a corrected "
                     "`licence` reaches an already-vendored file:\n"
-                    "  bin/hooks-daemon remote-docs add <url>\n\n"
+                    f"  {daemon_cli_command_for_docs()} remote-docs add <url>\n\n"
                     "If you need to record something ABOUT this document, "
                     "write it in your own docs and link to the vendored copy."
                 ),
-            ).under_rule(_RULE_REMOTE_DOCS_PROVENANCE)
+            ).under_rule(_rule_remote_docs_provenance())
         result = parse_provenance(self._added_text(hook_input))
         problems = "\n".join(f"  - {error.field}: {error.message}" for error in result.errors)
         return GatingResult(
@@ -176,16 +180,16 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
                 "it came from, so it can be refreshed, dated and trusted:\n\n"
                 f"{problems}\n\n"
                 "This tree is CAPTURED, not authored. Use:\n"
-                "  bin/hooks-daemon remote-docs add <url>\n\n"
+                f"  {daemon_cli_command_for_docs()} remote-docs add <url>\n\n"
                 "Editing a vendored document by hand also falsifies its recorded "
                 "`fidelity` — if upstream changed, refresh it instead:\n"
-                "  bin/hooks-daemon remote-docs refresh --path <file>"
+                f"  {daemon_cli_command_for_docs()} remote-docs refresh --path <file>"
             ),
-        ).under_rule(_RULE_REMOTE_DOCS_PROVENANCE)
+        ).under_rule(_rule_remote_docs_provenance())
 
     def get_rules(self) -> list[Rule]:
         """The Rule backing this handler's blocking behaviour."""
-        return [_RULE_REMOTE_DOCS_PROVENANCE]
+        return [_rule_remote_docs_provenance()]
 
     def get_claude_md(self) -> str | None:
         """Guidance injected into the project's CLAUDE.md."""
@@ -198,9 +202,9 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
             "inspected. A `Write` is denied unless the content carries valid "
             "provenance frontmatter (`source_url`, `fetched_at`, `fidelity`, "
             "`source_sha256`, `licence`, `stale_after`).\n\n"
-            "**Capture, do not author**: `bin/hooks-daemon remote-docs add <url>`. "
+            f"**Capture, do not author**: `{daemon_cli_command_for_docs()} remote-docs add <url>`. "
             "To pick up upstream changes: "
-            "`bin/hooks-daemon remote-docs refresh --path <file>`.\n\n"
+            f"`{daemon_cli_command_for_docs()} remote-docs refresh --path <file>`.\n\n"
             "**A file authored through Bash — a heredoc, `>`, `>>`, `tee` — "
             "never reaches this check**, because it keys on `Write`/`Edit`. "
             "There is no gap to exploit there: `remote_docs_commit_gate` "
@@ -219,7 +223,7 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
             "documentation source (`documentation.remote.known_sources`), the "
             "allow carries a hint to capture the page durably.\n\n"
             "So: before fetching a URL, check whether it is already vendored "
-            "— `bin/hooks-daemon remote-docs list` — and read the local copy."
+            f"— `{daemon_cli_command_for_docs()} remote-docs list` — and read the local copy."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

@@ -41,6 +41,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
 )
 from claude_code_hooks_daemon.remote_docs.provenance import parse_provenance
 from claude_code_hooks_daemon.utils.authored_paths import authored_path
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.fake_values import (
     REGISTRY_RELATIVE_PATH,
@@ -64,11 +65,16 @@ _REMEDY_DOC: Final[str] = (
     f"Use a listed fake from `{REGISTRY_RELATIVE_PATH}`, or extend that file for a "
     "genuinely new kind of fake."
 )
-_REMEDY_VENDORED: Final[str] = (
-    "This is a vendored page and must not be edited by hand. Capture it again with "
-    f"`bin/hooks-daemon remote-docs add --force <source_url>`, which swaps unlisted fakes "
-    f"for the listed ones in `{REGISTRY_RELATIVE_PATH}` and records the swap in provenance."
-)
+
+
+def _remedy_vendored() -> str:
+    """Vendored-page remedy naming the wrapper for this install mode (issue #147)."""
+    command = daemon_cli_command_for_docs("remote-docs", "add", "--force", "<source_url>")
+    return (
+        "This is a vendored page and must not be edited by hand. Capture it again with "
+        f"`{command}`, which swaps unlisted fakes "
+        f"for the listed ones in `{REGISTRY_RELATIVE_PATH}` and records the swap in provenance."
+    )
 
 
 def _registry_finding(error: FakeValuesError) -> Finding:
@@ -160,7 +166,7 @@ def _findings_for(rel_path: str, content: str, registry: FakeValuesRegistry) -> 
                         f"`{rel_path}` line {number} holds `{value}`, which looks like a fake "
                         f"`{kind}` but is not on the fake-values registry."
                     ),
-                    remediation=_REMEDY_VENDORED if vendored else _REMEDY_DOC,
+                    remediation=_remedy_vendored() if vendored else _REMEDY_DOC,
                     path=rel_path,
                 )
             )

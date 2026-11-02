@@ -23,6 +23,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
@@ -111,8 +112,8 @@ class RemoteDocsStalenessHandler(SessionStartHandlerBase):
             [
                 "",
                 "Refresh one, or the whole tree:",
-                "  bin/hooks-daemon remote-docs refresh --path <file>",
-                "  bin/hooks-daemon remote-docs refresh --all",
+                f"  {daemon_cli_command_for_docs('remote-docs', 'refresh', '--path', '<file>')}",
+                f"  {daemon_cli_command_for_docs('remote-docs', 'refresh', '--all')}",
                 "",
                 "Staleness is advisory: an upstream that has not changed is not a "
                 "problem, and a pinned snapshot is stale on purpose.",

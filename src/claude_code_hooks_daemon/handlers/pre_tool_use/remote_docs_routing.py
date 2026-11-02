@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
@@ -49,30 +50,33 @@ _FIELD_FILE_PATH: Final[str] = "file_path"
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _FALLBACK_REMOTE_DOCS_DIR: Final[str] = "remote-docs"
 
-_RULE_VENDORED_COPY: Final[Rule] = Rule(
-    rule_id=RuleID.REMOTE_DOCS_VENDORED_COPY,
-    blocked="a WebFetch of a URL this project already holds a fresh vendored copy of",
-    why=(
-        "The local copy is faster, costs no network round trip, and is the "
-        "corpus the remote-docs tree exists to build"
-    ),
-    fix="Read the local path named in the message, or refresh it if you need newer content",
-    verbose=(
-        "This project vendors documentation under its remote-docs tree, and "
-        "the URL you asked to fetch is already there and still within its "
-        "freshness window.\n\n"
-        "Read the local file instead: it is markdown, it is greppable "
-        "alongside the rest of the corpus, and it costs no fetch.\n\n"
-        "If you genuinely need newer content than the vendored copy, that is "
-        "a refresh rather than a fetch:\n"
-        "  bin/hooks-daemon remote-docs refresh --path <file>\n\n"
-        "A refresh re-fetches from the recorded `source_url`, keeps the "
-        "licence review already on the document, and no-ops when upstream "
-        "has not changed.\n\n"
-        "A STALE vendored copy is never blocked -- there the fetch is "
-        "effectively the refresh, and stopping it would strand the document."
-    ),
-)
+
+def _rule_vendored_copy() -> Rule:
+    """Rule built per call so the wrapper name follows the install mode (issue #147)."""
+    return Rule(
+        rule_id=RuleID.REMOTE_DOCS_VENDORED_COPY,
+        blocked="a WebFetch of a URL this project already holds a fresh vendored copy of",
+        why=(
+            "The local copy is faster, costs no network round trip, and is the "
+            "corpus the remote-docs tree exists to build"
+        ),
+        fix="Read the local path named in the message, or refresh it if you need newer content",
+        verbose=(
+            "This project vendors documentation under its remote-docs tree, and "
+            "the URL you asked to fetch is already there and still within its "
+            "freshness window.\n\n"
+            "Read the local file instead: it is markdown, it is greppable "
+            "alongside the rest of the corpus, and it costs no fetch.\n\n"
+            "If you genuinely need newer content than the vendored copy, that is "
+            "a refresh rather than a fetch:\n"
+            f"  {daemon_cli_command_for_docs()} remote-docs refresh --path <file>\n\n"
+            "A refresh re-fetches from the recorded `source_url`, keeps the "
+            "licence review already on the document, and no-ops when upstream "
+            "has not changed.\n\n"
+            "A STALE vendored copy is never blocked -- there the fetch is "
+            "effectively the refresh, and stopping it would strand the document."
+        ),
+    )
 
 
 class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
@@ -218,7 +222,7 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
                     "source for this project, but the page is not vendored "
                     "yet. Capture it so the whole project can grep it offline "
                     "instead of re-fetching:",
-                    f"  bin/hooks-daemon remote-docs add {url}",
+                    f"  {daemon_cli_command_for_docs()} remote-docs add {url}",
                 ],
             )
 
@@ -229,7 +233,7 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
                 context=[
                     "📄 REMOTE DOCS: the vendored copy of this URL is stale, "
                     "so this fetch is allowed. Consider recording the result:",
-                    f"  bin/hooks-daemon remote-docs refresh --path {document.path}",
+                    f"  {daemon_cli_command_for_docs()} remote-docs refresh --path {document.path}",
                 ],
             )
 
@@ -244,9 +248,9 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
                 "It is markdown, greppable alongside the rest of the corpus, "
                 "and costs no fetch.\n\n"
                 "If you genuinely need newer content, that is a refresh:\n"
-                f"  bin/hooks-daemon remote-docs refresh --path {document.path}"
+                f"  {daemon_cli_command_for_docs()} remote-docs refresh --path {document.path}"
             ),
-        ).under_rule(_RULE_VENDORED_COPY)
+        ).under_rule(_rule_vendored_copy())
 
     def _read_advisory(self, path: Path) -> list[str] | None:
         """Advisory lines for a stale or unreviewed document, or None."""
@@ -269,7 +273,7 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
                 [
                     f"  captured {provenance.fetched_at.date()}, "
                     f"stale since {provenance.stale_after}",
-                    f"  refresh: bin/hooks-daemon remote-docs refresh --path {path}",
+                    f"  refresh: {daemon_cli_command_for_docs()} remote-docs refresh --path {path}",
                 ]
             )
         if unreviewed:
@@ -282,7 +286,7 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
 
     def get_rules(self) -> list[Rule]:
         """The Rule backing the WebFetch denial."""
-        return [_RULE_VENDORED_COPY]
+        return [_rule_vendored_copy()]
 
     def get_claude_md(self) -> str | None:
         """No resident guidance: the sibling gate's section covers the corpus."""
