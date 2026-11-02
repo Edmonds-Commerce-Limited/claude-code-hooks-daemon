@@ -119,8 +119,9 @@ handlers:
       priority: 14
 
     # Blocks two independent sources of sensitive content (Plan 00201):
-    # public_patterns are safe to name in the deny message (that is what
-    # makes them fixable) and should stay STRUCTURAL — a shape any reviewer
+    # public_patterns are named in the deny message together with WHERE they
+    # matched, but the matched text is never shown (it would reach the
+    # transcript). They should stay STRUCTURAL — a shape any reviewer
     # could describe without seeing the leak itself. A specific identifier
     # (an employer/client name, a real person's name) is exactly what
     # secret_word_list_path is for: it is never named anywhere, only a

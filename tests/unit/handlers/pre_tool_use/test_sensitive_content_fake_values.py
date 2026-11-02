@@ -74,7 +74,7 @@ class TestRegisteredFakesAreAllowed:
         assert handler.matches(hook) is True
         result = handler.handle(hook)
         assert result.decision == Decision.DENY
-        assert _UNLISTED_REAL_LOOKING in (result.reason or "")
+        assert _UNLISTED_REAL_LOOKING not in (result.reason or "")
 
     def test_a_listed_value_does_not_shelter_an_unlisted_one_beside_it(
         self, tmp_path: Path

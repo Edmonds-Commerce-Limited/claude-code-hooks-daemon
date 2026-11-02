@@ -4,9 +4,10 @@ sensitive patterns or a gitignored secret word list (Plan 00201).
 Two independent sources:
 
 - **Public patterns** (``options.public_patterns``): named regexes declared
-  in ``.claude/hooks-daemon.yaml``, safe to name in the deny reason (paths,
-  non-placeholder home dirs, session UUIDs, profanity, ...). The reason
-  SHOULD say what matched — that is what makes it fixable.
+  in ``.claude/hooks-daemon.yaml`` (paths, non-placeholder home dirs, session
+  UUIDs, profanity, ...). The reason names the PATTERN and WHERE it matched
+  (path, line, git field, ``gh`` body) but never WHAT matched: the reason is
+  written to the transcript, so echoing the match would put the value there.
 - **Secret word list** (``options.secret_word_list_path``, default
   ``.claude/block-words.secret``): plain text, one gitignored term per line.
   A match here must NEVER reveal the term or its surrounding context — only
@@ -98,23 +99,21 @@ from claude_code_hooks_daemon.utils.staging_simulation import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Two independent rules (Plan 00116, Decision B): the two sources have
-# genuinely different disclosure properties -- a public-pattern match is safe
-# to name in full, a secret-word-list match must NEVER echo the term or its
-# surrounding context. `Rule.verbose` for both is STATIC boilerplate only;
-# the actual diagnostic (subject, pattern name/matched text, or entry index)
-# is invocation-specific and is appended in `handle()`, never baked into a
-# Rule -- for the secret-term rule that append path is the ONLY place the
-# redaction contract is enforced, so it must never carry the raw term.
+# Two independent rules (Plan 00116, Decision B). Both withhold the matched
+# text; they differ in what they may name instead -- a public-pattern deny
+# names the pattern and the location, a secret-word-list deny names only an
+# entry index. `Rule.verbose` for both is STATIC boilerplate only; the actual
+# diagnostic is invocation-specific and is appended in `handle()`, never baked
+# into a Rule, so that append path is where the no-echo contract is enforced.
 _RULE_PUBLIC_PATTERN = Rule(
     rule_id=RuleID.SENSITIVE_PUBLIC_PATTERN,
     blocked="content matching a configured public pattern",
-    why="The pattern is a named, safe-to-disclose signal (a path, a placeholder, profanity, ...)",
-    fix="Remove or replace the matched text before retrying",
+    why="The pattern is a named signal; what it matched is withheld so the value never reaches the transcript",
+    fix="Find the content at the cited location, then remove or replace what the named pattern matches",
     verbose=(
-        "Public patterns are named regexes declared in `.claude/hooks-daemon.yaml`, "
-        "safe to name in this reason -- the pattern name and the exact matched text "
-        "are shown below so the write is fixable."
+        "Public patterns are named regexes declared in `.claude/hooks-daemon.yaml`. "
+        "The pattern name and where it matched are shown below; the matched text is "
+        "deliberately never shown, because this reason is written to the transcript."
     ),
 )
 
@@ -132,6 +131,24 @@ _RULE_SECRET_TERM = Rule(
 )
 
 _FIELD_FILE_PATH: Final[str] = "file_path"
+
+# Public-safe location labels for a public-pattern deny. A match is never
+# named -- only the pattern and where it was found (owner ruling, issue #92).
+_UNLOCATED: Final[str] = "the text this call would record"
+_LOCATION_FILE_PATH: Final[str] = "the file path of this write"
+_LOCATION_COMMAND_TEXT: Final[str] = "text written by this command (message or body file content)"
+_LOCATION_GH_BODY: Final[str] = "the inline `gh` body, title or description on the command line"
+_GIT_FIELD_BY_SUBCOMMAND: Final[dict[str, str]] = {
+    "commit": "the commit message",
+    "tag": "the tag name or message",
+    "branch": "the branch name",
+    "checkout": "the branch name",
+    "switch": "the branch name",
+    "config": "the author identity",
+    "merge": "the merge message",
+}
+_LOCATION_WITHHELD: Final[str] = "a path whose own name also matches the pattern (not shown)"
+_OFFSET_KEY: Final[str] = "_offset"
 
 # Headline wording for the fail-closed denies, which cannot say "matched a
 # pattern" because nothing was matched: the write could not be checked.
@@ -441,6 +458,11 @@ class _Haystack(NamedTuple):
     staged blob or a body file the text stays where it is and only the path
     is cited.
 
+    ``location`` is what a PUBLIC-pattern deny names as where the match is. It
+    is chosen at construction and never derived from ``text`` or ``subject``,
+    because a command line or a file path can itself carry the match. With
+    ``report_line`` the deny also cites the 1-based line inside ``text``.
+
     ``public_patterns_apply`` is False only for the body of a faithful
     vendored copy (``is_faithful_vendored_copy``): upstream's bytes cannot
     carry this project's material. The secret word list judges every
@@ -450,6 +472,8 @@ class _Haystack(NamedTuple):
     subject: str
     text: str
     public_patterns_apply: bool = True
+    location: str = _UNLOCATED
+    report_line: bool = False
 
 
 def _shell_tokens(command: str) -> list[str]:
@@ -784,9 +808,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
     def _find_public_pattern_match(self, content: str) -> dict[str, str] | None:
         """First configured public pattern whose regex matches ``content``, else None.
 
-        Returns the ORIGINAL pattern dict (with the actual matched substring
-        attached under a synthetic ``_matched`` key) so the caller can build
-        an exact, fixable deny reason.
+        Returns the ORIGINAL pattern dict with the match's character offset
+        under a synthetic ``_offset`` key, so the caller can cite a line
+        number. The matched TEXT is deliberately never carried out of this
+        method: a deny reason, a log line or a finding built from it would put
+        the value into the transcript.
         """
         fake_values: FakeValuesRegistry | None = None
         # Client YAML, so an entry can be any shape: skip what is not a mapping
@@ -813,7 +839,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                     fake_values = self._fake_values()
                 if fake_values.allows(entry.get(_PATTERN_KEY_NAME, ""), match.group(0)):
                     continue
-                return {**entry, "_matched": match.group(0)}
+                return {**entry, _OFFSET_KEY: str(match.start())}
         return None
 
     def _fake_values(self) -> FakeValuesRegistry:
@@ -1038,7 +1064,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         # is judged the same way, as the command that records it.
         cwd = hook_input.get(HookInputField.CWD)
         for recording in self._metadata_commands(command, cwd if isinstance(cwd, str) else None):
-            haystacks.append(_Haystack(subject=recording, text=recording))
+            haystacks.append(
+                _Haystack(
+                    subject=recording, text=recording, location=self._metadata_location(recording)
+                )
+            )
             # Both surfaces can put the text in a FILE instead, and the file
             # route is read under the SAME condition as the inline one. A
             # reader placed under the `gh` branch alone is how `git commit -F`
@@ -1069,7 +1099,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         """
         cwd = hook_input.get(HookInputField.CWD)
         return [
-            _Haystack(subject=f"message file {found.path}", text=found.text)
+            _Haystack(
+                subject=f"message file {found.path}",
+                text=found.text,
+                location=f"message file {found.path}",
+            )
             for found in read_message_files(command, cwd if isinstance(cwd, str) else None)
         ]
 
@@ -1160,7 +1194,13 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             text = read_text_or_reason(abs_path, errors=_BODY_FILE_DECODE_ERRORS).text
             if not text or len(text.encode(_BODY_FILE_ENCODING)) > MAX_STAGED_FILE_BYTES:
                 continue
-            haystacks.append(_Haystack(subject=f"staged content of {relpath}", text=text))
+            haystacks.append(
+                _Haystack(
+                    subject=f"staged content of {relpath}",
+                    text=text,
+                    location=f"staged content of {relpath}",
+                )
+            )
         return haystacks
 
     @staticmethod
@@ -1354,6 +1394,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 _Haystack(
                     subject=f"staged content of {relpath}",
                     text=added,
+                    location=f"staged content of {relpath}",
                     public_patterns_apply=not self._records_faithful_copy(repo_root, scan, relpath),
                 )
             )
@@ -1498,7 +1539,9 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         body = self._get_content(hook_input)
         haystacks: list[_Haystack] = []
         if relative:
-            haystacks.append(_Haystack(subject=file_path, text=relative))
+            haystacks.append(
+                _Haystack(subject=file_path, text=relative, location=_LOCATION_FILE_PATH)
+            )
         if body:
             faithful = (
                 hook_input.get(HookInputField.TOOL_NAME) == ToolName.WRITE
@@ -1508,7 +1551,13 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 )
             )
             haystacks.append(
-                _Haystack(subject=file_path, text=body, public_patterns_apply=not faithful)
+                _Haystack(
+                    subject=file_path,
+                    text=body,
+                    public_patterns_apply=not faithful,
+                    location=file_path,
+                    report_line=True,
+                )
             )
         return haystacks
 
@@ -1631,7 +1680,12 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 continue
             public_match = self._find_public_pattern_match(hay.text)
             if public_match is not None:
-                return self._deny_public_pattern(transcript_path, hay.subject, public_match)
+                return self._deny_public_pattern(
+                    transcript_path,
+                    self._safe_location(hay.location),
+                    public_match,
+                    self._line_of(hay, public_match),
+                )
 
         try:
             terms = self._secret_terms()
@@ -1660,21 +1714,49 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
 
         return GatingResult(decision=Decision.ALLOW)
 
+    def _safe_location(self, location: str) -> str:
+        """``location``, unless the label itself carries a pattern match (a path can)."""
+        if self._find_public_pattern_match(location) is None:
+            return location
+        return _LOCATION_WITHHELD
+
+    @staticmethod
+    def _line_of(hay: _Haystack, match: dict[str, str]) -> int | None:
+        """1-based line of ``match`` inside ``hay.text``, when the haystack reports lines."""
+        if not hay.report_line:
+            return None
+        return hay.text.count("\n", 0, int(match[_OFFSET_KEY])) + 1
+
+    @classmethod
+    def _metadata_location(cls, recording: str) -> str:
+        """Which field of a git/gh command a metadata haystack came from."""
+        tokens = _shell_tokens(recording)
+        if tokens:
+            tokens = [tokens[0].lstrip("({"), *tokens[1:]]
+        for position, token in enumerate(tokens[:-1]):
+            if token != _GIT_EXECUTABLE and not token.endswith(f"/{_GIT_EXECUTABLE}"):
+                continue
+            index = git_subcommand_index(tokens, position)
+            if index is not None and tokens[index] in _GIT_FIELD_BY_SUBCOMMAND:
+                return _GIT_FIELD_BY_SUBCOMMAND[tokens[index]]
+        if _GH_BODY_PATTERN.search(recording):
+            return _LOCATION_GH_BODY
+        return _LOCATION_COMMAND_TEXT
+
     @staticmethod
     def _deny_public_pattern(
-        transcript_path: str | None, subject: str, match: dict[str, str]
+        transcript_path: str | None, location: str, match: dict[str, str], line: int | None
     ) -> GatingResult:
         """Deny a public-pattern match with a verbose-first/terse-after message.
 
         Verbosity is decided per (transcript_path, rule_id) via the shared
-        DisclosureTracker (Plan 00116, Decision G). The subject, pattern name
-        and matched text are all SAFE to disclose (public patterns are
-        declared safe-to-name), so they are appended on every fire — they
-        change per invocation and are the whole point of a fixable message.
+        DisclosureTracker (Plan 00116, Decision G). Only the pattern name and
+        WHERE it matched are disclosed. The matched text, a snippet of it and
+        the raw subject (a command line or path that may itself carry the
+        match) never appear: a deny reason lands in the transcript.
         """
         name = match.get(_PATTERN_KEY_NAME, "unnamed")
         description = match.get(_PATTERN_KEY_DESCRIPTION, "")
-        matched_text = match.get("_matched", "")
 
         formatter = RuleFormatter()
         tracker = get_data_layer().disclosure
@@ -1688,9 +1770,9 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             message = formatter.verbose(_RULE_PUBLIC_PATTERN)
 
         message += (
-            f"\n\n{_SUBJECT_LABEL}: {subject}\n"
+            f"\n\nLocation: {location}" + (f", line {line}" if line is not None else "") + "\n"
             f"Pattern: {name}" + (f" — {description}" if description else "") + "\n"
-            f"Matched: {matched_text}"
+            "The matched text is deliberately not shown."
         )
 
         return GatingResult(
@@ -1732,8 +1814,9 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             "gitignored secret word list is blocked. Two sources, two different "
             "disclosure rules:\n\n"
             "**Public patterns** (`handlers.pre_tool_use.sensitive_content.options."
-            "public_patterns`): named regexes safe to name — the deny reason shows the "
-            "pattern name and the exact matched text so you can fix it.\n\n"
+            "public_patterns`): named regexes. The deny reason names the pattern and "
+            "WHERE it matched (file path and line, the git field, or the `gh` body) but "
+            "never the matched text, because the reason is written to the transcript.\n\n"
             "**Secret word list** (`options.secret_word_list_path`, default "
             "`.claude/block-words.secret`, gitignored): a term never appears anywhere — "
             "not in the deny reason, not in any log, not in payload capture, not in a "
@@ -1833,7 +1916,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 tool_payload=public_pattern_probe,
                 description=(
                     "Content matching a configured public pattern is denied with a "
-                    "reason naming the pattern and the matched text."
+                    "reason naming the pattern and the location, never the matched text."
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
