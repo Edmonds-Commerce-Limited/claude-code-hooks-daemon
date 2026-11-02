@@ -87,8 +87,10 @@ in a guard over protected paths. Every issue except #141 lands in
 one worktree branch, with one commit per issue and a red test first each
 time.
 
-- [ ] ⬜ **Task 3.1** (#146): a trusted consumer command that redirects with
-  `2>&1` is denied, while a plain `>` is allowed.
+- [x] ✅ **Task 3.1** (#146): a trusted consumer command that redirects with
+  `2>&1` is denied, while a plain `>` is allowed. Merged in 209c8d334 and the
+  issue is closed. Report:
+  [261102-task-3.1-issue-146.md](subagent-reports/261102-task-3.1-issue-146.md).
 - [ ] ⬜ **Task 3.2** (#141): read-only awk is denied under a wildcard-only
   `write_protected_paths` glob. In `write_protected_paths.py`,
   `_AWK_WRITING_PROGRAM_RE` reads `>=` and the regex `|` as a redirect or a
