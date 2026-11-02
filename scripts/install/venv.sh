@@ -399,7 +399,13 @@ venv_lock_hash_matches() {
 #
 # Backend: `flock` by default -- Task 4.0's spike showed flock(2) excludes
 # across processes sharing a Podman bind mount. Where flock is not installed,
-# a mkdir lock (.venv-bootstrap.lock.d) with a stale-age check stands in.
+# the "mkdir" backend stands in: a lock FILE (.venv-bootstrap.lock.d, holding
+# the holder's pid) created exclusively by bash's noclobber redirect
+# (O_CREAT|O_EXCL), with a stale-age check. The backend keeps its old name, but
+# it no longer runs the external `mkdir`, whose exit status cannot be trusted
+# to mean "created by me" (the uutils mkdir on Ubuntu 25.10+, Plan 00474
+# N568). A DIRECTORY at that path, left by an older version (pid inside), is
+# honoured as a held lock and reclaimed by age like any other.
 # HOOKS_DAEMON_VENV_LOCK_BACKEND=flock|mkdir forces one, so an operator whose
 # mount misbehaves under flock has a way out without editing this file.
 #
@@ -774,11 +780,12 @@ venv_heartbeat_stop() {
 # _venv_lock_start_heartbeat() - Keep a mkdir lock fresh while this process holds it.
 #
 # Only for a holder that KEEPS the lock (acquire_venv_lock, adopt_venv_lock):
-# a try-then-release caller such as the hook path never runs one.
+# a try-then-release caller such as the hook path never runs one. Its errors
+# go beside the lock file; release_venv_lock removes them with it.
 #
 _venv_lock_start_heartbeat() {
     local lock_dir="$1"
-    venv_heartbeat_start "$lock_dir" "$lock_dir/heartbeat.log"
+    venv_heartbeat_start "$lock_dir" "$lock_dir.heartbeat.log"
     _VENV_LOCK_HEARTBEAT_PID="$VENV_HEARTBEAT_PID"
     _VENV_LOCK_HEARTBEAT_PARENT="$VENV_HEARTBEAT_PARENT"
 }
@@ -898,18 +905,18 @@ _venv_lock_try_once() {
         return "$VENV_LOCK_HELD"
     fi
 
-    local lock_dir="$lock_file.d" mkdir_err age
-    if [ -d "$lock_dir" ] && age="$(_venv_mkdir_lock_is_stale "$lock_dir")"; then
+    local lock_dir="$lock_file.d" create_err age
+    if [ -e "$lock_dir" ] && age="$(_venv_mkdir_lock_is_stale "$lock_dir")"; then
         print_warning "ensure_venv: removing stale venv lock $lock_dir (${age}s old, its holder is presumed dead)"
-        rm -rf "$lock_dir"
+        rm -rf "$lock_dir" "$lock_dir.heartbeat.log"
     fi
-    if mkdir_err="$(mkdir "$lock_dir" 2>&1)"; then
-        echo "$$" > "$lock_dir/pid"
+    # Exclusive create (noclobber is O_CREAT|O_EXCL), scoped to the subshell.
+    if create_err="$( (set -C && echo "$$" > "$lock_dir") 2>&1)"; then
         _VENV_LOCK_DIR="$lock_dir"
         return 0
     fi
-    if [ ! -d "$lock_dir" ]; then
-        print_error "ensure_venv: cannot create venv lock $lock_dir: $mkdir_err"
+    if [ ! -e "$lock_dir" ]; then
+        print_error "ensure_venv: cannot create venv lock $lock_dir: $create_err"
         return 1
     fi
     return "$VENV_LOCK_HELD"
@@ -970,7 +977,7 @@ venv_lock_is_held() {
         return
     fi
 
-    [ -d "$lock_file.d" ] || return 1
+    [ -e "$lock_file.d" ] || return 1
     local stale_age
     if stale_age="$(_venv_mkdir_lock_is_stale "$lock_file.d")"; then
         print_verbose "venv_lock_is_held: $lock_file.d is ${stale_age}s old, so its holder is presumed dead"
@@ -984,7 +991,7 @@ venv_lock_is_held() {
 #
 # Echoes "flock:<fd>" or "mkdir:<dir>". The child is started with the spec in
 # HOOKS_DAEMON_VENV_LOCK_INHERITED and inherits the flock descriptor (or owns
-# the lock directory); this process then calls forget_venv_lock. The lock is
+# the mkdir-backend lock file); this process then calls forget_venv_lock. The lock is
 # never free in between, so no other starter can slip in.
 #
 venv_lock_handoff_spec() {
@@ -1004,7 +1011,7 @@ venv_lock_handoff_spec() {
 # forget_venv_lock() - Drop this process's claim after handing the lock off.
 #
 # Closes this process's copy of the flock descriptor (the child's copy keeps
-# the lock) and leaves a mkdir lock directory in place for the child to
+# the lock) and leaves a mkdir-backend lock file in place for the child to
 # remove. Returns 0.
 #
 forget_venv_lock() {
@@ -1026,7 +1033,7 @@ forget_venv_lock() {
 # confirms the lock really is daemon_dir's venv lock and is held through it,
 # so release_venv_lock frees it. The spec is an environment variable, so it is
 # never trusted to name the lock: a mkdir spec must be exactly daemon_dir's
-# lock directory (release removes it), and a flock descriptor must be open on
+# lock file (release removes it), and a flock descriptor must be open on
 # daemon_dir's lock file where /proc can say so. The variable is then unset,
 # so nothing the build runs inherits it.
 #
@@ -1066,14 +1073,14 @@ adopt_venv_lock() {
         mkdir:*)
             local dir="${spec#mkdir:}"
             if [ "$dir" != "$lock_file.d" ]; then
-                print_error "adopt_venv_lock: inherited lock directory '$dir' is not this daemon's venv lock ($lock_file.d)"
+                print_error "adopt_venv_lock: inherited lock '$dir' is not this daemon's venv lock ($lock_file.d)"
                 return 1
             fi
-            if [ ! -d "$dir" ]; then
-                print_error "adopt_venv_lock: inherited lock directory is gone: $dir"
+            if [ ! -f "$dir" ]; then
+                print_error "adopt_venv_lock: inherited lock file is gone: $dir"
                 return 1
             fi
-            echo "$$" > "$dir/pid"
+            echo "$$" >| "$dir"
             _VENV_LOCK_BACKEND="mkdir"
             _VENV_LOCK_DIR="$dir"
             _venv_lock_start_heartbeat "$dir"
@@ -1145,7 +1152,7 @@ _venv_acquire_lock_raw() {
         fi
         if [ "$waited" -ge "$timeout" ]; then
             print_error "ensure_venv: gave up waiting for the venv lock after ${timeout}s: $lock_dir"
-            print_error "  Another daemon start or 'hooks-daemon repair' is still building the venv. If none is running, remove that directory and retry."
+            print_error "  Another daemon start or 'hooks-daemon repair' is still building the venv. If none is running, remove that lock and retry."
             return 1
         fi
         if [ "$announced" = 0 ]; then
@@ -1161,9 +1168,10 @@ _venv_acquire_lock_raw() {
 #
 # release_venv_lock() - Release whatever acquire_venv_lock took. Returns 0.
 #
-# A mkdir lock is removed only while its pid file still names this process:
-# if it was reclaimed as stale meanwhile, it is someone else's lock now, and
-# removing it would admit a third builder.
+# A mkdir-backend lock is removed only while it still names this process: if
+# it was reclaimed as stale meanwhile, it is someone else's lock now, and
+# removing it would admit a third builder. The pid is the lock file's content
+# (or, for an older version's lock directory, its pid file).
 #
 release_venv_lock() {
     _venv_clear_holder_record
@@ -1173,11 +1181,13 @@ release_venv_lock() {
     elif [ "$_VENV_LOCK_BACKEND" = "mkdir" ] && [ -n "$_VENV_LOCK_DIR" ]; then
         _venv_lock_stop_heartbeat
         local holder=""
-        if [ -f "$_VENV_LOCK_DIR/pid" ]; then
+        if [ -f "$_VENV_LOCK_DIR" ]; then
+            holder="$(cat "$_VENV_LOCK_DIR")"
+        elif [ -f "$_VENV_LOCK_DIR/pid" ]; then
             holder="$(cat "$_VENV_LOCK_DIR/pid")"
         fi
         if [ "$holder" = "$$" ]; then
-            rm -rf "$_VENV_LOCK_DIR"
+            rm -rf "$_VENV_LOCK_DIR" "$_VENV_LOCK_DIR.heartbeat.log"
         else
             print_warning "ensure_venv: not removing $_VENV_LOCK_DIR: it now belongs to pid '${holder:-unknown}', not this process ($$)"
         fi

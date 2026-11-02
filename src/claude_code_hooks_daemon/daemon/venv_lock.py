@@ -11,9 +11,13 @@ Contract (mirrors the bash implementation exactly):
 
 - ``flock`` backend (default): ``flock(2)`` on the lock file. Task 4.0's
   spike showed it excludes across processes sharing a Podman bind mount.
-- ``mkdir`` backend: ``.venv-bootstrap.lock.d`` with a ``pid`` file inside;
-  a lock dir older than ``HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS`` (600) is
-  presumed abandoned and reclaimed.
+- ``mkdir`` backend (the name is historical): ``.venv-bootstrap.lock.d`` is a
+  regular FILE holding the holder's pid, created with ``O_CREAT|O_EXCL`` --
+  bash takes it with a noclobber redirect, never the external ``mkdir``, whose
+  exit status the uutils coreutils on Ubuntu 25.10+ do not make exclusive
+  (Plan 00474 N568). A lock older than ``HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS``
+  (600) is presumed abandoned and reclaimed. A DIRECTORY at that path, left by
+  an older version, is honoured as held and reclaimed by age the same way.
 - ``HOOKS_DAEMON_VENV_LOCK_BACKEND`` forces one backend; anything else is a
   ``ValueError``.
 - ``HOOKS_DAEMON_VENV_LOCK_TIMEOUT`` (120) bounds the wait; on expiry
@@ -116,6 +120,25 @@ def _flock(
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def _remove_lock(lock_path: Path) -> None:
+    """Remove a lock file, or an older version's lock directory, if present."""
+    if lock_path.is_dir() and not lock_path.is_symlink():
+        shutil.rmtree(lock_path, ignore_errors=True)
+    else:
+        lock_path.unlink(missing_ok=True)
+
+
+def _create_lock_file(lock_path: Path) -> None:
+    """Create ``lock_path`` exclusively, holding this pid.
+
+    Raises:
+        FileExistsError: anything (file, directory, symlink) is already there.
+    """
+    fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    with os.fdopen(fd, "w") as handle:
+        handle.write(f"{os.getpid()}\n")
+
+
 @contextmanager
 def _mkdir_lock(
     lock_dir: Path, timeout_seconds: float, on_wait: Callable[[str], None] | None
@@ -126,7 +149,7 @@ def _mkdir_lock(
     retaken_immediately = False
     while True:
         try:
-            lock_dir.mkdir()
+            _create_lock_file(lock_dir)
             break
         except FileExistsError:
             try:
@@ -152,7 +175,7 @@ def _mkdir_lock(
                         f"removing stale venv lock {lock_dir} "
                         f"({age:.0f}s old, its holder is presumed dead)"
                     )
-                shutil.rmtree(lock_dir, ignore_errors=True)
+                _remove_lock(lock_dir)
                 continue
             if not announced:
                 announced = True
@@ -161,11 +184,10 @@ def _mkdir_lock(
             if time.monotonic() >= deadline:
                 raise VenvLockTimeout(_timeout_message(lock_dir, timeout_seconds)) from None
             time.sleep(_POLL_SECONDS)
-    (lock_dir / "pid").write_text(f"{os.getpid()}\n")
     try:
         yield
     finally:
-        shutil.rmtree(lock_dir, ignore_errors=True)
+        _remove_lock(lock_dir)
 
 
 #: The holder record and the last-result record, beside the lock. Same names

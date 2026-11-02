@@ -210,6 +210,11 @@ untracked/
 # Scheduled-tasks runtime lock (ScheduleWakeup/cron mechanism)
 .claude/scheduled_tasks.lock
 
+# Scaffolder lock files (mkplan.bash plan-dir fallback, mkroutine.bash). They
+# are regular files while held, so git would otherwise list them.
+.mkplan.lock
+.mkroutine.lock
+
 # Acceptance test results
 CLAUDE/AcceptanceTests/results/*
 !CLAUDE/AcceptanceTests/results/.gitkeep

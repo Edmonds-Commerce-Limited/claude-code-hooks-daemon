@@ -1,7 +1,7 @@
 """A signal must END a scaffolder run that holds the lock, not let it carry on.
 
 ``mkplan.bash`` and ``mkroutine.bash`` serialise number allocation with an
-atomic-``mkdir`` lock and remove it from a trap. When that trap covered INT and
+exclusively-created lock file and remove it from a trap. When that trap covered INT and
 TERM with the bare release function, bash ran the function and then RESUMED
 the script: the lock was gone while the runner was still inside the critical
 section, so a second runner could take the lock, read the same counter and
@@ -132,7 +132,7 @@ def test_signal_inside_the_critical_section_ends_the_run(
     )
     try:
         _wait_for(parked, holder)
-        assert (repo / lock_rel).is_dir(), "holder is parked but does not hold the lock"
+        assert (repo / lock_rel).is_file(), "holder is parked but does not hold the lock"
         holder.send_signal(sig)
         release.touch()
         _, stderr = holder.communicate(timeout=_SHELL_TIMEOUT)

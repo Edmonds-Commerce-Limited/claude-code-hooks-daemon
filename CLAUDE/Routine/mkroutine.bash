@@ -85,15 +85,15 @@ USAGE
 }
 
 # Release the routine-dir lock. Only removes the lock if THIS process took it
-# (lock_held set) and the dir is still present — never another runner's lock.
+# (lock_held set) and the file is still present — never another runner's lock.
 release_lock() {
     # The EXIT trap can fire in a command-substitution subshell on some bash
     # builds; that subshell shares lock_held but is not the owner, and removing
     # the lock there would let a second runner in while the first still works.
     # BASHPID is the current process (bash 4+); $$ is the fallback where it is
     # unset, which keeps the old behaviour on bash 3.2.
-    if [[ -n "$lock_held" && "${BASHPID:-$$}" == "$lock_owner_pid" && -d "$lock_held" ]]; then
-        rmdir "$lock_held"
+    if [[ -n "$lock_held" && "${BASHPID:-$$}" == "$lock_owner_pid" && -f "$lock_held" ]]; then
+        rm -f -- "$lock_held"
         trace "lock released: $lock_held"
     else
         trace "lock not released (held='$lock_held' owner='$lock_owner_pid')"
@@ -109,23 +109,33 @@ trace() {
     fi
 }
 
-# Acquire an exclusive lock via atomic `mkdir`. Portable (Linux + macOS/BSD, no
-# `flock` dependency) and silent: mkdir's stderr is captured into a variable,
-# NOT discarded, and surfaced only if we time out.
+# Create the lock file exclusively, holding $2 (the owner pid). Bash's
+# noclobber redirect opens a missing file with O_CREAT|O_EXCL, so exactly one
+# caller can succeed; set -C is scoped to the subshell. The external `mkdir`
+# is NOT used: the uutils mkdir on Ubuntu 25.10+ let two runners both
+# "create" one lock directory (Plan 00474 N568). A lock DIRECTORY left at the
+# path by an older mkroutine makes the open fail too, so it is honoured as held.
+create_lock_file() {
+    (set -C && printf '%s\n' "$2" > "$1")
+}
+
+# Acquire an exclusive lock via an exclusive file create. Portable (Linux +
+# macOS/BSD, no `flock` dependency) and silent: the create's stderr is
+# captured into a variable, NOT discarded, and surfaced only if we time out.
 acquire_lock() {
-    local lock_dir="$1"
-    local attempts=0 err
-    trace "acquiring $lock_dir"
-    while ! err="$(mkdir "$lock_dir" 2>&1)"; do
+    local lock_file="$1"
+    local attempts=0 err owner="${BASHPID:-$$}"
+    trace "acquiring $lock_file"
+    while ! err="$(create_lock_file "$lock_file" "$owner" 2>&1)"; do
         attempts=$((attempts + 1))
         trace "lock busy (attempt $attempts): $err"
         if (( attempts >= LOCK_MAX_ATTEMPTS )); then
-            die "timed out acquiring routine lock '$lock_dir' (concurrent run, or a stale lock — remove the directory if no other mkroutine is running). Last error: $err"
+            die "timed out acquiring routine lock '$lock_file' (concurrent run, or a stale lock — remove it if no other mkroutine is running). Last error: $err"
         fi
         sleep "$LOCK_RETRY_SECONDS"
     done
-    lock_held="$lock_dir"
-    lock_owner_pid="${BASHPID:-$$}"
+    lock_held="$lock_file"
+    lock_owner_pid="$owner"
     trace "lock acquired after $attempts busy attempt(s)"
     # INT/TERM must EXIT (which runs the EXIT trap). A trap that only released
     # the lock would return into the critical section, unlocked, and let a
@@ -252,7 +262,8 @@ routine_rel="${routine_dir#"$repo_root"/}"
 # --- take the lock, then resolve + sanity-check the next number ------------
 
 # Everything from here to the counter write is the critical section: a single
-# atomic-mkdir lock serialises concurrent runners so no two assign the same N.
+# exclusively-created lock file serialises concurrent runners so no two assign
+# the same N.
 acquire_lock "$routine_dir/$LOCK_BASENAME"
 
 fs_highest="$(filesystem_highest "$routine_dir")"
