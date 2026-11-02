@@ -21,6 +21,7 @@ neither of which a Python-level assertion could observe.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 from pathlib import Path
@@ -326,6 +327,9 @@ class TestConcurrency:
         prevent, which only a concurrent test can observe.
         """
         script = str(routine_repo / "CLAUDE" / "Routine" / "mkroutine.bash")
+        # MKROUTINE_TRACE logs every lock and counter event with a timestamp and
+        # pid, so a duplicate seen only on CI shows its own interleaving (N568).
+        env = {**os.environ, "MKROUTINE_TRACE": "1"}
         processes = [
             subprocess.Popen(
                 [script, name],
@@ -333,20 +337,26 @@ class TestConcurrency:
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=routine_repo,
+                env=env,
             )
             for name in ("first-sweep", "second-sweep")
         ]
         # Both runners' stderr is kept for EVERY failure, not only a non-zero
         # exit: N568's duplicate numbers came with two exit-0 runs, and their
-        # output is the evidence that tells a signal from a lock defect.
+        # output is the evidence that tells a signal from a lock defect. It is
+        # reported as plain text, which pytest does not truncate.
         stderrs = [process.communicate(timeout=_SHELL_TIMEOUT)[1] for process in processes]
+        evidence = "\n".join(
+            f"--- runner {index} (exit {process.returncode}) ---\n{text}"
+            for index, (process, text) in enumerate(zip(processes, stderrs, strict=True))
+        )
 
-        assert all(process.returncode == 0 for process in processes), stderrs
+        assert all(process.returncode == 0 for process in processes), evidence
         created = sorted(path.name for path in (routine_repo / "CLAUDE" / "Routine").glob("0*-*"))
         assert created == ["00001-first-sweep", "00002-second-sweep"] or created == [
             "00001-second-sweep",
             "00002-first-sweep",
-        ], (created, stderrs)
+        ], f"created={created}\n{evidence}"
 
 
 class TestConfigLockContention:

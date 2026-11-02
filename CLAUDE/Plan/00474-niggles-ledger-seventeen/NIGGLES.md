@@ -149,6 +149,14 @@ counter (only a read-only `rev-parse`); `git config` races (the guard proves ove
 the test itself (fresh `tmp_path`, no signals sent). Evidence that would settle it: the two runners' stderr on the
 next failure (the test prints it only when an exit code is non-zero), or a run of the suite with `strace -f -e trace=signal` on the scaffolder pair.
 
+**Still open after the signal fix**: CI run 41512426302 (main at eb2aa1e52, which carries the fix above) failed the
+same test with the same signature, so the signal path is a real defect but NOT the CI cause. The truncated stderr shows
+a runner bootstrapping from an unset counter. `mkroutine.bash` now has an opt-in `MKROUTINE_TRACE=1` that logs every
+lock and counter event with a timestamp and pid, and the test turns it on and reports both runners' full stderr as plain
+text, so the next CI failure carries its own interleaving.
+
+**Status**: 🔄 Signal defect fixed (eb2aa1e52); the CI duplicate is open pending the traced evidence.
+
 ### N567 — `init.sh` aborts when it is sourced if `untracked/` cannot be created, before any fail-closed arm runs
 
 **Source**: dogfood, 2026-10-31. Found while building Plan 00555 Tasks 2.5/2.6 (branch

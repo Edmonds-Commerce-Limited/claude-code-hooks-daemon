@@ -94,6 +94,18 @@ release_lock() {
     # unset, which keeps the old behaviour on bash 3.2.
     if [[ -n "$lock_held" && "${BASHPID:-$$}" == "$lock_owner_pid" && -d "$lock_held" ]]; then
         rmdir "$lock_held"
+        trace "lock released: $lock_held"
+    else
+        trace "lock not released (held='$lock_held' owner='$lock_owner_pid')"
+    fi
+}
+
+# Opt-in diagnostics: MKROUTINE_TRACE=1 writes timestamped lock and counter
+# events to stderr, so a concurrency failure seen only on CI can be read back
+# (Plan 00474 N568). Silent when unset.
+trace() {
+    if [[ -n "${MKROUTINE_TRACE:-}" ]]; then
+        printf 'mkroutine-trace: %s pid=%s %s\n' "${EPOCHREALTIME:-$(date +%s)}" "${BASHPID:-$$}" "$1" >&2
     fi
 }
 
@@ -103,8 +115,10 @@ release_lock() {
 acquire_lock() {
     local lock_dir="$1"
     local attempts=0 err
+    trace "acquiring $lock_dir"
     while ! err="$(mkdir "$lock_dir" 2>&1)"; do
         attempts=$((attempts + 1))
+        trace "lock busy (attempt $attempts): $err"
         if (( attempts >= LOCK_MAX_ATTEMPTS )); then
             die "timed out acquiring routine lock '$lock_dir' (concurrent run, or a stale lock — remove the directory if no other mkroutine is running). Last error: $err"
         fi
@@ -112,6 +126,7 @@ acquire_lock() {
     done
     lock_held="$lock_dir"
     lock_owner_pid="${BASHPID:-$$}"
+    trace "lock acquired after $attempts busy attempt(s)"
     # INT/TERM must EXIT (which runs the EXIT trap). A trap that only released
     # the lock would return into the critical section, unlocked, and let a
     # second runner allocate the same number (Plan 00474).
@@ -268,6 +283,7 @@ fi
 
 next=$((counter + 1))
 printf -v padded '%0*d' "$NUMBER_WIDTH" "$next"
+trace "routine_dir=$routine_dir fs_highest=$fs_highest counter=$counter next=$padded"
 
 # Collision guard: nothing on disk may already carry this number (active or
 # archived). filesystem_highest covers the common case; check the concrete
@@ -381,6 +397,7 @@ if (( counter > new_counter )); then
     new_counter="$counter"
 fi
 write_counter "$repo_root" "$new_counter"
+trace "counter written: $new_counter"
 
 # Lock is released by the EXIT trap (release_lock).
 
