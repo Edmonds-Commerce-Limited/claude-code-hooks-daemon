@@ -185,7 +185,7 @@ IDs: R-PLAN-NUMBER-DISCOVERY, R-PLAN-FOLDER-MKDIR
 
 A `Write`/`Edit` whose content matches a configured public pattern or a gitignored secret word list is blocked. Two sources, two different disclosure rules:
 
-**Public patterns** (`handlers.pre_tool_use.sensitive_content.options.public_patterns`): named regexes safe to name — the deny reason shows the pattern name and the exact matched text so you can fix it.
+**Public patterns** (`handlers.pre_tool_use.sensitive_content.options.public_patterns`): named regexes. The deny reason names the pattern and WHERE it matched (file path and line, the git field, or the `gh` body) but never the matched text, because the reason is written to the transcript.
 
 **Secret word list** (`options.secret_word_list_path`, default `.claude/block-words.secret`, gitignored): a term never appears anywhere — not in the deny reason, not in any log, not in payload capture, not in a transcript archive. The deny reason names only an index (`entry N of M in the secret word list`), which is meaningless without the gitignored file. **Do NOT try to guess or work around the block, and do NOT open the secret word list file** — it is itself read-protected by `secret_file_guard` (Plan 00272); ask the user what the entry covers. Only the ADDED text is checked on `Edit` (`new_string`) — removing sensitive content is never blocked.
 

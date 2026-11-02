@@ -1902,9 +1902,10 @@ never blocked.
 
 Two sources, with **deliberately different disclosure rules**:
 
-- **Public patterns** (`public_patterns`) — named regexes that are safe to name.
-  The deny reason shows the pattern's name and the exact matched text, so the
-  writer can fix it directly.
+- **Public patterns** (`public_patterns`) — named regexes. The deny reason
+  names the pattern and where it matched (file path and line, the git field, or
+  the `gh` body) but never the matched text, so the value does not reach the
+  transcript.
 - **Secret word list** (`secret_word_list_path`) — a gitignored file of terms
   that must never be echoed. A matched term appears nowhere: not in the deny
   reason, not in any log, not in payload capture, not in an archived

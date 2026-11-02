@@ -1,6 +1,6 @@
 # Plan 00514: sensitive content withheld match text
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-12
 **Owner**: dev
 **Priority**: Medium
@@ -20,30 +20,22 @@ code or a reference number, cannot be used safely, because the deny reason repea
 secret word list never discloses a term, but it matches exact terms only and cannot express a format. The commit-time
 scan already withholds the line and names only the path and the pattern.
 
-Changing what a safety control discloses is an owner call, so this plan records the options and waits.
+Changing what a safety control discloses is an owner call, and the owner has ruled.
 
-## Owner Decisions Needed
+## Owner Ruling
 
-The coordinator has not ruled on these.
+The owner's own words, 2 November 2026: "why would we ever want to disclose the matched text ... disclose WHERE we found
+it but not WHAT IT IS - that puts sensitive stuff directly into transcript which is absolutely wrong. disclose the
+pattern sure, dont disclose the match."
 
-1. **Shape of the change.** There are three options:
-
-   - (a) A per-pattern option such as `disclose_match: false`. Existing patterns keep naming what they match.
-   - (b) A separate pattern class, for example `withheld_patterns`, whose deny reason never shows the match.
-   - (c) Withhold the match for every public pattern by default.
-
-   Options (a) and (b) are additive. Option (c) reverses Plan 00201's decision for every existing user.
-
-2. **What a withheld reason names.** #92 asks for the path, the pattern name and the line number. The Write/Edit
-   reason has no line number today. Should it gain one, and should a withheld reason keep the pattern's description,
-   which an owner might also write too specifically?
-
-3. **Other surfaces.** Should the commit-time scan, the git metadata checks and the `gh` body checks follow the same
-   per-pattern setting, or stay as they are?
+So option (c) applies, with no per-pattern switch: no public pattern ever echoes its match, on any surface. The deny
+reason may name the pattern, the path, the line, the git field (commit message, tag name, branch name, author identity,
+merge message) and the `gh` body (inline, or the body-file path). It never names the matched characters, a snippet of
+them, or a recoverable redaction. This reverses Plan 00201's "public patterns are safe to name".
 
 ## Goals
 
-- An owner can declare a structural pattern whose match never appears in a deny reason, log or transcript.
+- No public pattern's match appears in a deny reason, log or transcript.
 - A withheld deny still tells the agent where to look, so the content stays fixable.
 
 ## Non-Goals
@@ -55,21 +47,24 @@ The coordinator has not ruled on these.
 
 ### Phase 0: Owner decisions
 
-- [ ] ⬜ **Task 0.1**: The owner answers the questions under Owner Decisions Needed.
+- [x] ✅ **Task 0.1**: The owner ruled (see Owner Ruling).
 
 ### Phase 1: Implement per the decisions
 
-- [ ] ⬜ **Task 1.1**: Write the tests red first, covering a withheld Write deny, a withheld Edit deny, and an unchanged named deny.
-- [ ] ⬜ **Task 1.2**: Implement the chosen shape, including its config validation.
-- [ ] ⬜ **Task 1.3**: Update the handler guidance and `docs/guides/HANDLER_REFERENCE.md`.
+- [x] ✅ **Task 1.1**: Tests written red first for Write, Edit, git metadata, `gh` body and log records.
+- [x] ✅ **Task 1.2**: Withhold the match on every surface and add the line number to the Write/Edit reason.
+- [x] ✅ **Task 1.3**: Handler guidance, rules table, `docs/guides/HANDLER_REFERENCE.md` and the release note updated.
+
+### Phase 2: Merge
+
+- [ ] ⬜ **Task 2.1**: The coordinator merges the branch, runs the full QA gate and closes this plan.
 
 ## Success Criteria
 
-- [ ] The owner's decisions are recorded in this plan's JOURNAL/.
-- [ ] With the #92 reproduction, a withheld pattern's deny reason does not contain the matched text.
-- [ ] Release-bound consequences are in the UNRELEASED holding area (a release note), or this plan records that it has
-  none because the owner declined it.
+- [x] The owner's ruling is recorded in this plan (Owner Ruling).
+- [x] With the #92 reproduction, the deny reason does not contain the matched text.
+- [x] Release-bound consequences are in the UNRELEASED holding area: release note 017.
 
 ## Delivery & Milestones
 
-- Filed from GitHub #92 by the coordinator; awaiting owner decisions.
+- Filed from GitHub #92 by the coordinator; owner ruled 2 November 2026; implemented.

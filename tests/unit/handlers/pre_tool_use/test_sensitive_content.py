@@ -345,14 +345,14 @@ class TestPublicPatternMatching:
         result = handler.handle(hook_input)
         assert "vhosts-path" in (result.reason or "")
 
-    def test_deny_reason_shows_matched_text(self) -> None:
-        """Public patterns are SAFE to echo — this is what makes them fixable."""
+    def test_deny_reason_withholds_matched_text(self) -> None:
+        """Owner ruling (issue #92): the pattern and location are named, the match never."""
         handler = _handler_with_public_patterns(
             [{"name": "vhosts-path", "pattern": "/var/www/vhosts", "description": "server path"}]
         )
         hook_input = _write_input("/tmp/f.txt", "deploy to /var/www/vhosts/app")
         result = handler.handle(hook_input)
-        assert "/var/www/vhosts" in (result.reason or "")
+        assert "/var/www/vhosts" not in (result.reason or "")
 
     def test_edit_new_string_is_checked(self) -> None:
         handler = _handler_with_public_patterns(
@@ -2269,10 +2269,10 @@ class TestDisclosureLadder:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.DENY
-        assert "safe to name in this reason" in (result.reason or "")
+        assert "deliberately never shown" in (result.reason or "")
         assert "vhosts-path" in (result.reason or "")
 
-    def test_public_pattern_second_fire_is_terse_but_still_names_the_match(self) -> None:
+    def test_public_pattern_second_fire_is_terse_but_still_names_the_pattern(self) -> None:
         handler = _handler_with_public_patterns(
             [
                 {"name": "vhosts-path", "pattern": "/var/www/vhosts", "description": "d"},
@@ -2289,7 +2289,7 @@ class TestDisclosureLadder:
         result = handler.handle(second)
 
         assert result.decision == Decision.DENY
-        assert "safe to name in this reason" not in (result.reason or "")
+        assert "deliberately never shown" not in (result.reason or "")
         assert "etc-path" in (result.reason or "")
 
     def test_public_pattern_terse_leads_with_rule_id(self) -> None:
@@ -2337,7 +2337,7 @@ class TestDisclosureLadder:
         handler.handle(hook_input)
         result = handler.handle(hook_input)
 
-        assert "safe to name in this reason" in (result.reason or "")
+        assert "deliberately never shown" in (result.reason or "")
 
 
 class TestDeclaredAcceptancePatternsAreProducible:

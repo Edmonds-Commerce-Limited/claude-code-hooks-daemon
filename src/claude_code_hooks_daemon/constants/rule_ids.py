@@ -478,7 +478,8 @@ class RuleID:
     # sensitive_content handler — 2 rules (two independent sources)
     # ------------------------------------------------------------------
 
-    #: Content matches a configured public pattern (safe to name in the reason).
+    #: Content matches a configured public pattern (the reason names the pattern
+    #: and the location, never the matched text).
     SENSITIVE_PUBLIC_PATTERN: str = "R-SENSITIVE-PUBLIC-PATTERN"
 
     #: Content matches a gitignored secret word list term (never echoed).
