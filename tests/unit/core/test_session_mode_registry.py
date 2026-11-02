@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.core.session_mode_registry import (
     import_legacy_blockage_marker,
 )
 from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_json_atomically
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.session_modes import (
     DECLARED_BLOCKED_TTL_SECONDS,
     FOCUS_TTL_SECONDS,
@@ -985,7 +986,7 @@ class TestGoalLoopNotice:
         text = ModeNotice(
             NoticeKind.GOAL_LOOP_ENTERED, self._entry(), goal_cleared=goal_cleared
         ).text()
-        assert "run `bin/hooks-daemon clear-goal`" in text
+        assert f"run `{daemon_cli_command_for_docs('clear-goal')}`" in text
         assert "mkplan.bash --journal" in text
         assert "stop with the real blocker stated" in text
 
