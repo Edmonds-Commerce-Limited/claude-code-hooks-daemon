@@ -19,12 +19,12 @@ Agent sessions create branches and worktrees far faster than anything removes th
 
 Today nothing holds a limit (code facts with citations: [subagent-reports/261103-issue-152-code-facts.md](subagent-reports/261103-issue-152-code-facts.md)):
 
-- `branch_count_advisor` is advisory, runs only at SessionStart on new sessions, and counts only local `worktree-*` and `agent-*` branches. The daemon's own `worktree_create` names its branches `<slug>-<8hex>`, so the advisor does not count them.
+- `branch_count_advisor` is advisory, runs only at SessionStart on new sessions, and counts only local `worktree-*` and `agent-*` branches. The daemon's own `worktree_create` names its branches `<slug>-<8hex>`, so the advisor counts only those whose slug happens to start with `worktree` or `agent`, and misses the rest.
 - `worktree_create`'s branches are never deleted: WorktreeRemove leaves them behind.
 - No Stop or SubagentStop handler looks at git state.
 - No hook acts on branch creation.
 - The remote-delete guard (R-GIT-PUSH-DELETE-REMOTE) treats a branch as deletable only when it is an ancestor of the default branch, with no notion of an integration line. It also times out on a large delete (#153).
-- The default branch is resolved in three separate places (`git_sync.default_branch`, `delete-branch --protected-ref`, `worktree-reap --base-branch`), and no project setting names it or any integration line.
+- The default branch is decided in three separate places: `git_sync.default_branch` resolves it (`origin/HEAD`, then `main`/`master`), while `delete-branch --protected-ref` and `worktree-reap --base-branch` hardcode `main`. No project setting names it or any integration line.
 
 ## Goals
 

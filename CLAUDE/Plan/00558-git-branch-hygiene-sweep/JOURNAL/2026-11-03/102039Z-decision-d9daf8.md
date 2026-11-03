@@ -1,0 +1,7 @@
+## 10:20 · decision · —   — v2 from #152; fact-check folded in
+
+Plan revised to v2 from GitHub #152 (owner) and its follow-up comment (a second installation): v1's report-only sweep becomes the foundation of a branch WIP limit with enforcement (creation cap, duplicate warning, dormancy with a parked marker, Stop/SubagentStop guard, lossless cleanup after merge, integration lines in the delete guards, the daemon cleaning up its own WorktreeCreate branches). v1 is kept as PLAN-v1.md, with CRITIQUE-v1.md saying why it was replaced. Code facts verified by an Explore agent (subagent-reports/261103-issue-152-code-facts.md).
+
+Fact-check of v2 (hooks-daemon-plan-fact-checker): 13 verified, 1 refuted, 3 unverifiable-here (the #152 figures, and the pre-triage counts, which only this journal attests). Refuted: "the advisor does not count `worktree_create` branches". A slug starting with `worktree` or `agent` (including the `worktree` fallback slug) IS counted, so the advisor misses most daemon-made branches, not all. Corrected. Also sharpened: of the three default-branch decisions, only `git_sync.default_branch` resolves; `delete-branch` and `worktree-reap` hardcode `main`.
+
+Triage comment posted on #152 mapping each request to a goal, and asking the commenter for the name pattern of the "preserve" branches, which no code here creates. Open for the owner: the cap's default and scope (Q2), the dormancy ages (Q3).
