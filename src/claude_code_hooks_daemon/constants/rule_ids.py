@@ -59,6 +59,12 @@ class RuleID:
     #: git branch -D — force-deletes a branch without checking if it is merged.
     GIT_BRANCH_FORCE_DELETE: str = "R-GIT-BRANCH-FORCE-DELETE"
 
+    #: git worktree remove — loses dirty files, ignored work or an unheld HEAD.
+    GIT_WORKTREE_REMOVE_FORCE: str = "R-GIT-WORKTREE-REMOVE-FORCE"
+
+    #: A patch saved where git does not track it, then the worktree/branch destroyed.
+    GIT_EVACUATE_THEN_DESTROY: str = "R-GIT-EVACUATE-THEN-DESTROY"
+
     #: git commit --amend — rewrites the previous commit.
     GIT_COMMIT_AMEND: str = "R-GIT-COMMIT-AMEND"
 

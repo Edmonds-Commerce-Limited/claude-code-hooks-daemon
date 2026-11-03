@@ -68,6 +68,11 @@ class TestRuleIDConstants:
         """RuleID has a constant for git branch -D."""
         assert hasattr(RuleID, "GIT_BRANCH_FORCE_DELETE")
 
+    def test_lossless_removal_constants_exist(self) -> None:
+        """Plan 00558 sections 11 and 13: force removal and evacuate-then-destroy."""
+        assert RuleID.GIT_WORKTREE_REMOVE_FORCE == "R-GIT-WORKTREE-REMOVE-FORCE"
+        assert RuleID.GIT_EVACUATE_THEN_DESTROY == "R-GIT-EVACUATE-THEN-DESTROY"
+
     def test_git_commit_amend_constant_exists(self) -> None:
         """RuleID has a constant for git commit --amend."""
         assert hasattr(RuleID, "GIT_COMMIT_AMEND")

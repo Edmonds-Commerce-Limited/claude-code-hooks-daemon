@@ -2,15 +2,24 @@
 
 import logging
 import re
-from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.branch_cleanup import preview_paths, worktree_blockers
+from claude_code_hooks_daemon.core.force_removal import (
+    ALL_HOLDERS,
+    REMOTE_HOLDERS,
+    ContainmentUnknown,
+    lost_commit_count,
+    uncontained_tips,
+)
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -281,6 +290,13 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
         "git push --delete (or a `:<name>` refspec) deletes a branch or tag on the remote, "
         "in the shared repository",
     ),
+    # Forced or not: git deletes a worktree's ignored files either way (Plan 00558
+    # section 11), so every removal is judged and a lossless one is allowed.
+    (
+        rf"{_GIT_INVOCATION}worktree[ \t]+remove\b",
+        "git worktree remove deletes the worktree's ignored files, and with --force its "
+        "modified and untracked files and any commit only its HEAD holds",
+    ),
 )
 
 # Parallel, index-aligned RuleID for each entry in _DESTRUCTIVE_PATTERN_REASONS
@@ -306,6 +322,7 @@ _PATTERN_RULE_IDS: tuple[str, ...] = (
     RuleID.GIT_GC_PRUNE_NOW,
     RuleID.GIT_FILTER_HISTORY,
     RuleID.GIT_PUSH_DELETE_REMOTE,
+    RuleID.GIT_WORKTREE_REMOVE_FORCE,
 )
 
 # Shared teaching content appended after the rule-specific "why" in every
@@ -332,14 +349,27 @@ def _verbose_content(why: str) -> str:
 # reaches, so clearing up such a branch needs no human. The teaching for that
 # rule therefore says how to get there, not that the LLM may not.
 _BRANCH_DELETE_VERBOSE: Final[str] = (
-    "A forced branch delete skips git's merge check, so a branch whose tip is on no remote "
-    "would lose its commits with no recovery.\n\n"
-    "It is ALLOWED when every named branch's tip is reachable from a remote-tracking ref "
-    "(`git for-each-ref --contains <tip> refs/remotes/` is non-empty), judged in the "
-    "repository the command runs in (`git -C <dir>` and a `cd` in the same command are "
-    "honoured). Anything the check cannot establish is denied.\n\n"
-    "To proceed: push each branch named below (`git push -u origin <name>`), then retry. "
-    "`git branch -d` (lowercase) remains the merge-checked delete."
+    "A forced branch delete skips git's merge check, so a branch whose tip no other ref "
+    "holds would lose its commits with no recovery.\n\n"
+    "It is ALLOWED when every named branch's tip is reachable from a ref that survives the "
+    "command: another local branch, a tag or a remote-tracking ref (refs the same command "
+    "deletes do not count), judged in the repository the command runs in (`git -C <dir>` "
+    "and a `cd` in the same command are honoured). Anything the check cannot establish is "
+    "denied. With `branches.force_removal.mode: off` only remote-tracking refs count.\n\n"
+    "To proceed: push each branch named below (`git push -u origin <name>`) or merge it, "
+    "then retry. `git branch -d` (lowercase) remains the merge-checked delete."
+)
+_WORKTREE_REMOVE_VERBOSE: Final[str] = (
+    "`git worktree remove` deletes the worktree directory. Even without `--force` git "
+    "deletes its IGNORED files (scratch notes, reports, patches), and `--force` also "
+    "deletes modified and untracked files and any commit that only the worktree's HEAD "
+    "holds.\n\n"
+    "It is ALLOWED when nothing would be lost: `git status --porcelain` is empty (forced "
+    "form), every ignored entry matches a `branches.cleanup_after_merge.regenerable` glob "
+    "(`untracked/scratch/` never does), and, when forced, the HEAD is held by a branch, tag "
+    "or remote-tracking ref the same command does not delete.\n\n"
+    "To proceed: commit or push the work on the lane's branch, move each listed path to a "
+    "tracked home, or delete it deliberately, then retry. Ask a human if none of those fits."
 )
 # A remote ref deletion removes the ref from the SHARED repository, where this
 # checkout's reflog cannot bring it back and other people may be working from it.
@@ -364,7 +394,15 @@ _PUSH_DELETE_VERBOSE: Final[str] = (
 _VERBOSE_OVERRIDES: Final[dict[str, str]] = {
     RuleID.GIT_BRANCH_FORCE_DELETE: _BRANCH_DELETE_VERBOSE,
     RuleID.GIT_PUSH_DELETE_REMOTE: _PUSH_DELETE_VERBOSE,
+    RuleID.GIT_WORKTREE_REMOVE_FORCE: _WORKTREE_REMOVE_VERBOSE,
 }
+
+
+#: Rules with a lossless case: allowed when the containment proof passes (section 11).
+_LOSSLESS_WHEN_PROVEN: Final[frozenset[str]] = frozenset(
+    {RuleID.GIT_BRANCH_FORCE_DELETE, RuleID.GIT_WORKTREE_REMOVE_FORCE}
+)
+_MODE_OFF: Final[str] = "off"
 
 
 class _Unverifiable(Exception):
@@ -445,70 +483,227 @@ def _deleted_branches(command: str) -> list[tuple[GitInvocation, list[str]]]:
     return deletions
 
 
-def _not_on_a_remote(directory: Path, name: str) -> bool:
-    """True unless a remote-tracking ref in ``directory`` reaches branch ``name``'s tip.
+_WORKTREE: Final[str] = "worktree"
+_REMOVE: Final[str] = "remove"
+_FORCE_LETTER: Final[str] = "f"
 
-    Fails closed: a missing branch, a failing git and a timeout all answer True.
+
+@dataclass(frozen=True)
+class _WorktreeRemoval:
+    """One ``git worktree remove``: the invocation, the path it names, and whether forced."""
+
+    run: GitInvocation
+    path: str
+    forced: bool
+
+
+def _worktree_removals(command: str) -> list[_WorktreeRemoval]:
+    """Every ``git worktree remove`` in ``command``.
+
+    Raises:
+        _Unverifiable: When an option this reading does not know, or other than one
+            path, could change what is removed.
     """
-    tip = run_git(
-        directory,
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        f"{branch_ref(name)}^{{commit}}",
-        timeout=Timeout.GIT_CONTEXT,
-    )
-    if tip.returncode != 0 or not tip.stdout.strip():
-        return True
-    holders = run_git(
-        directory,
-        "for-each-ref",
-        "--contains",
-        tip.stdout.strip(),
-        "--count=1",
-        "--format=%(refname)",
-        "refs/remotes/",
-        timeout=Timeout.GIT_CONTEXT,
-    )
-    return holders.returncode != 0 or not holders.stdout.strip()
+    removals: list[_WorktreeRemoval] = []
+    for run in git_invocations(command):
+        if run.subcommand != _WORKTREE or run.arguments[:1] != (_REMOVE,):
+            continue
+        forced = options_ended = False
+        paths: list[str] = []
+        for argument in run.arguments[1:]:
+            if options_ended or not argument.startswith("-"):
+                paths.append(argument)
+            elif argument == _OPTIONS_END:
+                options_ended = True
+            elif argument == "--force" or (
+                not argument.startswith("--") and set(argument[1:]) == {_FORCE_LETTER}
+            ):
+                forced = True
+            else:
+                raise _Unverifiable(f"`{argument}` changes what `git worktree remove` removes")
+        if len(paths) != 1:
+            raise _Unverifiable("`git worktree remove` must name exactly one worktree")
+        removals.append(_WorktreeRemoval(run=run, path=paths[0], forced=forced))
+    return removals
+
+
+@dataclass
+class _HeldTip:
+    """A commit a deletion leaves to the refs that survive it."""
+
+    label: str
+    rule_id: str
+    directory: Path
+    tip: str | None
+    advice: str
+
+
+def _git_line(directory: Path, *args: str) -> str | None:
+    """The trimmed stdout of one git call, or None when it fails or prints nothing."""
+    result = run_git(directory, *args, timeout=Timeout.GIT_CONTEXT)
+    line = result.stdout.strip()
+    return line if result.returncode == 0 and line else None
+
+
+def _commit_of(directory: Path, revision: str) -> str | None:
+    return _git_line(directory, "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}")
+
+
+def _common_dir(directory: Path) -> str | None:
+    """The repository ``directory`` belongs to, shared by all of its worktrees."""
+    return _git_line(directory, "rev-parse", "--path-format=absolute", "--git-common-dir")
 
 
 def _unverified(reason: str) -> str:
     return f"This delete could not be verified as safe: {reason}. {_UNVERIFIED_ADVICE}"
 
 
-def _branch_delete_note(command: str, cwd: Path) -> str | None:
-    """None when every forced deletion names only branches a remote holds, else why not."""
-    if _SUBSTITUTION.search(command):
-        return _unverified("a command or process substitution can run a delete this reading misses")
-    try:
-        deletions = _deleted_branches(command)
-    except _Unverifiable as exc:
-        return _unverified(str(exc))
-    if not deletions:
-        return _unverified("no `git branch -D` / `git update-ref -d` invocation could be read")
-    stranded: list[str] = []
-    for run, names in deletions:
-        problem = placement_problem(run, cwd)
+def _with_principle(note: str) -> str:
+    return f"{note}\n\n{BRANCH_LIMIT_PRINCIPLE}"
+
+
+def _lost_phrase(count: int | None) -> str:
+    if count is None:
+        return "an unknown number of commits"
+    return f"{count} commit" + ("" if count == 1 else "s")
+
+
+class _ForceRemovalJudge:
+    """Judges every forced branch delete and worktree removal in one command as a whole."""
+
+    def __init__(self, cwd: Path, branches: BranchesConfig) -> None:
+        self._cwd = cwd
+        self._branches = branches
+        self._judge_worktrees = branches.force_removal.mode != _MODE_OFF
+        self._namespaces = ALL_HOLDERS if self._judge_worktrees else REMOTE_HOLDERS
+        self._held: dict[str, list[_HeldTip]] = {}
+        self._excluded: dict[str, set[str]] = {}
+        self._unheld: list[_HeldTip] = []
+        self._worktree_losses: list[str] = []
+
+    def _place(self, run: GitInvocation) -> Path:
+        problem = placement_problem(run, self._cwd)
         if problem is not None:
-            return _unverified(problem)
-        directory = invocation_directory(run, cwd)
-        if not names:
-            return _unverified("it names no branch")
+            raise _Unverifiable(problem)
+        directory = invocation_directory(run, self._cwd)
         if not path_is_dir(directory, unreadable_means=False):
-            return _unverified(f"`{directory}` is not a directory")
-        for name in names:
-            if not _LITERAL_BRANCH_NAME.fullmatch(name):
-                return _unverified(f"`{name}` is not a literal branch name")
-            if _not_on_a_remote(directory, name):
-                where = "" if directory == cwd else f"-C {directory} "
-                stranded.append(f"`{name}` (push it: `git {where}push -u origin {name}`)")
-    if not stranded:
-        return None
-    return (
-        "Not deleted: these branches are not on any remote (or could not be checked), so the "
-        "delete could lose commits: " + "; ".join(stranded) + ". Push each one first, then retry."
-    )
+            raise _Unverifiable(f"`{directory}` is not a directory")
+        return directory
+
+    def _hold(self, held: _HeldTip) -> None:
+        """Queue ``held`` for the containment proof of its repository."""
+        repository = _common_dir(held.directory) if held.tip is not None else None
+        if repository is None:
+            self._unheld.append(held)
+            return
+        self._held.setdefault(repository, []).append(held)
+
+    def _add_deletions(self, deletions: list[tuple[GitInvocation, list[str]]]) -> None:
+        for run, names in deletions:
+            directory = self._place(run)
+            if not names:
+                raise _Unverifiable("it names no branch")
+            where = "" if directory == self._cwd else f"-C {directory} "
+            for name in names:
+                if not _LITERAL_BRANCH_NAME.fullmatch(name):
+                    raise _Unverifiable(f"`{name}` is not a literal branch name")
+                repository = _common_dir(directory)
+                if repository is not None:
+                    self._excluded.setdefault(repository, set()).add(branch_ref(name))
+                self._hold(
+                    _HeldTip(
+                        label=f"`{name}`",
+                        rule_id=RuleID.GIT_BRANCH_FORCE_DELETE,
+                        directory=directory,
+                        tip=_commit_of(directory, branch_ref(name)),
+                        advice=f"push it: `git {where}push -u origin {name}`",
+                    )
+                )
+
+    def _add_removal(self, removal: _WorktreeRemoval) -> None:
+        path = self._place(removal.run) / Path(removal.path).expanduser()
+        if not path_is_dir(path, unreadable_means=False):
+            raise _Unverifiable(f"worktree `{path}` is not a directory")
+        blockers = worktree_blockers(path, self._branches.cleanup_after_merge.regenerable)
+        if blockers:
+            self._worktree_losses.append(
+                f"worktree `{path}` holds {len(blockers)} path(s) the removal would lose: "
+                f"{preview_paths(blockers)}"
+            )
+        if removal.forced:
+            self._hold(
+                _HeldTip(
+                    label=f"worktree `{path}` HEAD",
+                    rule_id=RuleID.GIT_WORKTREE_REMOVE_FORCE,
+                    directory=path,
+                    tip=_commit_of(path, "HEAD"),
+                    advice=f"commit it to a branch: `git -C {path} switch -c <name>`, then push",
+                )
+            )
+
+    def _prove(self) -> None:
+        """Move every held tip no surviving ref contains onto ``_unheld``."""
+        for repository, held in self._held.items():
+            excluded = self._excluded.get(repository, set())
+            tips = [h.tip for h in held if h.tip is not None]
+            try:
+                stranded = uncontained_tips(held[0].directory, tips, excluded, self._namespaces)
+            except ContainmentUnknown as exc:
+                labels = ", ".join(h.label for h in held)
+                raise _Unverifiable(f"what holds {labels} could not be read ({exc})") from exc
+            self._unheld.extend(h for h in held if h.tip in stranded)
+
+    def _describe(self, held: _HeldTip) -> str:
+        if held.tip is None:
+            return f"{held.label} (its tip could not be read)"
+        repository = _common_dir(held.directory) or ""
+        count = lost_commit_count(
+            held.directory, held.tip, self._excluded.get(repository, set()), self._namespaces
+        )
+        return f"{held.label} ({held.advice}) would lose {_lost_phrase(count)}"
+
+    def judge(self, command: str) -> tuple[str, str] | None:
+        """None when nothing would be lost, else the rule that denies and why."""
+        deletions = _deleted_branches(command)
+        removals = _worktree_removals(command) if self._judge_worktrees else []
+        if not deletions and not removals:
+            if self._judge_worktrees or not _worktree_removals(command):
+                raise _Unverifiable("no forced branch delete or worktree removal could be read")
+            return None
+        self._add_deletions(deletions)
+        for removal in removals:
+            self._add_removal(removal)
+        self._prove()
+        losses = [*self._worktree_losses, *(self._describe(h) for h in self._unheld)]
+        if not losses:
+            return None
+        worktree_rule = self._worktree_losses or any(
+            h.rule_id == RuleID.GIT_WORKTREE_REMOVE_FORCE for h in self._unheld
+        )
+        rule_id = (
+            RuleID.GIT_WORKTREE_REMOVE_FORCE if worktree_rule else RuleID.GIT_BRANCH_FORCE_DELETE
+        )
+        note = (
+            "Not removed: nothing that survives this command (another branch, a tag, a "
+            "remote-tracking ref) holds this work, or it could not be checked, so it would be "
+            "lost: " + "; ".join(losses) + ". Push or merge each branch, commit or move each "
+            "path, then retry."
+        )
+        return rule_id, _with_principle(note)
+
+
+def _force_removal_note(
+    command: str, cwd: Path, branches: BranchesConfig, fallback_rule: str
+) -> tuple[str, str] | None:
+    """None when every forced deletion and worktree removal loses nothing, else (rule, why)."""
+    if _SUBSTITUTION.search(command):
+        return fallback_rule, _with_principle(
+            _unverified("a command or process substitution can run a delete this reading misses")
+        )
+    try:
+        return _ForceRemovalJudge(cwd, branches).judge(command)
+    except _Unverifiable as exc:
+        return fallback_rule, _with_principle(_unverified(str(exc)))
 
 
 _PUSH: Final[str] = "push"
@@ -909,6 +1104,13 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
         "run it, stop and ask the human to run it themselves",
     ),
     (
+        RuleID.GIT_WORKTREE_REMOVE_FORCE,
+        "`git worktree remove [--force]` of a worktree holding dirty files, unregenerable "
+        "ignored content, or (forced) a HEAD no surviving ref holds",
+        "The removal deletes that work with no recovery",
+        "Commit, push or deliberately delete each listed path, then remove",
+    ),
+    (
         RuleID.GIT_DESTRUCTIVE_UNREADABLE,
         "a git command that may destroy changes and cannot be read in full",
         "Fail closed: a command this handler cannot parse might be any of the rules above",
@@ -1098,7 +1300,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         # every named tip is on a remote nothing can be lost. It is judged only when
         # no other rule matched too, so a compound command cannot ride the allowance,
         # and the denial then names the rule that actually blocks it.
-        others = [matched for matched in rule_ids if matched != RuleID.GIT_BRANCH_FORCE_DELETE]
+        others = [matched for matched in rule_ids if matched not in _LOSSLESS_WHEN_PROVEN]
         rule_id = others[0] if others else (rule_ids[0] if rule_ids else None)
         if rule_id is None:
             # Defensive only: handle() is normally invoked exclusively after
@@ -1114,20 +1316,23 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         rule = self._rules_by_id[rule_id]
 
         note: str | None = None
-        # A remote delete has the same safe case, judged only when it is the sole rule.
         branches = self._branches
-        check: Callable[[str, Path], str | None] | None = (
-            _branch_delete_note
-            if not others
-            else (
-                (lambda text, cwd: _remote_delete_note(text, cwd, branches))
-                if rule_ids == [RuleID.GIT_PUSH_DELETE_REMOTE]
-                else None
-            )
-        )
-        if check is not None:
+        if not others:
             try:
-                note = check(command, self._cwd(hook_input))
+                judged = _force_removal_note(command, self._cwd(hook_input), branches, rule_id)
+            except RuntimeError as exc:
+                logger.warning("destructive_git: removal not verified: %s", exc)
+                judged = rule_id, _with_principle(
+                    _unverified("the directory the command runs in is unknown")
+                )
+            if judged is None:
+                return GatingResult(decision=Decision.ALLOW)
+            rule_id, note = judged
+            rule = self._rules_by_id[rule_id]
+        elif rule_ids == [RuleID.GIT_PUSH_DELETE_REMOTE]:
+            # A remote delete has the same safe case, judged only when it is the sole rule.
+            try:
+                note = _remote_delete_note(command, self._cwd(hook_input), branches)
             except RuntimeError as exc:
                 logger.warning("destructive_git: delete not verified: %s", exc)
                 note = _unverified("the directory the command runs in is unknown")
@@ -1393,6 +1598,24 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                     r"permanently",
                 ],
                 safety_notes="Uses non-existent file path - and bash -n -c only parses the command, never executes it",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="git worktree remove --force",
+                command="bash -n -c 'git worktree remove --force /nonexistent-safe-test-worktree'",
+                dispatch_as_bash=True,
+                description=(
+                    "Blocks a worktree removal that cannot be proven lossless; the denial "
+                    "names the branch-limit principle"
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"R-GIT-WORKTREE-REMOVE-FORCE",
+                    r"never so it disappears",
+                ],
+                safety_notes="Names a non-existent path - and bash -n -c only parses the command",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
