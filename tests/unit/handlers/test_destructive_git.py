@@ -32,6 +32,8 @@ _DECLARED_RULE_IDS = {
     RuleID.GIT_GC_PRUNE_NOW,
     RuleID.GIT_FILTER_HISTORY,
     RuleID.GIT_PUSH_DELETE_REMOTE,
+    RuleID.GIT_WORKTREE_REMOVE_FORCE,
+    RuleID.GIT_EVACUATE_THEN_DESTROY,
     RuleID.GIT_DESTRUCTIVE_UNREADABLE,
 }
 
@@ -795,17 +797,15 @@ class TestDestructiveGitPushForceSeparatorScoping:
         """Create handler instance."""
         return DestructiveGitHandler()
 
-    def test_compound_push_then_worktree_remove_force_not_blocked(self, handler):
-        """`git push ...; git worktree remove <path> --force` must NOT be blocked."""
+    def test_compound_push_then_worktree_remove_force_is_not_a_force_push(self, handler):
+        """The removal's `--force` is judged by the worktree rule, never as a push."""
         command = "git push origin main; git worktree remove /tmp/wt --force"
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
-        assert handler.matches(hook_input) is False
+        assert handler._match_rule_ids(command) == [RuleID.GIT_WORKTREE_REMOVE_FORCE]
 
-    def test_worktree_remove_force_alone_not_blocked(self, handler):
-        """A standalone `git worktree remove --force` must NOT be blocked."""
+    def test_worktree_remove_force_alone_is_only_the_worktree_rule(self, handler):
+        """A standalone `git worktree remove --force` goes to the lossless check (Plan 00558)."""
         command = "git worktree remove /tmp/wt --force"
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
-        assert handler.matches(hook_input) is False
+        assert handler._match_rule_ids(command) == [RuleID.GIT_WORKTREE_REMOVE_FORCE]
 
     def test_push_force_still_blocked(self, handler):
         """A real `git push --force` must still be blocked."""

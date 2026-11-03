@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core import Decision, force_removal
 from claude_code_hooks_daemon.handlers.pre_tool_use import destructive_git
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import DestructiveGitHandler
 
@@ -222,16 +222,12 @@ class TestFailClosed:
         work: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        real = destructive_git.run_git
-
-        def remote_query_fails(
+        def containment_query_fails(
             cwd: Path, *args: str, **kwargs: Any
         ) -> subprocess.CompletedProcess[str]:
-            if args and args[0] == "for-each-ref":
-                return subprocess.CompletedProcess(["git", *args], 128, "", "boom")
-            return real(cwd, *args, **kwargs)
+            return subprocess.CompletedProcess(["git", *args], 128, "", "boom")
 
-        monkeypatch.setattr(destructive_git, "run_git", remote_query_fails)
+        monkeypatch.setattr(force_removal, "run_git", containment_query_fails)
         assert "pushed" in _reason(handler, "git branch -D pushed", work)
 
     def test_a_bounded_timeout_is_passed_to_git(

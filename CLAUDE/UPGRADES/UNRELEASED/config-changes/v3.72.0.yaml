@@ -56,9 +56,15 @@ config_changes:
     - key: branches.stop_guard
       description: The Stop and SubagentStop guard over touched branches.
     - key: branches.force_removal
-      description: Lossless `worktree remove --force` and `branch -D`.
+      description: >-
+        Lossless `worktree remove [--force]` and `branch -D` (`mode` block | off).
+        `off` trusts only remote-tracking refs for a forced branch delete and
+        leaves worktree removal unjudged.
     - key: branches.evacuation
-      description: The evacuate-then-destroy shape.
+      description: >-
+        The evacuate-then-destroy shape (`mode` block | warn | off): one command
+        that writes a worktree's or branch's work to an untracked file and then
+        destroys that worktree or branch.
     - key: branches.cleanup_after_merge
       description: What happens to a work branch once merged (`mode` advise).
     - key: branches.cleanup_after_merge.regenerable

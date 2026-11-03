@@ -216,7 +216,8 @@ def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]
     return (*dirty, *kept)
 
 
-def _preview(paths: Sequence[str]) -> str:
+def preview_paths(paths: Sequence[str]) -> str:
+    """The first ``BLOCKER_PREVIEW`` of ``paths``, then how many more there are."""
     shown = ", ".join(paths[:BLOCKER_PREVIEW])
     rest = len(paths) - BLOCKER_PREVIEW
     return f"{shown} and {rest} more" if rest > 0 else shown
@@ -419,7 +420,7 @@ def clean_sweep(
             if blockers:
                 skipped.append(
                     f"{name}: the worktree {held_by} holds {len(blockers)} path(s) a removal "
-                    f"would lose: {_preview(blockers)}"
+                    f"would lose: {preview_paths(blockers)}"
                 )
                 continue
         verdict = _classify(repo, name, targets, never_work, ignore_worktree=held_by is not None)
@@ -500,6 +501,7 @@ __all__ = [
     "linked_worktrees",
     "merge_target_qualifies",
     "policy_refusal",
+    "preview_paths",
     "remote_delete_command",
     "render",
     "worktree_blockers",
