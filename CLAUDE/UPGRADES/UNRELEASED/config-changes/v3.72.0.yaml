@@ -103,6 +103,17 @@ config_changes:
         `hooksDaemonRoute`) and adds each session and agent that changes a
         branch to its `hooksDaemonTouchedBy` record, in git config
         (priority 40).
+    - key: handlers.stop.branch_stop_guard
+      description: >-
+        The Stop handler that denies a stop (at most three times) leaving a
+        dirty worktree, commits no remote holds, or a merged branch not deleted,
+        and adds an hourly line naming branches at the noisy dormancy stage
+        (priority 9; `branches.stop_guard.mode`).
+    - key: handlers.subagent_stop.branch_subagent_stop_guard
+      description: >-
+        The SubagentStop twin of `branch_stop_guard`, judging the branches the
+        sub-agent touched; `branches.stop_guard.unpushed_subagent` sets how its
+        unpushed commits are treated (priority 12).
 
   renamed:
     - old_key: handlers.session_start.branch_count_advisor.options.max_open_branches

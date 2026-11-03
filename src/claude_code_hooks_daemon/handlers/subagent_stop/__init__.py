@@ -13,12 +13,14 @@ catches a report too big to survive the wire, this one catches a report the
 agent said it wrote and did not.
 """
 
+from .branch_subagent_stop_guard import BranchSubagentStopGuardHandler
 from .cron_subagent_stop_enforcer import CronSubagentStopEnforcerHandler
 from .subagent_cache_aggregator import SubagentCacheAggregatorHandler
 from .subagent_report_path_verifier import SubagentReportPathVerifierHandler
 from .subagent_report_size_blocker import SubagentReportSizeBlockerHandler
 
 __all__: list[str] = [
+    "BranchSubagentStopGuardHandler",
     "CronSubagentStopEnforcerHandler",
     "SubagentCacheAggregatorHandler",
     "SubagentReportPathVerifierHandler",

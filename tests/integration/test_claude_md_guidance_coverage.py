@@ -92,6 +92,10 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "and stop, and to ignore the triggering request"
     ),
     "UsagePauseStopGateHandler": "T1 denies a paused session's stop until only the resume cron remains",
+    "BranchStopGuardHandler": (
+        "T1 denies a stop that leaves a dirty worktree, unpushed commits or a merged "
+        "branch behind, three times at most, and the agent must know to finish them first"
+    ),
     "IdleWorkableIssueStopGateHandler": (
         "T1 denies a main-thread idle stop while a workable issue is cached and nothing is in flight"
     ),
@@ -505,6 +509,10 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "T4: subagent_context_budget's section states this gate's stop block and its "
         "three-block limit; a second section would bill the same fact twice"
     ),
+    "BranchSubagentStopGuardHandler": (
+        "T4: branch_stop_guard's section states the shared guard, its three-block "
+        "limit and the sub-agent scope; a second section would bill the same fact twice"
+    ),
     "DispatchModelRecorderHandler": "observe-only sensor, no agent-facing action",
     "SubagentTierAdvisorHandler": (
         "T2: the advice arrives with the dispatch it is about and governs the NEXT one; "
@@ -797,6 +805,11 @@ class TestAnExemptHandlerCannotQuietlyDeny:
     # genuinely covers them. Deliberately empty: every deny-capable handler
     # currently earns its own section. An addition here should be argued.
     _EXEMPT_DESPITE_DENYING: ClassVar[dict[str, str]] = {
+        "BranchSubagentStopGuardHandler": (
+            "branch_stop_guard's section, which states that a stop (main thread or "
+            "sub-agent) leaving branch work behind is denied up to three times and names "
+            "the sub-agent scope. Verified by reading that section"
+        ),
         "SubagentHandoffGateHandler": (
             "subagent_context_budget's section, which states that past hard_tokens this "
             "gate BLOCKS the agent's stop until the named handoff file exists, at most "

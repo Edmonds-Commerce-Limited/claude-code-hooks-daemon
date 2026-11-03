@@ -71,6 +71,9 @@ class RuleID:
     #: creating a branch while the open work branches are at ``branches.wip.cap``.
     BRANCH_WIP_CAP: str = "R-BRANCH-WIP-CAP"
 
+    #: a stop that leaves a dirty worktree, unpushed commits or a merged branch behind.
+    BRANCH_STOP_GUARD: str = "R-BRANCH-STOP-GUARD"
+
     #: git checkout -f/--force — discards the working tree without naming a file.
     GIT_CHECKOUT_FORCE: str = "R-GIT-CHECKOUT-FORCE"
 

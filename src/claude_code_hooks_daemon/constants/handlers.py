@@ -763,6 +763,18 @@ class HandlerID:
         config_key="branch_creation_guard",
         display_name="branch-creation-guard",
     )
+    # Branch stop guards (Stop, SubagentStop) -- Plan 00558 Task 4.4: a stop
+    # that leaves a dirty worktree, unpushed commits or a merged branch behind.
+    BRANCH_STOP_GUARD = HandlerIDMeta(
+        class_name="BranchStopGuardHandler",
+        config_key="branch_stop_guard",
+        display_name="branch-stop-guard",
+    )
+    BRANCH_SUBAGENT_STOP_GUARD = HandlerIDMeta(
+        class_name="BranchSubagentStopGuardHandler",
+        config_key="branch_subagent_stop_guard",
+        display_name="branch-subagent-stop-guard",
+    )
     # Operator signal notice (PostToolUse) -- Plan 00508: the ccy supervisor
     # types a host reboot/shutdown warning only when the session is idle, so a
     # busy agent hears it late. This adds the same warning as hook context at

@@ -1236,6 +1236,10 @@ handlers:
   # `remind_prompt_library`) stay gone; Plan 00307 Task 3.1 adds the first live
   # handler back onto this event.
   subagent_stop:
+    branch_subagent_stop_guard:  # SubagentStop twin of branch_stop_guard (Plan 00558 Task 4.4)
+      enabled: true
+      priority: 12
+
     subagent_report_size_blocker:  # Blocks an oversized subagent final message
       enabled: true
       priority: 15
@@ -1357,6 +1361,10 @@ handlers:
   # cannot shadow auto_continue_stop in turn. See
   # tests/integration/test_stop_chain_terminal_shadowing.py.
   stop:
+    branch_stop_guard:  # Denies (three times at most) a stop leaving a dirty worktree, unpushed commits or a merged branch; hourly noisy-dormancy line (Plan 00558 Task 4.4)
+      enabled: true
+      priority: 9
+
     idle_workable_issue_stop_gate:  # Refuses an idle stop while a workable issue is cached and nothing is in flight (Plan 00470 Phase 7)
       enabled: true  # Inert unless the project declares an `issue-sdlc` persistent cron job; never terminal
       priority: 4
@@ -1552,6 +1560,8 @@ plugins:
 branches:
   cleanup_after_merge:
     mode: act
+  stop_guard:
+    unpushed_subagent: advise  # This repo's sub-agents commit without pushing and the coordinator merges locally, until the owner rules on Q5
 
 # Project layout truths (Plan 00288): which dirs are source/test. Read only
 # through the ProjectLayout facade, which composes this with
