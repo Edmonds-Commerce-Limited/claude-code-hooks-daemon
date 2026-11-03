@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
 
+
 def stop_guard_rule(rule_id: str, who: str) -> Rule:
     """The rule a stop guard files its deny under; ``who`` names the stopping identity."""
     return Rule(

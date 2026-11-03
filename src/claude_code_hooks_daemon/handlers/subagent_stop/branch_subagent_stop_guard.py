@@ -13,13 +13,13 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import AcceptanceTest, Decision, RecommendedModel, TestType
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget import (
     STATE_HARD_ENGAGED,
     STATE_KIND,
 )
-from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.handlers.stop.branch_stop_guard import (
     BranchStopGuardBase,
     stop_guard_rule,
