@@ -8,6 +8,10 @@
       "Bash(echo \"SUB_DIFF=$?\")"
     ]
   },
+  "claudeMdExcludes": [
+    "**/untracked/worktrees/*/CLAUDE.md",
+    "**/.claude/worktrees/*/CLAUDE.md"
+  ],
   "extraKnownMarketplaces": {
     "defence-before-fix": {
       "source": {

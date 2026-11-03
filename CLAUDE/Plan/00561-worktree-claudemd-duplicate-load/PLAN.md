@@ -29,9 +29,9 @@ Claude Code's `claudeMdExcludes` setting takes absolute-path globs and skips the
 
 ### Phase 1: Fix and guard
 
-- [ ] ⬜ **Task 1.1**: Add `claudeMdExcludes` with `**/untracked/worktrees/*/CLAUDE.md` and `**/.claude/worktrees/*/CLAUDE.md` to `.claude/settings.local.json` (tracked in this repository).
-- [ ] ⬜ **Task 1.2**: Add a test that reads `.claude/settings.local.json` and asserts that every worktree root the daemon creates is covered by one of its `claudeMdExcludes` globs. Derive the roots from the code that creates them, not from a copied list.
-- [ ] ⬜ **Task 1.3**: Document the setting and the reason in `CLAUDE/Worktree.md`.
+- [x] ✅ **Task 1.1**: Add `claudeMdExcludes` with `**/untracked/worktrees/*/CLAUDE.md` and `**/.claude/worktrees/*/CLAUDE.md` to `.claude/settings.local.json` (tracked in this repository).
+- [x] ✅ **Task 1.2**: Add a test that reads `.claude/settings.local.json` and asserts that every worktree root the daemon creates is covered by one of its `claudeMdExcludes` globs. Derive the roots from the code that creates them, not from a copied list.
+- [x] ✅ **Task 1.3**: Document the setting and the reason in `CLAUDE/Worktree.md`.
 
 ## Open questions (owner)
 

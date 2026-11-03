@@ -185,6 +185,28 @@ script is denied along with every other full-suite command.
 ./scripts/validate_worktrees.sh worktree-plan-00042 # one worktree
 ```
 
+## Why `claudeMdExcludes` Skips Worktree-Root `CLAUDE.md`
+
+A sub-agent rooted at the main checkout loads the root `CLAUDE.md` at launch.
+A subdirectory `CLAUDE.md` loads on demand, at the first read of a file under
+that directory, so the first read inside a worktree injects that worktree's
+copy of the same root file (about 119 KB, roughly 30,000 tokens) on top of the
+copy already loaded. On Plan 00558 this pushed several worktree agents to their
+context budget before they wrote any code (GitHub #156, Plan 00561).
+
+`.claude/settings.local.json` therefore sets `claudeMdExcludes`, an array of
+globs matched against absolute file paths:
+
+- `**/untracked/worktrees/*/CLAUDE.md` (worktrees from `scripts/setup_worktree.sh`)
+- `**/.claude/worktrees/*/CLAUDE.md` (worktrees from the WorktreeCreate handler)
+
+Only the worktree-root `CLAUDE.md` is skipped. A worktree's nested files
+(`src/CLAUDE.md`, `tests/CLAUDE.md`, `CLAUDE/CLAUDE.md`, and the rules files) still
+load on demand. The setting takes effect live, with no restart.
+`tests/integration/test_worktree_claudemd_excludes.py` fails when a worktree
+root the daemon creates has no matching glob, so a new worktree location must
+add its exclusion.
+
 ## Running This Project's QA Suite Inside a Worktree
 
 Wherever the core document says "run this project's test/QA suite", the
