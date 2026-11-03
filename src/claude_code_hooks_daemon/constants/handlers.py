@@ -755,6 +755,20 @@ class HandlerID:
         config_key="branch_touch_recorder",
         display_name="branch-touch-recorder",
     )
+    # Evacuation recorder (PostToolUse) -- Plan 00558 Task 4.5: records each
+    # evacuation under the current turn, for destructive_git's same-turn check.
+    EVACUATION_RECORDER = HandlerIDMeta(
+        class_name="EvacuationRecorderHandler",
+        config_key="evacuation_recorder",
+        display_name="evacuation-recorder",
+    )
+    # Evacuation turn marker (UserPromptSubmit) -- Plan 00558 Task 4.5: advances
+    # the main thread's turn, which ends the turn's evacuation records.
+    EVACUATION_TURN_MARKER = HandlerIDMeta(
+        class_name="EvacuationTurnMarkerHandler",
+        config_key="evacuation_turn_marker",
+        display_name="evacuation-turn-marker",
+    )
     # Branch creation guard (PreToolUse) -- Plan 00558 Task 4.2: a git command
     # or an isolated Agent dispatch that creates a branch while the open work
     # branches are at the cap is denied; a likely duplicate is warned about.

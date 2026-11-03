@@ -103,6 +103,16 @@ config_changes:
         `hooksDaemonRoute`) and adds each session and agent that changes a
         branch to its `hooksDaemonTouchedBy` record, in git config
         (priority 40).
+    - key: handlers.post_tool_use.evacuation_recorder
+      description: >-
+        The PostToolUse handler that records the worktree and branches of an
+        evacuation (work copied to an untracked file) for the current turn, so
+        `destructive_git` denies destroying them in a later command of the
+        same turn (priority 41).
+    - key: handlers.user_prompt_submit.evacuation_turn_marker
+      description: >-
+        The UserPromptSubmit handler that advances the main thread's turn, which
+        ends the previous turn's evacuation records (priority 43).
 
   renamed:
     - old_key: handlers.session_start.branch_count_advisor.options.max_open_branches

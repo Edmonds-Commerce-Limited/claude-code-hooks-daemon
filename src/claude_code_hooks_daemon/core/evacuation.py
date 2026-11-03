@@ -11,6 +11,7 @@ What cannot be placed is judged as matching: the check fails closed.
 """
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -61,7 +62,9 @@ class EvacuationMatch:
 
 
 @dataclass(frozen=True)
-class _Evacuation:
+class Evacuation:
+    """Work copied to an untracked landing, and where it came from."""
+
     text: str
     landing: str
     #: The worktree the work comes from; None when it cannot be placed.
@@ -173,7 +176,7 @@ def _named_branches(arguments: tuple[str, ...]) -> set[str]:
     return names
 
 
-def _evacuation(steps: list[SimpleCommand], index: int, cwd: Path) -> _Evacuation | None:
+def _evacuation(steps: list[SimpleCommand], index: int, cwd: Path) -> Evacuation | None:
     step = steps[index]
     run = step.git
     if run is None or not _evacuates(run):
@@ -196,7 +199,7 @@ def _evacuation(steps: list[SimpleCommand], index: int, cwd: Path) -> _Evacuatio
     branches = set(_named_branches(run.arguments))
     if toplevel is not None:
         branches |= _branch_of(toplevel)
-    return _Evacuation(
+    return Evacuation(
         text=" ".join(("git", run.subcommand, *run.arguments)),
         landing=landing,
         toplevel=toplevel,
@@ -284,7 +287,7 @@ def _destructions(step: SimpleCommand, cwd: Path) -> list[_Destruction]:
     ]
 
 
-def _same_work(evacuation: _Evacuation, destruction: _Destruction) -> bool:
+def _same_work(evacuation: Evacuation, destruction: _Destruction) -> bool:
     if evacuation.toplevel is None or not destruction.placed:
         return True
     if evacuation.branches & destruction.branches:
@@ -305,21 +308,71 @@ def evacuate_then_destroy(command: str, cwd: Path) -> EvacuationMatch | None:
     """
     steps = simple_commands(command)
     # Only a command carrying both shapes is worth a git call.
-    if not any(step.git is not None and _evacuates(step.git) for step in steps):
+    if not _has_evacuating_step(steps) or not any(_destroys(step) for step in steps):
         return None
-    if not any(_destroys(step) for step in steps):
-        return None
-    evacuations: list[_Evacuation] = []
+    earlier: list[Evacuation] = []
     for index, step in enumerate(steps):
-        for destruction in _destructions(step, cwd):
-            for evacuation in evacuations:
-                if _same_work(evacuation, destruction):
-                    return EvacuationMatch(
-                        evacuation=evacuation.text,
-                        landing=evacuation.landing,
-                        destruction=destruction.text,
-                    )
+        match = _first_match(step, cwd, earlier)
+        if match is not None:
+            return match
         found = _evacuation(steps, index, cwd)
         if found is not None:
-            evacuations.append(found)
+            earlier.append(found)
+    return None
+
+
+def _has_evacuating_step(steps: list[SimpleCommand]) -> bool:
+    return any(step.git is not None and _evacuates(step.git) for step in steps)
+
+
+def _first_match(
+    step: SimpleCommand, cwd: Path, works: Sequence[Evacuation]
+) -> EvacuationMatch | None:
+    for destruction in _destructions(step, cwd):
+        for work in works:
+            if _same_work(work, destruction):
+                return EvacuationMatch(
+                    evacuation=work.text, landing=work.landing, destruction=destruction.text
+                )
+    return None
+
+
+def evacuations(command: str, cwd: Path) -> list[Evacuation]:
+    """Every evacuation in ``command``: work copied to a landing nothing tracks.
+
+    Args:
+        command: The Bash command line.
+        cwd: The directory it starts in.
+
+    Returns:
+        The evacuations, each with the worktree toplevel (None when it cannot
+        be placed) and the branches whose work it read.
+    """
+    steps = simple_commands(command)
+    if not _has_evacuating_step(steps):
+        return []
+    found = (_evacuation(steps, index, cwd) for index in range(len(steps)))
+    return [work for work in found if work is not None]
+
+
+def destroys_recorded(
+    command: str, cwd: Path, works: Sequence[Evacuation]
+) -> EvacuationMatch | None:
+    """The first destruction in ``command`` of the source of an earlier recorded evacuation.
+
+    Args:
+        command: The Bash command line.
+        cwd: The directory it starts in.
+        works: Evacuations recorded earlier in the same turn.
+
+    Returns:
+        The match, or None when nothing recorded is destroyed.
+    """
+    if not works:
+        return None
+    for step in simple_commands(command):
+        if _destroys(step):
+            match = _first_match(step, cwd, works)
+            if match is not None:
+                return match
     return None
