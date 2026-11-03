@@ -342,23 +342,19 @@ def _list_refs(repo: Path, remote: str, default_ref: str | None) -> list[_Row]:
     return _parse_listing(result.stdout)
 
 
-def _refs_hash(repo: Path, rows: list[_Row]) -> str:
-    """Digest of every ref that can contain a tip: the remote refs and the tags.
+def _refs_hash(rows: list[_Row]) -> str:
+    """Digest of every ref that can contain a tip: the remote-tracking refs.
 
-    Keys the containment cache, so a moved, added or deleted tag or remote ref
-    invalidates every cached containment verdict.
+    Keys the containment cache, so a moved, added or deleted remote ref
+    invalidates every cached containment verdict. Tags are not containment
+    (see :func:`containment_of`), so they are not in the key either.
     """
-    tags = run_git(
-        repo, "for-each-ref", "--format=%(refname) %(objectname)", _TAGS, timeout=_GIT_TIMEOUT
-    )
-    if tags.returncode != 0:
-        raise BranchInventoryError(f"git for-each-ref {_TAGS} failed: {tags.stderr.strip()}")
     remote_refs = sorted(
         f"{r.refname} {r.sha}"
         for r in rows
         if isinstance(r, _RefRow) and r.refname.startswith(_REMOTES)
     )
-    return hashlib.sha256("\n".join([*remote_refs, tags.stdout]).encode()).hexdigest()
+    return hashlib.sha256("\n".join(remote_refs).encode()).hexdigest()
 
 
 def _ref_exists(repo: Path, ref: str) -> bool:
@@ -520,10 +516,15 @@ def _short(ref: str) -> str:
 def containment_of(
     repo: Path, *, name: str, tip: str, config: BranchesConfig, default: str | None
 ) -> tuple[Containment, str | None] | None:
-    """Where ``tip`` lives on ``config.remote`` or in a tag (DESIGN.md section 4); None when git fails.
+    """Where ``tip`` lives among ``config.remote``'s tracking refs (DESIGN.md section 4).
 
-    The cherry arm of "in the default branch" is not repeated here: a branch
-    whose patches are all in the default is classified patch-equivalent first.
+    None when git fails. Only remote-tracking refs count: a local tag may never
+    have been pushed, and counting one would report a branch no remote holds
+    as contained, silencing its CONTAINED NOWHERE warning. Telling a pushed
+    tag from a local one needs ``ls-remote``, a network call the inventory
+    never makes. The cherry arm of "in the default branch" is not repeated
+    here: a branch whose patches are all in the default is classified
+    patch-equivalent first.
     """
     remote = config.remote
     if default is not None:
@@ -539,7 +540,6 @@ def containment_of(
         f"--contains={tip}",
         "--format=%(refname)",
         f"{_REMOTES}{remote}",
-        _TAGS,
         timeout=_GIT_TIMEOUT,
     )
     if result.returncode != 0:
@@ -548,13 +548,11 @@ def containment_of(
     own = f"{remote_prefix}{name}"
     head = f"{remote_prefix}{_REMOTE_HEAD}"
     others = sorted(ref for ref in result.stdout.splitlines() if ref and ref not in {head, own})
-
-    def vouches(ref: str) -> bool:
-        if not ref.startswith(remote_prefix):
-            return True  # a tag
-        return _never_work(ref.removeprefix(remote_prefix), config, default) is not None
-
-    vouching = [ref for ref in others if vouches(ref)]
+    vouching = [
+        ref
+        for ref in others
+        if _never_work(ref.removeprefix(remote_prefix), config, default) is not None
+    ]
     if vouching:
         return Containment.REMOTE_REF, _short(vouching[0])
     if own in result.stdout.splitlines():
