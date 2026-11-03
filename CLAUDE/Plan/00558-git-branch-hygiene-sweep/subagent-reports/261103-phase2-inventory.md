@@ -88,4 +88,9 @@ Tests: `tests/unit/core/test_branch_inventory.py`, 70 tests. Module coverage is 
 
 ## QA
 
-See the commit message and the coordinator reply for the `llm_qa.py changed` verdict.
+`FULL_QA_LOCK_WAIT_SECONDS=5400 ./scripts/qa/llm_qa.py changed` was run twice.
+
+- First run: `QA: 39/42 PASSED, 2/42 FAILED, 1/42 NOT MEANINGFUL`. There were three mypy errors in `core/branch_inventory.py`: a local variable reused the name of a set-typed loop variable. These were fixed in a follow-up commit, which also stopped the tests importing `run_git` through the module.
+- Second run: `QA: 41/42 PASSED, 1/42 FAILED`. The one failure is `changed_tests`: 3522 passed, 0 failed, 5 skipped. Its only finding is the accepted "too-broad" unmapped notice for the hub files `config/models.py`, `daemon/branch_safety.py`, `daemon/cli.py`, `daemon/controller.py`, `daemon/init_config.py`, `handlers/registry.py` and `utils/git_sync.py`.
+- The new modules map by name, so no `changed_tests_map.yaml` rule was needed.
+- The brief's journal category `progress` is not valid for `mkplan.bash --journal`, so the entry was written as `action`.
