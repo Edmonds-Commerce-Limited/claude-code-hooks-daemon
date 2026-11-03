@@ -487,6 +487,25 @@ class TestContainment:
         assert record.containment == Containment.NOWHERE
         assert record.contained_in is None
 
+    def test_a_tip_held_only_by_a_local_tag_is_contained_nowhere(self, repo: Path) -> None:
+        tip = _git(repo, "rev-parse", "dormant-tagged")
+        assert _git(repo, "tag", "--points-at", tip) == "keep-me"
+        assert branch_inventory.containment_of(
+            repo, name="dormant-tagged", tip=tip, config=_CONFIG, default="main"
+        ) == (Containment.NOWHERE, None)
+
+    def test_a_cached_tag_vouch_from_an_older_cache_is_not_reused(self, repo: Path) -> None:
+        """An older cache version may hold a verdict a tag vouched for; it is discarded."""
+        cache = repo / CACHE_RELATIVE_PATH
+        build_inventory(repo, _CONFIG, now=NOW)
+        document = json.loads(cache.read_text(encoding="utf-8"))
+        for key in document["containment"]:
+            document["containment"][key] = {"containment": "in another remote ref", "ref": "x"}
+        document["version"] = 2
+        cache.write_text(json.dumps(document), encoding="utf-8")
+        record = build_inventory(repo, _CONFIG, now=NOW).records["dormant-tagged"]
+        assert record.containment == Containment.NOWHERE
+
     def test_in_default(self, repo: Path) -> None:
         """Reachable only through the helper: a branch in the default is merged first."""
         tip = _git(repo, "rev-parse", "merged-default")

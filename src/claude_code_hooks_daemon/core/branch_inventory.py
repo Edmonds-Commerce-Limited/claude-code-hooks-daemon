@@ -60,13 +60,13 @@ logger = logging.getLogger(__name__)
 
 #: Repository-relative path of the per-pair cache.
 CACHE_RELATIVE_PATH = Path("untracked/branch-inventory/cache.json")
-_CACHE_VERSION = 2
+#: Containment never counts tags; a version-2 entry may hold a tag's vouch.
+_CACHE_VERSION = 3
 
 _SECONDS_PER_DAY = 86_400
 _REFS = "refs/"
 _HEADS = "refs/heads/"
 _REMOTES = "refs/remotes/"
-_TAGS = "refs/tags"
 _REMOTE_HEAD = "HEAD"
 #: Field separator of the step-1 listing. A commit message cannot hold a NUL
 #: (git refuses one), and neither can a ref name, sha, date or count.
@@ -146,7 +146,8 @@ class Containment(StrEnum):
 
     Only ``DEFAULT`` and ``REMOTE_REF`` make a cleanup candidate, and
     ``REMOTE_REF`` is granted only by a ref that is not itself work: the
-    default, an integration line, a tag, an exempt or a protected branch. Work
+    default, an integration line, an exempt or a protected branch on the
+    remote (never a tag, which may be local only). Work
     branches that contain each other are ``OTHER_WORK_BRANCH``: two copies of
     unmerged work never vouch for each other.
     """
@@ -757,7 +758,7 @@ def build_inventory(
     rows = _list_refs(repo, remote, default_ref)
     by_name = _group_rows(rows, remote)
     sha_of = {row.refname: row.sha for row in rows if isinstance(row, _RefRow)}
-    refs_hash = _refs_hash(repo, rows)
+    refs_hash = _refs_hash(rows)
 
     targets: list[_Target] = []
     if default is not None and default_ref is not None and default_ref in sha_of:
