@@ -159,6 +159,21 @@ Shipped on `worktree-558-create`:
    falls back to the name shape; any other route not eligible. Count the `git config --get`
    in the `2 * GIT_WORKTREE` WorktreeRemove budget.
 
+## Part B done (creator record, touch record, WorktreeRemove eligibility)
+
+- `core/branch_records.py`: `identity`, `write_creator` (unchecked, 3 config writes),
+  `record_creation` (show-ref + no existing creator), `creator_route`,
+  `worktree_branch_deletable`, `record_touch` (spend-ledger state kind `branch-touch`,
+  key `<session>:<agent>`; agent binding of a `<session>:` creator), and
+  `touched_branches(repo, session_id, agent_id) -> list[str]` (reads git config, so it
+  takes the repository, not the untracked dir; raises RuntimeError on a git failure).
+- PostToolUse `branch_touch_recorder` (priority 40), enabled in `.claude/hooks-daemon.yaml`,
+  init template line, manifest entry, release note 096.
+- WorktreeCreate writes the creator (`<session>:`, route `worktree_create`) after a
+  successful add; `Timeout.GIT_BRANCH_RECORD_CALLS = 3` added to its budget; init.sh wait 85.
+- WorktreeRemove uses `worktree_branch_deletable`; the read runs under its `_Clock`, and
+  `_BRANCH_STEP_RESERVE` grew to `3 * GIT_CONTEXT` (the event budget is unchanged).
+
 ## Addition from the coordinator (after the creator record exists)
 
 `handlers/worktree_remove/worktree_remove_handler.py` decides a branch is eligible for its

@@ -39,7 +39,18 @@ logger = logging.getLogger(__name__)
 
 #: git subcommands that change the checked-out branch's history or position.
 TOUCH_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
-    {"commit", "merge", "rebase", "cherry-pick", "am", "revert", "reset", "switch", "checkout", "pull"}
+    {
+        "commit",
+        "merge",
+        "rebase",
+        "cherry-pick",
+        "am",
+        "revert",
+        "reset",
+        "switch",
+        "checkout",
+        "pull",
+    }
 )
 
 #: File tools and the tool-input field naming the file each one writes.

@@ -25,6 +25,7 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.worktree_naming import is_worktree_create_name
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path, write_state
 
@@ -126,7 +127,12 @@ def record_creation(
         if _get_all(repo, name, CREATOR_KEY, Timeout.GIT_CONTEXT):
             return False
     except RuntimeError as exc:
-        logger.warning("branch_records: creator of %s left unrecorded: %s", name, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"branch_records: the creator of {name} is left unrecorded; a recorder "
+            "never blocks the call it observes",
+        )
         return False
     return write_creator(repo, name, identity(session_id, agent_id), route, now=now)
 
@@ -153,7 +159,12 @@ def worktree_branch_deletable(
     try:
         route = creator_route(repo, name, timeout=timeout)
     except RuntimeError as exc:
-        logger.warning("branch_records: %s kept, its creator record is unreadable: %s", name, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"branch_records: {name} is kept because its creator record is "
+            "unreadable; an unproven branch is never deleted",
+        )
         return False
     if route is None:
         return is_worktree_create_name(name)
@@ -186,7 +197,12 @@ def record_touch(
         touched = _get_all(repo, branch, TOUCHED_KEY, Timeout.GIT_CONTEXT)
         creators = _get_all(repo, branch, CREATOR_KEY, Timeout.GIT_CONTEXT) if agent_id else []
     except RuntimeError as exc:
-        logger.warning("branch_records: touch of %s left unrecorded: %s", branch, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"branch_records: the touch of {branch} is left unrecorded; a recorder "
+            "never blocks the call it observes",
+        )
         return
     if who not in touched and not _set(
         repo, branch, TOUCHED_KEY, who, Timeout.GIT_CONTEXT, add=True

@@ -351,6 +351,12 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "ORIG_HEAD..HEAD-touched findings are shown) or where the rest still "
         "surfaces (the next SessionStart sweep)"
     ),
+    "BranchTouchRecorderHandler": (
+        "T3 the recorder is silent and never fires a message, yet its git config "
+        "keys decide what WorktreeRemove deletes and what the stop guard asks "
+        "about: the agent must know before acting that the hooksDaemon* keys "
+        "are records, not settings to edit by hand"
+    ),
     "CleanupAfterMergeHandler": (
         "T3 the deletion happens after the merge the agent already ran, so the "
         "fire-time report cannot change the merge: the agent needs to know BEFORE "

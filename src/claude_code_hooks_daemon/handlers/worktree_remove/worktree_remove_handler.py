@@ -42,8 +42,8 @@ from claude_code_hooks_daemon.core.branch_cleanup import (
     render,
     worktree_blockers,
 )
-from claude_code_hooks_daemon.core.handler_bases import WorktreeRemoveHandlerBase
 from claude_code_hooks_daemon.core.branch_records import worktree_branch_deletable
+from claude_code_hooks_daemon.core.handler_bases import WorktreeRemoveHandlerBase
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     WorktreeRecord,
