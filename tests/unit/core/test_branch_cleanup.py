@@ -430,3 +430,60 @@ class TestFailuresAndEdges:
         _git(repo, "push", "--quiet", "origin", "feat")
         report = clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b")
         assert "git push origin --delete feat" in report.commands
+
+
+class TestDeleteIfMerged:
+    """The WorktreeRemove branch step (Plan 00558 Task 3.2)."""
+
+    def test_a_merged_branch_is_deleted_with_its_restore_line(self, repo: Path) -> None:
+        tip = _merged(repo, "feat")
+        report = branch_cleanup.delete_if_merged(repo, "feat", config=_CONFIG, default="main")
+        assert report.deleted == ("feat",)
+        assert report.commands == (f"git branch feat {tip}",)
+        assert "feat" not in _branches(repo)
+
+    def test_a_branch_merged_into_an_integration_line_is_deleted(self, repo: Path) -> None:
+        _git(repo, "checkout", "-b", "release/1")
+        _git(repo, "checkout", "main")
+        _unproven(repo, "feat")
+        _git(repo, "checkout", "release/1")
+        _git(repo, "merge", "--no-ff", "-m", "Merge feat", "feat")
+        _git(repo, "checkout", "main")
+        report = branch_cleanup.delete_if_merged(repo, "feat", config=_CONFIG, default="main")
+        assert report.deleted == ("feat",)
+
+    def test_unmerged_and_patch_equivalent_are_left_for_the_sweep(self, repo: Path) -> None:
+        _unproven(repo, "novel")
+        _patch_equivalent(repo, "picked")
+        for name in ("novel", "picked"):
+            report = branch_cleanup.delete_if_merged(repo, name, config=_CONFIG, default="main")
+            assert report.deleted == ()
+            assert "branch-sweep --clean" in report.skipped[0]
+        assert {"novel", "picked"} <= _branches(repo)
+
+    def test_policy_refuses_an_exempt_branch(self, repo: Path) -> None:
+        _merged(repo, "users/alice")
+        report = branch_cleanup.delete_if_merged(
+            repo, "users/alice", config=_CONFIG, default="main"
+        )
+        assert report.deleted == ()
+        assert "users/alice" in _branches(repo)
+
+    def test_a_branch_checked_out_elsewhere_is_refused_by_the_proof(self, repo: Path) -> None:
+        _merged(repo, "feat")
+        _worktree(repo, "feat")
+        report = branch_cleanup.delete_if_merged(repo, "feat", config=_CONFIG, default="main")
+        assert report.deleted == ()
+        assert "feat" in _branches(repo)
+
+    def test_a_refused_delete_is_reported(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _merged(repo, "feat")
+        monkeypatch.setattr(
+            branch_cleanup,
+            "delete_branches",
+            lambda *a, **k: DeletionReport(refused=True, blockers=("moved",)),
+        )
+        report = branch_cleanup.delete_if_merged(repo, "feat", config=_CONFIG, default="main")
+        assert report.skipped == ("feat: moved",)

@@ -175,6 +175,28 @@ def effective_wip_cap(config: BranchesConfig, legacy_options: Mapping[str, Any])
     return config.wip.cap
 
 
+def effective_behind_threshold(config: BranchesConfig, legacy_options: Mapping[str, Any]) -> int:
+    """``sweep.behind_threshold`` if set, else ``behind_main_threshold``, else the default."""
+    explicit = config.explicit_behind_threshold()
+    if explicit is not None:
+        return explicit
+    legacy = legacy_options.get("behind_main_threshold")
+    if isinstance(legacy, int) and not isinstance(legacy, bool) and legacy >= 1:
+        return legacy
+    return config.sweep.behind_threshold
+
+
+def _far_behind(inventory: BranchInventory, threshold: int) -> list[BranchRecord]:
+    """Unmerged work branches more than ``threshold`` commits behind the default."""
+    done = _NEVER_WORK | _MERGED | {BranchState.PATCH_EQUIVALENT}
+    return [
+        inventory.records[name]
+        for name in sorted(inventory.records)
+        if inventory.records[name].state not in done
+        and (inventory.records[name].behind or 0) > threshold
+    ]
+
+
 def deprecation_line(config: BranchesConfig, legacy_options: Mapping[str, Any]) -> str | None:
     """The one-release notice for old options still set while their new key is not."""
     explicit = {
@@ -386,19 +408,30 @@ def session_summary(
     cap: int,
     new_session: bool,
     deprecation: str | None = None,
+    behind_threshold: int | None = None,
 ) -> list[str]:
     """The SessionStart lines; empty when there is nothing to say.
 
     Contained-nowhere branches are named on every source; the merged count,
-    the dormant branches, the unresolved-default warning and the count against
-    the cap only on a new session. At most :data:`MAX_SUMMARY_LINES` branch
-    lines, then one "and N more" line.
+    the dormant branches, the work branches more than ``behind_threshold``
+    (default ``branches.sweep.behind_threshold``) commits behind the default,
+    the unresolved-default warning and the count against the cap only on a new
+    session. At most :data:`MAX_SUMMARY_LINES` branch lines, then one "and N
+    more" line.
     """
     groups = group_records(inventory)
     entries = [_nowhere_line(r, config) for r in groups.contained_nowhere]
     notes: list[str] = []
     if new_session:
         entries += [f"Dormant: {_dormant_line(r).strip()}" for r in groups.dormant]
+        threshold = config.sweep.behind_threshold if behind_threshold is None else behind_threshold
+        default = inventory.default_branch or "the default branch"
+        entries += [
+            f"Behind {default}: {r.name} is {r.behind} commits behind "
+            f"(branches.sweep.behind_threshold: {threshold}); rebase or merge {default} "
+            "into it, or delete it if it is done."
+            for r in _far_behind(inventory, threshold)
+        ]
         if inventory.default_ref is None:
             notes.append(
                 "The default branch could not be resolved (branches.default: "

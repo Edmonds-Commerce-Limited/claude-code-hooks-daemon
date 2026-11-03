@@ -318,3 +318,52 @@ class TestSessionSummary:
             clean, _CONFIG, cap=10, new_session=True, deprecation="old option"
         )
         assert lines == ["old option"]
+
+
+class TestBehindDefault:
+    """The far-behind-default line, restored (Plan 00558 Task 3.3)."""
+
+    def test_a_work_branch_past_the_threshold_is_named_on_a_new_session(self) -> None:
+        far = _inventory(
+            _record("w", BranchState.LIVE, behind=80), _record("ok", BranchState.LIVE, behind=3)
+        )
+        lines = branch_sweep.session_summary(far, _CONFIG, cap=10, new_session=True)
+        assert [line for line in lines if "behind" in line] == [
+            "Behind main: w is 80 commits behind (branches.sweep.behind_threshold: 50); "
+            "rebase or merge main into it, or delete it if it is done."
+        ]
+
+    def test_not_on_resume(self) -> None:
+        far = _inventory(_record("w", BranchState.LIVE, behind=80))
+        assert branch_sweep.session_summary(far, _CONFIG, cap=10, new_session=False) == []
+
+    def test_the_threshold_is_exclusive_and_configurable(self) -> None:
+        far = _inventory(_record("w", BranchState.LIVE, behind=50))
+        assert branch_sweep.session_summary(far, _CONFIG, cap=10, new_session=True) == []
+        lines = branch_sweep.session_summary(
+            far, _CONFIG, cap=10, new_session=True, behind_threshold=49
+        )
+        assert any("w is 50 commits behind" in line for line in lines)
+
+    def test_merged_never_work_and_unknown_are_not_named(self) -> None:
+        records = (
+            _record("done", BranchState.MERGED_DEFAULT, behind=500),
+            _record("users/x", BranchState.EXEMPT, behind=500),
+            _record("unknown", BranchState.LIVE, behind=None),
+        )
+        lines = branch_sweep.session_summary(
+            _inventory(*records), _CONFIG, cap=10, new_session=True
+        )
+        assert not any("commits behind" in line for line in lines)
+
+    def test_behind_lines_share_the_line_cap(self) -> None:
+        many = [_record(f"b{i:02d}", BranchState.LIVE, behind=99) for i in range(30)]
+        lines = branch_sweep.session_summary(_inventory(*many), _CONFIG, cap=100, new_session=True)
+        assert sum("commits behind" in line for line in lines) == branch_sweep.MAX_SUMMARY_LINES
+
+    def test_the_legacy_option_is_the_fallback(self) -> None:
+        assert branch_sweep.effective_behind_threshold(BranchesConfig(), {}) == 50
+        legacy = {"behind_main_threshold": 7}
+        assert branch_sweep.effective_behind_threshold(BranchesConfig(), legacy) == 7
+        explicit = BranchesConfig.model_validate({"sweep": {"behind_threshold": 9}})
+        assert branch_sweep.effective_behind_threshold(explicit, legacy) == 9
