@@ -6486,6 +6486,39 @@ def _branches_config(repo: Path) -> BranchesConfig:
     return Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml").branches
 
 
+def cmd_branch_sweep(args: argparse.Namespace) -> int:
+    """Report every branch by state, actionable groups first (Plan 00558 Task 2.2).
+
+    A report, not a gate: exit 0 whatever it finds, 1 only when the inventory
+    cannot run at all (not a git repository, or git failed on a bulk listing).
+
+    Returns:
+        0 on a report, 1 when there is no inventory.
+    """
+    from claude_code_hooks_daemon.config.models import handler_options
+    from claude_code_hooks_daemon.core import branch_inventory, branch_sweep
+
+    repo = get_project_path(getattr(args, "project_root", None))
+    config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
+    branches = config.branches
+    legacy = handler_options(config.handlers.session_start.get(HandlerID.BRANCH_SWEEP.config_key))
+    try:
+        inventory = branch_inventory.build_inventory(repo, branches)
+    except branch_inventory.BranchInventoryError as e:
+        print(f"ERROR: no branch inventory for {repo}: {e}", file=sys.stderr)
+        return 1
+    cap = branch_sweep.effective_wip_cap(branches, legacy)
+    if args.json:
+        print(json.dumps(branch_sweep.report_json(inventory, cap=cap, config=branches), indent=2))
+        return 0
+    for line in branch_sweep.render_report(inventory, branches, cap=cap, show_all=args.all):
+        print(line)
+    notice = branch_sweep.deprecation_line(branches, legacy)
+    if notice is not None:
+        print(notice)
+    return 0
+
+
 def cmd_delete_branch(args: argparse.Namespace) -> int:
     """Delete local branches only when their safety can be proven (Plan 00206).
 
@@ -12886,6 +12919,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format: text (default) or json",
     )
     parser_delete_branch.set_defaults(func=cmd_delete_branch)
+
+    # branch-sweep command (Plan 00558 Task 2.2)
+    from claude_code_hooks_daemon.core.branch_sweep import JSON_RECORD_KEYS
+
+    parser_branch_sweep = subparsers.add_parser(
+        "branch-sweep",
+        help="Report every branch by state: contained nowhere, merged, dormant, live, "
+        "parked; and open work against branches.wip.cap (a report, never a gate)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Exit 0 for a report whatever it finds; 1 only when the inventory cannot run "
+            "(not a git repository).\n\n"
+            "--json prints {default_branch, default_ref, worktrees_known, open_work, cap, "
+            "branches: [...]}. Every branch record carries these keys, in this order:\n  "
+            + ", ".join(JSON_RECORD_KEYS)
+            + "\n'group' is one of contained-nowhere, merged, patch-equivalent, dormant, "
+            "live, parked, unclassified, not-work; 'action' is the command that secures or "
+            "deletes the branch, or null."
+        ),
+    )
+    parser_branch_sweep.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the full records as JSON (every branch, exempt and protected included)",
+    )
+    parser_branch_sweep.add_argument(
+        "--all",
+        action="store_true",
+        help="Also list the default, integration-line, protected and exempt branches",
+    )
+    parser_branch_sweep.set_defaults(func=cmd_branch_sweep)
 
     # release-notes command
     parser_release_notes = subparsers.add_parser(

@@ -104,3 +104,21 @@ config_changes:
       migration_note: >-
         Set `relay_source: null` to stop install and upgrade provisioning the
         binary.
+    - key: handlers.session_start.branch_count_advisor
+      recommended: false
+      dormant: false
+      description: >-
+        Replaced by the `branch_sweep` SessionStart handler, which summarises the
+        branch inventory: branches whose commits no remote ref holds (every
+        session start), merged branches not yet deleted, dormant branches and the
+        open-work count against `branches.wip.cap` (new sessions). It counts
+        every non-exempt branch, not only `worktree-*` and `agent-*`, and is
+        silent when there is nothing to report. The old key is an alias: an
+        existing `enabled: false` still silences the new summary, and its
+        `max_open_branches` / `behind_main_threshold` options are read for one
+        release while the `branches.*` keys are unset.
+      migration_note: >-
+        Rename the key to `handlers.session_start.branch_sweep` and move the two
+        options to `branches.wip.cap` and `branches.sweep.behind_threshold`;
+        while they stay, the summary prints a deprecation line. Run
+        `bin/hooks-daemon branch-sweep` for the full report.
