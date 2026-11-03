@@ -104,9 +104,7 @@ class BranchSweepHandler(SessionStartHandlerBase):
         )
         if not lines:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
-        return AdvisoryResult(
-            decision=Decision.ALLOW, context=[f"{_ICON}  GIT BRANCHES:", *lines]
-        )
+        return AdvisoryResult(decision=Decision.ALLOW, context=[f"{_ICON}  GIT BRANCHES:", *lines])
 
     def get_claude_md(self) -> str | None:
         """The branch summary and the cap are a standing policy."""
@@ -144,9 +142,7 @@ class BranchSweepHandler(SessionStartHandlerBase):
                     "`hooks-daemon branch-sweep`. Silent otherwise. It never blocks."
                 ),
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[
-                    r"CONTAINED NOWHERE|merged branch|Dormant|Open work|^$"
-                ],
+                expected_message_patterns=[r"CONTAINED NOWHERE|merged branch|Dormant|Open work|^$"],
                 safety_notes="Advisory only; reads branch refs, changes nothing",
                 test_type=TestType.CONTEXT,
                 requires_event="SessionStart event",

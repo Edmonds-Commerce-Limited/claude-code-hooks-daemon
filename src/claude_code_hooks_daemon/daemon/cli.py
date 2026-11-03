@@ -6501,9 +6501,7 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     repo = get_project_path(getattr(args, "project_root", None))
     config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
     branches = config.branches
-    legacy = handler_options(
-        config.handlers.session_start.get(HandlerID.BRANCH_SWEEP.config_key)
-    )
+    legacy = handler_options(config.handlers.session_start.get(HandlerID.BRANCH_SWEEP.config_key))
     try:
         inventory = branch_inventory.build_inventory(repo, branches)
     except branch_inventory.BranchInventoryError as e:

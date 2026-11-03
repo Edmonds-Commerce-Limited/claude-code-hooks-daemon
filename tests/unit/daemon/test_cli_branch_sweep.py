@@ -24,8 +24,18 @@ _BUILD = "claude_code_hooks_daemon.core.branch_inventory.build_inventory"
 
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com",
-         "-c", "commit.gpgsign=false", *args],
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
         check=True,
         capture_output=True,
     )
@@ -76,9 +86,7 @@ class TestParser:
     def test_help_documents_the_json_keys(self) -> None:
         parser = build_parser()
         sub = next(
-            action
-            for action in parser._actions
-            if isinstance(action, argparse._SubParsersAction)
+            action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
         )
         epilog = sub.choices["branch-sweep"].epilog or ""
         for key in JSON_RECORD_KEYS:
@@ -143,8 +151,6 @@ class TestExitCodes:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         (tmp_path / ".claude" / "hooks-daemon").mkdir(parents=True)
-        with patch(
-            "claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path
-        ):
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
             assert cmd_branch_sweep(_args(tmp_path)) == 1
         assert "ERROR" in capsys.readouterr().err

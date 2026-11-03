@@ -274,9 +274,7 @@ class TestSessionSummary:
         assert branch_sweep.session_summary(clean, _CONFIG, cap=10, new_session=True) == []
 
     def test_new_session_reports_everything(self, inventory: BranchInventory) -> None:
-        text = "\n".join(
-            branch_sweep.session_summary(inventory, _CONFIG, cap=10, new_session=True)
-        )
+        text = "\n".join(branch_sweep.session_summary(inventory, _CONFIG, cap=10, new_session=True))
         assert "CONTAINED NOWHERE: lost" in text
         assert "git push -u origin lost" in text
         assert "1 merged branch" in text
@@ -309,8 +307,10 @@ class TestSessionSummary:
         lines = branch_sweep.session_summary(_inventory(*many), _CONFIG, cap=100, new_session=True)
         assert len(lines) <= branch_sweep.MAX_SUMMARY_LINES + 3
         overflow = [line for line in lines if "more: run `bin/hooks-daemon branch-sweep`" in line]
-        assert overflow == [f"  and {30 - branch_sweep.MAX_SUMMARY_LINES} more: run "
-                            "`bin/hooks-daemon branch-sweep`"]
+        assert overflow == [
+            f"  and {30 - branch_sweep.MAX_SUMMARY_LINES} more: run "
+            "`bin/hooks-daemon branch-sweep`"
+        ]
 
     def test_deprecation_line_alone_is_not_silent(self) -> None:
         clean = _inventory(_record("w", BranchState.LIVE))
