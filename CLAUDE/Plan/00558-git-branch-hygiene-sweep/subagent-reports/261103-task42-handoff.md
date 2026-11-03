@@ -125,3 +125,14 @@ must be added to that budget and to init.sh, or the add can finish after the hoo
 Everything in the brief: tests first, the four modules above, registration, the labels snapshot
 writer, budget update, release note 097, manifest entries, guidance, acceptance tests, targeted
 QA, report `subagent-reports/261103-task42.md`.
+
+## Addition from the coordinator (after the creator record exists)
+
+`handlers/worktree_remove/worktree_remove_handler.py` decides a branch is eligible for its
+merged-branch delete by name shape alone (`is_worktree_create_name`, `<slug>-<8hex>`). Make it
+prefer the creator record: eligible when `branch.<name>.hooksDaemonRoute` is `worktree_create`
+(so WorktreeCreate must write exactly that route value); fall back to the name shape ONLY when
+the branch has no creator record at all; a record with any other route is NOT eligible. RED test
+first for each of the three cases. Grep for `is_worktree_create_name` to find the call and read
+only that function. Note the WorktreeRemove event also has a pinned git budget
+(`constants/timeout.py`, `2 * GIT_WORKTREE`), so count the extra `git config --get` read.
