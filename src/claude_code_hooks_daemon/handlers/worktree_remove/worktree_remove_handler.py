@@ -44,13 +44,13 @@ from claude_code_hooks_daemon.core.branch_cleanup import (
 )
 from claude_code_hooks_daemon.core.handler_bases import WorktreeRemoveHandlerBase
 from claude_code_hooks_daemon.core.worktree_naming import is_worktree_create_name
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     WorktreeRecord,
     branch_ref,
     parse_worktree_porcelain,
     run_git,
 )
-from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_sync import resolve_default_branch
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 
@@ -219,6 +219,12 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
                     probe_timeout=clock.timeout(Timeout.GIT_CONTEXT, f"the merge probe of {name}"),
                 )
             except RuntimeError as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="an unread ref listing proves nothing, so the branch is kept "
+                    "for branch-sweep --clean",
+                )
                 report = CleanupReport(skipped=(f"{name}: the refs could not be read: {exc}",))
         logger.warning(
             "worktree_remove: %s (no creator record yet; eligible by its <slug>-<8 hex> name): %s",
