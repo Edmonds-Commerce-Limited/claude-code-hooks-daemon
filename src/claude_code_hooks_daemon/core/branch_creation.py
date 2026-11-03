@@ -26,8 +26,13 @@ from typing import Final, Literal
 
 from claude_code_hooks_daemon.config.models import BRANCH_DEFAULT_AUTO, BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.core.branch_inventory import is_work_branch, worktrees_by_branch
+from claude_code_hooks_daemon.core.branch_inventory import (
+    DormancyStage,
+    is_work_branch,
+    worktrees_by_branch,
+)
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
@@ -67,6 +72,7 @@ class CreationVerdict:
 
     decision: Decision
     lines: tuple[str, ...]
+    rule_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -120,7 +126,11 @@ def number_tokens(name: str) -> frozenset[str]:
 def write_labels(path: Path, branches: list[dict[str, object]]) -> None:
     """Write ``{name: {group, action}}`` from ``report_json(...)["branches"]``."""
     labels = {
-        str(record["name"]): {"group": record.get("group"), "action": record.get("action")}
+        str(record["name"]): {
+            "group": record.get("group"),
+            "action": record.get("action"),
+            "stage": record.get("dormancy_stage"),
+        }
         for record in branches
     }
     try:
@@ -260,6 +270,62 @@ def _cap_lines(
     return lines
 
 
+def _dormant_work(
+    groups: list[_Work], config: BranchesConfig, labels: Labels
+) -> tuple[list[_Work], list[_Work]]:
+    """``(block-stage, noisy-stage)`` work from the labels snapshot's inventory stages.
+
+    The inventory already aged and parked-checked each branch when the snapshot
+    was written, so no age is computed here. ``dormancy.mode: warn`` folds the
+    block stage into the noisy one; ``off`` reports nothing.
+    """
+    mode = config.dormancy.mode
+    if mode == "off":
+        return [], []
+    blocking: list[_Work] = []
+    noisy: list[_Work] = []
+    for work in groups:
+        stage = next(
+            (
+                labels[name].get("stage")
+                for name in (work.name, *sorted(work.names))
+                if labels.get(name, {}).get("stage")
+            ),
+            None,
+        )
+        if stage == DormancyStage.BLOCK and mode == "block":
+            blocking.append(work)
+        elif stage in (DormancyStage.NOISY, DormancyStage.BLOCK):
+            noisy.append(work)
+    return blocking, noisy
+
+
+def _dormancy_deny_lines(
+    blocking: list[_Work], now: float, worktrees: Mapping[str, Path] | None
+) -> list[str]:
+    lines = [
+        "Dormant branches are blocking new work. Finish and merge each one, park it "
+        "(`hooks-daemon branch-park <name> --reason ...`), or delete it (`delete-branch`):"
+    ]
+    ordered = sorted(blocking, key=lambda work: (work.committed, work.name))
+    lines.extend(f"  - {_detail(work, now, worktrees)}" for work in ordered[:DENY_LIST_LIMIT])
+    if len(ordered) > DENY_LIST_LIMIT:
+        lines.append(f"  ... and {len(ordered) - DENY_LIST_LIMIT} more")
+    lines.append(BRANCH_LIMIT_PRINCIPLE)
+    return lines
+
+
+def _dormancy_context_lines(
+    noisy: list[_Work], now: float, worktrees: Mapping[str, Path] | None
+) -> list[str]:
+    ordered = sorted(noisy, key=lambda work: (work.committed, work.name))
+    details = ", ".join(_detail(work, now, worktrees) for work in ordered[:DUPLICATE_LIST_LIMIT])
+    return [
+        f"Dormant branches need attention: {details}. Finish, park "
+        "(`hooks-daemon branch-park <name> --reason ...`) or delete them."
+    ]
+
+
 def _duplicates(new_name: str, groups: list[_Work], remote: str) -> list[_Work]:
     new_stem = stem(new_name, remote)
     new_numbers = number_tokens(new_stem)
@@ -318,7 +384,8 @@ def creation_verdict(
         if new_name and config.duplicates.mode == "warn"
         else []
     )
-    if not over_cap and not duplicates:
+    blocking, noisy = _dormant_work(groups, config, labels or {})
+    if not over_cap and not duplicates and not blocking and not noisy:
         return CreationVerdict("allow", ())
     worktrees = worktrees_by_branch(repo)
     lines: list[str] = []
@@ -330,7 +397,15 @@ def creation_verdict(
             )
     if over_cap:
         lines.extend(_cap_lines(groups, config, labels or {}, moment, worktrees))
-    decision: Decision = "warn"
-    if over_cap and config.wip.mode == "block":
-        decision = "deny"
-    return CreationVerdict(decision, tuple(lines))
+    if blocking:
+        lines.extend(_dormancy_deny_lines(blocking, moment, worktrees))
+    elif noisy:
+        lines.extend(_dormancy_context_lines(noisy, moment, worktrees))
+    cap_deny = over_cap and config.wip.mode == "block"
+    if cap_deny:
+        return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_WIP_CAP)
+    if blocking:
+        return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_DORMANT)
+    if over_cap or duplicates:
+        return CreationVerdict("warn", tuple(lines))
+    return CreationVerdict("allow", tuple(lines))

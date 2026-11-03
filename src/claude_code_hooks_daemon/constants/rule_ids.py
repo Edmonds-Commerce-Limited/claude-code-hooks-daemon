@@ -71,6 +71,9 @@ class RuleID:
     #: creating a branch while the open work branches are at ``branches.wip.cap``.
     BRANCH_WIP_CAP: str = "R-BRANCH-WIP-CAP"
 
+    #: creating a branch while an unmerged, unparked branch is at the dormancy block stage.
+    BRANCH_DORMANT: str = "R-BRANCH-DORMANT"
+
     #: git checkout -f/--force — discards the working tree without naming a file.
     GIT_CHECKOUT_FORCE: str = "R-GIT-CHECKOUT-FORCE"
 

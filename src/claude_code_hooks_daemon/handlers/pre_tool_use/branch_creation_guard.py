@@ -69,11 +69,24 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
                 "  patch-equivalent branches carry their delete command."
             ),
         )
+        self._dormant_rule = Rule(
+            rule_id=RuleID.BRANCH_DORMANT,
+            blocked="creating a branch while an unparked, unmerged branch is at the "
+            "`branches.dormancy` block stage",
+            why="A branch nobody has touched for weeks is work that is being forgotten; "
+            "new work waits until each one is finished, parked or deleted",
+            fix="Merge it, `hooks-daemon branch-park <name> --reason ...`, or `delete-branch` it",
+            verbose=(
+                "WHY:\n"
+                "  Dormancy ages a branch from its tip's commit date. Parked and merged\n"
+                "  branches never trip it; `dormancy.mode: warn` stops at the noisy stage."
+            ),
+        )
         self._formatter = RuleFormatter()
 
     def get_rules(self) -> list[Rule]:
-        """Return the single Rule backing this handler's deny path."""
-        return [self._rule]
+        """Return the Rules backing this handler's deny paths."""
+        return [self._rule, self._dormant_rule]
 
     def _project_root(self) -> Path:
         if self._project_root_override is not None:
@@ -130,7 +143,9 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
         lines = [line for verdict in verdicts for line in verdict.lines]
         worst = max((verdict.decision for verdict in verdicts), key=_SEVERITY.__getitem__)
         if worst == "deny":
-            reason = "\n".join([self._formatter.headline(self._rule), "", *lines])
+            denying = next(verdict for verdict in verdicts if verdict.decision == "deny")
+            rule = self._dormant_rule if denying.rule_id == RuleID.BRANCH_DORMANT else self._rule
+            reason = "\n".join([self._formatter.headline(rule), "", *lines])
             return GatingResult(decision=Decision.DENY, reason=reason)
         return GatingResult(decision=Decision.ALLOW, context=list(dict.fromkeys(lines)))
 

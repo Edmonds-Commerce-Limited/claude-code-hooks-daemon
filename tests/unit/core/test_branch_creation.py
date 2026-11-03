@@ -10,11 +10,13 @@ from typing import Literal
 import pytest
 
 from claude_code_hooks_daemon.config.models import (
+    BranchDormancyConfig,
     BranchDuplicatesConfig,
     BranchesConfig,
     BranchWipConfig,
 )
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core.branch_creation import (
     DENY_LIST_LIMIT,
     creation_verdict,
@@ -203,11 +205,71 @@ def test_number_tokens() -> None:
     assert number_tokens("a-1-123456") == frozenset()
 
 
+def _dormancy_config(mode: Literal["block", "warn", "off"] = "block") -> BranchesConfig:
+    return BranchesConfig(
+        default="main",
+        wip=BranchWipConfig(cap=50, mode="block", count_remote=True),
+        duplicates=BranchDuplicatesConfig(mode="off"),
+        dormancy=BranchDormancyConfig(mode=mode),
+    )
+
+
+class TestDormancy:
+    def test_block_stage_denies_with_rule_and_ways_out(self, repo: Path) -> None:
+        _branch(repo, "stale")
+        labels = {"stale": {"group": "dormant", "action": None, "stage": "block"}}
+        verdict = creation_verdict(repo, _dormancy_config(), "fresh", labels=labels)
+        assert verdict.decision == "deny"
+        assert verdict.rule_id == RuleID.BRANCH_DORMANT
+        text = "\n".join(verdict.lines)
+        assert "stale" in text
+        assert "branch-park" in text and "delete-branch" in text
+        assert verdict.lines[-1] == BRANCH_LIMIT_PRINCIPLE
+
+    def test_warn_mode_stops_at_noisy(self, repo: Path) -> None:
+        _branch(repo, "stale")
+        labels = {"stale": {"group": "dormant", "action": None, "stage": "block"}}
+        verdict = creation_verdict(repo, _dormancy_config("warn"), "fresh", labels=labels)
+        assert verdict.decision == "allow"
+        assert "stale" in "\n".join(verdict.lines)
+
+    def test_noisy_stage_adds_context_line_to_allow(self, repo: Path) -> None:
+        _branch(repo, "slow")
+        labels = {"slow": {"group": "dormant", "action": None, "stage": "noisy"}}
+        verdict = creation_verdict(repo, _dormancy_config(), "fresh", labels=labels)
+        assert verdict.decision == "allow"
+        assert "slow" in "\n".join(verdict.lines)
+
+    def test_advisory_stage_is_silent(self, repo: Path) -> None:
+        _branch(repo, "young")
+        labels = {"young": {"group": "dormant", "action": None, "stage": "advisory"}}
+        verdict = creation_verdict(repo, _dormancy_config(), "fresh", labels=labels)
+        assert verdict.lines == ()
+
+    def test_parked_branch_never_trips(self, repo: Path) -> None:
+        _branch(repo, "parked")
+        labels = {"parked": {"group": "parked", "action": None, "stage": None}}
+        verdict = creation_verdict(repo, _dormancy_config(), "fresh", labels=labels)
+        assert verdict.decision == "allow"
+        assert verdict.lines == ()
+
+    def test_off_mode_ignores_stages(self, repo: Path) -> None:
+        _branch(repo, "stale")
+        labels = {"stale": {"group": "dormant", "action": None, "stage": "block"}}
+        verdict = creation_verdict(repo, _dormancy_config("off"), "fresh", labels=labels)
+        assert verdict.lines == ()
+
+    def test_labels_round_trip_stage(self, tmp_path: Path) -> None:
+        path = tmp_path / "labels.json"
+        write_labels(path, [{"name": "a", "group": "dormant", "dormancy_stage": "noisy"}])
+        assert read_labels(path)["a"]["stage"] == "noisy"
+
+
 class TestLabels:
     def test_round_trip(self, tmp_path: Path) -> None:
         path = tmp_path / "x" / "labels.json"
         write_labels(path, [{"name": "a", "group": "merged", "action": "do"}])
-        assert read_labels(path) == {"a": {"group": "merged", "action": "do"}}
+        assert read_labels(path) == {"a": {"group": "merged", "action": "do", "stage": None}}
 
     def test_absent_is_empty(self, tmp_path: Path) -> None:
         assert read_labels(tmp_path / "none.json") == {}
