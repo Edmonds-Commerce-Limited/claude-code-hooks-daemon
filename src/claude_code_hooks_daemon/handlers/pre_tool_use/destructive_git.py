@@ -38,6 +38,7 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
     placement_problem,
 )
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_sync import resolve_default_branch
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 
@@ -1295,12 +1296,17 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         """The evacuate-then-destroy shape in ``command``, unless the mode turns it off."""
         if self._branches.evacuation.mode == _MODE_OFF:
             return None
+        cwd: Path | None = None
         try:
             cwd = self._cwd(hook_input)
         except RuntimeError as exc:
-            logger.warning("destructive_git: evacuation not judged: %s", exc)
-            return None
-        return evacuate_then_destroy(command, cwd)
+            log_and_continue(
+                logger,
+                exc,
+                reason="with no starting directory the evacuation shape cannot be placed; "
+                "the destructive patterns and their own fail-closed checks still apply",
+            )
+        return evacuate_then_destroy(command, cwd) if cwd is not None else None
 
     @staticmethod
     def _evacuation_note(found: EvacuationMatch) -> str:

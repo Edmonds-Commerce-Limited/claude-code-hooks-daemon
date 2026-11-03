@@ -69,7 +69,9 @@ class TestEvacuateThenDestroy:
         assert found.landing == str(repo / "untracked" / "lane.patch")
 
     def test_cd_chain_places_the_evacuation(self, repo: Path, wt: Path) -> None:
-        command = f"cd {wt} && git diff main > ../out.patch && cd {repo} && git worktree remove {wt}"
+        command = (
+            f"cd {wt} && git diff main > ../out.patch && cd {repo} && git worktree remove {wt}"
+        )
         assert evacuate_then_destroy(command, repo) is not None
 
     def test_format_patch_output_directory_then_rm(self, repo: Path, wt: Path) -> None:
@@ -133,6 +135,7 @@ class TestHandler:
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
         assert result.rule == RuleID.GIT_EVACUATE_THEN_DESTROY
+        assert result.reason is not None
         assert "commit" in result.reason
         assert BRANCH_LIMIT_PRINCIPLE in result.reason
 
