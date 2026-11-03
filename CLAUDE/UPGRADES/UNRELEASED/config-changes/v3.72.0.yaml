@@ -6,6 +6,78 @@ date: "UNRELEASED"
 breaking: false
 
 config_changes:
+  added:
+    # Plan 00558: the top-level `branches:` block (branch WIP limit and hygiene).
+    - key: branches.integration_lines
+      recommended: true
+      dormant: false
+      description: >-
+        Globs naming integration lines (e.g. `release/*`, `epic/*`): merge
+        targets that are never counted toward the WIP cap and never deleted
+        remotely by an agent. A project with release branches must declare
+        them before the branch guards fire, or they are counted as work.
+      example_yaml: |
+        branches:
+          integration_lines: ["release/*"]
+    - key: branches.exempt
+      recommended: true
+      dormant: false
+      description: >-
+        Globs naming branches never counted, judged or deleted by an agent
+        (human-owned branches such as `users/*`, or `gh-pages`). Declare them
+        before the branch guards fire.
+      example_yaml: |
+        branches:
+          exempt: ["users/*", "gh-pages"]
+    - key: branches.dormancy.preset
+      dormant: false
+      description: >-
+        Dormancy stages for an idle unmerged branch. `standard` (the default)
+        advises at 7 days, repeats in every session at 14 and blocks new
+        branches at 30; `strict` warns from 3 days and blocks at 7.
+        `advisory_days`, `noisy_days` and `block_days` override one stage each.
+    - key: branches.default
+      description: >-
+        The default branch: `auto` (origin/HEAD, then local main, then master)
+        or a name. `delete-branch --protected-ref` and `worktree-reap
+        --base-branch` now default to it.
+    - key: branches.remote
+      description: The remote whose refs count and whose deletes are judged (default origin).
+    - key: branches.protected_names
+      description: >-
+        Branch names no delete command removes (default main, master, develop,
+        trunk); the resolved default branch is always added.
+    - key: branches.wip
+      description: >-
+        The repository-wide cap on open work branches (`cap` 10, `mode` block,
+        `count_remote` true).
+    - key: branches.duplicates
+      description: The duplicate-stem warning on a new branch name (`mode` warn).
+    - key: branches.stop_guard
+      description: The Stop and SubagentStop guard over touched branches.
+    - key: branches.force_removal
+      description: Lossless `worktree remove --force` and `branch -D`.
+    - key: branches.evacuation
+      description: The evacuate-then-destroy shape.
+    - key: branches.cleanup_after_merge
+      description: What happens to a work branch once merged (`mode` advise).
+    - key: branches.sweep
+      description: >-
+        The inventory pass's wall-clock `budget_ms` (3000) and the
+        `behind_threshold` (50) at which a branch is reported far behind.
+
+  renamed:
+    - old_key: handlers.session_start.branch_count_advisor.options.max_open_branches
+      new_key: branches.wip.cap
+      migration_note: >-
+        The old option is still read while `branches.wip.cap` is unset; move
+        the value to `branches.wip.cap`.
+    - old_key: handlers.session_start.branch_count_advisor.options.behind_main_threshold
+      new_key: branches.sweep.behind_threshold
+      migration_note: >-
+        The old option is still read while `branches.sweep.behind_threshold`
+        is unset; move the value to `branches.sweep.behind_threshold`.
+
   changed:
     - key: daemon.transport.relay_enabled
       recommended: false

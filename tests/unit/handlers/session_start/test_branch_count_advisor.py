@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants import HandlerIDMeta, HandlerTag, HookInputField
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.session_start.branch_count_advisor import (
@@ -196,6 +197,54 @@ class TestBehindMain:
     def test_default_threshold_applies(self, repo: Path) -> None:
         self._far_behind(repo, 2)
         assert _run(repo, _make()) == []
+
+
+class TestBranchesConfigWins:
+    """Plan 00558 Task 2.0: `branches.wip.cap` / `branches.sweep.behind_threshold`.
+
+    The handler's own options are a fallback read only while those keys are unset.
+    """
+
+    def test_declares_the_injected_attribute(self) -> None:
+        assert BranchCountAdvisorHandler()._branches == BranchesConfig()
+
+    def test_explicit_wip_cap_overrides_the_option(self, repo: Path) -> None:
+        for n in range(4):
+            _git(repo, "branch", f"worktree-b{n}")
+        handler = _make(max_open=2)
+        handler._branches = BranchesConfig.model_validate({"wip": {"cap": 5}})
+        assert _run(repo, handler) == []
+
+    def test_unset_wip_cap_falls_back_to_the_option(self, repo: Path) -> None:
+        for n in range(4):
+            _git(repo, "branch", f"worktree-b{n}")
+        handler = _make(max_open=2)
+        handler._branches = BranchesConfig()
+        assert "limit 2" in "\n".join(_run(repo, handler))
+
+    def test_explicit_behind_threshold_overrides_the_option(self, repo: Path) -> None:
+        _git(repo, "branch", "worktree-old")
+        for n in range(5):
+            _commit(repo, f"m{n}")
+        handler = _make(behind=100)
+        handler._branches = BranchesConfig.model_validate({"sweep": {"behind_threshold": 3}})
+        text = "\n".join(_run(repo, handler))
+        assert "more than 3 commits" in text
+        assert "5 commits behind" in text
+
+    def test_behind_is_measured_against_the_configured_default(self, repo: Path) -> None:
+        """`branches.default` names the base, not `git_sync.default_branch`'s guess."""
+        _git(repo, "branch", "develop")
+        _git(repo, "branch", "worktree-old")
+        _git(repo, "checkout", "-q", "develop")
+        for n in range(5):
+            _commit(repo, f"d{n}")
+        _git(repo, "checkout", "-q", "main")
+        handler = _make(behind=3)
+        handler._branches = BranchesConfig(default="develop")
+        text = "\n".join(_run(repo, handler))
+        assert "behind develop" in text
+        assert "5 commits behind" in text
 
 
 class TestFailOpen:

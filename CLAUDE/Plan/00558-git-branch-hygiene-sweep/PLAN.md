@@ -70,8 +70,8 @@ Today nothing holds a limit (code facts with citations: [subagent-reports/261103
 
 ### Phase 2: Inventory and report (TDD)
 
-- [ ] ⬜ **Task 2.0**: Add the `branches:` config block, `resolve_default_branch`, and migrate the `delete-branch`/`worktree-reap` defaults, `branch_safety`'s protected names and `branch_count_advisor`'s options onto it, with the config-changes manifest entries ([DESIGN.md](DESIGN.md) section 1).
-- [ ] ⬜ **Task 2.1**: Write the inventory module with fixture repositories: local and remote branches, worktrees, ahead and behind counts, lines, age, identical tips, integration-line merges, containment of idle branches, plan and issue links.
+- [x] ✅ **Task 2.0**: Add the `branches:` config block, `resolve_default_branch`, and migrate the `delete-branch`/`worktree-reap` defaults, `branch_safety`'s protected names and `branch_count_advisor`'s options onto it, with the config-changes manifest entries ([DESIGN.md](DESIGN.md) section 1). Report: [subagent-reports/261103-phase2-inventory.md](subagent-reports/261103-phase2-inventory.md).
+- [x] ✅ **Task 2.1**: Write the inventory module with fixture repositories: local and remote branches, worktrees, ahead and behind counts, lines, age, identical tips, integration-line merges, containment of idle branches, plan and issue links. `core/branch_inventory.py`; same report.
 - [ ] ⬜ **Task 2.2**: Add the `branch-sweep` CLI verb (text and `--json`).
 - [ ] ⬜ **Task 2.3**: Add the SessionStart summary. It must be time-bounded, cached and silent when clean, and it replaces `branch_count_advisor`'s line.
 

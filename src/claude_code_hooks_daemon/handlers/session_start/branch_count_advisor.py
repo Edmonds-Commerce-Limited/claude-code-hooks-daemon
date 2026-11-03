@@ -17,6 +17,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
@@ -65,8 +66,22 @@ class BranchCountAdvisorHandler(SessionStartHandlerBase):
             ],
         )
         # Set by the registry from options.max_open_branches / behind_main_threshold.
+        # These are the FALLBACK: `branches.wip.cap` / `branches.sweep.behind_threshold`
+        # win whenever the config sets them (Plan 00558).
         self._max_open_branches: int = DEFAULT_MAX_OPEN_BRANCHES
         self._behind_main_threshold: int = DEFAULT_BEHIND_MAIN_THRESHOLD
+        # Injected by the registry from the top-level `branches:` block.
+        self._branches: BranchesConfig = BranchesConfig()
+
+    @property
+    def _cap(self) -> int:
+        explicit = self._branches.explicit_wip_cap()
+        return self._max_open_branches if explicit is None else explicit
+
+    @property
+    def _behind_threshold(self) -> int:
+        explicit = self._branches.explicit_behind_threshold()
+        return self._behind_main_threshold if explicit is None else explicit
 
     def _get_project_root(self) -> Path:
         try:
@@ -117,7 +132,7 @@ class BranchCountAdvisorHandler(SessionStartHandlerBase):
         if not branches:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
-        base = git_sync.default_branch(root)
+        base = git_sync.resolve_default_branch(self._branches, root)
         stale: list[tuple[str, int]] = []
         unchecked = 0
         if base is not None:
@@ -134,11 +149,11 @@ class BranchCountAdvisorHandler(SessionStartHandlerBase):
                         level=logging.DEBUG,
                     )
                     continue
-                if behind > self._behind_main_threshold:
+                if behind > self._behind_threshold:
                     stale.append((branch, behind))
 
         context: list[str] = []
-        if len(branches) > self._max_open_branches:
+        if len(branches) > self._cap:
             context.extend(self._count_lines(branches))
         if stale and base is not None:
             if context:
@@ -156,7 +171,7 @@ class BranchCountAdvisorHandler(SessionStartHandlerBase):
     def _count_lines(self, branches: list[str]) -> list[str]:
         lines = [
             f"{_ICON}  GIT: {len(branches)} open work branches exist (limit "
-            f"{self._max_open_branches}, see CLAUDE/Worktree.md, Small Batches). "
+            f"{self._cap}, see CLAUDE/Worktree.md, Small Batches). "
             "Finish one before starting another: merge it or drop it.",
             "",
         ]
@@ -165,7 +180,7 @@ class BranchCountAdvisorHandler(SessionStartHandlerBase):
 
     def _stale_lines(self, stale: list[tuple[str, int]], base: str) -> list[str]:
         lines = [
-            f"{_ICON}  GIT: work branch(es) more than {self._behind_main_threshold} commits "
+            f"{_ICON}  GIT: work branch(es) more than {self._behind_threshold} commits "
             f"behind {base}. Merge cost grows with every commit missed; merge or drop them.",
             "",
         ]

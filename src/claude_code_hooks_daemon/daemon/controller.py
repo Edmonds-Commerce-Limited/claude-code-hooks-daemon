@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.utils.protected_file_index import IndexPrewarmer
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import (
+        BranchesConfig,
         ClaudeMdConfig,
         DaemonConfig,
         DocumentationConfig,
@@ -244,6 +245,7 @@ class DaemonController:
         write_claude_md_in_linked_worktree: bool = False,
         worktree: "WorktreeConfig | None" = None,
         reference_repos: "ReferenceReposConfig | None" = None,
+        branches: "BranchesConfig | None" = None,
         chain_deadline_problems: list[str] | None = None,
         config_fingerprint: str | None = None,
         config_problems: list[str] | None = None,
@@ -365,6 +367,7 @@ class DaemonController:
             project_registry=project_registry,
             worktree=worktree,
             reference_repos=reference_repos,
+            branches=branches,
             config_problems=self._config_problems,
         )
 

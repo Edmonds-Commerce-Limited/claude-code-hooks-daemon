@@ -50,7 +50,12 @@ import psutil
 from pydantic import ValidationError as PydanticValidationError
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
-from claude_code_hooks_daemon.config.models import Config, TransportConfig, handler_options
+from claude_code_hooks_daemon.config.models import (
+    BranchesConfig,
+    Config,
+    TransportConfig,
+    handler_options,
+)
 from claude_code_hooks_daemon.constants import DaemonPath, HandlerID, Timeout
 from claude_code_hooks_daemon.constants.dbf import DefectClass, DefenceBeforeFix
 from claude_code_hooks_daemon.constants.modes import DaemonMode, SessionModeIPC
@@ -162,6 +167,7 @@ from claude_code_hooks_daemon.install.repair_install import repair_install, sett
 from claude_code_hooks_daemon.issue_report.build import build_report
 from claude_code_hooks_daemon.issue_report.upstream import filing_command
 from claude_code_hooks_daemon.qa.full_qa_lock import host_lock_path as qa_host_lock_path
+from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, is_in_claude_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 from claude_code_hooks_daemon.utils.cli_command import (
@@ -4431,6 +4437,7 @@ def _build_initialised_controller(
         write_claude_md_in_linked_worktree=write_claude_md_in_linked_worktree,
         worktree=config.worktree,
         reference_repos=config.reference_repos,
+        branches=config.branches,
         config_fingerprint=config_fingerprint,
         loaded_config=config,
         defer_nonessential_startup=defer_nonessential_startup,
@@ -6474,6 +6481,11 @@ def _confirm_abandonment_on_tty(
     return answer.strip().lower() == _ABANDON_CONFIRMATION_WORD
 
 
+def _branches_config(repo: Path) -> BranchesConfig:
+    """The project's ``branches:`` block, at the model defaults when absent (Plan 00558)."""
+    return Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml").branches
+
+
 def cmd_delete_branch(args: argparse.Namespace) -> int:
     """Delete local branches only when their safety can be proven (Plan 00206).
 
@@ -6494,6 +6506,25 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     repo = get_project_path(getattr(args, "project_root", None))
     bundle_path = None if args.no_bundle else Path(args.bundle)
 
+    branches = _branches_config(repo)
+    protected_ref = args.protected_ref or git_sync.resolve_default_branch(branches, repo)
+    if protected_ref is None:
+        print(
+            "ERROR: cannot determine the default branch (branches.default is 'auto' and "
+            "git names none); pass --protected-ref <ref> or set branches.default",
+            file=sys.stderr,
+        )
+        return 2
+    # Never-work branches are refused whatever the proof says (DESIGN.md section 1):
+    # the protected names, the resolved default, and every integration-line and
+    # exempt glob, matched by `branch_safety.matches_any_glob`.
+    protected_names = (
+        *branches.protected_names,
+        *branches.integration_lines,
+        *branches.exempt,
+        protected_ref,
+    )
+
     # Pass a confirmer ONLY when a human can actually answer it. Passing one
     # that always declines would report "a human declined" when in truth none
     # was ever asked — so a missing terminal is signalled by its absence, and
@@ -6504,7 +6535,8 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         report = delete_branches(
             repo,
             args.branches,
-            protected_ref=args.protected_ref,
+            protected_ref=protected_ref,
+            protected_names=protected_names,
             allow_unproven=args.allow_unproven,
             reason=args.reason,
             bundle_path=bundle_path,
@@ -9390,7 +9422,16 @@ def cmd_worktree_reap(
     )
 
     repo_root = Path(getattr(args, "project_root", None) or get_project_path(None))
-    base_branch = getattr(args, "base_branch", None) or "main"
+    base_branch = getattr(args, "base_branch", None) or git_sync.resolve_default_branch(
+        _branches_config(repo_root), repo_root
+    )
+    if base_branch is None:
+        print(
+            "ERROR: cannot determine the default branch (branches.default is 'auto' and "
+            "git names none); pass --base-branch <branch> or set branches.default",
+            file=sys.stderr,
+        )
+        return 2
     reap = bool(getattr(args, "reap", False))
     reap_branches = bool(getattr(args, "reap_branches", False))
     only = getattr(args, "only", None)
@@ -12437,8 +12478,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser_worktree_reap.add_argument(
         "--base-branch",
         dest="base_branch",
-        default="main",
-        help="Branch a worktree's commits must already be on (default: main)",
+        default=None,
+        help="Branch a worktree's commits must already be on (default: branches.default)",
     )
     parser_worktree_reap.add_argument(
         "--reap",
@@ -12806,8 +12847,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser_delete_branch.add_argument(
         "--protected-ref",
         dest="protected_ref",
-        default="main",
-        help="Ref every proof is measured against (default: main)",
+        default=None,
+        help="Ref every proof is measured against (default: branches.default)",
     )
     parser_delete_branch.add_argument(
         "--dry-run",

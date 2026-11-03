@@ -160,6 +160,18 @@ class TestConfigTemplate:
         assert label in ConfigTemplate.generate_minimal()
         assert label in ConfigTemplate.generate_full()
 
+    def test_full_template_documents_the_branches_block_at_its_defaults(self) -> None:
+        """Plan 00558: the full template carries `branches:` and it loads to the model defaults."""
+        import yaml
+
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+
+        template = ConfigTemplate.generate_full()
+        assert "\nbranches:\n" in template
+        assert "preset: standard" in template
+        block = yaml.safe_load(template)["branches"]
+        assert BranchesConfig.model_validate(block) == BranchesConfig()
+
 
 class TestGenerateConfig:
     """Tests for generate_config convenience function."""

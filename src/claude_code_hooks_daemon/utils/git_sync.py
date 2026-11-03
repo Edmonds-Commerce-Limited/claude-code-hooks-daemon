@@ -31,9 +31,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.config.models import BranchesConfig
 
 # Non-interactive fetch/pull env (identical intent to the status-line git_branch
 # background fetch): never block on credentials, never open an interactive
@@ -369,27 +373,67 @@ def pull_ff_only(cwd: Path, timeout: float = Timeout.GIT_PULL_SESSION) -> PullRe
     return PullResult(ok=False, detail=detail)
 
 
+_DEFAULT_REMOTE = "origin"
+_CONVENTIONAL_DEFAULTS = ("main", "master")
+
+
 def default_branch(
-    cwd: Path, *, run_fn: Callable[..., subprocess.CompletedProcess[str] | None] | None = None
+    cwd: Path,
+    *,
+    remote: str = _DEFAULT_REMOTE,
+    run_fn: Callable[..., subprocess.CompletedProcess[str] | None] | None = None,
 ) -> str | None:
     """Return the repo's default branch name (e.g. ``main``), or ``None``.
 
-    Prefers ``origin/HEAD`` (``refs/remotes/origin/HEAD`` → ``origin/main`` →
-    ``main``); falls back to a local ``main``/``master`` if present.
+    Prefers ``<remote>/HEAD`` (``refs/remotes/<remote>/HEAD`` → ``<remote>/main``
+    → ``main``); falls back to a local ``main``/``master`` if present.
 
     ``run_fn(cwd, *args)`` replaces the git runner, so a caller with its own time
     budget can bound all (up to three) probes; by default each gets
     ``Timeout.GIT_CONTEXT``.
     """
     runner = run_fn or partial(_run_git, timeout=Timeout.GIT_CONTEXT)
-    result = runner(cwd, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    result = runner(cwd, "symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD")
     if result is not None and result.returncode == 0:
         ref = result.stdout.strip()  # e.g. "origin/main"
         if ref:
             return ref.split("/", 1)[1] if "/" in ref else ref
 
-    for candidate in ("main", "master"):
+    for candidate in _CONVENTIONAL_DEFAULTS:
         probe = runner(cwd, "show-ref", "--verify", "--quiet", f"refs/heads/{candidate}")
+        if probe is not None and probe.returncode == 0:
+            return candidate
+    return None
+
+
+def resolve_default_branch(config: BranchesConfig, repo: Path) -> str | None:
+    """The default branch per ``branches.default`` (Plan 00558).
+
+    A named branch is returned as written. ``auto`` asks git through
+    :func:`default_branch` for ``branches.remote``, then probes
+    ``refs/remotes/<remote>/main`` and ``master``: a clone with neither
+    ``<remote>/HEAD`` nor a local default still resolves, as the bare ``main``
+    the CLI verbs used to default to did. ``None`` means git could not tell,
+    and the caller must say so rather than guess.
+    """
+    # Imported here: config.models imports utils modules, so a module-level
+    # import from utils would be circular.
+    from claude_code_hooks_daemon.config.models import BRANCH_DEFAULT_AUTO
+
+    if config.default != BRANCH_DEFAULT_AUTO:
+        return config.default
+    found = default_branch(repo, remote=config.remote)
+    if found is not None:
+        return found
+    for candidate in _CONVENTIONAL_DEFAULTS:
+        probe = _run_git(
+            repo,
+            "show-ref",
+            "--verify",
+            "--quiet",
+            f"refs/remotes/{config.remote}/{candidate}",
+            timeout=Timeout.GIT_CONTEXT,
+        )
         if probe is not None and probe.returncode == 0:
             return candidate
     return None

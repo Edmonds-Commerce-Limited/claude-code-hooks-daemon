@@ -42,6 +42,45 @@ _TRANSPORT_BLOCK = (
 )
 
 
+# branches (Plan 00558): one block for the branch inventory, guards and CLI.
+# Written out at the model defaults so a project sees every key it can set.
+_BRANCHES_BLOCK = (
+    "\n"
+    "# Branch WIP limit and hygiene (one block read by the sweep, the guards and the CLI)\n"
+    "branches:\n"
+    "  default: auto              # auto = origin/HEAD, then local main, then master; or a name\n"
+    "  remote: origin             # the remote whose refs count and whose deletes are judged\n"
+    "  integration_lines: []      # globs, e.g. ['release/*']: merge targets, never counted\n"
+    "  exempt: []                 # globs: never counted, judged or deleted by an agent\n"
+    "  protected_names: [main, master, develop, trunk]\n"
+    "  wip:\n"
+    "    cap: 10                  # open work branches allowed, repository-wide\n"
+    "    mode: block              # block | warn | off\n"
+    "    count_remote: true       # remote-only branches count; identical tips count once\n"
+    "  duplicates:\n"
+    "    mode: warn               # warn | off\n"
+    "  dormancy:\n"
+    "    preset: standard         # standard (7/14/30 days) | strict (3/3/7)\n"
+    "    advisory_days: null      # null = the preset's value\n"
+    "    noisy_days: null\n"
+    "    block_days: null\n"
+    "    mode: block              # block | warn | off\n"
+    "  stop_guard:\n"
+    "    mode: block              # block | warn | off\n"
+    "    unpushed_subagent: block # block | advise | off\n"
+    "    include_default: false\n"
+    "  force_removal:\n"
+    "    mode: block              # block | off\n"
+    "  evacuation:\n"
+    "    mode: block              # block | warn | off\n"
+    "  cleanup_after_merge:\n"
+    "    mode: advise             # act | advise | off\n"
+    "  sweep:\n"
+    "    budget_ms: 3000          # wall-clock budget for the per-branch inventory steps\n"
+    "    behind_threshold: 50     # commits behind the default branch that earn a warning\n"
+)
+
+
 class ConfigTemplate:
     """Generate configuration templates for hooks-daemon.yaml.
 
@@ -462,7 +501,7 @@ class ConfigTemplate:
             "# Daemon plugins: custom handler modules (not Claude Code plugins)\n"
             "plugins:\n"
             "  paths: []\n"
-            "  plugins: []\n"
+            "  plugins: []\n" + _BRANCHES_BLOCK
         )
 
 
