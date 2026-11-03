@@ -516,6 +516,10 @@ _PUSH_LONG_FLAGS: Final[frozenset[str]] = frozenset(
     {_DELETE_LONG, "--quiet", "--verbose", "--dry-run", "--no-verify", "--set-upstream"}
 )
 _REFSPEC_SEPARATOR: Final[str] = ":"
+# Branch patterns per `git ls-remote` call. One call per remote is the aim; this only
+# bounds the argv (Linux caps one argument at 128 KiB and the whole argv near 2 MiB), and
+# 500 names of ~100 bytes stay far below both while a realistic delete is a single call.
+_LS_REMOTE_CHUNK: Final[int] = 500
 
 
 def _remote_delete_targets(run: GitInvocation) -> tuple[str, list[str]] | None:
@@ -560,20 +564,29 @@ def _remote_delete_targets(run: GitInvocation) -> tuple[str, list[str]] | None:
     return positional[0], refs
 
 
-def _remote_branch_problem(directory: Path, remote: str, ref: str, default: str) -> str | None:
-    """Why remote branch ``ref`` may not be deleted, or None when it is merged.
+def _branch_name(ref: str) -> str:
+    """The branch name a delete ``ref`` (``name`` or ``refs/heads/name``) refers to."""
+    return ref.removeprefix(HEADS_PREFIX)
+
+
+def _merged_tracking_tip(
+    directory: Path, remote: str, ref: str, default: str
+) -> tuple[str | None, str | None]:
+    """``(tracking_tip, None)`` when ``ref`` is merged, else ``(None, problem)``.
 
     Merged means: the remote-tracking ref ``refs/remotes/<remote>/<ref>`` exists and
     is an ancestor of the default branch (its remote-tracking ref or the local one).
-    Fails closed: a missing ref, a failing git and a timeout all give a reason.
+    Judged from local git only; the remote's live tip is checked afterwards, for all
+    branches at once, by :func:`_remote_tip_problems`. Fails closed: a missing ref, a
+    failing git and a timeout all give a reason.
     """
-    name = ref.removeprefix(HEADS_PREFIX)
+    name = _branch_name(ref)
     if not _LITERAL_BRANCH_NAME.fullmatch(remote):
-        return f"`{remote}` is not a literal remote name"
+        return None, f"`{remote}` is not a literal remote name"
     if name.startswith(_TAGS_PREFIX) or not _LITERAL_BRANCH_NAME.fullmatch(name):
-        return f"`{ref}` is not a literal branch name (tags are never deleted by an agent)"
+        return None, f"`{ref}` is not a literal branch name (tags are never deleted by an agent)"
     if name == default:
-        return f"`{name}` is the default branch"
+        return None, f"`{name}` is the default branch"
     tag = run_git(
         directory,
         "rev-parse",
@@ -583,7 +596,7 @@ def _remote_branch_problem(directory: Path, remote: str, ref: str, default: str)
         timeout=Timeout.GIT_CONTEXT,
     )
     if tag.returncode == 0:
-        return f"`{name}` is also the name of a tag, so the delete is ambiguous"
+        return None, f"`{name}` is also the name of a tag, so the delete is ambiguous"
     tracking = f"{_REMOTES_PREFIX}{remote}/{name}"
     tip = run_git(
         directory,
@@ -594,45 +607,69 @@ def _remote_branch_problem(directory: Path, remote: str, ref: str, default: str)
         timeout=Timeout.GIT_CONTEXT,
     )
     if tip.returncode != 0 or not tip.stdout.strip():
-        return f"`{name}` has no remote-tracking ref `{tracking}` here"
+        return None, f"`{name}` has no remote-tracking ref `{tracking}` here"
+    local_tip = tip.stdout.strip()
     for target in (f"{_REMOTES_PREFIX}{remote}/{default}", branch_ref(default)):
         merged = run_git(
             directory,
             "merge-base",
             "--is-ancestor",
-            tip.stdout.strip(),
+            local_tip,
             target,
             timeout=Timeout.GIT_CONTEXT,
         )
         if merged.returncode == 0:
-            return _remote_tip_problem(directory, remote, name, tip.stdout.strip())
-    return f"`{name}` is not merged into `{default}`"
+            return local_tip, None
+    return None, f"`{name}` is not merged into `{default}`"
 
 
-def _remote_tip_problem(directory: Path, remote: str, name: str, local_tip: str) -> str | None:
-    """Why the remote's live tip of ``name`` is not the merged ``local_tip``, else None.
+def _live_remote_tips(directory: Path, remote: str, names: list[str]) -> dict[str, str]:
+    """Map branch name to the tip ``remote`` reports, from one ``ls-remote`` per chunk.
+
+    Fails closed: a failed or timed-out listing contributes nothing, so its branches
+    are absent from the map. Lines are keyed by their exact ref, so a pattern that
+    also matches a longer name (``feat`` and ``feat-2``) or a foreign ref ending in
+    the name never lends its tip to another branch.
+    """
+    tips: dict[str, str] = {}
+    for start in range(0, len(names), _LS_REMOTE_CHUNK):
+        chunk = names[start : start + _LS_REMOTE_CHUNK]
+        listing = run_git(
+            directory,
+            "ls-remote",
+            remote,
+            *[f"{HEADS_PREFIX}{name}" for name in chunk],
+            timeout=Timeout.GIT_CONTEXT,
+            env={"GIT_TERMINAL_PROMPT": "0"},
+        )
+        if listing.returncode != 0:
+            continue
+        for line in listing.stdout.splitlines():
+            tip, separator, listed = line.partition("\t")
+            if separator and listed.startswith(HEADS_PREFIX):
+                tips[listed.removeprefix(HEADS_PREFIX)] = tip
+    return tips
+
+
+def _remote_tip_problems(directory: Path, remote: str, local_tips: dict[str, str]) -> list[str]:
+    """Why the remote's live tips are not the merged ``local_tips`` (name to tip).
 
     The remote-tracking ref is only as fresh as the last fetch: a commit pushed since
-    would be lost by the delete. ``git ls-remote`` asks the remote itself; it never
-    fetches. Fails closed: a mismatch, an absent branch, a failure and a timeout all
-    give a reason.
+    would be lost by the delete. ``git ls-remote`` asks the remote itself, once for
+    all the branches (a delete of dozens of branches once exceeded the dispatch
+    budget at one call each); it never fetches. Fails closed: a mismatch, an absent
+    branch, a failure and a timeout all give a reason naming the branch.
     """
-    listing = run_git(
-        directory,
-        "ls-remote",
-        remote,
-        f"{HEADS_PREFIX}{name}",
-        timeout=Timeout.GIT_CONTEXT,
-        env={"GIT_TERMINAL_PROMPT": "0"},
-    )
-    lines = listing.stdout.strip().splitlines() if listing.returncode == 0 else []
-    if lines == [f"{local_tip}\t{HEADS_PREFIX}{name}"]:
-        return None
-    return (
+    if not local_tips:
+        return []
+    live = _live_remote_tips(directory, remote, list(local_tips))
+    return [
         f"the remote tip of `{name}` could not be confirmed as merged (it differs from "
         f"`{_REMOTES_PREFIX}{remote}/{name}`, is gone, or `git ls-remote {remote}` failed); "
         "run `git fetch` and retry"
-    )
+        for name, tip in local_tips.items()
+        if live.get(name) != tip
+    ]
 
 
 def _remote_delete_note(command: str, cwd: Path) -> str | None:
@@ -660,10 +697,14 @@ def _remote_delete_note(command: str, cwd: Path) -> str | None:
         default = default_branch(directory)
         if default is None:
             return _unverified("the default branch could not be determined")
+        local_tips: dict[str, str] = {}
         for ref in refs:
-            problem = _remote_branch_problem(directory, remote, ref, default)
+            tip, problem = _merged_tracking_tip(directory, remote, ref, default)
             if problem is not None:
                 problems.append(problem)
+            elif tip is not None:
+                local_tips[_branch_name(ref)] = tip
+        problems.extend(_remote_tip_problems(directory, remote, local_tips))
     if not problems:
         return None
     return (
