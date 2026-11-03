@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import (
+        BranchesConfig,
         Config,
         DocumentationConfig,
         PlanWorkflowConfig,
@@ -628,6 +629,7 @@ class HandlerRegistry:
         project_registry: "ProjectRegistry | None" = None,
         worktree: "WorktreeConfig | None" = None,
         reference_repos: "ReferenceReposConfig | None" = None,
+        branches: "BranchesConfig | None" = None,
         config_problems: Sequence[str] = (),
     ) -> int:
         """Register all discovered handlers with the router.
@@ -655,6 +657,9 @@ class HandlerRegistry:
                 that attribute — attribute-selected rather than tag-selected,
                 because the two handlers that want it already carry the broad
                 ``git`` tag shared by handlers that do not
+            branches: Optional BranchesConfig (Plan 00558), injected as
+                ``_branches`` onto handlers that DECLARE that attribute,
+                selected the same way as ``reference_repos``
             config_problems: ``DaemonConfig.config_problems`` (Plan 00466
                 round 3), injected as ``_config_problems`` onto handlers that
                 DECLARE that attribute, like ``_option_failures``
@@ -879,6 +884,11 @@ class HandlerRegistry:
                                 instance, reference_repos_attr_name
                             ):
                                 setattr(instance, reference_repos_attr_name, reference_repos)
+
+                            # The `branches:` block (Plan 00558), same selection.
+                            branches_attr_name = "_branches"
+                            if branches is not None and hasattr(instance, branches_attr_name):
+                                setattr(instance, branches_attr_name, branches)
 
                             # Pass-1 option failures (Plan 00466 N19), for the
                             # session-start alert. Same declared-attribute

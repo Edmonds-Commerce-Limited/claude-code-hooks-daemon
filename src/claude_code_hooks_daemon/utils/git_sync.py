@@ -31,9 +31,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.config.models import BranchesConfig
 
 # Non-interactive fetch/pull env (identical intent to the status-line git_branch
 # background fetch): never block on credentials, never open an interactive
@@ -393,6 +397,22 @@ def default_branch(
         if probe is not None and probe.returncode == 0:
             return candidate
     return None
+
+
+def resolve_default_branch(config: BranchesConfig, repo: Path) -> str | None:
+    """The default branch per ``branches.default`` (Plan 00558).
+
+    A named branch is returned as written; ``auto`` asks git through
+    :func:`default_branch`. ``None`` means git could not tell, and the caller
+    must say so rather than guess.
+    """
+    # Imported here: config.models imports utils modules, so a module-level
+    # import from utils would be circular.
+    from claude_code_hooks_daemon.config.models import BRANCH_DEFAULT_AUTO
+
+    if config.default != BRANCH_DEFAULT_AUTO:
+        return config.default
+    return default_branch(repo)
 
 
 def remotes(cwd: Path) -> list[str]:

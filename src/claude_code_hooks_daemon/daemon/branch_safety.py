@@ -47,6 +47,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
 
@@ -79,8 +80,9 @@ REFUSAL_WORKTREE = "checked-out-in-worktree"
 REFUSAL_PROTECTED = "protected-branch"
 REFUSAL_NOT_A_BRANCH = "not-a-local-branch"
 
-# Branch names never deletable by this command regardless of proof.
-DEFAULT_PROTECTED_NAMES: tuple[str, ...] = ("main", "master", "develop", "trunk")
+# Branch names never deletable by this command regardless of proof. The model
+# default of `branches.protected_names` is the single source (Plan 00558).
+DEFAULT_PROTECTED_NAMES: tuple[str, ...] = tuple(BranchesConfig().protected_names)
 
 # The ref every proof is measured against.
 DEFAULT_PROTECTED_REF = "main"
@@ -419,6 +421,26 @@ def _unique_commit_count(repo: Path, name: str, protected_ref: str) -> int:
     """Commits on ``name`` whose patch-id is not already upstream."""
     result = _git(repo, "cherry", protected_ref, branch_ref(name), check=False)
     return sum(1 for line in result.stdout.splitlines() if line.startswith(_CHERRY_UNIQUE_MARKER))
+
+
+def cherry_unique_shas(
+    repo: Path, upstream: str, head: str, *, timeout: float = Timeout.GIT_BRANCH_SAFETY
+) -> list[str] | None:
+    """Commits on ``head`` whose patch-id is absent from ``upstream``; None when git fails.
+
+    The patch-equivalence step of the branch inventory (Plan 00558). Unlike
+    :func:`_unique_commit_count` it fails CLOSED: a failed ``git cherry`` is
+    None, never an empty list, so a caller cannot read "git broke" as "nothing
+    is unique".
+    """
+    result = _git(repo, "cherry", upstream, head, check=False, timeout=timeout)
+    if result.returncode != 0:
+        return None
+    return [
+        line.split()[1]
+        for line in result.stdout.splitlines()
+        if line.startswith(_CHERRY_UNIQUE_MARKER) and len(line.split()) > 1
+    ]
 
 
 def _paths_in_tree(repo: Path, ref: str) -> set[str]:

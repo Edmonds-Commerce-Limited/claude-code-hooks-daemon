@@ -2185,6 +2185,182 @@ class WorktreeConfig(BaseModel):
     )
 
 
+#: Dormancy stage days ``(advisory, noisy, block)`` per preset (Plan 00558 DESIGN.md
+#: section 4). ``strict`` warns noisily from day 3 because a quiet stage four days
+#: before the block is too easy to miss.
+BRANCH_DORMANCY_PRESETS: dict[str, tuple[int, int, int]] = {
+    "standard": (7, 14, 30),
+    "strict": (3, 3, 7),
+}
+
+#: ``branches.default`` value meaning "ask git" (``git_sync.default_branch``).
+BRANCH_DEFAULT_AUTO = "auto"
+
+
+class BranchWipConfig(BaseModel):
+    """``branches.wip``: the repository-wide cap on open work branches."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cap: Annotated[int, Field(ge=1)] = Field(default=10, description="Open work branches allowed")
+    mode: Literal["block", "warn", "off"] = Field(default="block")
+    count_remote: bool = Field(
+        default=True, description="Remote-only branches count; identical tips count once"
+    )
+
+
+class BranchDuplicatesConfig(BaseModel):
+    """``branches.duplicates``: the duplicate-stem warning (never blocks)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["warn", "off"] = Field(default="warn")
+
+
+class BranchDormancyConfig(BaseModel):
+    """``branches.dormancy``: preset plus optional per-stage overrides.
+
+    The effective value of a stage is its explicit key when set, else the
+    preset's. The EFFECTIVE values are validated, so an override that inverts
+    the stages under the chosen preset fails the load.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    preset: Literal["standard", "strict"] = Field(default="standard")
+    advisory_days: Annotated[int, Field(ge=1)] | None = Field(default=None)
+    noisy_days: Annotated[int, Field(ge=1)] | None = Field(default=None)
+    block_days: Annotated[int, Field(ge=1)] | None = Field(default=None)
+    mode: Literal["block", "warn", "off"] = Field(default="block")
+
+    @property
+    def effective_days(self) -> tuple[int, int, int]:
+        """``(advisory, noisy, block)`` after applying the preset."""
+        advisory, noisy, block = BRANCH_DORMANCY_PRESETS[self.preset]
+        return (
+            advisory if self.advisory_days is None else self.advisory_days,
+            noisy if self.noisy_days is None else self.noisy_days,
+            block if self.block_days is None else self.block_days,
+        )
+
+    @model_validator(mode="after")
+    def validate_stage_order(self) -> Self:
+        """Require ``advisory_days <= noisy_days < block_days`` on the effective values."""
+        advisory, noisy, block = self.effective_days
+        if not advisory <= noisy < block:
+            raise ValueError(
+                "branches.dormancy: effective days must satisfy "
+                f"advisory_days <= noisy_days < block_days; preset {self.preset!r} "
+                f"with overrides gives {advisory}/{noisy}/{block}"
+            )
+        return self
+
+
+class BranchStopGuardConfig(BaseModel):
+    """``branches.stop_guard``: the Stop and SubagentStop guard."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["block", "warn", "off"] = Field(default="block")
+    unpushed_subagent: Literal["block", "advise", "off"] = Field(default="block")
+    include_default: bool = Field(
+        default=False, description="Judge the default branch and integration lines at stop too"
+    )
+
+
+class BranchForceRemovalConfig(BaseModel):
+    """``branches.force_removal``: lossless ``worktree remove --force`` and ``branch -D``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["block", "off"] = Field(default="block")
+
+
+class BranchEvacuationConfig(BaseModel):
+    """``branches.evacuation``: the evacuate-then-destroy shape."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["block", "warn", "off"] = Field(default="block")
+
+
+class BranchCleanupAfterMergeConfig(BaseModel):
+    """``branches.cleanup_after_merge``: what happens to a branch once merged."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["act", "advise", "off"] = Field(default="advise")
+
+
+class BranchSweepConfig(BaseModel):
+    """``branches.sweep``: the inventory pass's budget and the behind-default warning line."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    budget_ms: Annotated[int, Field(ge=0)] = Field(
+        default=3000, description="Wall-clock budget for the per-branch inventory steps"
+    )
+    behind_threshold: Annotated[int, Field(ge=1)] = Field(
+        default=50, description="Commits behind the default branch that earn a warning"
+    )
+
+
+class BranchesConfig(BaseModel):
+    """Branch WIP limit and hygiene policy (Plan 00558, DESIGN.md section 1).
+
+    One top-level block read by the inventory, the guards and the CLI, so
+    they cannot disagree about the default branch, the integration lines or
+    what is exempt.
+
+    Attributes:
+        default: The default branch name, or ``auto`` to ask git
+            (``origin/HEAD``, then local ``main``, then ``master``)
+        remote: The remote whose refs count and whose deletes are judged
+        integration_lines: Globs naming merge targets that are never counted
+            and never deleted remotely by an agent
+        exempt: Globs naming branches never counted, judged or deleted
+        protected_names: Branch names no delete command will remove
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    default: str = Field(default=BRANCH_DEFAULT_AUTO, min_length=1)
+    remote: str = Field(default="origin", min_length=1)
+    integration_lines: list[str] = Field(default_factory=list)
+    exempt: list[str] = Field(default_factory=list)
+    protected_names: list[str] = Field(
+        default_factory=lambda: ["main", "master", "develop", "trunk"]
+    )
+    wip: BranchWipConfig = Field(default_factory=BranchWipConfig)
+    duplicates: BranchDuplicatesConfig = Field(default_factory=BranchDuplicatesConfig)
+    dormancy: BranchDormancyConfig = Field(default_factory=BranchDormancyConfig)
+    stop_guard: BranchStopGuardConfig = Field(default_factory=BranchStopGuardConfig)
+    force_removal: BranchForceRemovalConfig = Field(default_factory=BranchForceRemovalConfig)
+    evacuation: BranchEvacuationConfig = Field(default_factory=BranchEvacuationConfig)
+    cleanup_after_merge: BranchCleanupAfterMergeConfig = Field(
+        default_factory=BranchCleanupAfterMergeConfig
+    )
+    sweep: BranchSweepConfig = Field(default_factory=BranchSweepConfig)
+
+    @field_validator("default", "remote")
+    @classmethod
+    def reject_blank(cls, value: str) -> str:
+        """A blank name is no branch and no remote."""
+        if not value.strip():
+            raise ValueError("must name a branch or remote, not whitespace")
+        return value
+
+    def explicit_wip_cap(self) -> int | None:
+        """``wip.cap`` when the config sets it, else None (unset falls back elsewhere)."""
+        return self.wip.cap if "cap" in self.wip.model_fields_set else None
+
+    def explicit_behind_threshold(self) -> int | None:
+        """``sweep.behind_threshold`` when the config sets it, else None."""
+        if "behind_threshold" in self.sweep.model_fields_set:
+            return self.sweep.behind_threshold
+        return None
+
+
 class CcyConfig(BaseModel):
     """Configuration for the ccy (claude-yolo) container workflow (Plan 00147).
 
@@ -2734,6 +2910,7 @@ class Config(BaseModel):
         project_handlers: Project-level handler configuration
         ccy: ccy container-workflow configuration (Plan 00147)
         worktree: Worktree-workflow policy, the merge-to-main gate (Plan 00367)
+        branches: Branch WIP limit and hygiene policy (Plan 00558)
         layout: Project directory-layout truths with no other config home
             (Plan 00288); composed with other homes by the ``ProjectLayout``
             facade (``core/project_layout.py``)
@@ -2761,6 +2938,7 @@ class Config(BaseModel):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     ccy: CcyConfig = Field(default_factory=CcyConfig)
     worktree: WorktreeConfig = Field(default_factory=WorktreeConfig)
+    branches: BranchesConfig = Field(default_factory=BranchesConfig)
     tool_policy: ToolPolicyConfig = Field(default_factory=ToolPolicyConfig)
     persistent_crons: PersistentCronsConfig = Field(default_factory=PersistentCronsConfig)
     autonomy: AutonomyConfig = Field(default_factory=AutonomyConfig)
