@@ -289,7 +289,7 @@ def _same_work(evacuation: _Evacuation, destruction: _Destruction) -> bool:
     if evacuation.branches & destruction.branches:
         return True
     path = destruction.path
-    return path is not None and (evacuation.toplevel == path or path in evacuation.toplevel.parents)
+    return path is not None and evacuation.toplevel.is_relative_to(path)
 
 
 def evacuate_then_destroy(command: str, cwd: Path) -> EvacuationMatch | None:
