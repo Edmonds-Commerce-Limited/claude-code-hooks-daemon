@@ -113,4 +113,4 @@ Proving tests for each criterion: [subagent-reports/261103-success-criteria.md](
 - [x] A remote delete of a branch merged only into an integration line is allowed; a delete of the integration line is refused; a 40-branch delete is judged within the dispatch budget. Tests prove it.
 - [x] Nothing is deleted that is not proven recoverable. A test proves an unproven branch survives the cleanup.
 - [x] Release notes are recorded in `CLAUDE/UPGRADES/UNRELEASED/` (the pending-release holding area).
-- [ ] GitHub #152 and #153 are commented on with what shipped and closed.
+- [x] GitHub #152 and #153 are commented on with what shipped and closed.
