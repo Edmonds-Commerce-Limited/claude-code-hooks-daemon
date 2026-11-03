@@ -215,6 +215,19 @@ def judge_stop(
     return StopJudgement(tuple(findings), tips, incomplete)
 
 
+def _never_moved(repo: Path, name: str, budget: _Budget) -> bool:
+    """True when the branch's reflog holds only its creation: no work, so nothing merged.
+
+    A worktree branch made for a sub-agent that has not committed yet sits at
+    the default tip, and ancestry reads that as merged. An unreadable reflog
+    answers False, so the branch is still reported.
+    """
+    result = budget.git(repo, "reflog", "show", "--format=%H", f"refs/heads/{name}", "--")
+    if result is None or result.returncode != 0:
+        return False
+    return len(result.stdout.split()) == 1
+
+
 def _judge_branch(
     repo: Path,
     record: BranchRecord,
@@ -244,7 +257,7 @@ def _judge_branch(
                 )
             )
     if merged:
-        if not handoff:
+        if not handoff and not _never_moved(repo, record.name, budget):
             findings.append(
                 StopFinding(
                     record.name, StopCheck.MERGED, tip, _merged_commands(record, config.remote)

@@ -175,6 +175,14 @@ class TestUnpushed:
 
 
 class TestMerged:
+    def test_branch_that_never_moved_is_not_merged_work(self, repo: Path, tmp_path: Path) -> None:
+        # A worktree branch made for a sub-agent that has not committed yet sits
+        # at the default tip, so ancestry calls it merged; nothing was merged.
+        _branch(repo, "fresh", push=True, commit=False)
+        _git(repo, "worktree", "add", "-q", str(tmp_path / "wt"), "fresh")
+        _touch(repo, "fresh")
+        assert ("fresh", StopCheck.MERGED) not in _checks(_judge(repo))
+
     def test_merged_not_deleted_blocks_with_commands(self, repo: Path) -> None:
         _branch(repo, "work", push=True)
         _git(repo, "merge", "-q", "--no-ff", "-m", "merge", "work")
