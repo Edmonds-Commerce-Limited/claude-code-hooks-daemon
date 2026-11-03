@@ -55,7 +55,9 @@ class TestPark:
         new = _git(repo, "rev-parse", "work")
         assert new != old and result.sha == new
         assert _git(repo, "rev-parse", f"{new}^") == old
-        assert _git(repo, "rev-parse", f"{new}^{{tree}}") == _git(repo, "rev-parse", f"{old}^{{tree}}")
+        assert _git(repo, "rev-parse", f"{new}^{{tree}}") == _git(
+            repo, "rev-parse", f"{old}^{{tree}}"
+        )
         message = _git(repo, "log", "-1", "--format=%B", "work")
         assert "Parked-Reason: waiting on review" in message
         assert "Parked-By: Tess" in message

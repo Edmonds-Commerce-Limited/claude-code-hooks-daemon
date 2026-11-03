@@ -6528,7 +6528,10 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
         0 when the park stands (a failed push is reported, with its retry command),
         1 when it could not be written, 2 on a usage error.
     """
-    from claude_code_hooks_daemon.core.branch_creation import LABELS_RELATIVE_PATH, clear_label_stage
+    from claude_code_hooks_daemon.core.branch_creation import (
+        LABELS_RELATIVE_PATH,
+        clear_label_stage,
+    )
     from claude_code_hooks_daemon.core.branch_park import BranchParkError, park_branch
 
     if args.clear and args.reason:

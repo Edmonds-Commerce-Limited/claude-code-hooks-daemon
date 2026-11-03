@@ -75,7 +75,9 @@ def park_branch(
     )
     moved = run_git(repo, "update-ref", ref, new, old)
     if moved.returncode != 0:
-        raise BranchParkError(f"{name} moved while parking; nothing changed: {moved.stderr.strip()}")
+        raise BranchParkError(
+            f"{name} moved while parking; nothing changed: {moved.stderr.strip()}"
+        )
     retry = f"git push {remote} {name}"
     pushed = run_git(repo, "push", remote, name, timeout=Timeout.GIT_FETCH_SESSION)
     if pushed.returncode != 0:
