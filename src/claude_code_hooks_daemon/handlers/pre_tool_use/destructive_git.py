@@ -32,13 +32,13 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     remove_word_quoting,
 )
 from claude_code_hooks_daemon.utils.command_position import command_position_argument_segments
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_commit_parsing import GitInvocation, git_invocations
 from claude_code_hooks_daemon.utils.git_invocation_directory import (
     invocation_directory,
     placement_problem,
 )
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
-from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_sync import resolve_default_branch
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 
