@@ -80,8 +80,8 @@ Today nothing holds a limit (code facts with citations: [subagent-reports/261103
 Cleanup comes before enforcement: on the #152 commenter's 154 leftovers it alone would have removed about three quarters ([DESIGN.md](DESIGN.md) section 9).
 
 - [x] ✅ **Task 3.1**: Add the lossless cleanup after a merge and `branch-sweep --clean` (Goal 7), with integration lines in R-GIT-PUSH-DELETE-REMOTE and its batched remote check (#153) (Goal 8). The batched check is already merged (e4841e27d). Before any cleanup deletes on `classify_branch`, close its two fail-open gaps: a failed `git cherry` reads as patch-equivalent (`_unique_commit_count` returns 0; switch to `cherry_unique_shas`, which fails closed), and a branch whose merge commits carry content not in the target passes as patch-equivalent (it decides from the `git cherry` count alone; the same gap that [subagent-reports/261103-phase2-review.md](subagent-reports/261103-phase2-review.md) finding 2 found and fixed in the inventory).
-- [ ] ⬜ **Task 3.2**: Make WorktreeRemove delete its proven-merged branch, and count `worktree_create` names (Goal 9).
-- [ ] ⬜ **Task 3.3**: Fix what dogfooding `branch-sweep --clean --dry-run` on this repository showed, and restore one line the summary dropped:
+- [x] ✅ **Task 3.2**: Make WorktreeRemove delete its proven-merged branch, and count `worktree_create` names (Goal 9). Until Task 4.2's creator record exists, eligibility is the `<slug>-<8 hex>` name. Report: [subagent-reports/261103-task32-33.md](subagent-reports/261103-task32-33.md).
+- [x] ✅ **Task 3.3**: Fix what dogfooding `branch-sweep --clean --dry-run` on this repository showed, and restore one line the summary dropped:
   - an empty `untracked/scratch/` counts as a blocker;
   - a regenerable glob with a trailing slash does not match a symlinked store (`untracked/lsp-venv`);
   - the defaults miss `untracked/repair.log`, `untracked/repair.txt`, `.coverage`, `untracked/.python-cmd-cache`, `untracked/context-sidecar/`, `untracked/logs/`, `untracked/acceptance/` and `.CLAUDE.md.pre-inject`;

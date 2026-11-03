@@ -64,10 +64,14 @@ config_changes:
     - key: branches.cleanup_after_merge.regenerable
       description: >-
         Worktree-relative globs naming the ignored stores `branch-sweep --clean`
-        may lose when it removes a linked worktree (venvs, QA output, caches,
-        `.claude/hooks-daemon/`, `*.egg-info/`). Any other ignored path blocks
-        the removal. `untracked/scratch/` always blocks: a list covering it
-        fails the config load.
+        may lose when it removes a linked worktree, read by `branch-sweep --clean`
+        and the WorktreeRemove cleanup (venvs, QA output, caches, logs,
+        `untracked/repair.log`/`repair.txt`, `untracked/.python-cmd-cache`,
+        `untracked/context-sidecar/`, `untracked/acceptance/`, `.coverage`,
+        `.CLAUDE.md.pre-inject`, `.claude/hooks-daemon/`, `*.egg-info/`). Any
+        other ignored path blocks the removal; an empty directory never does, and
+        a `store/` glob also covers a symlink of that name. `untracked/scratch/`
+        with any file in it always blocks: a list covering it fails the config load.
     - key: branches.sweep
       description: >-
         The inventory pass's wall-clock `budget_ms` (3000) and the
