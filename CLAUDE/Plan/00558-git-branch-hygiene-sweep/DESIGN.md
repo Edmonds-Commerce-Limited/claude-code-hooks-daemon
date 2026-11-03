@@ -109,7 +109,8 @@ Cost: steps 1-4 are four to six git processes whatever the branch count; on 1,40
 ### Reuse of `daemon/branch_safety.py`
 
 - The merged, patch-equivalent and content-preserved tiers (`classify_branch`, `:508`) are the proof for every delete: the cleanup (section 7), WorktreeRemove (section 8) and a new `branch-sweep --clean` all call `classify_branch` and `delete_branches` (`:655`), which already writes the recovery bundle and re-checks the tip before deleting.
-- `_unique_commit_count` (`:418`) is the patch-equivalence step 5 uses.
+- `cherry_unique_shas` is the patch-equivalence step 5 uses. It returns None when `git cherry` fails, and a range containing a merge commit is never patch-equivalent; both fail closed in the inventory and in `classify_branch`.
+- Containment (section 4) counts remote-tracking refs only. An unpushed local tag never makes a tip contained, so it cannot hide CONTAINED NOWHERE. Section 11's lossless-delete proof still counts local tags, because there the question is only whether the commits survive locally.
 - The inventory does NOT run the content-preserved tier: it walks every blob and is for the delete moment only.
 - `classify_branch` gains a `targets` parameter (default ref plus integration-line refs) in place of the single `protected_ref`, so merged-into-a-line is a proof tier too.
 
@@ -273,12 +274,12 @@ A sub-agent that dies on a rate limit or an API error never fires SubagentStop (
 
 A PostToolUse handler on a successful Bash `git merge <branch>` run in a checkout whose current branch is the default or an integration line.
 
-1. Prove: `classify_branch` against the checkout's HEAD; anything not merged or patch-equivalent is left alone.
-2. `git worktree remove <path>` (never `--force`) when the branch is checked out in a clean linked worktree.
-3. Local delete through `delete_branches` (recovery bundle, tip re-check; `-d` for merged).
+1. Prove: `classify_branch` against the checkout's HEAD (`content_tier=False`). Only the `merged` tier is acted on; a patch-equivalent branch's own commits are not reachable from HEAD, so the hook prints the `branch-sweep --clean` command for it instead.
+2. The hook never removes a worktree: `git worktree remove` deletes ignored files, including a worktree's own `untracked/scratch/` (the loss #155 describes). A branch held by a worktree gets the removal and delete commands printed, whatever the mode.
+3. Local delete of a merged branch held by no worktree, with a tip re-check and no recovery bundle (one bundle measured 8.2 s and 51 MB here, too slow for a hook, and every commit is reachable from HEAD). The handler prints the restore line `git branch <name> <sha>`.
 4. The remote delete is NOT run inside the hook: it is a network call within the dispatch budget, and at this point the merge target is usually not pushed, so the proof would fail. The handler prints the exact `git push <remote> --delete <branch>` to run after the target is pushed; R-GIT-PUSH-DELETE-REMOTE then proves it, and the Stop guard's merged-but-not-deleted check makes sure it happens.
 
-`mode: advise` prints steps 2-4 as commands instead of running them; `act` runs 2 and 3. Never a force, never the default branch, an integration line, an exempt branch, or a branch the proof did not cover. `gh pr merge` merges on the server; the cleanup there runs on the next `git fetch`/`git pull` that brings the merge in, through the same proof.
+`mode: advise` prints steps 3-4 as commands instead of running them; `act` runs step 3. `branch-sweep --clean` deletes both tiers behind the recovery bundle, and removes a linked worktree only when it is clean and every ignored file in it matches `branches.cleanup_after_merge.regenerable` (venvs, QA caches, the deployed daemon, build metadata; `untracked/scratch/` can never be listed), otherwise it skips that worktree and names the blocking paths. Never a force, never the default branch, an integration line, an exempt branch, or a branch the proof did not cover. `gh pr merge` merges on the server; the cleanup there runs on the next `git fetch`/`git pull` that brings the merge in, through the same proof.
 
 ### Integration lines in R-GIT-PUSH-DELETE-REMOTE
 
