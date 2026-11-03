@@ -60,6 +60,58 @@ class TestInitialisation:
         assert handler.matches({"hook_event_name": EventType.WORKTREE_CREATE.value}) is True
 
 
+class TestBranchCap:
+    """Plan 00558 Task 4.2: a new worktree's branch is held to branches.wip.cap."""
+
+    def _input(self, repo: Path) -> dict:
+        return {"cwd": str(repo), "name": "new work", "prompt_id": "p", "session_id": "s"}
+
+    def _handler(self, cap: int) -> WorktreeCreateHandler:
+        from claude_code_hooks_daemon.config.models import BranchesConfig, BranchWipConfig
+
+        handler = WorktreeCreateHandler()
+        handler._branches = BranchesConfig(wip=BranchWipConfig(cap=cap, mode="block"))
+        return handler
+
+    def _open(self, repo: Path, *names: str) -> None:
+        for name in names:
+            tree = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD^{tree}"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            sha = subprocess.run(
+                ["git", "-C", str(repo), "commit-tree", tree, "-p", "HEAD", "-m", name],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            subprocess.run(
+                ["git", "-C", str(repo), "update-ref", f"refs/heads/{name}", sha], check=True
+            )
+
+    def test_at_cap_refuses_and_creates_nothing(self, repo: Path) -> None:
+        self._open(repo, "one", "two")
+        with pytest.raises(RuntimeError, match="R-BRANCH-WIP-CAP"):
+            self._handler(cap=2).handle(self._input(repo))
+        assert not (repo / ".claude" / "worktrees").exists() or not any(
+            (repo / ".claude" / "worktrees").iterdir()
+        )
+
+    def test_under_cap_creates(self, repo: Path) -> None:
+        self._open(repo, "one")
+        result = self._handler(cap=3).handle(self._input(repo))
+        assert result.worktree_path is not None
+        assert Path(result.worktree_path).is_dir()
+
+    def test_existing_worktree_is_reused_without_judging(self, repo: Path) -> None:
+        first = self._handler(cap=5).handle(self._input(repo))
+        self._open(repo, "one", "two", "three", "four", "five")
+        again = self._handler(cap=2).handle(self._input(repo))
+        assert again.worktree_path == first.worktree_path
+
+
 class TestHandle:
     def _input(self, repo: Path, name: str = "Refactor Auth") -> dict:
         return {

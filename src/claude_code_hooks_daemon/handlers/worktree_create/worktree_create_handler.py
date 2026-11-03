@@ -22,10 +22,17 @@ import subprocess  # nosec B404 — CalledProcessError typing only; run_git owns
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.protocol import HookInputField
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import AdvisoryResult
+from claude_code_hooks_daemon.core.branch_creation import (
+    LABELS_RELATIVE_PATH,
+    creation_verdict,
+    read_labels,
+)
 from claude_code_hooks_daemon.core.handler_bases import WorktreeCreateHandlerBase
 from claude_code_hooks_daemon.core.worktree_naming import worktree_dir_name, worktree_path
 from claude_code_hooks_daemon.core.worktree_seed import (
@@ -57,6 +64,10 @@ _NOT_FOUND_HINT = (
     "or a git hook such as post-checkout ran a command that was not found - in that "
     "case the worktree was still created and the hook's own stderr is quoted above]"
 )
+
+
+class BranchCapError(RuntimeError):
+    """The new worktree's branch would exceed ``branches.wip.cap``."""
 
 
 class _WorktreeAddError(subprocess.CalledProcessError):
@@ -91,6 +102,7 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         # ``_resolved_seed`` memoises the validated form on first use.
         self._seed: Any = None
         self._resolved_seed: list[SeedEntry] | None = None
+        self._branches: BranchesConfig = BranchesConfig()
 
     def _seed_entries(self) -> list[SeedEntry]:
         """Return the validated seed entries, parsing the option once."""
@@ -126,6 +138,8 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         # under a fixed `.claude/worktrees/` prefix, never from the payload
         # directly -- unlike WorktreeRemove, which does take a payload path.
         if not path.exists():
+            branch = worktree_dir_name(name, prompt_id, session_id)
+            self._judge_branch_cap(Path(root), branch)
             entries = self._seed_entries()
             # BEFORE creation: an unusable entry must abandon the whole
             # operation rather than leave a worktree missing files its agent
@@ -133,12 +147,26 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             validate_seed_sources(Path(root), entries)
 
             path.parent.mkdir(parents=True, exist_ok=True)
-            branch = worktree_dir_name(name, prompt_id, session_id)
             self._git_worktree_add(cwd, path, branch)
 
             seed_worktree(Path(root), path, entries)
 
         return AdvisoryResult(worktree_path=str(path))
+
+    def _judge_branch_cap(self, root: Path, branch: str) -> None:
+        """Refuse the creation at ``branches.wip.cap``; log any warning.
+
+        The event's answer is a path and nothing else, so a refusal is a raise
+        (a non-zero exit aborts creation) and a warning can only be logged.
+        """
+        labels = read_labels(root / LABELS_RELATIVE_PATH)
+        verdict = creation_verdict(root, self._branches, branch, labels=labels)
+        if verdict.decision == "deny":
+            raise BranchCapError(
+                "\n".join([f"BLOCKED [{RuleID.BRANCH_WIP_CAP}]", *verdict.lines])
+            )
+        for line in verdict.lines:
+            logger.warning("worktree_create: %s", line)
 
     @staticmethod
     def _repo_root(cwd: str) -> str:

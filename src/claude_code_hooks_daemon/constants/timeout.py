@@ -176,6 +176,9 @@ class Timeout:
     # worktree, prune its registration, delete its branch).
     GIT_WORKTREE_CLEANUP = GIT_CONTEXT
     GIT_WORKTREE_CLEANUP_CALLS = 4
+    # Plan 00558 Task 4.2: the branch-cap verdict before the add -- one
+    # for-each-ref, and a worktree list when a deny or a warning names worktrees.
+    GIT_BRANCH_CREATION_CALLS = 2
 
     # Plan 00512 (issue #82): WorktreeCreate and WorktreeRemove are not guards.
     # They run git and report a path, and their git call (GIT_WORKTREE) is longer
@@ -191,8 +194,9 @@ class Timeout:
     # test_event_budgets.py pins the two equal.
     CHAIN_DEADLINE_HANDLER_MARGIN_SECONDS = 5
     EVENT_HANDLER_BUDGET: ClassVar[dict[EventType, int]] = {
-        # The add plus its short pre-check and cleanup calls, all failing.
-        EventType.WORKTREE_CREATE: GIT_WORKTREE + GIT_WORKTREE_CLEANUP * GIT_WORKTREE_CLEANUP_CALLS,
+        # The add plus its short pre-check, branch-cap and cleanup calls, all failing.
+        EventType.WORKTREE_CREATE: GIT_WORKTREE
+        + GIT_WORKTREE_CLEANUP * (GIT_WORKTREE_CLEANUP_CALLS + GIT_BRANCH_CREATION_CALLS),
         # `worktree remove --force` and then `worktree prune`.
         EventType.WORKTREE_REMOVE: 2 * GIT_WORKTREE,
     }

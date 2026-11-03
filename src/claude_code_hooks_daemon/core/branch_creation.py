@@ -26,6 +26,7 @@ from typing import Final, Literal
 
 from claude_code_hooks_daemon.config.models import BRANCH_DEFAULT_AUTO, BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.branch_inventory import is_work_branch, worktrees_by_branch
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
@@ -167,7 +168,9 @@ def _read_refs(
     namespaces = [_HEADS.rstrip("/")]
     if config.wip.count_remote:
         namespaces.append(f"{_REMOTES}{config.remote}")
-    result = run_git(repo, "for-each-ref", f"--format={_FORMAT}", *namespaces)
+    result = run_git(
+        repo, "for-each-ref", f"--format={_FORMAT}", *namespaces, timeout=Timeout.GIT_CONTEXT
+    )
     if result.returncode != 0:
         return result.stderr.strip() or f"git exited {result.returncode}"
     remote_prefix = f"{_REMOTES}{config.remote}/"
