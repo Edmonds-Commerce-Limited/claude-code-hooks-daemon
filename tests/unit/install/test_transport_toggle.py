@@ -750,6 +750,37 @@ class TestRelayProvisioning:
         assert "no musl toolchain" in provision.failure
         assert provision.route is None
 
+    def test_ensure_relay_binary_auto_source_failed_download_leaves_no_binary(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plan 00554: the default ``auto`` source falls back to the download when
+        no musl toolchain exists; a failed fetch fails the enable and deploys
+        nothing. The fetch is stubbed, so the test never touches the network."""
+        from claude_code_hooks_daemon.install import relay_deploy
+
+        binary = self._remove_fixture_binary(project)
+        config_path = _config_path(project)
+        config_path.write_text(
+            config_path.read_text().replace("relay_source: null", "relay_source: auto")
+        )
+        fetched: list[str] = []
+
+        def failing_fetch(url: str) -> bytes:
+            fetched.append(url)
+            raise OSError("network stubbed out")
+
+        monkeypatch.setattr(relay_deploy, "host_relay_target", lambda: relay_deploy.RELAY_TARGET)
+        monkeypatch.setattr(relay_deploy, "check_musl_toolchain", lambda **_k: False)
+        monkeypatch.setattr(relay_deploy, "_default_fetch", failing_fetch)
+
+        provision = ensure_relay_binary(project)
+
+        assert fetched, "the download route must have been attempted via the stub"
+        assert provision.failure is not None
+        assert "relay_source=auto" in provision.failure
+        assert provision.route is None
+        assert not binary.exists()
+
 
 class TestProvisioningIsReported:
     """N525: a binary provisioned by ``transport on`` is a change and is carried
