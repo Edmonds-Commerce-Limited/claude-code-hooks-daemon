@@ -1,5 +1,6 @@
 """PostToolUse event handlers."""
 
+from .branch_touch_recorder import BranchTouchRecorderHandler
 from .cleanup_after_merge import CleanupAfterMergeHandler
 from .daemon_sync_after_merge import DaemonSyncAfterMergeHandler
 from .git_hooks_executable_fixer import GitHooksExecutableFixerHandler
@@ -9,6 +10,7 @@ from .merge_qa_report import MergeQaReportHandler
 from .validate_eslint_on_write import ValidateEslintOnWriteHandler
 
 __all__ = [
+    "BranchTouchRecorderHandler",
     "CleanupAfterMergeHandler",
     "DaemonSyncAfterMergeHandler",
     "GitHooksExecutableFixerHandler",

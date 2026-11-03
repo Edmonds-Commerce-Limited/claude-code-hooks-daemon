@@ -90,6 +90,13 @@ config_changes:
         name looks like an existing branch's work (`branches.duplicates.mode`).
         WorktreeCreate applies the same verdict before its `worktree add`
         (priority 40).
+    - key: handlers.post_tool_use.branch_touch_recorder
+      description: >-
+        The PostToolUse handler that writes a new branch's creator record
+        (`branch.<name>.hooksDaemonCreator`, `hooksDaemonCreated`,
+        `hooksDaemonRoute`) and adds each session and agent that changes a
+        branch to its `hooksDaemonTouchedBy` record, in git config
+        (priority 40).
 
   renamed:
     - old_key: handlers.session_start.branch_count_advisor.options.max_open_branches
