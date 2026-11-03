@@ -128,7 +128,7 @@ class TestDisposition:
         assert by_name["branch-sweep"].cli_argv == ("branch-sweep",)
         assert by_name["branch-sweep-clean"].cli_argv == ("branch-sweep", "--clean")
         assert by_name["branch-sweep-clean"].confirmation_required
-        assert by_name["remote-docs-check"].cli_argv ==("remote-docs", "check")
+        assert by_name["remote-docs-check"].cli_argv == ("remote-docs", "check")
         assert by_name["remote-docs-refresh"].cli_argv == ("remote-docs", "refresh")
 
     def test_optimise_runs_through_its_existing_skill_entry_point(self) -> None:
