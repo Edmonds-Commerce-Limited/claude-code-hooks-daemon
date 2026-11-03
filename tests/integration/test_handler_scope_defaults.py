@@ -81,6 +81,8 @@ _EXPECTED_MAIN: frozenset[str] = frozenset(
         "idle-workable-issue-stop-gate",
         # Plan 00501 Phase 6: goals are set and evaluated on the coordinator's session.
         "goal-loop-detector",
+        # Plan 00558 Task 4.4: judges the coordinator's own stop.
+        "branch-stop-guard",
     }
 )
 
@@ -94,6 +96,8 @@ _EXPECTED_SUB: frozenset[str] = frozenset(
         # the coordinator's context is not a subagent's to hand off.
         "subagent-context-budget",
         "subagent-handoff-gate",
+        # Plan 00558 Task 4.4: a subagent's own stop and the branches it touched.
+        "branch-subagent-stop-guard",
     }
 )
 

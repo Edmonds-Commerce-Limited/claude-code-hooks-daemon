@@ -19,7 +19,11 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget impo
     STATE_HARD_ENGAGED,
     STATE_KIND,
 )
-from claude_code_hooks_daemon.handlers.stop.branch_stop_guard import BranchStopGuardBase
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.handlers.stop.branch_stop_guard import (
+    BranchStopGuardBase,
+    stop_guard_rule,
+)
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path
 
 
@@ -31,6 +35,7 @@ class BranchSubagentStopGuardHandler(BranchStopGuardBase):
             handler_id=HandlerID.BRANCH_SUBAGENT_STOP_GUARD,
             priority=Priority.BRANCH_SUBAGENT_STOP_GUARD,
             scope=HandlerScope.SUB,
+            rule=stop_guard_rule(RuleID.BRANCH_SUBAGENT_STOP_GUARD, "sub-agent"),
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -77,5 +82,22 @@ class BranchSubagentStopGuardHandler(BranchStopGuardBase):
                     "It needs a real sub-agent whose branch touches are recorded in git "
                     "config; the harness fabricates neither."
                 ),
-            )
+            ),
+            AcceptanceTest(
+                title="branch subagent stop guard - a sub-agent stop with its branches pushed is allowed",
+                command="Stop a subagent whose touched branches are clean, pushed and unmerged",
+                description=(
+                    "Nothing is left behind, so the stop proceeds with no block. Only the "
+                    "unpushed commit differs from the deny case."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="The near miss of the deny case.",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                harness_cannot_produce=(
+                    "It needs a real sub-agent whose branch touches are recorded in git "
+                    "config; the harness fabricates neither."
+                ),
+            ),
         ]

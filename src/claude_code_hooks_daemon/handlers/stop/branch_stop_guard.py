@@ -37,27 +37,33 @@ from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
 
-RULE: Final[Rule] = Rule(
-    rule_id=RuleID.BRANCH_STOP_GUARD,
-    blocked="a stop that leaves a dirty worktree, unpushed commits or a merged branch behind",
-    why="Work left on a branch nobody returns to is lost work; the guard makes the stopping "
-    "session finish, park or hand over each branch it touched",
-    fix="Run the commands the message lists for each branch, then stop again",
-    verbose=(
-        "WHY BLOCKED:\n"
-        "  This session touched the branches below and is stopping with work on them\n"
-        "  uncommitted, unpushed, or merged but not deleted.\n\n"
-        "DO INSTEAD:\n"
-        "  Run the listed commands per branch. After three blocked stops the guard\n"
-        "  gives way and records the branches as abandoned."
-    ),
-)
+def stop_guard_rule(rule_id: str, who: str) -> Rule:
+    """The rule a stop guard files its deny under; ``who`` names the stopping identity."""
+    return Rule(
+        rule_id=rule_id,
+        blocked="a stop that leaves a dirty worktree, unpushed commits or a merged branch behind",
+        why="Work left on a branch nobody returns to is lost work; the guard makes the stopping "
+        f"{who} finish, park or hand over each branch it touched",
+        fix="Run the commands the message lists for each branch, then stop again",
+        verbose=(
+            "WHY BLOCKED:\n"
+            f"  This {who} touched the branches below and is stopping with work on them\n"
+            "  uncommitted, unpushed, or merged but not deleted.\n\n"
+            "DO INSTEAD:\n"
+            "  Run the listed commands per branch. After three blocked stops the guard\n"
+            "  gives way and records the branches as abandoned."
+        ),
+    )
+
+
+RULE: Final[Rule] = stop_guard_rule(RuleID.BRANCH_STOP_GUARD, "session")
 
 
 class BranchStopGuardBase(StopHandlerBase):
     """Shared Stop/SubagentStop flow; subclasses name the event, scope and agent handling."""
 
-    def __init__(self, *, handler_id: Any, priority: int, scope: HandlerScope) -> None:
+    def __init__(self, *, handler_id: Any, priority: int, scope: HandlerScope, rule: Rule) -> None:
+        self._rule = rule
         super().__init__(
             handler_id=handler_id,
             priority=priority,
@@ -84,7 +90,7 @@ class BranchStopGuardBase(StopHandlerBase):
 
     def get_rules(self) -> list[Rule]:
         """The rule behind the blocked stop."""
-        return [RULE]
+        return [self._rule]
 
     def get_claude_md(self) -> str | None:
         """Guidance for the stop guard; the SubagentStop twin shares it."""
@@ -127,7 +133,7 @@ class BranchStopGuardBase(StopHandlerBase):
             return allow
         if decision.reason is not None:
             return BlockingResult.deny(decision.reason, context=list(decision.context)).under_rule(
-                RULE
+                self._rule
             )
         return BlockingResult(decision=Decision.ALLOW, context=list(decision.context))
 
@@ -140,6 +146,7 @@ class BranchStopGuardHandler(BranchStopGuardBase):
             handler_id=HandlerID.BRANCH_STOP_GUARD,
             priority=Priority.BRANCH_STOP_GUARD,
             scope=HandlerScope.MAIN,
+            rule=RULE,
         )
 
     def _agent_id(self, hook_input: dict[str, Any]) -> str | None:
@@ -155,7 +162,7 @@ class BranchStopGuardHandler(BranchStopGuardBase):
             "the branches as abandoned. The coordinator also answers for its sub-agents' "
             "unpushed and merged leftovers. Configure with `branches.stop_guard` "
             "(`mode`, `unpushed_subagent`, `include_default`).\n\n"
-            "IDs: R-BRANCH-STOP-GUARD"
+            "IDs: R-BRANCH-STOP-GUARD, R-BRANCH-SUBAGENT-STOP-GUARD"
         )
 
     def get_acceptance_tests(self) -> list[Any]:
@@ -179,5 +186,22 @@ class BranchStopGuardHandler(BranchStopGuardBase):
                     "The judgement reads the session's git-config touch records, which the "
                     "harness fabricates no branch history to produce."
                 ),
-            )
+            ),
+            AcceptanceTest(
+                title="branch stop guard - a stop with every touched branch pushed is allowed",
+                command="Stop a session whose touched branches are clean, pushed and unmerged",
+                description=(
+                    "Nothing is left behind, so the stop proceeds with no block. Only the "
+                    "unpushed commit differs from the deny case."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="The near miss of the deny case.",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                harness_cannot_produce=(
+                    "The judgement reads the session's git-config touch records, which the "
+                    "harness fabricates no branch history to produce."
+                ),
+            ),
         ]
