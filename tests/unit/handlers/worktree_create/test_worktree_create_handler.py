@@ -99,6 +99,22 @@ class TestBranchCap:
             (repo / ".claude" / "worktrees").iterdir()
         )
 
+    def test_dormancy_refusal_carries_the_dormancy_rule_id(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+        from claude_code_hooks_daemon.core.branch_creation import CreationVerdict
+        from claude_code_hooks_daemon.handlers.worktree_create import worktree_create_handler
+
+        def dormant_verdict(*_args: object, **_kwargs: object) -> CreationVerdict:
+            return CreationVerdict("deny", ("old-work is dormant",), RuleID.BRANCH_DORMANT)
+
+        monkeypatch.setattr(worktree_create_handler, "creation_verdict", dormant_verdict)
+        with pytest.raises(RuntimeError) as raised:
+            self._handler(cap=5).handle(self._input(repo))
+        assert f"BLOCKED [{RuleID.BRANCH_DORMANT}]" in str(raised.value)
+        assert RuleID.BRANCH_WIP_CAP not in str(raised.value)
+
     def test_under_cap_creates(self, repo: Path) -> None:
         self._open(repo, "one")
         result = self._handler(cap=3).handle(self._input(repo))

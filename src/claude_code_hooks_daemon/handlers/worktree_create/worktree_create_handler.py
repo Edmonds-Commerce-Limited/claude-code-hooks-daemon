@@ -177,7 +177,8 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         labels = read_labels(root / LABELS_RELATIVE_PATH)
         verdict = creation_verdict(root, self._branches, branch, labels=labels)
         if verdict.decision == "deny":
-            raise BranchCapError("\n".join([f"BLOCKED [{RuleID.BRANCH_WIP_CAP}]", *verdict.lines]))
+            rule = verdict.rule_id or RuleID.BRANCH_WIP_CAP
+            raise BranchCapError("\n".join([f"BLOCKED [{rule}]", *verdict.lines]))
         for line in verdict.lines:
             logger.warning("worktree_create: %s", line)
 
