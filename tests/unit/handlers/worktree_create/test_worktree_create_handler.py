@@ -93,8 +93,9 @@ class TestBranchCap:
 
     def test_at_cap_refuses_and_creates_nothing(self, repo: Path) -> None:
         self._open(repo, "one", "two")
-        with pytest.raises(RuntimeError, match="R-BRANCH-WIP-CAP"):
+        with pytest.raises(RuntimeError, match="R-BRANCH-WIP-CAP") as raised:
             self._handler(cap=2).handle(self._input(repo))
+        assert "one" in str(raised.value) and "two" in str(raised.value)
         assert not (repo / ".claude" / "worktrees").exists() or not any(
             (repo / ".claude" / "worktrees").iterdir()
         )

@@ -8,6 +8,7 @@ the proof. The proof is one `git for-each-ref --merged` per target, never one
 """
 
 import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ import pytest
 from tests.support.git_fixtures import run_git
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.handlers.pre_tool_use import destructive_git
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import DestructiveGitHandler
@@ -175,6 +177,19 @@ def test_forty_branches_cost_one_ls_remote_and_one_for_each_ref_per_target(
     assert many.count("rev-parse") == 0
     # Targets: origin/main, local main, origin/release/x -- plus one listing call.
     assert many.count("for-each-ref") == few.count("for-each-ref") == 4
+
+
+def test_forty_branches_are_judged_within_the_dispatch_budget(
+    install: Callable[[_FakeGit], _FakeGit], tmp_path: Path
+) -> None:
+    names = [f"b{i}" for i in range(40)]
+    install(_FakeGit(names))
+    command = "git push origin --delete " + " ".join(names)
+    started = time.monotonic()
+    result = _handler().handle(_input(command, tmp_path))
+    elapsed_ms = (time.monotonic() - started) * 1000
+    assert result.decision == "allow"
+    assert elapsed_ms < Timeout.HOOK_DISPATCH
 
 
 def test_a_for_each_ref_failure_denies(

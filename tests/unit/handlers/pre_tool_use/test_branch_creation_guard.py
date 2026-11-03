@@ -148,6 +148,45 @@ class TestHandle:
         assert result.reason is not None
         assert "delete-branch two" in result.reason
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git switch -c fresh",
+            "git switch -C fresh",
+            "git switch --create fresh",
+            "git checkout -b fresh",
+            "git checkout -B fresh",
+            "git branch fresh",
+            "git branch fresh main",
+            "git worktree add -b fresh ../wt-fresh",
+            "git worktree add -B fresh ../wt-fresh",
+            "git worktree add ../wt-fresh",
+        ],
+    )
+    def test_every_bash_creation_route_is_denied_listing_the_open_branches(
+        self, handler: BranchCreationGuardHandler, repo: Path, command: str
+    ) -> None:
+        result = handler.handle(_bash(command, repo))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert result.reason.startswith("BLOCKED [R-BRANCH-WIP-CAP]")
+        assert "one" in result.reason and "two" in result.reason
+        assert BRANCH_LIMIT_PRINCIPLE in result.reason
+
+    @pytest.mark.parametrize("tool_name", ["Agent", "Task"])
+    def test_every_isolated_dispatch_route_is_denied_listing_the_open_branches(
+        self, handler: BranchCreationGuardHandler, repo: Path, tool_name: str
+    ) -> None:
+        hook_input = {
+            "tool_name": tool_name,
+            "tool_input": {"isolation": "worktree", "name": "fresh"},
+            "cwd": str(repo),
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "one" in result.reason and "two" in result.reason
+
     def test_isolated_agent_at_cap_is_denied(
         self, handler: BranchCreationGuardHandler, repo: Path
     ) -> None:
