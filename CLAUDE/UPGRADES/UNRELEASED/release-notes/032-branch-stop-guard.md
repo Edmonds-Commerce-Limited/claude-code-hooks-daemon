@@ -5,7 +5,7 @@
 
 Two new non-terminal handlers, `branch_stop_guard` (Stop, priority 9) and `branch_subagent_stop_guard` (SubagentStop, priority 12), judge the branches the stopping session or sub-agent touched, using the touch records.
 
-- **Checks**: a dirty worktree, commits no remote holds, and a branch merged but not deleted. The deny names the branch, the failed check and the exact commands. The default branch and integration lines are skipped unless `branches.stop_guard.include_default` is set.
+- **Checks**: a dirty worktree, commits no remote holds, and a branch merged but not deleted. The deny names the branch, the failed check and the exact commands. The default branch and integration lines are skipped unless `branches.stop_guard.include_default` is set. A branch that has not moved since it was created (a sub-agent's worktree before its first commit) is not reported as merged.
 - **Scope**: a sub-agent answers for its own branches. The coordinator answers for its own and for its sub-agents' unpushed and merged-but-present branches, not their dirty worktrees. `branches.stop_guard.unpushed_subagent` (`block`, `advise`, `off`) sets how a sub-agent's unpushed commits are treated.
 - **Gives way**: after three denied stops the guard allows the stop and records the branches as abandoned in the session's spend-ledger state. A live usage pause, a recorded release, or a git failure also allows the stop. An agent past its hard context budget skips the merged check and the deny lists each branch with its tip sha for the handoff.
 - **Noisy line**: at a main-thread stop, at most once an hour per session, a non-blocking line lists branches at the noisy dormancy stage or later.

@@ -97,18 +97,20 @@ Cleanup comes before enforcement: on the #152 commenter's 154 leftovers it alone
 
 ### Phase 5: Ship
 
-- [ ] ⬜ **Task 5.1**: Write the handler guidance, docs and the `/hooks-daemon housekeeping` step.
-- [ ] ⬜ **Task 5.2**: Add release notes in the pending-release holding area.
-- [ ] ⬜ **Task 5.3**: Dogfood on this repository: run the sweep, act on what it finds, and confirm the guards fire.
+- [x] ✅ **Task 5.1**: Write the handler guidance, docs and the `/hooks-daemon housekeeping` step. Housekeeping gains `branch-sweep` (report) and `branch-sweep-clean` (held); `HANDLER_REFERENCE.md` and `CONFIGURATION.md` cover every new handler and `branches:` key. Open owner question: `CLAUDE/Worktree.md` still says 3 against the `wip.cap` default of 10.
+- [x] ✅ **Task 5.2**: Add release notes in the pending-release holding area. Notes 023-032 in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`; 031 warns an upgrading repository that a branch already 30 days idle blocks creation from the first session start.
+- [ ] 🔄 **Task 5.3**: Dogfood on this repository: run the sweep, act on what it finds, and confirm the guards fire. The sweep has run and the guards have fired (journal); acting on the two branches at the dormancy block stage (`agent-a388f9611b6f8f3d1-1f7c8c8f`, `feature/00135-tmux-send-keys-injection`) is the owner's decision: park or delete.
 
 ## Success Criteria
 
-- [ ] On a fixture repository with branches merged into the default branch, merged into a `release/*` line, abandoned, duplicated and parked, the sweep classifies each correctly. A test proves it.
-- [ ] At the configured cap, every creation route in Goal 3 is denied, and the denial lists the open branches. A test per route proves it.
-- [ ] A Stop and a SubagentStop that leave any touched branch dirty, holding commits no remote contains, or merged but undeleted are refused. Tests prove it, including a branch touched and then switched away from.
-- [ ] A forced worktree removal or `branch -D` that would lose work is refused, and an evacuate-then-destroy command is refused; every deny carries the Goal 11 text. Tests prove it.
-- [ ] Idle branches are reported with their containment, and the `strict` preset applies 3 and 7 days. Tests prove it.
-- [ ] A remote delete of a branch merged only into an integration line is allowed; a delete of the integration line is refused; a 40-branch delete is judged within the dispatch budget. Tests prove it.
-- [ ] Nothing is deleted that is not proven recoverable. A test proves an unproven branch survives the cleanup.
-- [ ] Release notes are recorded in `CLAUDE/UPGRADES/UNRELEASED/` (the pending-release holding area).
+Proving tests for each criterion: [subagent-reports/261103-success-criteria.md](subagent-reports/261103-success-criteria.md).
+
+- [x] On a fixture repository with branches merged into the default branch, merged into a `release/*` line, abandoned, duplicated and parked, the sweep classifies each correctly. A test proves it.
+- [x] At the configured cap, every creation route in Goal 3 is denied, and the denial lists the open branches. A test per route proves it.
+- [x] A Stop and a SubagentStop that leave any touched branch dirty, holding commits no remote contains, or merged but undeleted are refused. Tests prove it, including a branch touched and then switched away from.
+- [x] A forced worktree removal or `branch -D` that would lose work is refused, and an evacuate-then-destroy command is refused; every deny carries the Goal 11 text. Tests prove it.
+- [x] Idle branches are reported with their containment, and the `strict` preset applies 3 and 7 days. Tests prove it.
+- [x] A remote delete of a branch merged only into an integration line is allowed; a delete of the integration line is refused; a 40-branch delete is judged within the dispatch budget. Tests prove it.
+- [x] Nothing is deleted that is not proven recoverable. A test proves an unproven branch survives the cleanup.
+- [x] Release notes are recorded in `CLAUDE/UPGRADES/UNRELEASED/` (the pending-release holding area).
 - [ ] GitHub #152 and #153 are commented on with what shipped and closed.
