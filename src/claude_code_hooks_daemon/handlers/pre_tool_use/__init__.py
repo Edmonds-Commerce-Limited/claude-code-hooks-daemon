@@ -3,6 +3,7 @@
 from .absolute_path import AbsolutePathHandler
 from .ancestry_preserving_merge import AncestryPreservingMergeHandler
 from .bash_safe_mode import BashSafeModeHandler
+from .branch_creation_guard import BranchCreationGuardHandler
 from .british_english import BritishEnglishHandler
 from .comment_changelog import CommentChangelogHandler
 from .comment_size import CommentSizeHandler
@@ -57,6 +58,7 @@ __all__ = [
     "ErrorHidingBlockerHandler",
     "FlaggableContentChannelGuardHandler",
     "FlaggableWorkAdvisorHandler",
+    "BranchCreationGuardHandler",
     "GhIssueCommentsHandler",
     "GhPrCommentsHandler",
     "GitMessageBacktickHandler",

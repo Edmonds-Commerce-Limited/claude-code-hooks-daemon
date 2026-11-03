@@ -503,6 +503,16 @@ def _never_work(name: str, config: BranchesConfig, default: str | None) -> Branc
     return None
 
 
+def is_work_branch(name: str, config: BranchesConfig, default: str | None) -> bool:
+    """Whether ``name`` is a work branch: not exempt, default, integration or protected."""
+    return _never_work(name, config, default) is None
+
+
+def worktrees_by_branch(repo: Path) -> dict[str, Path] | None:
+    """Branch name to worktree path; None when git cannot list worktrees."""
+    return _worktrees(repo)
+
+
 def _short(ref: str) -> str:
     """``refs/remotes/origin/x`` -> ``origin/x``, ``refs/heads/x`` -> ``x``, else drop ``refs/``."""
     for prefix in (_REMOTES, _HEADS):

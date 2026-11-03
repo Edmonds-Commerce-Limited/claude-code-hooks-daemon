@@ -62,6 +62,9 @@ class RuleID:
     #: git commit --amend — rewrites the previous commit.
     GIT_COMMIT_AMEND: str = "R-GIT-COMMIT-AMEND"
 
+    #: creating a branch while the open work branches are at ``branches.wip.cap``.
+    BRANCH_WIP_CAP: str = "R-BRANCH-WIP-CAP"
+
     #: git checkout -f/--force — discards the working tree without naming a file.
     GIT_CHECKOUT_FORCE: str = "R-GIT-CHECKOUT-FORCE"
 

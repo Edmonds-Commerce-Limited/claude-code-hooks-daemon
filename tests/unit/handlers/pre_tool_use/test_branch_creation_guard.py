@@ -1,0 +1,172 @@
+"""Tests for the branch_creation_guard PreToolUse handler (Plan 00558 Task 4.2)."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from claude_code_hooks_daemon.config.models import (
+    BranchDuplicatesConfig,
+    BranchesConfig,
+    BranchWipConfig,
+)
+from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
+from claude_code_hooks_daemon.core.branch_creation import LABELS_RELATIVE_PATH, write_labels
+from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.handlers.pre_tool_use.branch_creation_guard import (
+    BranchCreationGuardHandler,
+)
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+    ).stdout
+
+
+def _branch(repo: Path, name: str) -> None:
+    tree = _git(repo, "rev-parse", "main^{tree}").strip()
+    sha = _git(repo, "commit-tree", tree, "-p", "main", "-m", name).strip()
+    _git(repo, "update-ref", f"refs/heads/{name}", sha)
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "t")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "root")
+    _branch(root, "one")
+    _branch(root, "two")
+    return root
+
+
+@pytest.fixture
+def handler(repo: Path) -> BranchCreationGuardHandler:
+    guard = BranchCreationGuardHandler()
+    guard._branches = BranchesConfig(
+        default="main",
+        wip=BranchWipConfig(cap=2, mode="block"),
+        duplicates=BranchDuplicatesConfig(mode="warn"),
+    )
+    guard._project_root_override = repo
+    return guard
+
+
+def _bash(command: str, cwd: Path) -> dict[str, Any]:
+    return {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(cwd)}
+
+
+def _agent(cwd: Path, **tool_input: Any) -> dict[str, Any]:
+    return {"tool_name": "Agent", "tool_input": tool_input, "cwd": str(cwd)}
+
+
+class TestMatches:
+    def test_bash_creation_matches(self, handler: BranchCreationGuardHandler, repo: Path) -> None:
+        assert handler.matches(_bash("git switch -c fresh", repo)) is True
+
+    def test_bash_non_creation_does_not_match(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        assert handler.matches(_bash("git switch one", repo)) is False
+
+    def test_isolated_agent_matches(self, handler: BranchCreationGuardHandler, repo: Path) -> None:
+        assert handler.matches(_agent(repo, isolation="worktree", name="x")) is True
+        task = {"tool_name": "Task", "tool_input": {"isolation": "worktree"}, "cwd": str(repo)}
+        assert handler.matches(task) is True
+
+    def test_plain_agent_does_not_match(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        assert handler.matches(_agent(repo, prompt="x")) is False
+
+    def test_other_tool_does_not_match(self, handler: BranchCreationGuardHandler) -> None:
+        assert handler.matches({"tool_name": "Read", "tool_input": {}}) is False
+
+
+class TestHandle:
+    def test_creation_at_cap_is_denied(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        result = handler.handle(_bash("git checkout -b fresh", repo))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert result.reason.startswith("BLOCKED [R-BRANCH-WIP-CAP]")
+        assert "one" in result.reason and BRANCH_LIMIT_PRINCIPLE in result.reason
+
+    def test_dash_c_directory_is_judged(
+        self, handler: BranchCreationGuardHandler, repo: Path, tmp_path: Path
+    ) -> None:
+        result = handler.handle(_bash(f"git -C {repo} switch -c fresh", tmp_path))
+        assert result.decision == Decision.DENY
+
+    def test_reset_of_existing_branch_is_allowed(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        result = handler.handle(_bash("git checkout -B one main", repo))
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_under_cap_allows(self, handler: BranchCreationGuardHandler, repo: Path) -> None:
+        handler._branches = handler._branches.model_copy(
+            update={"wip": BranchWipConfig(cap=5, mode="block")}
+        )
+        result = handler.handle(_bash("git switch -c fresh", repo))
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_warn_mode_allows_with_context(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        handler._branches = handler._branches.model_copy(
+            update={"wip": BranchWipConfig(cap=2, mode="warn")}
+        )
+        result = handler.handle(_bash("git switch -c fresh", repo))
+        assert result.decision == Decision.ALLOW
+        assert any("Open work branches" in line for line in result.context)
+
+    def test_git_failure_allows_with_advisory(
+        self, handler: BranchCreationGuardHandler, tmp_path: Path
+    ) -> None:
+        result = handler.handle(_bash("git switch -c fresh", tmp_path / "gone"))
+        assert result.decision == Decision.ALLOW
+        assert any("could not judge" in line for line in result.context)
+
+    def test_labels_snapshot_orders_the_list(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        write_labels(
+            repo / LABELS_RELATIVE_PATH,
+            [{"name": "two", "group": "merged", "action": "bin/hooks-daemon delete-branch two"}],
+        )
+        result = handler.handle(_bash("git switch -c fresh", repo))
+        assert result.reason is not None
+        assert "delete-branch two" in result.reason
+
+    def test_isolated_agent_at_cap_is_denied(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        result = handler.handle(_agent(repo, isolation="worktree", name="one"))
+        assert result.decision == Decision.DENY
+
+    def test_isolated_agent_duplicate_warns(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        handler._branches = handler._branches.model_copy(
+            update={"wip": BranchWipConfig(cap=5, mode="block")}
+        )
+        result = handler.handle(_agent(repo, isolation="worktree", name="one-2"))
+        assert result.decision == Decision.ALLOW
+        assert any("continue there" in line for line in result.context)
+
+
+def test_rules_guidance_and_acceptance_tests(handler: BranchCreationGuardHandler) -> None:
+    assert [rule.rule_id for rule in handler.get_rules()] == ["R-BRANCH-WIP-CAP"]
+    guidance = handler.get_claude_md()
+    assert guidance is not None and "wip.cap" in guidance
+    assert handler.get_acceptance_tests()

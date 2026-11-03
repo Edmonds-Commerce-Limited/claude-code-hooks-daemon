@@ -332,6 +332,7 @@ class ConfigTemplate:
             "      #     - Swift\n"
             "      #     - Dart\n"
             "    gh_issue_comments: {enabled: true, priority: 40}  # Require --comments on gh issue view\n"
+            "    branch_creation_guard: {enabled: true, priority: 41}  # Deny a new branch while open work branches are at branches.wip.cap (Plan 00558)\n"
             "    gh_pr_comments: {enabled: true, priority: 40}    # Require --comments on gh pr view\n"
             # Plan 00490: opt-in until it has run in the daemon's own repository for a while.
             "    github_issue_assignment_guard: {enabled: false, priority: 53}  # Issue-tied work needs the issue assigned to you and an approved author\n"
