@@ -153,6 +153,47 @@ class TestWorktreeBlockers:
         (path / ".gitignore").write_text("changed\n", encoding="utf-8")
         assert set(worktree_blockers(path, _REGENERABLE)) == {"new.txt", ".gitignore"}
 
+    def test_an_empty_scratch_directory_is_not_a_blocker(self, repo: Path) -> None:
+        """Nothing is lost by removing a directory that holds no file (Task 3.3)."""
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        (path / "untracked" / "scratch" / "nested").mkdir(parents=True)
+        assert worktree_blockers(path, _REGENERABLE) == ()
+
+    def test_an_empty_directory_elsewhere_is_not_a_blocker(self, repo: Path) -> None:
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        (path / "src" / "__pycache__").mkdir(parents=True)
+        (path / "untracked" / "kept").mkdir(parents=True)
+        assert worktree_blockers(path, ["untracked/qa/"]) == ()
+
+    def test_scratch_holding_one_file_deep_down_still_blocks(self, repo: Path) -> None:
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        deep = path / "untracked" / "scratch" / "a" / "b"
+        deep.mkdir(parents=True)
+        (deep / "notes.md").write_text("x\n", encoding="utf-8")
+        assert worktree_blockers(path, _REGENERABLE) == ("untracked/scratch/",)
+
+    def test_a_symlinked_store_matches_its_directory_glob(self, repo: Path, tmp_path: Path) -> None:
+        """``untracked/lsp-venv/`` covers a symlink of that name (Task 3.3)."""
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        (path / "untracked").mkdir()
+        store = tmp_path / "shared-lsp-venv"
+        store.mkdir()
+        (store / "python").write_text("x\n", encoding="utf-8")
+        (path / "untracked" / "lsp-venv").symlink_to(store)
+        (path / "untracked" / "gone-venv").symlink_to(tmp_path / "missing")
+        assert worktree_blockers(path, ["untracked/lsp-venv/", "untracked/gone-venv/"]) == ()
+
+    def test_a_symlink_the_globs_do_not_name_still_blocks(self, repo: Path, tmp_path: Path) -> None:
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        (path / "untracked").mkdir()
+        (path / "untracked" / "notes").symlink_to(tmp_path)
+        assert worktree_blockers(path, ["untracked/lsp-venv/"]) == ("untracked/notes/",)
+
 
 class TestCleanupAfterMerge:
     def test_act_deletes_a_merged_branch_and_prints_the_restore_line(self, repo: Path) -> None:
@@ -389,3 +430,60 @@ class TestFailuresAndEdges:
         _git(repo, "push", "--quiet", "origin", "feat")
         report = clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b")
         assert "git push origin --delete feat" in report.commands
+
+
+class TestDeleteIfMerged:
+    """The WorktreeRemove branch step (Plan 00558 Task 3.2)."""
+
+    def test_a_merged_branch_is_deleted_with_its_restore_line(self, repo: Path) -> None:
+        tip = _merged(repo, "feat")
+        report = branch_cleanup.delete_if_merged(repo, "feat", config=_CONFIG, default="main")
+        assert report.deleted == ("feat",)
+        assert report.commands == (f"git branch feat {tip}",)
+        assert "feat" not in _branches(repo)
+
+    def test_a_branch_merged_into_an_integration_line_is_deleted(self, repo: Path) -> None:
+        _git(repo, "checkout", "-b", "release/1")
+        _git(repo, "checkout", "main")
+        _unproven(repo, "feat")
+        _git(repo, "checkout", "release/1")
+        _git(repo, "merge", "--no-ff", "-m", "Merge feat", "feat")
+        _git(repo, "checkout", "main")
+        report = branch_cleanup.delete_if_merged(repo, "feat", config=_CONFIG, default="main")
+        assert report.deleted == ("feat",)
+
+    def test_unmerged_and_patch_equivalent_are_left_for_the_sweep(self, repo: Path) -> None:
+        _unproven(repo, "novel")
+        _patch_equivalent(repo, "picked")
+        for name in ("novel", "picked"):
+            report = branch_cleanup.delete_if_merged(repo, name, config=_CONFIG, default="main")
+            assert report.deleted == ()
+            assert "branch-sweep --clean" in report.skipped[0]
+        assert {"novel", "picked"} <= _branches(repo)
+
+    def test_policy_refuses_an_exempt_branch(self, repo: Path) -> None:
+        _merged(repo, "users/alice")
+        report = branch_cleanup.delete_if_merged(
+            repo, "users/alice", config=_CONFIG, default="main"
+        )
+        assert report.deleted == ()
+        assert "users/alice" in _branches(repo)
+
+    def test_a_branch_checked_out_elsewhere_is_refused_by_the_proof(self, repo: Path) -> None:
+        _merged(repo, "feat")
+        _worktree(repo, "feat")
+        report = branch_cleanup.delete_if_merged(repo, "feat", config=_CONFIG, default="main")
+        assert report.deleted == ()
+        assert "feat" in _branches(repo)
+
+    def test_a_refused_delete_is_reported(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _merged(repo, "feat")
+        monkeypatch.setattr(
+            branch_cleanup,
+            "delete_branches",
+            lambda *a, **k: DeletionReport(refused=True, blockers=("moved",)),
+        )
+        report = branch_cleanup.delete_if_merged(repo, "feat", config=_CONFIG, default="main")
+        assert report.skipped == ("feat: moved",)

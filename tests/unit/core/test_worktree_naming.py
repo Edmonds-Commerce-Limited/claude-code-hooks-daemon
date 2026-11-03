@@ -14,6 +14,7 @@ from pathlib import Path
 from claude_code_hooks_daemon.core.worktree_naming import (
     HASH_SUFFIX_LENGTH,
     WORKTREES_SUBDIR,
+    is_worktree_create_name,
     slugify,
     worktree_dir_name,
     worktree_path,
@@ -94,3 +95,21 @@ class TestWorktreePath:
     def test_no_braces_in_path(self) -> None:
         path = worktree_path("/workspace", "{}", "pid", "sid")
         assert "{" not in str(path) and "}" not in str(path)
+
+
+class TestIsWorktreeCreateName:
+    """The ``<slug>-<8 hex>`` shape is what makes a branch eligible for cleanup
+    until the creator record exists (Plan 00558 Task 3.2)."""
+
+    def test_a_generated_name_is_recognised(self) -> None:
+        assert is_worktree_create_name(worktree_dir_name("Refactor Auth", "p", "s")) is True
+
+    def test_the_fallback_slug_is_recognised(self) -> None:
+        assert is_worktree_create_name(worktree_dir_name("", None, None)) is True
+
+    def test_a_hand_named_branch_is_not(self) -> None:
+        for name in ("main", "feature-x", "fix-auth-1234567", "fix-auth-1234567G", "Fix-12345678"):
+            assert is_worktree_create_name(name) is False, name
+
+    def test_a_namespaced_branch_is_not(self) -> None:
+        assert is_worktree_create_name("users/fix-12345678") is False

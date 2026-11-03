@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Protocol
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.worktree_naming import is_worktree_create_name
 from claude_code_hooks_daemon.core.worktree_paths import WORKTREE_DIR_PATTERNS
 from claude_code_hooks_daemon.utils.git_repo import (
     AGENT_BRANCH_PREFIX,
@@ -555,10 +556,17 @@ def reap_worktree(
     )
 
 
-#: The naming shape agent dispatch uses (`agent-<hex>-<hex>`). Scoped to it on
-#: purpose: Plan 00349 and Plan 00048 both declined a general branch-pruning
-#: policy, and Plan 00352 inherits that boundary rather than widening it.
-AGENT_BRANCH_GLOB = f"{AGENT_BRANCH_PREFIX}*"
+def is_daemon_created_branch(name: str) -> bool:
+    """Whether orphan pruning may consider ``name``: an agent or WorktreeCreate branch.
+
+    Agent dispatch names ``agent-<hex>-<hex>``; WorktreeCreate ``<slug>-<8 hex>``.
+
+    Scoped on purpose: Plans 00349 and 00048 declined a general branch-pruning
+    policy, so only names the daemon or agent dispatch generate are eligible
+    (Plan 00558 DESIGN.md section 8 adds the ``<slug>-<8 hex>`` names).
+    """
+    return name.startswith(AGENT_BRANCH_PREFIX) or is_worktree_create_name(name)
+
 
 #: List with the FULL refname and strip it. `%(refname:short)` yields the
 #: shortest UNAMBIGUOUS name, so a branch sharing its name with a tag comes back
@@ -617,22 +625,13 @@ def collect_orphaned_branches(
     if listing.returncode != 0:
         return ()
 
-    all_names = _branch_names(
-        run_fn(repo_root, "branch", "--list", AGENT_BRANCH_GLOB, _BRANCH_FORMAT)
-    )
-    if all_names is None:
+    listed = _branch_names(run_fn(repo_root, "branch", "--list", _BRANCH_FORMAT))
+    if listed is None:
         return ()
+    all_names = [name for name in listed if is_daemon_created_branch(name)]
 
     merged_names = _branch_names(
-        run_fn(
-            repo_root,
-            "branch",
-            "--merged",
-            base_branch,
-            "--list",
-            AGENT_BRANCH_GLOB,
-            _BRANCH_FORMAT,
-        )
+        run_fn(repo_root, "branch", "--merged", base_branch, "--list", _BRANCH_FORMAT)
     )
     # An unreadable --merged listing means the merge status is UNKNOWN. Treating
     # unknown as merged would turn a git failure into a deletion, so every

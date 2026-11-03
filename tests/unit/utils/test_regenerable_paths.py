@@ -34,6 +34,15 @@ class TestDefaults:
             "untracked/.venv-bootstrap-py313/",
             "untracked/.venv-bootstrap.log",
             "untracked/lsp-venv/",
+            "untracked/repair.log",
+            "untracked/repair.txt",
+            ".coverage",
+            "untracked/.python-cmd-cache",
+            "untracked/context-sidecar/",
+            "untracked/logs/",
+            "untracked/logs/daemon.log",
+            "untracked/acceptance/",
+            ".CLAUDE.md.pre-inject",
         ],
     )
     def test_default_stores_are_regenerable(self, entry: str) -> None:

@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
 from claude_code_hooks_daemon.core.branch_sweep import (
     deprecation_line,
+    effective_behind_threshold,
     effective_wip_cap,
     session_summary,
 )
@@ -101,6 +102,7 @@ class BranchSweepHandler(SessionStartHandlerBase):
             cap=effective_wip_cap(self._branches, legacy),
             new_session=not is_resume_session(hook_input),
             deprecation=deprecation_line(self._branches, legacy),
+            behind_threshold=effective_behind_threshold(self._branches, legacy),
         )
         if not lines:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
@@ -113,7 +115,9 @@ class BranchSweepHandler(SessionStartHandlerBase):
             "At SessionStart the branch inventory is summarised: a branch whose commits no "
             "remote ref holds is named on EVERY session start as `CONTAINED NOWHERE`, with "
             "the `git push -u` that secures it; on a new session it also names dormant "
-            "branches, the count of merged branches not yet deleted, and the open-work count "
+            "branches, work branches more than `branches.sweep.behind_threshold` commits "
+            "behind the default, the count of merged branches not yet deleted, and the "
+            "open-work count "
             "against `branches.wip.cap`. Run `bin/hooks-daemon branch-sweep` for the full "
             "report (`--json` for the records, `--all` for exempt and protected branches) "
             "and delete a done branch with the `bin/hooks-daemon delete-branch` command it "
@@ -142,7 +146,9 @@ class BranchSweepHandler(SessionStartHandlerBase):
                     "`hooks-daemon branch-sweep`. Silent otherwise. It never blocks."
                 ),
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"CONTAINED NOWHERE|merged branch|Dormant|Open work|^$"],
+                expected_message_patterns=[
+                    r"CONTAINED NOWHERE|merged branch|Dormant|Behind|Open work|^$"
+                ],
                 safety_notes="Advisory only; reads branch refs, changes nothing",
                 test_type=TestType.CONTEXT,
                 requires_event="SessionStart event",

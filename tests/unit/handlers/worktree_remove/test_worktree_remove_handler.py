@@ -18,11 +18,14 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.handlers.worktree_remove import worktree_remove_handler as wrh
 from claude_code_hooks_daemon.handlers.worktree_remove.worktree_remove_handler import (
     WorktreeRemoveHandler,
 )
@@ -115,3 +118,190 @@ class TestHandle:
             {"cwd": str(repo), "worktree_path": str(repo / ".claude/worktrees/nope")}
         )
         assert result.to_json(EventType.WORKTREE_REMOVE.value) == {}
+
+
+# --- Plan 00558 Task 3.2: lossless removal, then delete the proven-merged branch ---
+
+_ELIGIBLE = "fix-auth-1a2b3c4d"
+
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+    ).stdout
+
+
+@pytest.fixture
+def main_repo(tmp_path: Path) -> Path:
+    root = tmp_path / "main-repo"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@t.t")
+    _git(root, "config", "user.name", "t")
+    (root / ".gitignore").write_text("untracked/\n.claude/worktrees/\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    return root
+
+
+def _handler() -> WorktreeRemoveHandler:
+    handler = WorktreeRemoveHandler()
+    handler._branches = BranchesConfig(default="main")
+    return handler
+
+
+def _work(root: Path, name: str, *, merge: bool) -> Path:
+    wt = _add_worktree(root, name)
+    (wt / f"{name}.txt").write_text("work\n", encoding="utf-8")
+    _git(wt, "add", "-A")
+    _git(wt, "commit", "-q", "-m", f"work on {name}")
+    if merge:
+        _git(root, "merge", "-q", "--no-ff", "-m", f"Merge {name}", name)
+    return wt
+
+
+def _has_branch(root: Path, name: str) -> bool:
+    return bool(_git(root, "branch", "--list", name).strip())
+
+
+class TestBranchCleanup:
+    def test_a_merged_worktree_create_branch_is_deleted(self, main_repo: Path) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=True)
+        _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert not wt.exists()
+        assert not _has_branch(main_repo, _ELIGIBLE)
+
+    def test_an_unmerged_branch_is_kept_for_the_sweep(self, main_repo: Path) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=False)
+        _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert not wt.exists()
+        assert _has_branch(main_repo, _ELIGIBLE)
+
+    def test_a_hand_named_merged_branch_is_kept(self, main_repo: Path) -> None:
+        wt = _work(main_repo, "feature-x", merge=True)
+        _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert not wt.exists()
+        assert _has_branch(main_repo, "feature-x")
+
+    def test_an_exempt_branch_is_kept(self, main_repo: Path) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=True)
+        handler = _handler()
+        handler._branches = BranchesConfig(default="main", exempt=["fix-*"])
+        handler.handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert _has_branch(main_repo, _ELIGIBLE)
+
+    def test_a_detached_worktree_is_removed_and_no_branch_touched(self, main_repo: Path) -> None:
+        wt = main_repo / ".claude" / "worktrees" / "detached"
+        _git(main_repo, "worktree", "add", "--detach", str(wt))
+        _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert not wt.exists()
+        assert _has_branch(main_repo, "main")
+
+
+class TestLosslessRemoval:
+    def test_scratch_notes_keep_the_worktree(
+        self, main_repo: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=True)
+        notes = wt / "untracked" / "scratch" / "notes.md"
+        notes.parent.mkdir(parents=True)
+        notes.write_text("my notes\n", encoding="utf-8")
+        with caplog.at_level("WARNING"):
+            _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert notes.read_text(encoding="utf-8") == "my notes\n"
+        assert _has_branch(main_repo, _ELIGIBLE)
+        assert "untracked/scratch/" in caplog.text
+
+    def test_an_untracked_file_keeps_the_worktree(self, main_repo: Path) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=True)
+        (wt / "new.txt").write_text("x\n", encoding="utf-8")
+        _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert (wt / "new.txt").exists()
+
+    def test_regenerable_stores_do_not_keep_the_worktree(self, main_repo: Path) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=True)
+        (wt / "untracked" / "qa").mkdir(parents=True)
+        (wt / "untracked" / "qa" / "out.json").write_text("{}\n", encoding="utf-8")
+        _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert not wt.exists()
+
+    def test_an_unregistered_directory_is_never_removed(self, main_repo: Path) -> None:
+        stray = main_repo / ".claude" / "worktrees" / "stray"
+        stray.mkdir(parents=True)
+        (stray / "keep.txt").write_text("x\n", encoding="utf-8")
+        _handler().handle({"cwd": str(main_repo), "worktree_path": str(stray)})
+        assert (stray / "keep.txt").exists()
+
+    def test_the_main_checkout_is_never_removed(self, main_repo: Path) -> None:
+        _handler().handle({"cwd": str(main_repo), "worktree_path": str(main_repo)})
+        assert (main_repo / ".gitignore").exists()
+
+
+class TestForceOnlyWhenContained:
+    @staticmethod
+    def _removes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+        calls: list[tuple[str, ...]] = []
+        real = wrh.run_git
+
+        def spy(cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if args[:2] == ("worktree", "remove"):
+                calls.append(args)
+            return real(cwd, *args, **kwargs)
+
+        monkeypatch.setattr(wrh, "run_git", spy)
+        return calls
+
+    def test_head_contained_in_another_ref_uses_force(
+        self, main_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=True)
+        calls = self._removes(monkeypatch)
+        _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert calls and "--force" in calls[0]
+
+    def test_head_only_on_its_own_branch_is_removed_without_force(
+        self, main_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=False)
+        calls = self._removes(monkeypatch)
+        _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert calls and "--force" not in calls[0]
+
+
+class TestBudget:
+    def test_an_exhausted_budget_reports_and_keeps_the_branch(
+        self, main_repo: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=True)
+        clock = iter([0.0] + [1000.0] * 50)
+        monkeypatch.setattr(wrh.time, "monotonic", lambda: next(clock))
+        with caplog.at_level("WARNING"):
+            _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert _has_branch(main_repo, _ELIGIBLE)
+        assert "budget" in caplog.text
+
+
+class TestBranchStepFailures:
+    def test_no_default_branch_keeps_the_branch(
+        self, main_repo: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=True)
+        monkeypatch.setattr(wrh, "resolve_default_branch", lambda config, repo: None)
+        with caplog.at_level("WARNING"):
+            _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert _has_branch(main_repo, _ELIGIBLE)
+        assert "no default branch resolves" in caplog.text
+
+    def test_unreadable_refs_keep_the_branch(
+        self, main_repo: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=True)
+
+        def boom(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("for-each-ref failed")
+
+        monkeypatch.setattr(wrh, "delete_if_merged", boom)
+        with caplog.at_level("WARNING"):
+            _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert _has_branch(main_repo, _ELIGIBLE)
+        assert "for-each-ref failed" in caplog.text
