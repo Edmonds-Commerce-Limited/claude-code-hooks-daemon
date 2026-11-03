@@ -274,6 +274,9 @@ class BranchClassification:
     #: resolve. A proof is a statement about a COMMIT, so it expires the moment
     #: the branch moves — `delete_branches` re-reads this before deleting.
     tip: str = ""
+    #: The target ref that proved a merged or patch-equivalent tier, e.g.
+    #: ``refs/heads/main`` or ``refs/heads/release/x``; "" otherwise.
+    proven_against: str = ""
 
     @property
     def is_safe(self) -> bool:
@@ -418,10 +421,17 @@ def worktree_branches(repo: Path) -> set[str]:
     return names
 
 
-def _unique_commit_count(repo: Path, name: str, protected_ref: str) -> int:
-    """Commits on ``name`` whose patch-id is not already upstream."""
-    result = _git(repo, "cherry", protected_ref, branch_ref(name), check=False)
-    return sum(1 for line in result.stdout.splitlines() if line.startswith(_CHERRY_UNIQUE_MARKER))
+def _has_merge_commits(repo: Path, target: str, tip: str) -> bool | None:
+    """Whether ``target..tip`` holds a merge commit; None when git fails.
+
+    ``git cherry`` never lists merges, so content a merge adds (a conflict
+    resolution, an "evil merge") is invisible to patch-ids; a range holding one
+    is never patch-equivalent (Plan 00558, the same rule the inventory applies).
+    """
+    result = _git(repo, "rev-list", "--merges", f"{target}..{tip}", check=False)
+    if result.returncode != 0:
+        return None
+    return bool(result.stdout.strip())
 
 
 def matches_any_glob(name: str, patterns: Sequence[str]) -> bool:
@@ -440,10 +450,10 @@ def cherry_unique_shas(
 ) -> list[str] | None:
     """Commits on ``head`` whose patch-id is absent from ``upstream``; None when git fails.
 
-    The patch-equivalence step of the branch inventory (Plan 00558). Unlike
-    :func:`_unique_commit_count` it fails CLOSED: a failed ``git cherry`` is
-    None, never an empty list, so a caller cannot read "git broke" as "nothing
-    is unique".
+    The patch-equivalence step of the branch inventory and of
+    :func:`classify_branch` (Plan 00558). It fails CLOSED: a failed ``git
+    cherry`` is None, never an empty list, so a caller cannot read "git broke"
+    as "nothing is unique".
     """
     result = _git(repo, "cherry", upstream, head, check=False, timeout=timeout)
     if result.returncode != 0:
@@ -539,14 +549,41 @@ def _protected_base_ref(repo: Path, protected_ref: str) -> str:
     return protected_ref
 
 
+def _patch_equivalent(repo: Path, target: str, tip_ref: str) -> tuple[bool, int | None]:
+    """Whether every patch of ``tip_ref`` is in ``target``, and the unique count.
+
+    Fails CLOSED: a failed ``git cherry`` or merge listing is never equivalent,
+    and a range holding a merge commit is never equivalent.
+    """
+    unique = cherry_unique_shas(repo, target, tip_ref)
+    if unique is None:
+        return False, None
+    if unique:
+        return False, len(unique)
+    return _has_merge_commits(repo, target, tip_ref) is False, 0
+
+
 def classify_branch(
     repo: Path,
     name: str,
     *,
     protected_ref: str = DEFAULT_PROTECTED_REF,
     protected_names: Sequence[str] = DEFAULT_PROTECTED_NAMES,
+    targets: Sequence[str] | None = None,
 ) -> BranchClassification:
-    """Classify one branch, returning its tier or the reason it is refused."""
+    """Classify one branch, returning its tier or the reason it is refused.
+
+    Args:
+        protected_ref: The single target when ``targets`` is not given.
+        targets: Every ref a merge into counts as safe: the default ref plus the
+            integration-line refs (Plan 00558, DESIGN.md section 2). The first
+            target that proves a tier is recorded in ``proven_against``.
+
+    Raises:
+        ValueError: ``targets`` is given but empty.
+    """
+    if targets is not None and not targets:
+        raise ValueError("classify_branch needs at least one target ref")
     if name not in local_branches(repo):
         return BranchClassification(
             name=name,
@@ -580,36 +617,51 @@ def classify_branch(
     # Resolve the BASE once, here, so every proof below measures against the same
     # unambiguous ref. Passing the bare name to git would let a same-named tag
     # answer for it — see :func:`_protected_base_ref`.
-    protected_ref = _protected_base_ref(repo, protected_ref)
+    bases = [_protected_base_ref(repo, ref) for ref in (targets or (protected_ref,))]
+    tip_ref = branch_ref(name)
 
-    ancestor = _git(
-        repo, "merge-base", "--is-ancestor", branch_ref(name), protected_ref, check=False
+    for base in bases:
+        ancestor = _git(repo, "merge-base", "--is-ancestor", tip_ref, base, check=False)
+        if ancestor.returncode == 0:
+            # Ancestry to a target settles SAFETY. It does not settle which flag
+            # git will accept: `-d` measures against the branch's own upstream if
+            # one resolves and against HEAD otherwise, so a branch fully contained
+            # in a target is still refused when it is ahead of `origin/<name>`
+            # (Plan 00249) or when HEAD is on another branch (Plan 00253).
+            # Splitting the tier here keeps the dry run honest — it can say what
+            # the real run will do, and say why.
+            tier = _tier_for_merged_branch(repo, name)
+            return BranchClassification(
+                name=name, tier=tier, detail=_TIER_DETAIL[tier], tip=tip, proven_against=base
+            )
+
+    known_counts: list[int] = []
+    for base in bases:
+        equivalent, count = _patch_equivalent(repo, base, tip_ref)
+        if equivalent:
+            return BranchClassification(
+                name=name,
+                tier=TIER_PATCH_EQUIVALENT,
+                detail=_TIER_DETAIL[TIER_PATCH_EQUIVALENT],
+                tip=tip,
+                proven_against=base,
+            )
+        if count is not None:
+            known_counts.append(count)
+    unique_commits = min(known_counts) if known_counts else 0
+    patch_summary = (
+        f"{unique_commits} commit(s) not upstream by patch-id"
+        if known_counts
+        else "patch-ids could not be compared (git cherry failed)"
     )
-    if ancestor.returncode == 0:
-        # Ancestry to the protected ref settles SAFETY. It does not settle which
-        # flag git will accept: `-d` measures against the branch's own upstream if
-        # one resolves and against HEAD otherwise, so a branch fully contained in
-        # the protected ref is still refused when it is ahead of `origin/<name>`
-        # (Plan 00249) or when HEAD is on another branch (Plan 00253). Splitting
-        # the tier here keeps the dry run honest — it can say what the real run
-        # will do, and say why.
-        tier = _tier_for_merged_branch(repo, name)
-        return BranchClassification(name=name, tier=tier, detail=_TIER_DETAIL[tier], tip=tip)
-
-    unique_commits = _unique_commit_count(repo, name, protected_ref)
-    if unique_commits == 0:
-        return BranchClassification(
-            name=name,
-            tier=TIER_PATCH_EQUIVALENT,
-            detail=_TIER_DETAIL[TIER_PATCH_EQUIVALENT],
-            tip=tip,
-        )
 
     # Commit-level uniqueness does not imply content loss: a stale branch is
-    # usually byte-identical to the protected ref and merely arranged
-    # differently. Compare blob shas, which ARE content identity in git.
-    branch_blobs = _blobs_in_tree(repo, branch_ref(name))
-    reachable = _reachable_object_shas(repo, protected_ref)
+    # usually byte-identical to a target and merely arranged differently.
+    # Compare blob shas, which ARE content identity in git.
+    branch_blobs = _blobs_in_tree(repo, tip_ref)
+    reachable: set[str] = set()
+    for base in bases:
+        reachable |= _reachable_object_shas(repo, base)
     content_unique_paths = tuple(
         sorted(path for path, sha in branch_blobs.items() if sha not in reachable)
     )
@@ -622,9 +674,11 @@ def classify_branch(
             tip=tip,
         )
 
-    unique_paths = tuple(
-        sorted(_paths_in_tree(repo, branch_ref(name)) - _paths_in_history(repo, protected_ref))
-    )
+    history: set[str] = set()
+    for base in bases:
+        history |= _paths_in_history(repo, base)
+    unique_paths = tuple(sorted(_paths_in_tree(repo, tip_ref) - history))
+    where = ", ".join(bases)
     return BranchClassification(
         name=name,
         tier=TIER_UNPROVEN,
@@ -633,10 +687,10 @@ def classify_branch(
         unique_commits=unique_commits,
         tip=tip,
         detail=(
-            f"{unique_commits} commit(s) not upstream by patch-id; "
+            f"{patch_summary}; "
             f"{len(content_unique_paths)} file(s) hold content found nowhere "
-            f"in {protected_ref} ({len(unique_paths)} path(s) are new, but a "
-            f"new path whose bytes already exist in {protected_ref} loses "
+            f"in {where} ({len(unique_paths)} path(s) are new, but a "
+            f"new path whose bytes already exist in {where} loses "
             f"nothing)"
         ),
     )
@@ -697,6 +751,7 @@ def delete_branches(
     bundle_path: Path | None = None,
     dry_run: bool = False,
     confirm: ConfirmCallback | None = None,
+    targets: Sequence[str] | None = None,
 ) -> DeletionReport:
     """Classify every branch, then delete the batch.
 
@@ -725,6 +780,8 @@ def delete_branches(
             mechanically; ``unproven`` is the one path that knowingly destroys
             unmerged work, so it must not be reachable by an agent passing
             another flag. A declared reason asserts intent — it does not gate.
+        targets: Passed to :func:`classify_branch`; the default ref plus the
+            integration-line refs. ``protected_ref`` alone when None.
 
     Raises:
         ValueError: if ``allow_unproven`` is set without a reason.
@@ -736,7 +793,13 @@ def delete_branches(
         )
 
     classifications = tuple(
-        classify_branch(repo, name, protected_ref=protected_ref, protected_names=protected_names)
+        classify_branch(
+            repo,
+            name,
+            protected_ref=protected_ref,
+            protected_names=protected_names,
+            targets=targets,
+        )
         for name in names
     )
 
