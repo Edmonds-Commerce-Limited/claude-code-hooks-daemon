@@ -14,6 +14,7 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.branch_cleanup import preview_paths, worktree_blockers
 from claude_code_hooks_daemon.core.evacuation import (
+    Evacuation,
     EvacuationMatch,
     destroys_recorded,
     evacuate_then_destroy,
@@ -1320,9 +1321,13 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         self, command: str, cwd: Path, hook_input: dict[str, Any]
     ) -> EvacuationMatch | None:
         """A destruction of work an earlier command of this turn evacuated (DESIGN section 13)."""
+        return destroys_recorded(command, cwd, self._turn_records(hook_input))
+
+    def _turn_records(self, hook_input: dict[str, Any]) -> list[Evacuation]:
+        """The evacuations recorded this turn for the calling identity; none without a session."""
         session_id = hook_input.get(HookInputField.SESSION_ID)
         if not isinstance(session_id, str) or not session_id:
-            return None
+            return []
         raw_agent = hook_input.get(HookInputField.AGENT_ID)
         agent_id = raw_agent if isinstance(raw_agent, str) and raw_agent else None
         try:
@@ -1334,10 +1339,8 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 reason="with no daemon untracked directory there are no turn records to read; "
                 "the same-command check and the destructive patterns still apply",
             )
-            return None
-        return destroys_recorded(
-            command, cwd, recorded_evacuations(untracked, session_id, agent_id)
-        )
+            return []
+        return recorded_evacuations(untracked, session_id, agent_id)
 
     @staticmethod
     def _evacuation_note(found: EvacuationMatch) -> str:
