@@ -166,7 +166,7 @@ git config --local hooksdaemon.latestPlanNumber
 
 Take the higher of the counter and the highest plan number on disk (`Completed/` included), then add 1 (zero-pad to 5 digits, e.g. highest `117` → next plan `00118`). The counter is per clone, so on its own it lags a plan made in another clone; `mkplan.bash` and the daemon both take that higher value.
 
-**Do NOT** scan `CLAUDE/Plan/` with `ls`/`find`/glob pipelines to discover the next number. Folder scans miss plans in `Completed/` and other subdirectories, and disagree across branches. The folder scan is only used to bootstrap the counter when the git key is unset (which `mkplan.bash` and the daemon both handle).
+**Do NOT** scan `CLAUDE/Plan/` with `ls`/`find`/glob pipelines to discover the next number. Folder scans miss plans in `Completed/` and other subdirectories, and disagree across branches. The folder scan is only used to bootstrap the counter when the git key is unset (which `mkplan.bash` and the daemon both handle). Listing a path INSIDE one numbered plan folder (`CLAUDE/Plan/00554-x/JOURNAL/`) names a single plan, is not a number discovery, and is allowed.
 
 **To FIND an existing plan** — a different question from the next number, and the one a folder scan is usually reaching for:
 
