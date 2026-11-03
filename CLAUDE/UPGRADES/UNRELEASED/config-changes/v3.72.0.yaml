@@ -72,6 +72,12 @@ config_changes:
       description: >-
         The inventory pass's wall-clock `budget_ms` (3000) and the
         `behind_threshold` (50) at which a branch is reported far behind.
+    - key: handlers.post_tool_use.cleanup_after_merge
+      description: >-
+        The PostToolUse handler that, after a `git merge` into the default
+        branch or an integration line, deletes or advises deleting the merged
+        local branch per `branches.cleanup_after_merge.mode` (priority 39;
+        `mode` defaults to advise).
 
   renamed:
     - old_key: handlers.session_start.branch_count_advisor.options.max_open_branches
