@@ -669,6 +669,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - branch_sweep — branches that need attention
 
+<!-- handler: branch-touch-recorder -->
+
+- branch_touch_recorder — who created and who touched a branch
+
 <!-- handler: budget-exhaustion-detector -->
 
 - budget_exhaustion_detector — hidden agent budgets are surfaced
