@@ -66,7 +66,7 @@ Today nothing holds a limit (code facts with citations: [subagent-reports/261103
 
 - [x] ✅ **Task 1.1**: Decide the config surface (Goal 1), including how it migrates the three existing default-branch resolutions and the existing `branch_count_advisor` options. Recorded in [DESIGN.md](DESIGN.md) section 1: a top-level `branches:` block.
 - [x] ✅ **Task 1.2**: Decide the classification rules, the parked marker (Q4), how a branch's creator (session or sub-agent) is recorded for the Stop guard, and the guard modes (advisory, block). Recorded in [DESIGN.md](DESIGN.md) sections 2-13, including the strict preset and the #152 follow-up requirements (Goals 10-12).
-- [ ] ⬜ **Task 1.3**: Fact-check this plan against the repository (`hooks-daemon-plan-fact-checker`) and fold in the findings.
+- [x] ✅ **Task 1.3**: Fact-check this plan against the repository (`hooks-daemon-plan-fact-checker`) and fold in the findings. The plan was checked in v2 and DESIGN.md in [subagent-reports/261103-design-fact-check.md](subagent-reports/261103-design-fact-check.md); all refuted claims are corrected.
 
 ### Phase 2: Inventory and report (TDD)
 
