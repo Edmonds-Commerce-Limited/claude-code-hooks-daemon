@@ -147,6 +147,22 @@ def write_labels(path: Path, branches: list[dict[str, object]]) -> None:
         )
 
 
+def clear_label_stage(path: Path, name: str) -> None:
+    """Mark ``name`` parked in the labels snapshot so a fresh park lifts its block at once."""
+    labels = read_labels(path)
+    if name not in labels:
+        return
+    labels[name] = {**labels[name], "group": "parked", "stage": None}
+    try:
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(labels, sort_keys=True), encoding="utf-8")
+        temporary.replace(path)
+    except OSError as exc:
+        log_and_continue(
+            logger, exc, reason="the next SessionStart rewrites the snapshot from the inventory"
+        )
+
+
 def read_labels(path: Path) -> dict[str, dict[str, str | None]]:
     """The labels snapshot, or ``{}`` when it is absent or unreadable."""
     try:
