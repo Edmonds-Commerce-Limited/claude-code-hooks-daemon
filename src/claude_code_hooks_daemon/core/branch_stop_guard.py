@@ -16,6 +16,7 @@ an unjudged branch is not a defect.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass
 from enum import StrEnum
@@ -215,17 +216,30 @@ def judge_stop(
     return StopJudgement(tuple(findings), tips, incomplete)
 
 
-def _never_moved(repo: Path, name: str, budget: _Budget) -> bool:
-    """True when the branch's reflog holds only its creation: no work, so nothing merged.
+#: Reflog subjects that move a branch without adding work of its own: its
+#: creation, a fast-forward onto commits that already exist, a reset, a rename.
+#: Anything else (a commit, a real merge, a cherry-pick, an unlabelled
+#: update-ref) counts as work, so an unknown entry still reports the branch.
+_NO_WORK_REFLOG = re.compile(
+    r"^(branch: Created from |branch: Reset to |Branch: renamed |reset: moving to "
+    r"|(merge|pull)\b[^:]*: Fast-forward)"
+)
 
-    A worktree branch made for a sub-agent that has not committed yet sits at
-    the default tip, and ancestry reads that as merged. An unreadable reflog
+
+def _never_worked(repo: Path, name: str, budget: _Budget) -> bool:
+    """True when no reflog entry of the branch added work: nothing of its own was merged.
+
+    A worktree branch made for a sub-agent sits at the default tip until its
+    first commit, and a `merge --ff-only main` only moves it to another commit
+    main already has; ancestry reads both as merged. An unreadable reflog
     answers False, so the branch is still reported.
     """
-    result = budget.git(repo, "reflog", "show", "--format=%H", f"refs/heads/{name}", "--")
+    result = budget.git(repo, "reflog", "show", "--format=%gs", f"refs/heads/{name}", "--")
     if result is None or result.returncode != 0:
         return False
-    return len(result.stdout.split()) == 1
+    # Keep empty subjects: an unlabelled ref update is work, not noise.
+    subjects = result.stdout.rstrip("\n").split("\n") if result.stdout else []
+    return bool(subjects) and all(_NO_WORK_REFLOG.match(s) for s in subjects)
 
 
 def _judge_branch(
@@ -257,7 +271,7 @@ def _judge_branch(
                 )
             )
     if merged:
-        if not handoff and not _never_moved(repo, record.name, budget):
+        if not handoff and not _never_worked(repo, record.name, budget):
             findings.append(
                 StopFinding(
                     record.name, StopCheck.MERGED, tip, _merged_commands(record, config.remote)

@@ -185,6 +185,19 @@ class TestUnpushed:
 
 
 class TestMerged:
+    def test_branch_only_fast_forwarded_is_not_merged_work(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        # A sub-agent's first step is often `git merge --ff-only main`: the
+        # branch moves, but only onto commits main already has.
+        _branch(repo, "fresh", push=True, commit=False)
+        wt = tmp_path / "wt"
+        _git(repo, "worktree", "add", "-q", str(wt), "fresh")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "main moves on")
+        _git(wt, "merge", "-q", "--ff-only", "main")
+        _touch(repo, "fresh")
+        assert ("fresh", StopCheck.MERGED) not in _checks(_judge(repo))
+
     def test_branch_that_never_moved_is_not_merged_work(self, repo: Path, tmp_path: Path) -> None:
         # A worktree branch made for a sub-agent that has not committed yet sits
         # at the default tip, so ancestry calls it merged; nothing was merged.
