@@ -33,9 +33,9 @@ Today nothing holds a limit (code facts with citations: [subagent-reports/261103
    - an exempt list (never counted, never deleted by an agent);
    - each branch's state: merged into the default branch, merged into an integration line, patch-equivalent, same tip as another branch, live work, parked, dormant.
 2. **Report.** `hooks-daemon branch-sweep` (text and `--json`) and a terse SessionStart line: every local branch, remote branch and worktree with work, with its ahead count, lines, age, drift, remote presence and linked plan or issue. This is v1's scope.
-3. **A WIP cap that holds.** Every non-default, non-exempt branch counts, local and remote, with identical tips counted once. At the cap, new work is denied: `git switch -c`, `git checkout -b`, `git branch <new>`, `git worktree add`, an Agent dispatch with `isolation: worktree`, and WorktreeCreate. The denial lists the open branches to finish.
+3. **A WIP cap that holds.** Repository-wide, default 10 (owner, Q2). Every non-default, non-exempt branch counts, local and remote, with identical tips counted once. At the cap, new work is denied: `git switch -c`, `git checkout -b`, `git branch <new>`, `git worktree add`, an Agent dispatch with `isolation: worktree`, and WorktreeCreate. The denial lists the open branches to finish.
 4. **Same-task duplicates.** Creating a branch whose stem or issue number matches an open branch (`-2`, `-r3`, `-orig` and similar) is warned about, naming the existing branch to continue.
-5. **Dormancy.** Days since a branch's last commit, advisory at one age and blocking new work at a second. A branch can be marked parked on a human decision (reason and date); it is then shown as waiting, not forgotten, and does not trip the dormancy block.
+5. **Dormancy.** Days since a branch's last commit: an advisory at 7 days, a noisy advisory at 14 days, and a block on new work at 30 days (owner defaults, Q3). A branch can be marked parked on a human decision (reason and date); it is then shown as waiting, not forgotten, and does not trip the dormancy block.
 6. **Stop and SubagentStop guard.** A session or sub-agent may not stop while a branch it created has unpushed commits, a dirty worktree, or is merged but not deleted (locally, on the remote, or as a worktree). It says which, and how to finish.
 7. **Lossless cleanup after a merge.** Optional, on by default in this repository: after a merge into the default branch or an integration line, `git branch -d`, a remote delete of the merged branch, and `git worktree remove` without `--force`. Never a force, never an integration line itself, never an unproven branch.
 8. **Integration lines in the delete guards.** R-GIT-PUSH-DELETE-REMOTE and the cleanup accept "an ancestor of an integration line's remote-tracking ref, and the live tip matches" as proof, and never let an agent delete the integration branch itself. The guard's remote check is one `ls-remote` for all named branches (#153).
@@ -51,8 +51,8 @@ Today nothing holds a limit (code facts with citations: [subagent-reports/261103
 ## Open questions
 
 - **Q1 (for the #152 commenter):** the "preserve" branches the daemon reportedly auto-commits to were not found in this repository's source (finding 4 of the code-facts report). What is their name pattern, and which tool created them? Until that is answered, they are covered generically by Goals 3 and 7, not by a dedicated rule.
-- **Q2 (owner):** the WIP cap's default value, and whether it applies per session or to the whole repository. #152 implies the repository.
-- **Q3 (owner):** the dormancy defaults (advisory and blocking ages).
+- **Q2 (owner), answered 3 November 2026:** the WIP cap is repository-wide, default 10.
+- **Q3 (owner), answered 3 November 2026:** dormancy has three stages: an advisory at 7 days since the last commit, a noisy advisory at 14 days, and a block on new work at 30 days.
 - **Q4 (design):** where a "parked" marker lives so it survives a fresh clone. Candidates: a tracked file, the plan the branch belongs to, a git note on the tip. Decide in Phase 1.
 
 ## Tasks
