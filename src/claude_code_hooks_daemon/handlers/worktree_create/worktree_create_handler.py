@@ -33,6 +33,11 @@ from claude_code_hooks_daemon.core.branch_creation import (
     creation_verdict,
     read_labels,
 )
+from claude_code_hooks_daemon.core.branch_records import (
+    WORKTREE_CREATE_ROUTE,
+    identity,
+    write_creator,
+)
 from claude_code_hooks_daemon.core.handler_bases import WorktreeCreateHandlerBase
 from claude_code_hooks_daemon.core.worktree_naming import worktree_dir_name, worktree_path
 from claude_code_hooks_daemon.core.worktree_seed import (
@@ -148,6 +153,16 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
 
             path.parent.mkdir(parents=True, exist_ok=True)
             self._git_worktree_add(cwd, path, branch)
+            # `worktree add -b` refuses an existing branch, so this call made it.
+            # The agent is bound later by its first touch (branch_touch_recorder);
+            # a failed write is logged and the worktree still answers.
+            write_creator(
+                Path(root),
+                branch,
+                identity(str(session_id or ""), None),
+                WORKTREE_CREATE_ROUTE,
+                timeout=Timeout.GIT_WORKTREE_CLEANUP,
+            )
 
             seed_worktree(Path(root), path, entries)
 

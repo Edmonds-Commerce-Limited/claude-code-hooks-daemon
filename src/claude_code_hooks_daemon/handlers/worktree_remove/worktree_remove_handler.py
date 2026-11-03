@@ -11,8 +11,8 @@ an empty allow. What it did, and what it left, goes to the daemon log.
    scratch notes among them (issue #155). ``--force`` is added only when HEAD is
    also contained in another ref (DESIGN.md section 11); otherwise git's own
    refusal stands. A blocked worktree is left and its blocking paths logged.
-3. A branch with the WorktreeCreate ``<slug>-<8 hex>`` name (standing in for the
-   creator record until Task 4.2 builds it) is deleted through
+3. A branch WorktreeCreate made (creator route ``worktree_create``; with no
+   creator record at all, the ``<slug>-<8 hex>`` name) is deleted through
    :func:`delete_if_merged` when the default or an integration line holds every
    commit. Anything else is left for ``branch-sweep --clean``.
 4. Always ``git worktree prune`` (only drops registrations whose directory is
@@ -43,7 +43,7 @@ from claude_code_hooks_daemon.core.branch_cleanup import (
     worktree_blockers,
 )
 from claude_code_hooks_daemon.core.handler_bases import WorktreeRemoveHandlerBase
-from claude_code_hooks_daemon.core.worktree_naming import is_worktree_create_name
+from claude_code_hooks_daemon.core.branch_records import worktree_branch_deletable
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     WorktreeRecord,
@@ -61,8 +61,9 @@ _WORKTREE_REMOVE_PRIORITY = 50
 # Payload keys that may carry the worktree path (defensive: exact key unknown).
 _PATH_KEYS = ("worktree_path", "path")
 
-#: Time the branch step needs left over before it starts (probes plus delete).
-_BRANCH_STEP_RESERVE = 2 * Timeout.GIT_CONTEXT
+#: Time the branch step needs left over before it starts (creator record read,
+#: probes plus delete).
+_BRANCH_STEP_RESERVE = 3 * Timeout.GIT_CONTEXT
 
 
 class _BudgetSpent(Exception):
@@ -200,12 +201,17 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
             self._delete_branch(records[0].path, record.branch, clock)
 
     def _delete_branch(self, repo: Path, name: str, clock: _Clock) -> None:
-        """Delete ``name`` when it is a WorktreeCreate branch proven merged."""
-        if not is_worktree_create_name(name):
-            logger.info("worktree_remove: %s is not a WorktreeCreate name; branch kept", name)
-            return
+        """Delete ``name`` when it is a WorktreeCreate branch proven merged.
+
+        Its creator record decides (route ``worktree_create``); only a branch with
+        no record falls back to the ``<slug>-<8 hex>`` name shape.
+        """
         if clock.left() < _BRANCH_STEP_RESERVE:
             raise _BudgetSpent(f"the branch check of {name}")
+        record_timeout = clock.timeout(Timeout.GIT_CONTEXT, f"the creator record of {name}")
+        if not worktree_branch_deletable(repo, name, timeout=record_timeout):
+            logger.info("worktree_remove: %s was not made by WorktreeCreate; branch kept", name)
+            return
         default = resolve_default_branch(self._branches, repo)
         if default is None:
             report = CleanupReport(skipped=(f"{name}: no default branch resolves",))
@@ -227,7 +233,7 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
                 )
                 report = CleanupReport(skipped=(f"{name}: the refs could not be read: {exc}",))
         logger.warning(
-            "worktree_remove: %s (no creator record yet; eligible by its <slug>-<8 hex> name): %s",
+            "worktree_remove: %s (made by WorktreeCreate): %s",
             name,
             "; ".join(render(report)),
         )
