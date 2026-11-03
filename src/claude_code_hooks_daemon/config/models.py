@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.config.exception_entries import (
 from claude_code_hooks_daemon.config.yaml_loading import safe_load_yaml
 from claude_code_hooks_daemon.constants import ConfigKey, EventKey, Timeout, wired_event_metas
 from claude_code_hooks_daemon.constants.events import EventType
+from claude_code_hooks_daemon.constants.handlers import HANDLER_KEY_ALIASES
 from claude_code_hooks_daemon.core.handler_scope import (
     SCOPE_CONFIG_KEY,
     HandlerScope,
@@ -217,6 +218,50 @@ def scope_from_raw_block(raw_scope: object) -> HandlerScope | None:
     return HandlerScope(str(raw_scope).strip().upper())
 
 
+def _alias_block_dict(block: Any) -> dict[str, Any]:
+    """A handler block as a plain dict of what it SETS (a bare ``key:`` is empty)."""
+    if isinstance(block, HandlerConfig):
+        return block.model_dump(exclude_unset=True)
+    if isinstance(block, dict):
+        return dict(block)
+    if block is None:
+        return {}
+    raise ValueError(f"handler config block must be a mapping, got {type(block).__name__}")
+
+
+def fold_handler_aliases(event_key: str, handlers: dict[str, Any]) -> dict[str, Any]:
+    """Fold each ``HANDLER_KEY_ALIASES`` old key of ``event_key`` into its new key.
+
+    The merged block keeps every setting of both, the new key's value winning
+    where both set one, except ``enabled``: either block saying ``false``
+    disables the handler, so an old ``enabled: false`` keeps silencing it.
+    ``options`` merge the same way. The old key is removed. A block that was a
+    ``HandlerConfig`` comes back as one.
+    """
+    aliases = HANDLER_KEY_ALIASES.get(event_key, {})
+    if not any(old in handlers for old in aliases):
+        return handlers
+    folded = dict(handlers)
+    for old_key, new_key in aliases.items():
+        if old_key not in folded:
+            continue
+        old_raw = folded.pop(old_key)
+        new_raw = folded.get(new_key)
+        old_block = _alias_block_dict(old_raw)
+        new_block = _alias_block_dict(new_raw)
+        merged = {**old_block, **new_block}
+        options = {**handler_options(old_raw), **handler_options(new_raw)}
+        if options:
+            merged[ConfigKey.OPTIONS] = options
+        if ConfigKey.ENABLED in old_block or ConfigKey.ENABLED in new_block:
+            merged[ConfigKey.ENABLED] = bool(
+                old_block.get(ConfigKey.ENABLED, True) and new_block.get(ConfigKey.ENABLED, True)
+            )
+        as_model = isinstance(old_raw, HandlerConfig) or isinstance(new_raw, HandlerConfig)
+        folded[new_key] = HandlerConfig.model_validate(merged) if as_model else merged
+    return folded
+
+
 class HandlersConfig(BaseModel):
     """Configuration for all handler event types.
 
@@ -265,6 +310,19 @@ class HandlersConfig(BaseModel):
     post_compact: dict[str, Any] = Field(default_factory=dict)
     elicitation: dict[str, Any] = Field(default_factory=dict)
     elicitation_result: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def fold_aliases(cls, data: Any) -> Any:
+        """Fold every aliased old handler key into its replacement's block."""
+        if not isinstance(data, dict):
+            return data
+        folded = dict(data)
+        for event_key in HANDLER_KEY_ALIASES:
+            block = folded.get(event_key)
+            if isinstance(block, dict):
+                folded[event_key] = fold_handler_aliases(event_key, block)
+        return folded
 
     @model_validator(mode="after")
     def validate_handler_scopes(self) -> Self:

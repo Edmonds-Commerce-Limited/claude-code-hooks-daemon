@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.constants.events import (
 )
 from claude_code_hooks_daemon.constants.formatting import FormatLimit
 from claude_code_hooks_daemon.constants.handlers import (
+    HANDLER_KEY_ALIASES,
     RELOCATED_HANDLERS,
     RETIRED_HANDLER_OPTIONS,
     RETIRED_HANDLERS,
@@ -74,6 +75,7 @@ from claude_code_hooks_daemon.constants.validation import ValidationLimit
 
 __all__ = [
     "CORE_VENDORED_BUILD_DIR_NAMES",
+    "HANDLER_KEY_ALIASES",
     "RELOCATED_HANDLERS",
     "RETIRED_HANDLERS",
     "RETIRED_HANDLER_OPTIONS",

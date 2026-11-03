@@ -19,6 +19,7 @@ from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.config.models import LogLevel, handler_options
 from claude_code_hooks_daemon.constants import (
+    HANDLER_KEY_ALIASES,
     RETIRED_HANDLER_OPTIONS,
     RETIRED_HANDLERS,
     ConfigKey,
@@ -522,6 +523,7 @@ class ConfigValidator:
                     validate_handler_names
                     and handler_name not in available_handlers
                     and handler_name not in RETIRED_HANDLERS
+                    and handler_name not in HANDLER_KEY_ALIASES.get(event_type, {})
                 ):
                     # A RETIRED name is exempted above, never reported here. The
                     # client's config is their file: removing a handler upstream

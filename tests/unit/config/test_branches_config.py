@@ -158,7 +158,7 @@ class TestDormancyEffectiveValues:
 
 
 class TestExplicitFallbackKeys:
-    """`branch_count_advisor` falls back to its own options only when these are unset."""
+    """The branch sweep falls back to the old advisor options only when these are unset."""
 
     def test_unset_returns_none(self) -> None:
         config = BranchesConfig()

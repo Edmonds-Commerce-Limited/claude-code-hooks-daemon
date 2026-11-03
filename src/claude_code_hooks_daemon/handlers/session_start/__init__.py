@@ -2,7 +2,7 @@
 
 from . import secret_file_hygiene_checker as _secret_file_hygiene_checker_module
 from .autonomy_notice import AutonomyNoticeHandler
-from .branch_count_advisor import BranchCountAdvisorHandler
+from .branch_sweep import BranchSweepHandler
 from .ccy_supervisor_integrity import CcySupervisorIntegrityHandler
 from .config_optimisation_reminder import ConfigOptimisationReminderHandler
 from .contract_staleness import ContractStalenessHandler
@@ -32,7 +32,7 @@ SecretFileHygieneCheckerHandler = (
 
 __all__ = [
     "AutonomyNoticeHandler",
-    "BranchCountAdvisorHandler",
+    "BranchSweepHandler",
     "CcySupervisorIntegrityHandler",
     "ConfigOptimisationReminderHandler",
     "ContractStalenessHandler",

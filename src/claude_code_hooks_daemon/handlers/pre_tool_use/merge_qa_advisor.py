@@ -74,7 +74,7 @@ _OPTION_END: Final[str] = "--"
 _REMOTE: Final[str] = "origin"
 _REMOTES_PREFIX: Final[str] = f"refs/remotes/{_REMOTE}/"
 # A work branch as `git merge` can name it: bare, `refs/heads/`, `origin/` or
-# `refs/remotes/origin/`. The prefixes are the ones branch_count_advisor counts.
+# `refs/remotes/origin/`. The prefixes are git_repo.WORK_BRANCH_PREFIXES.
 _WORK_REF: Final[re.Pattern[str]] = re.compile(
     rf"^(?:(?P<heads>{re.escape(HEADS_PREFIX)})|(?P<remote>(?:refs/remotes/)?{_REMOTE}/))?"
     rf"(?P<branch>(?:{'|'.join(re.escape(prefix) for prefix in WORK_BRANCH_PREFIXES)})\S+)$"

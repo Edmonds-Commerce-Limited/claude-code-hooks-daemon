@@ -915,13 +915,14 @@ class HandlerID:
         display_name="git-upstream-checker",
     )
 
-    # Branch count advisor (SessionStart handler) — Plan 00475 Task 4.1: name
-    # open worktree-* branches beyond the limit and any far behind the default
-    # branch. Advisory only.
-    BRANCH_COUNT_ADVISOR = HandlerIDMeta(
-        class_name="BranchCountAdvisorHandler",
-        config_key="branch_count_advisor",
-        display_name="branch-count-advisor",
+    # Branch sweep (SessionStart handler) — Plan 00558 Task 2.3: summarise the
+    # branch inventory (contained nowhere, merged, dormant, count vs cap).
+    # Advisory only. Its old key `branch_count_advisor` is an alias
+    # (HANDLER_KEY_ALIASES).
+    BRANCH_SWEEP = HandlerIDMeta(
+        class_name="BranchSweepHandler",
+        config_key="branch_sweep",
+        display_name="branch-sweep",
     )
 
     # Reference-repo freshness sweep (SessionStart handler) — Plan 00401: fetch
@@ -1664,6 +1665,16 @@ _AWAITING_HUMAN_IS_A_SESSION_MODE: Final[str] = (
 RETIRED_HANDLER_OPTIONS: dict[str, dict[str, str]] = {
     "failsafe_cron_blockage_suppressor": {"expiry_hours": _AWAITING_HUMAN_IS_A_SESSION_MODE},
     "idle_workable_issue_stop_gate": {"marker_expiry_hours": _AWAITING_HUMAN_IS_A_SESSION_MODE},
+}
+
+# A replaced handler's old config key that still configures its replacement:
+# ``{event: {old_key: new_key}}``. Unlike a RETIRED_HANDLERS key, an alias has
+# an effect: ``config.models.fold_handler_aliases`` folds the old block into the
+# new one at load (either ``enabled: false`` disables it, options merge with the
+# new key's winning), so a client's existing config keeps working.
+HANDLER_KEY_ALIASES: dict[str, dict[str, str]] = {
+    # Plan 00558 Task 2.3: branch_count_advisor became the branch sweep summary.
+    "session_start": {"branch_count_advisor": "branch_sweep"},
 }
 
 

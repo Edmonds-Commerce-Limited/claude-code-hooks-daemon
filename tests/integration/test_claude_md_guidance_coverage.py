@@ -253,9 +253,10 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "T3 standing policy: while autonomy is off the session must keep doing only "
         "what it was asked, long after the one session-start line"
     ),
-    "BranchCountAdvisorHandler": (
-        "T3 standing policy: the open-branch limit governs every later decision "
-        "to start a branch, long after the one session-start message"
+    "BranchSweepHandler": (
+        "T3 standing policy: the open-branch cap and the delete-branch route govern "
+        "every later decision to start or remove a branch, long after the one "
+        "session-start summary"
     ),
     "BudgetExhaustionDetectorHandler": (
         "T3 standing policy: every future detection must lead with the same "
