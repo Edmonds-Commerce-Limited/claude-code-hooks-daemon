@@ -327,6 +327,27 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         return GatingResult(decision=Decision.DENY, reason=message, rule=self._rule_mkdir.rule_id)
 
     @staticmethod
+    def _without_inside_plan_paths(text: str, plan_dir: str) -> str:
+        """Replace every path inside a numbered plan folder with a placeholder.
+
+        ``<plan-dir>/NNNNN-name`` and anything beneath it (also under an archive
+        directory such as ``Completed/``) names one plan, so it carries no
+        information about which numbers exist. A path that climbs out with a
+        ``..`` segment is left alone: it can reach the plan root again.
+        """
+        inside = re.compile(
+            rf"{re.escape(plan_dir)}/(?:[A-Za-z][\w-]*/)?\d{{1,{PLAN_NUMBER_WIDTH}}}-"
+            r"[^\s;&|<>\"'()]*"
+        )
+
+        def _replace(match: re.Match[str]) -> str:
+            if ".." in match.group(0).split("/"):
+                return match.group(0)
+            return "<inside-plan-folder>"
+
+        return inside.sub(_replace, text)
+
+    @staticmethod
     def _extracts_latest(command: str) -> bool:
         """True when the command reduces its output to the single highest entry.
 
@@ -527,6 +548,14 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         # folder (ledger 00474 N141).
         if self._new_plan_folder_in_mkdir(command) is not None:
             return True
+
+        # A path INSIDE one numbered plan folder names that plan; it is not a
+        # listing of the plan root. Every discovery rule below judges the
+        # command with such paths removed, so `ls <dir>/00554-x/JOURNAL/` next
+        # to an unrelated `grep '[0-9]'` is not read as a scan (GitHub #151).
+        command = self._without_inside_plan_paths(command, plan_dir)
+        executable_text = self._without_inside_plan_paths(executable_text, plan_dir)
+        position_text = self._without_inside_plan_paths(position_text, plan_dir)
 
         # A command piped to `wc` COUNTS lines/words/bytes; it can never be
         # part of a "find the latest/highest plan number" idiom (which needs
@@ -777,7 +806,9 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
             "**Do NOT** scan `CLAUDE/Plan/` with `ls`/`find`/glob pipelines to discover the "
             "next number. Folder scans miss plans in `Completed/` and other subdirectories, "
             "and disagree across branches. The folder scan is only used to bootstrap the "
-            "counter when the git key is unset (which `mkplan.bash` and the daemon both handle).\n\n"
+            "counter when the git key is unset (which `mkplan.bash` and the daemon both handle). "
+            "Listing a path INSIDE one numbered plan folder (`CLAUDE/Plan/00554-x/JOURNAL/`) "
+            "names a single plan, is not a number discovery, and is allowed.\n\n"
             "**To FIND an existing plan** — a different question from the next "
             "number, and the one a folder scan is usually reaching for:\n\n"
             "```\n"
