@@ -1028,6 +1028,10 @@ handlers:
       enabled: true
       priority: 40
 
+    evacuation_recorder:  # Plan 00558 Task 4.5: remember this turn's evacuations so destroying the source later in the turn is denied
+      enabled: true
+      priority: 41
+
     cleanup_after_merge:  # Dogfood: delete a branch once merged into main (Plan 00558); mode is branches.cleanup_after_merge.mode
       enabled: true
       priority: 39
@@ -1283,6 +1287,10 @@ handlers:
     limit_rebrief:  # One-shot re-brief after a usage-limit resume; names a background/teammate agent a limit killed (Plan 00470)
       enabled: true  # Never denies; never terminal
       priority: 39
+
+    evacuation_turn_marker:  # Plan 00558 Task 4.5: advances the main thread's turn so evacuation records expire
+      enabled: true  # Silent bookkeeping; never terminal
+      priority: 43
 
     focus_mode_trigger:  # `hooks-daemon focus <task>` / `focus off` at the start of a prompt turns the session's focus mode on or off (Plan 00501)
       enabled: true  # Never denies; never terminal

@@ -91,7 +91,7 @@
 | 60 | subagent_tier_advisor | ADVISORY | Advise a cheaper tier on an unchosen or up-overridden dispatch, and a floor below it |
 | 60 | workflow_fanout_advisor | ADVISORY | Advise on a Workflow script's agent count, inherited sites and per-family ceiling |
 
-### PostToolUse (18 handlers)
+### PostToolUse (19 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -113,6 +113,7 @@
 | 38 | operator_signal_notice | ADVISORY | Surface a pending operator signal as hook context, once per signal per agent thread |
 | 39 | cleanup_after_merge | ADVISORY | Delete or advise deleting the branch a merge into the default just landed |
 | 40 | branch_touch_recorder | ADVISORY | Write the creator and touch records of the branches a call created or changed |
+| 41 | evacuation_recorder | ADVISORY | Keep the evacuations of this turn for destructive_git's same-turn check |
 
 ### SessionStart (35 handlers)
 
@@ -161,7 +162,7 @@
 | 15 | disclosure_reset_pre_compact | NON-TERMINAL | Reset DisclosureTracker state for the firing agent on PreCompact |
 | 20 | compaction_signal | NON-TERMINAL | Write a ``<session>.compacting`` signal on PreCompact for the supervisor |
 
-### UserPromptSubmit (10 handlers)
+### UserPromptSubmit (11 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -171,6 +172,7 @@
 | 38 | stop_failure_resolver | ADVISORY | Resolve this session's recorded StopFailure when it submits a prompt |
 | 39 | limit_rebrief | ADVISORY | Re-brief after a usage-limit resume; name a background or teammate agent a limit killed |
 | 41 | focus_mode_trigger | ADVISORY | Turn the session's focus mode on or off from the prompt; renew it on every human prompt |
+| 43 | evacuation_turn_marker | ADVISORY | Start a new main-thread turn at each prompt |
 | 55 | critical_thinking_advisory | ADVISORY | Periodically inject advisory context encouraging critical evaluation |
 | 56 | idle_housekeeping_advisory | ADVISORY | After N consecutive no-op recovery ticks, advise a report-first |
 | 57 | standing_authorisations | ADVISORY | Inject the authorisations a project has recorded in its config |

@@ -357,6 +357,12 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "about: the agent must know before acting that the hooksDaemon* keys "
         "are records, not settings to edit by hand"
     ),
+    "EvacuationRecorderHandler": (
+        "T3 the recorder is silent and never fires a message, yet what it records "
+        "makes destructive_git deny a later removal in the same turn: the agent must "
+        "know before acting that exporting a patch protects the worktree and branch "
+        "from removal until its next prompt"
+    ),
     "CleanupAfterMergeHandler": (
         "T3 the deletion happens after the merge the agent already ran, so the "
         "fire-time report cannot change the merge: the agent needs to know BEFORE "
@@ -539,6 +545,10 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "silent state-file writer, never denies and never speaks (T1 no, T3 no); "
         "Claude Code ignores a StopFailure hook's output, and the failure it records "
         "is shown to the human by the usage indicator in the status line"
+    ),
+    "EvacuationTurnMarkerHandler": (
+        "silent state-file writer, never denies and never speaks (T1 no, T3 no); "
+        "it only advances the main thread's turn counter at each prompt"
     ),
     "StopFailureResolverHandler": (
         "silent state-file writer, never denies and never speaks (T1 no, T3 no); "

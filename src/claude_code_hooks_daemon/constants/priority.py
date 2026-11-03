@@ -353,6 +353,15 @@ class Priority:
     # writer; no other PostToolUse handler depends on its order.)
     BRANCH_TOUCH_RECORDER = 40
 
+    # Evacuation recorder (Priority: 41 - PostToolUse sensor; Plan 00558 Task 4.5,
+    # the slot after BRANCH_TOUCH_RECORDER. A silent ledger writer; nothing
+    # depends on its order.)
+    EVACUATION_RECORDER = 41
+
+    # Evacuation turn marker (Priority: 43 - UserPromptSubmit bookkeeping; Plan
+    # 00558 Task 4.5. Advances the main thread's turn counter; never terminal.)
+    EVACUATION_TURN_MARKER = 43
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30

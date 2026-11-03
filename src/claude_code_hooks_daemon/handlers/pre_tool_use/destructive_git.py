@@ -13,7 +13,13 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.branch_cleanup import preview_paths, worktree_blockers
-from claude_code_hooks_daemon.core.evacuation import EvacuationMatch, evacuate_then_destroy
+from claude_code_hooks_daemon.core.evacuation import (
+    Evacuation,
+    EvacuationMatch,
+    destroys_recorded,
+    evacuate_then_destroy,
+)
+from claude_code_hooks_daemon.core.evacuation_turns import recorded_evacuations
 from claude_code_hooks_daemon.core.force_removal import (
     ALL_HOLDERS,
     REMOTE_HOLDERS,
@@ -1178,6 +1184,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         # Injected by the registry from the top-level `branches:` block (Plan 00558);
         # the model defaults apply when the config has none.
         self._branches: BranchesConfig = BranchesConfig()
+        self._untracked_override: Path | None = None
 
     @property
     def destructive_patterns(self) -> tuple[re.Pattern[str], ...]:
@@ -1306,7 +1313,34 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 reason="with no starting directory the evacuation shape cannot be placed; "
                 "the destructive patterns and their own fail-closed checks still apply",
             )
-        return evacuate_then_destroy(command, cwd) if cwd is not None else None
+        if cwd is None:
+            return None
+        return evacuate_then_destroy(command, cwd) or self._same_turn(command, cwd, hook_input)
+
+    def _same_turn(
+        self, command: str, cwd: Path, hook_input: dict[str, Any]
+    ) -> EvacuationMatch | None:
+        """A destruction of work an earlier command of this turn evacuated (DESIGN section 13)."""
+        return destroys_recorded(command, cwd, self._turn_records(hook_input))
+
+    def _turn_records(self, hook_input: dict[str, Any]) -> list[Evacuation]:
+        """The evacuations recorded this turn for the calling identity; none without a session."""
+        session_id = hook_input.get(HookInputField.SESSION_ID)
+        if not isinstance(session_id, str) or not session_id:
+            return []
+        raw_agent = hook_input.get(HookInputField.AGENT_ID)
+        agent_id = raw_agent if isinstance(raw_agent, str) and raw_agent else None
+        try:
+            untracked = self._untracked_override or ProjectContext.daemon_untracked_dir()
+        except RuntimeError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="with no daemon untracked directory there are no turn records to read; "
+                "the same-command check and the destructive patterns still apply",
+            )
+            return []
+        return recorded_evacuations(untracked, session_id, agent_id)
 
     @staticmethod
     def _evacuation_note(found: EvacuationMatch) -> str:
@@ -1459,7 +1493,10 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "`-o` to an untracked, ignored or out-of-repo file, followed by `worktree "
             "remove`, `branch -d/-D`, `update-ref -d` or `rm -r` of that same worktree or "
             "branch, is denied (R-GIT-EVACUATE-THEN-DESTROY): commit or push on the lane's "
-            "branch instead, or ask a human. `branches.evacuation.mode`: block, warn, off |\n"
+            "branch instead, or ask a human. The same denial applies when the copy was made by an "
+            "EARLIER command of the same turn (the `evacuation_recorder` remembers it; the main "
+            "thread's turn ends at your next prompt, a sub-agent's is its lifetime). "
+            "`branches.evacuation.mode`: block, warn, off |\n"
             "| `git commit --amend` | Rewrites the previous commit — create a new commit instead |\n"
             "| `git checkout -f` / `git switch -f` / `git switch --discard-changes` "
             "| Discards every uncommitted change, naming no file |\n"
