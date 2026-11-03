@@ -89,11 +89,11 @@ Cleanup comes before enforcement: on the #152 commenter's 154 leftovers it alone
 
 ### Phase 4: Enforcement (TDD)
 
-- [ ] ⬜ **Task 4.1**: Deny a lossy `worktree remove --force` and widen `branch -D`'s proof to "contained elsewhere" (Goal 10).
+- [x] ✅ **Task 4.1**: Deny a lossy `worktree remove --force` and widen `branch -D`'s proof to "contained elsewhere" (Goal 10). Report: [subagent-reports/261103-task41-45.md](subagent-reports/261103-task41-45.md).
 - [ ] ⬜ **Task 4.2**: Add the creation guard: the WIP cap (Goal 3) and same-task duplicate warning (Goal 4) on every creation route, the creator and touch record, and the shared deny text (Goal 11).
 - [ ] ⬜ **Task 4.3**: Add the dormancy limit, the `standard` and `strict` presets, and the parked marker (Goal 5).
 - [ ] ⬜ **Task 4.4**: Add the Stop and SubagentStop guard (Goal 6).
-- [ ] ⬜ **Task 4.5**: Deny evacuate-then-destroy, same command then same turn (Goal 12).
+- [ ] 🔄 **Task 4.5**: Deny evacuate-then-destroy, same command then same turn (Goal 12). The same-command deny (`R-GIT-EVACUATE-THEN-DESTROY`, `core/evacuation.py`) is on main; the same-turn recorder and lookup are specified in the report's "Left" section ([subagent-reports/261103-task41-45.md](subagent-reports/261103-task41-45.md)).
 
 ### Phase 5: Ship
 
