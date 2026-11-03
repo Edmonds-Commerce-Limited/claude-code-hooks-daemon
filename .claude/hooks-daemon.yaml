@@ -1020,6 +1020,10 @@ handlers:
       enabled: true  # Silent unless the operation actually changed daemon config or handler code.
       priority: 35
 
+    cleanup_after_merge:  # Dogfood: delete a branch once merged into main (Plan 00558); mode is branches.cleanup_after_merge.mode
+      enabled: true
+      priority: 39
+
     cron_record_keeper:  # Dogfood: record each CronCreate/CronDelete so the stop enforcers refresh a job before the 7-day expiry (Plan 00470)
       enabled: true  # On by default; silent bookkeeping, never blocks.
       priority: 36
@@ -1534,6 +1538,12 @@ plugins:
       event_type: session_start
       enabled: true
       priority: 35
+
+# Branch hygiene (Plan 00558). Dogfood: a branch merged into main is deleted
+# after the merge, with its `git branch <name> <sha>` restore line printed.
+branches:
+  cleanup_after_merge:
+    mode: act
 
 # Project layout truths (Plan 00288): which dirs are source/test. Read only
 # through the ProjectLayout facade, which composes this with

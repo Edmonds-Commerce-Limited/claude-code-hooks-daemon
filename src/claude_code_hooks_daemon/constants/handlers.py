@@ -740,6 +740,14 @@ class HandlerID:
         config_key="daemon_sync_after_merge",
         display_name="daemon-sync-after-merge",
     )
+    # Cleanup after merge (PostToolUse) -- Plan 00558 Task 3.1: after a merge
+    # into the default branch or an integration line, delete (or advise
+    # deleting) the merged branch, printing its restore line.
+    CLEANUP_AFTER_MERGE = HandlerIDMeta(
+        class_name="CleanupAfterMergeHandler",
+        config_key="cleanup_after_merge",
+        display_name="cleanup-after-merge",
+    )
     # Operator signal notice (PostToolUse) -- Plan 00508: the ccy supervisor
     # types a host reboot/shutdown warning only when the session is idle, so a
     # busy agent hears it late. This adds the same warning as hook context at

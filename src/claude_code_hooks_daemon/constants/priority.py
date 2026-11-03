@@ -342,6 +342,12 @@ class Priority:
     # depends on its order.)
     OPERATOR_SIGNAL_NOTICE = 38
 
+    # Cleanup after merge (Priority: 39 - PostToolUse actor; Plan 00558 Task
+    # 3.1, the next free slot in the PostToolUse band after
+    # OPERATOR_SIGNAL_NOTICE. It deletes only branches already merged, so its
+    # order against the merge advisories above is not load-bearing.)
+    CLEANUP_AFTER_MERGE = 39
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30
