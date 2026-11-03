@@ -662,9 +662,9 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - background_process_tracker — backgrounded processes are tracked
 
-<!-- handler: branch-count-advisor -->
+<!-- handler: branch-sweep -->
 
-- branch_count_advisor — keep open work branches few
+- branch_sweep — branches that need attention
 
 <!-- handler: budget-exhaustion-detector -->
 
