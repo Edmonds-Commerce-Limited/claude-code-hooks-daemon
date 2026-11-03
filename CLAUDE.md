@@ -707,6 +707,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - docs_qa_sweep — documentation drift report at session start
 
+<!-- handler: evacuation-recorder -->
+
+- evacuation_recorder — an evacuated worktree or branch stays protected this turn
+
 <!-- handler: failsafe-cron-session-advisor -->
 
 - failsafe_cron_session_advisor — the failsafe cron from session start
