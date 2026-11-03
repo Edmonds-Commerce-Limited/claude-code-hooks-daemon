@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     build_inventory,
 )
 from claude_code_hooks_daemon.daemon import branch_safety
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 NOW = 1_800_000_000
 DAY = 86_400
@@ -407,7 +408,7 @@ class TestFailClosed:
     def test_merged_listing_failure_proves_nothing_wrongly(
         self, repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        real = branch_inventory.run_git
+        real = run_git
 
         def failing_merged(
             cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
@@ -429,7 +430,7 @@ class TestEdges:
     def test_old_git_without_ahead_behind_leaves_behind_unknown(
         self, repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        real = branch_inventory.run_git
+        real = run_git
 
         def no_atom(
             cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
@@ -451,7 +452,7 @@ class TestEdges:
     def test_worktree_listing_failure_means_no_paths(
         self, repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        real = branch_inventory.run_git
+        real = run_git
 
         def no_worktrees(
             cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT

@@ -675,10 +675,11 @@ def _classify(
         if target.is_default:
             own = {"ahead": found.ahead, "lines": found.lines}
     # Section 2 order: merged into the default, then into a line, then patch-equivalent.
-    merged = [t for t, f in facts if f.ahead == 0]
-    if merged:
-        state = BranchState.MERGED_DEFAULT if merged[0].is_default else BranchState.MERGED_LINE
-        return BranchRecord(state=state, merged_into=merged[0].name, **base, **own)
+    contained_by = [t for t, f in facts if f.ahead == 0]
+    if contained_by:
+        first = contained_by[0]
+        state = BranchState.MERGED_DEFAULT if first.is_default else BranchState.MERGED_LINE
+        return BranchRecord(state=state, merged_into=first.name, **base, **own)
     equivalent = next((t for t, f in facts if f.unique == 0), None)
     if equivalent is not None:
         return BranchRecord(
