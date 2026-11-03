@@ -176,7 +176,9 @@ class TestRecordTouch:
     def test_failed_write_logs_and_returns(
         self, tmp_path: Path, untracked: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        record_touch(tmp_path, "b", session_id="s1", agent_id=None, untracked=untracked)
+        assert not record_touch(
+            tmp_path, "b", session_id="s1", agent_id=None, untracked=untracked
+        )
         assert "branch_records" in caplog.text
 
 

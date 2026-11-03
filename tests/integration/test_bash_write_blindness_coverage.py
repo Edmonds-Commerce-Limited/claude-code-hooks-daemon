@@ -133,7 +133,7 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "branch (commit, merge, rebase, reset, ...), which is where Bash-route "
         "work on a branch is recorded. A heredoc or redirect alone records no "
         "touch until that work is committed. Silent recorder: a missed touch "
-        "costs nothing at write time."
+        "costs nothing at write time.",
     ),
     "WriteProtectedPathsHandler": (
         _PARTIAL,

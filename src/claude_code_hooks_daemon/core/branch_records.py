@@ -178,12 +178,13 @@ def record_touch(
     session_id: str,
     agent_id: str | None,
     untracked: Path,
-) -> None:
+) -> bool:
     """Add this identity to ``branch``'s touch record, once per session state.
 
     A call with an agent touching a branch whose creator is this session's main
     thread (``<session>:``, as WorktreeCreate writes it) rebinds the creator to
-    the agent. Every git failure is logged and the call returns.
+    the agent. Returns whether the identity is on the record; every git failure
+    is logged and reported as False.
     """
     who = identity(session_id, agent_id)
     path = state_path(untracked, session_id, _STATE_KIND, who)
@@ -192,7 +193,7 @@ def record_touch(
     seen_list: list[str] = [str(item) for item in seen] if isinstance(seen, list) else []
     marker = f"{repo.resolve()}\0{branch}"
     if marker in seen_list:
-        return
+        return True
     try:
         touched = _get_all(repo, branch, TOUCHED_KEY, Timeout.GIT_CONTEXT)
         creators = _get_all(repo, branch, CREATOR_KEY, Timeout.GIT_CONTEXT) if agent_id else []
@@ -203,14 +204,15 @@ def record_touch(
             reason=f"branch_records: the touch of {branch} is left unrecorded; a recorder "
             "never blocks the call it observes",
         )
-        return
+        return False
     if who not in touched and not _set(
         repo, branch, TOUCHED_KEY, who, Timeout.GIT_CONTEXT, add=True
     ):
-        return
+        return False
     if creators == [identity(session_id, None)]:
         _set(repo, branch, CREATOR_KEY, who, Timeout.GIT_CONTEXT)
     write_state(path, {**state, _SEEN: [*seen_list, marker]})
+    return True
 
 
 def touched_branches(repo: Path, session_id: str, agent_id: str | None) -> list[str]:
