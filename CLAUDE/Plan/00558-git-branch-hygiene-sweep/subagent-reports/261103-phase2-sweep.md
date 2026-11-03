@@ -27,4 +27,4 @@
 
 ## Evidence
 
-Targeted tests: `tests/unit/core/test_branch_sweep.py`, `tests/unit/handlers/session_start/test_branch_sweep.py`, `tests/unit/daemon/test_cli_branch_sweep.py`, `tests/unit/handlers/test_registry_branches_injection.py`, `tests/unit/config/`. The QA verdict is in the journal entry and the reply to the lead.
+Targeted tests: `tests/unit/core/test_branch_sweep.py`, `tests/unit/handlers/session_start/test_branch_sweep.py`, `tests/unit/daemon/test_cli_branch_sweep.py`, `tests/unit/handlers/test_registry_branches_injection.py`, `tests/unit/config/`. Targeted QA (`llm_qa.py changed` on a4141b675): `QA: 41/42 PASSED, 1/42 FAILED`. The one failure is `changed_tests`' "too-broad" unmapped notice; its tests ran 4,712 passed, 0 failed, 5 skipped over 106 files. A first run on the previous commit timed out in `changed_tests` (1,800 s, host load about 12) and flagged the example config's `branch_count_advisor`, fixed in a4141b675.
