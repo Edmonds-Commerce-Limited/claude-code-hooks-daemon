@@ -20,7 +20,7 @@ registry grows.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Final
@@ -45,6 +45,13 @@ _PSEUDO_HANDLERS_KEY: Final[str] = "handlers"
 
 _SUMMARY_MAX_CHARS: Final[int] = 72
 _RULE_WIDTH: Final[int] = 62
+
+_BRANCHES_SECTION: Final[str] = "branches"
+_DORMANCY_KEY: Final[str] = "dormancy"
+_PRESET_KEY: Final[str] = "preset"
+_PRESET_STANDARD: Final[str] = "standard"
+_MODE_KEY: Final[str] = "mode"
+_STAGE_DAY_KEYS: Final[tuple[str, ...]] = ("advisory_days", "noisy_days", "block_days")
 
 _UNASSESSED_REASON: Final[str] = "could not be constructed, so nothing about it was measured"
 
@@ -241,6 +248,27 @@ def build_checklist(
     return items
 
 
+def optional_suggestions(config: Mapping[str, Any]) -> list[str]:
+    """Non-scoring OPTIONAL lines about config outside the handler registry.
+
+    Never counted in the overall score, so a project on the defaults keeps full
+    marks. Today: the stricter branch-dormancy preset, offered only to a
+    project on ``standard`` with no stage overrides (and dormancy not off).
+    """
+    dormancy = _block(_block(config, _BRANCHES_SECTION), _DORMANCY_KEY)
+    on_defaults = (
+        dormancy.get(_PRESET_KEY, _PRESET_STANDARD) == _PRESET_STANDARD
+        and dormancy.get(_MODE_KEY, "block") != "off"
+        and all(dormancy.get(key) is None for key in _STAGE_DAY_KEYS)
+    )
+    if not on_defaults:
+        return []
+    return [
+        "stricter dormancy available: `branches.dormancy.preset: strict` "
+        "(warn at 3 days, block new work at 7)"
+    ]
+
+
 def _verdict(enabled: int, relevant: int) -> str:
     """PASS: all relevant enabled; WARN: more than half; FAIL: half or fewer."""
     if relevant == 0:
@@ -261,7 +289,7 @@ def _default_marker(item: ChecklistItem) -> str:
     return "" if item.default_enabled else "  [default off]"
 
 
-def render_report(items: list[ChecklistItem]) -> str:
+def render_report(items: list[ChecklistItem], optional: Sequence[str] = ()) -> str:
     """Render the grouped, collapsed report plus the numbered recommendations.
 
     Per area: a heading with the verdict and ``enabled/relevant`` count; a
@@ -327,6 +355,7 @@ def render_report(items: list[ChecklistItem]) -> str:
     if total_unassessed:
         overall += f" · {total_unassessed} could not be assessed"
     lines.append(overall)
+    lines.extend(f"OPTIONAL (not scored): {suggestion}" for suggestion in optional)
     lines.append("")
 
     if not recommendations:

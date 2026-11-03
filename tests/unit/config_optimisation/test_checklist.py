@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.config_optimisation.checklist import (
     ChecklistItem,
     ItemStatus,
     build_checklist,
+    optional_suggestions,
     render_report,
     report_as_json,
 )
@@ -350,3 +351,44 @@ class TestRender:
             "summary",
         }
         assert data["summary"]["relevant"] == sum(1 for i in items if i.relevance.applicable)
+
+
+class TestDormancyOptional:
+    """The stricter-dormancy suggestion is OPTIONAL: it never changes the score."""
+
+    @pytest.mark.parametrize(
+        "branches",
+        [
+            {},
+            {"dormancy": {"preset": "standard"}},
+            {"dormancy": {"block_days": None}},
+        ],
+    )
+    def test_standard_preset_without_overrides_suggests_strict(
+        self, branches: dict[str, Any]
+    ) -> None:
+        lines = optional_suggestions({"branches": branches})
+        assert len(lines) == 1
+        assert "branches.dormancy.preset: strict" in lines[0]
+
+    @pytest.mark.parametrize(
+        "branches",
+        [
+            {"dormancy": {"preset": "strict"}},
+            {"dormancy": {"block_days": 20}},
+            {"dormancy": {"mode": "off"}},
+        ],
+    )
+    def test_other_dormancy_settings_are_not_nagged(self, branches: dict[str, Any]) -> None:
+        assert optional_suggestions({"branches": branches}) == []
+
+    def test_report_prints_the_line_and_leaves_the_score_alone(self, tmp_path: Path) -> None:
+        items = build_checklist(_config(), _context(tmp_path))
+        plain = render_report(items)
+        with_optional = render_report(items, optional_suggestions({}))
+        assert "OPTIONAL (not scored): stricter dormancy available" in with_optional
+        overall = [line for line in plain.splitlines() if line.startswith("Overall:")]
+        assert overall == [
+            line for line in with_optional.splitlines() if line.startswith("Overall:")
+        ]
+        assert report_as_json(items) == report_as_json(items)

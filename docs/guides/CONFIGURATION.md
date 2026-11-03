@@ -317,6 +317,34 @@ paragraph above.
 
 ---
 
+## Branches (`branches:`)
+
+The top-level `branches:` block holds the branch hygiene settings: the open-work cap (`wip.cap`, default 10), duplicate warnings, cleanup after merge and dormancy. Dormancy ages an unmerged, unparked branch from its tip's commit date and applies three stages:
+
+- advisory: one line per branch in the SessionStart summary of a new session.
+- noisy: the same line in every SessionStart, plus a context line on every allowed branch creation.
+- block: creating a branch is denied (rule `R-BRANCH-DORMANT`) until each blocking branch is merged, parked or deleted. Nothing else is denied.
+
+`branches.dormancy.preset` picks the stage days; `advisory_days`, `noisy_days` and `block_days` override one stage each (the effective values must satisfy `advisory <= noisy < block`). `mode: warn` stops at the noisy stage and `off` disables the stages.
+
+| Preset               | `advisory_days` | `noisy_days` | `block_days` |
+| -------------------- | --------------- | ------------ | ------------ |
+| `standard` (default) | 7               | 14           | 30           |
+| `strict`             | 3               | 3            | 7            |
+
+`strict` changes only the dormancy days; it does not tighten `wip.cap`. `bin/hooks-daemon optimise-checklist` prints a non-scoring OPTIONAL line suggesting `strict` to a project on `standard` with no overrides.
+
+```yaml
+branches:
+  dormancy:
+    preset: strict
+    block_days: 10 # optional per-stage override
+```
+
+### Parking a branch
+
+`bin/hooks-daemon branch-park <name> --reason "<text>"` writes an empty commit with `Parked-Reason` and `Parked-By` trailers at the branch tip (no checkout), then pushes the branch with a plain fast-forward `git push`. A parked branch is exempt from the dormancy stages, but still counts against the WIP cap. A failed push is reported with the command to retry; the local park stands. A later commit on the branch ends the park, and `bin/hooks-daemon branch-park --clear <name>` writes an `Unparked` commit to restart the clock without a code change.
+
 ## Handler Configuration
 
 Handlers are grouped by the event type they respond to. Each handler has at minimum an `enabled` flag and a `priority` number.

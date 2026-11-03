@@ -7923,6 +7923,7 @@ def cmd_optimise_checklist(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.config.loader import ConfigLoader
     from claude_code_hooks_daemon.config_optimisation.checklist import (
         build_checklist,
+        optional_suggestions,
         render_report,
         report_as_json,
     )
@@ -7955,7 +7956,7 @@ def cmd_optimise_checklist(args: argparse.Namespace) -> int:
     if getattr(args, "format", "text") == "json":
         print(json.dumps(report_as_json(items), indent=2))
     else:
-        print(render_report(items), end="")
+        print(render_report(items, optional_suggestions(config_dict)), end="")
     return 0
 
 
