@@ -748,6 +748,14 @@ class HandlerID:
         config_key="cleanup_after_merge",
         display_name="cleanup-after-merge",
     )
+    # Branch creation guard (PreToolUse) -- Plan 00558 Task 4.2: a git command
+    # or an isolated Agent dispatch that creates a branch while the open work
+    # branches are at the cap is denied; a likely duplicate is warned about.
+    BRANCH_CREATION_GUARD = HandlerIDMeta(
+        class_name="BranchCreationGuardHandler",
+        config_key="branch_creation_guard",
+        display_name="branch-creation-guard",
+    )
     # Operator signal notice (PostToolUse) -- Plan 00508: the ccy supervisor
     # types a host reboot/shutdown warning only when the session is idle, so a
     # busy agent hears it late. This adds the same warning as hook context at

@@ -73,7 +73,32 @@ class TestBudgetOrdering:
             {"cwd": str(tmp_path), "name": "x", "prompt_id": "p", "session_id": "s"},
         )
         assert timeouts, "the handler made no git call"
-        assert sum(timeouts) <= Timeout.EVENT_HANDLER_BUDGET[EventType.WORKTREE_CREATE]
+        # The branch-cap verdict's calls run in core modules: at worst a
+        # for-each-ref and a worktree list, both at GIT_CONTEXT.
+        verdict = Timeout.GIT_CONTEXT * Timeout.GIT_BRANCH_CREATION_CALLS
+        assert sum(timeouts) + verdict <= Timeout.EVENT_HANDLER_BUDGET[EventType.WORKTREE_CREATE]
+
+    def test_creation_verdict_calls_are_short(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.config.models import BranchesConfig, BranchWipConfig
+        from claude_code_hooks_daemon.core import branch_creation, branch_inventory
+
+        timeouts: list[float] = []
+
+        def fake_run_git(cwd: Path, *args: str, timeout: float = 0, **_: Any) -> Any:
+            timeouts.append(timeout)
+            if args[0] == "for-each-ref":
+                row = "refs/heads/a\x00" + "1" * 40 + "\x000\x00\n"
+                return subprocess.CompletedProcess(["git", *args], 0, row, "")
+            return subprocess.CompletedProcess(["git", *args], 1, "", "boom")
+
+        config = BranchesConfig(default="main", wip=BranchWipConfig(cap=1))
+        with (
+            patch.object(branch_creation, "run_git", fake_run_git),
+            patch.object(branch_inventory, "run_git", fake_run_git),
+        ):
+            assert branch_creation.creation_verdict(tmp_path, config, "b").decision == "deny"
+        assert len(timeouts) == Timeout.GIT_BRANCH_CREATION_CALLS
+        assert all(value <= Timeout.GIT_CONTEXT for value in timeouts)
 
     def test_remove_handler_worst_case_git_time_is_within_its_budget(self, tmp_path: Path) -> None:
         worktree = tmp_path / "wt"

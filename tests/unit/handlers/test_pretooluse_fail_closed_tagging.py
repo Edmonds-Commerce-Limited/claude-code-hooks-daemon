@@ -175,6 +175,10 @@ _AUDITED_BLOCKING_ONLY_REASONS: dict[str, str] = {
         "the session, and the cron is the backstop. Not a dangerous-action guard."
     ),
     "gh_issue_comments": "Workflow completeness gate: forces --comments on gh issue view.",
+    "branch_creation_guard": (
+        "Plan 00558: a work-in-progress governance gate (finish a branch before "
+        "starting another), not a dangerous-action guard; a git failure allows."
+    ),
     "github_issue_assignment_guard": (
         "Plan 00490: an ownership workflow gate (claim the issue, do not work "
         "someone else's). A fail-open costs a possible duplicate effort, "

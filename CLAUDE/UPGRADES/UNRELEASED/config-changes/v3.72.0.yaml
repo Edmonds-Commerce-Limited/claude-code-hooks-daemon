@@ -82,6 +82,14 @@ config_changes:
         branch or an integration line, deletes or advises deleting the merged
         local branch per `branches.cleanup_after_merge.mode` (priority 39;
         `mode` defaults to advise).
+    - key: handlers.pre_tool_use.branch_creation_guard
+      description: >-
+        The PreToolUse handler that denies a git command or an isolated Agent
+        dispatch creating a branch while the open work branches are at
+        `branches.wip.cap` (`wip.mode` warn only warns), and warns when the new
+        name looks like an existing branch's work (`branches.duplicates.mode`).
+        WorktreeCreate applies the same verdict before its `worktree add`
+        (priority 40).
 
   renamed:
     - old_key: handlers.session_start.branch_count_advisor.options.max_open_branches

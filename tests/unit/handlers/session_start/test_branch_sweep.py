@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.config.models import (
 )
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.branch_creation import LABELS_RELATIVE_PATH, read_labels
 from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
 from claude_code_hooks_daemon.handlers.session_start.branch_sweep import BranchSweepHandler
 
@@ -104,6 +105,17 @@ class TestSummary:
         _commit(repo, "fresh")
         _git(repo, "checkout", "-q", "main")
         assert _run(BranchSweepHandler(), repo, _new()) == []
+
+    def test_writes_the_labels_snapshot_for_the_creation_guard(self, repo: Path) -> None:
+        _git(repo, "branch", "done", "main")
+        _git(repo, "checkout", "-q", "-b", "open")
+        _commit(repo, "open")
+        _git(repo, "checkout", "-q", "main")
+        _run(BranchSweepHandler(), repo, _new())
+        labels = read_labels(repo / LABELS_RELATIVE_PATH)
+        assert labels["done"]["group"] == "merged"
+        assert labels["done"]["action"]
+        assert labels["open"]["group"] == "live"
 
     def test_unpushed_dormant_branch_is_loud_on_resume_too(self, repo: Path) -> None:
         _git(repo, "checkout", "-q", "-b", "lost")

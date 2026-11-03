@@ -23,11 +23,13 @@ from typing import Any
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.branch_creation import LABELS_RELATIVE_PATH, write_labels
 from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
 from claude_code_hooks_daemon.core.branch_sweep import (
     deprecation_line,
     effective_behind_threshold,
     effective_wip_cap,
+    report_json,
     session_summary,
 )
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
@@ -96,10 +98,17 @@ class BranchSweepHandler(SessionStartHandlerBase):
                 level=logging.DEBUG,
             )
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
+        cap = effective_wip_cap(self._branches, legacy)
+        # The branch creation guard orders its deny list from this snapshot:
+        # it cannot afford the inventory on the PreToolUse path.
+        write_labels(
+            root / LABELS_RELATIVE_PATH,
+            report_json(inventory, cap=cap, config=self._branches)["branches"],
+        )
         lines = session_summary(
             inventory,
             self._branches,
-            cap=effective_wip_cap(self._branches, legacy),
+            cap=cap,
             new_session=not is_resume_session(hook_input),
             deprecation=deprecation_line(self._branches, legacy),
             behind_threshold=effective_behind_threshold(self._branches, legacy),

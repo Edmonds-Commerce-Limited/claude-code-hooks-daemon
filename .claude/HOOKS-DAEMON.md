@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (81 handlers)
+### PreToolUse (82 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -59,6 +59,7 @@
 | 39 | reference_repo_freshness | BLOCKING | Gate a read of a governed reference repo on a cached freshness reading |
 | 39 | resume_guard | BLOCKING | Gate a SendMessage that would cold-resume a large stopped agent |
 | 39 | subagent_context_budget | BLOCKING | Advise a subagent past ``soft_tokens``; past ``hard_tokens`` allow only its handoff |
+| 40 | branch_creation_guard | BLOCKING | Hold the open work branches at ``branches.wip.cap``; warn on likely duplicates |
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
 | 42 | conflict_marker_commit_gate | BLOCKING | Deny a commit that would record a merge-conflict marker |
