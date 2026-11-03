@@ -16,18 +16,18 @@ The code facts in [CODE-FACTS.md](CODE-FACTS.md) do not settle these. Each has a
 
 - **D4. What the scratch-shape allowlist holds.** Working answer: name patterns, configurable, matched under `untracked/scratch/`:
 
-  - message and body files: `commit-msg*`, `*-commit*.txt`, `pr-body*`, `issue-*.md`, `issue-*.json`, `journal-*.md`, `comment-*.md`;
+  - message and body files: `commit-msg*`, `*-commit*.txt`, `pr-body*`, `issue-*.md`, `issue-*.json`, `comment-*.md`. Journal bodies have no fixed name (CODE-FACTS.md F9), so they cannot be on this list: either `mkplan.bash` documents a `journal-*.md` convention that this allowlist then holds, or a journal body is admitted at creation and judged only by consumption. Phase 1 decides which;
   - briefs: `brief-*.md`;
   - captures: `*.txt`, `*.log`, `*.out`, and `*.json` read back.
 
   Registered stores (any file allowed inside):
 
   - `untracked/captures/`, `untracked/issue-reports/` and `untracked/agent-reports/auto/`;
-  - `untracked/worktrees/`, `untracked/qa/` and the daemon's own runtime files;
+  - `untracked/worktrees/`, `untracked/qa/` and the daemon's own runtime files. `untracked/qa/` already holds a hand-written report (`00552-full-gate-report.md`), so a store that admits any file would admit that shape too: Phase 1 decides whether a store admits only the files its owning tool writes;
   - Claude Code's `.claude/worktrees/`.
 
   A `*.patch` or `*.diff` is NOT a scratch shape: that is the evacuation Plan 00558 Goal 12 forbids. Phase 1 settles the list against CODE-FACTS.md F10's prefix counts.
 
 - **D5. Scope of "the ignored root".** Working answer: configured roots, defaulting to `untracked/`. That avoids a `git check-ignore` subprocess on every write; PLAN.md Q3 asks whether to widen it.
 
-- **D6. The tracked counterpart of a saved reply (Goal 3).** Working answer: the dispatch's declared tracked destination exists and is committed, recorded at dispatch time. CODE-FACTS.md F5 notes `untracked/agent-dispatch-registry/` as a candidate carrier. A reply whose dispatch declared nothing tracked is listed.
+- **D6. The tracked counterpart of a saved reply (Goal 3).** Working answer: the dispatch's declared tracked destination exists and is committed, recorded at dispatch time. CODE-FACTS.md F5 shows `untracked/agent-dispatch-registry/` cannot carry it as it stands (keyed by session and name, named dispatches only, overwritten on a repeated name), so Phase 1 either extends it to a per-dispatch key or records the destination elsewhere. A reply whose dispatch declared nothing tracked is listed.

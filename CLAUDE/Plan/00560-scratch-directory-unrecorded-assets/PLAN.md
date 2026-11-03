@@ -91,7 +91,7 @@ Cheap changes that stop the steering before any gate exists.
 
 - [ ] ⬜ **Task 2.1**: `project_containment`: the source comment, rule `fix`/`verbose`, deny suffix and guidance (F1) say the scratch directory is for consumed, short-lived files, and that durable work goes to a plan folder, a journal, a pushed commit or an issue.
 - [ ] ⬜ **Task 2.2**: `markdown_organization`: `untracked/` is no longer a general markdown home. Only the scratch shapes and registered stores are allowed, behind a migration-safe option (F2).
-- [ ] ⬜ **Task 2.3**: Sweep the 32 docs and agent or skill definitions that mention `untracked/scratch` (F10) so none calls it a place to keep work.
+- [ ] ⬜ **Task 2.3**: Sweep every doc, agent or skill definition and shipped template that mentions `untracked/scratch` (F10: 32 under `CLAUDE/`, `.claude/` and `CLAUDE.md`, plus 11 under `src/`, `README.md` and two `docs/guides/` files) so none calls it a place to keep work. Edit the `src/` originals of deployed skills, not only the `.claude/skills/` copies.
 
 ### Phase 3: Dispatch declarations and persisted replies (TDD; items 4 and 5)
 

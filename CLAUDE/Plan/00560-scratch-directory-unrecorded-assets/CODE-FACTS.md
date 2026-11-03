@@ -25,7 +25,7 @@ The allowance covers the whole ignored root, not just the scratch directory. A r
 ## F3. `dispatch_declaration` accepts any path, ignored or not, as a non-plan destination (CONFIRMED, wider than the issue says)
 
 - `handlers/pre_tool_use/dispatch_declaration.py:248-252` (`_has_declaration`): a dispatch counts as declared if it names a plan folder, or if it says "not plan work" AND `_prompt_declares_destination` is true.
-- `:131-152` (`_prompt_declares_destination`): true when a destination keyword (`:92-96`: write/save/report/output/store/file) and ANY path-shaped token (`:106`, `\S*/\S+`) appear in the same clause. Nothing checks whether that path is tracked, ignored or even inside the repository: `/tmp/x.md` and `untracked/scratch/x.md` both count.
+- `:131-152` (`_prompt_declares_destination`): true when a destination keyword (`:92-96`: write/save/report/output/store/file) and ANY path-shaped token (`:105`, `\S*/\S+`) appear in the same clause. Nothing checks whether that path is tracked, ignored or even inside the repository: `/tmp/x.md` and `untracked/scratch/x.md` both count.
 - The default fallback is `DEFAULT_REPORT_DIR` = `untracked/agent-reports/` (`:64`, `utils/subagent_report_paths.py:44`). The contract text (`:262-267`) offers it as the plan-less destination and says it is gitignored.
 - The only push-back on an ignored destination is the N5 advisory (`:280-297`). It fires only when the prompt names a plan folder AND the fallback directory.
 - Strict mode (`:115-126`) requires a declaration but applies the same test, so an ignored destination satisfies it.
@@ -40,7 +40,7 @@ The allowance covers the whole ignored root, not just the scratch directory. A r
 ## F5. The report-path verifier checks claims, not declarations (CONFIRMED)
 
 - `handlers/subagent_stop/subagent_report_path_verifier.py:53-59`: it judges only a `.md` path that a past-tense write verb ("written", "wrote", "saved", "created") governs in the agent's FINAL MESSAGE. Paths outside the project root are skipped (module docstring).
-- It does not know the destination the dispatch declared. An agent that was told to write `CLAUDE/Plan/NNNNN-x/subagent-reports/r.md`, wrote nothing there and never claimed the path is not caught. Item 5 needs the declared destination recorded at dispatch and read at SubagentStop. `untracked/agent-dispatch-registry/` exists (a registry keyed per dispatch); Phase 1 decides whether it can carry the declared destination.
+- It does not know the destination the dispatch declared. An agent that was told to write `CLAUDE/Plan/NNNNN-x/subagent-reports/r.md`, wrote nothing there and never claimed the path is not caught. Item 5 needs the declared destination recorded at dispatch and read at SubagentStop. `untracked/agent-dispatch-registry/` exists but is NOT keyed per dispatch: it holds one file per `(session_id, name)`, records named dispatches only, and a repeated name overwrites the earlier row. It cannot carry a per-dispatch declared destination as it stands; Phase 1 decides whether to extend it or record the destination elsewhere.
 
 ## F6. The Plan 00470 stale-scratch report is not a SessionStart sweep, and it suggests deleting (CONFIRMED, relevant to item 7)
 
@@ -66,7 +66,7 @@ These are registered stores, not scratch, and the allowlist must name them:
 - `issue_report/upstream.py:13`: issue bodies go to `untracked/issue-reports/<report>.md`.
 - `utils/subagent_report_paths.py:44,56`: `untracked/agent-reports/` and `.../auto/`.
 - `issue_report/reproduction.py:55`: reproductions use fixtures under `untracked/scratch/`.
-- `CLAUDE/Plan/mkplan.bash:350-351` and `CLAUDE/PlanJournalling.md:200-202`: the documented journal body location is `untracked/scratch/journal-*.md`.
+- `CLAUDE/Plan/mkplan.bash:350-351` and `CLAUDE/PlanJournalling.md:200-202` document journal bodies under `untracked/scratch/` with no fixed name pattern (examples `entry.md`, `fix.md`; live bodies are named like `j558-standin.md`). A name-pattern allowlist cannot recognise them; consumption by `mkplan.bash --journal` must.
 
 ## F10. This repository's own practice (measured at plan time)
 
@@ -74,4 +74,4 @@ These are registered stores, not scratch, and the allowlist must name them:
 - The most common top-level name prefixes are `brief` (136), `issue` (130), `wt` (79), `journal` (78), `ci` (78), `merge` (64), `qa` (62), `setup` (61), `restart` (52), `triage` (33), `close` (33). Most are consumed shapes: briefs read by a dispatched agent, issue bodies passed to `gh --body-file`, journal bodies passed to `mkplan.bash --journal`, and QA or CI captures read back.
 - `untracked/agent-reports/` holds 575 files. `untracked/briefs/` holds `*-report.md` files (for example `ci-tiers-report.md`, `land-worktree-n466-lifecycle-report.md`). Those are sub-agent reports in an ignored directory: the asset class this plan is about.
 - `untracked/worktrees/` holds this repository's linked worktrees (Plan 00558's territory). `untracked/` also holds `worktree-archive/` and `deleted-branches.bundle`, which are rescue copies of the kind the issue's creation path 3 describes.
-- 32 files in `CLAUDE/`, `.claude/agents/`, `.claude/skills/` and `CLAUDE.md` (plans excluded) mention `untracked/scratch`. The guidance changes in Phase 2 must sweep them.
+- 32 files in `CLAUDE/`, `.claude/agents/`, `.claude/skills/` and `CLAUDE.md` (plans excluded) mention `untracked/scratch`. So do 11 shipped source files under `src/` (skills, install templates, `src/CLAUDE.md`), `README.md` and two `docs/guides/` files. The `.claude/skills/` copies are deployed from `src/`, so the sweep must edit the `src/` originals or an upgrade undoes it.
