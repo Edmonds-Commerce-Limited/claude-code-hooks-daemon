@@ -24,7 +24,7 @@ Today nothing holds a limit (code facts with citations: [subagent-reports/261103
 - No Stop or SubagentStop handler looks at git state.
 - No hook acts on branch creation.
 - The remote-delete guard (R-GIT-PUSH-DELETE-REMOTE) treats a branch as deletable only when it is an ancestor of the default branch, with no notion of an integration line. It also times out on a large delete (#153).
-- The default branch is decided in three separate places: `git_sync.default_branch` resolves it (`origin/HEAD`, then `main`/`master`), while `delete-branch --protected-ref` and `worktree-reap --base-branch` hardcode `main`. No project setting names it or any integration line.
+- The default branch is decided in three separate places: `git_sync.default_branch` resolves it (`origin/HEAD`, then `main`/`master`), while `delete-branch --protected-ref` and `worktree-reap --base-branch` default to `main` unless the caller overrides them. No project setting names it or any integration line.
 
 ## Goals
 
