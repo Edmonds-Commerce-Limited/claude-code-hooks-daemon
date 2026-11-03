@@ -345,6 +345,21 @@ branches:
 
 `bin/hooks-daemon branch-park <name> --reason "<text>"` writes an empty commit with `Parked-Reason` and `Parked-By` trailers at the branch tip (no checkout), then pushes the branch with a plain fast-forward `git push`. A parked branch is exempt from the dormancy stages, but still counts against the WIP cap. A failed push is reported with the command to retry; the local park stands. A later commit on the branch ends the park, and `bin/hooks-daemon branch-park --clear <name>` writes an `Unparked` commit to restart the clock without a code change.
 
+### Other branch settings
+
+| Key                            | Values (default first)        | Effect                                                                                                                                                     |
+| ------------------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wip.cap` / `wip.mode`         | `10` / `block`, `warn`, `off` | Open work branches allowed before a creation is denied (`R-BRANCH-WIP-CAP`); `count_remote` also counts remote ones                                        |
+| `duplicates.mode`              | `warn`, `off`                 | Warn when a new branch name is close to an existing one; never denies                                                                                      |
+| `stop_guard.mode`              | `block`, `warn`, `off`        | Stop and SubagentStop refuse while a touched branch is dirty, holds commits no remote has, or is merged but undeleted                                      |
+| `stop_guard.unpushed_subagent` | `block`, `advise`, `off`      | How the unpushed-commits finding is treated at a SubagentStop (this repository sets `advise`)                                                              |
+| `force_removal.mode`           | `block`, `off`                | `git worktree remove --force` and `git branch -D` are denied when they would lose work                                                                     |
+| `evacuation.mode`              | `block`, `warn`, `off`        | Copying work to an untracked file and destroying its worktree or branch is denied, in one command or one turn                                              |
+| `cleanup_after_merge.mode`     | `advise`, `act`, `off`        | After a merge lands: advise the delete command, or delete the branch when it is proven merged; `regenerable` lists the ignored globs that may be discarded |
+| `sweep.budget_ms`              | `3000` / integer milliseconds | Wall-clock budget for the per-branch inventory steps; `behind_threshold` (default 50) is the commits-behind-default count that earns a warning             |
+
+Every deny from these guards ends with the same principle text: the limit exists so work finishes, never so it disappears. `bin/hooks-daemon branch-sweep` reports every branch by state; `branch-sweep --clean` deletes the provably merged ones and writes a recovery bundle first. The same two commands are the `branch-sweep` (report) and `branch-sweep-clean` (held) steps of `/hooks-daemon housekeeping`.
+
 ## Handler Configuration
 
 Handlers are grouped by the event type they respond to. Each handler has at minimum an `enabled` flag and a `priority` number.
