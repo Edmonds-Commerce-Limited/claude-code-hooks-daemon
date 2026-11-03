@@ -182,6 +182,12 @@ class Timeout:
     # Plan 00558 Task 4.2: the creator record after the add -- three git config
     # writes (creator, created, route).
     GIT_BRANCH_RECORD_CALLS = 3
+    # Plan 00558 Task 4.4: the Stop and SubagentStop branch guard spends at most
+    # this many seconds on its own git calls (status, remote containment, ancestry
+    # per judged branch); past it the branches left are reported as unjudged and
+    # the stop is allowed. Held under CHAIN_DEADLINE_DEFAULT, which also has to
+    # cover the inventory pass and every other Stop handler.
+    GIT_STOP_GUARD_BUDGET = 8.0
 
     # Plan 00512 (issue #82): WorktreeCreate and WorktreeRemove are not guards.
     # They run git and report a path, and their git call (GIT_WORKTREE) is longer

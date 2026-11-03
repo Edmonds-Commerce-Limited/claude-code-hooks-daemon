@@ -215,23 +215,46 @@ def record_touch(
     return True
 
 
+def _touch_values(repo: Path, timeout: float) -> list[tuple[str, str]]:
+    """Every ``(branch, identity)`` pair on a touch record; RuntimeError when git fails."""
+    pattern = rf"^branch\..*\.{TOUCHED_KEY.lower()}$"
+    result = run_git(repo, "config", "--get-regexp", pattern, timeout=timeout)
+    if result.returncode == _CONFIG_KEY_ABSENT:
+        return []
+    if result.returncode != 0:
+        raise RuntimeError(f"git config --get-regexp failed: {result.stderr.strip()}")
+    prefix, suffix = "branch.", f".{TOUCHED_KEY.lower()}"
+    pairs: list[tuple[str, str]] = []
+    for line in result.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        if key.startswith(prefix) and key.endswith(suffix):
+            pairs.append((key[len(prefix) : -len(suffix)], value))
+    return pairs
+
+
 def touched_branches(repo: Path, session_id: str, agent_id: str | None) -> list[str]:
     """The branches of ``repo`` whose touch record holds this identity, sorted.
 
     Raises:
         RuntimeError: git could not read the config.
     """
-    pattern = rf"^branch\..*\.{TOUCHED_KEY.lower()}$"
-    result = run_git(repo, "config", "--get-regexp", pattern)
-    if result.returncode == _CONFIG_KEY_ABSENT:
-        return []
-    if result.returncode != 0:
-        raise RuntimeError(f"git config --get-regexp failed: {result.stderr.strip()}")
     who = identity(session_id, agent_id)
-    prefix, suffix = "branch.", f".{TOUCHED_KEY.lower()}"
-    names: set[str] = set()
-    for line in result.stdout.splitlines():
-        key, _, value = line.partition(" ")
-        if value == who and key.startswith(prefix) and key.endswith(suffix):
-            names.add(key[len(prefix) : -len(suffix)])
-    return sorted(names)
+    return sorted({name for name, value in _touch_values(repo, Timeout.GIT_CONTEXT) if value == who})
+
+
+def touched_by_session(
+    repo: Path, session_id: str, *, timeout: float = Timeout.GIT_CONTEXT
+) -> dict[str, set[str]]:
+    """Each branch this session touched, with the agent ids that touched it.
+
+    The main thread is the empty agent id.
+
+    Raises:
+        RuntimeError: git could not read the config.
+    """
+    prefix = f"{session_id}:"
+    touched: dict[str, set[str]] = {}
+    for name, value in _touch_values(repo, timeout):
+        if value.startswith(prefix):
+            touched.setdefault(name, set()).add(value[len(prefix) :])
+    return touched
