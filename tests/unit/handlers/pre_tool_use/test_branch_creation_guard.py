@@ -166,7 +166,10 @@ class TestHandle:
 
 
 def test_rules_guidance_and_acceptance_tests(handler: BranchCreationGuardHandler) -> None:
-    assert [rule.rule_id for rule in handler.get_rules()] == ["R-BRANCH-WIP-CAP"]
+    assert [rule.rule_id for rule in handler.get_rules()] == [
+        "R-BRANCH-WIP-CAP",
+        "R-BRANCH-DORMANT",
+    ]
     guidance = handler.get_claude_md()
     assert guidance is not None and "wip.cap" in guidance
     assert handler.get_acceptance_tests()

@@ -6521,6 +6521,41 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_branch_park(args: argparse.Namespace) -> int:
+    """``branch-park <name> --reason ...`` / ``--clear <name>`` (Plan 00558 Task 4.3).
+
+    Returns:
+        0 when the park stands (a failed push is reported, with its retry command),
+        1 when it could not be written, 2 on a usage error.
+    """
+    from claude_code_hooks_daemon.core.branch_creation import (
+        LABELS_RELATIVE_PATH,
+        clear_label_stage,
+    )
+    from claude_code_hooks_daemon.core.branch_park import BranchParkError, park_branch
+
+    if args.clear and args.reason:
+        print("ERROR: --clear takes no --reason", file=sys.stderr)
+        return 2
+    repo = get_project_path(getattr(args, "project_root", None))
+    branches = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml").branches
+    try:
+        result = park_branch(
+            repo, args.name, reason=args.reason, remote=branches.remote, clear=args.clear
+        )
+    except BranchParkError as e:
+        print(f"ERROR: branch-park: {e}", file=sys.stderr)
+        return 1
+    verb = "Unparked" if args.clear else "Parked"
+    print(f"{verb} {args.name} at {result.sha[:12]}.")
+    if not args.clear:
+        clear_label_stage(repo / LABELS_RELATIVE_PATH, args.name)
+    if not result.pushed:
+        print(f"WARNING: the push failed ({result.push_error}); the local {verb.lower()} stands.")
+        print(f"Retry: {result.retry_command}")
+    return 0
+
+
 #: Where ``branch-sweep --clean`` writes its recovery bundle, relative to the project.
 _BRANCH_CLEANUP_BUNDLE_DIR = Path("untracked") / "branch-cleanup"
 
@@ -7891,6 +7926,7 @@ def cmd_optimise_checklist(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.config.loader import ConfigLoader
     from claude_code_hooks_daemon.config_optimisation.checklist import (
         build_checklist,
+        optional_suggestions,
         render_report,
         report_as_json,
     )
@@ -7923,7 +7959,7 @@ def cmd_optimise_checklist(args: argparse.Namespace) -> int:
     if getattr(args, "format", "text") == "json":
         print(json.dumps(report_as_json(items), indent=2))
     else:
-        print(render_report(items), end="")
+        print(render_report(items, optional_suggestions(config_dict)), end="")
     return 0
 
 
@@ -12995,6 +13031,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --clean: print what would be removed and deleted, change nothing",
     )
     parser_branch_sweep.set_defaults(func=cmd_branch_sweep)
+
+    # branch-park command (Plan 00558 Task 4.3)
+    parser_branch_park = subparsers.add_parser(
+        "branch-park",
+        help="Park a branch (exempts it from dormancy) with an empty Parked-Reason commit, "
+        "then push it; --clear resumes the clock",
+    )
+    parser_branch_park.add_argument("name", help="Local branch to park")
+    parser_branch_park.add_argument("--reason", help="Why the branch is parked (one line)")
+    parser_branch_park.add_argument(
+        "--clear",
+        action="store_true",
+        help="Unpark: write an Unparked commit so the dormancy clock runs again",
+    )
+    parser_branch_park.set_defaults(func=cmd_branch_park)
 
     # release-notes command
     parser_release_notes = subparsers.add_parser(
