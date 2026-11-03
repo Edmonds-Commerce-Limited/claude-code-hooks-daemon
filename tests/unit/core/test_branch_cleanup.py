@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -275,7 +276,7 @@ class TestRender:
 def _failing_git(subcommand: str, monkeypatch: pytest.MonkeyPatch) -> None:
     real = branch_cleanup.run_git
 
-    def fake(cwd: Path, *args: str, **kwargs: float) -> subprocess.CompletedProcess[str]:
+    def fake(cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if args and args[0] == subcommand:
             return subprocess.CompletedProcess(["git", *args], 128, "", "boom")
         return real(cwd, *args, **kwargs)

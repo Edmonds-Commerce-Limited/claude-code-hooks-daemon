@@ -129,7 +129,7 @@ class CleanupAfterMergeHandler(PostToolUseHandlerBase):
         if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return False
         command = get_bash_command(hook_input)
-        return bool(command) and bool(merge_operands(command))
+        return command is not None and bool(merge_operands(command))
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Clean the merged branches; context lines say what was done and how to undo it."""
