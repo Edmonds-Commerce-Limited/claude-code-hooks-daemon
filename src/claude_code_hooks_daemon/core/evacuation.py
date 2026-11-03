@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
     placement_problem,
 )
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, run_git
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 #: Options that make ``diff``/``show`` print a summary, not the work itself.
 _SUMMARY_ONLY: Final[frozenset[str]] = frozenset(
@@ -289,7 +290,7 @@ def _same_work(evacuation: _Evacuation, destruction: _Destruction) -> bool:
     if evacuation.branches & destruction.branches:
         return True
     path = destruction.path
-    return path is not None and evacuation.toplevel.is_relative_to(path)
+    return path is not None and path_is_relative_to(evacuation.toplevel, path)
 
 
 def evacuate_then_destroy(command: str, cwd: Path) -> EvacuationMatch | None:
