@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.daemon.branch_safety import matches_any_glob
 from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
     SUBCOMMAND_SEPARATOR_CHARS,
@@ -27,7 +28,6 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
     placement_problem,
 )
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
-from claude_code_hooks_daemon.daemon.branch_safety import matches_any_glob
 from claude_code_hooks_daemon.utils.git_sync import resolve_default_branch
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 
@@ -683,7 +683,9 @@ def _merged_tracking_tips(
         ],
     )
     if refs is None:
-        return {}, [f"`git for-each-ref` failed, so `{name}` could not be checked" for name in names]
+        return {}, [
+            f"`git for-each-ref` failed, so `{name}` could not be checked" for name in names
+        ]
     tips: dict[str, str] = {}
     problems: list[str] = []
     for name in names:
@@ -699,8 +701,10 @@ def _merged_tracking_tips(
         for target in _proof_targets(remote, default, branches, refs):
             merged = _merged_into(directory, target, [tracking[name] for name in tips])
             if merged is None:
-                failed = [f"`git for-each-ref --merged={target}` failed, so `{n}` could not be "
-                          "checked" for n in tips]
+                failed = [
+                    f"`git for-each-ref --merged={target}` failed, so `{n}` could not be " "checked"
+                    for n in tips
+                ]
                 return {}, problems + failed
             proven |= merged
     lines = " or any integration line" if branches.integration_lines else ""
