@@ -1,0 +1,11 @@
+## 10:43 · decision · —
+
+Design additions after the strict-preset ruling and the #152 follow-up requirements (DESIGN.md sections 4, 6, 9, 11-13; Goals 5, 6, 10-12).
+
+- Preset expression: `branches.dormancy.preset: standard | strict` with per-stage keys defaulting to null (explicit value wins); effective values validated `advisory <= noisy < block`. `strict` = 3/3/7: no quiet stage, because four days is too short for a once-per-session line. `strict` does not touch the WIP cap or any non-age rule. Suggested by the config optimiser as an OPTIONAL line (no score penalty), documented in docs/guides/CONFIGURATION.md, listed under `added` in the config-changes manifest without `recommended: true`. Not suggested in the SessionStart line. Rejected: explicit values only; a branch-wide profile; a preset that forbids overrides.
+- Containment: each idle branch reported as contained in default, in another remote ref, on its own remote only, or nowhere; "nowhere" is loud at every stage and every SessionStart, still advisory.
+- Stop guard now covers every TOUCHED branch: multi-valued `branch.<name>.hooksDaemonTouchedBy` git config, written once per branch per session on commit/merge/rebase/switch/etc. and the first edit in a worktree. Model default blocks sub-agent stops on commits no remote holds; this repository sets `unpushed_subagent: advise` until Q5 because its sub-agents are told not to push. Containment in the local default branch counts as handed over, so a coordinator that merged locally can stop; default branch and integration lines excluded by default.
+- Lossless force removal: one `contained_elsewhere` proof (any ref outside those the command deletes) for `worktree remove --force` (plus a dirty check) and a widened `branch -D`; the daemon's own WorktreeRemove `--force` uses the same proof.
+- One `BRANCH_LIMIT_PRINCIPLE` constant appended to every branch-limit deny; a test pins it.
+- Evacuate-then-destroy: same command is built first (parser); same turn is feasible via spend-ledger records keyed by the main thread's prompt turn or a sub-agent's lifetime, built second.
+- Build order changed: Phase 3 is now cleanup (cleanup after merge with #153, WorktreeRemove), Phase 4 enforcement (force removal, creation guard, dormancy, Stop guard, evacuation), because cleanup alone clears about three quarters of the commenter's 154 leftovers.

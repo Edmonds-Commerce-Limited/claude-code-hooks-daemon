@@ -6,7 +6,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00559: daemon clone follows expected version after pull](00559-daemon-clone-follows-expected-version-after-pull/PLAN.md) - Not Started (#148, parked `agent-needs-human`: a pull that moves `expected_version` should re-provision from a trigger outside the stale daemon; owner to choose the trigger, the retry rule and whether to add a scheduled check)
 
-- [00558: branch WIP limit and hygiene](00558-git-branch-hygiene-sweep/PLAN.md) - Not Started (v2, GitHub #152: one branch model with integration lines; a sweep report; a blocking WIP cap over every branch, dormancy limit, Stop/SubagentStop guard against abandoned branches, lossless cleanup after merge)
+- [00558: branch WIP limit and hygiene](00558-git-branch-hygiene-sweep/PLAN.md) - In Progress (v2, GitHub #152, Phase 1 design in DESIGN.md: one branch model with integration lines; a sweep report; a blocking WIP cap over every branch, dormancy limit, Stop/SubagentStop guard against abandoned branches, lossless cleanup after merge)
 
 - [00550: per command bash task budget](00550-per-command-bash-task-budget/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #137: a `CLAUDE_CODE_SHELL_PREFIX` wrapper giving each Bash tool call its own task budget so one runaway fork chain cannot kill the session; it wraps every Bash call and hook, so shipping it and its default are owner decisions)
 
