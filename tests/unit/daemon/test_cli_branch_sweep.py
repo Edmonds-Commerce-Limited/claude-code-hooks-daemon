@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.core.branch_sweep import JSON_RECORD_KEYS
 from claude_code_hooks_daemon.daemon.cli import build_parser, cmd_branch_sweep
 
 _BUILD = "claude_code_hooks_daemon.core.branch_inventory.build_inventory"
+_CLEAN = "claude_code_hooks_daemon.core.branch_cleanup.clean_sweep"
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -63,8 +64,73 @@ def _config(project: Path, yaml_body: str) -> None:
     (project / ".claude" / "hooks-daemon.yaml").write_text(f'version: "2.0"\n{yaml_body}')
 
 
-def _args(project: Path, *, as_json: bool = False, show_all: bool = False) -> argparse.Namespace:
-    return argparse.Namespace(project_root=project, json=as_json, all=show_all)
+def _args(
+    project: Path,
+    *,
+    as_json: bool = False,
+    show_all: bool = False,
+    clean: bool = False,
+    dry_run: bool = False,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        project_root=project, json=as_json, all=show_all, clean=clean, dry_run=dry_run
+    )
+
+
+def _heads(project: Path) -> set[str]:
+    out = subprocess.run(
+        ["git", "-C", str(project), "for-each-ref", "--format=%(refname:short)", "refs/heads"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return set(out.split())
+
+
+class TestClean:
+    def test_dry_run_deletes_nothing(
+        self, project: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cmd_branch_sweep(_args(project, clean=True, dry_run=True)) == 0
+        assert "would delete done" in capsys.readouterr().out
+        assert "done" in _heads(project)
+
+    def test_clean_deletes_behind_a_bundle(
+        self, project: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cmd_branch_sweep(_args(project, clean=True)) == 0
+        out = capsys.readouterr().out
+        assert "done" not in _heads(project)
+        assert "work" in _heads(project)
+        assert str(project / "untracked" / "branch-cleanup") in out
+
+    def test_nothing_to_clean_says_so(
+        self, project: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        cmd_branch_sweep(_args(project, clean=True))
+        capsys.readouterr()
+        assert cmd_branch_sweep(_args(project, clean=True)) == 0
+        assert "Nothing to clean" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{"dry_run": True}, {"clean": True, "as_json": True}, {"clean": True, "show_all": True}],
+    )
+    def test_flag_misuse_is_a_usage_error(
+        self, project: Path, capsys: pytest.CaptureFixture[str], kwargs: dict[str, bool]
+    ) -> None:
+        assert cmd_branch_sweep(_args(project, **kwargs)) == 2
+        assert "ERROR" in capsys.readouterr().err
+
+    @pytest.mark.parametrize(
+        "error", [BranchInventoryError("no refs"), ValueError("no default branch")]
+    )
+    def test_a_sweep_failure_exits_1(
+        self, project: Path, capsys: pytest.CaptureFixture[str], error: Exception
+    ) -> None:
+        with patch(_CLEAN, side_effect=error):
+            assert cmd_branch_sweep(_args(project, clean=True)) == 1
+        assert str(error) in capsys.readouterr().err
 
 
 class TestParser:
@@ -79,9 +145,12 @@ class TestParser:
         assert args.json is True
         assert args.all is True
 
-    def test_no_clean_flag_yet(self) -> None:
-        with pytest.raises(SystemExit):
-            build_parser().parse_args(["branch-sweep", "--clean"])
+    def test_clean_flags_parse(self) -> None:
+        args = build_parser().parse_args(["branch-sweep", "--clean", "--dry-run"])
+        assert args.clean is True
+        assert args.dry_run is True
+        plain = build_parser().parse_args(["branch-sweep"])
+        assert (plain.clean, plain.dry_run) == (False, False)
 
     def test_help_documents_the_json_keys(self) -> None:
         parser = build_parser()
