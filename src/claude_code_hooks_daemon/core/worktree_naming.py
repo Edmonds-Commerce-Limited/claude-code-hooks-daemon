@@ -74,6 +74,19 @@ def worktree_dir_name(name: str | None, prompt_id: str | None, session_id: str |
     return f"{slug}{_NAME_SEPARATOR}{_short_hash(name, prompt_id, session_id)}"
 
 
+#: The shape :func:`worktree_dir_name` produces: a slug, then the hash suffix.
+_WORKTREE_CREATE_NAME = re.compile(rf"[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{{{HASH_SUFFIX_LENGTH}}}")
+
+
+def is_worktree_create_name(branch: str) -> bool:
+    """Whether ``branch`` has the ``<slug>-<shorthash>`` shape WorktreeCreate gives it.
+
+    Stands in for the creator record (Plan 00558 Task 4.2) when deciding which
+    branches the daemon's own cleanup may delete.
+    """
+    return _WORKTREE_CREATE_NAME.fullmatch(branch) is not None
+
+
 def worktree_path(
     cwd: str, name: str | None, prompt_id: str | None, session_id: str | None
 ) -> Path:

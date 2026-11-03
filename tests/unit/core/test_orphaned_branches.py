@@ -231,3 +231,19 @@ class TestPruning:
         assert not outcome.deleted
         assert "not fully merged" in outcome.detail
         assert not any("-D" in call for call in git.calls)
+
+
+class TestWorktreeCreateNamesAreEligible:
+    """Orphan pruning covers the ``worktree_create`` ``<slug>-<8 hex>`` names as
+    well as ``agent-*`` (Plan 00558 Task 3.2, DESIGN.md section 8)."""
+
+    _MIXED = (
+        "refs/heads/agent-orphan-2\nrefs/heads/fix-auth-1a2b3c4d\n"
+        "refs/heads/feature-x\nrefs/heads/main\n"
+    )
+
+    def test_a_worktree_create_name_is_an_orphan_and_a_hand_name_is_not(self) -> None:
+        git = _FakeGit(branches=_ok(self._MIXED), merged=_ok("refs/heads/fix-auth-1a2b3c4d\n"))
+        orphans = collect_orphaned_branches(Path("/repo"), "main", run_fn=git)
+        found = {b.name: b.merged_into_base for b in orphans}
+        assert found == {"agent-orphan-2": False, "fix-auth-1a2b3c4d": True}

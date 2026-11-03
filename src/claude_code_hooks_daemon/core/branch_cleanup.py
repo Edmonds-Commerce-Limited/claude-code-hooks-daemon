@@ -152,9 +152,43 @@ def _expand(root: Path, entry: str) -> list[str]:
     its children are listed and judged one by one. Any other entry is as given.
     """
     if entry != f"{_UNTRACKED}/":
-        return [entry]
+        return [_judged_form(root, entry)]
     children = sorted((root / _UNTRACKED).iterdir(), key=lambda child: child.name)
-    return [f"{entry}{c.name}/" if c.is_dir() else f"{entry}{c.name}" for c in children]
+    return [_judged_form(root, f"{entry}{c.name}") for c in children]
+
+
+def _judged_form(root: Path, entry: str) -> str:
+    """``entry`` with a trailing ``/`` when it is a directory or a symlink.
+
+    A symlink is judged as the directory it names: a removal deletes only the
+    link, so a symlinked store (``untracked/lsp-venv``) matches its ``store/``
+    glob whether or not its target is still there.
+    """
+    bare = entry.rstrip("/")
+    target = root / bare
+    if entry.endswith("/") or target.is_symlink() or target.is_dir():
+        return f"{bare}/"
+    return bare
+
+
+def _holds_nothing(root: Path, entry: str) -> bool:
+    """Whether ``entry`` is a real directory with no file anywhere beneath it.
+
+    Removing such a directory loses nothing, so it is never a blocker. A
+    symlink is not walked, and anything unreadable counts as holding something.
+    """
+    return entry.endswith("/") and _empty_tree(root / entry.rstrip("/"))
+
+
+def _empty_tree(path: Path) -> bool:
+    """A real directory whose subtree holds only directories (an unreadable one does not)."""
+    if path.is_symlink() or not path.is_dir():
+        return False
+    try:
+        children = list(path.iterdir())
+    except OSError:
+        return False
+    return all(_empty_tree(child) for child in children)
 
 
 def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]:
@@ -174,7 +208,11 @@ def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]
     if ignored.returncode != 0:
         return (*dirty, f"<git ls-files failed: {ignored.stderr.strip()}>")
     entries = [e for line in ignored.stdout.splitlines() if line for e in _expand(path, line)]
-    kept = [entry for entry in entries if not is_regenerable(entry, regenerable)]
+    kept = [
+        entry
+        for entry in entries
+        if not is_regenerable(entry, regenerable) and not _holds_nothing(path, entry)
+    ]
     return (*dirty, *kept)
 
 
@@ -274,6 +312,61 @@ def cleanup_after_merge(
     return CleanupReport(
         deleted=tuple(deleted), skipped=tuple(skipped), commands=tuple(dict.fromkeys(commands))
     )
+
+
+def _merged_into_any(repo: Path, name: str, targets: Sequence[str], timeout: float) -> bool:
+    """Cheap ancestry probe, so an unmerged branch never pays for ``git cherry``."""
+    return any(
+        run_git(
+            repo, "merge-base", "--is-ancestor", branch_ref(name), target, timeout=timeout
+        ).returncode
+        == 0
+        for target in targets
+    )
+
+
+def delete_if_merged(
+    repo: Path,
+    name: str,
+    *,
+    config: BranchesConfig,
+    default: str,
+    probe_timeout: float = Timeout.GIT_CONTEXT,
+) -> CleanupReport:
+    """Delete ``name`` when the default or an integration line holds every commit.
+
+    The WorktreeRemove cleanup (DESIGN.md section 8). Only the merged tiers are
+    deleted, with no bundle (the restore line is printed instead); anything else
+    is left for ``branch-sweep --clean``.
+
+    Raises:
+        RuntimeError: The integration-line refs could not be listed.
+    """
+    refusal = policy_refusal(name, config, default)
+    if refusal is not None:
+        return CleanupReport(skipped=(f"{name}: {refusal}",))
+    targets = cleanup_targets(repo, config, default)
+    if not targets or not _merged_into_any(repo, name, targets, probe_timeout):
+        return CleanupReport(skipped=(f"{name}: not merged; left for {SWEEP_CLEAN_COMMAND}",))
+    never_work = _never_work(config, default)
+    verdict = _classify(repo, name, targets, never_work)
+    if verdict.refusal is not None or verdict.tier not in MERGED_TIERS:
+        return CleanupReport(skipped=(f"{name}: {verdict.detail}",))
+    report = delete_branches(
+        repo,
+        [name],
+        protected_names=never_work,
+        targets=targets,
+        bundle_path=None,
+        content_tier=False,
+    )
+    if name not in report.deleted:
+        return CleanupReport(skipped=tuple(f"{name}: {b}" for b in report.blockers))
+    commands = [f"git branch {name} {verdict.tip}"]
+    remote = remote_delete_command(repo, config.remote, name)
+    if remote is not None:
+        commands.append(remote)
+    return CleanupReport(deleted=(name,), commands=tuple(commands))
 
 
 def _remove_worktree(repo: Path, path: Path) -> str | None:
@@ -403,6 +496,7 @@ __all__ = [
     "clean_sweep",
     "cleanup_after_merge",
     "cleanup_targets",
+    "delete_if_merged",
     "linked_worktrees",
     "merge_target_qualifies",
     "policy_refusal",

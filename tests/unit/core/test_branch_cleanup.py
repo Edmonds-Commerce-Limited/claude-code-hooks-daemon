@@ -153,6 +153,47 @@ class TestWorktreeBlockers:
         (path / ".gitignore").write_text("changed\n", encoding="utf-8")
         assert set(worktree_blockers(path, _REGENERABLE)) == {"new.txt", ".gitignore"}
 
+    def test_an_empty_scratch_directory_is_not_a_blocker(self, repo: Path) -> None:
+        """Nothing is lost by removing a directory that holds no file (Task 3.3)."""
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        (path / "untracked" / "scratch" / "nested").mkdir(parents=True)
+        assert worktree_blockers(path, _REGENERABLE) == ()
+
+    def test_an_empty_directory_elsewhere_is_not_a_blocker(self, repo: Path) -> None:
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        (path / "src" / "__pycache__").mkdir(parents=True)
+        (path / "untracked" / "kept").mkdir(parents=True)
+        assert worktree_blockers(path, ["untracked/qa/"]) == ()
+
+    def test_scratch_holding_one_file_deep_down_still_blocks(self, repo: Path) -> None:
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        deep = path / "untracked" / "scratch" / "a" / "b"
+        deep.mkdir(parents=True)
+        (deep / "notes.md").write_text("x\n", encoding="utf-8")
+        assert worktree_blockers(path, _REGENERABLE) == ("untracked/scratch/",)
+
+    def test_a_symlinked_store_matches_its_directory_glob(self, repo: Path, tmp_path: Path) -> None:
+        """``untracked/lsp-venv/`` covers a symlink of that name (Task 3.3)."""
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        (path / "untracked").mkdir()
+        store = tmp_path / "shared-lsp-venv"
+        store.mkdir()
+        (store / "python").write_text("x\n", encoding="utf-8")
+        (path / "untracked" / "lsp-venv").symlink_to(store)
+        (path / "untracked" / "gone-venv").symlink_to(tmp_path / "missing")
+        assert worktree_blockers(path, ["untracked/lsp-venv/", "untracked/gone-venv/"]) == ()
+
+    def test_a_symlink_the_globs_do_not_name_still_blocks(self, repo: Path, tmp_path: Path) -> None:
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        (path / "untracked").mkdir()
+        (path / "untracked" / "notes").symlink_to(tmp_path)
+        assert worktree_blockers(path, ["untracked/lsp-venv/"]) == ("untracked/notes/",)
+
 
 class TestCleanupAfterMerge:
     def test_act_deletes_a_merged_branch_and_prints_the_restore_line(self, repo: Path) -> None:
