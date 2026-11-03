@@ -16,7 +16,7 @@ an unjudged branch is not a defect.
 from __future__ import annotations
 
 import logging
-import subprocess
+import subprocess  # nosec B404 — only the CompletedProcess type; git runs through utils.git_repo
 import time
 from dataclasses import dataclass
 from enum import StrEnum
@@ -87,9 +87,7 @@ class _Budget:
         return run_git(cwd, *args, timeout=min(Timeout.GIT_CONTEXT, remaining))
 
 
-def _scope(
-    touches: dict[str, set[str]], agent_id: str | None
-) -> tuple[set[str], set[str]]:
+def _scope(touches: dict[str, set[str]], agent_id: str | None) -> tuple[set[str], set[str]]:
     """``(own, owned)``: branches judged in full, and sub-agent branches the coordinator owns."""
     who = agent_id or ""
     own = {name for name, agents in touches.items() if who in agents}

@@ -95,9 +95,7 @@ class TestStopHandler:
         monkeypatch.setattr(branch_stop_guard, "hook_is_usage_paused", lambda _payload: True)
         assert handler.handle(_payload()).decision == Decision.ALLOW
 
-    def test_allow_carries_context(
-        self, handler: BranchStopGuardHandler, repo: Path
-    ) -> None:
+    def test_allow_carries_context(self, handler: BranchStopGuardHandler, repo: Path) -> None:
         _leave_unpushed(repo)
         handler._branches = handler._branches.model_validate({"stop_guard": {"mode": "warn"}})
         result = handler.handle(_payload())

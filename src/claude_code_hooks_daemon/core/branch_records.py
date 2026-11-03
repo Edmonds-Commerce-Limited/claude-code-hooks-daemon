@@ -239,7 +239,9 @@ def touched_branches(repo: Path, session_id: str, agent_id: str | None) -> list[
         RuntimeError: git could not read the config.
     """
     who = identity(session_id, agent_id)
-    return sorted({name for name, value in _touch_values(repo, Timeout.GIT_CONTEXT) if value == who})
+    return sorted(
+        {name for name, value in _touch_values(repo, Timeout.GIT_CONTEXT) if value == who}
+    )
 
 
 def touched_by_session(

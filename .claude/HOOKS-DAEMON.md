@@ -188,7 +188,7 @@
 |----------|---------|----------|-------------|
 | 50 | quota_resume_recorder | ADVISORY | Record each ``quota_auto_resume_*`` notification, silently |
 
-### Stop (7 handlers)
+### Stop (8 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -197,10 +197,11 @@
 | 6 | usage_pause_stop_gate | BLOCKING | Allow a paused session's stop only when its crons are exactly the resume cron |
 | 7 | cron_stop_enforcer | BLOCKING | Block a Stop while a declared persistent cron was never created |
 | 9 | background_task_recorder | NON-TERMINAL | Record a Stop's finished agent tasks for the live count; always allow |
+| 9 | branch_stop_guard | BLOCKING | Main-thread Stop: judge the branches this session touched |
 | 9 | teammate_reap_advisor | ADVISORY | Report the Stop payload's ``background_tasks`` count and name ``TaskStop`` |
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |
 
-### SubagentStop (6 handlers)
+### SubagentStop (7 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -209,6 +210,7 @@
 | 9 | subagent_cache_aggregator | NON-TERMINAL | Record a stopping sub-agent's prompt-cache totals for the status line |
 | 10 | subagent_report_persistence | NON-TERMINAL | Persist every stopping sub-agent's final reply to a gitignored file |
 | 11 | subagent_handoff_gate | BLOCKING | Block an over-hard-budget subagent's stop until its handoff file exists |
+| 12 | branch_subagent_stop_guard | BLOCKING | SubagentStop: judge the branches this sub-agent touched |
 | 15 | subagent_report_size_blocker | TERMINAL | Block a SubagentStop whose ``last_assistant_message`` is oversized |
 
 ### Status (19 handlers)

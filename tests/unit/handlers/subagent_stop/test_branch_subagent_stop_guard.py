@@ -13,6 +13,8 @@ from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.branch_records import TOUCHED_KEY
 from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget import (
     STATE_HARD_ENGAGED,
+)
+from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget import (
     STATE_KIND as BUDGET_STATE_KIND,
 )
 from claude_code_hooks_daemon.handlers.subagent_stop.branch_subagent_stop_guard import (

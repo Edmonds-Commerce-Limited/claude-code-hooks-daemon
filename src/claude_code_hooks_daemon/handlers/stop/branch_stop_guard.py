@@ -19,8 +19,14 @@ from typing import Any, Final
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
-from claude_code_hooks_daemon.core import AcceptanceTest, BlockingResult, Decision, ProjectContext
-from claude_code_hooks_daemon.core import RecommendedModel, TestType
+from claude_code_hooks_daemon.core import (
+    AcceptanceTest,
+    BlockingResult,
+    Decision,
+    ProjectContext,
+    RecommendedModel,
+    TestType,
+)
 from claude_code_hooks_daemon.core.branch_stop_gate import StopDecision, decide_stop
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
@@ -51,16 +57,19 @@ RULE: Final[Rule] = Rule(
 class BranchStopGuardBase(StopHandlerBase):
     """Shared Stop/SubagentStop flow; subclasses name the event, scope and agent handling."""
 
-    def __init__(
-        self, *, handler_id: Any, priority: int, scope: HandlerScope
-    ) -> None:
+    def __init__(self, *, handler_id: Any, priority: int, scope: HandlerScope) -> None:
         super().__init__(
             handler_id=handler_id,
             priority=priority,
             terminal=False,
             scope=scope,
             shares_options_with=None,
-            tags=[HandlerTag.WORKFLOW, HandlerTag.GIT, HandlerTag.BLOCKING, HandlerTag.NON_TERMINAL],
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.GIT,
+                HandlerTag.BLOCKING,
+                HandlerTag.NON_TERMINAL,
+            ],
         )
         # Injected by the registry from the ``branches:`` block.
         self._branches: BranchesConfig = BranchesConfig()
@@ -89,7 +98,9 @@ class BranchStopGuardBase(StopHandlerBase):
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """A real stop that names its session."""
-        return not is_synthetic_event(hook_input) and bool(hook_input.get(HookInputField.SESSION_ID))
+        return not is_synthetic_event(hook_input) and bool(
+            hook_input.get(HookInputField.SESSION_ID)
+        )
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Deny a stop that leaves branch work behind; any failure to judge allows the stop."""

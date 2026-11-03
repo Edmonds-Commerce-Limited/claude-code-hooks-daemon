@@ -156,7 +156,9 @@ def decide_stop(
             names = sorted({f.branch for f in blocking})
             state["abandoned"] = names
             logger.warning("branch_stop_guard: abandoned at stop: %s", ", ".join(names))
-            context.append(f"Branches abandoned at stop after {MAX_STOP_BLOCKS} blocks: " + ", ".join(names))
+            context.append(
+                f"Branches abandoned at stop after {MAX_STOP_BLOCKS} blocks: " + ", ".join(names)
+            )
     if reason is None and agent_id is None:
         context.extend(_noisy_context(inventory, state, now=now))
     if state:
