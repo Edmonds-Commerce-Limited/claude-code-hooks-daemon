@@ -188,6 +188,7 @@ def test_a_held_lock_keeps_a_second_runner_out(
                 process.kill()
                 process.communicate()
 
+    assert second is not None, "the second runner was never started"
     evidence = f"first={first.returncode} {first_out}\nsecond={second.returncode} {second_out}"
     assert not intruded, f"second runner entered the critical section under a held lock\n{evidence}"
     assert first.returncode == 0 and second.returncode == 0, evidence
@@ -245,6 +246,6 @@ def test_venv_fallback_lock_refuses_a_second_taker(
 
     assert "first=0" in result.stdout, result.stdout + result.stderr
     assert "second=75" in result.stdout, result.stdout + result.stderr
-    assert not any((daemon_dir / "untracked").glob(".venv-bootstrap.lock*")), (
-        "the holder's release must leave no lock behind"
-    )
+    assert not any(
+        (daemon_dir / "untracked").glob(".venv-bootstrap.lock*")
+    ), "the holder's release must leave no lock behind"
