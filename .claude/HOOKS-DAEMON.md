@@ -243,7 +243,7 @@
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
-| 50 | worktree_remove | TERMINAL | Prune stale worktree registrations (and remove a named worktree) |
+| 50 | worktree_remove | TERMINAL | Remove a worktree without loss, then delete its branch when proven merged |
 
 ### PostToolUseFailure (1 handler)
 

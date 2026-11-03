@@ -279,3 +279,29 @@ class TestBudget:
             _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
         assert _has_branch(main_repo, _ELIGIBLE)
         assert "budget" in caplog.text
+
+
+class TestBranchStepFailures:
+    def test_no_default_branch_keeps_the_branch(
+        self, main_repo: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=True)
+        monkeypatch.setattr(wrh, "resolve_default_branch", lambda config, repo: None)
+        with caplog.at_level("WARNING"):
+            _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert _has_branch(main_repo, _ELIGIBLE)
+        assert "no default branch resolves" in caplog.text
+
+    def test_unreadable_refs_keep_the_branch(
+        self, main_repo: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=True)
+
+        def boom(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("for-each-ref failed")
+
+        monkeypatch.setattr(wrh, "delete_if_merged", boom)
+        with caplog.at_level("WARNING"):
+            _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert _has_branch(main_repo, _ELIGIBLE)
+        assert "for-each-ref failed" in caplog.text

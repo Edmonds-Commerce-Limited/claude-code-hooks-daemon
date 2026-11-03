@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.branch_cleanup import (
+    CleanupReport,
     delete_if_merged,
     render,
     worktree_blockers,
@@ -49,6 +50,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
     parse_worktree_porcelain,
     run_git,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_sync import resolve_default_branch
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 
@@ -143,10 +145,11 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
             try:
                 self._remove(Path(cwd), path, clock)
             except _BudgetSpent as spent:
-                logger.warning(
-                    "worktree_remove: the handler budget ran out before %s; %s is left as it is",
+                log_and_continue(
+                    logger,
                     spent,
-                    path,
+                    reason=f"WorktreeRemove cannot block and must answer within its budget; "
+                    f"{path} and its branch are left for branch-sweep --clean",
                 )
         # Prune last so registrations for just-removed / externally-deleted
         # worktrees are dropped regardless of how the directory went away.
@@ -205,19 +208,18 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
             raise _BudgetSpent(f"the branch check of {name}")
         default = resolve_default_branch(self._branches, repo)
         if default is None:
-            logger.warning("worktree_remove: no default branch resolves; %s is kept", name)
-            return
-        try:
-            report = delete_if_merged(
-                repo,
-                name,
-                config=self._branches,
-                default=default,
-                probe_timeout=clock.timeout(Timeout.GIT_CONTEXT, f"the merge probe of {name}"),
-            )
-        except RuntimeError as exc:
-            logger.warning("worktree_remove: %s is kept; the refs could not be read: %s", name, exc)
-            return
+            report = CleanupReport(skipped=(f"{name}: no default branch resolves",))
+        else:
+            try:
+                report = delete_if_merged(
+                    repo,
+                    name,
+                    config=self._branches,
+                    default=default,
+                    probe_timeout=clock.timeout(Timeout.GIT_CONTEXT, f"the merge probe of {name}"),
+                )
+            except RuntimeError as exc:
+                report = CleanupReport(skipped=(f"{name}: the refs could not be read: {exc}",))
         logger.warning(
             "worktree_remove: %s (no creator record yet; eligible by its <slug>-<8 hex> name): %s",
             name,
