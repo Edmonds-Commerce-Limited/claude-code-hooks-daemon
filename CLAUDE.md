@@ -674,6 +674,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - ccy_supervisor_integrity — keep the ccy supervisor properly set up
 
+<!-- handler: cleanup-after-merge -->
+
+- cleanup_after_merge — a merged branch is cleaned up after the merge
+
 <!-- handler: command-hints -->
 
 - command_hints — advisory reminders after specific commands
