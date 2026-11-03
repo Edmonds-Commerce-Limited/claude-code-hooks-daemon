@@ -161,9 +161,7 @@ def read_labels(path: Path) -> dict[str, dict[str, str | None]]:
 # --- reading refs ---------------------------------------------------------------------
 
 
-def _read_refs(
-    repo: Path, config: BranchesConfig
-) -> tuple[list[_Ref], str | None] | str:
+def _read_refs(repo: Path, config: BranchesConfig) -> tuple[list[_Ref], str | None] | str:
     """Every local (and remote) ref plus the default name, or git's error text."""
     namespaces = [_HEADS.rstrip("/")]
     if config.wip.count_remote:

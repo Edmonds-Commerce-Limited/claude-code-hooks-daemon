@@ -32,13 +32,18 @@ def _names(command: str) -> list[tuple[str, str, bool]]:
         ("git worktree add -B feat ../p main", [("feat", "worktree", False)]),
         ("git worktree add ../wt/feat", [("feat", "worktree", True)]),
         ("git -C /x switch -c feat", [("feat", "switch", False)]),
-        ("cd a && git checkout -b one && git switch -c two", [
-            ("one", "checkout", False),
-            ("two", "switch", False),
-        ]),
+        (
+            "cd a && git checkout -b one && git switch -c two",
+            [
+                ("one", "checkout", False),
+                ("two", "switch", False),
+            ],
+        ),
     ],
 )
-def test_creation_forms_name_the_branch(command: str, expected: list[tuple[str, str, bool]]) -> None:
+def test_creation_forms_name_the_branch(
+    command: str, expected: list[tuple[str, str, bool]]
+) -> None:
     assert _names(command) == expected
 
 
@@ -61,7 +66,7 @@ def test_creation_forms_name_the_branch(command: str, expected: list[tuple[str, 
         "git worktree add ../p main",
         "git worktree list",
         "git switch -c $NAME",
-        "git checkout -b \"$(date)\"",
+        'git checkout -b "$(date)"',
         "git worktree add ../$X",
         "git switch -c",
         "git status",

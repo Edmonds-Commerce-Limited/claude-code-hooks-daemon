@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -49,7 +50,11 @@ def _branch(repo: Path, name: str, *, own_commit: bool = True) -> None:
         _git(repo, "update-ref", f"refs/heads/{name}", sha)
 
 
-def _config(cap: int = 2, mode: str = "block", dup: str = "warn") -> BranchesConfig:
+def _config(
+    cap: int = 2,
+    mode: Literal["block", "warn", "off"] = "block",
+    dup: Literal["warn", "off"] = "warn",
+) -> BranchesConfig:
     return BranchesConfig(
         default="main",
         wip=BranchWipConfig(cap=cap, mode=mode, count_remote=True),

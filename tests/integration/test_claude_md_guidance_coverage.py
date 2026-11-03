@@ -101,6 +101,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     ),
     "ErrorHidingBlockerHandler": "T1 denies error-suppression patterns",
     "GhIssueCommentsHandler": "T1 denies gh issue view without --comments",
+    "BranchCreationGuardHandler": "T1 denies a new branch at branches.wip.cap",
     "GhPrCommentsHandler": "T1 denies gh pr view without --comments",
     "GitMessageBacktickHandler": "T1 denies a message whose backticks would execute",
     "GithubAutoCloseKeywordsHandler": (

@@ -763,7 +763,7 @@ handlers:
 
     branch_creation_guard:  # Plan 00558: deny a new branch at branches.wip.cap
       enabled: true
-      priority: 41
+      priority: 40
 
     gh_issue_comments:     # Requires --comments flag for gh issue view
       enabled: true

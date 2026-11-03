@@ -434,9 +434,9 @@ class Priority:
     GLOBAL_NPM_ADVISOR = 40
 
     # Plan 00558 Task 4.2: the branch cap judges only branch-creating commands
-    # and isolated Agent dispatches, after the safety handlers. 41 belongs to
-    # this project's enforce-llm-qa handler, whose shapes are disjoint.
-    BRANCH_CREATION_GUARD = 41
+    # and isolated Agent dispatches, after the safety handlers. Not 41: this
+    # project's enforce-llm-qa handler holds that slot.
+    BRANCH_CREATION_GUARD = 40
 
     # Plan 00490: judges issue-tied work only, after the cheap safety handlers
     # have had their say. A workflow guard, so it sits in the workflow band.

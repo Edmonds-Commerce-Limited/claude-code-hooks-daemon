@@ -126,6 +126,39 @@ Everything in the brief: tests first, the four modules above, registration, the 
 writer, budget update, release note 097, manifest entries, guidance, acceptance tests, targeted
 QA, report `subagent-reports/261103-task42.md`.
 
+## Part A done (design items 1-3, WorktreeCreate check, labels snapshot)
+
+Shipped on `worktree-558-create`:
+
+- `utils/git_branch_creation.py`: `created_branches(command) -> list[Creation]`
+  (`name`, `route` = `switch|checkout|branch|worktree`, `dwim`, `invocation`).
+- `core/branch_creation.py`: `creation_verdict(repo, config, new_name, *, labels, now, name_is_branch=True) -> CreationVerdict(decision, lines)`, `stem`, `number_tokens`,
+  `LABELS_RELATIVE_PATH`, `read_labels`/`write_labels`. Public wrappers
+  `is_work_branch` and `worktrees_by_branch` added to `core/branch_inventory.py`.
+- PreToolUse `branch_creation_guard` (priority 41, rule `R-BRANCH-WIP-CAP`), enabled in
+  `.claude/hooks-daemon.yaml`, init template line, manifest entry, release note 097.
+- SessionStart `branch_sweep` writes `untracked/branch-inventory/labels.json`
+  (`{name: {group, action}}`) after its inventory; the deny orders by it.
+- WorktreeCreate: `_judge_branch_cap` runs inside `if not path.exists():` before the add
+  and raises `BranchCapError` at the cap (warnings are logged only: the event answers a
+  path). `Timeout.GIT_BRANCH_CREATION_CALLS = 2` added to the WorktreeCreate budget;
+  `init.sh` (the `.claude/init.sh` symlink target) wait is now 70.
+
+## Left for part B
+
+1. `core/branch_records.py` + PostToolUse `branch_touch_recorder` per design item 4: the
+   creator record (`hooksDaemonCreator`, `hooksDaemonCreated`, `hooksDaemonRoute`) written
+   after `show-ref --verify` succeeds and only when no creator is recorded; use
+   `created_branches()` for the Bash route so the parser is shared. WorktreeCreate must
+   record route exactly `worktree_create` with creator `<session>:` (empty agent); each
+   extra `git config` call there must be added to `GIT_BRANCH_CREATION_CALLS` (or a sibling
+   constant) in the budget AND the `init.sh` wait.
+2. Touch records and `touched_branches(untracked, session_id, agent_id) -> frozenset[str]`
+   for Task 4.4, plus the agent-binding rewrite.
+3. WorktreeRemove eligibility (below): creator route `worktree_create` eligible; no record
+   falls back to the name shape; any other route not eligible. Count the `git config --get`
+   in the `2 * GIT_WORKTREE` WorktreeRemove budget.
+
 ## Addition from the coordinator (after the creator record exists)
 
 `handlers/worktree_remove/worktree_remove_handler.py` decides a branch is eligible for its

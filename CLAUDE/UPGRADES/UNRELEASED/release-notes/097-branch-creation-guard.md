@@ -12,4 +12,4 @@ The new `branch_creation_guard` PreToolUse handler (rule `R-BRANCH-WIP-CAP`) jud
 - WorktreeCreate applies the same verdict before its `git worktree add` and refuses the creation at the cap. Its event budget grows by two short git calls, so the `.claude/init.sh` client wait for WorktreeCreate is now 70 seconds.
 - A git failure allows the creation with a "could not judge" line.
 
-Enable it with `handlers.pre_tool_use.branch_creation_guard: {enabled: true, priority: 41}`.
+Enable it with `handlers.pre_tool_use.branch_creation_guard: {enabled: true, priority: 40}`.

@@ -89,7 +89,7 @@ config_changes:
         `branches.wip.cap` (`wip.mode` warn only warns), and warns when the new
         name looks like an existing branch's work (`branches.duplicates.mode`).
         WorktreeCreate applies the same verdict before its `worktree add`
-        (priority 41).
+        (priority 40).
 
   renamed:
     - old_key: handlers.session_start.branch_count_advisor.options.max_open_branches

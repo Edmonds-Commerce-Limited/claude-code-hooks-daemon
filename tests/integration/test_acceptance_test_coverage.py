@@ -56,6 +56,13 @@ _EXEMPT_FROM_DENY_TEST: dict[str, str] = {
         "cannot receive anything else. A playbook cannot trigger a branch that "
         "exists to fail fast if the impossible happens."
     ),
+    "BranchCreationGuardHandler": (
+        "denies only while the repository's open work branches are at "
+        "`branches.wip.cap`, a property of whatever branches exist when the "
+        "playbook runs; a playbook cannot set that state up without creating "
+        "branches itself. The deny path is covered against built repositories in "
+        "tests/unit/handlers/pre_tool_use/test_branch_creation_guard.py."
+    ),
     "PlanQaCommitGateHandler": (
         "denies only under `commit_gate_mode: block`; the shipped default is "
         "`warn`, so a playbook running the default configuration cannot reach "

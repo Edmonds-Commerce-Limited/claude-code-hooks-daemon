@@ -98,7 +98,7 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
         if self._is_isolated_dispatch(hook_input):
             return True
         command = get_bash_command(hook_input)
-        return bool(command) and bool(created_branches(command))
+        return command is not None and bool(created_branches(command))
 
     def _verdicts(self, hook_input: dict[str, Any]) -> list[CreationVerdict]:
         cwd = Path(str(hook_input.get(HookInputField.CWD) or self._project_root()))
