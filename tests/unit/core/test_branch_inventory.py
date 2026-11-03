@@ -275,6 +275,19 @@ class TestStates:
     def test_state(self, inventory: BranchInventory, name: str, state: BranchState) -> None:
         assert inventory.records[name].state == state
 
+    def test_one_fixture_classifies_every_kind_of_leftover(
+        self, inventory: BranchInventory
+    ) -> None:
+        """Merged into the default, merged into release/*, abandoned, duplicated, parked."""
+        records = inventory.records
+        assert records["merged-default"].state == BranchState.MERGED_DEFAULT
+        assert records["merged-line"].state == BranchState.MERGED_LINE
+        assert records["merged-line"].merged_into == "release/x"
+        assert records["dormant-nowhere"].state == BranchState.DORMANT
+        assert records["dormant-nowhere"].containment == Containment.NOWHERE
+        assert records["twin-a"].same_tip_as == ("twin-b",)
+        assert records["parked"].state == BranchState.PARKED
+
     def test_default_branch_is_resolved(self, inventory: BranchInventory) -> None:
         assert inventory.default_branch == "main"
         assert inventory.default_ref == "refs/remotes/origin/main"

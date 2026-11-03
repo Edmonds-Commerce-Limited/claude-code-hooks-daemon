@@ -116,6 +116,11 @@ HOUSEKEEPING_STEPS: Final[tuple[HousekeepingStep, ...]] = (
     _report(
         "worktree-reap", "Agent worktrees whose work is fully merged (report only)", "worktree-reap"
     ),
+    _report(
+        "branch-sweep",
+        "Branches by state: contained nowhere, merged, dormant, live, parked (report only)",
+        "branch-sweep",
+    ),
     _report("skill-scan", "Transcript mining for repeated workloads worth a skill", "skill-scan"),
     _mutating(
         "format-markdown",
@@ -148,6 +153,12 @@ HOUSEKEEPING_STEPS: Final[tuple[HousekeepingStep, ...]] = (
         "Remove the worktrees worktree-reap cleared, and their branches",
         "worktree-reap",
         "--reap",
+    ),
+    _mutating(
+        "branch-sweep-clean",
+        "Delete the branches branch-sweep proved merged or patch-equivalent, with a recovery bundle",
+        "branch-sweep",
+        "--clean",
     ),
     HousekeepingStep(
         name="optimise",

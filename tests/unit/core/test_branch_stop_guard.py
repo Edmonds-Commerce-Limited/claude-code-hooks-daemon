@@ -139,6 +139,16 @@ class TestUnpushed:
         assert any("git push -u origin work" in c for c in finding.commands)
         assert not finding.advisory
 
+    def test_a_branch_touched_then_switched_away_from_is_still_judged(self, repo: Path) -> None:
+        _git(repo, "checkout", "-q", "-b", "work")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "unpushed work")
+        _touch(repo, "work")
+        _touch(repo, "work", AGENT)
+        _git(repo, "checkout", "-q", "main")
+        assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+        assert _checks(_judge(repo)) == {("work", StopCheck.UNPUSHED)}
+        assert _checks(_judge(repo, agent=AGENT)) == {("work", StopCheck.UNPUSHED)}
+
     def test_pushed_branch_is_clean(self, repo: Path) -> None:
         _branch(repo, "work", push=True)
         _touch(repo, "work")

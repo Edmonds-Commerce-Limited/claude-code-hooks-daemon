@@ -3740,6 +3740,47 @@ handlers:
 
 ---
 
+#### cleanup_after_merge
+
+| Property       | Value                 |
+| -------------- | --------------------- |
+| **Config key** | `cleanup_after_merge` |
+| **Priority**   | 39                    |
+| **Type**       | Advisory              |
+| **Event**      | PostToolUse           |
+
+**Description:** After a `git merge` concludes, names the merged branch's delete command (`branches.cleanup_after_merge.mode: advise`, the default) or deletes the branch and its worktree when each is proven merged and nothing is lost (`act`). `off` silences it. A branch not provably contained in the default branch is never deleted. Configured by the top-level `branches:` block; see [CONFIGURATION.md](CONFIGURATION.md).
+
+**Config example:**
+
+```yaml
+branches:
+  cleanup_after_merge:
+    mode: act
+```
+
+#### branch_touch_recorder
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `branch_touch_recorder` |
+| **Priority**   | 40                      |
+| **Type**       | Advisory                |
+| **Event**      | PostToolUse             |
+
+**Description:** Silently records who created a branch and which branches each session or sub-agent touched (a git command that creates or changes a branch, or a file write inside a branch's worktree). The Stop and SubagentStop guards read this record to judge only the branches the stopping agent touched. Never blocks and prints nothing.
+
+#### evacuation_recorder
+
+| Property       | Value                 |
+| -------------- | --------------------- |
+| **Config key** | `evacuation_recorder` |
+| **Priority**   | 41                    |
+| **Type**       | Advisory              |
+| **Event**      | PostToolUse           |
+
+**Description:** Records, for the current turn, each Bash command that copies a worktree's or branch's work to an untracked file (`git diff`, `format-patch`, `stash show -p` or `show` by redirect, `tee` or `-o`). `destructive_git` reads the record so that destroying the same worktree or branch later in the same turn is refused (`R-GIT-EVACUATE-THEN-DESTROY`). Never blocks.
+
 #### goal_injection
 
 | Property       | Value            |
@@ -4325,6 +4366,17 @@ handlers:
 
 ---
 
+#### branch_sweep
+
+| Property       | Value          |
+| -------------- | -------------- |
+| **Config key** | `branch_sweep` |
+| **Priority**   | 56             |
+| **Type**       | Advisory       |
+| **Event**      | SessionStart   |
+
+**Description:** Prints a short summary of the branches that need attention at session start: commits contained nowhere, merged but undeleted, dormant (advisory and noisy stages), and open work against `branches.wip.cap`. The full report is `bin/hooks-daemon branch-sweep`. Never blocks. Thresholds come from the top-level `branches:` block; see [CONFIGURATION.md](CONFIGURATION.md).
+
 #### plan_qa_sweep
 
 | Property       | Value           |
@@ -4522,6 +4574,25 @@ None ship today. `cleanup`, the only one, was removed in Plan 00237: it reaped a
 
 These handlers run when Claude stops generating a response.
 
+#### branch_stop_guard
+
+| Property       | Value               |
+| -------------- | ------------------- |
+| **Config key** | `branch_stop_guard` |
+| **Priority**   | 9                   |
+| **Type**       | Blocking            |
+| **Event**      | Stop                |
+
+**Description:** Refuses a stop (rule `R-BRANCH-STOP-GUARD`) while a branch this session touched is dirty, holds commits no remote contains, or is merged but not deleted. The message lists the commands that finish, park or hand over each branch. It yields to the usage-pause and release gates and gives way after 3 blocks. `branches.stop_guard.mode: warn` only warns.
+
+**Config example:**
+
+```yaml
+branches:
+  stop_guard:
+    mode: block
+```
+
 #### goal_loop_detector
 
 | Property       | Value                |
@@ -4668,6 +4739,17 @@ register **below** priority 10 and confirm it fires;
 
 These handlers run when a subagent (Task tool agent) completes.
 
+#### branch_subagent_stop_guard
+
+| Property       | Value                        |
+| -------------- | ---------------------------- |
+| **Config key** | `branch_subagent_stop_guard` |
+| **Priority**   | 12                           |
+| **Type**       | Blocking                     |
+| **Event**      | SubagentStop                 |
+
+**Description:** The sub-agent twin of `branch_stop_guard` (rule `R-BRANCH-SUBAGENT-STOP-GUARD`): refuses a sub-agent stop while a branch that sub-agent touched is dirty, unpushed or merged but undeleted. A written handoff waives the merged-not-deleted finding. `branches.stop_guard.unpushed_subagent` (`block`, `advise`, `off`) sets how unpushed commits are treated; this repository uses `advise` because its sub-agents are told not to push.
+
 #### subagent_report_size_blocker
 
 | Property       | Value                          |
@@ -4750,6 +4832,17 @@ handlers:
 ```
 
 ---
+
+#### evacuation_turn_marker
+
+| Property       | Value                    |
+| -------------- | ------------------------ |
+| **Config key** | `evacuation_turn_marker` |
+| **Priority**   | 43                       |
+| **Type**       | Advisory                 |
+| **Event**      | UserPromptSubmit         |
+
+**Description:** Advances a per-session prompt count at every prompt, silently. `evacuation_recorder` keys a main-thread evacuation by that count, so an evacuation made in one turn does not protect a destroy in a later one. Never blocks.
 
 #### git_context_injector
 

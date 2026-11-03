@@ -40,6 +40,7 @@ _REPORT_ONLY_EXPECTED = {
     "block-report",
     "harvest-background",
     "worktree-reap",
+    "branch-sweep",
     "skill-scan",
 }
 
@@ -51,6 +52,7 @@ _MUTATING_EXPECTED = {
     "prune-venvs",
     "check-permissions-fix",
     "worktree-reap-reap",
+    "branch-sweep-clean",
     "optimise",
 }
 
@@ -123,6 +125,9 @@ class TestDisposition:
         assert "--fix" not in by_name["check-permissions"].cli_argv
         assert "--reap" in by_name["worktree-reap-reap"].cli_argv
         assert "--fix" in by_name["check-permissions-fix"].cli_argv
+        assert by_name["branch-sweep"].cli_argv == ("branch-sweep",)
+        assert by_name["branch-sweep-clean"].cli_argv == ("branch-sweep", "--clean")
+        assert by_name["branch-sweep-clean"].confirmation_required
         assert by_name["remote-docs-check"].cli_argv == ("remote-docs", "check")
         assert by_name["remote-docs-refresh"].cli_argv == ("remote-docs", "refresh")
 
