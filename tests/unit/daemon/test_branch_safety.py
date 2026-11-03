@@ -1620,3 +1620,39 @@ class TestIntegrationLineTargets:
         _merged_branch(repo, "feature")
         with pytest.raises(ValueError, match="target"):
             classify_branch(repo, "feature", targets=())
+
+
+class TestCleanupKeywords:
+    """``ignore_worktree`` and ``content_tier`` serve the merge cleanup (Plan 00558)."""
+
+    def test_ignore_worktree_proves_a_branch_held_by_a_worktree(self, repo: Path) -> None:
+        _merged_branch(repo, "wt-branch")
+        _git(repo, "worktree", "add", str(repo.parent / "wt"), "wt-branch")
+        assert classify_branch(repo, "wt-branch").refusal == REFUSAL_WORKTREE
+        result = classify_branch(repo, "wt-branch", ignore_worktree=True)
+        assert result.refusal is None
+        assert result.tier == TIER_MERGED
+
+    def test_ignore_worktree_never_skips_the_current_branch_refusal(self, repo: Path) -> None:
+        assert classify_branch(repo, "main", ignore_worktree=True).refusal == (
+            REFUSAL_CURRENT_BRANCH
+        )
+
+    def test_without_the_content_tier_a_content_preserved_branch_is_unproven(
+        self, repo: Path
+    ) -> None:
+        TestContentPreservedTier._branch_duplicating_main_content(repo, "dup")
+        result = classify_branch(repo, "dup", content_tier=False)
+        assert result.tier == TIER_UNPROVEN
+        assert "content tier was not run" in result.detail
+
+    def test_without_the_content_tier_merged_is_still_proven(self, repo: Path) -> None:
+        _merged_branch(repo, "feature")
+        assert classify_branch(repo, "feature", content_tier=False).tier == TIER_MERGED
+
+    def test_delete_branches_passes_content_tier_through(self, repo: Path) -> None:
+        TestContentPreservedTier._branch_duplicating_main_content(repo, "dup")
+        report = delete_branches(repo, ["dup"], content_tier=False)
+        assert report.refused is True
+        assert report.deleted == ()
+        assert "dup" in _local_branches(repo)

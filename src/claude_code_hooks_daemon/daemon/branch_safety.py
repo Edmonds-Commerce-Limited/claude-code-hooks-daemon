@@ -570,6 +570,8 @@ def classify_branch(
     protected_ref: str = DEFAULT_PROTECTED_REF,
     protected_names: Sequence[str] = DEFAULT_PROTECTED_NAMES,
     targets: Sequence[str] | None = None,
+    ignore_worktree: bool = False,
+    content_tier: bool = True,
 ) -> BranchClassification:
     """Classify one branch, returning its tier or the reason it is refused.
 
@@ -578,6 +580,12 @@ def classify_branch(
         targets: Every ref a merge into counts as safe: the default ref plus the
             integration-line refs (Plan 00558, DESIGN.md section 2). The first
             target that proves a tier is recorded in ``proven_against``.
+        ignore_worktree: Skip ONLY the linked-worktree refusal, for the proof
+            made before that worktree is removed. A delete never passes it, so
+            it re-classifies with the worktree gone.
+        content_tier: When False, a branch neither merged nor patch-equivalent
+            is ``unproven`` without the blob walk of every reachable object,
+            which is too slow for a hook (Plan 00558 cleanup).
 
     Raises:
         ValueError: ``targets`` is given but empty.
@@ -602,7 +610,7 @@ def classify_branch(
             refusal=REFUSAL_PROTECTED,
             detail=_REFUSAL_DETAIL[REFUSAL_PROTECTED],
         )
-    if name in worktree_branches(repo):
+    if not ignore_worktree and name in worktree_branches(repo):
         return BranchClassification(
             name=name,
             refusal=REFUSAL_WORKTREE,
@@ -654,6 +662,15 @@ def classify_branch(
         if known_counts
         else "patch-ids could not be compared (git cherry failed)"
     )
+
+    if not content_tier:
+        return BranchClassification(
+            name=name,
+            tier=TIER_UNPROVEN,
+            unique_commits=unique_commits,
+            tip=tip,
+            detail=f"{patch_summary}; the content tier was not run",
+        )
 
     # Commit-level uniqueness does not imply content loss: a stale branch is
     # usually byte-identical to a target and merely arranged differently.
@@ -752,6 +769,7 @@ def delete_branches(
     dry_run: bool = False,
     confirm: ConfirmCallback | None = None,
     targets: Sequence[str] | None = None,
+    content_tier: bool = True,
 ) -> DeletionReport:
     """Classify every branch, then delete the batch.
 
@@ -782,6 +800,7 @@ def delete_branches(
             another flag. A declared reason asserts intent — it does not gate.
         targets: Passed to :func:`classify_branch`; the default ref plus the
             integration-line refs. ``protected_ref`` alone when None.
+        content_tier: Passed to :func:`classify_branch`.
 
     Raises:
         ValueError: if ``allow_unproven`` is set without a reason.
@@ -799,6 +818,7 @@ def delete_branches(
             protected_ref=protected_ref,
             protected_names=protected_names,
             targets=targets,
+            content_tier=content_tier,
         )
         for name in names
     )
