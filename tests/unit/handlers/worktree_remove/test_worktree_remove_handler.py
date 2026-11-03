@@ -190,6 +190,28 @@ class TestBranchCleanup:
         handler.handle({"cwd": str(main_repo), "worktree_path": str(wt)})
         assert _has_branch(main_repo, _ELIGIBLE)
 
+    def test_a_worktree_create_route_record_makes_a_hand_name_eligible(
+        self, main_repo: Path
+    ) -> None:
+        wt = _work(main_repo, "feature-y", merge=True)
+        _git(main_repo, "config", "branch.feature-y.hooksDaemonRoute", "worktree_create")
+        _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert not _has_branch(main_repo, "feature-y")
+
+    def test_another_route_record_keeps_a_worktree_create_shaped_name(
+        self, main_repo: Path
+    ) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=True)
+        _git(main_repo, "config", f"branch.{_ELIGIBLE}.hooksDaemonRoute", "switch")
+        _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert _has_branch(main_repo, _ELIGIBLE)
+
+    def test_no_record_falls_back_to_the_name_shape(self, main_repo: Path) -> None:
+        wt = _work(main_repo, _ELIGIBLE, merge=True)
+        assert not _git(main_repo, "config", "--list").count("hooksdaemonroute")
+        _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert not _has_branch(main_repo, _ELIGIBLE)
+
     def test_a_detached_worktree_is_removed_and_no_branch_touched(self, main_repo: Path) -> None:
         wt = main_repo / ".claude" / "worktrees" / "detached"
         _git(main_repo, "worktree", "add", "--detach", str(wt))

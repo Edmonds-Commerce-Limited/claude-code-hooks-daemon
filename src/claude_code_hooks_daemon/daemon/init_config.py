@@ -385,6 +385,7 @@ class ConfigTemplate:
             "    merge_qa_report: {enabled: true, priority: 34}  # Post-hoc plan/docs QA report on what a git merge/pull/rebase introduced (fires only when plan/docs QA sweeps are active)\n"
             "    daemon_sync_after_merge: {enabled: true, priority: 35}  # A merge/pull/rebase that changed daemon config or handler code leaves the running daemon stale -- advises a restart, naming the paths\n"
             "    cleanup_after_merge: {enabled: true, priority: 39}  # After a merge into the default branch, delete or advise deleting the merged branch per branches.cleanup_after_merge.mode (Plan 00558)\n"
+            "    branch_touch_recorder: {enabled: true, priority: 40}  # Record each branch's creator and the sessions/agents that touched it in git config (Plan 00558)\n"
             "    cron_record_keeper: {enabled: true, priority: 36}  # Record each CronCreate/CronDelete so cron_stop_enforcer can refresh a job before the 7-day cron expiry (silent bookkeeping, opt-out)\n"
             "    plan_fact_check_feed: {enabled: false, priority: 37}  # Debounce plan edits; the next tool call asks the session to dispatch hooks-daemon-plan-fact-checker on the diff (opt-in, never blocks, Plan 00480)\n"
             "    operator_signal_notice: {enabled: true, priority: 38}  # Add a pending host reboot/shutdown warning as context at the next tool call, once per signal; never touches the signal file (opt-out, Plan 00508)\n"

@@ -91,7 +91,7 @@
 | 60 | subagent_tier_advisor | ADVISORY | Advise a cheaper tier on an unchosen or up-overridden dispatch, and a floor below it |
 | 60 | workflow_fanout_advisor | ADVISORY | Advise on a Workflow script's agent count, inherited sites and per-family ceiling |
 
-### PostToolUse (17 handlers)
+### PostToolUse (18 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -112,6 +112,7 @@
 | 37 | plan_fact_check_feed | ADVISORY | Feed plan edits to the debouncer so a burst yields one pending fact-check |
 | 38 | operator_signal_notice | ADVISORY | Surface a pending operator signal as hook context, once per signal per agent thread |
 | 39 | cleanup_after_merge | ADVISORY | Delete or advise deleting the branch a merge into the default just landed |
+| 40 | branch_touch_recorder | ADVISORY | Write the creator and touch records of the branches a call created or changed |
 
 ### SessionStart (35 handlers)
 

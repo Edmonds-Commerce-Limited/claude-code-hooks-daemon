@@ -128,6 +128,22 @@ class TestHandle:
         assert result.worktree_path is not None
         assert Path(result.worktree_path).is_dir()
 
+    def test_records_the_creator_with_the_worktree_create_route(self, repo: Path) -> None:
+        result = WorktreeCreateHandler().handle(self._input(repo))
+        branch = Path(result.worktree_path or "").name
+
+        def get(key: str) -> str:
+            return subprocess.run(
+                ["git", "-C", str(repo), "config", "--get", f"branch.{branch}.{key}"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+        assert get("hooksDaemonRoute") == "worktree_create"
+        assert get("hooksDaemonCreator") == "sid-456:"
+        assert get("hooksDaemonCreated").isdigit()
+
     def test_path_is_semantic_and_absolute(self, repo: Path) -> None:
         handler = WorktreeCreateHandler()
         result = handler.handle(self._input(repo))

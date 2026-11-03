@@ -1024,6 +1024,10 @@ handlers:
       enabled: true  # Silent unless the operation actually changed daemon config or handler code.
       priority: 35
 
+    branch_touch_recorder:  # Plan 00558: creator and touch records in git config, read by WorktreeRemove and the stop guard
+      enabled: true
+      priority: 40
+
     cleanup_after_merge:  # Dogfood: delete a branch once merged into main (Plan 00558); mode is branches.cleanup_after_merge.mode
       enabled: true
       priority: 39

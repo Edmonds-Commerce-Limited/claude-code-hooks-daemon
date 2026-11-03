@@ -126,6 +126,15 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "commit; the guard's premise is ownership of the work, not the bytes "
         "reaching disk, so the commit gate is where it matters",
     ),
+    "BranchTouchRecorderHandler": (
+        _PARTIAL,
+        "Plan 00558 Task 4.2: a Write/Edit/NotebookEdit records a touch of the "
+        "file's branch, and so does every Bash git command that changes the "
+        "branch (commit, merge, rebase, reset, ...), which is where Bash-route "
+        "work on a branch is recorded. A heredoc or redirect alone records no "
+        "touch until that work is committed. Silent recorder: a missed touch "
+        "costs nothing at write time.",
+    ),
     "WriteProtectedPathsHandler": (
         _PARTIAL,
         "Plan 00499: the Bash surface is the point of this handler, since "

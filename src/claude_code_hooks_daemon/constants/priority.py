@@ -348,6 +348,11 @@ class Priority:
     # order against the merge advisories above is not load-bearing.)
     CLEANUP_AFTER_MERGE = 39
 
+    # Branch touch recorder (Priority: 40 - PostToolUse sensor; Plan 00558 Task
+    # 4.2, the next free slot after CLEANUP_AFTER_MERGE. A silent git config
+    # writer; no other PostToolUse handler depends on its order.)
+    BRANCH_TOUCH_RECORDER = 40
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30
