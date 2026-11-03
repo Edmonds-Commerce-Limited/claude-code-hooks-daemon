@@ -553,7 +553,7 @@ class TestSwitchedOffMeansSwitchedOff:
     def test_a_switched_off_build_child_writes_no_failed_marker(self, tmp_path: Path) -> None:
         daemon_dir = _daemon_dir(tmp_path)
         lock_dir = daemon_dir / "untracked" / ".venv-bootstrap.lock.d"
-        lock_dir.mkdir()
+        lock_dir.write_text("1\n")
         env = _env(
             tmp_path,
             with_uv=_stub_uv(tmp_path),

@@ -155,7 +155,40 @@ a runner bootstrapping from an unset counter. `mkroutine.bash` now has an opt-in
 lock and counter event with a timestamp and pid, and the test turns it on and reports both runners' full stderr as plain
 text, so the next CI failure carries its own interleaving.
 
-**Status**: 🔄 Signal defect fixed (eb2aa1e52); the CI duplicate is open pending the traced evidence.
+**Root cause of the CI duplicate (found)**: the external `mkdir`. Full-matrix CI run 41530438536 ran on runner image
+`ubuntu-26.04` and failed the same test on Python 3.11 and 3.13 with `MKROUTINE_TRACE` on. The trace shows both runners
+logging `acquiring …/.mkroutine.lock` within 20 µs of each other, then both logging `lock acquired after 0 busy attempt(s)` within 11 µs: two `mkdir` calls on one path both exited 0. Both allocated `00001`, and one runner's later
+`rmdir` failed with "No such file or directory" because the other had already removed the lock. A kernel `mkdir(2)`
+cannot succeed twice on one path; Ubuntu 25.10 and later ship the Rust uutils coreutils as `mkdir`, whose exit status
+under that race evidently does not mean "I created it" (not confirmed from uutils' source; the fix does not depend on
+the exact mechanism). Locally, with GNU coreutils, it never reproduced.
+
+**Class**: a lock whose exclusivity rests on an external `mkdir` failing with EEXIST. **Sweep** (`*.sh`, `*.bash` and
+the extensionless shipped bash scripts, archived `Completed/` plans excluded): `CLAUDE/Plan/mkplan.bash` and its
+deployed template `src/claude_code_hooks_daemon/install/templates/mkplan.bash`, `CLAUDE/Routine/mkroutine.bash`, the
+`mkdir` fallback backend of `scripts/install/venv.sh`, and one the brief did not list: the background-sync lock in
+`provision.sh` (`.claude/provision.sh` is a symlink to it). All five are fixed. The Python side of the venv lock
+(`daemon/venv_lock.py`) used `os.mkdir`, a direct syscall and so outside the class, but it had to move to the same
+lock shape so the two still exclude each other.
+
+**Fix**: each lock is now a regular FILE holding the holder's pid, created by bash itself with a noclobber redirect
+(`(set -C && printf '%s\n' "$pid" > "$lock")`), which opens with `O_CREAT|O_EXCL`; `set -C` is confined to the subshell.
+`set -C` is POSIX, so macOS/BSD bash 3.2 keeps working. The lock paths are unchanged, so a lock DIRECTORY left by an
+older version fails the exclusive open too (bash reports EISDIR) and is honoured as held: the scaffolders wait and time
+out naming it, venv.sh and `venv_lock.py` reclaim it by age, and provision.sh reads the pid file inside it. The owner-only
+release (`BASHPID`), the EXIT/INT/TERM handling, the retry, timeout and error text, the `MKROUTINE_TRACE` events, and
+venv.sh's stale age and heartbeat are kept; the heartbeat's error log moved beside the lock file. `.mkplan.lock` and
+`.mkroutine.lock` are gitignored, since a held lock file (unlike an empty directory) would show in `git status`.
+
+**Test**: `tests/unit/scripts/test_lock_survives_a_permissive_mkdir.py` puts a `mkdir` first on PATH that succeeds when
+the directory already exists (after a 0.2s sleep). It parks one scaffolder inside the lock (the `git` shim from the
+signal test) and requires that a second runner never reaches the counter read; it runs two scaffolders in parallel and
+requires distinct numbers; and it requires venv.sh's fallback lock to answer 75 (held) to a second taker. All 5 cases
+were red against the unfixed scripts (second runner entered the critical section; `numbers=['00001', '00001']`; the CI
+`rmdir` failure reproduced for mkplan; venv `second=0`) and are green after the fix.
+
+**Status**: ✅ Fixed on branch `worktree-lock-oexcl` (signal defect eb2aa1e52; root cause, the external `mkdir`, on
+this branch). Confirm on the next `ubuntu-26.04` CI run.
 
 ### N567 — `init.sh` aborts when it is sourced if `untracked/` cannot be created, before any fail-closed arm runs
 

@@ -8,7 +8,8 @@ backend selection — or the bash lock only serialises bash with bash.
 ``venv_lock`` mirrors the bash contract exactly:
 
 - lock file ``{project_root}/untracked/.venv-bootstrap.lock`` (flock), or
-  ``.venv-bootstrap.lock.d`` (mkdir fallback);
+  ``.venv-bootstrap.lock.d`` (the "mkdir" fallback: an O_EXCL lock file; an
+  older version's lock directory there is honoured as held);
 - bounded wait, then ``VenvLockTimeout`` whose message names the lock path
   and the bound;
 - ``HOOKS_DAEMON_VENV_LOCK_BACKEND`` selects the backend; a stale mkdir lock
@@ -116,14 +117,35 @@ class TestFlockBackend:
 
 
 class TestMkdirBackend:
-    def test_acquires_creates_and_removes_the_dir(self, tmp_path: Path) -> None:
+    def test_acquires_creates_and_removes_the_lock_file(self, tmp_path: Path) -> None:
         lock_dir = tmp_path / "untracked" / f"{VENV_LOCK_FILE_NAME}.d"
         with venv_lock(tmp_path, timeout_seconds=1, backend="mkdir"):
-            assert lock_dir.is_dir()
-            assert (lock_dir / "pid").read_text().strip() == str(os.getpid())
+            assert lock_dir.is_file()
+            assert lock_dir.read_text().strip() == str(os.getpid())
         assert not lock_dir.exists()
 
+    def test_fresh_lock_file_times_out_with_its_path(self, tmp_path: Path) -> None:
+        lock_file = tmp_path / "untracked" / f"{VENV_LOCK_FILE_NAME}.d"
+        lock_file.parent.mkdir(parents=True)
+        lock_file.write_text("999999\n")
+        with pytest.raises(VenvLockTimeout) as excinfo:
+            with venv_lock(tmp_path, timeout_seconds=1, backend="mkdir"):
+                pytest.fail("must not enter while a fresh lock file exists")
+        assert str(lock_file) in str(excinfo.value)
+        assert lock_file.read_text() == "999999\n", "another holder's lock is untouched"
+
+    def test_stale_lock_file_is_reclaimed(self, tmp_path: Path) -> None:
+        lock_file = tmp_path / "untracked" / f"{VENV_LOCK_FILE_NAME}.d"
+        lock_file.parent.mkdir(parents=True)
+        lock_file.write_text("999999\n")
+        an_hour_ago = time.time() - 3600
+        os.utime(lock_file, (an_hour_ago, an_hour_ago))
+        with venv_lock(tmp_path, timeout_seconds=1, backend="mkdir"):
+            assert lock_file.read_text().strip() == str(os.getpid())
+        assert not lock_file.exists()
+
     def test_fresh_lock_dir_times_out_with_its_path(self, tmp_path: Path) -> None:
+        """An older version's lock DIRECTORY at the path is honoured as held."""
         lock_dir = tmp_path / "untracked" / f"{VENV_LOCK_FILE_NAME}.d"
         lock_dir.mkdir(parents=True)
         with pytest.raises(VenvLockTimeout) as excinfo:
@@ -138,7 +160,7 @@ class TestMkdirBackend:
         os.utime(lock_dir, (an_hour_ago, an_hour_ago))
         notices: list[str] = []
         with venv_lock(tmp_path, timeout_seconds=1, backend="mkdir", on_wait=notices.append):
-            assert (lock_dir / "pid").exists(), "reclaimed and re-taken by this process"
+            assert lock_dir.is_file(), "reclaimed and re-taken by this process"
         assert any("stale venv lock" in n for n in notices)
 
     def test_stale_threshold_is_configurable(
@@ -167,21 +189,22 @@ class TestMkdirBackendRacesTheHolder:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         lock_dir = tmp_path / "untracked" / f"{VENV_LOCK_FILE_NAME}.d"
-        lock_dir.mkdir(parents=True)
+        lock_dir.parent.mkdir(parents=True)
+        lock_dir.write_text("999999\n")
         real_stat = Path.stat
         raced = {"done": False}
 
         def releasing_stat(self: Path, *, follow_symlinks: bool = True) -> os.stat_result:
             if self == lock_dir and not raced["done"]:
                 raced["done"] = True
-                # The holder's rmtree, landing in the gap.
-                shutil.rmtree(lock_dir)
+                # The holder's release, landing in the gap.
+                lock_dir.unlink()
                 raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(self))
             return real_stat(self, follow_symlinks=follow_symlinks)
 
         monkeypatch.setattr(Path, "stat", releasing_stat)
         with venv_lock(tmp_path, timeout_seconds=5, backend="mkdir"):
-            assert (lock_dir / "pid").read_text().strip() == str(os.getpid())
+            assert lock_dir.read_text().strip() == str(os.getpid())
         assert raced["done"], "the race must actually have been exercised"
 
     def test_a_permanently_unstattable_lock_still_ends_in_the_bounded_timeout(
@@ -215,7 +238,7 @@ class TestBackendSelection:
         monkeypatch.setenv("HOOKS_DAEMON_VENV_LOCK_BACKEND", "mkdir")
         lock_dir = tmp_path / "untracked" / f"{VENV_LOCK_FILE_NAME}.d"
         with venv_lock(tmp_path, timeout_seconds=1):
-            assert lock_dir.is_dir()
+            assert lock_dir.is_file()
 
     def test_default_is_flock(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("HOOKS_DAEMON_VENV_LOCK_BACKEND", raising=False)
