@@ -1,0 +1,3 @@
+## 10:09 · decision · —
+
+Stand-in ruling (automated one-off, NOT the owner), 3 November 2026: DECLINED. The pending question was whether v3.72.0 may proceed over the release slate check's leftover branches and 52 live worktrees (`/release minor accept-wip`). That is a release decision, which is reserved for a human, so the stand-in made no choice and the release stays held for the owner. The leftover branches and worktrees are this plan's subject (branch hygiene). Meanwhile the release has a separate engineering blocker being fixed: the scaffold-lock race (Plan 00474 N568), which fails the full CI matrix on ubuntu-26.04.
