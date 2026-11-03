@@ -211,6 +211,11 @@ class Priority:
     # Plan 00471 L2: ahead of the terminal size blocker (15) for the reason the
     # path verifier is, and non-terminal like it, so one stop reports both.
     SUBAGENT_HANDOFF_GATE = 11
+    # Plan 00558 Task 4.4: non-terminal, so it sits below the terminal size
+    # blocker (15) and the handoff gate (11) and one stop reports all of them.
+    BRANCH_SUBAGENT_STOP_GUARD = 12
+    # Plan 00558 Task 4.4: Stop twin; ahead of the terminal auto_continue_stop.
+    BRANCH_STOP_GUARD = 9
     # Plan 00460 Task 1.6: runs ahead of the terminal size blocker (15) so a
     # persisted report EXISTS on disk before the size blocker's glob lookup
     # (subagent_report_paths.find_persisted_report) runs — there is no

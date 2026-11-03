@@ -74,6 +74,12 @@ class RuleID:
     #: creating a branch while an unmerged, unparked branch is at the dormancy block stage.
     BRANCH_DORMANT: str = "R-BRANCH-DORMANT"
 
+    #: a stop that leaves a dirty worktree, unpushed commits or a merged branch behind.
+    BRANCH_STOP_GUARD: str = "R-BRANCH-STOP-GUARD"
+
+    #: a sub-agent stop that leaves a dirty worktree, unpushed commits or a merged branch behind.
+    BRANCH_SUBAGENT_STOP_GUARD: str = "R-BRANCH-SUBAGENT-STOP-GUARD"
+
     #: git checkout -f/--force — discards the working tree without naming a file.
     GIT_CHECKOUT_FORCE: str = "R-GIT-CHECKOUT-FORCE"
 

@@ -16,12 +16,14 @@ Before adding a Stop handler, read that test module.
 """
 
 from .auto_continue_stop import AutoContinueStopHandler
+from .branch_stop_guard import BranchStopGuardHandler
 from .cron_stop_enforcer import CronStopEnforcerHandler
 from .idle_workable_issue_stop_gate import IdleWorkableIssueStopGateHandler
 from .teammate_reap_advisor import TeammateReapAdvisorHandler
 
 __all__ = [
     "AutoContinueStopHandler",
+    "BranchStopGuardHandler",
     "CronStopEnforcerHandler",
     "IdleWorkableIssueStopGateHandler",
     "TeammateReapAdvisorHandler",

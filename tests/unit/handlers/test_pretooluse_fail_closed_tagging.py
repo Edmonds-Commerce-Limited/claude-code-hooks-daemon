@@ -246,6 +246,16 @@ _AUDITED_BLOCKING_ONLY_REASONS: dict[str, str] = {
         "unmeasurable transcript fails open, so no work is lost. Not a "
         "dangerous-action guard."
     ),
+    "branch_stop_guard": (
+        "Stop, Plan 00558 Task 4.4: a workflow gate (finish, park or hand over a "
+        "branch before stopping), not a dangerous-action guard; a git failure "
+        "allows and it gives way after three blocks so no session is trapped."
+    ),
+    "branch_subagent_stop_guard": (
+        "SubagentStop, Plan 00558 Task 4.4: the sub-agent twin of branch_stop_guard; "
+        "a workflow gate, not a dangerous-action guard; a git failure allows and it "
+        "gives way after three blocks."
+    ),
     "subagent_handoff_gate": (
         "SubagentStop, Plan 00471 L2: blocks an over-budget subagent's stop "
         "until its handoff file exists, at most three times. Workflow "
