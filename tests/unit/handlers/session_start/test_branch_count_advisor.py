@@ -232,6 +232,20 @@ class TestBranchesConfigWins:
         assert "more than 3 commits" in text
         assert "5 commits behind" in text
 
+    def test_behind_is_measured_against_the_configured_default(self, repo: Path) -> None:
+        """`branches.default` names the base, not `git_sync.default_branch`'s guess."""
+        _git(repo, "branch", "develop")
+        _git(repo, "branch", "worktree-old")
+        _git(repo, "checkout", "-q", "develop")
+        for n in range(5):
+            _commit(repo, f"d{n}")
+        _git(repo, "checkout", "-q", "main")
+        handler = _make(behind=3)
+        handler._branches = BranchesConfig(default="develop")
+        text = "\n".join(_run(repo, handler))
+        assert "behind develop" in text
+        assert "5 commits behind" in text
+
 
 class TestFailOpen:
     def test_not_a_repo_is_silent(self, tmp_path: Path) -> None:

@@ -132,7 +132,7 @@ class BranchCountAdvisorHandler(SessionStartHandlerBase):
         if not branches:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
-        base = git_sync.default_branch(root)
+        base = git_sync.resolve_default_branch(self._branches, root)
         stale: list[tuple[str, int]] = []
         unchecked = 0
         if base is not None:

@@ -11,14 +11,25 @@ processes plus a bounded per-branch step:
 3. ``for-each-ref --merged=<target>`` per default ref and integration line: the
    bulk ancestry test;
 4. same-tip grouping, in Python;
-5. per unmerged branch and target: a ``log`` walk (ahead, park commits),
-   ``git cherry`` via :func:`branch_safety.cherry_unique_shas` and
-   ``diff --shortstat`` (lines). Cached by ``(tip, target)`` in
+5. per unmerged tip and target: a ``log`` walk (ahead, park commits, merge
+   commits), ``git cherry`` via :func:`branch_safety.cherry_unique_shas` and
+   ``diff --shortstat`` (lines). Cached by ``(tip, target, lines wanted)`` in
    ``untracked/branch-inventory/cache.json`` and cut off at ``sweep.budget_ms``;
    a branch not reached is ``UNCLASSIFIED``, never guessed.
 
 Every git error fails CLOSED: a branch whose proof could not be computed is
-``UNCLASSIFIED``, never merged.
+``UNCLASSIFIED``, never merged. In particular:
+
+- a name whose local and remote copies sit at different tips is merged,
+  patch-equivalent or contained only when EVERY copy is (the weakest proof
+  wins), and ``proven_by`` names the ref that proved it, so a merge into an
+  unpushed local default is told apart from one into ``<remote>/<default>``;
+- a range holding a merge commit is never patch-equivalent: ``git cherry``
+  never lists merges, so content added by a merge (a conflict resolution, an
+  "evil merge") would otherwise be invisible;
+- a listing row that cannot be parsed is ``UNCLASSIFIED`` with a reason, never
+  dropped and never given a default date;
+- a failed ``worktree list`` leaves ``worktree_known`` False, never "no worktree".
 
 Park commits (DESIGN.md section 5): a commit whose tree equals its parent's and
 that carries a ``Parked-*`` or ``Unparked`` trailer is not counted in ``ahead``
@@ -35,7 +46,6 @@ import re
 import time
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
@@ -50,16 +60,24 @@ logger = logging.getLogger(__name__)
 
 #: Repository-relative path of the per-pair cache.
 CACHE_RELATIVE_PATH = Path("untracked/branch-inventory/cache.json")
-_CACHE_VERSION = 1
+_CACHE_VERSION = 2
 
 _SECONDS_PER_DAY = 86_400
+_REFS = "refs/"
 _HEADS = "refs/heads/"
 _REMOTES = "refs/remotes/"
+_TAGS = "refs/tags"
 _REMOTE_HEAD = "HEAD"
+#: Field separator of the step-1 listing. A commit message cannot hold a NUL
+#: (git refuses one), and neither can a ref name, sha, date or count.
 _FIELD = "\x00"
+#: for-each-ref ends every record with a newline after the format's trailing NUL.
+_RECORD_END = "\n"
+_FIELD_COUNT = 7
 _UNIT = "\x1f"
 _GIT_TIMEOUT = Timeout.GIT_CONTEXT
 _BOUNDARY_MARK = "-"
+_OBJECT_NAME = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 #: Trailers that mark a park (or unpark) commit.
 _PARK_TRAILER_KEYS = ("Parked-Reason", "Parked-By", "Unparked")
@@ -72,6 +90,10 @@ _ISSUE_IN_SUBJECT = re.compile(r"Addresses #(\d+)")
 _PLAN_IN_SUBJECT = re.compile(r"\bPlan (\d{2,5})\b")
 _PLAN_WIDTH = 5
 _SHORTSTAT_COUNT = re.compile(r"(\d+) (?:insertion|deletion)")
+
+_UNMEASURED_REASON = (
+    "the sweep budget ran out, or git failed, before this tip was measured against every target"
+)
 
 
 def _lines_of(output: str) -> list[str]:
@@ -93,6 +115,7 @@ class BranchState(StrEnum):
     EXEMPT = "exempt"
     DEFAULT = "default"
     INTEGRATION_LINE = "integration-line"
+    PROTECTED = "protected"
     MERGED_DEFAULT = "merged"
     MERGED_LINE = "merged-into-line"
     PATCH_EQUIVALENT = "patch-equivalent"
@@ -100,6 +123,14 @@ class BranchState(StrEnum):
     DORMANT = "dormant"
     LIVE = "live"
     UNCLASSIFIED = "not yet classified"
+
+
+#: "Done, not deleted" (DESIGN.md section 2, states 3-5), strongest proof first.
+_DONE_RANK = {
+    BranchState.MERGED_DEFAULT: 0,
+    BranchState.MERGED_LINE: 1,
+    BranchState.PATCH_EQUIVALENT: 2,
+}
 
 
 class DormancyStage(StrEnum):
@@ -111,11 +142,19 @@ class DormancyStage(StrEnum):
 
 
 class Containment(StrEnum):
-    """Where an idle branch's tip lives (DESIGN.md section 4)."""
+    """Where an idle branch's tip lives (DESIGN.md section 4).
+
+    Only ``DEFAULT`` and ``REMOTE_REF`` make a cleanup candidate, and
+    ``REMOTE_REF`` is granted only by a ref that is not itself work: the
+    default, an integration line, a tag, an exempt or a protected branch. Work
+    branches that contain each other are ``OTHER_WORK_BRANCH``: two copies of
+    unmerged work never vouch for each other.
+    """
 
     DEFAULT = "in the default branch"
     REMOTE_REF = "in another remote ref"
     OWN_REMOTE = "on its own remote only"
+    OTHER_WORK_BRANCH = "only in another work branch"
     NOWHERE = "nowhere"
 
 
@@ -132,12 +171,18 @@ class BranchRecord:
     ahead: int | None
     behind: int | None
     lines: int | None
-    committed_at: int
-    age_days: float
+    committed_at: int | None
+    age_days: float | None
     parked_reason: str | None
     plan: str | None
     issue: int | None
     merged_into: str | None = None
+    #: The ref that proved a done state, e.g. ``origin/main`` or (unpushed) ``main``.
+    proven_by: str | None = None
+    #: Why the record is ``UNCLASSIFIED``.
+    reason: str | None = None
+    #: False when ``git worktree list`` failed: ``worktree`` is then unknown, not absent.
+    worktree_known: bool = True
     same_tip_as: tuple[str, ...] = ()
     dormancy_stage: DormancyStage | None = None
     containment: Containment | None = None
@@ -146,10 +191,17 @@ class BranchRecord:
 
 @dataclass(frozen=True)
 class BranchInventory:
-    """The result of one pass."""
+    """The result of one pass.
+
+    ``default_ref`` is None when the default could not be resolved to a ref;
+    nothing is then merged into the default, and a consumer should report the
+    configuration rather than act on the verdicts.
+    """
 
     default_branch: str | None
+    default_ref: str | None
     records: dict[str, BranchRecord]
+    worktrees_known: bool = True
 
 
 @dataclass(frozen=True)
@@ -164,11 +216,23 @@ class _RefRow:
 
 
 @dataclass(frozen=True)
+class _BadRow:
+    """A listing row whose fields could not be read; its name is still known."""
+
+    refname: str
+    reason: str
+
+
+_Row = _RefRow | _BadRow
+
+
+@dataclass(frozen=True)
 class _PairFacts:
     """Step-5 facts for one ``(tip, target)`` pair, park commits excluded."""
 
     ahead: int
     unique: int
+    merges: int
     lines: int | None
 
 
@@ -186,25 +250,83 @@ class _Target:
     is_default: bool
 
 
+@dataclass(frozen=True)
+class _Verdict:
+    """The proof for ONE tip of a name; ``LIVE`` stands for "not done"."""
+
+    state: BranchState
+    merged_into: str | None = None
+    proven_ref: str | None = None
+    ahead: int | None = None
+    lines: int | None = None
+    reason: str | None = None
+
+
 # --- step 1: refs -------------------------------------------------------------
 
 
 def _ref_format(default_ref: str | None) -> str:
     ahead_behind = f"%(ahead-behind:{default_ref})" if default_ref else ""
-    return _FIELD.join(
-        (
-            "%(refname)",
-            "%(objectname)",
-            "%(committerdate:unix)",
-            "%(upstream)",
-            ahead_behind,
-            f"%(trailers:key={_PARK_REASON_KEY},valueonly,separator=%x1f)",
-            "%(contents:subject)",
-        )
-    ).replace(_FIELD, "%00")
+    fields = (
+        "%(refname)",
+        "%(objectname)",
+        "%(committerdate:unix)",
+        "%(upstream)",
+        ahead_behind,
+        f"%(trailers:key={_PARK_REASON_KEY},valueonly,unfold,separator=%x1f)",
+        "%(contents:subject)",
+    )
+    return "".join(f"{atom}%00" for atom in fields)
 
 
-def _list_refs(repo: Path, remote: str, default_ref: str | None) -> list[_RefRow]:
+def _parse_row(refname: str, fields: list[str]) -> _Row:
+    sha, date, upstream, ahead_behind, parked, subject = fields
+    if not _OBJECT_NAME.fullmatch(sha):
+        return _BadRow(refname, f"unparseable object name {sha!r} in the ref listing")
+    if not date.isdigit():
+        return _BadRow(refname, f"unparseable committer date {date!r} in the ref listing")
+    behind: int | None = None
+    if ahead_behind:
+        counts = ahead_behind.split()
+        behind = int(counts[1]) if len(counts) == 2 and counts[1].isdigit() else None
+    return _RefRow(
+        refname=refname,
+        sha=sha,
+        committed_at=int(date),
+        upstream=upstream.removeprefix(_REMOTES) or None,
+        behind=behind,
+        parked_reason=parked.split(_UNIT)[0].strip() or None,
+        subject=subject,
+    )
+
+
+def _parse_listing(stdout: str) -> list[_Row]:
+    """Split the NUL-delimited listing into rows, refusing anything misaligned.
+
+    Records are counted by fields, not split on newlines, so a newline inside a
+    value cannot cut a record in two. A misaligned listing raises: past that
+    point no field can be trusted to belong to the ref beside it.
+    """
+    if not stdout:
+        return []
+    tokens = stdout.split(_FIELD)
+    if tokens.pop() != _RECORD_END or len(tokens) % _FIELD_COUNT:
+        raise BranchInventoryError("git for-each-ref output does not align to whole records")
+    rows: list[_Row] = []
+    for start in range(0, len(tokens), _FIELD_COUNT):
+        fields = tokens[start : start + _FIELD_COUNT]
+        refname = fields[0]
+        if start:
+            if not refname.startswith(_RECORD_END):
+                raise BranchInventoryError(f"git for-each-ref record {refname!r} is misaligned")
+            refname = refname.removeprefix(_RECORD_END)
+        if not refname.startswith(_REFS) or not refname.isprintable() or " " in refname:
+            raise BranchInventoryError(f"git for-each-ref record has no ref name: {refname!r}")
+        rows.append(_parse_row(refname, fields[1:]))
+    return rows
+
+
+def _list_refs(repo: Path, remote: str, default_ref: str | None) -> list[_Row]:
     roots = (_HEADS.rstrip("/"), f"{_REMOTES}{remote}")
     result = run_git(
         repo, "for-each-ref", f"--format={_ref_format(default_ref)}", *roots, timeout=_GIT_TIMEOUT
@@ -217,28 +339,26 @@ def _list_refs(repo: Path, remote: str, default_ref: str | None) -> list[_RefRow
         )
     if result.returncode != 0:
         raise BranchInventoryError(f"git for-each-ref failed: {result.stderr.strip()}")
-    rows: list[_RefRow] = []
-    for line in _lines_of(result.stdout):
-        parts = line.split(_FIELD)
-        if len(parts) != 7:
-            continue
-        refname, sha, date, upstream, ahead_behind, parked, subject = parts
-        behind: int | None = None
-        if ahead_behind:
-            counts = ahead_behind.split()
-            behind = int(counts[1]) if len(counts) == 2 and counts[1].isdigit() else None
-        rows.append(
-            _RefRow(
-                refname=refname,
-                sha=sha,
-                committed_at=int(date) if date.isdigit() else 0,
-                upstream=upstream.removeprefix(_REMOTES) or None,
-                behind=behind,
-                parked_reason=parked.split(_UNIT)[0].strip() or None,
-                subject=subject,
-            )
-        )
-    return rows
+    return _parse_listing(result.stdout)
+
+
+def _refs_hash(repo: Path, rows: list[_Row]) -> str:
+    """Digest of every ref that can contain a tip: the remote refs and the tags.
+
+    Keys the containment cache, so a moved, added or deleted tag or remote ref
+    invalidates every cached containment verdict.
+    """
+    tags = run_git(
+        repo, "for-each-ref", "--format=%(refname) %(objectname)", _TAGS, timeout=_GIT_TIMEOUT
+    )
+    if tags.returncode != 0:
+        raise BranchInventoryError(f"git for-each-ref {_TAGS} failed: {tags.stderr.strip()}")
+    remote_refs = sorted(
+        f"{r.refname} {r.sha}"
+        for r in rows
+        if isinstance(r, _RefRow) and r.refname.startswith(_REMOTES)
+    )
+    return hashlib.sha256("\n".join([*remote_refs, tags.stdout]).encode()).hexdigest()
 
 
 def _ref_exists(repo: Path, ref: str) -> bool:
@@ -259,11 +379,12 @@ def _default_ref(repo: Path, remote: str, default: str | None) -> str | None:
 # --- step 2: worktrees ----------------------------------------------------------
 
 
-def _worktrees(repo: Path) -> dict[str, Path]:
+def _worktrees(repo: Path) -> dict[str, Path] | None:
+    """Branch name to worktree path; None (unknown, never "none") when git fails."""
     result = run_git(repo, "worktree", "list", "--porcelain", timeout=_GIT_TIMEOUT)
     if result.returncode != 0:
         logger.info("branch_inventory: worktree list failed: %s", result.stderr.strip())
-        return {}
+        return None
     found: dict[str, Path] = {}
     path: Path | None = None
     for line in result.stdout.splitlines():
@@ -297,8 +418,15 @@ def _merged_refs(repo: Path, target_ref: str, remote: str) -> set[str]:
 # --- step 5: per-pair facts -------------------------------------------------------
 
 
-def _park_shas(log_output: str) -> tuple[list[str], set[str]] | None:
-    """Range commits and the park commits among them, from a ``--boundary`` log."""
+@dataclass(frozen=True)
+class _Walk:
+    commits: list[str]
+    parks: set[str]
+    merges: int
+
+
+def _park_shas(log_output: str) -> _Walk | None:
+    """Range commits, the park commits and the merge count, from a ``--boundary`` log."""
     trees: dict[str, str] = {}
     in_range: list[tuple[str, str, list[str], str]] = []
     for line in _lines_of(log_output):
@@ -314,7 +442,11 @@ def _park_shas(log_output: str) -> tuple[list[str], set[str]] | None:
         for sha, tree, parents, trailers in in_range
         if trailers.strip() and len(parents) == 1 and trees.get(parents[0]) == tree
     }
-    return [sha for sha, _tree, _parents, _trailers in in_range], parks
+    return _Walk(
+        commits=[sha for sha, _tree, _parents, _trailers in in_range],
+        parks=parks,
+        merges=sum(1 for _sha, _tree, parents, _trailers in in_range if len(parents) > 1),
+    )
 
 
 def _lines(repo: Path, target: str, tip: str) -> int | None:
@@ -325,13 +457,13 @@ def _lines(repo: Path, target: str, tip: str) -> int | None:
 
 
 def _pair_facts(repo: Path, tip: str, target: str, *, want_lines: bool) -> _PairFacts | None:
-    """Ahead (parks excluded), unique patches (parks excluded) and lines; None on any failure."""
+    """Ahead and unique patches (parks excluded), merges and lines; None on any failure."""
     keys = ",".join(f"key={key}" for key in _PARK_TRAILER_KEYS)
     log = run_git(
         repo,
         "log",
         "--boundary",
-        f"--format=%m%x1f%H%x1f%T%x1f%P%x1f%(trailers:{keys},valueonly,separator=%x1d)",
+        f"--format=%m%x1f%H%x1f%T%x1f%P%x1f%(trailers:{keys},valueonly,unfold,separator=%x1d)",
         f"{target}..{tip}",
         timeout=_GIT_TIMEOUT,
     )
@@ -340,55 +472,95 @@ def _pair_facts(repo: Path, tip: str, target: str, *, want_lines: bool) -> _Pair
     walked = _park_shas(log.stdout)
     if walked is None:
         return None
-    commits, parks = walked
-    ahead = len(commits) - len(parks)
+    ahead = len(walked.commits) - len(walked.parks)
     if ahead == 0:
-        return _PairFacts(ahead=0, unique=0, lines=0 if want_lines else None)
+        return _PairFacts(ahead=0, unique=0, merges=0, lines=0 if want_lines else None)
     unique = branch_safety.cherry_unique_shas(repo, target, tip, timeout=_GIT_TIMEOUT)
     if unique is None:
         return None
     lines = _lines(repo, target, tip) if want_lines else None
     if want_lines and lines is None:
         return None
-    return _PairFacts(ahead=ahead, unique=len(set(unique) - parks), lines=lines)
+    return _PairFacts(
+        ahead=ahead, unique=len(set(unique) - walked.parks), merges=walked.merges, lines=lines
+    )
+
+
+# --- never-work names ---------------------------------------------------------------
+
+
+def _never_work(name: str, config: BranchesConfig, default: str | None) -> BranchState | None:
+    """The non-work state of ``name``, or None when it is a work branch.
+
+    Exempt, the default, an integration line or a protected name: never
+    counted, never judged, and never "contained" work for another branch.
+    """
+    if branch_safety.matches_any_glob(name, config.exempt):
+        return BranchState.EXEMPT
+    if name == default:
+        return BranchState.DEFAULT
+    if branch_safety.matches_any_glob(name, config.integration_lines):
+        return BranchState.INTEGRATION_LINE
+    if branch_safety.matches_any_glob(name, config.protected_names):
+        return BranchState.PROTECTED
+    return None
+
+
+def _short(ref: str) -> str:
+    """``refs/remotes/origin/x`` -> ``origin/x``, ``refs/heads/x`` -> ``x``, else drop ``refs/``."""
+    for prefix in (_REMOTES, _HEADS):
+        if ref.startswith(prefix):
+            return ref.removeprefix(prefix)
+    return ref.removeprefix(_REFS)
 
 
 # --- containment ------------------------------------------------------------------
 
 
 def containment_of(
-    repo: Path, *, name: str, tip: str, remote: str, default: str | None
+    repo: Path, *, name: str, tip: str, config: BranchesConfig, default: str | None
 ) -> tuple[Containment, str | None] | None:
-    """Where ``tip`` lives on ``remote`` (DESIGN.md section 4); None when git fails.
+    """Where ``tip`` lives on ``config.remote`` or in a tag (DESIGN.md section 4); None when git fails.
 
     The cherry arm of "in the default branch" is not repeated here: a branch
     whose patches are all in the default is classified patch-equivalent first.
     """
+    remote = config.remote
     if default is not None:
         default_ref = f"{_REMOTES}{remote}/{default}"
         ancestor = run_git(
             repo, "merge-base", "--is-ancestor", tip, default_ref, timeout=_GIT_TIMEOUT
         )
         if ancestor.returncode == 0:
-            return Containment.DEFAULT, default_ref.removeprefix(_REMOTES)
+            return Containment.DEFAULT, _short(default_ref)
     result = run_git(
         repo,
         "for-each-ref",
         f"--contains={tip}",
         "--format=%(refname)",
         f"{_REMOTES}{remote}",
+        _TAGS,
         timeout=_GIT_TIMEOUT,
     )
     if result.returncode != 0:
         return None
-    own = f"{_REMOTES}{remote}/{name}"
-    head = f"{_REMOTES}{remote}/{_REMOTE_HEAD}"
-    refs = sorted(ref for ref in result.stdout.splitlines() if ref and ref != head)
-    others = [ref for ref in refs if ref != own]
+    remote_prefix = f"{_REMOTES}{remote}/"
+    own = f"{remote_prefix}{name}"
+    head = f"{remote_prefix}{_REMOTE_HEAD}"
+    others = sorted(ref for ref in result.stdout.splitlines() if ref and ref not in {head, own})
+
+    def vouches(ref: str) -> bool:
+        if not ref.startswith(remote_prefix):
+            return True  # a tag
+        return _never_work(ref.removeprefix(remote_prefix), config, default) is not None
+
+    vouching = [ref for ref in others if vouches(ref)]
+    if vouching:
+        return Containment.REMOTE_REF, _short(vouching[0])
+    if own in result.stdout.splitlines():
+        return Containment.OWN_REMOTE, _short(own)
     if others:
-        return Containment.REMOTE_REF, others[0].removeprefix(_REMOTES)
-    if own in refs:
-        return Containment.OWN_REMOTE, own.removeprefix(_REMOTES)
+        return Containment.OTHER_WORK_BRANCH, _short(others[0])
     return Containment.NOWHERE, None
 
 
@@ -444,12 +616,13 @@ def _save_cache(path: Path, cache: _Cache, live_tips: set[str]) -> None:
 def _facts_from_cache(entry: dict[str, Any] | None) -> _PairFacts | None:
     if not isinstance(entry, dict):
         return None
-    ahead, unique, lines = entry.get("ahead"), entry.get("unique"), entry.get("lines")
-    if not isinstance(ahead, int) or not isinstance(unique, int):
+    ahead, unique, merges = entry.get("ahead"), entry.get("unique"), entry.get("merges")
+    lines = entry.get("lines")
+    if not (isinstance(ahead, int) and isinstance(unique, int) and isinstance(merges, int)):
         return None
     if lines is not None and not isinstance(lines, int):
         return None
-    return _PairFacts(ahead=ahead, unique=unique, lines=lines)
+    return _PairFacts(ahead=ahead, unique=unique, merges=merges, lines=lines)
 
 
 # --- links ----------------------------------------------------------------------------
@@ -483,11 +656,6 @@ def _links(name: str, subject: str) -> tuple[str | None, int | None]:
 # --- the pass -----------------------------------------------------------------------
 
 
-def _matches(name: str, patterns: list[str]) -> bool:
-    """Glob match on the branch name; ``*`` spans ``/`` (``release/*`` matches ``release/a/b``)."""
-    return any(fnmatchcase(name, pattern) for pattern in patterns)
-
-
 def _stage(age_days: float, config: BranchesConfig) -> DormancyStage | None:
     if config.dormancy.mode == "off":
         return None
@@ -514,44 +682,56 @@ class _Pass:
         return time.monotonic() < self.deadline
 
     def facts(self, tip: str, target: _Target) -> _PairFacts | None:
-        key = f"{tip}:{target.sha}"
+        want_lines = target.is_default
+        key = f"{tip}:{target.sha}:{'lines' if want_lines else 'nolines'}"
         cached = _facts_from_cache(self.cache.pairs.get(key))
         if cached is not None:
             return cached
         if not self._within_budget():
             return None
-        computed = _pair_facts(self.repo, tip, target.sha, want_lines=target.is_default)
+        computed = _pair_facts(self.repo, tip, target.sha, want_lines=want_lines)
         if computed is not None:
             self.cache.pairs[key] = {
                 "ahead": computed.ahead,
                 "unique": computed.unique,
+                "merges": computed.merges,
                 "lines": computed.lines,
             }
         return computed
 
     def containment(
-        self, name: str, tip: str, default: str | None, remote_hash: str
+        self, name: str, tip: str, default: str | None, refs_hash: str
     ) -> tuple[Containment, str | None] | None:
-        key = f"{tip}:{remote_hash}:{name}"
+        key = f"{tip}:{refs_hash}:{name}"
         entry = self.cache.containment.get(key)
         if isinstance(entry, dict) and entry.get("containment") in {c.value for c in Containment}:
             ref = entry.get("ref")
             return Containment(entry["containment"]), ref if isinstance(ref, str) else None
         if not self._within_budget():
             return None
-        found = containment_of(
-            self.repo, name=name, tip=tip, remote=self.config.remote, default=default
-        )
+        found = containment_of(self.repo, name=name, tip=tip, config=self.config, default=default)
         if found is not None:
             self.cache.containment[key] = {"containment": found[0].value, "ref": found[1]}
         return found
 
 
-def _group_rows(
-    rows: list[_RefRow], remote: str
-) -> dict[str, tuple[_RefRow | None, _RefRow | None]]:
+@dataclass(frozen=True)
+class _Context:
+    """Facts shared by every record of one pass."""
+
+    default: str | None
+    targets: list[_Target]
+    #: ``(ref, refs merged into it)`` for the remote default ref, then the local one.
+    merged_default: list[tuple[str, set[str]]]
+    merged_lines: list[tuple[_Target, set[str]]]
+    worktrees: dict[str, Path] | None
+    refs_hash: str
+    moment: float
+
+
+def _group_rows(rows: list[_Row], remote: str) -> dict[str, tuple[_Row | None, _Row | None]]:
     remote_prefix = f"{_REMOTES}{remote}/"
-    grouped: dict[str, list[_RefRow | None]] = {}
+    grouped: dict[str, list[_Row | None]] = {}
     for row in rows:
         if row.refname.startswith(_HEADS):
             grouped.setdefault(row.refname.removeprefix(_HEADS), [None, None])[0] = row
@@ -569,7 +749,8 @@ def build_inventory(
 
     Raises:
         BranchInventoryError: The refs could not be listed (not a repository,
-            or git failed or timed out on the one bulk listing).
+            git failed or timed out on a bulk listing, or the listing did not
+            parse into whole records).
     """
     moment = time.time() if now is None else now
     remote = config.remote
@@ -577,132 +758,197 @@ def build_inventory(
     default_ref = _default_ref(repo, remote, default)
     rows = _list_refs(repo, remote, default_ref)
     by_name = _group_rows(rows, remote)
-    sha_of = {row.refname: row.sha for row in rows}
-    remote_hash = hashlib.sha256(
-        "\n".join(
-            sorted(f"{r.refname} {r.sha}" for r in rows if r.refname.startswith(_REMOTES))
-        ).encode()
-    ).hexdigest()
+    sha_of = {row.refname: row.sha for row in rows if isinstance(row, _RefRow)}
+    refs_hash = _refs_hash(repo, rows)
 
     targets: list[_Target] = []
-    if default is not None and default_ref is not None:
+    if default is not None and default_ref is not None and default_ref in sha_of:
         targets.append(_Target(default, default_ref, sha_of[default_ref], is_default=True))
     for name in sorted(by_name):
-        if name != default and _matches(name, config.integration_lines):
+        if name != default and branch_safety.matches_any_glob(name, config.integration_lines):
             local, remote_row = by_name[name]
             row = remote_row or local
-            if row is not None:
+            if isinstance(row, _RefRow):
                 targets.append(_Target(name, row.refname, row.sha, is_default=False))
 
-    merged_default: set[str] = set()
+    merged_default: list[tuple[str, set[str]]] = []
     if default is not None:
         for ref in (f"{_REMOTES}{remote}/{default}", f"{_HEADS}{default}"):
             if ref in sha_of:
-                merged_default |= _merged_refs(repo, ref, remote)
-    merged_lines = [(t, _merged_refs(repo, t.ref, remote)) for t in targets if not t.is_default]
-    worktrees = _worktrees(repo)
+                merged_default.append((ref, _merged_refs(repo, ref, remote)))
+    context = _Context(
+        default=default,
+        targets=targets,
+        merged_default=merged_default,
+        merged_lines=[(t, _merged_refs(repo, t.ref, remote)) for t in targets if not t.is_default],
+        worktrees=_worktrees(repo),
+        refs_hash=refs_hash,
+        moment=moment,
+    )
     cache_path = repo / CACHE_RELATIVE_PATH
     run = _Pass(repo, config, _load_cache(cache_path))
 
-    records: dict[str, BranchRecord] = {}
-    for name in sorted(by_name):
-        local, remote_row = by_name[name]
-        chosen = local or remote_row
-        if chosen is None:
-            continue
-        plan, issue = _links(name, chosen.subject)
-        base: dict[str, Any] = {
-            "name": name,
-            "local_tip": local.sha if local else None,
-            "remote_tip": remote_row.sha if remote_row else None,
-            "upstream": local.upstream if local else None,
-            "worktree": worktrees.get(name),
-            "behind": chosen.behind,
-            "committed_at": chosen.committed_at,
-            "age_days": (moment - chosen.committed_at) / _SECONDS_PER_DAY,
-            "parked_reason": chosen.parked_reason,
-            "plan": plan,
-            "issue": issue,
-        }
-        records[name] = _classify(
-            run, name, chosen, base, targets, merged_default, merged_lines, default, remote_hash
-        )
-
+    records = {name: _record(run, context, name, *by_name[name]) for name in sorted(by_name)}
     records = _with_same_tips(records)
-    _save_cache(cache_path, run.cache, {row.sha for row in rows})
-    return BranchInventory(default_branch=default, records=records)
+    _save_cache(cache_path, run.cache, set(sha_of.values()))
+    return BranchInventory(
+        default_branch=default,
+        default_ref=default_ref,
+        records=records,
+        worktrees_known=context.worktrees is not None,
+    )
 
 
-def _classify(
-    run: _Pass,
-    name: str,
-    chosen: _RefRow,
-    base: dict[str, Any],
-    targets: list[_Target],
-    merged_default: set[str],
-    merged_lines: list[tuple[_Target, set[str]]],
-    default: str | None,
-    remote_hash: str,
+def _row_facts(row: _RefRow | None, moment: float) -> dict[str, Any]:
+    """The per-copy fields of a record, all unknown without a parsed row."""
+    if row is None:
+        return {"behind": None, "committed_at": None, "age_days": None, "parked_reason": None}
+    return {
+        "behind": row.behind,
+        "committed_at": row.committed_at,
+        "age_days": (moment - row.committed_at) / _SECONDS_PER_DAY,
+        "parked_reason": row.parked_reason,
+    }
+
+
+def _record(
+    run: _Pass, context: _Context, name: str, local: _Row | None, remote_row: _Row | None
 ) -> BranchRecord:
-    config = run.config
+    """Classify one name over every copy it has (DESIGN.md section 2)."""
+    copies = [row for row in (local, remote_row) if row is not None]
+    parsed = [row for row in copies if isinstance(row, _RefRow)]
+    display = parsed[0] if parsed else None
+    plan, issue = _links(name, display.subject if display else "")
+    fixed: dict[str, Any] = {
+        "name": name,
+        "local_tip": local.sha if isinstance(local, _RefRow) else None,
+        "remote_tip": remote_row.sha if isinstance(remote_row, _RefRow) else None,
+        "upstream": local.upstream if isinstance(local, _RefRow) else None,
+        "worktree": context.worktrees.get(name) if context.worktrees is not None else None,
+        "worktree_known": context.worktrees is not None,
+        "plan": plan,
+        "issue": issue,
+    }
     unmeasured: dict[str, Any] = {"ahead": None, "lines": None}
-    if _matches(name, config.exempt):
-        return BranchRecord(state=BranchState.EXEMPT, **base, **unmeasured)
-    if name == default:
-        return BranchRecord(state=BranchState.DEFAULT, **base, **unmeasured)
-    if _matches(name, config.integration_lines):
-        return BranchRecord(state=BranchState.INTEGRATION_LINE, **base, **unmeasured)
-    if chosen.refname in merged_default:
-        return BranchRecord(
-            state=BranchState.MERGED_DEFAULT, merged_into=default, ahead=0, lines=0, **base
-        )
-    for line, merged in merged_lines:
-        if chosen.refname in merged:
-            return BranchRecord(
-                state=BranchState.MERGED_LINE, merged_into=line.name, **base, **unmeasured
-            )
 
-    facts: list[tuple[_Target, _PairFacts]] = []
-    for target in targets:
-        found = run.facts(chosen.sha, target)
-        if found is None:
-            return BranchRecord(state=BranchState.UNCLASSIFIED, **base, **unmeasured)
-        facts.append((target, found))
-        if target.is_default and found.ahead == 0:
-            break
-    own: dict[str, Any] = unmeasured
-    for target, found in facts:
-        if target.is_default:
-            own = {"ahead": found.ahead, "lines": found.lines}
-    # Section 2 order: merged into the default, then into a line, then patch-equivalent.
-    contained_by = [t for t, f in facts if f.ahead == 0]
-    if contained_by:
-        first = contained_by[0]
-        state = BranchState.MERGED_DEFAULT if first.is_default else BranchState.MERGED_LINE
-        return BranchRecord(state=state, merged_into=first.name, **base, **own)
-    equivalent = next((t for t, f in facts if f.unique == 0), None)
-    if equivalent is not None:
+    never = _never_work(name, run.config, context.default)
+    if never is not None:
         return BranchRecord(
-            state=BranchState.PATCH_EQUIVALENT, merged_into=equivalent.name, **base, **own
+            state=never, **fixed, **_row_facts(display, context.moment), **unmeasured
+        )
+    bad = next((row for row in copies if isinstance(row, _BadRow)), None)
+    if bad is not None:
+        return BranchRecord(
+            state=BranchState.UNCLASSIFIED,
+            reason=f"{bad.refname}: {bad.reason}",
+            **fixed,
+            **_row_facts(None, context.moment),
+            **unmeasured,
         )
 
-    if chosen.parked_reason is not None:
-        return BranchRecord(state=BranchState.PARKED, **base, **own)
-    stage = _stage(base["age_days"], config)
+    distinct: list[_RefRow] = []
+    for row in parsed:
+        if all(row.sha != seen.sha for seen in distinct):
+            distinct.append(row)
+    judged = [(row, _tip_verdict(run, context, row)) for row in distinct]
+    unmeasurable = next(
+        ((row, v) for row, v in judged if v.state == BranchState.UNCLASSIFIED), None
+    )
+    if unmeasurable is not None:
+        row, verdict = unmeasurable
+        return BranchRecord(
+            state=BranchState.UNCLASSIFIED,
+            reason=verdict.reason,
+            **fixed,
+            **_row_facts(row, context.moment),
+            **unmeasured,
+        )
+    undone = [(row, v) for row, v in judged if v.state not in _DONE_RANK]
+    if not undone:
+        done = _weakest([v for _row, v in judged])
+        return BranchRecord(
+            state=done.state,
+            merged_into=done.merged_into,
+            proven_by=_short(done.proven_ref) if done.proven_ref else None,
+            ahead=done.ahead,
+            lines=done.lines,
+            **fixed,
+            **_row_facts(display, context.moment),
+        )
+
+    row, verdict = undone[0]
+    facts = _row_facts(row, context.moment)
+    own: dict[str, Any] = {"ahead": verdict.ahead, "lines": verdict.lines}
+    if row.parked_reason is not None:
+        return BranchRecord(state=BranchState.PARKED, **fixed, **facts, **own)
+    stage = _stage(facts["age_days"], run.config)
     if stage is None:
-        return BranchRecord(state=BranchState.LIVE, **base, **own)
-    found_in = run.containment(name, chosen.sha, default, remote_hash)
+        return BranchRecord(state=BranchState.LIVE, **fixed, **facts, **own)
+    found_in = run.containment(name, row.sha, context.default, context.refs_hash)
     return BranchRecord(
         state=BranchState.DORMANT,
         dormancy_stage=stage,
         containment=found_in[0] if found_in else None,
         contained_in=found_in[1] if found_in else None,
-        **base,
+        **fixed,
+        **facts,
         **own,
     )
 
 
-_UNGROUPED = {BranchState.EXEMPT, BranchState.DEFAULT, BranchState.INTEGRATION_LINE}
+def _tip_verdict(run: _Pass, context: _Context, row: _RefRow) -> _Verdict:
+    """States 3-5 for ONE tip; ``LIVE`` when it is none of them."""
+    for ref, merged in context.merged_default:
+        if row.refname in merged:
+            return _Verdict(
+                BranchState.MERGED_DEFAULT, context.default, proven_ref=ref, ahead=0, lines=0
+            )
+    for line, merged in context.merged_lines:
+        if row.refname in merged:
+            return _Verdict(BranchState.MERGED_LINE, line.name, proven_ref=line.ref)
+
+    facts: list[tuple[_Target, _PairFacts]] = []
+    for target in context.targets:
+        found = run.facts(row.sha, target)
+        if found is None:
+            return _Verdict(BranchState.UNCLASSIFIED, reason=_UNMEASURED_REASON)
+        facts.append((target, found))
+        if target.is_default and found.ahead == 0:
+            break
+    ahead: int | None = None
+    lines: int | None = None
+    for target, found in facts:
+        if target.is_default:
+            ahead, lines = found.ahead, found.lines
+    # Section 2 order: merged into the default, then into a line, then patch-equivalent.
+    contained_by = next((t for t, f in facts if f.ahead == 0), None)
+    if contained_by is not None:
+        state = BranchState.MERGED_DEFAULT if contained_by.is_default else BranchState.MERGED_LINE
+        return _Verdict(state, contained_by.name, contained_by.ref, ahead, lines)
+    # A merge commit can carry content no patch-id shows, so it is never equivalent.
+    equivalent = next((t for t, f in facts if f.unique == 0 and f.merges == 0), None)
+    if equivalent is not None:
+        return _Verdict(BranchState.PATCH_EQUIVALENT, equivalent.name, equivalent.ref, ahead, lines)
+    return _Verdict(BranchState.LIVE, ahead=ahead, lines=lines)
+
+
+def _weakest(verdicts: list[_Verdict]) -> _Verdict:
+    """The weakest done proof among a name's copies; a local-only ref is weaker than a remote one."""
+    return max(
+        verdicts,
+        key=lambda v: (
+            _DONE_RANK[v.state],
+            v.proven_ref is not None and v.proven_ref.startswith(_HEADS),
+        ),
+    )
+
+
+_UNGROUPED = {
+    BranchState.EXEMPT,
+    BranchState.DEFAULT,
+    BranchState.INTEGRATION_LINE,
+    BranchState.PROTECTED,
+}
 
 
 def _with_same_tips(records: dict[str, BranchRecord]) -> dict[str, BranchRecord]:

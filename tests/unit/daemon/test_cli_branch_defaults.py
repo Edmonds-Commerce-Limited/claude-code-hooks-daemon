@@ -7,6 +7,7 @@ The argparse defaults are `None`; `None` resolves through
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -126,6 +127,80 @@ class TestDeleteBranch:
         assert cmd_delete_branch(_delete_args(repo, None)) == _EXIT_USAGE
         assert "--protected-ref" in capsys.readouterr().err
         assert captured_delete == {}
+
+
+class TestDeleteBranchRefusesNeverWorkBranches:
+    """Exempt, integration-line and protected-name matches are refused like the default."""
+
+    @pytest.mark.parametrize("name", ["users/alice", "release/1.0", "keep"])
+    def test_refused_although_merged(
+        self, tmp_path: Path, name: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        repo = _project(
+            tmp_path,
+            "  default: main\n  exempt: ['users/*']\n  integration_lines: ['release/*']\n"
+            "  protected_names: [keep]\n",
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "c",
+            ],
+            check=True,
+        )
+        subprocess.run(["git", "-C", str(repo), "branch", name], check=True)
+        args = _delete_args(repo, None)
+        args.branches = [name]
+        args.format = "json"
+        assert cmd_delete_branch(args) == 1
+        report = json.loads(capsys.readouterr().out)
+        assert report["classifications"][0]["refusal"] == branch_safety.REFUSAL_PROTECTED
+
+    def test_globs_are_passed_through(
+        self, tmp_path: Path, captured_delete: dict[str, Any]
+    ) -> None:
+        repo = _project(
+            tmp_path, "  default: trunk\n  exempt: ['users/*']\n  integration_lines: ['rel/*']\n"
+        )
+        cmd_delete_branch(_delete_args(repo, None))
+        assert {"users/*", "rel/*", "trunk"} <= set(captured_delete["protected_names"])
+
+
+class TestClassifyBranchGlobs:
+    def test_a_protected_glob_refuses_a_matching_name(self, tmp_path: Path) -> None:
+        repo = _project(tmp_path, None)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "c",
+            ],
+            check=True,
+        )
+        subprocess.run(["git", "-C", str(repo), "branch", "users/bob"], check=True)
+        verdict = branch_safety.classify_branch(
+            repo, "users/bob", protected_ref="main", protected_names=("users/*",)
+        )
+        assert verdict.refusal == branch_safety.REFUSAL_PROTECTED
 
 
 class TestWorktreeReap:

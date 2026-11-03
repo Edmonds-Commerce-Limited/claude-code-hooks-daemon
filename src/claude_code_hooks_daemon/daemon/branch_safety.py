@@ -45,6 +45,7 @@ from __future__ import annotations
 import subprocess  # nosec B404 - trusted system tool (git), list form, no shell
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
@@ -423,6 +424,17 @@ def _unique_commit_count(repo: Path, name: str, protected_ref: str) -> int:
     return sum(1 for line in result.stdout.splitlines() if line.startswith(_CHERRY_UNIQUE_MARKER))
 
 
+def matches_any_glob(name: str, patterns: Sequence[str]) -> bool:
+    """Whether a branch name matches any glob; ``*`` spans ``/``.
+
+    A plain name is a glob that matches only itself (git forbids ``*``, ``?``
+    and ``[`` in branch names), so a list of literal protected names keeps its
+    exact-match meaning. One definition for the inventory and the delete
+    refusal, so ``release/*`` cannot mean two things (Plan 00558).
+    """
+    return any(fnmatchcase(name, pattern) for pattern in patterns)
+
+
 def cherry_unique_shas(
     repo: Path, upstream: str, head: str, *, timeout: float = Timeout.GIT_BRANCH_SAFETY
 ) -> list[str] | None:
@@ -547,7 +559,7 @@ def classify_branch(
             refusal=REFUSAL_CURRENT_BRANCH,
             detail=_REFUSAL_DETAIL[REFUSAL_CURRENT_BRANCH],
         )
-    if name in protected_names:
+    if matches_any_glob(name, protected_names):
         return BranchClassification(
             name=name,
             refusal=REFUSAL_PROTECTED,

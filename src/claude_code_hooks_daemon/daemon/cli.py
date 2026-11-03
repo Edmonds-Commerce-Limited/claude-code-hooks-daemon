@@ -6515,8 +6515,15 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    # The resolved default is protected too, whatever the configured names say.
-    protected_names = (*branches.protected_names, protected_ref)
+    # Never-work branches are refused whatever the proof says (DESIGN.md section 1):
+    # the protected names, the resolved default, and every integration-line and
+    # exempt glob, matched by `branch_safety.matches_any_glob`.
+    protected_names = (
+        *branches.protected_names,
+        *branches.integration_lines,
+        *branches.exempt,
+        protected_ref,
+    )
 
     # Pass a confirmer ONLY when a human can actually answer it. Passing one
     # that always declines would report "a human declined" when in truth none
