@@ -2526,6 +2526,35 @@ handlers:
 
 ---
 
+#### branch_creation_guard
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `branch_creation_guard` |
+| **Priority**   | 40                      |
+| **Type**       | Blocking                |
+| **Event**      | PreToolUse              |
+
+**Description:** Denies a git command that creates a branch (`switch -c`, `checkout -b`, `branch <name>`, `worktree add`) or an Agent dispatch with `isolation: "worktree"` while the open work branches already number `branches.wip.cap` (rule `R-BRANCH-WIP-CAP`). The deny lists the open branches, merged ones first with their delete command. `branches.wip.mode: warn` only warns. A name already in `refs/heads` is never a creation, and a name close to an existing branch's draws a duplicate warning (`branches.duplicates.mode`) that never blocks. WorktreeCreate applies the same verdict before its `git worktree add`.
+
+**Example trigger (at the cap):**
+
+```bash
+git switch -c another-feature
+```
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    branch_creation_guard:
+      enabled: true
+      priority: 40
+```
+
+---
+
 #### gh_issue_comments
 
 | Property       | Value               |
@@ -5133,6 +5162,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `subagent_context_budget`       | PreToolUse        | 39       | A subagent's non-handoff tool calls past hard_tokens (hard band off)     |
 | `resume_guard`                  | PreToolUse        | 39       | A SendMessage cold-resuming a large stopped agent (mode: deny)           |
 | `subagent_handoff_gate`         | SubagentStop      | 11       | An over-hard-budget agent's stop with no handoff file (three blocks max) |
+| `branch_creation_guard`         | PreToolUse        | 40       | a new branch while open work branches are at branches.wip.cap            |
 | `gh_issue_comments`             | PreToolUse        | 40       | gh issue view without --comments                                         |
 | `gh_pr_comments`                | PreToolUse        | 40       | gh pr view without --comments                                            |
 | `plan_time_estimates`           | PreToolUse        | 40       | Time estimates in plan docs                                              |
