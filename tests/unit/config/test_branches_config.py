@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.config.models import (
     Config,
 )
 from claude_code_hooks_daemon.daemon import branch_safety
+from claude_code_hooks_daemon.utils.regenerable_paths import DEFAULT_REGENERABLE_STORES
 
 
 class TestTopLevelDefaults:
@@ -72,6 +73,21 @@ class TestNestedDefaults:
         assert config.force_removal.mode == "block"
         assert config.evacuation.mode == "block"
         assert config.cleanup_after_merge.mode == "advise"
+
+    def test_cleanup_regenerable_defaults_to_the_shared_list(self) -> None:
+        regenerable = BranchesConfig().cleanup_after_merge.regenerable
+        assert tuple(regenerable) == DEFAULT_REGENERABLE_STORES
+
+    def test_a_project_may_set_its_own_regenerable_list(self) -> None:
+        config = BranchesConfig.model_validate(
+            {"cleanup_after_merge": {"regenerable": ["build/", "untracked/qa/"]}}
+        )
+        assert config.cleanup_after_merge.regenerable == ["build/", "untracked/qa/"]
+
+    @pytest.mark.parametrize("pattern", ["untracked/scratch/", "untracked/", "*", ""])
+    def test_a_regenerable_list_may_not_cover_scratch(self, pattern: str) -> None:
+        with pytest.raises(ValidationError, match="regenerable"):
+            BranchesConfig.model_validate({"cleanup_after_merge": {"regenerable": [pattern]}})
 
     def test_sweep(self) -> None:
         sweep = BranchesConfig().sweep

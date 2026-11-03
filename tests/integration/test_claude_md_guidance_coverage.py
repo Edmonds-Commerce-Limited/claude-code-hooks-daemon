@@ -350,6 +350,13 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "ORIG_HEAD..HEAD-touched findings are shown) or where the rest still "
         "surfaces (the next SessionStart sweep)"
     ),
+    "CleanupAfterMergeHandler": (
+        "T3 the deletion happens after the merge the agent already ran, so the "
+        "fire-time report cannot change the merge: the agent needs to know BEFORE "
+        "merging that a merged branch disappears (act) with only a restore line, "
+        "that a worktree is never removed for it, and that the rest is "
+        "branch-sweep --clean's job behind a bundle"
+    ),
     "DaemonSyncAfterMergeHandler": (
         "T3 the remedy happens after the advisory — the agent runs the restart "
         "itself, because the handler runs INSIDE the daemon serving the hook and "

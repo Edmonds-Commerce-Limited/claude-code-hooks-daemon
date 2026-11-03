@@ -476,10 +476,35 @@ class TestContainment:
         assert record.containment == Containment.REMOTE_REF
         assert record.contained_in == "origin/develop"
 
-    def test_a_tag_vouches(self, inventory: BranchInventory) -> None:
+    def test_an_unpushed_local_tag_does_not_vouch(self, inventory: BranchInventory) -> None:
+        """Containment is remote-tracking refs only (DESIGN.md section 4).
+
+        A local tag may never have been pushed, so counting it would hide a
+        branch whose commits no remote holds behind a CONTAINED NOWHERE that
+        never prints.
+        """
         record = inventory.records["dormant-tagged"]
-        assert record.containment == Containment.REMOTE_REF
-        assert record.contained_in == "tags/keep-me"
+        assert record.containment == Containment.NOWHERE
+        assert record.contained_in is None
+
+    def test_a_tip_held_only_by_a_local_tag_is_contained_nowhere(self, repo: Path) -> None:
+        tip = _git(repo, "rev-parse", "dormant-tagged")
+        assert _git(repo, "tag", "--points-at", tip) == "keep-me"
+        assert branch_inventory.containment_of(
+            repo, name="dormant-tagged", tip=tip, config=_CONFIG, default="main"
+        ) == (Containment.NOWHERE, None)
+
+    def test_a_cached_tag_vouch_from_an_older_cache_is_not_reused(self, repo: Path) -> None:
+        """An older cache version may hold a verdict a tag vouched for; it is discarded."""
+        cache = repo / CACHE_RELATIVE_PATH
+        build_inventory(repo, _CONFIG, now=NOW)
+        document = json.loads(cache.read_text(encoding="utf-8"))
+        for key in document["containment"]:
+            document["containment"][key] = {"containment": "in another remote ref", "ref": "x"}
+        document["version"] = 2
+        cache.write_text(json.dumps(document), encoding="utf-8")
+        record = build_inventory(repo, _CONFIG, now=NOW).records["dormant-tagged"]
+        assert record.containment == Containment.NOWHERE
 
     def test_in_default(self, repo: Path) -> None:
         """Reachable only through the helper: a branch in the default is merged first."""
@@ -719,19 +744,32 @@ class TestEdges:
         with pytest.raises(branch_inventory.BranchInventoryError):
             branch_inventory._parse_listing(row + row + "\n")
 
-    def test_a_failed_tag_listing_raises(self, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_git_call_reads_tags(self, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Tags are neither containment nor part of its cache key, so none is listed."""
         real = run_git
+        calls: list[tuple[str, ...]] = []
 
-        def no_tags(
+        def recording(
             cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
         ) -> subprocess.CompletedProcess[str]:
-            if args[0] == "for-each-ref" and args[-1] == "refs/tags":
-                return subprocess.CompletedProcess(list(args), 1, "", "boom")
+            calls.append(args)
             return real(cwd, *args, timeout=timeout)
 
-        monkeypatch.setattr(branch_inventory, "run_git", no_tags)
-        with pytest.raises(branch_inventory.BranchInventoryError):
-            build_inventory(repo, _CONFIG, now=NOW)
+        monkeypatch.setattr(branch_inventory, "run_git", recording)
+        cache = repo / CACHE_RELATIVE_PATH
+        if cache.exists():
+            cache.unlink()
+        build_inventory(repo, _CONFIG, now=NOW)
+        assert not [args for args in calls if any("refs/tags" in arg for arg in args)]
+
+    def test_containment_cache_key_ignores_tags(self, repo: Path) -> None:
+        rows = branch_inventory._list_refs(repo, "origin", None)
+        before = branch_inventory._refs_hash(rows)
+        _git(repo, "tag", "cache-key-probe", "live")
+        try:
+            assert branch_inventory._refs_hash(rows) == before
+        finally:
+            _git(repo, "tag", "-d", "cache-key-probe")
 
     def test_log_failure_is_no_facts(self, repo: Path) -> None:
         assert branch_inventory._pair_facts(repo, "live", "no-such", want_lines=True) is None

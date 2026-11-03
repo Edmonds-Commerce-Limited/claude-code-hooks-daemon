@@ -1493,3 +1493,166 @@ class TestASameNamedTagCannotHijackTheProof:
             "the branch was deleted, not advanced — the diagnosis must not say "
             f"otherwise: {blockers}"
         )
+
+
+def _fail_git_subcommand(monkeypatch: pytest.MonkeyPatch, subcommand: str) -> None:
+    """Make every ``git <subcommand>`` call inside branch_safety exit 128."""
+    real = branch_safety._git
+
+    def failing(repo: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if args and args[0] == subcommand:
+            return subprocess.CompletedProcess(list(args), 128, "", "fatal: simulated")
+        return real(repo, *args, **kwargs)
+
+    monkeypatch.setattr(branch_safety, "_git", failing)
+
+
+def _evil_merge_branch(repo: Path, name: str, *, evil: bool) -> None:
+    """Every plain commit of ``name`` is cherry-picked into main; the merge is not.
+
+    With ``evil`` the merge commit adds a file main never receives, content that
+    ``git cherry`` cannot see because it never lists merges (Plan 00558).
+    """
+    _git(repo, "checkout", "-b", name)
+    _commit(repo, f"{name}-a.txt", "a\n", "A")
+    _git(repo, "checkout", "-b", f"{name}-side", "main")
+    _commit(repo, f"{name}-y.txt", "y\n", "Y")
+    _git(repo, "checkout", name)
+    _git(repo, "merge", "--no-ff", "--no-commit", f"{name}-side")
+    if evil:
+        (repo / f"{name}-evil.txt").write_text("only in the merge\n", encoding="utf-8")
+        _git(repo, "add", f"{name}-evil.txt")
+    _git(repo, "commit", "-m", "merge side")
+    _git(repo, "checkout", "main")
+    _git(repo, "cherry-pick", f"{name}^1")
+    _git(repo, "cherry-pick", f"{name}-side")
+    _git(repo, "branch", "-D", f"{name}-side")
+
+
+class TestPatchEquivalenceFailsClosed:
+    """Plan 00558 Task 3.1: the two fail-open gaps in the patch-equivalent tier."""
+
+    def test_a_failed_git_cherry_is_not_patch_equivalent(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _unproven_branch(repo, "novel")
+        _fail_git_subcommand(monkeypatch, "cherry")
+        result = classify_branch(repo, "novel")
+        assert result.tier == TIER_UNPROVEN
+        assert result.is_safe is False
+
+    def test_a_failed_merge_listing_is_not_patch_equivalent(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _git(repo, "checkout", "-b", "picked")
+        _commit(repo, "picked.txt", "picked\n", "Pick me")
+        _git(repo, "checkout", "main")
+        _git(repo, "cherry-pick", "picked")
+        _commit(repo, "picked.txt", "moved on\n", "Main moves the file on")
+        _fail_git_subcommand(monkeypatch, "rev-list")
+        assert classify_branch(repo, "picked").tier != TIER_PATCH_EQUIVALENT
+
+    def test_an_evil_merge_is_not_patch_equivalent(self, repo: Path) -> None:
+        _evil_merge_branch(repo, "evil", evil=True)
+        result = classify_branch(repo, "evil")
+        assert result.tier == TIER_UNPROVEN
+        assert "evil-evil.txt" in result.content_unique_paths
+
+    def test_an_evil_merge_branch_is_never_deleted(self, repo: Path) -> None:
+        _evil_merge_branch(repo, "evil", evil=True)
+        report = delete_branches(repo, ["evil"], bundle_path=None)
+        assert report.refused is True
+        assert "evil" in _local_branches(repo)
+
+    def test_a_clean_merge_falls_through_to_content_preserved(self, repo: Path) -> None:
+        """A merge is never patch-equivalent, but every byte is in main, so it is provable."""
+        _evil_merge_branch(repo, "clean", evil=False)
+        assert classify_branch(repo, "clean").tier == TIER_CONTENT_PRESERVED
+
+
+class TestIntegrationLineTargets:
+    """``targets`` makes "merged into an integration line" a proof tier."""
+
+    @staticmethod
+    def _line_with(repo: Path, name: str, *, cherry_pick: bool = False) -> None:
+        _git(repo, "branch", "release/x", "main")
+        _git(repo, "checkout", "-b", name)
+        _commit(repo, f"{name}.txt", f"{name}\n", f"Add {name}")
+        _git(repo, "checkout", "release/x")
+        if cherry_pick:
+            # Diverge first: a pick onto the same parent in the same second
+            # would reproduce the very same commit sha.
+            _commit(repo, "line-only.txt", "line\n", "Line moves on")
+            _git(repo, "cherry-pick", name)
+        else:
+            _git(repo, "merge", "--no-ff", "-m", f"Merge {name}", name)
+        _git(repo, "checkout", "main")
+
+    def test_without_the_line_a_branch_merged_only_there_is_unproven(self, repo: Path) -> None:
+        self._line_with(repo, "feat")
+        assert classify_branch(repo, "feat").tier == TIER_UNPROVEN
+
+    def test_merged_into_a_line_is_proven(self, repo: Path) -> None:
+        self._line_with(repo, "feat")
+        result = classify_branch(repo, "feat", targets=("main", "release/x"))
+        assert result.tier in (TIER_MERGED, TIER_MERGED_NOT_IN_HEAD)
+        assert result.is_safe is True
+        assert result.proven_against == "refs/heads/release/x"
+
+    def test_patch_equivalent_to_a_line_is_proven(self, repo: Path) -> None:
+        self._line_with(repo, "feat", cherry_pick=True)
+        result = classify_branch(repo, "feat", targets=("main", "release/x"))
+        assert result.tier == TIER_PATCH_EQUIVALENT
+        assert result.proven_against == "refs/heads/release/x"
+
+    def test_delete_branches_accepts_targets(self, repo: Path) -> None:
+        self._line_with(repo, "feat")
+        report = delete_branches(repo, ["feat"], targets=("main", "release/x"), bundle_path=None)
+        assert report.deleted == ("feat",)
+
+    def test_targets_default_to_the_protected_ref(self, repo: Path) -> None:
+        _merged_branch(repo, "feature")
+        result = classify_branch(repo, "feature", protected_ref="main")
+        assert result.tier == TIER_MERGED
+        assert result.proven_against == "refs/heads/main"
+
+    def test_an_empty_target_list_is_rejected(self, repo: Path) -> None:
+        _merged_branch(repo, "feature")
+        with pytest.raises(ValueError, match="target"):
+            classify_branch(repo, "feature", targets=())
+
+
+class TestCleanupKeywords:
+    """``ignore_worktree`` and ``content_tier`` serve the merge cleanup (Plan 00558)."""
+
+    def test_ignore_worktree_proves_a_branch_held_by_a_worktree(self, repo: Path) -> None:
+        _merged_branch(repo, "wt-branch")
+        _git(repo, "worktree", "add", str(repo.parent / "wt"), "wt-branch")
+        assert classify_branch(repo, "wt-branch").refusal == REFUSAL_WORKTREE
+        result = classify_branch(repo, "wt-branch", ignore_worktree=True)
+        assert result.refusal is None
+        assert result.tier == TIER_MERGED
+
+    def test_ignore_worktree_never_skips_the_current_branch_refusal(self, repo: Path) -> None:
+        assert classify_branch(repo, "main", ignore_worktree=True).refusal == (
+            REFUSAL_CURRENT_BRANCH
+        )
+
+    def test_without_the_content_tier_a_content_preserved_branch_is_unproven(
+        self, repo: Path
+    ) -> None:
+        TestContentPreservedTier._branch_duplicating_main_content(repo, "dup")
+        result = classify_branch(repo, "dup", content_tier=False)
+        assert result.tier == TIER_UNPROVEN
+        assert "content tier was not run" in result.detail
+
+    def test_without_the_content_tier_merged_is_still_proven(self, repo: Path) -> None:
+        _merged_branch(repo, "feature")
+        assert classify_branch(repo, "feature", content_tier=False).tier == TIER_MERGED
+
+    def test_delete_branches_passes_content_tier_through(self, repo: Path) -> None:
+        TestContentPreservedTier._branch_duplicating_main_content(repo, "dup")
+        report = delete_branches(repo, ["dup"], content_tier=False)
+        assert report.refused is True
+        assert report.deleted == ()
+        assert "dup" in _local_branches(repo)
