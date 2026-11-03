@@ -63,7 +63,12 @@ class _FakeGit:
 def _listing_of(tips: dict[str, str]) -> Callable[[tuple[str, ...]], Any]:
     def listing(args: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         wanted = args[2:]
-        return _done(0, "".join(f"{tip}\trefs/heads/{n}\n" for n, tip in tips.items() if f"refs/heads/{n}" in wanted))
+        return _done(
+            0,
+            "".join(
+                f"{tip}\trefs/heads/{n}\n" for n, tip in tips.items() if f"refs/heads/{n}" in wanted
+            ),
+        )
 
     return listing
 
@@ -87,7 +92,7 @@ def test_many_branches_cost_one_ls_remote(
     install: Callable[[_FakeGit], _FakeGit], tmp_path: Path
 ) -> None:
     names = [f"b{i}" for i in range(40)]
-    fake = install(_FakeGit(_listing_of({n: _TIP for n in names})))
+    fake = install(_FakeGit(_listing_of(dict.fromkeys(names, _TIP))))
     result = _handle("git push origin --delete " + " ".join(names), tmp_path)
     assert result.decision == "allow"
     assert len(fake.ls_remote_calls) == 1
@@ -162,7 +167,7 @@ def test_a_huge_delete_is_chunked_not_one_giant_argv(
     install: Callable[[_FakeGit], _FakeGit], tmp_path: Path
 ) -> None:
     names = [f"b{i}" for i in range(1200)]
-    fake = install(_FakeGit(_listing_of({n: _TIP for n in names})))
+    fake = install(_FakeGit(_listing_of(dict.fromkeys(names, _TIP))))
     result = _handle("git push origin --delete " + " ".join(names), tmp_path)
     assert result.decision == "allow"
     assert len(fake.ls_remote_calls) == 3
