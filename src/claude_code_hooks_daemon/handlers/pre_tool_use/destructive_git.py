@@ -13,6 +13,7 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.branch_cleanup import preview_paths, worktree_blockers
+from claude_code_hooks_daemon.core.evacuation import EvacuationMatch, evacuate_then_destroy
 from claude_code_hooks_daemon.core.force_removal import (
     ALL_HOLDERS,
     REMOTE_HOLDERS,
@@ -391,7 +392,17 @@ _PUSH_DELETE_VERBOSE: Final[str] = (
     "Local clean-up is not affected: `git tag -d <tag>` and `git branch -d <name>` only touch "
     "this checkout and are allowed."
 )
+_EVACUATE_VERBOSE: Final[str] = (
+    "This command writes a worktree's or branch's work out to a file no repository tracks "
+    "(a patch, a diff, a `tee` copy) and then destroys the worktree or branch it came from. "
+    "History, review and the branch's remote copy are traded for one loose file that nothing "
+    "checks and the next clean-up deletes.\n\n"
+    "To proceed: commit the work on the lane's branch and push it (or merge it), then remove "
+    "the worktree or branch in its own command. If the work should not be kept, ask a human "
+    "to remove it. `branches.evacuation.mode` is `block`, `warn` or `off`."
+)
 _VERBOSE_OVERRIDES: Final[dict[str, str]] = {
+    RuleID.GIT_EVACUATE_THEN_DESTROY: _EVACUATE_VERBOSE,
     RuleID.GIT_BRANCH_FORCE_DELETE: _BRANCH_DELETE_VERBOSE,
     RuleID.GIT_PUSH_DELETE_REMOTE: _PUSH_DELETE_VERBOSE,
     RuleID.GIT_WORKTREE_REMOVE_FORCE: _WORKTREE_REMOVE_VERBOSE,
@@ -403,6 +414,7 @@ _LOSSLESS_WHEN_PROVEN: Final[frozenset[str]] = frozenset(
     {RuleID.GIT_BRANCH_FORCE_DELETE, RuleID.GIT_WORKTREE_REMOVE_FORCE}
 )
 _MODE_OFF: Final[str] = "off"
+_MODE_WARN: Final[str] = "warn"
 
 
 class _Unverifiable(Exception):
@@ -1111,6 +1123,14 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
         "Commit, push or deliberately delete each listed path, then remove",
     ),
     (
+        RuleID.GIT_EVACUATE_THEN_DESTROY,
+        "one command that copies a worktree's or branch's work to an untracked file "
+        "(`git diff`/`format-patch`/`stash show -p`/`show` by redirect, `tee` or `-o`) and "
+        "then destroys that worktree or branch",
+        "The work survives only as an unreviewed patch file outside history",
+        "Commit or push the work on the lane's branch, then remove it; or ask a human",
+    ),
+    (
         RuleID.GIT_DESTRUCTIVE_UNREADABLE,
         "a git command that may destroy changes and cannot be read in full",
         "Fail closed: a command this handler cannot parse might be any of the rules above",
@@ -1266,7 +1286,29 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         if not command or "git" not in command.lower():
             return False
 
-        return self._match_reason(command) is not None
+        if self._match_reason(command) is not None:
+            return True
+        # An `rm -r` of a worktree matches no git pattern; only its evacuation makes it ours.
+        return self._evacuation(command, hook_input) is not None
+
+    def _evacuation(self, command: str, hook_input: dict[str, Any]) -> EvacuationMatch | None:
+        """The evacuate-then-destroy shape in ``command``, unless the mode turns it off."""
+        if self._branches.evacuation.mode == _MODE_OFF:
+            return None
+        try:
+            cwd = self._cwd(hook_input)
+        except RuntimeError as exc:
+            logger.warning("destructive_git: evacuation not judged: %s", exc)
+            return None
+        return evacuate_then_destroy(command, cwd)
+
+    @staticmethod
+    def _evacuation_note(found: EvacuationMatch) -> str:
+        return _with_principle(
+            f"`{found.evacuation}` writes the work to `{found.landing}`, which nothing tracks, "
+            f"and `{found.destruction}` then destroys its source. Commit or push the work on "
+            "the lane's branch instead, or ask a human."
+        )
 
     def get_rules(self) -> list[Rule]:
         """Return the Rule objects backing this handler's blocking behaviour.
@@ -1293,6 +1335,23 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         if not command:
             return GatingResult(decision=Decision.ALLOW)
 
+        # Evacuate then destroy (DESIGN section 13) is judged before any lossless allowance:
+        # a removal that loses nothing to git has still moved the work out of history.
+        found = self._evacuation(command, hook_input)
+        if found is None:
+            return self._judge(command, hook_input)
+        note = self._evacuation_note(found)
+        if self._branches.evacuation.mode != _MODE_WARN:
+            return self._deny(RuleID.GIT_EVACUATE_THEN_DESTROY, note, hook_input)
+        if not self._match_rule_ids(command):
+            return GatingResult(decision=Decision.ALLOW, context=[note])
+        result = self._judge(command, hook_input)
+        if result.decision == Decision.ALLOW:
+            return GatingResult(decision=Decision.ALLOW, context=[note])
+        return result
+
+    def _judge(self, command: str, hook_input: dict[str, Any]) -> GatingResult:
+        """The destructive-pattern verdict, with each rule's lossless allowance."""
         # Both matches() and handle() consume the same ordered mapping, so they
         # can never drift on which pattern matched first.
         rule_ids = self._match_rule_ids(command)
@@ -1313,7 +1372,6 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 reason=f"{self._formatter.headline(unreadable)}\n\n{_GENERIC_DESTRUCTIVE_REASON}",
                 rule=unreadable.rule_id,
             )
-        rule = self._rules_by_id[rule_id]
 
         note: str | None = None
         branches = self._branches
@@ -1328,7 +1386,6 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             if judged is None:
                 return GatingResult(decision=Decision.ALLOW)
             rule_id, note = judged
-            rule = self._rules_by_id[rule_id]
         elif rule_ids == [RuleID.GIT_PUSH_DELETE_REMOTE]:
             # A remote delete has the same safe case, judged only when it is the sole rule.
             try:
@@ -1339,6 +1396,11 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             if note is None:
                 return GatingResult(decision=Decision.ALLOW)
 
+        return self._deny(rule_id, note, hook_input)
+
+    def _deny(self, rule_id: str, note: str | None, hook_input: dict[str, Any]) -> GatingResult:
+        """Deny under ``rule_id``: verbose on its first fire for an agent, terse after."""
+        rule = self._rules_by_id[rule_id]
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
 
@@ -1375,10 +1437,23 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "| `git push --force` / `git push <remote> +<refspec>` "
             "| Can overwrite remote history and destroy teammates' work |\n"
             "| `git branch -D` / `git update-ref -d refs/heads/<name>` "
-            "| ALLOWED when every named branch's tip is reachable from a remote-tracking "
-            "ref, judged in the repository the command runs in (`git -C`, `cd`); otherwise "
-            "denied, naming each branch to push first (`git push -u origin <name>`). Any "
-            "check failure denies. Lowercase `-d` is the merge-checked delete |\n"
+            "| ALLOWED when every named branch's tip is reachable from any surviving "
+            "branch, tag or remote-tracking ref (refs the same command deletes do not "
+            "count), judged in the repository the command runs in (`git -C`, `cd`); "
+            "otherwise denied, naming each branch with the commits it would lose. Any "
+            "check failure denies. Lowercase `-d` is the merge-checked delete. "
+            "`branches.force_removal.mode: off` trusts only remote-tracking refs |\n"
+            "| `git worktree remove [--force]` "
+            "| ALLOWED when nothing would be lost: every ignored entry matches a "
+            "`branches.cleanup_after_merge.regenerable` glob, and when forced the status "
+            "is clean and the HEAD is held by a surviving ref. Otherwise denied "
+            "(R-GIT-WORKTREE-REMOVE-FORCE), listing each path to commit, push or delete |\n"
+            "| copy out, then destroy, in ONE command "
+            "| `git diff`/`format-patch`/`stash show -p`/`show` written by redirect, `tee` or "
+            "`-o` to an untracked, ignored or out-of-repo file, followed by `worktree "
+            "remove`, `branch -d/-D`, `update-ref -d` or `rm -r` of that same worktree or "
+            "branch, is denied (R-GIT-EVACUATE-THEN-DESTROY): commit or push on the lane's "
+            "branch instead, or ask a human. `branches.evacuation.mode`: block, warn, off |\n"
             "| `git commit --amend` | Rewrites the previous commit — create a new commit instead |\n"
             "| `git checkout -f` / `git switch -f` / `git switch --discard-changes` "
             "| Discards every uncommitted change, naming no file |\n"
