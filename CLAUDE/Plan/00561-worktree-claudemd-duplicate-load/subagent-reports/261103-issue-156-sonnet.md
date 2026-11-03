@@ -19,6 +19,10 @@ AssertionError: scripts/setup_worktree.sh creates worktrees under untracked/work
 
 3 passed. `mypy --strict` on the test file: no issues.
 
+## Targeted QA (commit 5fd4be20c)
+
+`QA: 41/42 PASSED, 1/42 FAILED`. The single failure is `changed_tests`: 1563 passed, 0 failed, and the only complaint is `.claude/settings.local.json [too-broad]` as unmapped, the accepted non-blocker.
+
 ## Notes
 
 - I did not disagree with the approach.
