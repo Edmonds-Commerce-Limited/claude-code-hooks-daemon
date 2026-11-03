@@ -2,9 +2,11 @@
 
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -25,7 +27,8 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
     placement_problem,
 )
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
-from claude_code_hooks_daemon.utils.git_sync import default_branch
+from claude_code_hooks_daemon.daemon.branch_safety import matches_any_glob
+from claude_code_hooks_daemon.utils.git_sync import resolve_default_branch
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 
 logger = logging.getLogger(__name__)
@@ -346,10 +349,13 @@ _PUSH_DELETE_VERBOSE: Final[str] = (
     "This command deletes a branch or tag on the REMOTE repository. Other people and other "
     "machines share that ref, and nothing in this checkout (reflog included) restores it.\n\n"
     "It is ALLOWED when every named branch's remote-tracking ref is already merged into the "
-    "default branch (`git merge-base --is-ancestor`) AND `git ls-remote` shows the remote's "
-    "live tip equal to it (a stale tracking ref is denied: run `git fetch` and retry), judged "
-    "in the repository the command runs in; nothing is lost then. Tags, the default branch, an unmerged branch and anything "
-    "the check cannot establish are denied.\n\n"
+    "default branch or an integration line (`branches.integration_lines`; one "
+    "`git for-each-ref --merged` per target) AND `git ls-remote` shows the remote's live tip "
+    "equal to it (a stale tracking ref is denied: run `git fetch` and retry), judged in the "
+    "repository the command runs in; nothing is lost then. Tags, the default branch, an "
+    "integration line, an exempt or protected name (`branches.exempt`, "
+    "`branches.protected_names`), an unmerged branch and anything the check cannot "
+    "establish are denied.\n\n"
     "Otherwise do not run it, and do not look for another spelling of it. Stop and ask the "
     "human to run it themselves: tell them the remote, the ref and why it should go.\n\n"
     "Local clean-up is not affected: `git tag -d <tag>` and `git branch -d <name>` only touch "
@@ -569,58 +575,140 @@ def _branch_name(ref: str) -> str:
     return ref.removeprefix(HEADS_PREFIX)
 
 
-def _merged_tracking_tip(
-    directory: Path, remote: str, ref: str, default: str
-) -> tuple[str | None, str | None]:
-    """``(tracking_tip, None)`` when ``ref`` is merged, else ``(None, problem)``.
+def _refusal(name: str, default: str, branches: BranchesConfig) -> str | None:
+    """Why ``name`` may never be deleted remotely by an agent, whatever the proof."""
+    if name == default:
+        return f"`{name}` is the default branch"
+    if matches_any_glob(name, branches.integration_lines):
+        return f"`{name}` is an integration line (`branches.integration_lines`)"
+    if matches_any_glob(name, branches.exempt):
+        return f"`{name}` is exempt (`branches.exempt`)"
+    if matches_any_glob(name, branches.protected_names):
+        return f"`{name}` is a protected name (`branches.protected_names`)"
+    return None
 
-    Merged means: the remote-tracking ref ``refs/remotes/<remote>/<ref>`` exists and
-    is an ancestor of the default branch (its remote-tracking ref or the local one).
-    Judged from local git only; the remote's live tip is checked afterwards, for all
-    branches at once, by :func:`_remote_tip_problems`. Fails closed: a missing ref, a
-    failing git and a timeout all give a reason.
-    """
+
+def _named_ref_problem(remote: str, ref: str, default: str, branches: BranchesConfig) -> str | None:
+    """Why ``ref`` cannot be judged or is refused outright, before any git runs."""
     name = _branch_name(ref)
     if not _LITERAL_BRANCH_NAME.fullmatch(remote):
-        return None, f"`{remote}` is not a literal remote name"
+        return f"`{remote}` is not a literal remote name"
     if name.startswith(_TAGS_PREFIX) or not _LITERAL_BRANCH_NAME.fullmatch(name):
-        return None, f"`{ref}` is not a literal branch name (tags are never deleted by an agent)"
-    if name == default:
-        return None, f"`{name}` is the default branch"
-    tag = run_git(
+        return f"`{ref}` is not a literal branch name (tags are never deleted by an agent)"
+    return _refusal(name, default, branches)
+
+
+_REF_FORMAT: Final[str] = "--format=%(objectname) %(objecttype) %(refname)"
+
+
+def _listed_refs(directory: Path, patterns: list[str]) -> dict[str, tuple[str, str]] | None:
+    """Map refname to ``(object, type)`` for every ref matching ``patterns``, in one call.
+
+    Keyed by the exact refname, so a pattern that also matches a longer ref never
+    lends it to another name. None when git fails or times out.
+    """
+    listing = run_git(
+        directory, "for-each-ref", _REF_FORMAT, *patterns, timeout=Timeout.GIT_CONTEXT
+    )
+    if listing.returncode != 0:
+        return None
+    refs: dict[str, tuple[str, str]] = {}
+    for line in listing.stdout.splitlines():
+        parts = line.split(" ", 2)
+        if len(parts) == 3:
+            refs[parts[2]] = (parts[0], parts[1])
+    return refs
+
+
+def _merged_into(directory: Path, target: str, refnames: list[str]) -> set[str] | None:
+    """Which of ``refnames`` are ancestors of ``target``: one ``for-each-ref --merged``.
+
+    None when git fails or times out.
+    """
+    merged = run_git(
         directory,
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        f"{_TAGS_PREFIX}{name}",
+        "for-each-ref",
+        f"--merged={target}",
+        "--format=%(refname)",
+        *refnames,
         timeout=Timeout.GIT_CONTEXT,
     )
-    if tag.returncode == 0:
-        return None, f"`{name}` is also the name of a tag, so the delete is ambiguous"
-    tracking = f"{_REMOTES_PREFIX}{remote}/{name}"
-    tip = run_git(
+    if merged.returncode != 0:
+        return None
+    return set(merged.stdout.splitlines())
+
+
+def _proof_targets(
+    remote: str, default: str, branches: BranchesConfig, refs: dict[str, tuple[str, str]]
+) -> list[str]:
+    """The existing refs a merged branch may be an ancestor of: default, then lines."""
+    tracking_prefix = f"{_REMOTES_PREFIX}{remote}/"
+    targets = [
+        ref
+        for ref in (f"{tracking_prefix}{default}", branch_ref(default))
+        if ref in refs and refs[ref][1] == "commit"
+    ]
+    for refname, (_object, kind) in refs.items():
+        line = refname.removeprefix(tracking_prefix)
+        if (
+            refname.startswith(tracking_prefix)
+            and kind == "commit"
+            and line not in (default, "HEAD")
+            and matches_any_glob(line, branches.integration_lines)
+        ):
+            targets.append(refname)
+    return targets
+
+
+def _merged_tracking_tips(
+    directory: Path, remote: str, names: list[str], default: str, branches: BranchesConfig
+) -> tuple[dict[str, str], list[str]]:
+    """``(name -> tracking tip for every proven name, problems for the rest)``.
+
+    Proven means: ``refs/remotes/<remote>/<name>`` exists, no tag shares the name, and
+    the tip is an ancestor of the default branch (its remote-tracking ref or the local
+    one) or of any existing ``refs/remotes/<remote>/<line>`` for an integration line.
+    One listing call, then one ``for-each-ref --merged`` per target over all the named
+    refs, so the cost does not grow with the number of branches. Judged from local git
+    only; the remote's live tip is checked afterwards by :func:`_remote_tip_problems`.
+    Fails closed: a missing ref, a failing git and a timeout all give a reason.
+    """
+    tracking = {name: f"{_REMOTES_PREFIX}{remote}/{name}" for name in names}
+    refs = _listed_refs(
         directory,
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        f"{tracking}^{{commit}}",
-        timeout=Timeout.GIT_CONTEXT,
+        [
+            f"{_REMOTES_PREFIX}{remote}",
+            branch_ref(default),
+            *[f"{_TAGS_PREFIX}{name}" for name in names],
+        ],
     )
-    if tip.returncode != 0 or not tip.stdout.strip():
-        return None, f"`{name}` has no remote-tracking ref `{tracking}` here"
-    local_tip = tip.stdout.strip()
-    for target in (f"{_REMOTES_PREFIX}{remote}/{default}", branch_ref(default)):
-        merged = run_git(
-            directory,
-            "merge-base",
-            "--is-ancestor",
-            local_tip,
-            target,
-            timeout=Timeout.GIT_CONTEXT,
-        )
-        if merged.returncode == 0:
-            return local_tip, None
-    return None, f"`{name}` is not merged into `{default}`"
+    if refs is None:
+        return {}, [f"`git for-each-ref` failed, so `{name}` could not be checked" for name in names]
+    tips: dict[str, str] = {}
+    problems: list[str] = []
+    for name in names:
+        listed = refs.get(tracking[name])
+        if f"{_TAGS_PREFIX}{name}" in refs:
+            problems.append(f"`{name}` is also the name of a tag, so the delete is ambiguous")
+        elif listed is None or listed[1] != "commit":
+            problems.append(f"`{name}` has no remote-tracking ref `{tracking[name]}` here")
+        else:
+            tips[name] = listed[0]
+    proven: set[str] = set()
+    if tips:
+        for target in _proof_targets(remote, default, branches, refs):
+            merged = _merged_into(directory, target, [tracking[name] for name in tips])
+            if merged is None:
+                failed = [f"`git for-each-ref --merged={target}` failed, so `{n}` could not be "
+                          "checked" for n in tips]
+                return {}, problems + failed
+            proven |= merged
+    lines = " or any integration line" if branches.integration_lines else ""
+    for name in list(tips):
+        if tracking[name] not in proven:
+            del tips[name]
+            problems.append(f"`{name}` is not merged into `{default}`{lines}")
+    return tips, problems
 
 
 def _live_remote_tips(directory: Path, remote: str, names: list[str]) -> dict[str, str]:
@@ -672,7 +760,7 @@ def _remote_tip_problems(directory: Path, remote: str, local_tips: dict[str, str
     ]
 
 
-def _remote_delete_note(command: str, cwd: Path) -> str | None:
+def _remote_delete_note(command: str, cwd: Path, branches: BranchesConfig) -> str | None:
     """None when every remote ref ``command`` deletes is merged, else why not."""
     if _SUBSTITUTION.search(command):
         return _unverified("a command or process substitution can run a delete this reading misses")
@@ -694,23 +782,29 @@ def _remote_delete_note(command: str, cwd: Path) -> str | None:
         directory = invocation_directory(run, cwd)
         if not path_is_dir(directory, unreadable_means=False):
             return _unverified(f"`{directory}` is not a directory")
-        default = default_branch(directory)
+        default = resolve_default_branch(branches, directory)
         if default is None:
             return _unverified("the default branch could not be determined")
-        local_tips: dict[str, str] = {}
+        judged: list[str] = []
         for ref in refs:
-            tip, problem = _merged_tracking_tip(directory, remote, ref, default)
+            problem = _named_ref_problem(remote, ref, default, branches)
             if problem is not None:
                 problems.append(problem)
-            elif tip is not None:
-                local_tips[_branch_name(ref)] = tip
-        problems.extend(_remote_tip_problems(directory, remote, local_tips))
+            elif _branch_name(ref) not in judged:
+                judged.append(_branch_name(ref))
+        if judged:
+            local_tips, unproven = _merged_tracking_tips(
+                directory, remote, judged, default, branches
+            )
+            problems.extend(unproven)
+            problems.extend(_remote_tip_problems(directory, remote, local_tips))
     if not problems:
         return None
     return (
         "Not deleted: " + "; ".join(problems) + ". A remote branch that is already merged into "
-        "the default branch may be deleted by an agent; an unmerged branch (or any tag) is "
-        "human-only, so ask the human to run it."
+        "the default branch or an integration line may be deleted by an agent; an unmerged "
+        "branch, the default, an integration line, an exempt or protected name (or any tag) "
+        "is human-only, so ask the human to run it."
     )
 
 
@@ -854,6 +948,9 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         )
         self._rules_by_id: dict[str, Rule] = {rule.rule_id: rule for rule in self._rules}
         self._formatter = RuleFormatter()
+        # Injected by the registry from the top-level `branches:` block (Plan 00558);
+        # the model defaults apply when the config has none.
+        self._branches: BranchesConfig = BranchesConfig()
 
     @property
     def destructive_patterns(self) -> tuple[re.Pattern[str], ...]:
@@ -1014,10 +1111,15 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
 
         note: str | None = None
         # A remote delete has the same safe case, judged only when it is the sole rule.
-        check = (
+        branches = self._branches
+        check: Callable[[str, Path], str | None] | None = (
             _branch_delete_note
             if not others
-            else _remote_delete_note if rule_ids == [RuleID.GIT_PUSH_DELETE_REMOTE] else None
+            else (
+                (lambda text, cwd: _remote_delete_note(text, cwd, branches))
+                if rule_ids == [RuleID.GIT_PUSH_DELETE_REMOTE]
+                else None
+            )
         )
         if check is not None:
             try:
@@ -1078,11 +1180,13 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "| `git filter-branch` / `git filter-repo` | Rewrites every commit in the history |\n"
             "| `git push --delete <name>` / `git push <remote> :<name>` "
             "| ALLOWED when every named branch is already merged into the default branch "
-            "(its `refs/remotes/<remote>/<name>` is an ancestor of the default branch, "
+            "or an integration line (its `refs/remotes/<remote>/<name>` is an ancestor of "
+            "the default branch or of a `branches.integration_lines` ref, "
             "and `git ls-remote` confirms the remote's live tip equals it, so a stale "
             "tracking ref is denied until `git fetch`; `git -C` and `cd` are honoured). "
             "Otherwise HUMAN ONLY — an "
-            "unmerged branch, a tag, the default branch, a missing remote-tracking ref or "
+            "unmerged branch, a tag, the default branch, an integration line, an exempt or "
+            "protected name, a missing remote-tracking ref or "
             "any check failure is denied: stop and ask the human to run it. "
             "`git push --mirror` and `git push --prune` delete remote refs the command "
             "never names, so they are always HUMAN ONLY. Local "
