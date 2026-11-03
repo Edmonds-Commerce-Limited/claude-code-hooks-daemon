@@ -37,6 +37,11 @@ from claude_code_hooks_daemon.core.handler_scope import (
 )
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname, hostname_matches
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.regenerable_paths import (
+    DEFAULT_REGENERABLE_STORES,
+    NEVER_REGENERABLE,
+    never_regenerable_violations,
+)
 from claude_code_hooks_daemon.utils.relay_host import relay_supported_by_host
 from claude_code_hooks_daemon.utils.repo_relative_path import (
     normalise_repo_relative_path as _normalise_repo_relative_path,
@@ -2343,11 +2348,33 @@ class BranchEvacuationConfig(BaseModel):
 
 
 class BranchCleanupAfterMergeConfig(BaseModel):
-    """``branches.cleanup_after_merge``: what happens to a branch once merged."""
+    """``branches.cleanup_after_merge``: what happens to a branch once merged.
+
+    ``regenerable`` names the ignored stores ``branch-sweep --clean`` may lose
+    when it removes a linked worktree (dialect: ``utils/regenerable_paths``).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["act", "advise", "off"] = Field(default="advise")
+    regenerable: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_REGENERABLE_STORES),
+        description="Worktree-relative globs of ignored stores rebuilt on demand",
+    )
+
+    @field_validator("regenerable")
+    @classmethod
+    def reject_scratch(cls, value: list[str]) -> list[str]:
+        """A blank entry, or one covering the scratch notes, would lose agent work."""
+        if any(not entry.strip("/ ") for entry in value):
+            raise ValueError("regenerable: an entry must name a path, not be blank")
+        covering = never_regenerable_violations(value)
+        if covering:
+            raise ValueError(
+                f"regenerable: {covering} would cover {NEVER_REGENERABLE}, "
+                "which always blocks a worktree removal"
+            )
+        return value
 
 
 class BranchSweepConfig(BaseModel):

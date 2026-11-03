@@ -75,6 +75,7 @@ _BRANCHES_BLOCK = (
     "    mode: block              # block | warn | off\n"
     "  cleanup_after_merge:\n"
     "    mode: advise             # act | advise | off\n"
+    "    # regenerable: [...]     # ignored stores branch-sweep --clean may lose\n"
     "  sweep:\n"
     "    budget_ms: 3000          # wall-clock budget for the per-branch inventory steps\n"
     "    behind_threshold: 50     # commits behind the default branch that earn a warning\n"

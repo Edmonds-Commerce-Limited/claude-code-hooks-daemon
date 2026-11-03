@@ -11,7 +11,8 @@ cannot disagree about what is safe:
   is issue #155. It advises instead.
 - ``branch-sweep --clean`` deletes the merged AND patch-equivalent tiers behind a
   recovery bundle, and removes a linked worktree only when it is clean and every
-  ignored file in it lies under a regenerable store (:data:`REGENERABLE_STORES`).
+  ignored file in it lies under a regenerable store
+  (``branches.cleanup_after_merge.regenerable``).
 
 Neither runs the content-preserved tier (a walk of every reachable object), so
 only a merged or patch-equivalent branch can ever be deleted here.
@@ -19,7 +20,6 @@ only a merged or patch-equivalent branch can ever be deleted here.
 
 from __future__ import annotations
 
-import fnmatch
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
     parse_worktree_porcelain,
     run_git,
 )
+from claude_code_hooks_daemon.utils.regenerable_paths import is_regenerable
 
 CleanupMode = Literal["act", "advise", "off"]
 
@@ -56,26 +57,7 @@ CLEAN_STATES = frozenset(
     {BranchState.MERGED_DEFAULT, BranchState.MERGED_LINE, BranchState.PATCH_EQUIVALENT}
 )
 
-#: Ignored stores a worktree removal may destroy, because each is rebuilt on demand.
-#: A directory entry ends in ``/``; the rest are file-name globs under ``untracked/``.
-REGENERABLE_STORES = (
-    "untracked/venv-*/",
-    "untracked/qa/",
-    "untracked/docs-qa/",
-    "untracked/branch-inventory/",
-    "untracked/daemon-*",
-    "untracked/events-*",
-    "__pycache__/",
-    ".pytest_cache/",
-    ".mypy_cache/",
-    ".ruff_cache/",
-)
-
-#: Cache directories regenerable wherever they sit in the tree.
-_ANYWHERE_STORES = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
 _UNTRACKED = "untracked"
-_UNTRACKED_DIR_STORES = ("venv-*", "qa", "docs-qa", "branch-inventory")
-_UNTRACKED_FILE_STORES = ("daemon-*", "events-*")
 
 #: Blocking paths listed per skipped worktree before the rest are counted.
 BLOCKER_PREVIEW = 10
@@ -162,22 +144,6 @@ def linked_worktrees(repo: Path) -> dict[str, Path]:
     return {r.branch: r.path for r in records if r.branch is not None}
 
 
-def is_regenerable(entry: str) -> bool:
-    """Whether an ignored ``ls-files --directory`` entry lies under a regenerable store."""
-    parts = entry.rstrip("/").split("/")
-    if any(part in _ANYWHERE_STORES for part in parts[:-1]) or (
-        entry.endswith("/") and parts[-1] in _ANYWHERE_STORES
-    ):
-        return True
-    if len(parts) < 2 or parts[0] != _UNTRACKED:
-        return False
-    store = parts[1]
-    inside_dir = entry.endswith("/") or len(parts) > 2
-    if inside_dir and any(fnmatch.fnmatchcase(store, p) for p in _UNTRACKED_DIR_STORES):
-        return True
-    return any(fnmatch.fnmatchcase(store, p) for p in _UNTRACKED_FILE_STORES)
-
-
 def _expand(root: Path, entry: str) -> list[str]:
     """Open a collapsed ``untracked/`` entry one level, so its stores can be told apart.
 
@@ -191,11 +157,11 @@ def _expand(root: Path, entry: str) -> list[str]:
     return [f"{entry}{c.name}/" if c.is_dir() else f"{entry}{c.name}" for c in children]
 
 
-def worktree_blockers(path: Path) -> tuple[str, ...]:
+def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]:
     """Paths a removal of the worktree at ``path`` would lose.
 
     Modified and untracked files (git refuses those anyway) and every ignored
-    entry outside :data:`REGENERABLE_STORES`. A git failure is itself a blocker:
+    entry outside the ``regenerable`` globs. A git failure is itself a blocker:
     an unread tree is never called clean.
     """
     status = run_git(path, "status", "--porcelain")
@@ -208,7 +174,7 @@ def worktree_blockers(path: Path) -> tuple[str, ...]:
     if ignored.returncode != 0:
         return (*dirty, f"<git ls-files failed: {ignored.stderr.strip()}>")
     entries = [e for line in ignored.stdout.splitlines() if line for e in _expand(path, line)]
-    kept = [entry for entry in entries if not is_regenerable(entry)]
+    kept = [entry for entry in entries if not is_regenerable(entry, regenerable)]
     return (*dirty, *kept)
 
 
@@ -356,7 +322,7 @@ def clean_sweep(
     for name in candidates:
         held_by = worktrees.get(name)
         if held_by is not None:
-            blockers = worktree_blockers(held_by)
+            blockers = worktree_blockers(held_by, config.cleanup_after_merge.regenerable)
             if blockers:
                 skipped.append(
                     f"{name}: the worktree {held_by} holds {len(blockers)} path(s) a removal "
@@ -431,14 +397,12 @@ __all__ = [
     "BLOCKER_PREVIEW",
     "CLEAN_STATES",
     "MERGED_TIERS",
-    "REGENERABLE_STORES",
     "SWEEP_CLEAN_COMMAND",
     "CleanupMode",
     "CleanupReport",
     "clean_sweep",
     "cleanup_after_merge",
     "cleanup_targets",
-    "is_regenerable",
     "linked_worktrees",
     "merge_target_qualifies",
     "policy_refusal",

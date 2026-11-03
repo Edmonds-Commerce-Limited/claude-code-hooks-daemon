@@ -61,6 +61,13 @@ config_changes:
       description: The evacuate-then-destroy shape.
     - key: branches.cleanup_after_merge
       description: What happens to a work branch once merged (`mode` advise).
+    - key: branches.cleanup_after_merge.regenerable
+      description: >-
+        Worktree-relative globs naming the ignored stores `branch-sweep --clean`
+        may lose when it removes a linked worktree (venvs, QA output, caches,
+        `.claude/hooks-daemon/`, `*.egg-info/`). Any other ignored path blocks
+        the removal. `untracked/scratch/` always blocks: a list covering it
+        fails the config load.
     - key: branches.sweep
       description: >-
         The inventory pass's wall-clock `budget_ms` (3000) and the

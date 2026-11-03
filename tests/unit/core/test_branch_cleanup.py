@@ -18,7 +18,6 @@ from claude_code_hooks_daemon.core.branch_cleanup import (
     clean_sweep,
     cleanup_after_merge,
     cleanup_targets,
-    is_regenerable,
     merge_target_qualifies,
     policy_refusal,
     render,
@@ -39,6 +38,7 @@ _ENV = {
 }
 
 _CONFIG = BranchesConfig(default="main", integration_lines=["release/*"], exempt=["users/*"])
+_REGENERABLE = _CONFIG.cleanup_after_merge.regenerable
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -123,55 +123,34 @@ class TestCleanupTargets:
         assert cleanup_targets(repo, _CONFIG, "main") == ["main", "refs/heads/release/1"]
 
 
-class TestRegenerable:
-    @pytest.mark.parametrize(
-        "entry",
-        [
-            "untracked/venv-x-py313/",
-            "untracked/qa/",
-            "untracked/qa/report.json",
-            "untracked/docs-qa/",
-            "untracked/branch-inventory/cache.json",
-            "untracked/daemon-1234.sock",
-            "untracked/events-today.jsonl",
-            "src/pkg/__pycache__/",
-            ".pytest_cache/",
-            ".mypy_cache/",
-            ".ruff_cache/",
-        ],
-    )
-    def test_regenerable_stores(self, entry: str) -> None:
-        assert is_regenerable(entry) is True
-
-    @pytest.mark.parametrize(
-        "entry",
-        ["untracked/scratch/", "untracked/notes.md", "untracked/", "secret.env", "untracked/qa"],
-    )
-    def test_anything_else_blocks(self, entry: str) -> None:
-        assert is_regenerable(entry) is False
-
-
 class TestWorktreeBlockers:
     def test_a_clean_worktree_with_only_regenerable_files_has_none(self, repo: Path) -> None:
         _git(repo, "branch", "feat")
         path = _worktree(repo, "feat")
         (path / "untracked" / "qa").mkdir(parents=True)
         (path / "untracked" / "qa" / "out.txt").write_text("x\n", encoding="utf-8")
-        assert worktree_blockers(path) == ()
+        assert worktree_blockers(path, _REGENERABLE) == ()
 
     def test_scratch_notes_block(self, repo: Path) -> None:
         _git(repo, "branch", "feat")
         path = _worktree(repo, "feat")
         (path / "untracked" / "scratch").mkdir(parents=True)
         (path / "untracked" / "scratch" / "notes.md").write_text("x\n", encoding="utf-8")
-        assert worktree_blockers(path) == ("untracked/scratch/",)
+        assert worktree_blockers(path, _REGENERABLE) == ("untracked/scratch/",)
+
+    def test_the_configured_list_decides(self, repo: Path) -> None:
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        (path / "untracked" / "qa").mkdir(parents=True)
+        (path / "untracked" / "qa" / "out.txt").write_text("x\n", encoding="utf-8")
+        assert worktree_blockers(path, ["untracked/docs-qa/"]) == ("untracked/qa/",)
 
     def test_untracked_and_modified_files_block(self, repo: Path) -> None:
         _git(repo, "branch", "feat")
         path = _worktree(repo, "feat")
         (path / "new.txt").write_text("x\n", encoding="utf-8")
         (path / ".gitignore").write_text("changed\n", encoding="utf-8")
-        assert set(worktree_blockers(path)) == {"new.txt", ".gitignore"}
+        assert set(worktree_blockers(path, _REGENERABLE)) == {"new.txt", ".gitignore"}
 
 
 class TestCleanupAfterMerge:
@@ -293,10 +272,6 @@ class TestRender:
             assert part in text
 
 
-def test_module_exports_the_regenerable_stores() -> None:
-    assert "__pycache__/" in branch_cleanup.REGENERABLE_STORES
-
-
 def _failing_git(subcommand: str, monkeypatch: pytest.MonkeyPatch) -> None:
     real = branch_cleanup.run_git
 
@@ -333,10 +308,10 @@ class TestFailuresAndEdges:
         self, repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _failing_git("status", monkeypatch)
-        assert worktree_blockers(repo) == ("<git status failed: boom>",)
+        assert worktree_blockers(repo, _REGENERABLE) == ("<git status failed: boom>",)
         monkeypatch.undo()
         _failing_git("ls-files", monkeypatch)
-        assert worktree_blockers(repo) == ("<git ls-files failed: boom>",)
+        assert worktree_blockers(repo, _REGENERABLE) == ("<git ls-files failed: boom>",)
 
     def test_off_does_nothing(self, repo: Path) -> None:
         _merged(repo, "feat")
