@@ -47,12 +47,14 @@ class _FakeGit:
             assert kwargs["env"] == {"GIT_TERMINAL_PROMPT": "0"}
             assert kwargs["timeout"] > 0
             return self._listing(args)
-        if args[0] == "rev-parse" and args[3].startswith("refs/tags/"):
-            return _done(1)
-        if args[0] == "rev-parse":
-            return _done(0, _TIP + "\n")
-        if args[0] == "merge-base":
-            return _done(0)
+        if args[0] == "for-each-ref" and args[1].startswith("--merged="):
+            return _done(0, "".join(f"{a}\n" for a in args[3:]))
+        if args[0] == "for-each-ref":
+            # Every branch the command names is tracked at _TIP; no tag shares a name.
+            remote = args[2].removeprefix("refs/remotes/")
+            names = [a.removeprefix("refs/tags/") for a in args if a.startswith("refs/tags/")]
+            rows = [f"{_TIP} commit refs/remotes/{remote}/{n}\n" for n in [*names, "main"]]
+            return _done(0, "".join(rows))
         raise AssertionError(f"unexpected git call {args}")
 
     @property
@@ -77,7 +79,9 @@ def _listing_of(tips: dict[str, str]) -> Callable[[tuple[str, ...]], Any]:
 def install(monkeypatch: pytest.MonkeyPatch) -> Callable[[_FakeGit], _FakeGit]:
     def _install(fake: _FakeGit) -> _FakeGit:
         monkeypatch.setattr(destructive_git, "run_git", fake)
-        monkeypatch.setattr(destructive_git, "default_branch", lambda _directory: "main")
+        monkeypatch.setattr(
+            destructive_git, "resolve_default_branch", lambda _config, _directory: "main"
+        )
         return fake
 
     return _install
