@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 from pathlib import Path
 
@@ -127,6 +128,20 @@ class TestDirty:
         _touch(repo, "work", AGENT)
         assert _judge(repo).findings == ()
         assert (("work", StopCheck.DIRTY)) in _checks(_judge(repo, agent=AGENT))
+
+    def test_an_unknown_worktree_listing_is_not_called_clean(self, repo: Path) -> None:
+        _branch(repo, "work", push=True)
+        _touch(repo, "work")
+        cfg = BranchesConfig()
+        inventory = build_inventory(repo, cfg)
+        unknown = dataclasses.replace(
+            inventory.records["work"], worktree=None, worktree_known=False
+        )
+        inventory = dataclasses.replace(inventory, records={**inventory.records, "work": unknown})
+        judgement = judge_stop(
+            repo, inventory, cfg, session_id=SESSION, agent_id=None, budget=Timeout.GIT_CONTEXT
+        )
+        assert judgement.incomplete is True
 
 
 class TestUnpushed:

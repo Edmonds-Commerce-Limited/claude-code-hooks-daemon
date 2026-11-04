@@ -128,7 +128,8 @@ def _merged_commands(record: BranchRecord, remote: str) -> tuple[str, ...]:
 def _is_dirty(record: BranchRecord, budget: _Budget) -> bool | None:
     """Whether the branch's worktree has changes; None when unknown or out of budget."""
     if record.worktree is None:
-        return False
+        # A failed worktree listing says nothing about whether one exists.
+        return False if record.worktree_known else None
     result = budget.git(record.worktree, "status", "--porcelain")
     if result is None or result.returncode != 0:
         return None
