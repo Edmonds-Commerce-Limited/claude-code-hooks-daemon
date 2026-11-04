@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00562: cross clone plan number allocation](00562-cross-clone-plan-number-allocation/PLAN.md) - Not Started (#154, parked `agent-needs-human`: plan numbers collide across clones because both allocation sources are per-clone; owner to choose a read-only remote scan, a pushed reservation ref, or both)
+- [00562: cross clone plan number allocation](00562-cross-clone-plan-number-allocation/PLAN.md) - In Progress (#154: plan numbers collide across clones because both allocation sources are per-clone; owner chose a read-only remote scan after a fetch)
 
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - Not Started (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a consumption ledger with a stop gate shared with 00558, a scratch-shape allowlist and a SessionStart sweep)
 
