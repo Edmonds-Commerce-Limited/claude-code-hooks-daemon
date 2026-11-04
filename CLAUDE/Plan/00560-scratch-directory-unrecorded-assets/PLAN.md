@@ -124,6 +124,8 @@ Cheap changes that stop the steering before any gate exists.
 
 ## Open questions for the owner
 
+A plain-language version of these questions, for the owner to answer, is in [OWNER-DECISIONS.md](OWNER-DECISIONS.md).
+
 - **Q1. The non-plan fallback for a dispatch.** Options: a configured tracked directory (for example `CLAUDE/AgentReports/`), a GitHub issue or PR comment, or none (plan-less dispatches must name an issue). **Recommended:** a configured tracked directory, unset by default. While it is unset, a plan-less dispatch must name a plan folder or an issue, and the contract text says so.
 - **Q2. Does a `Read` of a file count as consumption?** **Recommended:** yes, because a capture is meant to be read back. It is safe only because Goal 6 stops a non-scratch shape being created in the first place (D1).
 - **Q3. Scope of the ignored root.** Options: `untracked/` only, or every gitignored path (`git check-ignore`). **Recommended:** configured roots, default `untracked/`; widen later if field reports show assets elsewhere.
