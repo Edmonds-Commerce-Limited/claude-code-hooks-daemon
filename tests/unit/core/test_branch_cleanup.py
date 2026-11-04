@@ -214,12 +214,44 @@ class TestWorktreeBlockers:
         (path / "untracked" / "gone-venv").symlink_to(tmp_path / "missing")
         assert worktree_blockers(path, ["untracked/lsp-venv/", "untracked/gone-venv/"]) == ()
 
-    def test_a_symlink_the_globs_do_not_name_still_blocks(self, repo: Path, tmp_path: Path) -> None:
+    def test_a_symlink_to_a_directory_the_globs_do_not_name_is_not_a_blocker(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """Removal only unlinks a symlink; its target outside the worktree survives."""
         _git(repo, "branch", "feat")
         path = _worktree(repo, "feat")
         (path / "untracked").mkdir()
-        (path / "untracked" / "notes").symlink_to(tmp_path)
-        assert worktree_blockers(path, ["untracked/lsp-venv/"]) == ("untracked/notes/",)
+        outside = tmp_path / "outside-dir"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("x\n", encoding="utf-8")
+        (path / "untracked" / "notes").symlink_to(outside)
+        assert worktree_blockers(path, ["untracked/lsp-venv/"]) == ()
+        assert (outside / "keep.txt").exists()
+
+    def test_a_seeded_symlink_to_a_file_outside_is_not_a_blocker(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        (repo / ".claude").mkdir()
+        (repo / ".claude" / "settings.json").write_text("{}\n", encoding="utf-8")
+        (repo / ".git" / "info" / "exclude").write_text("untracked/\n.claude/*.cfg\n")
+        _git(repo, "add", ".claude/settings.json")
+        _git(repo, "commit", "-q", "-m", "track .claude")
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        target = tmp_path / "shared.cfg"
+        target.write_text("x\n", encoding="utf-8")
+        (path / ".claude" / "seeded.cfg").symlink_to(target)
+        assert worktree_blockers(path, _REGENERABLE) == ()
+
+    def test_a_real_ignored_file_beside_a_symlink_still_blocks(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        (path / "untracked" / "scratch").mkdir(parents=True)
+        (path / "untracked" / "scratch" / "notes.md").write_text("x\n", encoding="utf-8")
+        (path / "untracked" / "link").symlink_to(tmp_path)
+        assert worktree_blockers(path, _REGENERABLE) == ("untracked/scratch/",)
 
 
 class TestCleanupAfterMerge:
