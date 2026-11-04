@@ -44,7 +44,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.branch_cleanup import policy_refusal
+from claude_code_hooks_daemon.core.branch_records import WORKTREE_CREATE_ROUTE, creator_route
 from claude_code_hooks_daemon.core.worktree_naming import is_worktree_create_name
 from claude_code_hooks_daemon.core.worktree_paths import WORKTREE_DIR_PATTERNS
 from claude_code_hooks_daemon.utils.git_repo import (
@@ -608,8 +611,31 @@ def _attached_branches(listing: str) -> set[str]:
     }
 
 
+def _prunable(repo_root: Path, name: str, base_branch: str, config: BranchesConfig) -> bool:
+    """Whether orphan pruning may consider ``name``.
+
+    The configured policy (default, integration lines, protected, exempt) always
+    applies. An ``agent-*`` branch is then eligible by its name; any other branch
+    only when its creator record says WorktreeCreate made it, because the
+    ``<slug>-<8 hex>`` shape alone also matches ``release-20261104``.
+    """
+    if policy_refusal(name, config, base_branch) is not None:
+        return False
+    if name.startswith(AGENT_BRANCH_PREFIX):
+        return True
+    try:
+        return creator_route(repo_root, name) == WORKTREE_CREATE_ROUTE
+    except RuntimeError:
+        # An unreadable record proves nothing, and an unproven branch is kept.
+        return False
+
+
 def collect_orphaned_branches(
-    repo_root: Path, base_branch: str, *, run_fn: RunGit = run_git
+    repo_root: Path,
+    base_branch: str,
+    *,
+    run_fn: RunGit = run_git,
+    config: BranchesConfig | None = None,
 ) -> tuple[OrphanedBranch, ...]:
     """Agent branches with no worktree, each tagged with its merge status.
 
@@ -630,7 +656,12 @@ def collect_orphaned_branches(
     listed = _branch_names(run_fn(repo_root, "branch", "--list", _BRANCH_FORMAT))
     if listed is None:
         return ()
-    all_names = [name for name in listed if is_daemon_created_branch(name)]
+    policy = config if config is not None else BranchesConfig()
+    all_names = [
+        name
+        for name in listed
+        if is_daemon_created_branch(name) and _prunable(repo_root, name, base_branch, policy)
+    ]
 
     merged_names = _branch_names(
         run_fn(repo_root, "branch", "--merged", base_branch, "--list", _BRANCH_FORMAT)

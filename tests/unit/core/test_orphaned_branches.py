@@ -17,6 +17,11 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
+from claude_code_hooks_daemon.config.models import BranchesConfig
+from claude_code_hooks_daemon.core import worktree_reaping
+from claude_code_hooks_daemon.core.branch_records import write_creator
 from claude_code_hooks_daemon.core.worktree_reaping import (
     OrphanedBranch,
     collect_orphaned_branches,
@@ -242,8 +247,45 @@ class TestWorktreeCreateNamesAreEligible:
         "refs/heads/feature-x\nrefs/heads/main\n"
     )
 
-    def test_a_worktree_create_name_is_an_orphan_and_a_hand_name_is_not(self) -> None:
+    def test_a_worktree_create_name_is_an_orphan_and_a_hand_name_is_not(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            worktree_reaping, "creator_route", lambda _repo, _name: "worktree_create"
+        )
         git = _FakeGit(branches=_ok(self._MIXED), merged=_ok("refs/heads/fix-auth-1a2b3c4d\n"))
         orphans = collect_orphaned_branches(Path("/repo"), "main", run_fn=git)
         found = {b.name: b.merged_into_base for b in orphans}
         assert found == {"agent-orphan-2": False, "fix-auth-1a2b3c4d": True}
+
+
+class TestOnlyRecordedWorktreeCreateBranchesArePrunable:
+    """A `<slug>-<8 hex>` shape alone must never make an ordinary branch prunable."""
+
+    @staticmethod
+    def _repo(tmp_path: Path, names: list[str]) -> Path:
+        def git(*args: str) -> None:
+            subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+        git("init", "-q", "-b", "main")
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i")
+        for name in names:
+            git("branch", name)
+        return tmp_path
+
+    def test_ordinary_names_with_the_hex_shape_are_not_candidates(self, tmp_path: Path) -> None:
+        repo = self._repo(tmp_path, ["release-20261104", "hotfix-cafebabe"])
+        assert collect_orphaned_branches(repo, "main", config=BranchesConfig()) == ()
+
+    def test_a_recorded_worktree_create_branch_is_a_candidate(self, tmp_path: Path) -> None:
+        repo = self._repo(tmp_path, ["fix-thing-0123abcd"])
+        assert write_creator(repo, "fix-thing-0123abcd", "s:", "worktree_create")
+        found = collect_orphaned_branches(repo, "main", config=BranchesConfig())
+        assert [b.name for b in found] == ["fix-thing-0123abcd"]
+
+    def test_a_protected_name_is_never_a_candidate_even_when_recorded(self, tmp_path: Path) -> None:
+        repo = self._repo(tmp_path, ["keep-0123abcd", "line-0123abcd"])
+        for name in ("keep-0123abcd", "line-0123abcd"):
+            assert write_creator(repo, name, "s:", "worktree_create")
+        config = BranchesConfig(protected_names=["keep-*"], integration_lines=["line-*"])
+        assert collect_orphaned_branches(repo, "main", config=config) == ()

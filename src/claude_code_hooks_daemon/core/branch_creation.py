@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal
 
-from claude_code_hooks_daemon.config.models import BRANCH_DEFAULT_AUTO, BranchesConfig
+from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     is_work_branch,
     worktrees_by_branch,
 )
+from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
@@ -199,16 +200,16 @@ def _read_refs(repo: Path, config: BranchesConfig) -> tuple[list[_Ref], str | No
         return result.stderr.strip() or f"git exited {result.returncode}"
     remote_prefix = f"{_REMOTES}{config.remote}/"
     head_ref = f"{remote_prefix}HEAD"
-    default = None if config.default == BRANCH_DEFAULT_AUTO else config.default
+    # The same resolution the branch inventory uses, so the guard and the report
+    # agree on the default whatever `wip.count_remote` says.
+    default = git_sync.resolve_default_branch(config, repo)
     refs: list[_Ref] = []
     for line in result.stdout.splitlines():
         fields = line.split(_FIELD_SEP)
         if len(fields) != 4:
             continue
-        refname, tip, committed, symref = fields
+        refname, tip, committed, _symref = fields
         if refname == head_ref:
-            if default is None and symref.startswith(remote_prefix):
-                default = symref.removeprefix(remote_prefix)
             continue
         local = refname.startswith(_HEADS)
         name = refname.removeprefix(_HEADS) if local else refname.removeprefix(remote_prefix)
@@ -270,7 +271,7 @@ def _cap_lines(
 ) -> list[str]:
     ordered = sorted(groups, key=lambda work: (_rank(work, labels), work.committed, work.name))
     lines = [
-        f"Open work branches: {len(groups)} (cap {config.wip.cap}). "
+        f"Open work branches: {len(groups)} (cap {config.effective_wip_cap()}). "
         "Finish, park or delete one before starting another:"
     ]
     for work in ordered[:DENY_LIST_LIMIT]:
@@ -394,7 +395,7 @@ def creation_verdict(
     work_refs = [ref for ref in refs if is_work_branch(ref.name, config, default)]
     groups = _work_groups(work_refs)
     moment = time.time() if now is None else now
-    over_cap = config.wip.mode != "off" and len(groups) >= config.wip.cap
+    over_cap = config.wip.mode != "off" and len(groups) >= config.effective_wip_cap()
     duplicates = (
         _duplicates(new_name, groups, config.remote)
         if new_name and config.duplicates.mode == "warn"
