@@ -6,7 +6,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00564: remote meta ref allocator](00564-remote-meta-ref-allocator/PLAN.md) - Not Started (owner proposal, not for the next release: plan numbers allocated by compare-and-swap on a remote metadata ref, `refs/hooks-daemon/meta`, with an offline fallback to Plan 00562's scan and a recovery step)
 
-- [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - Not Started (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a consumption ledger with a stop gate shared with 00558, a scratch-shape allowlist and a SessionStart sweep)
+- [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
 - [00559: daemon clone follows expected version after pull](00559-daemon-clone-follows-expected-version-after-pull/PLAN.md) - Not Started (#148, parked `agent-needs-human`: a pull that moves `expected_version` should re-provision from a trigger outside the stale daemon; owner to choose the trigger, the retry rule and whether to add a scheduled check)
 
