@@ -336,11 +336,14 @@ jobs:
 
       # Runner image ubuntu26/20261101.64 caps /tmp, which the integration
       # tests' tmp_path trees outgrow (EDQUOT under /tmp/pytest-of-runner);
-      # release-gate.yml's tests job carries the same step for the same reason.
-      - name: Keep temporary files on the work disk
+      # release-gate.yml's tests job carries the same step and says why the
+      # directory is /ci-tmp rather than RUNNER_TEMP.
+      - name: Keep temporary files off the capped /tmp
         run: |
-          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          df -h /tmp "$RUNNER_TEMP"
+          sudo install -d -o "$(id -u)" -g "$(id -g)" /ci-tmp
+          echo "TMPDIR=/ci-tmp" >> "$GITHUB_ENV"
+          df -h /tmp /ci-tmp
+          findmnt --target /tmp
 
       # The tools are invoked directly rather than through scripts/qa/run_all.sh.
       # That script resolves its interpreter via the daemon's fingerprint-keyed
