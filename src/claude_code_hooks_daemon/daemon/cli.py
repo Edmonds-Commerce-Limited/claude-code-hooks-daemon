@@ -13038,7 +13038,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Park a branch (exempts it from dormancy) with an empty Parked-Reason commit, "
         "then push it; --clear resumes the clock",
     )
-    parser_branch_park.add_argument("name", help="Local branch to park")
+    parser_branch_park.add_argument("name", help="Branch to park (local, or remote-only)")
     parser_branch_park.add_argument("--reason", help="Why the branch is parked (one line)")
     parser_branch_park.add_argument(
         "--clear",

@@ -15,18 +15,27 @@ from claude_code_hooks_daemon.core.branch_creation import (
 )
 from claude_code_hooks_daemon.core.branch_inventory import BranchState, build_inventory
 from claude_code_hooks_daemon.core.branch_park import BranchParkError, park_branch
+from tests.support.git_fixtures import git_setup_timeout
 
 
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=git_setup_timeout(),
     ).stdout.strip()
 
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     bare = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
+    subprocess.run(
+        ["git", "init", "-q", "--bare", "-b", "main", str(bare)],
+        check=True,
+        timeout=git_setup_timeout(),
+    )
     root = tmp_path / "repo"
     root.mkdir()
     _git(root, "init", "-q", "-b", "main")
@@ -87,6 +96,45 @@ class TestPark:
     def test_unknown_branch_fails(self, repo: Path) -> None:
         with pytest.raises(BranchParkError, match="nope"):
             park_branch(repo, "nope", reason="r", remote="origin")
+
+    def test_remote_only_branch_is_parked_without_a_local_branch(self, repo: Path) -> None:
+        old = _git(repo, "rev-parse", "origin/work")
+        _git(repo, "branch", "-D", "work")
+        result = park_branch(repo, "work", reason="remote only", remote="origin")
+        assert result.pushed is True and result.sha != old
+        assert _git(repo, "rev-parse", f"{result.sha}^") == old
+        assert _git(repo, "rev-parse", "origin/work") == result.sha
+        local = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", "refs/heads/work"],
+            capture_output=True,
+            text=True,
+            timeout=git_setup_timeout(),
+        )
+        assert local.returncode != 0
+        bare = repo.parent / "origin.git"
+        assert _git(bare, "rev-parse", "refs/heads/work") == result.sha
+        assert "Parked-Reason: remote only" in _git(repo, "log", "-1", "--format=%B", "origin/work")
+
+    def test_remote_only_park_is_seen_as_parked_by_the_inventory(self, repo: Path) -> None:
+        _git(repo, "branch", "-D", "work")
+        park_branch(repo, "work", reason="remote only", remote="origin")
+        record = build_inventory(repo, _config()).records["work"]
+        assert record.state == BranchState.PARKED
+        assert record.parked_reason == "remote only"
+
+    def test_remote_only_push_failure_parks_nothing(self, repo: Path) -> None:
+        old = _git(repo, "rev-parse", "origin/work")
+        _git(repo, "branch", "-D", "work")
+        _git(repo, "remote", "set-url", "origin", str(repo / "missing.git"))
+        with pytest.raises(BranchParkError, match="push"):
+            park_branch(repo, "work", reason="r", remote="origin")
+        assert _git(repo, "rev-parse", "origin/work") == old
+
+    def test_remote_only_clear_unparks(self, repo: Path) -> None:
+        _git(repo, "branch", "-D", "work")
+        park_branch(repo, "work", reason="r", remote="origin")
+        park_branch(repo, "work", reason=None, remote="origin", clear=True)
+        assert "Unparked:" in _git(repo, "log", "-1", "--format=%B", "origin/work")
 
     @pytest.mark.parametrize("reason", ["", "  ", "two\nlines", None])
     def test_bad_reason_fails_before_any_change(self, repo: Path, reason: str | None) -> None:

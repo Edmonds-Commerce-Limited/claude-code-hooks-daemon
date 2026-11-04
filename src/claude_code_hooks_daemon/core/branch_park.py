@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
 _HEADS = "refs/heads/"
+_REMOTES = "refs/remotes/"
 
 
 class BranchParkError(Exception):
@@ -46,6 +47,55 @@ def _message(reason: str | None, user: str, *, clear: bool) -> str:
     return f"Park branch: {reason}\n\nParked-Reason: {reason}\nParked-By: {user}\n"
 
 
+def _write_park_commit(repo: Path, parent: str, reason: str, *, clear: bool) -> str:
+    """A trailer commit on ``parent``'s own tree; returns its sha."""
+    tree = _git_out(repo, "rev-parse", f"{parent}^{{tree}}")
+    user = run_git(repo, "config", "user.name").stdout.strip() or "unknown"
+    return _git_out(
+        repo, "commit-tree", tree, "-p", parent, "-m", _message(reason, user, clear=clear)
+    )
+
+
+def _park_remote_only(
+    repo: Path,
+    name: str,
+    remote: str,
+    remote_ref: str,
+    old: str,
+    reason: str,
+    *,
+    clear: bool,
+) -> ParkResult:
+    """Park a branch only ``remote`` holds, with no local branch.
+
+    The park commit is pushed as a plain fast-forward; no local ref holds it, so
+    a failed push parks nothing. On success the remote-tracking ref follows the
+    push so the inventory sees the park without a fetch.
+    """
+    new = _write_park_commit(repo, old, reason, clear=clear)
+    pushed = run_git(
+        repo,
+        "push",
+        remote,
+        f"{new}:{_HEADS}{name}",
+        timeout=Timeout.GIT_FETCH_SESSION,
+    )
+    if pushed.returncode != 0:
+        raise BranchParkError(
+            f"push of {name} to {remote} failed, so nothing is parked: "
+            f"{pushed.stderr.strip() or 'git push failed'}"
+        )
+    # ``git push`` already advances the tracking ref when the remote has the default
+    # fetch refspec; setting it to ``new`` is idempotent and covers a remote without one.
+    moved = run_git(repo, "update-ref", remote_ref, new)
+    if moved.returncode != 0:
+        raise BranchParkError(
+            f"{name} was parked on {remote} but {remote_ref} could not follow: "
+            f"{moved.stderr.strip()}"
+        )
+    return ParkResult(new, True, None, None)
+
+
 def park_branch(
     repo: Path,
     name: str,
@@ -54,25 +104,31 @@ def park_branch(
     remote: str,
     clear: bool = False,
 ) -> ParkResult:
-    """Park (or, with ``clear``, unpark) local branch ``name`` and push it.
+    """Park (or, with ``clear``, unpark) branch ``name`` and push it.
+
+    A branch with no local ref but a ``<remote>/<name>`` tracking ref is parked on
+    the remote alone (no local branch is created).
 
     Raises:
-        BranchParkError: The reason is unusable, the branch is missing, or the
-            tip moved while the park commit was written.
+        BranchParkError: The reason is unusable, the branch is missing, the
+            tip moved while the park commit was written, or a remote-only
+            park could not be pushed.
     """
     stripped = reason.strip() if reason is not None else ""
     if not clear and (not stripped or "\n" in stripped):
         raise BranchParkError("a single-line, non-empty reason is required (--reason)")
     ref = f"{_HEADS}{name}"
     verified = run_git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+    remote_ref = f"{_REMOTES}{remote}/{name}"
     if verified.returncode != 0:
-        raise BranchParkError(f"no local branch {name}")
+        remote_tip = run_git(repo, "rev-parse", "--verify", "--quiet", f"{remote_ref}^{{commit}}")
+        if remote_tip.returncode != 0:
+            raise BranchParkError(f"no local branch {name} and no {remote}/{name}")
+        return _park_remote_only(
+            repo, name, remote, remote_ref, remote_tip.stdout.strip(), stripped, clear=clear
+        )
     old = verified.stdout.strip()
-    tree = _git_out(repo, "rev-parse", f"{old}^{{tree}}")
-    user = run_git(repo, "config", "user.name").stdout.strip() or "unknown"
-    new = _git_out(
-        repo, "commit-tree", tree, "-p", old, "-m", _message(stripped, user, clear=clear)
-    )
+    new = _write_park_commit(repo, old, stripped, clear=clear)
     moved = run_git(repo, "update-ref", ref, new, old)
     if moved.returncode != 0:
         raise BranchParkError(
