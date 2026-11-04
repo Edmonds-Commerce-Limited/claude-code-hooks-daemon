@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00564: remote meta ref allocator](00564-remote-meta-ref-allocator/PLAN.md) - Not Started (owner proposal, not for the next release: plan numbers allocated by compare-and-swap on a remote metadata ref, `refs/hooks-daemon/meta`, with an offline fallback to Plan 00562's scan and a recovery step)
+
 - [00563: optimise suggests claudemd excludes](00563-optimise-suggests-claudemd-excludes/PLAN.md) - Not Started (owner ruling on Plan 00561 Q1: `/hooks-daemon optimise` recommends `claudeMdExcludes` for worktree roots under a client's project; never installs it)
 
 - [00562: cross clone plan number allocation](00562-cross-clone-plan-number-allocation/PLAN.md) - In Progress (#154: plan numbers collide across clones because both allocation sources are per-clone; owner chose a read-only remote scan after a fetch)
@@ -326,11 +328,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 563 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 564 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 477 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 63 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 64 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
