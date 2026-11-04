@@ -255,7 +255,7 @@ def read_blobs(
         return {}
     argv = ["git", "-C", str(cwd), "cat-file", "--batch"]
     child_env = _child_environment(env)
-    request = "".join(f"{sha}\n" for sha in shas).encode("ascii")
+    request = "".join(f"{sha}\n" for sha in shas).encode("utf-8")
     try:
         result = subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
             argv,
@@ -285,7 +285,7 @@ def _parse_cat_file_batch(output: bytes) -> dict[str, bytes] | None:
             return None
         fields = output[position:header_end].split(b" ")
         position = header_end + 1
-        if len(fields) == 2 and fields[1] == b"missing":
+        if fields[-1] == b"missing":
             continue
         if len(fields) != 3 or not fields[2].isdigit():
             return None

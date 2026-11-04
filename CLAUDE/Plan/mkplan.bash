@@ -86,6 +86,10 @@ readonly REMOTE_FETCH_TIMEOUT_DEFAULT_SECONDS=30
 REMOTE_FETCH_TIMEOUT_SECONDS="${MKPLAN_REMOTE_FETCH_TIMEOUT_SECONDS:-$REMOTE_FETCH_TIMEOUT_DEFAULT_SECONDS}"
 readonly REMOTE_FETCH_TIMEOUT_SECONDS
 readonly REMOTE_ARCHIVE_FOLDERS=(Completed Cancelled)
+# Overall deadline for listing the remote's plan folders (the fetch has its own).
+# MKPLAN_REMOTE_SCAN_BUDGET_SECONDS overrides it, mainly for tests.
+REMOTE_SCAN_BUDGET_SECONDS="${MKPLAN_REMOTE_SCAN_BUDGET_SECONDS:-20}"
+readonly REMOTE_SCAN_BUDGET_SECONDS
 
 # Journal assets (Plan 00163), also used by --journal (Plan 00427).
 readonly JOURNAL_DIR_BASENAME="JOURNAL"
@@ -276,9 +280,11 @@ filesystem_highest() {
 # (handlers/utils/plan_numbering.py); the fetch budget is Timeout.GIT_FETCH_SESSION,
 # pinned by tests/unit/scripts/test_mkplan_remote_scan.py. READ-ONLY: it fetches
 # and lists tree names, and never pushes. mkplan is the only caller that fetches;
-# the daemon's hook path reads the already-fetched refs. A failed ls-tree on any
-# ref leaves the remote unchecked, as it does in the daemon. The trailing slashes make ls-tree list
-# a folder's CONTENTS rather than the folder itself.
+# the daemon's hook path reads the already-fetched refs. A ref that is not a
+# commit, a failed ls-tree, or an exceeded scan deadline leaves the remote
+# unchecked, as in the daemon. Unlike the daemon (one cat-file --batch) this
+# runs one ls-tree per DISTINCT plan folder tree: bash cannot parse the raw
+# tree bytes, so the deadline is what bounds it.
 default_remote() {
     local root="$1" remotes
     remotes="$(git -C "$root" remote)" || return 1
@@ -293,13 +299,9 @@ default_remote() {
 # Sets the global `remote_highest_result` (0 when no plan is on the remote) and
 # returns 0, or returns 1 when the remote could not be checked.
 remote_highest() {
-    local root="$1" rel="$2" remote ref name sub
-    local -a paths=("$rel/")
+    local root="$1" rel="$2" remote ref name
     remote_highest_result=0
     remote="$(default_remote "$root")" || return 1
-    for sub in "${REMOTE_ARCHIVE_FOLDERS[@]}"; do
-        paths+=("$rel/$sub/")
-    done
     local refs listing
     # Stock macOS ships no `timeout` (coreutils installs it as `gtimeout`).
     # With neither present the fetch runs WITHOUT a time limit rather than
@@ -315,10 +317,38 @@ remote_highest() {
         git -C "$root" fetch --quiet --no-tags "$remote" >/dev/null; then
         return 1
     fi
-    refs="$(git -C "$root" for-each-ref --format='%(refname)' "refs/remotes/$remote/")" || return 1
+    # One overall deadline for the listing, however many branches exist. Branch
+    # trees are deduplicated (and so are the plan folders inside them) before any
+    # ls-tree runs, so a branch that changed no plan costs no process.
+    local deadline=$((SECONDS + REMOTE_SCAN_BUDGET_SECONDS)) line otype tree spec
+    local -a trees=() specs=()
+    refs="$(git -C "$root" for-each-ref --format='%(objecttype) %(tree) %(refname)' \
+        "refs/remotes/$remote/")" || return 1
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        otype="${line%% *}"
+        tree="${line#* }"
+        tree="${tree%% *}"
+        [[ "$otype" == commit && -n "$tree" ]] || return 1
+        trees+=("$tree")
+    done <<<"$refs"
+    (( ${#trees[@]} > 0 )) || return 0
+    while IFS= read -r tree; do
+        for spec in "$rel" "${REMOTE_ARCHIVE_FOLDERS[@]/#/$rel/}"; do
+            specs+=("$tree:$spec")
+        done
+    done < <(printf '%s\n' "${trees[@]}" | sort -u)
+    # `missing` lines are plan folders a branch does not have; real ones are shas.
+    listing="$(printf '%s\n' "${specs[@]}" | git -C "$root" cat-file --batch-check)" || return 1
+    local -a folder_ids=()
+    while IFS= read -r line; do
+        [[ "$line" == *" tree "* ]] && folder_ids+=("${line%% *}")
+    done <<<"$listing"
+    (( ${#folder_ids[@]} > 0 )) || return 0
+    refs="$(printf '%s\n' "${folder_ids[@]}" | sort -u)"
     while IFS= read -r ref; do
-        [[ -n "$ref" ]] || continue
-        listing="$(git -C "$root" ls-tree --name-only "$ref" -- "${paths[@]}")" || return 1
+        (( SECONDS < deadline )) || return 1
+        listing="$(git -C "$root" ls-tree --name-only "$ref")" || return 1
         while IFS= read -r name; do
             name="${name##*/}"
             if [[ "$name" =~ ^([0-9]{1,5})-[a-zA-Z] ]]; then

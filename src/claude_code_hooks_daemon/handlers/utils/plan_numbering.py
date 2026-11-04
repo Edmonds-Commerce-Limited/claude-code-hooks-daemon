@@ -18,12 +18,13 @@ Two layers:
 
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME
-from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
+from claude_code_hooks_daemon.utils.git_repo import GitRepo, read_blobs, run_git
 
 # git config key holding the per-repo plan high-water mark (highest number
 # ever allocated). Section names are case-insensitive in git; stored lowercased.
@@ -40,6 +41,13 @@ _PLAN_FOLDER_RE = re.compile(r"^(\d{1,5})-[a-zA-Z]")
 # Archive folders under the plan root that the remote scan reads. Mirrored by
 # REMOTE_ARCHIVE_FOLDERS in mkplan.bash.
 _REMOTE_ARCHIVE_FOLDERS = ("Completed", "Cancelled")
+# One overall deadline for the whole remote listing: it runs on PreToolUse,
+# under the 5 s handler budget, so it takes half of it. A scan that cannot finish
+# is reported as unchecked, never left to run on.
+_REMOTE_SCAN_BUDGET_SECONDS: float = Timeout.GIT_CONTEXT / 2
+_MIN_GIT_TIMEOUT_SECONDS = 0.05
+_TREE_ID_BYTES = 20  # SHA-1 object ids in a raw tree entry
+_DEADLINE_REASON = "remote plan scan exceeded its deadline"
 _REMOTE_UNCHECKED_NOTICE = (
     "plan numbering: remote could not be checked; using local plan numbers only"
 )
@@ -181,10 +189,11 @@ def remote_highest_plan_number(
 ) -> RemoteScan:
     """Highest plan number on the default remote's branches, read-only.
 
-    Lists the plan folder names on every ``refs/remotes/<remote>/*`` ref with
-    ``git ls-tree``, no checkout. Only the plan root and its ``Completed/`` and
-    ``Cancelled/`` folders are read. ``mkplan.bash`` mirrors this
-    (``remote_highest``); keep the two in step.
+    Lists the plan folder names on every ``refs/remotes/<remote>/*`` ref, no
+    checkout, with one ``git for-each-ref`` and one ``git cat-file --batch``
+    under a single overall deadline (:data:`_REMOTE_SCAN_BUDGET_SECONDS`).
+    Only the plan root and its ``Completed/`` and ``Cancelled/`` folders are
+    read. ``mkplan.bash`` mirrors this (``remote_highest``); keep the two in step.
 
     The hook path calls this with ``fetch=False`` and reads the refs already
     fetched: hooks run under a 5 s handler budget and must perform no network
@@ -210,19 +219,63 @@ def remote_highest_plan_number(
         )
         if fetched.returncode != 0:
             return _unchecked(f"git fetch {remote} failed", fetched.stderr)
-    refs = run_git(repo_root, "for-each-ref", "--format=%(refname)", f"refs/remotes/{remote}/")
+    deadline = time.monotonic() + _REMOTE_SCAN_BUDGET_SECONDS
+    refs = run_git(
+        repo_root,
+        "for-each-ref",
+        "--format=%(objecttype) %(tree) %(refname)",
+        f"refs/remotes/{remote}/",
+        timeout=_remaining(deadline),
+    )
     if refs.returncode != 0:
         return _unchecked("git for-each-ref failed", refs.stderr)
-    # The trailing slash makes ls-tree list a folder's CONTENTS, not the folder.
-    paths = [f"{plan_subdir}/{sub}/" for sub in _REMOTE_ARCHIVE_FOLDERS]
-    paths.insert(0, f"{plan_subdir}/")
+    trees: set[str] = set()
+    for line in refs.stdout.splitlines():
+        object_type, _, rest = line.partition(" ")
+        tree, _, refname = rest.partition(" ")
+        if object_type != "commit" or not tree:
+            return _unchecked(f"{refname} is not a commit")
+        trees.add(tree)
+    if not trees:
+        return RemoteScan(0)
+    # ONE ``git cat-file --batch`` reads every distinct plan folder of every
+    # branch, so the cost does not grow with the branch count. The bare tree is
+    # requested too: an absent plan folder is normal (``missing``), an absent
+    # commit tree is a damaged ref.
+    folders = [plan_subdir, *(f"{plan_subdir}/{sub}" for sub in _REMOTE_ARCHIVE_FOLDERS)]
+    requests = sorted(trees) + [f"{tree}:{folder}" for tree in sorted(trees) for folder in folders]
+    if time.monotonic() >= deadline:
+        return _unchecked(_DEADLINE_REASON)
+    objects = read_blobs(repo_root, requests, timeout=_remaining(deadline))
+    if objects is None:
+        return _unchecked("git cat-file --batch failed or exceeded the scan deadline")
+    if any(tree not in objects for tree in trees):
+        return _unchecked("a remote branch's tree is missing from the repository")
     highest = 0
-    for ref in refs.stdout.split():
-        listing = run_git(repo_root, "ls-tree", "--name-only", ref, "--", *paths)
-        if listing.returncode != 0:
-            return _unchecked(f"git ls-tree {ref} failed", listing.stderr)
-        highest = max(highest, _highest_plan_number_in_names(listing.stdout))
+    for sha, body in objects.items():
+        if sha in trees:
+            continue  # a whole branch tree, requested only to prove it exists
+        highest = max(highest, _highest_plan_number_in_names("\n".join(_tree_entry_names(body))))
     return RemoteScan(highest)
+
+
+def _remaining(deadline: float) -> float:
+    """Seconds left before ``deadline``, never zero (``subprocess`` rejects none)."""
+    return max(deadline - time.monotonic(), _MIN_GIT_TIMEOUT_SECONDS)
+
+
+def _tree_entry_names(body: bytes) -> list[str]:
+    """Entry names of a raw git tree object (``<mode> <name>\\0<20-byte id>`` repeated)."""
+    names: list[str] = []
+    position = 0
+    while position < len(body):
+        space = body.find(b" ", position)
+        nul = body.find(b"\0", space + 1)
+        if space == -1 or nul == -1:
+            break
+        names.append(body[space + 1 : nul].decode("utf-8", errors="replace"))
+        position = nul + 1 + _TREE_ID_BYTES
+    return names
 
 
 def resolve_plan_repo_root(target_path: Path) -> Path | None:
