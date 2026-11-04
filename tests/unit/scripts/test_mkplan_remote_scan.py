@@ -403,7 +403,7 @@ class TestListingFailureParity:
 
         assert scan.highest is None
         assert scan.reason is not None
-        assert "ls-tree refs/remotes/origin/broken failed" in scan.reason
+        assert "refs/remotes/origin/broken is not a commit" in scan.reason
 
     def test_mkplan_treats_a_failed_listing_as_unchecked(
         self, remote_and_clones: tuple[Path, Path, Path]
@@ -429,3 +429,104 @@ class TestFetchBudgetParity:
 
         assert match is not None
         assert int(match.group(1)) == Timeout.GIT_FETCH_SESSION
+
+
+def _push_branches(clone: Path, count: int) -> None:
+    """Push ``count`` branches, each carrying its own distinct plan folder."""
+    for index in range(count):
+        _git(clone, "checkout", "--quiet", "-b", f"feat-{index}", "main")
+        plan = clone / _PLAN_SUBDIR / f"{index + 1:05d}-branch-plan"
+        plan.mkdir()
+        (plan / "PLAN.md").write_text("x")
+        _git(clone, "add", "-A")
+        _git(clone, "commit", "--quiet", "-m", f"plan {index}")
+        _git(clone, "push", "--quiet", "origin", f"feat-{index}")
+    _git(clone, "checkout", "--quiet", "main")
+
+
+class TestBatchedRemoteScan:
+    """The scan costs a fixed number of git processes however many branches exist."""
+
+    def test_git_calls_do_not_grow_with_the_branch_count(
+        self, remote_and_clones: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, clone_a, clone_b = remote_and_clones
+        _push_branches(clone_a, 12)
+        _git(clone_b, "fetch", "--quiet", "origin")
+        calls: list[tuple[str, ...]] = []
+        real_run_git = plan_numbering.run_git
+
+        def recording(cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            return real_run_git(cwd, *args, **kwargs)
+
+        monkeypatch.setattr(plan_numbering, "run_git", recording)
+
+        scan = remote_highest_plan_number(clone_b, _PLAN_SUBDIR)
+
+        assert scan.highest == 12
+        assert len(calls) <= 3
+        assert all(args[0] != "ls-tree" for args in calls)
+
+    def test_mkplan_sees_the_highest_of_many_branches(
+        self, remote_and_clones: tuple[Path, Path, Path]
+    ) -> None:
+        _, clone_a, clone_b = remote_and_clones
+        _push_branches(clone_a, 8)
+
+        result = _scaffold(clone_b, "after-many")
+
+        assert result.returncode == 0, result.stderr
+        assert (clone_b / _PLAN_SUBDIR / "00009-after-many").is_dir()
+
+
+class TestScanDeadline:
+    """One overall deadline bounds the scan; exceeding it leaves the remote unchecked."""
+
+    def test_daemon_scan_over_its_deadline_is_unchecked(
+        self, remote_and_clones: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, clone_a, clone_b = remote_and_clones
+        _push_branches(clone_a, 3)
+        _git(clone_b, "fetch", "--quiet", "origin")
+        monkeypatch.setattr(plan_numbering, "_REMOTE_SCAN_BUDGET_SECONDS", 0.0)
+
+        scan = remote_highest_plan_number(clone_b, _PLAN_SUBDIR)
+
+        assert scan.highest is None
+        assert scan.reason is not None
+        assert "deadline" in scan.reason
+
+    def test_mkplan_scan_over_its_deadline_falls_back_to_local(
+        self, remote_and_clones: tuple[Path, Path, Path]
+    ) -> None:
+        _, clone_a, clone_b = remote_and_clones
+        _push_branches(clone_a, 3)
+
+        result = _scaffold(clone_b, "deadline", {"MKPLAN_REMOTE_SCAN_BUDGET_SECONDS": "-1"})
+
+        assert result.returncode == 0, result.stderr
+        assert (clone_b / _PLAN_SUBDIR / "00001-deadline").is_dir()
+        assert result.stderr.count(_NOTICE) == 1
+
+
+
+class TestRecordedNumberIncludesTheRemote:
+    """The number plan_number_helper advertises is the number the recorder accepts."""
+
+    def test_advertised_number_is_recorded_when_the_remote_is_ahead(
+        self, remote_and_clones: tuple[Path, Path, Path]
+    ) -> None:
+        _, clone_a, clone_b = remote_and_clones
+        archived = clone_a / _PLAN_SUBDIR / "Completed" / "00040-old"
+        archived.mkdir(parents=True)
+        (archived / "PLAN.md").write_text("x")
+        _commit_and_push(clone_a)
+        _git(clone_b, "fetch", "--quiet", "origin")
+        target = clone_b / _PLAN_SUBDIR / "x"
+        advertised = int(next_plan_number_for_target(target, _PLAN_SUBDIR, clone_b))
+        assert advertised == 41
+        doc = clone_b / _PLAN_SUBDIR / "00041-new" / "PLAN.md"
+
+        assert plan_numbering.record_new_plan_document(doc, _PLAN_SUBDIR, clone_b) == 41
+        assert plan_numbering.read_plan_counter(clone_b) == 41
