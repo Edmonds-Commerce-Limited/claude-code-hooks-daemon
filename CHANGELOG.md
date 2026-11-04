@@ -61,6 +61,15 @@ _A branch-hygiene, relay-by-default and hardening release. A new top-level `bran
 - Branch containment: a tip held only by a local tag is contained nowhere, a branch that never moved is not called merged by the stop guard, `branch-park` parks a remote-only branch by fast-forward push, and an empty directory or symlinked store never blocks worktree removal (Plan 00558).
 - `plan_number_helper` no longer denies listing inside an existing plan folder as plan-number discovery (Plan 00474).
 - Compound commands with a pattern-only `grep`, `awk` comparisons and `2>&1` no longer draw false `secret_file_guard` and `write_protected_paths` denials (Plan 00556).
+- Release review fixes to this release's own branch-hygiene work (Plan 00558):
+  - `reap --reap-branches` no longer prunes an ordinary merged branch whose name ends in eight hex digits (`release-20261104`), and never prunes a protected, integration-line or exempt branch.
+  - The creation guard and the `branch-sweep` report now use one default-branch rule and one WIP-cap rule, including the legacy `max_open_branches` while `branches.wip.cap` is unset.
+  - The stop guard treats a failed worktree listing as unknown, not clean.
+  - A plain (unforced) `git worktree remove` of a detached worktree whose commits no ref holds is now denied like the forced form, and WorktreeRemove keeps such a worktree.
+  - A diff of committed revisions is no longer recorded as an evacuation, and a removal whose path cannot be placed no longer matches one.
+- `command_hints` no longer crashes with a `KeyError` when two requests arrive together right after a daemon start.
+- `mkplan.bash` falls back to `gtimeout`, then to no time limit, where `timeout` is missing (stock macOS), so the remote plan-number scan runs there (Plan 00562).
+- `limit_rebrief` recognises Claude Code's "5-hour limit" wording (2.1.312) as well as "session limit" and "weekly limit".
 
 ## [3.71.0] - 2026-10-23
 

@@ -135,8 +135,12 @@ release host ran Claude Code 2.1.318.
   5-hour-window kill is not recognised and no re-brief fires. Widen the regex and update the acceptance-test sentence.
 - **N570 (adopt, 2.1.314)**: hooks matching Bash now run on shell commands started by the Monitor tool (block or ask
   only, no approve or rewrite), and `if` conditions such as `Monitor(tail *)` match its commands. The Bash command
-  guards (`pipe_blocker`, `sed_blocker`, destructive git, secret guards) select on tool name Bash; whether the payload
-  says Monitor or Bash is unverified. Check the shape and decide whether Monitor is treated as Bash.
+  guards (`pipe_blocker`, `sed_blocker`, destructive git, secret guards) select on tool name Bash. **Verified live on
+  2.1.318 (4 November 2026):** a Monitor call reaches the daemon's PreToolUse with tool name `Monitor` (the
+  orchestrator-mode recorder logged `Monitor`, not `Bash`), so every Bash-only command guard ignores a command started
+  through Monitor. The gap predates v3.72.0 and is not a regression. The fix is cross-cutting (every handler that
+  selects on `ToolName.BASH` and reads the command through `get_bash_command`), so it needs its own plan rather than a
+  release-branch patch.
 - **N571 (adopt, 2.1.312)**: Write now refuses to overwrite a very large subdirectory CLAUDE.md, rules file or
   @-included file after Claude saw only its start, and asks Claude to read it all or edit in place. This extends
   instruction fact G4-05. `write_clobber_guard` is complementary (it keys on "not read this session", not "read only
@@ -146,7 +150,8 @@ release host ran Claude Code 2.1.318.
   (R-WRITE-OUTSIDE-PROJECT-ROOT) only in part: the daemon bounds by the repository root and also judges Bash
   redirects. Keep the handler; the setting may be offered as defence in depth in the shipped settings template.
 
-**Status**: N569 and N570 🔄 being fixed in this release on branch `worktree-rel372-misc`. N571 ✅ recorded on
+**Status**: N569 ✅ fixed in this release (`ba8f18699`, merged via `worktree-rel372-misc`). N570 ⬜ open: payload
+shape verified, cross-cutting fix not started. N571 ✅ recorded on
 `release/3.72.0`: G4-05 extended and the contract re-audited at 2.1.318 (META.json page hash `275fe39e…`; G3-05
 re-anchored because the page dropped its "unconditionally" sentence). N572 ✅ recorded, no change: the handler stays.
 
