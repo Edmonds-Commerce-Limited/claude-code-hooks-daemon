@@ -10,9 +10,9 @@
 
 ## Overview
 
-`CLAUDE/Plan/mkplan.bash` and the daemon's plan-number helper (`handlers/utils/plan_numbering.py`, built by Plan 00144) give out the next plan number as the higher of two sources: the per-clone git counter `hooksdaemon.latestPlanNumber`, and the highest plan folder on disk in the current checkout. Both sources are local. A plan claimed in another clone, or on a branch not yet merged, is invisible to them, so two clones of one repository can take the same number, and the clash only shows when their branches meet. This was observed in the field and reported on #152, and Plan 00558 deferred it to a separate plan.
+`CLAUDE/Plan/mkplan.bash` and the daemon's plan-number helper (`handlers/utils/plan_numbering.py`, built by Plan 00112 and reused by Plan 00144) give out the next plan number as the higher of two sources: the per-clone git counter `hooksdaemon.latestPlanNumber`, and the highest plan folder on disk in the current checkout. Both sources are local. A plan claimed in another clone, or on a branch not yet merged, is invisible to them, so two clones of one repository can take the same number, and the clash only shows when their branches meet. This was observed in the field and reported on #152, and Plan 00558 deferred it to a separate plan.
 
-Inside one clone, concurrent runs are already serialised by the scaffold lock (Plan 00474, #59). This plan covers the cross-clone case, which no local lock can reach.
+Inside one clone, including its linked worktrees, concurrent runs are already serialised by the scaffold lock in the common git directory (Plan 00474, #59). This plan covers the cross-clone case, which no local lock can reach.
 
 The fix needs a source every clone shares, and choosing one is a product decision, because `mkplan.bash` ships to every client project. That decision is the owner's (Q1 below), so the plan is parked until it is made.
 
