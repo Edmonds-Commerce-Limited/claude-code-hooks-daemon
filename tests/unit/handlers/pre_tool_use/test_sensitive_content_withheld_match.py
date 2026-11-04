@@ -62,6 +62,7 @@ class TestWriteAndEdit:
         reason = _assert_withheld(result.reason)
         assert "/tmp/f.txt" in reason
         assert "line 3" in reason
+        assert "edited text" not in reason
 
     def test_edit_names_pattern_path_and_line_but_not_the_match(
         self, handler: SensitiveContentHandler
@@ -79,7 +80,8 @@ class TestWriteAndEdit:
         assert result.decision == Decision.DENY
         reason = _assert_withheld(result.reason)
         assert "/tmp/f.txt" in reason
-        assert "line 2" in reason
+        # The line counts inside new_string, not the file, and says so.
+        assert "line 2 of the edited text" in reason
 
     def test_a_match_in_the_file_path_itself_is_not_echoed(
         self,
