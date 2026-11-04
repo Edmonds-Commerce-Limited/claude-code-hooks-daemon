@@ -12,6 +12,10 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
+from claude_code_hooks_daemon.config_optimisation.claudemd_excludes import (
+    KNOWN_WORKTREE_ROOTS,
+    glob_to_regex,
+)
 from claude_code_hooks_daemon.core.worktree_naming import WORKTREES_SUBDIR
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -21,29 +25,6 @@ EXAMPLE_PROJECT = PurePosixPath("/example/project")
 EXAMPLE_WORKTREE = "worktree-example"
 
 _SCRIPT_WORKTREES_DIR = re.compile(r'^WORKTREES_DIR="\$\{PROJECT_ROOT\}/(?P<rel>[^"]+)"$', re.M)
-
-
-def _glob_to_regex(glob: str) -> re.Pattern[str]:
-    """Translate a glob over absolute paths: ``**`` crosses directories, ``*`` does not."""
-    parts: list[str] = []
-    i = 0
-    while i < len(glob):
-        if glob.startswith("**/", i):
-            parts.append("(?:.*/)?")
-            i += 3
-        elif glob.startswith("**", i):
-            parts.append(".*")
-            i += 2
-        elif glob[i] == "*":
-            parts.append("[^/]*")
-            i += 1
-        elif glob[i] == "?":
-            parts.append("[^/]")
-            i += 1
-        else:
-            parts.append(re.escape(glob[i]))
-            i += 1
-    return re.compile("".join(parts) + r"\Z")
 
 
 def _worktree_roots() -> dict[str, str]:
@@ -69,7 +50,7 @@ def test_worktree_root_claude_md_is_excluded(creator: str) -> None:
     root = _worktree_roots()[creator]
     target = str(EXAMPLE_PROJECT / root / EXAMPLE_WORKTREE / "CLAUDE.md")
     patterns = _excludes()
-    assert any(_glob_to_regex(p).match(target) for p in patterns), (
+    assert any(glob_to_regex(p).match(target) for p in patterns), (
         f"{creator} creates worktrees under {root}/ but no claudeMdExcludes glob "
         f"in {SETTINGS_PATH.name} matches {target}; globs: {patterns}"
     )
@@ -79,4 +60,9 @@ def test_nested_claude_md_in_worktree_still_loads() -> None:
     """Only the worktree-root CLAUDE.md is excluded; nested ones keep loading."""
     for creator, root in _worktree_roots().items():
         nested = str(EXAMPLE_PROJECT / root / EXAMPLE_WORKTREE / "src" / "CLAUDE.md")
-        assert not any(_glob_to_regex(p).match(nested) for p in _excludes()), creator
+        assert not any(glob_to_regex(p).match(nested) for p in _excludes()), creator
+
+
+def test_optimise_known_roots_match_the_creators() -> None:
+    """The roots `optimise` checks are exactly the roots the daemon's creators use."""
+    assert set(KNOWN_WORKTREE_ROOTS) == set(_worktree_roots().values())
