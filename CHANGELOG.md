@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.72.0] - 2026-11-04
+
+_A branch-hygiene, relay-by-default and hardening release. A new top-level `branches:` block and nine handlers keep branch work from piling up (a repository-wide WIP cap, a dormancy block, lossless forced removal, an evacuate-then-destroy deny, creator and touch records, a branch stop guard, post-merge cleanup and a `branch-sweep` report; Plan 00558); the Rust relay is the default hook transport on Linux (Plan 00554); a venv whose Python changed underneath it is rebuilt and a daemon that cannot start no longer locks the session out (Plan 00555); `mkplan.bash` reads remote plan numbers before allocating (Plan 00562); a merge conflict can no longer brick a session through the hook stubs (Plan 00552); and `secret_file_guard` stops denying read-only commands on six false-positive shapes (Plan 00556). `breaking: false` in the config-changes manifest: its `renamed` and `changed` entries all keep working on an existing config (the old keys are read as aliases for one release, an explicit `relay_enabled: false` is kept), and no pre-upgrade or post-upgrade task ships. Check `bin/hooks-daemon branch-sweep` before upgrading a repository that holds a branch idle for 30 days or more: new branches are blocked until it is merged, parked or deleted._
+
+### Added
+
+- Branch hygiene (Plan 00558; Addresses #152, #153, #155): the top-level `branches:` config block (`default`, `remote`, `integration_lines`, `exempt`, `protected_names`, `wip`, `duplicates`, `dormancy`, `stop_guard`, `force_removal`, `evacuation`, `cleanup_after_merge`, `sweep`).
+- `bin/hooks-daemon branch-sweep` reports every local and remote branch by state (`--json`, `--all`), and `branch-sweep --clean [--dry-run]` deletes merged and patch-equivalent branches behind a recovery bundle under `untracked/branch-cleanup/`; the SessionStart `branch_sweep` summary replaces `branch_count_advisor` (Plan 00558).
+- `branch_creation_guard` (PreToolUse; rules R-BRANCH-WIP-CAP and R-BRANCH-DORMANT) denies a new branch or isolated agent worktree while the open work branches are at `branches.wip.cap` (default 10) or a branch is at the dormancy block stage (30 days), and WorktreeCreate applies the same verdict (Plan 00558).
+- `bin/hooks-daemon branch-park <name> --reason <text>` (and `--clear`) exempts a branch from the dormancy stages; `branches.dormancy.preset: strict` is suggested by `optimise-checklist` (Plan 00558).
+- `branch_touch_recorder` (PostToolUse) writes each branch's creator and the sessions and agents that touched it into git config (Plan 00558).
+- `branch_stop_guard` (Stop) and `branch_subagent_stop_guard` (SubagentStop) deny, at most three times, a stop that leaves a dirty worktree, commits no remote holds or a merged branch not deleted, and add an hourly noisy-dormancy line (Plan 00558).
+- `cleanup_after_merge` (PostToolUse) advises or performs deletion of a branch after `git merge` into the default branch or an integration line, per `branches.cleanup_after_merge.mode` (Plan 00558).
+- Rules R-GIT-WORKTREE-REMOVE-FORCE and R-GIT-EVACUATE-THEN-DESTROY, with the PostToolUse `evacuation_recorder` and the UserPromptSubmit `evacuation_turn_marker` extending the second across commands of one turn (Plan 00558).
+- `hooks-daemon repair-install` restores broken hook stubs and `.claude/init.sh` from a terminal with no session or daemon (`--check`, `--reconcile-settings`); install and upgrade write a managed `.gitattributes` block setting `-merge` on `.claude/hooks/**` and `.claude/init.sh` (Plan 00552).
+- `hooks-daemon diagnose` runs with no venv and no daemon, naming interpreter drift, the last build result and its log; `hooks-daemon status` reports stops let through while the daemon was down; the fail-closed guard allows a small read-only set while the daemon is unreachable (Plan 00555).
+- A `venv_interpreter_trust` QA check blocks code that trusts a venv interpreter without comparing its `major.minor` (Plan 00555).
+- `hooks-daemon check` gains an "Idle Compaction" line, and session start writes `idleCompaction: true` to `~/.claude/settings.json` when the key is absent (Plan 00557).
+- `hooks-screen`, a Rust helper that renders terminal output so the ccy supervisor can decide its focus hold from the screen (`CCY_SCREEN_CAPTURE=1` collects captures; Plan 00538).
+- `persist_every_crossings` for `goal_loop_detector`, which logs a `loop-persisting` transition, and `bin/hooks-daemon clear-goal` for an agent to retract its own stuck goal (Plan 00501).
+- `mkplan.bash` fetches the default remote and reads plan folder names on every remote branch before allocating a number (Plan 00562; Addresses #154).
+
+### Changed
+
+- **Default change:** the Rust relay is the default hook transport on Linux x86_64 (downloaded, digest-verified) and aarch64 (built from source); `daemon.transport.relay_enabled` resolves to true where the host can run it and false elsewhere, and `relay_source` defaults to `auto`. An explicit `false` is kept and an explicit `null` is rejected (Plan 00554).
+- **Default change:** `goal_loop_detector` defaults to `mode: act` (it was `observe`); a loop is entered once per fingerprint, its fingerprint hashes the committed tree by content, and a Blocked plan drops out of the session's combined goal (Plan 00501).
+- The ccy supervisor's main-thread focus hold is off unless `CCY_FOCUS_HOLD=1` (Plan 00474).
+- `worktree_remove` no longer runs `git worktree remove --force`: it removes only a linked worktree where nothing would be lost, and deletes the worktree's merged branch (Plan 00558; Addresses #155).
+- `destructive_git` allows `git branch -D` and `git update-ref -d` when every tip is reachable from a surviving ref, judges `git worktree remove` on what it would lose, accepts remote branches merged into an integration line, refuses to delete the default branch, an integration line, an exempt or a protected name, and confirms a batched remote delete with one `git ls-remote` per remote (Plan 00558; Addresses #153).
+- `delete-branch --protected-ref` and `worktree-reap --base-branch` default to the configured default branch; `worktree-reap` orphan pruning also covers `<slug>-<8 hex>` branches (Plan 00558).
+- `.claude/init.sh` waits 85 seconds for WorktreeCreate, which now makes more git calls (Plan 00558).
+- The `supervisor_indicator` status segment is green only for a session the supervisor oversees (Plan 00553; Addresses #140).
+- Every venv check compares the `major.minor` recorded in `pyvenv.cfg` with the interpreter that will run, so a drifted venv is rebuilt (Plan 00555).
+- A `sensitive_content` public-pattern deny names the pattern and where it matched, never the matched text (Plan 00514; Addresses #92).
+- Deny messages and advice name the daemon wrapper that exists for the install mode in use (`.claude/hooks-daemon/bin/hooks-daemon` on a client install; Plan 00556; Addresses #147).
+- `secret_file_guard` judges a bare dotted word as a mention only when it names an existing, indexed or file-opening operand; a pattern-only grep is judged statement by statement; redirection operators (`2>&1`, `&>file`) no longer void a trusted consumer's exemption; a bare `**` is judged on the shell snapshots' `globstar` and `dotglob` state (Plan 00556; Addresses #142, #143, #144, #145, #146).
+- `write_protected_paths` reads awk programs, wildcard-only globs and heredoc bodies precisely, so read-only commands are no longer denied as writes (Plan 00556; Addresses #141).
+- The awaiting-human legacy pattern requires "only" (`waiting only on the user's decision`); `[awaiting-human]` is unchanged (Plan 00474; Addresses #149).
+- The sub-agent context budget reads context from the last `message` entry of `usage.iterations`, not the summed top level, and its soft advisory no longer says "then stop" when `hard_tokens` is off (Plan 00474; Addresses #150).
+- The `claudeMdExcludes` setting keeps a worktree-root `CLAUDE.md` from loading twice for worktree sub-agents, and `optimise` suggests it (Plans 00561, 00563; Addresses #156).
+- `plan_number_helper` ignores a path inside one numbered plan folder (Plan 00474).
+- The daemon spend ledger counts as a regenerable store, so it no longer blocks removing a merged worktree (Plan 00558; Addresses #152).
+- The vendored remote documentation was refetched (release housekeeping).
+
+### Fixed
+
+- A merge, rebase or stash pop conflicting on a hook stub or `.claude/init.sh` no longer bricks every event: each stub runs `bash -n` on `init.sh` and fails open with a named message (Plan 00552).
+- A venv whose Python changed underneath it (for example 3.11 to 3.13) is rebuilt instead of failing every daemon start with `ModuleNotFoundError`; a daemon that cannot start no longer locks the session out, and a Stop blocked while the daemon is down is allowed on the third consecutive block (Plan 00555).
+- Two `mkplan.bash` runs can no longer take the same plan number: the lock is an exclusive-create file (not `mkdir`, which the Rust uutils coreutils on Ubuntu 25.10 and later can report as succeeding twice), and an interrupted run releases the lock and exits without creating anything. The venv build lock fallback and the background-sync lock use the same fix (Plan 00474).
+- The automatic relay repair starts on a uv-managed CPython (no `POSIX_SPAWN_SETSID`) through `subprocess.Popen(start_new_session=True)` (Plan 00474).
+- Probing a venv interpreter no longer leaves a stray `sleep` attached to PID 1 (Plan 00474).
+- Generated forwarders and the relay guard no longer use bash 4-only constructs (macOS bash 3.2), and a relay binary built for another OS or architecture is detected as defective and removed (Plan 00554).
+- A goal-loop in which a stand-in's journal-only commit re-armed the fingerprint no longer splits into many `would-enter` records (Plan 00501).
+- Branch containment: a tip held only by a local tag is contained nowhere, a branch that never moved is not called merged by the stop guard, `branch-park` parks a remote-only branch by fast-forward push, and an empty directory or symlinked store never blocks worktree removal (Plan 00558).
+- `plan_number_helper` no longer denies listing inside an existing plan folder as plan-number discovery (Plan 00474).
+- Compound commands with a pattern-only `grep`, `awk` comparisons and `2>&1` no longer draw false `secret_file_guard` and `write_protected_paths` denials (Plan 00556).
+
 ## [3.71.0] - 2026-10-23
 
 _A session-modes, relay-by-default and release-pipeline release. A session now has first-class modes (`awaiting-human`, `focus`, `goal-blocked`, `manual-goals`) that are visible on the status line, logged, and read by the ccy supervisor (Plan 00501); the Rust relay is on by default for new installs and a broken relay binary is reported instead of running a call unguarded (Plan 00529); the status line gets a cheap tick (Plan 00542); the dispatch pool is configurable and a saturated daemon can be restarted from inside a session (Plan 00533); a plan journal is one file per entry (Plan 00543); the daemon ships a `docs-optimise` skill (Plan 00532); and a release now goes through a pull request whose CI is the gate (Plan 00476). `breaking: false` in the config-changes manifest, and no pre-upgrade or post-upgrade task ships. Two retired options are listed under Removed; a config that still sets them validates with a warning, so the removal is not breaking._
