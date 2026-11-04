@@ -16,11 +16,14 @@ Two layers:
    repo uses that repo's own counter and plan folder. See Plan 00112.
 """
 
+import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME
-from claude_code_hooks_daemon.utils.git_repo import GitRepo
+from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
 
 # git config key holding the per-repo plan high-water mark (highest number
 # ever allocated). Section names are case-insensitive in git; stored lowercased.
@@ -33,6 +36,15 @@ PLAN_NUMBER_WIDTH = 5
 # by the filesystem scan and the new-document check so the two cannot drift
 # into disagreeing about what a plan folder looks like.
 _PLAN_FOLDER_RE = re.compile(r"^(\d{1,5})-[a-zA-Z]")
+
+# Archive folders under the plan root that the remote scan reads. Mirrored by
+# REMOTE_ARCHIVE_FOLDERS in mkplan.bash.
+_REMOTE_ARCHIVE_FOLDERS = ("Completed", "Cancelled")
+_REMOTE_UNCHECKED_NOTICE = (
+    "plan numbering: remote could not be checked; using local plan numbers only"
+)
+
+logger = logging.getLogger(__name__)
 
 
 def get_next_plan_number(plan_folder: Path) -> str:
@@ -117,6 +129,102 @@ def highest_plan_number(plan_folder: Path) -> int:
     return highest_number
 
 
+def _default_remote(repo_root: Path) -> str | None:
+    """``origin`` when configured, else the first configured remote, else ``None``."""
+    result = run_git(repo_root, "remote")
+    if result.returncode != 0:
+        return None
+    remotes = result.stdout.split()
+    if not remotes:
+        return None
+    return "origin" if "origin" in remotes else remotes[0]
+
+
+def _highest_plan_number_in_names(names: str) -> int:
+    """Highest ``NNNNN-name`` plan number among the basenames in ``names``."""
+    highest = 0
+    for line in names.splitlines():
+        match = _PLAN_FOLDER_RE.match(line.rsplit("/", 1)[-1])
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return highest
+
+
+@dataclass(frozen=True)
+class RemoteScan:
+    """Outcome of a remote plan-number scan.
+
+    ``highest`` is ``None`` when the remote could not be checked, and then
+    ``reason`` says why (including git's own error text); otherwise ``reason``
+    is ``None``.
+    """
+
+    highest: int | None
+    reason: str | None = None
+
+    @property
+    def notice(self) -> str | None:
+        """One-line, caller-surfaceable fallback message, or ``None`` when checked."""
+        if self.highest is not None:
+            return None
+        return f"{_REMOTE_UNCHECKED_NOTICE} ({self.reason})"
+
+
+def _unchecked(reason: str, git_stderr: str = "") -> RemoteScan:
+    """A scan that could not check the remote, keeping git's stderr in the reason."""
+    detail = git_stderr.strip()
+    return RemoteScan(None, f"{reason}: {detail}" if detail else reason)
+
+
+def remote_highest_plan_number(
+    repo_root: Path, plan_subdir: str, *, fetch: bool = False
+) -> RemoteScan:
+    """Highest plan number on the default remote's branches, read-only.
+
+    Lists the plan folder names on every ``refs/remotes/<remote>/*`` ref with
+    ``git ls-tree``, no checkout. Only the plan root and its ``Completed/`` and
+    ``Cancelled/`` folders are read. ``mkplan.bash`` mirrors this
+    (``remote_highest``); keep the two in step.
+
+    The hook path calls this with ``fetch=False`` and reads the refs already
+    fetched: hooks run under a 5 s handler budget and must perform no network
+    I/O. Only an explicit caller (``fetch=True``) runs ``git fetch``
+    (``Timeout.GIT_FETCH_SESSION`` budget; fetch never pushes).
+
+    The remote counts as unchecked (``highest`` is ``None``, ``reason`` set)
+    when there is no remote, the fetch failed or timed out, any ref listing
+    failed, or ``repo_root`` is not a git repository.
+    """
+    remote = _default_remote(repo_root)
+    if remote is None:
+        return _unchecked("no git remote is configured")
+    if fetch:
+        fetched = run_git(
+            repo_root,
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            remote,
+            timeout=Timeout.GIT_FETCH_SESSION,
+            env={"GIT_TERMINAL_PROMPT": "0"},
+        )
+        if fetched.returncode != 0:
+            return _unchecked(f"git fetch {remote} failed", fetched.stderr)
+    refs = run_git(repo_root, "for-each-ref", "--format=%(refname)", f"refs/remotes/{remote}/")
+    if refs.returncode != 0:
+        return _unchecked("git for-each-ref failed", refs.stderr)
+    # The trailing slash makes ls-tree list a folder's CONTENTS, not the folder.
+    paths = [f"{plan_subdir}/{sub}/" for sub in _REMOTE_ARCHIVE_FOLDERS]
+    paths.insert(0, f"{plan_subdir}/")
+    highest = 0
+    for ref in refs.stdout.split():
+        listing = run_git(repo_root, "ls-tree", "--name-only", ref, "--", *paths)
+        if listing.returncode != 0:
+            return _unchecked(f"git ls-tree {ref} failed", listing.stderr)
+        highest = max(highest, _highest_plan_number_in_names(listing.stdout))
+    return RemoteScan(highest)
+
+
 def resolve_plan_repo_root(target_path: Path) -> Path | None:
     """Return the toplevel of the nearest git repo enclosing ``target_path``.
 
@@ -158,8 +266,33 @@ def next_plan_number_for_target(
     target_path: Path,
     plan_subdir: str,
     fallback_root: Path,
+    *,
+    include_remote: bool = True,
 ) -> str:
-    """Next plan number for the repo enclosing ``target_path``.
+    """Next plan number; a remote fallback is logged as a warning.
+
+    Thin wrapper over :func:`next_plan_number_with_notice` for callers with no
+    way to show the notice to the user.
+    """
+    number, notice = next_plan_number_with_notice(
+        target_path, plan_subdir, fallback_root, include_remote=include_remote
+    )
+    if notice is not None:
+        logger.warning(notice)
+    return number
+
+
+def next_plan_number_with_notice(
+    target_path: Path,
+    plan_subdir: str,
+    fallback_root: Path,
+    *,
+    include_remote: bool = True,
+) -> tuple[str, str | None]:
+    """Next plan number for the repo enclosing ``target_path``, plus any notice.
+
+    Returns ``(number, notice)``; ``notice`` is ``None`` unless the remote could
+    not be checked, in which case it says why and the caller should surface it.
 
     Trusts the git-stored counter when present (``counter + 1``). When the
     counter is absent it bootstraps from a filesystem scan of the repo's plan
@@ -171,23 +304,32 @@ def next_plan_number_for_target(
         target_path: The plan file/folder about to be created.
         plan_subdir: Plan folder relative to the repo root (e.g. ``CLAUDE/Plan``).
         fallback_root: Project root used when ``target_path`` is not in a repo.
+        include_remote: Also count the plans on the default remote's branches
+            (GitHub #154), read from the already-fetched remote-tracking refs.
+            This path NEVER fetches: it runs inside hooks, which allow no
+            network I/O. ``mkplan.bash`` fetches before it allocates.
     """
     repo_root = resolve_plan_repo_root(target_path)
     if repo_root is None:
         highest = highest_plan_number(fallback_root / plan_subdir)
-        return f"{highest + 1:0{PLAN_NUMBER_WIDTH}d}"
+        return f"{highest + 1:0{PLAN_NUMBER_WIDTH}d}", None
 
     counter = read_plan_counter(repo_root)
-    if counter is not None:
-        # The counter is per clone, so it can lag plan folders pulled from
-        # elsewhere; the disk says which numbers are taken (N371).
-        highest = max(counter, highest_plan_number(repo_root / plan_subdir))
-        return f"{highest + 1:0{PLAN_NUMBER_WIDTH}d}"
-
-    # Bootstrap: no counter yet — seed it from the filesystem high-water mark.
-    highest = highest_plan_number(repo_root / plan_subdir)
-    write_plan_counter(repo_root, highest)
-    return f"{highest + 1:0{PLAN_NUMBER_WIDTH}d}"
+    # The counter is per clone, so it can lag plan folders pulled from
+    # elsewhere; the disk says which numbers are taken (N371).
+    disk = highest_plan_number(repo_root / plan_subdir)
+    if counter is None:
+        # Bootstrap: no counter yet — seed it from the filesystem high-water mark.
+        write_plan_counter(repo_root, disk)
+    highest = max(counter or 0, disk)
+    notice: str | None = None
+    if include_remote:
+        scan = remote_highest_plan_number(repo_root, plan_subdir)
+        if scan.highest is None:
+            notice = scan.notice
+        else:
+            highest = max(highest, scan.highest)
+    return f"{highest + 1:0{PLAN_NUMBER_WIDTH}d}", notice
 
 
 def record_new_plan_document(
@@ -236,7 +378,9 @@ def record_new_plan_document(
     if resolve_plan_repo_root(plan_doc_path) is None:
         return None
 
-    expected = int(next_plan_number_for_target(plan_doc_path, plan_subdir, fallback_root))
+    expected = int(
+        next_plan_number_for_target(plan_doc_path, plan_subdir, fallback_root, include_remote=False)
+    )
     if plan_number not in (expected, expected - 1):
         return None
 
