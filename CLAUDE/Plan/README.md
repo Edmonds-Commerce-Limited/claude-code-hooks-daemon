@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00564: remote meta ref allocator](00564-remote-meta-ref-allocator/PLAN.md) - Not Started (owner proposal, not for the next release: plan numbers allocated by compare-and-swap on a remote metadata ref, `refs/hooks-daemon/meta`, with an offline fallback to Plan 00562's scan and a recovery step)
 
-- [00563: optimise suggests claudemd excludes](00563-optimise-suggests-claudemd-excludes/PLAN.md) - Not Started (owner ruling on Plan 00561 Q1: `/hooks-daemon optimise` recommends `claudeMdExcludes` for worktree roots under a client's project; never installs it)
-
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - Not Started (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a consumption ledger with a stop gate shared with 00558, a scratch-shape allowlist and a SessionStart sweep)
 
 - [00559: daemon clone follows expected version after pull](00559-daemon-clone-follows-expected-version-after-pull/PLAN.md) - Not Started (#148, parked `agent-needs-human`: a pull that moves `expected_version` should re-provision from a trigger outside the stale daemon; owner to choose the trigger, the retry rule and whether to add a scheduled check)
@@ -213,6 +211,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00563: optimise suggests claudemd excludes](Completed/00563-optimise-suggests-claudemd-excludes/PLAN.md) - Complete at merge `d95c988f1` + `3f5a5dff3` + the archiving commit (owner ruling on Plan 00561 Q1: `/hooks-daemon optimise` lists an unscored `claudeMdExcludes` suggestion for worktree roots under the project that no glob covers; never writes it; release note 001)
+
 - [00562: cross clone plan number allocation](Completed/00562-cross-clone-plan-number-allocation/PLAN.md) - Complete at merge `5289e8fad` + `9b21e9c5c` + the archiving commit (GitHub #154: `mkplan.bash` fetches with a time limit and reads the plan folders on every remote branch before allocating; hooks read already-fetched refs only; release note 033; the not-yet-pushed race is Plan 00564)
 
 - [00558: branch WIP limit and hygiene](Completed/00558-git-branch-hygiene-sweep/PLAN.md) - Complete at the Plan 00558 merges + `0c75cfa0b`, `42502078a`, `bce4f829c` + the archiving commit (GitHub #152: a blocking WIP cap of 10 over every branch, dormancy limits, park and lossless delete, a Stop/SubagentStop guard against abandoned branches, lossless cleanup after merge and worktree removal; release notes 023-032)
@@ -271,8 +271,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00522: the pytest text report reads pytest's final summary line](Completed/00522-pytest-text-report-reads-the-final-summary-line/PLAN.md) - Complete at merge `413432043` + the archiving commit (#115: every count comes from pytest's own final totals line, so a nested summary quoted in a failure message no longer replaces them; QA-script only, no release note)
 
-- [00521: tdd_enforcement treats a Write over an existing file as an edit](Completed/00521-tdd-write-overwrite-is-not-creation/PLAN.md) - Complete at merge `113a1705a` + the archiving commit (#114: a `Write` over an existing regular file is not gated, like an `Edit`; a creating `Write` is judged as before; release note 058)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -326,9 +324,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 564 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 479 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 480 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 62 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

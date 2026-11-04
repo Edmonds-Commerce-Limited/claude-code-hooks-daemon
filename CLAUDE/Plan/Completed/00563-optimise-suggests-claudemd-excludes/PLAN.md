@@ -1,6 +1,6 @@
 # Plan 00563: optimise suggests claudemd excludes
 
-**Status**: In Progress
+**Status**: Complete (2026-11-04)
 **Created**: 2026-11-04
 **Owner**: dev
 **Priority**: Medium
