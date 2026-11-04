@@ -45,18 +45,18 @@ The allowance covers the whole ignored root, not just the scratch directory. A r
 ## F6. The Plan 00470 stale-scratch report is not a SessionStart sweep, and it suggests deleting (CONFIRMED, relevant to item 7)
 
 - The report is built by `utils/stale_litter.py:148-196` (`collect_scratch_report`) over `untracked/scratch` (`:35`), with a 14-day default (`:38`, `DEFAULT_SCRATCH_DAYS`).
-- Its only caller is `handlers/user_prompt_submit/idle_housekeeping_advisor.py:297`, a **UserPromptSubmit** handler that fires on repeated no-op recovery ticks. It is off by default (`:159`, `default_enabled = False`) and gated on the project's `autonomy:` config (`:163`).
+- Its only caller is `handlers/user_prompt_submit/idle_housekeeping_advisor.py:302`, a **UserPromptSubmit** handler that fires on repeated no-op recovery ticks. It is off by default (`:159`, `default_enabled = False`) and gated on the project's `autonomy:` config (`:163`).
 - The command the report offers is `find <scratch> -type f -mmin +<N> -delete` (`stale_litter.py:193`). That is the opposite of item 7's three choices: it deletes every old file, assets included, without asking which ones held something worth keeping. Judged only by age, it cannot tell a consumed commit body from an unconsumed review.
 
 ## F7. Nothing judges scratch at Stop or SubagentStop (CONFIRMED)
 
-- The Stop handlers are `auto_continue_stop`, `background_task_recorder`, `cron_stop_enforcer`, `goal_loop_detector`, `idle_workable_issue_stop_gate`, `teammate_reap_advisor` and `usage_pause_stop_gate` (`handlers/stop/`). None reads the files a session created.
-- Relevant priorities (`constants/priority.py`): `USAGE_PAUSE_STOP_GATE = 6` (`:154`), `SUBAGENT_HANDOFF_GATE = 11` (`:213`), `AUTO_CONTINUE_STOP = 15` (`:226`; this project overrides it to 10, `:128-129`). Plan 00558 DESIGN.md section 6 places its Stop guard between 9 and 10; this plan's gate needs a slot next to it.
+- The Stop handlers are `auto_continue_stop`, `background_task_recorder`, `branch_stop_guard` (Plan 00558, built since), `cron_stop_enforcer`, `goal_loop_detector`, `idle_workable_issue_stop_gate`, `teammate_reap_advisor` and `usage_pause_stop_gate` (`handlers/stop/`). None reads the files a session created.
+- Relevant priorities (`constants/priority.py`): `USAGE_PAUSE_STOP_GATE = 6` (`:154`), `BRANCH_STOP_GUARD = 9` (`:218`), `SUBAGENT_HANDOFF_GATE = 11` (`:213`), `BRANCH_SUBAGENT_STOP_GUARD = 12` (`:216`), `AUTO_CONTINUE_STOP = 15` (`:231`; this project overrides it to 10, `:128-129`). The owner has since dropped this plan's stop gate (DESIGN.md section 0), so no slot is needed.
 
 ## F8. Reusable pieces
 
 - `core/utils.py:670` `get_written_file_paths(hook_input)`: the accessor `lint_on_edit` and `sed_blocker` already use to find the files a Bash command AUTHORS (redirect, `tee`, heredoc). The ledger and the allowlist deny can use it for Bash-authored writes.
-- Plan 00558 DESIGN.md section 13 records evacuations in the session's spend-ledger state keyed by turn. The scratch ledger has the same keying problem (main thread vs sub-agent) and should share that storage decision.
+- Plan 00558 DESIGN.md section 13 (now `CLAUDE/Plan/Completed/00558-git-branch-hygiene-sweep/`) records evacuations in the session's spend-ledger state keyed by turn. The scratch ledger has the same keying problem (main thread vs sub-agent) and should share that storage decision.
 
 ## F9. Other ignored homes the daemon itself writes to
 
@@ -66,7 +66,7 @@ These are registered stores, not scratch, and the allowlist must name them:
 - `issue_report/upstream.py:13`: issue bodies go to `untracked/issue-reports/<report>.md`.
 - `utils/subagent_report_paths.py:44,56`: `untracked/agent-reports/` and `.../auto/`.
 - `issue_report/reproduction.py:55`: reproductions use fixtures under `untracked/scratch/`.
-- `CLAUDE/Plan/mkplan.bash:350-351` and `CLAUDE/PlanJournalling.md:200-202` document journal bodies under `untracked/scratch/` with no fixed name pattern (examples `entry.md`, `fix.md`; live bodies are named like `j558-standin.md`). A name-pattern allowlist cannot recognise them; consumption by `mkplan.bash --journal` must.
+- `CLAUDE/Plan/mkplan.bash:447-448` and `CLAUDE/PlanJournalling.md:200-202` document journal bodies under `untracked/scratch/` with no fixed name pattern (examples `entry.md`, `fix.md`; live bodies are named like `j558-standin.md`). A name-pattern allowlist cannot recognise them; consumption by `mkplan.bash --journal` must.
 
 ## F10. This repository's own practice (measured at plan time)
 
