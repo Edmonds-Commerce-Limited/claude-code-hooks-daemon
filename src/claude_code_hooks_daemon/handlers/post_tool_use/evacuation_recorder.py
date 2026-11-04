@@ -89,7 +89,7 @@ class EvacuationRecorderHandler(PostToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="evacuation-recorder - an evacuating command is allowed silently",
-                command="Run `git diff > untracked/scratch/x.patch` in a linked worktree",
+                command="Run `git diff > untracked/acceptance/x.patch` in a linked worktree",
                 harness_cannot_produce=(
                     "The recorder reads real worktrees and git state, which the harness's "
                     "fixture allowlist cannot make. Covered by "
