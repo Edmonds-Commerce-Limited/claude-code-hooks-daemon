@@ -79,6 +79,10 @@ readonly LOCK_MAX_ATTEMPTS=100
 readonly LOCK_RETRY_SECONDS=0.1
 readonly CONFIG_LOCK_MAX_ATTEMPTS=30
 readonly CONFIG_LOCK_RETRY_SECONDS=0.1
+# Remote plan-number scan (GitHub #154). The fetch budget equals the daemon's
+# Timeout.GIT_FETCH_SESSION; a test pins the two together.
+readonly REMOTE_FETCH_TIMEOUT_SECONDS=30
+readonly REMOTE_ARCHIVE_FOLDERS=(Completed Cancelled)
 
 # Journal assets (Plan 00163), also used by --journal (Plan 00427).
 readonly JOURNAL_DIR_BASENAME="JOURNAL"
@@ -262,6 +266,54 @@ filesystem_highest() {
     scan_plan_tree "$plan_dir"
     shopt -u nullglob dotglob
     printf '%d' "$scan_highest_result"
+}
+
+# Remote scan (GitHub #154): the counter and the disk are both local, so two
+# clones can take the same number. Mirrors remote_highest_plan_number
+# (handlers/utils/plan_numbering.py); the fetch budget is Timeout.GIT_FETCH_SESSION,
+# pinned by tests/unit/scripts/test_mkplan_remote_scan.py. READ-ONLY: it fetches
+# and lists tree names, and never pushes. The trailing slashes make ls-tree list
+# a folder's CONTENTS rather than the folder itself.
+default_remote() {
+    local root="$1" remotes
+    remotes="$(git -C "$root" remote)" || return 1
+    [[ -n "$remotes" ]] || return 1
+    if grep -qx 'origin' <<<"$remotes"; then
+        printf 'origin'
+    else
+        printf '%s' "${remotes%%$'\n'*}"
+    fi
+}
+
+# Sets the global `remote_highest_result` (0 when no plan is on the remote) and
+# returns 0, or returns 1 when the remote could not be checked.
+remote_highest() {
+    local root="$1" rel="$2" remote ref name sub
+    local -a paths=("$rel/")
+    remote_highest_result=0
+    remote="$(default_remote "$root")" || return 1
+    for sub in "${REMOTE_ARCHIVE_FOLDERS[@]}"; do
+        paths+=("$rel/$sub/")
+    done
+    local refs listing
+    if ! GIT_TERMINAL_PROMPT=0 timeout "$REMOTE_FETCH_TIMEOUT_SECONDS" \
+        git -C "$root" fetch --quiet --no-tags "$remote" >/dev/null; then
+        return 1
+    fi
+    refs="$(git -C "$root" for-each-ref --format='%(refname)' "refs/remotes/$remote/")" || return 1
+    while IFS= read -r ref; do
+        [[ -n "$ref" ]] || continue
+        listing="$(git -C "$root" ls-tree --name-only "$ref" -- "${paths[@]}")" || return 1
+        while IFS= read -r name; do
+            name="${name##*/}"
+            if [[ "$name" =~ ^([0-9]{1,5})-[a-zA-Z] ]]; then
+                if (( 10#${BASH_REMATCH[1]} > remote_highest_result )); then
+                    remote_highest_result=$((10#${BASH_REMATCH[1]}))
+                fi
+            fi
+        done <<<"$listing"
+    done <<<"$refs"
+    return 0
 }
 
 # Plan folders in the plan ROOT only -- the same set the dedupe scout is told
@@ -802,6 +854,15 @@ plan_rel="${plan_dir#"$repo_root"/}"
 # Everything from here to the counter write is the critical section: a single
 # exclusively-created lock file serialises concurrent runners so no two assign
 # the same N.
+# The remote scan runs BEFORE the lock: a fetch can take up to its whole budget
+# and a waiting runner gives up on the lock sooner than that.
+if remote_highest "$repo_root" "$plan_rel"; then
+    remote_highest_value="$remote_highest_result"
+else
+    remote_highest_value=0
+    printf 'mkplan: remote could not be checked; using local plan numbers only\n' >&2
+fi
+
 acquire_lock "$(scaffold_lock_dir "$plan_dir")"
 
 fs_highest="$(filesystem_highest "$plan_dir")"
@@ -829,6 +890,13 @@ if (( fs_highest > counter )); then
     printf 'mkplan: counter (%s) is behind the highest plan on disk (%s); advancing it\n' \
         "$counter" "$fs_highest" >&2
     counter="$fs_highest"
+fi
+
+# Other clones' pushed plans take numbers too (GitHub #154).
+if (( remote_highest_value > counter )); then
+    printf 'mkplan: highest plan on the remote (%s) is ahead of the counter (%s); advancing it\n' \
+        "$remote_highest_value" "$counter" >&2
+    counter="$remote_highest_value"
 fi
 
 next=$((counter + 1))
