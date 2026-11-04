@@ -1,6 +1,6 @@
 # Plan 00562: cross clone plan number allocation
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-04
 **Owner**: dev
 **Priority**: Medium
@@ -44,16 +44,18 @@ The fix needs a source every clone shares. Because `mkplan.bash` ships to every 
 
 ### Phase 2: implementation
 
-- [ ] ⬜ **Task 2.1**: Write a failing test that reproduces the cross-clone collision: two clones of a bare remote, one scaffolds and pushes, the other scaffolds the same number.
-- [ ] ⬜ **Task 2.2**: Implement the chosen source in `mkplan.bash` and in `plan_numbering.py` together, so the two cannot disagree.
-- [ ] ⬜ **Task 2.3**: Test the offline fallback and the "could not check" message.
+- [x] ✅ **Task 2.1**: Write a failing test that reproduces the cross-clone collision: two clones of a bare remote, one scaffolds and pushes, the other scaffolds the same number.
+- [x] ✅ **Task 2.2**: Implement the chosen source in `mkplan.bash` and in `plan_numbering.py` together, so the two cannot disagree.
+- [x] ✅ **Task 2.3**: Test the offline fallback and the "could not check" message.
 
 ## Success Criteria
 
-- [ ] The collision test from Task 2.1 passes.
-- [ ] The offline test passes.
-- [ ] A release note in the pending-release holding area (`CLAUDE/UPGRADES/UNRELEASED/`) describes the changed allocation, because `mkplan.bash` is deployed to clients.
-- [ ] GitHub #154 is commented on and closed.
+- [x] The collision test from Task 2.1 passes.
+- [x] The offline test passes.
+- [x] A release note in the pending-release holding area (`CLAUDE/UPGRADES/UNRELEASED/release-notes/033-plan-number-remote-scan.md`) describes the changed allocation, because `mkplan.bash` is deployed to clients.
+- [x] GitHub #154 is commented on and closed.
+
+The remaining gap, two clones that both scaffold before either pushes, is planned in Plan 00564.
 
 ## Delivery & Milestones
 
