@@ -68,7 +68,11 @@ _A branch-hygiene, relay-by-default and hardening release. A new top-level `bran
   - A plain (unforced) `git worktree remove` of a detached worktree whose commits no ref holds is now denied like the forced form, and WorktreeRemove keeps such a worktree.
   - A diff of committed revisions is no longer recorded as an evacuation, and a removal whose path cannot be placed no longer matches one.
 - `command_hints` no longer crashes with a `KeyError` when two requests arrive together right after a daemon start.
+- The eight language-aware handlers (`pipe_blocker`, `qa_suppression`, `tdd_enforcement`, `error_hiding_blocker`, `security_antipattern`, `comment_size`, `comment_changelog`, `lint_on_edit`) apply their language filter once under a lock, so a request that arrives with another right after a daemon start never sees the unfiltered set.
+- The status-line `supervisor_indicator` walks the process table outside its shared lock, so one session's walk no longer delays every other session's render.
+- A `sensitive_content` deny on an Edit names "line N of the edited text" instead of presenting that number as a line of the file.
 - `mkplan.bash` falls back to `gtimeout`, then to no time limit, where `timeout` is missing (stock macOS), so the remote plan-number scan runs there (Plan 00562).
+- The hook-path remote plan-number scan reads every remote branch's plan folders in one batched git call under one deadline instead of one process per branch, and a plan written with the advertised remote-aware number is recorded by the counter, so the commit gate accepts it (Plan 00562).
 - `limit_rebrief` recognises Claude Code's "5-hour limit" wording (2.1.312) as well as "session limit" and "weekly limit".
 
 ## [3.71.0] - 2026-10-23
