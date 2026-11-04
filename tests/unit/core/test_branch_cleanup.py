@@ -226,7 +226,9 @@ class TestWorktreeBlockers:
         (outside / "keep.txt").write_text("x\n", encoding="utf-8")
         (path / "untracked" / "notes").symlink_to(outside)
         assert worktree_blockers(path, ["untracked/lsp-venv/"]) == ()
-        assert (outside / "keep.txt").exists()
+        _git(repo, "worktree", "remove", str(path))
+        assert not path.exists()
+        assert (outside / "keep.txt").read_text(encoding="utf-8") == "x\n"
 
     def test_a_seeded_symlink_to_a_file_outside_is_not_a_blocker(
         self, repo: Path, tmp_path: Path
