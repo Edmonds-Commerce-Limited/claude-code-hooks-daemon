@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.apply_once import ApplyOnce, LazyLanguageFilterMixin
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -83,7 +84,7 @@ def _default_exclude_globs(layout: "ProjectLayout | None") -> tuple[str, ...]:
     return vendored + _FIXTURE_EXCLUDE_GLOBS
 
 
-class ErrorHidingBlockerHandler(PreToolUseHandlerBase):
+class ErrorHidingBlockerHandler(LazyLanguageFilterMixin, PreToolUseHandlerBase):
     """Block error-hiding patterns in code written via Write or Edit tools.
 
     Inspects the content of any Write or Edit tool call. If the new content
@@ -121,7 +122,7 @@ class ErrorHidingBlockerHandler(PreToolUseHandlerBase):
         self._registry = ErrorHidingStrategyRegistry.create_default()
         # Set by HandlerRegistry via setattr from config options
         self._languages: list[str] | None = None
-        self._languages_applied: bool = False
+        self._language_gate = ApplyOnce()
         # Client-configured exclude globs (Plan 00150); project-level default is
         # injected as _project_exclude_paths by the registry.
         self._exclude_paths: list[str] | None = None
@@ -130,15 +131,6 @@ class ErrorHidingBlockerHandler(PreToolUseHandlerBase):
     # ------------------------------------------------------------------
     # Language filter (applied lazily on first use)
     # ------------------------------------------------------------------
-
-    def _apply_language_filter(self) -> None:
-        """Apply language filter to registry on first use (lazy)."""
-        if self._languages_applied:
-            return
-        self._languages_applied = True
-        effective_languages = self._languages or self._project_languages
-        if effective_languages:
-            self._registry.filter_by_languages(effective_languages)
 
     # ------------------------------------------------------------------
     # Handler interface

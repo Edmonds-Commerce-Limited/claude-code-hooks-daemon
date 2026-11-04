@@ -1131,14 +1131,14 @@ class TestTddEnforcementHandler:
         """Language filter should be applied lazily and only once."""
         handler = TddEnforcementHandler()
         handler._languages = ["Python"]
-        assert handler._languages_applied is False
+        assert handler._language_gate.done is False
         # First call applies filter
         hook_input = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/workspace/src/pkg/module.py"},
         }
         handler.matches(hook_input)
-        assert handler._languages_applied is True
+        assert handler._language_gate.done is True
         # Changing _languages after first call has no effect (already applied)
         handler._languages = ["Go"]
         hook_input_py = {

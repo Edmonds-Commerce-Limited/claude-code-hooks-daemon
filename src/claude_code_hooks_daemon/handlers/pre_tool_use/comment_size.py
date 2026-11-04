@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.apply_once import ApplyOnce, LazyLanguageFilterMixin
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -161,7 +162,7 @@ def _breaches(span: CommentSpan, max_line_chars: int, max_block_lines: int) -> b
     return span.max_line_length > max_line_chars or span.line_count > max_block_lines
 
 
-class CommentSizeHandler(PreToolUseHandlerBase):
+class CommentSizeHandler(LazyLanguageFilterMixin, PreToolUseHandlerBase):
     """Block/advise on over-long comments, tiered like plan-doc-size.
 
     Configuration options (set via config YAML):
@@ -204,20 +205,12 @@ class CommentSizeHandler(PreToolUseHandlerBase):
         )
         self._registry = CommentStrategyRegistry.create_default()
         self._languages: list[str] | None = None
-        self._languages_applied: bool = False
+        self._language_gate = ApplyOnce()
         self._max_comment_line_chars: int = _DEFAULT_MAX_COMMENT_LINE_CHARS
         self._max_comment_block_lines: int = _DEFAULT_MAX_COMMENT_BLOCK_LINES
         self._mode: str = _MODE_BLOCK
         self._exclude_paths: list[str] | None = None
         self._formatter = RuleFormatter()
-
-    def _apply_language_filter(self) -> None:
-        if self._languages_applied:
-            return
-        self._languages_applied = True
-        effective_languages = self._languages or self._project_languages
-        if effective_languages:
-            self._registry.filter_by_languages(effective_languages)
 
     def _region_after(self, hook_input: dict[str, Any]) -> str:
         tool_name = hook_input.get(HookInputField.TOOL_NAME)

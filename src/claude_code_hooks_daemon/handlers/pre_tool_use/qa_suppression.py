@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.apply_once import ApplyOnce, LazyLanguageFilterMixin
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -65,7 +66,7 @@ _QA_SUPPRESSION_RULE = Rule(
 )
 
 
-class QaSuppressionHandler(PreToolUseHandlerBase):
+class QaSuppressionHandler(LazyLanguageFilterMixin, PreToolUseHandlerBase):
     """Block QA suppression comments across all supported languages.
 
     Uses Strategy Pattern: delegates ALL language-specific decisions to
@@ -106,28 +107,11 @@ class QaSuppressionHandler(PreToolUseHandlerBase):
         # Config option: restrict to specific languages (None = ALL languages)
         # Set by registry via setattr after __init__
         self._languages: list[str] | None = None
-        self._languages_applied: bool = False
+        self._language_gate = ApplyOnce()
         # Client-configured exclude globs (Plan 00150), layered on top of the
         # per-language skip_directories; project default injected by registry.
         self._exclude_paths: list[str] | None = None
         self._formatter = RuleFormatter()
-
-    def _apply_language_filter(self) -> None:
-        """Apply language filter to registry on first use (lazy).
-
-        Config options are set via setattr AFTER __init__, so we must defer
-        filtering until first matches()/handle() call. This is idempotent -
-        only applies once via the _languages_applied guard.
-
-        Priority: handler-level _languages > project-level _project_languages > ALL
-        """
-        if self._languages_applied:
-            return
-        self._languages_applied = True
-        # Handler-level override takes priority over project-level default
-        effective_languages = self._languages or self._project_languages
-        if effective_languages:
-            self._registry.filter_by_languages(effective_languages)
 
     def _get_content(self, hook_input: dict[str, Any]) -> str:
         """Extract content to check from hook input, handling Write vs Edit."""

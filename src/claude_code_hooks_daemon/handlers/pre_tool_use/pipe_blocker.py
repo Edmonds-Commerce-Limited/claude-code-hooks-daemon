@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.core import (
     GatingResult,
     get_data_layer,
 )
+from claude_code_hooks_daemon.core.apply_once import ApplyOnce, LazyLanguageFilterMixin
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.core.utils import get_bash_command
@@ -315,7 +316,7 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str, str], ...] = (
 )
 
 
-class PipeBlockerHandler(PreToolUseHandlerBase):
+class PipeBlockerHandler(LazyLanguageFilterMixin, PreToolUseHandlerBase):
     """Block expensive commands piped to tail/head to prevent information loss.
 
     Three-tier decision system:
@@ -369,7 +370,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
 
         # Language filtering (applied lazily on first use)
         self._languages: list[str] | None = None
-        self._languages_applied: bool = False
+        self._language_gate = ApplyOnce()
 
         # Pre-compiled universal whitelist patterns
         self._whitelist: list[re.Pattern[str]] = [
@@ -398,15 +399,6 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             for rule_id, blocked, why, fix, verbose in _RULE_DEFINITIONS
         )
         self._rules_by_id: dict[str, Rule] = {rule.rule_id: rule for rule in self._rules}
-
-    def _apply_language_filter(self) -> None:
-        """Apply language filter to registry on first use (lazy)."""
-        if self._languages_applied:
-            return
-        self._languages_applied = True
-        effective_languages = self._languages or self._project_languages
-        if effective_languages:
-            self._registry.filter_by_languages(effective_languages)
 
     @classmethod
     def _strip_inert_spans(cls, command: str) -> str:
