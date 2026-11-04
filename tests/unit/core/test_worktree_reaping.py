@@ -147,10 +147,17 @@ class TestTheRefusalRoutesToWhoeverIsReading:
         assert "need a human" not in lowered
         assert "needs a human" not in lowered
 
-    def test_it_says_removal_is_not_blocked(self) -> None:
-        """The false belief was that a hook reserved this to a human."""
+    def test_it_says_removal_is_open_once_nothing_would_be_lost(self) -> None:
+        """The false belief was that a hook reserved this to a human.
+
+        A hook does judge the removal (R-GIT-WORKTREE-REMOVE-FORCE), but only
+        for loss: it names what blocks, and allows the removal once that is
+        dealt with, whoever runs it.
+        """
         reason = reap_refusal_reason(_state(uncommitted_paths=("a.py",))) or ""
-        assert "no hook blocks" in reason
+        assert "no hook blocks" not in reason
+        assert "R-GIT-WORKTREE-REMOVE-FORCE" in reason
+        assert "only when nothing would be lost" in reason
 
     def test_it_names_the_command_that_removes_the_worktree(self) -> None:
         reason = reap_refusal_reason(_state(uncommitted_paths=("a.py",))) or ""

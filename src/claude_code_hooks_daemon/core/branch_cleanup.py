@@ -20,11 +20,12 @@ only a merged or patch-equivalent branch can ever be deleted here.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Final, Literal
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -40,12 +41,15 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     delete_branches,
     matches_any_glob,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     branch_ref,
     parse_worktree_porcelain,
     run_git,
 )
 from claude_code_hooks_daemon.utils.regenerable_paths import is_regenerable
+
+logger = logging.getLogger(__name__)
 
 CleanupMode = Literal["act", "advise", "off"]
 
@@ -211,9 +215,43 @@ def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]
     kept = [
         entry
         for entry in entries
-        if not is_regenerable(entry, regenerable) and not _holds_nothing(path, entry)
+        if not is_regenerable(entry, regenerable)
+        and not _holds_nothing(path, entry)
+        and not _is_generated_daemon_env(path, entry)
     ]
     return (*dirty, *kept)
+
+
+#: The daemon env file every worktree gets from `scripts/setup_worktree.sh`.
+_DAEMON_ENV_ENTRY: Final = ".claude/hooks-daemon.env"
+
+#: The one assignment the installer's template writes; checkout-agnostic, so a
+#: worktree's copy is regenerated identically by the next setup.
+_GENERATED_DAEMON_ENV_LINE: Final = 'HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"'
+
+
+def _is_generated_daemon_env(path: Path, entry: str) -> bool:
+    """True when ``entry`` is the daemon env file exactly as the installer writes it.
+
+    Comments, blank lines and the single checkout-agnostic assignment, nothing
+    else. Any other line is a hand edit the removal would lose, so it blocks;
+    an unreadable file blocks too.
+    """
+    if entry != _DAEMON_ENV_ENTRY:
+        return False
+    try:
+        text = (path / entry).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"branch_cleanup: {entry} in {path} is unreadable, so it is kept as a "
+            "blocker; an unread file is never called regenerable",
+        )
+        return False
+    lines = [line.strip() for line in text.splitlines()]
+    settings = [line for line in lines if line and not line.startswith("#")]
+    return settings == [_GENERATED_DAEMON_ENV_LINE]
 
 
 def preview_paths(paths: Sequence[str]) -> str:

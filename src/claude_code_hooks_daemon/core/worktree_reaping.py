@@ -269,9 +269,11 @@ def reap_refusal_reason(state: WorktreeState) -> str | None:
     return (
         f"{state.name} is not safe to reap: "
         + "; ".join(problems)
-        + ". This is a refusal by THIS command, not a rule: no hook blocks "
-        "`git worktree remove --force <path>`, so whoever is reading this — "
-        "agent or human — can inspect and remove it. It is accounted for when "
+        + ". This is a refusal by THIS command, not a reservation for a human: "
+        "`git worktree remove --force <path>` is allowed only when nothing would "
+        "be lost (R-GIT-WORKTREE-REMOVE-FORCE names any path that blocks it), so "
+        "whoever is reading this — agent or human — can inspect, deal with each "
+        "listed path, and remove it. It is accounted for when "
         "`git log --oneline <base>..<branch>` is empty AND every path listed "
         "above is generated output or a change already on the base. The reason "
         "this command will not decide that for you is that a rebased commit "

@@ -146,6 +146,32 @@ class TestWorktreeBlockers:
         (path / "untracked" / "qa" / "out.txt").write_text("x\n", encoding="utf-8")
         assert worktree_blockers(path, ["untracked/docs-qa/"]) == ("untracked/qa/",)
 
+    def _feat_with_daemon_env(self, repo: Path, body: str) -> Path:
+        # A real worktree tracks `.claude/`; only the env file inside is ignored.
+        (repo / ".claude").mkdir()
+        (repo / ".claude" / "settings.json").write_text("{}\n", encoding="utf-8")
+        (repo / ".git" / "info" / "exclude").write_text("untracked/\n.claude/*.env\n")
+        _git(repo, "add", ".claude/settings.json")
+        _git(repo, "commit", "-q", "-m", "track .claude")
+        _git(repo, "branch", "feat")
+        path = _worktree(repo, "feat")
+        (path / ".claude" / "hooks-daemon.env").write_text(body, encoding="utf-8")
+        return path
+
+    def test_the_generated_daemon_env_is_not_a_blocker(self, repo: Path) -> None:
+        # setup_worktree.sh writes it with the installer's template: comments
+        # and one checkout-agnostic assignment, nothing a removal can lose.
+        path = self._feat_with_daemon_env(
+            repo, '# generated\n\nHOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"\n'
+        )
+        assert worktree_blockers(path, _REGENERABLE) == ()
+
+    def test_a_hand_edited_daemon_env_still_blocks(self, repo: Path) -> None:
+        path = self._feat_with_daemon_env(
+            repo, 'HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"\nEXTRA_SETTING="kept"\n'
+        )
+        assert worktree_blockers(path, _REGENERABLE) == (".claude/hooks-daemon.env",)
+
     def test_untracked_and_modified_files_block(self, repo: Path) -> None:
         _git(repo, "branch", "feat")
         path = _worktree(repo, "feat")
