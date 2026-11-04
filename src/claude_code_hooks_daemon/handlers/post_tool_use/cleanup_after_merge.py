@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.core.branch_cleanup import (
 )
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_commit_parsing import git_invocations
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, branch_ref, run_git
@@ -180,10 +181,10 @@ class CleanupAfterMergeHandler(PostToolUseHandlerBase):
             "merged local branch on the command line is handled per "
             "`branches.cleanup_after_merge.mode`: `act` deletes it when the target holds "
             "every commit and prints `git branch <name> <sha>` to restore it; `advise` "
-            "prints the `bin/hooks-daemon delete-branch` command; `off` is silent. A "
+            f"prints the `{daemon_cli_command_for_docs('delete-branch')}` command; `off` is silent. A "
             "branch checked out in a worktree is never removed here (the worktree "
             "removal is printed for you to run), and a patch-equivalent branch is left "
-            "to `bin/hooks-daemon branch-sweep --clean`, which works behind a recovery "
+            f"to `{daemon_cli_command_for_docs('branch-sweep', '--clean')}`, which works behind a recovery "
             "bundle. The remote delete is printed, never run.\n"
         )
 

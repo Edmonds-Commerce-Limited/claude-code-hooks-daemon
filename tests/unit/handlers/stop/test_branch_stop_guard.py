@@ -11,8 +11,8 @@ import pytest
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.branch_records import TOUCHED_KEY
-from claude_code_hooks_daemon.handlers.stop import branch_stop_guard
 from claude_code_hooks_daemon.handlers.stop.branch_stop_guard import BranchStopGuardHandler
+from claude_code_hooks_daemon.handlers.utils import branch_stop_guard_base
 
 SESSION = "sess-1"
 
@@ -92,7 +92,7 @@ class TestStopHandler:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _leave_unpushed(repo)
-        monkeypatch.setattr(branch_stop_guard, "hook_is_usage_paused", lambda _payload: True)
+        monkeypatch.setattr(branch_stop_guard_base, "hook_is_usage_paused", lambda _payload: True)
         assert handler.handle(_payload()).decision == Decision.ALLOW
 
     def test_allow_carries_context(self, handler: BranchStopGuardHandler, repo: Path) -> None:
@@ -108,7 +108,7 @@ class TestStopHandler:
         def boom(*_args: object, **_kwargs: object) -> None:
             raise RuntimeError("boom")
 
-        monkeypatch.setattr(branch_stop_guard, "decide_stop", boom)
+        monkeypatch.setattr(branch_stop_guard_base, "decide_stop", boom)
         assert handler.handle(_payload()).decision == Decision.ALLOW
 
     def test_acceptance_tests_declared(self, handler: BranchStopGuardHandler) -> None:

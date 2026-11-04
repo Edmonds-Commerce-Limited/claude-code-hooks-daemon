@@ -87,9 +87,11 @@ _ENUMERATING: Final[frozenset[str]] = frozenset({"diff", "grep", "ls-files"})
 #: Subcommands whose own output is content rather than a list of names.
 _CONTENT_BEARING: Final[frozenset[str]] = frozenset({"diff", "grep"})
 
-#: Flags that reduce a call to names, or to a test about one named path.
+#: Flags that reduce a call to names, to a test about one named path, or to bare
+#: totals (`--shortstat` prints "N files changed, X insertions, Y deletions" and
+#: neither a path nor a byte of content).
 _NAMES_ONLY_FLAGS: Final[frozenset[str]] = frozenset(
-    {"--name-only", "--name-status", "--error-unmatch"}
+    {"--name-only", "--name-status", "--error-unmatch", "--shortstat"}
 )
 
 #: Any reference to one of these means the module consults the protected set.

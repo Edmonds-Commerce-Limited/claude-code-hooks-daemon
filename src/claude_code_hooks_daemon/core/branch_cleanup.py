@@ -41,6 +41,8 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     delete_branches,
     matches_any_glob,
 )
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     branch_ref,
@@ -69,8 +71,12 @@ BLOCKER_PREVIEW = 10
 #: Width of the ``XY `` status prefix in ``git status --porcelain``.
 _STATUS_PREFIX = 3
 
-SWEEP_CLEAN_COMMAND = "bin/hooks-daemon branch-sweep --clean"
 _BUNDLE_STAMP = "%Y%m%dT%H%M%SZ"
+
+
+def sweep_clean_command() -> str:
+    """The ``branch-sweep --clean`` invocation, spelled for this install's wrapper."""
+    return daemon_cli_command_for_docs("branch-sweep", "--clean")
 
 
 @dataclass(frozen=True)
@@ -235,9 +241,12 @@ def _is_generated_daemon_env(path: Path, entry: str) -> bool:
 
     Comments, blank lines and the single checkout-agnostic assignment, nothing
     else. Any other line is a hand edit the removal would lose, so it blocks;
-    an unreadable file blocks too.
+    an unreadable file blocks too, and so does one the project protects (its
+    bytes are never read, so it cannot be judged regenerable).
     """
     if entry != _DAEMON_ENV_ENTRY:
+        return False
+    if sfm.path_is_protected(str(path / entry), sfm.resolve_configured_patterns()):
         return False
     try:
         text = (path / entry).read_text(encoding="utf-8")
@@ -308,7 +317,9 @@ def cleanup_after_merge(
     deleted: list[str] = []
     skipped: list[str] = []
     commands: list[str] = []
-    delete_command = "bin/hooks-daemon delete-branch {name} --protected-ref " + target
+    delete_command = (
+        daemon_cli_command_for_docs("delete-branch") + " {name} --protected-ref " + target
+    )
     for name in names:
         refusal = policy_refusal(name, config, target)
         if refusal is not None:
@@ -321,7 +332,7 @@ def cleanup_after_merge(
             continue
         if verdict.tier == TIER_PATCH_EQUIVALENT:
             skipped.append(f"{name}: patch-equivalent, not reachable from {target}")
-            commands.append(SWEEP_CLEAN_COMMAND)
+            commands.append(sweep_clean_command())
             continue
         if verdict.tier not in MERGED_TIERS:
             skipped.append(f"{name}: {verdict.detail}")
@@ -386,7 +397,7 @@ def delete_if_merged(
         return CleanupReport(skipped=(f"{name}: {refusal}",))
     targets = cleanup_targets(repo, config, default)
     if not targets or not _merged_into_any(repo, name, targets, probe_timeout):
-        return CleanupReport(skipped=(f"{name}: not merged; left for {SWEEP_CLEAN_COMMAND}",))
+        return CleanupReport(skipped=(f"{name}: not merged; left for {sweep_clean_command()}",))
     never_work = _never_work(config, default)
     verdict = _classify(repo, name, targets, never_work)
     if verdict.refusal is not None or verdict.tier not in MERGED_TIERS:
@@ -529,7 +540,6 @@ __all__ = [
     "BLOCKER_PREVIEW",
     "CLEAN_STATES",
     "MERGED_TIERS",
-    "SWEEP_CLEAN_COMMAND",
     "CleanupMode",
     "CleanupReport",
     "clean_sweep",
@@ -542,5 +552,6 @@ __all__ = [
     "preview_paths",
     "remote_delete_command",
     "render",
+    "sweep_clean_command",
     "worktree_blockers",
 ]

@@ -76,6 +76,10 @@ MODE_READERS: Final[dict[str, str]] = {
     "status_line/session_mode_indicator.py": "displays the session's modes",
     "status_line/usage_indicator.py": "displays the usage pause",
     "stop/auto_continue_stop.py": "drives continuation; enters awaiting-human",
+    "utils/branch_stop_guard_base.py": (
+        "stands aside while usage-paused: that mode's own stop gate already holds the "
+        "session, so a branch deny would only fight it"
+    ),
     "stop/cron_stop_enforcer.py": "driver: no cron demand while usage-paused",
     "stop/goal_loop_detector.py": "enters goal-blocked",
     "stop/idle_workable_issue_stop_gate.py": (

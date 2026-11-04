@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.core.branch_sweep import (
 )
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
@@ -127,9 +128,9 @@ class BranchSweepHandler(SessionStartHandlerBase):
             "branches, work branches more than `branches.sweep.behind_threshold` commits "
             "behind the default, the count of merged branches not yet deleted, and the "
             "open-work count "
-            "against `branches.wip.cap`. Run `bin/hooks-daemon branch-sweep` for the full "
+            f"against `branches.wip.cap`. Run `{daemon_cli_command_for_docs('branch-sweep')}` for the full "
             "report (`--json` for the records, `--all` for exempt and protected branches) "
-            "and delete a done branch with the `bin/hooks-daemon delete-branch` command it "
+            f"and delete a done branch with the `{daemon_cli_command_for_docs('delete-branch')}` command it "
             "prints, never a raw force delete. Replaces `branch_count_advisor`: that key "
             "still disables this handler, and its `max_open_branches` / "
             "`behind_main_threshold` options are read for one release when "

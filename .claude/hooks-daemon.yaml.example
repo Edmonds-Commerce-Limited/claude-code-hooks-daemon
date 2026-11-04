@@ -49,6 +49,10 @@ daemon:
 handlers:
   # PreToolUse handlers (run before every tool call)
   pre_tool_use:
+    branch_creation_guard:  # Plan 00558: deny a new branch at branches.wip.cap
+      enabled: true
+      priority: 40
+
     # SAFETY HANDLERS (Priority 10-20) - HIGHLY RECOMMENDED
     destructive_git:       # Blocks git reset --hard, git clean -f, etc
       enabled: true
@@ -552,7 +556,19 @@ handlers:
 
   # PostToolUse handlers (run after tool execution)
   post_tool_use:
-    lint_on_edit:              # Language-aware lint validation after Write/Edit
+    branch_touch_recorder:  # Plan 00558: creator and touch records in git config, read by WorktreeRemove and the stop guard
+      enabled: true
+      priority: 40
+
+    evacuation_recorder:  # Plan 00558 Task 4.5: remember this turn's evacuations so destroying the source later in the turn is denied
+      enabled: true
+      priority: 41
+
+    cleanup_after_merge:  # Delete a branch once merged into main (Plan 00558); mode is branches.cleanup_after_merge.mode
+      enabled: true
+      priority: 39
+
+    lint_on_edit:            # Language-aware lint validation after Write/Edit
       enabled: false           # Enable for automatic lint validation (Shell, Python, Go, Rust, etc.)
       priority: 25
       # options:
@@ -845,6 +861,10 @@ handlers:
 
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:
+    evacuation_turn_marker:  # Plan 00558 Task 4.5: advances the main thread's turn so evacuation records expire
+      enabled: true  # Silent bookkeeping; never terminal
+      priority: 43
+
     usage_pause_gate:  # Pauses the session at its host usage ceiling, holds the pause, resumes it (Plan 00479)
       enabled: true    # Inert unless `hosts:` gives this host a usage_ceiling; never terminal
       priority: 9
@@ -929,6 +949,10 @@ handlers:
   # auto_continue_stop in turn. See
   # tests/integration/test_stop_chain_terminal_shadowing.py.
   stop:
+    branch_stop_guard:  # Denies (three times at most) a stop leaving a dirty worktree, unpushed commits or a merged branch (Plan 00558 Task 4.4)
+      enabled: true
+      priority: 9
+
     idle_workable_issue_stop_gate:  # Refuses an idle stop while a workable issue is cached and nothing is in flight (Plan 00470 Phase 7)
       enabled: true         # Inert unless the project declares an `issue-sdlc` persistent cron job; never terminal
       priority: 4
@@ -969,6 +993,10 @@ handlers:
       priority: 10
 
   subagent_stop:
+    branch_subagent_stop_guard:  # SubagentStop twin of branch_stop_guard (Plan 00558 Task 4.4)
+      enabled: true
+      priority: 12
+
     cron_subagent_stop_enforcer:  # SubagentStop twin of cron_stop_enforcer above (Plan 00416)
       enabled: true                 # Silent unless persistent_crons.enabled AND a job is declared
       priority: 7

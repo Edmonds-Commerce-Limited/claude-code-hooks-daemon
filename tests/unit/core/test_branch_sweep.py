@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     DormancyStage,
     build_inventory,
 )
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 
 NOW = 1_800_000_000
 DAY = 86_400
@@ -306,11 +307,9 @@ class TestSessionSummary:
         ]
         lines = branch_sweep.session_summary(_inventory(*many), _CONFIG, cap=100, new_session=True)
         assert len(lines) <= branch_sweep.MAX_SUMMARY_LINES + 3
-        overflow = [line for line in lines if "more: run `bin/hooks-daemon branch-sweep`" in line]
-        assert overflow == [
-            f"  and {30 - branch_sweep.MAX_SUMMARY_LINES} more: run "
-            "`bin/hooks-daemon branch-sweep`"
-        ]
+        sweep = daemon_cli_command_for_docs("branch-sweep")
+        overflow = [line for line in lines if f"more: run `{sweep}`" in line]
+        assert overflow == [f"  and {30 - branch_sweep.MAX_SUMMARY_LINES} more: run `{sweep}`"]
 
     def test_deprecation_line_alone_is_not_silent(self) -> None:
         clean = _inventory(_record("w", BranchState.LIVE))
