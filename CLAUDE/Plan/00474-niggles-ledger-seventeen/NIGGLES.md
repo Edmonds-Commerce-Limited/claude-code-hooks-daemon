@@ -124,6 +124,26 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N573 to N575 — v3.72.0 release gate and post-release cleanup
+
+**Source**: the v3.72.0 release (PR #157) and the Plan 00563 merge, 4 November 2026.
+
+- **N573 (open)**: an agent worktree made by Claude Code's `isolation: worktree`
+  (`.claude/worktrees/agent-aae785a2dc25b659a-5cad6d1c`, branch merged into main) cannot be removed. The worktree guard
+  lists the daemon env path under `.claude/` as unrecoverable content, rendered with a trailing slash, as a directory.
+  That path is secret-protected, so an agent can neither inspect nor delete it, and every earlier `worktree-rel372-*`
+  worktree holding the same path as a file was removed without complaint. Either the agent worktree really holds a
+  directory there (something created it), or the guard mis-classifies it. A human has to look; the agent must not.
+- **N574 (fixed)**: the release gate's py3.13 integration leg failed with EDQUOT under `/tmp/pytest-of-runner` on runner
+  image `ubuntu26/20261101.64` (the previous image passed the same commit). The fix in v3.72.0 points TMPDIR at `/ci-tmp`
+  in both workflows. `$RUNNER_TEMP` was tried first and failed 12 unit tests: it sits under `/home/runner`, whose
+  `.claude` the root-discovery tests found, and its length overflowed AF_UNIX socket paths. One test whose layout depended
+  on the tmp path's sort order was pinned (`3a94db888`).
+- **N575 (fixed)**: `scripts/release/check_release_ci.py` was tracked 100644, so RELEASING.md Step 13.2's direct
+  invocation failed with "Permission denied". Fixed in `852e25552`.
+
+**Status**: N573 ⬜ open (human). N574 ✅ fixed (`0414d5291`, `8de7062b0`, `3a94db888`). N575 ✅ fixed (`852e25552`).
+
 ### N569 to N572 — the v3.72.0 Claude Code changelog review (2.1.309 to 2.1.318): one conflict, two adopts, one redundant
 
 **Source**: RELEASING.md Step 1c for v3.72.0; the review is
