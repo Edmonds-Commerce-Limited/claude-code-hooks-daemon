@@ -181,6 +181,15 @@ def _judged_form(root: Path, entry: str) -> str:
     return bare
 
 
+def _is_symlink(root: Path, entry: str) -> bool:
+    """Whether ``entry`` is itself a symlink (never followed).
+
+    A removal unlinks the link and leaves its target, which lives outside the
+    worktree, so a symlink is never lost content whatever it points at.
+    """
+    return (root / entry.rstrip("/")).is_symlink()
+
+
 def _holds_nothing(root: Path, entry: str) -> bool:
     """Whether ``entry`` is a real directory with no file anywhere beneath it.
 
@@ -221,7 +230,8 @@ def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]
     kept = [
         entry
         for entry in entries
-        if not is_regenerable(entry, regenerable)
+        if not _is_symlink(path, entry)
+        and not is_regenerable(entry, regenerable)
         and not _holds_nothing(path, entry)
         and not _is_generated_daemon_env(path, entry)
     ]
