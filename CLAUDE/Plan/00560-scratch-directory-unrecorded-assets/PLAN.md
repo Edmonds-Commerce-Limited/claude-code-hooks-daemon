@@ -84,7 +84,7 @@ The questions are in [DESIGN-QUESTIONS.md](DESIGN-QUESTIONS.md); the decisions a
 
 - [x] ✅ **Task 1.1**: Settle D1 to D3 in [DESIGN.md](DESIGN.md). D1 and D2 dropped, D3 reduced to age-only, by owner ruling.
 - [x] ✅ **Task 1.2**: Settle D4 to D6 and the config surface in [DESIGN.md](DESIGN.md): name-pattern whitelist, `untracked/` root, reduced D6, one `scratch:` block, consume-then-remove rule.
-- [ ] ⬜ **Task 1.3**: Agree the shared Stop/SubagentStop design with Plan 00558. Open: the stop gate is dropped and 00558 is Complete, so the coordinator decides whether this closes as reduced (DESIGN.md section 9).
+- [x] ✅ **Task 1.3**: Closed as reduced (coordinator, 4 November 2026): the owner dropped this plan's stop gate and Plan 00558 is Complete, so no Stop/SubagentStop design is shared. The one shared piece left, printing this plan's SessionStart sweep beside 00558's branch sweep, is Task 6.3, which reuses 00558's output as built (DESIGN.md section 9).
 - [ ] 🚫 **Task 1.4**: Decide the modes and rollout (Q5) and the backlog (Q4). Blocked on the owner: Q5 is open; Q4 has a provisional stand-in answer (DESIGN.md section 6).
 - [x] ✅ **Task 1.5**: Fact-check CODE-FACTS.md and DESIGN.md against the repository and fold in the findings (done inline, not by a dispatched checker; see the journal).
 
