@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.load_scaling import scaled_seconds
 from tests.support.git_fixtures import git_setup_timeout
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -304,7 +305,7 @@ class TestHookPathNeverFetches:
         )
 
         assert number == "00001"
-        assert time.monotonic() - started < 5
+        assert time.monotonic() - started < scaled_seconds(5.0)
 
 
 class TestHungFetchIsCutOff:
@@ -322,7 +323,7 @@ class TestHungFetchIsCutOff:
         started = time.monotonic()
         result = _scaffold(clone_b, "hung", {"MKPLAN_REMOTE_FETCH_TIMEOUT_SECONDS": "1"})
 
-        assert time.monotonic() - started < 15
+        assert time.monotonic() - started < scaled_seconds(15.0)
         assert result.returncode == 0, result.stderr
         assert (clone_b / _PLAN_SUBDIR / "00001-hung").is_dir()
         assert result.stderr.count(_NOTICE) == 1
@@ -337,7 +338,7 @@ class TestHungFetchIsCutOff:
         started = time.monotonic()
         scan = remote_highest_plan_number(clone_b, _PLAN_SUBDIR, fetch=True)
 
-        assert time.monotonic() - started < 15
+        assert time.monotonic() - started < scaled_seconds(15.0)
         assert scan.highest is None
         assert scan.reason is not None
         assert "git fetch origin failed" in scan.reason
