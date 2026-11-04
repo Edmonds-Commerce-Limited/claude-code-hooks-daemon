@@ -2427,6 +2427,9 @@ class BranchesConfig(BaseModel):
     )
     sweep: BranchSweepConfig = Field(default_factory=BranchSweepConfig)
 
+    #: The retired ``branch_sweep`` option ``max_open_branches``, set by ``Config``.
+    _legacy_wip_cap: int | None = PrivateAttr(default=None)
+
     @field_validator("default", "remote")
     @classmethod
     def reject_blank(cls, value: str) -> str:
@@ -2438,6 +2441,27 @@ class BranchesConfig(BaseModel):
     def explicit_wip_cap(self) -> int | None:
         """``wip.cap`` when the config sets it, else None (unset falls back elsewhere)."""
         return self.wip.cap if "cap" in self.wip.model_fields_set else None
+
+    def effective_wip_cap(self) -> int:
+        """The WIP cap in force: ``wip.cap`` if set, else the retired option, else the default.
+
+        The single rule behind both the report (``branch-sweep``, SessionStart)
+        and the creation guard, so they cannot disagree about the cap.
+        """
+        explicit = self.explicit_wip_cap()
+        if explicit is not None:
+            return explicit
+        if self._legacy_wip_cap is not None:
+            return self._legacy_wip_cap
+        return self.wip.cap
+
+    def adopt_legacy_wip_cap(self, value: object) -> None:
+        """Remember the retired ``max_open_branches`` while ``wip.cap`` is unset.
+
+        Anything other than a positive integer is ignored, as the report ignores it.
+        """
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 1:
+            self._legacy_wip_cap = value
 
     def explicit_behind_threshold(self) -> int | None:
         """``sweep.behind_threshold`` when the config sets it, else None."""
@@ -3123,6 +3147,13 @@ class Config(BaseModel):
                 raise ValueError(f"duplicate project root {project.root!r} in 'projects'")
             seen_names.add(project.name)
             seen_roots.add(project.root)
+        return self
+
+    @model_validator(mode="after")
+    def adopt_legacy_branch_options(self) -> Self:
+        """Hand the retired ``max_open_branches`` to ``branches`` for as long as it is read."""
+        legacy = handler_options(self.handlers.session_start.get("branch_sweep"))
+        self.branches.adopt_legacy_wip_cap(legacy.get("max_open_branches"))
         return self
 
     @model_validator(mode="after")

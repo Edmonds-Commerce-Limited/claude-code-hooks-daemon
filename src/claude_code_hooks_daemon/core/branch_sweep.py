@@ -181,7 +181,7 @@ def effective_wip_cap(config: BranchesConfig, legacy_options: Mapping[str, Any])
     legacy = legacy_options.get("max_open_branches")
     if isinstance(legacy, int) and not isinstance(legacy, bool) and legacy >= 1:
         return legacy
-    return config.wip.cap
+    return config.effective_wip_cap()
 
 
 def effective_behind_threshold(config: BranchesConfig, legacy_options: Mapping[str, Any]) -> int:

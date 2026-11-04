@@ -14,6 +14,8 @@ from claude_code_hooks_daemon.config.models import (
     BranchDuplicatesConfig,
     BranchesConfig,
     BranchWipConfig,
+    Config,
+    handler_options,
 )
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -25,6 +27,7 @@ from claude_code_hooks_daemon.core.branch_creation import (
     stem,
     write_labels,
 )
+from claude_code_hooks_daemon.core.branch_sweep import effective_wip_cap
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -170,6 +173,48 @@ class TestCap:
         _git(repo, "worktree", "add", "-q", str(tmp_path / "wt"), "one")
         verdict = creation_verdict(repo, _config(cap=2), "fresh")
         assert any("wt" in line and "one" in line for line in verdict.lines)
+
+
+class TestLegacyCap:
+    """With only the retired ``max_open_branches`` set, the report and the guard share one cap."""
+
+    @staticmethod
+    def _legacy_config() -> Config:
+        return Config.model_validate(
+            {
+                "handlers": {
+                    "session_start": {
+                        "branch_sweep": {"enabled": True, "options": {"max_open_branches": 2}}
+                    }
+                },
+                "branches": {"default": "main", "duplicates": {"mode": "off"}},
+            }
+        )
+
+    def test_report_and_guard_agree_on_the_legacy_cap(self, repo: Path) -> None:
+        config = self._legacy_config()
+        legacy = handler_options(config.handlers.session_start.get("branch_sweep"))
+        assert effective_wip_cap(config.branches, legacy) == 2
+        assert config.branches.effective_wip_cap() == 2
+        _branch(repo, "one")
+        _branch(repo, "two")
+        verdict = creation_verdict(repo, config.branches, "fresh")
+        assert verdict.decision == "deny"
+        assert "cap 2" in "\n".join(verdict.lines)
+
+    def test_an_explicit_cap_beats_the_legacy_value(self, repo: Path) -> None:
+        config = Config.model_validate(
+            {
+                "handlers": {
+                    "session_start": {"branch_sweep": {"options": {"max_open_branches": 2}}}
+                },
+                "branches": {"default": "main", "wip": {"cap": 5}},
+            }
+        )
+        assert config.branches.effective_wip_cap() == 5
+
+    def test_nothing_set_is_the_default(self) -> None:
+        assert Config.model_validate({}).branches.effective_wip_cap() == 10
 
 
 class TestDuplicates:

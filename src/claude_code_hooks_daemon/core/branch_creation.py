@@ -271,7 +271,7 @@ def _cap_lines(
 ) -> list[str]:
     ordered = sorted(groups, key=lambda work: (_rank(work, labels), work.committed, work.name))
     lines = [
-        f"Open work branches: {len(groups)} (cap {config.wip.cap}). "
+        f"Open work branches: {len(groups)} (cap {config.effective_wip_cap()}). "
         "Finish, park or delete one before starting another:"
     ]
     for work in ordered[:DENY_LIST_LIMIT]:
@@ -395,7 +395,7 @@ def creation_verdict(
     work_refs = [ref for ref in refs if is_work_branch(ref.name, config, default)]
     groups = _work_groups(work_refs)
     moment = time.time() if now is None else now
-    over_cap = config.wip.mode != "off" and len(groups) >= config.wip.cap
+    over_cap = config.wip.mode != "off" and len(groups) >= config.effective_wip_cap()
     duplicates = (
         _duplicates(new_name, groups, config.remote)
         if new_name and config.duplicates.mode == "warn"
