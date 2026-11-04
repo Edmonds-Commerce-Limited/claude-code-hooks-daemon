@@ -132,6 +132,18 @@ class TestCap:
         config = config.model_copy(update={"default": "auto"})
         assert creation_verdict(repo, config, "fresh").decision == "allow"
 
+    def test_auto_default_resolves_without_counting_remote_refs(self, repo: Path) -> None:
+        """The default resolves the same way the inventory does, whatever wip.count_remote is."""
+        _branch(repo, "one")
+        _branch(repo, "trunkish")
+        sha = _git(repo, "rev-parse", "trunkish").strip()
+        _git(repo, "update-ref", "refs/remotes/origin/trunkish", sha)
+        _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunkish")
+        config = BranchesConfig(
+            default="auto", wip=BranchWipConfig(cap=2, mode="block", count_remote=False)
+        )
+        assert creation_verdict(repo, config, "fresh").decision == "allow"
+
     def test_git_failure_allows_with_could_not_judge(self, tmp_path: Path) -> None:
         verdict = creation_verdict(tmp_path / "missing", _config(), "fresh")
         assert verdict.decision == "allow"
