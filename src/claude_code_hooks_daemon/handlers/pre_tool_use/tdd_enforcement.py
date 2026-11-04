@@ -269,7 +269,7 @@ def _is_existing_regular_file(file_path: str) -> bool:
     return path_is_file(path, unreadable_means=False)
 
 
-class TddEnforcementHandler(LazyLanguageFilterMixin, PreToolUseHandlerBase):
+class TddEnforcementHandler(LazyLanguageFilterMixin[TddStrategyRegistry], PreToolUseHandlerBase):
     """Enforce TDD by blocking production file creation without corresponding test file.
 
     Uses Strategy Pattern: delegates ALL language-specific decisions to TddStrategy

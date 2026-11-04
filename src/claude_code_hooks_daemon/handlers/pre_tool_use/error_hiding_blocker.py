@@ -84,7 +84,9 @@ def _default_exclude_globs(layout: "ProjectLayout | None") -> tuple[str, ...]:
     return vendored + _FIXTURE_EXCLUDE_GLOBS
 
 
-class ErrorHidingBlockerHandler(LazyLanguageFilterMixin, PreToolUseHandlerBase):
+class ErrorHidingBlockerHandler(
+    LazyLanguageFilterMixin[ErrorHidingStrategyRegistry], PreToolUseHandlerBase
+):
     """Block error-hiding patterns in code written via Write or Edit tools.
 
     Inspects the content of any Write or Edit tool call. If the new content

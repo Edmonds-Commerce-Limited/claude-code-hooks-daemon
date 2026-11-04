@@ -162,7 +162,7 @@ def _breaches(span: CommentSpan, max_line_chars: int, max_block_lines: int) -> b
     return span.max_line_length > max_line_chars or span.line_count > max_block_lines
 
 
-class CommentSizeHandler(LazyLanguageFilterMixin, PreToolUseHandlerBase):
+class CommentSizeHandler(LazyLanguageFilterMixin[CommentStrategyRegistry], PreToolUseHandlerBase):
     """Block/advise on over-long comments, tiered like plan-doc-size.
 
     Configuration options (set via config YAML):

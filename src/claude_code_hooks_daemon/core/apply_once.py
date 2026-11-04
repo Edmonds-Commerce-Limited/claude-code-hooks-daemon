@@ -9,7 +9,7 @@ threads never both mutate it.
 
 import threading
 from collections.abc import Callable
-from typing import Any
+from typing import Generic, Protocol, TypeVar
 
 
 class ApplyOnce:
@@ -35,7 +35,16 @@ class ApplyOnce:
             self._done = True
 
 
-class LazyLanguageFilterMixin:
+class _LanguageFilterable(Protocol):
+    """A strategy registry that can be narrowed to a set of languages."""
+
+    def filter_by_languages(self, language_names: list[str]) -> None: ...
+
+
+_RegistryT = TypeVar("_RegistryT", bound=_LanguageFilterable)
+
+
+class LazyLanguageFilterMixin(Generic[_RegistryT]):
     """Shared lazy ``registry.filter_by_languages`` for language-strategy handlers.
 
     The host sets ``_registry``, ``_languages``, ``_project_languages`` and a
@@ -44,7 +53,8 @@ class LazyLanguageFilterMixin:
     Priority: handler ``_languages`` > project ``_project_languages`` > all.
     """
 
-    _registry: Any
+    # Parameterised so each handler keeps its concrete registry type.
+    _registry: _RegistryT
     _languages: list[str] | None
     _project_languages: list[str] | None
     _language_gate: ApplyOnce

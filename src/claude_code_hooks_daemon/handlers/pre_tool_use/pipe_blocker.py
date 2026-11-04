@@ -316,7 +316,9 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str, str], ...] = (
 )
 
 
-class PipeBlockerHandler(LazyLanguageFilterMixin, PreToolUseHandlerBase):
+class PipeBlockerHandler(
+    LazyLanguageFilterMixin[PipeBlockerStrategyRegistry], PreToolUseHandlerBase
+):
     """Block expensive commands piped to tail/head to prevent information loss.
 
     Three-tier decision system:

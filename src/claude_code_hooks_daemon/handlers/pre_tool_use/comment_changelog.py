@@ -209,7 +209,9 @@ def _advisory_reasons(text: str, max_history_entries: int) -> list[str]:
     return reasons
 
 
-class CommentChangelogHandler(LazyLanguageFilterMixin, PreToolUseHandlerBase):
+class CommentChangelogHandler(
+    LazyLanguageFilterMixin[CommentStrategyRegistry], PreToolUseHandlerBase
+):
     """Block Write/Edit content that writes historical narrative into a comment.
 
     This is the valuable half of Plan 00208 -- size is a proxy, history is

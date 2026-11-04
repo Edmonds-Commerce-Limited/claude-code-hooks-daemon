@@ -85,7 +85,7 @@ LINT_TIMEOUT_NOTICE: Final[str] = (
 )
 
 
-class LintOnEditHandler(LazyLanguageFilterMixin, PostToolUseHandlerBase):
+class LintOnEditHandler(LazyLanguageFilterMixin[LintStrategyRegistry], PostToolUseHandlerBase):
     """Run language-aware lint validation on files after Write/Edit.
 
     Uses Strategy Pattern: delegates ALL language-specific decisions to LintStrategy

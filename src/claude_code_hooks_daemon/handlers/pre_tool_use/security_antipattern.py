@@ -135,7 +135,9 @@ def _verbose_content(why: str) -> str:
     )
 
 
-class SecurityAntipatternHandler(LazyLanguageFilterMixin, PreToolUseHandlerBase):
+class SecurityAntipatternHandler(
+    LazyLanguageFilterMixin[SecurityStrategyRegistry], PreToolUseHandlerBase
+):
     """Block Write/Edit of files containing security antipatterns.
 
     Scans content being written for security antipatterns defined by

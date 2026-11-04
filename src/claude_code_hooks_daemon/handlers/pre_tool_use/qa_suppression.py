@@ -66,7 +66,9 @@ _QA_SUPPRESSION_RULE = Rule(
 )
 
 
-class QaSuppressionHandler(LazyLanguageFilterMixin, PreToolUseHandlerBase):
+class QaSuppressionHandler(
+    LazyLanguageFilterMixin[QaSuppressionStrategyRegistry], PreToolUseHandlerBase
+):
     """Block QA suppression comments across all supported languages.
 
     Uses Strategy Pattern: delegates ALL language-specific decisions to
