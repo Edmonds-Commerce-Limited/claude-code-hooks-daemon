@@ -286,6 +286,16 @@ jobs:
           test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
           echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
 
+      # Runner image ubuntu26/20261101.64 caps /tmp, and the integration
+      # shard's tmp_path trees (a full clone of this repository among them)
+      # outgrew it: every test leg on that image failed with EDQUOT under
+      # /tmp/pytest-of-runner. RUNNER_TEMP is on the work disk. Every later
+      # step, and every process it spawns, inherits TMPDIR from GITHUB_ENV.
+      - name: Keep temporary files on the work disk
+        run: |
+          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          df -h /tmp "$RUNNER_TEMP"
+
       # The `rest` shards reach the live daemon and the relay (acceptance and
       # transport gates); HOOKS_DAEMON_RELEASE_GATE turns a skipped gate red.
       - name: Start daemon

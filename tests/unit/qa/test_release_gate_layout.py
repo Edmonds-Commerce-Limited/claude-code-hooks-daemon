@@ -89,3 +89,23 @@ class TestShardMatrix:
             ]
         combined = workflow["jobs"]["coverage"]["env"]["SHARDS"].split()
         assert sorted(combined) == sorted(_shard_names())
+
+
+TMPDIR_EXPORT = 'echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"'
+
+
+class TestTemporaryFilesLiveOnTheWorkDisk:
+    """Runner image ubuntu26/20261101.64 caps /tmp, and the integration shard's tmp_path trees outgrew it.
+
+    Every test leg on that image failed with EDQUOT under /tmp/pytest-of-runner, while the same commit
+    passed on the previous image. TMPDIR is pointed at RUNNER_TEMP, on the work disk, before any test runs.
+    """
+
+    def test_the_tests_job_exports_tmpdir_before_running_the_shards(
+        self, workflow: dict[str, Any]
+    ) -> None:
+        steps: list[dict[str, Any]] = workflow["jobs"]["tests"]["steps"]
+        names = [str(step.get("name", "")) for step in steps]
+        exporting = [i for i, step in enumerate(steps) if TMPDIR_EXPORT in str(step.get("run", ""))]
+        assert exporting, "no step of the tests job exports TMPDIR from RUNNER_TEMP"
+        assert exporting[0] < names.index("Run the shards")

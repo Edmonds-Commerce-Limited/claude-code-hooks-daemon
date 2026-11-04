@@ -334,6 +334,14 @@ jobs:
           test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
           echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
 
+      # Runner image ubuntu26/20261101.64 caps /tmp, which the integration
+      # tests' tmp_path trees outgrow (EDQUOT under /tmp/pytest-of-runner);
+      # release-gate.yml's tests job carries the same step for the same reason.
+      - name: Keep temporary files on the work disk
+        run: |
+          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          df -h /tmp "$RUNNER_TEMP"
+
       # The tools are invoked directly rather than through scripts/qa/run_all.sh.
       # That script resolves its interpreter via the daemon's fingerprint-keyed
       # venv resolver, which only exists on an installed daemon — it is a
