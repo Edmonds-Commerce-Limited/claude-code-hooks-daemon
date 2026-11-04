@@ -2,6 +2,13 @@
 
 This page explains the plan in plain terms and lists the seven questions it needs answered. The full plan is in [PLAN.md](PLAN.md); you do not need to read it to answer these.
 
+## Your answers so far (4 November)
+
+- **Q1, decided:** there is no separate store for reports. An agent asked for a report with no plan folder stops and asks for one, and the coordinator either makes the plan or tells the agent to make it.
+- **Scope, decided (80/20):** the usage tracking in points 2 and 3 below is dropped as over-engineering. That makes Q2 and Q7 moot.
+- **New, decided:** any command that uses a scratch file (for example `git commit -F`, `gh --body-file`, `mkplan.bash --journal`) must chain `&& rm <file>`, so the file is deleted only when the command succeeds. The unchained form is blocked.
+- **Still open:** a whitelist of file names for the scratch directory (you were leaning towards it), plus Q3, Q4, Q5 and Q6.
+
 ## The problem in one paragraph
 
 Agents keep valuable work (research, reviews, design notes, sub-agent reports) in `untracked/scratch/`. That directory is gitignored, so the work never reaches GitHub, and it is lost when the container goes or someone tidies up. Issue #155 counted about 237 such files in one project and three near-losses in one week. The daemon makes it worse: several of its own messages tell agents that scratch is a good place to keep things.
