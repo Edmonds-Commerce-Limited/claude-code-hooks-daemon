@@ -75,12 +75,12 @@ logger = logging.getLogger(__name__)
 _TASK_NOTIFICATION_MARKER: Final[str] = "<task-notification"
 _TEAMMATE_MARKER: Final[str] = "<teammate-message"
 
-#: The harness's own sentence for a usage-limit rejection, in both spellings the
-#: repository's evidence quotes ("session" and "weekly"), up to the "resets" that
-#: always follows it. The apostrophe may be straight or typographic, so any one
-#: non-word character stands in for it.
+#: The harness's own sentence for a usage-limit rejection, in the spellings seen
+#: ("session" and "weekly", plus "5-hour", which Claude Code 2.1.312 uses for the
+#: five-hour window), up to the "resets" that always follows it. The apostrophe
+#: may be straight or typographic, so any one non-word character stands in for it.
 _LIMIT_RE: Final[re.Pattern[str]] = re.compile(
-    r"You\Wve hit your (?:session|weekly) limit\W{0,6}resets"
+    r"You\Wve hit your (?:session|weekly|5-hour) limit\W{0,6}resets"
 )
 
 #: A teammate that stopped because it failed, as its idle notification reports it.
