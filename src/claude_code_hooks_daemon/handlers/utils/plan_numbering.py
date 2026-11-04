@@ -431,9 +431,9 @@ def record_new_plan_document(
     if resolve_plan_repo_root(plan_doc_path) is None:
         return None
 
-    expected = int(
-        next_plan_number_for_target(plan_doc_path, plan_subdir, fallback_root, include_remote=False)
-    )
+    # The window is the number plan_number_helper advertises, so it includes the
+    # already-fetched remote high-water mark (read-only; a hook never fetches).
+    expected = int(next_plan_number_for_target(plan_doc_path, plan_subdir, fallback_root))
     if plan_number not in (expected, expected - 1):
         return None
 

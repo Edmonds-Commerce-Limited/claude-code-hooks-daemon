@@ -509,3 +509,24 @@ class TestScanDeadline:
         assert (clone_b / _PLAN_SUBDIR / "00001-deadline").is_dir()
         assert result.stderr.count(_NOTICE) == 1
 
+
+
+class TestRecordedNumberIncludesTheRemote:
+    """The number plan_number_helper advertises is the number the recorder accepts."""
+
+    def test_advertised_number_is_recorded_when_the_remote_is_ahead(
+        self, remote_and_clones: tuple[Path, Path, Path]
+    ) -> None:
+        _, clone_a, clone_b = remote_and_clones
+        archived = clone_a / _PLAN_SUBDIR / "Completed" / "00040-old"
+        archived.mkdir(parents=True)
+        (archived / "PLAN.md").write_text("x")
+        _commit_and_push(clone_a)
+        _git(clone_b, "fetch", "--quiet", "origin")
+        target = clone_b / _PLAN_SUBDIR / "x"
+        advertised = int(next_plan_number_for_target(target, _PLAN_SUBDIR, clone_b))
+        assert advertised == 41
+        doc = clone_b / _PLAN_SUBDIR / "00041-new" / "PLAN.md"
+
+        assert plan_numbering.record_new_plan_document(doc, _PLAN_SUBDIR, clone_b) == 41
+        assert plan_numbering.read_plan_counter(clone_b) == 41
