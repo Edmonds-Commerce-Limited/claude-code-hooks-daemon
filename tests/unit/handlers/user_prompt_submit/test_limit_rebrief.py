@@ -311,6 +311,20 @@ class TestResumeRebrief:
 
 
 class TestKilledAgentNotice:
+    @pytest.mark.parametrize(
+        "wording",
+        [
+            "You've hit your session limit · resets 9:50am (UTC)",
+            "You've hit your weekly limit · resets Sep 27, 8am (UTC)",
+            "You've hit your 5-hour limit · resets 9:50am (UTC)",
+        ],
+    )
+    def test_every_limit_wording_is_recognised(self, tmp_path: Path, wording: str) -> None:
+        path = tmp_path / "e.json"
+        body = f'Agent "builder-7" failed: {wording}'
+        _Handler(path).handle(_prompt(_task_notification(body)))
+        assert [e.kind for e in read_events(path)] == [KIND_AGENT_KILLED]
+
     def test_a_background_task_notification_naming_a_limit_is_recorded_and_surfaced(
         self, tmp_path: Path
     ) -> None:

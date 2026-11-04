@@ -6,6 +6,7 @@ the start of a shell segment — path-qualified and ``env``-prefixed spellings
 included), a rate-limited HINT is injected as advisory context. Never blocks.
 """
 
+import re
 from unittest.mock import patch
 
 import pytest
@@ -260,6 +261,27 @@ class TestMatchesDefaultHint:
         handler.matches(_bash("agent-browser"))
         result = handler.handle(_bash("agent-browser"))
         assert result.context
+
+
+class TestConcurrentLazyResolution:
+    """A thread must never observe resolved hints without their compiled patterns."""
+
+    def test_reentrant_call_during_resolution_does_not_raise(self) -> None:
+        handler = CommandHintsHandler()
+        real_compile = _compile_hint_pattern
+        observed: list[bool] = []
+
+        def compile_and_observe(pattern: str) -> re.Pattern[str]:
+            if not observed:
+                # Simulates a concurrent thread arriving mid-resolution.
+                observed.append(False)
+                observed[0] = handler.matches(_bash("agent-browser --close"))
+            return real_compile(pattern)
+
+        target = "claude_code_hooks_daemon.handlers.post_tool_use.command_hints"
+        with patch(f"{target}._compile_hint_pattern", side_effect=compile_and_observe):
+            assert handler.matches(_bash("agent-browser --close")) is True
+        assert observed == [True]
 
 
 class TestHandleTtlGating:
