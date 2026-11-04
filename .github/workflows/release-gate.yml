@@ -286,6 +286,21 @@ jobs:
           test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
           echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
 
+      # Runner image ubuntu26/20261101.64 caps /tmp, and the integration
+      # shard's tmp_path trees (a full clone of this repository among them)
+      # outgrew it: every test leg on that image failed with EDQUOT under
+      # /tmp/pytest-of-runner. /ci-tmp is on the root disk, short, and has no
+      # ancestor but `/`. RUNNER_TEMP is none of the last two: it sits under
+      # /home/runner, whose `.claude` the root-discovery tests found, and its
+      # length overflowed AF_UNIX socket paths. Every later step, and every
+      # process it spawns, inherits TMPDIR from GITHUB_ENV.
+      - name: Keep temporary files off the capped /tmp
+        run: |
+          sudo install -d -o "$(id -u)" -g "$(id -g)" /ci-tmp
+          echo "TMPDIR=/ci-tmp" >> "$GITHUB_ENV"
+          df -h /tmp /ci-tmp
+          findmnt --target /tmp
+
       # The `rest` shards reach the live daemon and the relay (acceptance and
       # transport gates); HOOKS_DAEMON_RELEASE_GATE turns a skipped gate red.
       - name: Start daemon

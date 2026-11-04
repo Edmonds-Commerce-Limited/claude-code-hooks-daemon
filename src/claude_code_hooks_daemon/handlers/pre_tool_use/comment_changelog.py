@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.constants.dbf import DefectClass
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.apply_once import ApplyOnce, LazyLanguageFilterMixin
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -208,7 +209,9 @@ def _advisory_reasons(text: str, max_history_entries: int) -> list[str]:
     return reasons
 
 
-class CommentChangelogHandler(PreToolUseHandlerBase):
+class CommentChangelogHandler(
+    LazyLanguageFilterMixin[CommentStrategyRegistry], PreToolUseHandlerBase
+):
     """Block Write/Edit content that writes historical narrative into a comment.
 
     This is the valuable half of Plan 00208 -- size is a proxy, history is
@@ -259,19 +262,11 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
         )
         self._registry = CommentStrategyRegistry.create_default()
         self._languages: list[str] | None = None
-        self._languages_applied: bool = False
+        self._language_gate = ApplyOnce()
         self._max_history_entries: int = _DEFAULT_MAX_HISTORY_ENTRIES
         self._mode: str = _MODE_BLOCK
         self._exclude_paths: list[str] | None = None
         self._formatter = RuleFormatter()
-
-    def _apply_language_filter(self) -> None:
-        if self._languages_applied:
-            return
-        self._languages_applied = True
-        effective_languages = self._languages or self._project_languages
-        if effective_languages:
-            self._registry.filter_by_languages(effective_languages)
 
     def _get_content(self, hook_input: dict[str, Any]) -> str:
         tool_name = hook_input.get(HookInputField.TOOL_NAME)

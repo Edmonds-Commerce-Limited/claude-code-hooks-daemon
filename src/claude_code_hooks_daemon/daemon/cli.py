@@ -9558,7 +9558,13 @@ def cmd_worktree_reap(
     # worktree collector, so it is reported here — the moment a human needs to
     # know is the moment they finish reaping its siblings. `--only` names a
     # WORKTREE, so the branch report is suppressed rather than filtered.
-    orphans = () if only else collect_orphaned_branches(repo_root, base_branch, **collect_kwargs)
+    orphans = (
+        ()
+        if only
+        else collect_orphaned_branches(
+            repo_root, base_branch, config=_branches_config(repo_root), **collect_kwargs
+        )
+    )
     if not states and not orphans:
         print("No agent worktrees found.")
         return 0

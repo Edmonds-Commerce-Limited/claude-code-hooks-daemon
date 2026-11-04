@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.daemon import paths as paths_module
 from claude_code_hooks_daemon.daemon.paths import (
     _compute_project_lock_hash_stdlib,
     project_path_slug,
@@ -298,13 +299,18 @@ class TestScanFallbackRanking:
     def test_lock_hash_match_beats_lexically_first_legacy_venv(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The issue's layout: legacy v1.0.0 venv sorts first, slugged v2.0.0 matches."""
+        """The issue's layout: legacy v1.0.0 venv sorts first, slugged v2.0.0 matches.
+
+        The slug is pinned: tmp_path's real slug starts with its TMPDIR, so a TMPDIR whose first
+        component sorts before "py" (e.g. /ci-tmp) would put the slugged venv first and void the layout.
+        """
         monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        monkeypatch.setattr(paths_module, "project_path_slug", lambda _root: "zz-demo")
         current_hash = _write_project_sources(tmp_path)
         untracked = tmp_path / "untracked"
         legacy = _make_fake_venv(untracked / "venv-py311-00000001")
         _stamp_metadata(legacy.parent.parent, "sha256:stale", "v1.0.0")
-        slug = project_path_slug(tmp_path)
+        slug = paths_module.project_path_slug(tmp_path)
         slugged_dir = untracked / f"venv-{slug}-py313-00000002"
         slugged = _make_fake_venv(slugged_dir)
         _stamp_metadata(slugged_dir, current_hash, "v2.0.0")

@@ -183,10 +183,10 @@
     {
       "id": "G3-05",
       "group": "G3",
-      "statement": "A rule without a `paths` field is loaded unconditionally for all files.",
+      "statement": "A rule without a `paths` field loads at launch, so it applies whichever files Claude touches. The page no longer says 'unconditionally' under Path-specific rules; it states only the launch load, which G3-02 also pins.",
       "anchor": {
-        "heading": "path-specific-rules",
-        "quote": "Rules without a `paths` field are loaded unconditionally and apply to all files."
+        "heading": "set-up-rules",
+        "quote": "are loaded at launch with the same priority as `.claude/CLAUDE.md`."
       },
       "min_claude_code_version": null
     },
@@ -263,7 +263,7 @@
     {
       "id": "G4-05",
       "group": "G4",
-      "statement": "A file that loads on demand (a subdirectory CLAUDE.md or CLAUDE.local.md and its @path imports, a subdirectory's .claude/rules/ file, a path-scoped rule) over a per-file limit loads only its start, ending in a note to Read the rest. The limit is 40,000 characters with a 200K context window; with a 1M window it is 200,000 characters on Claude Opus 4.6 and Claude Sonnet 4.6 and 150,000 on later models.",
+      "statement": "A file that loads on demand (a subdirectory CLAUDE.md or CLAUDE.local.md and its @path imports, a subdirectory's .claude/rules/ file, a path-scoped rule) over a per-file limit loads only its start, ending in a note to Read the rest. The limit is 40,000 characters with a 200K context window; with a 1M window it is 200,000 characters on Claude Opus 4.6 and Claude Sonnet 4.6 and 150,000 on later models. From Claude Code 2.1.312, Write refuses to overwrite such a file after Claude has seen only its start, and asks Claude to read it all or edit in place (changelog 2.1.312; the memory page does not document this, so the anchor covers only the truncated load).",
       "anchor": {
         "heading": "claude-ignores-the-end-of-my-subdirectory-claude-md",
         "quote": "When a subdirectory `CLAUDE.md` or a rules file that loads on demand is over a per-file size limit, Claude receives only the start of it."

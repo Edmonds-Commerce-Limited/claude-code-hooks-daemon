@@ -110,3 +110,21 @@ releases:
       ran FROM 2.1.302 (v3.70.0's reviewed_through) to 2.1.309: one conflict
       row (a nested CLAUDE.md over the size limit now loads its start rather
       than being skipped), no adopt or redundant rows.
+  v3.72.0:
+    claude_code_version: unknown
+    evidence: ""
+    review_date: "2026-11-04"
+    reviewed_through: "2.1.318"
+    review_report: CLAUDE/Plan/00474-niggles-ledger-seventeen/subagent-reports/261104-claude-code-review-v3.72.0.md
+    note: >-
+      The release host ran Claude Code 2.1.318, but the hook contract
+      (contracts/claude-code-hooks/META.json) has not been re-audited at that
+      version, so 2.1.318 is not recorded as the tested version. The review
+      ran FROM 2.1.309 (v3.71.0's reviewed_through) to 2.1.318: one conflict
+      row (limit_rebrief does not match the renamed "5-hour limit" message),
+      two adopt rows (Bash hooks now see Monitor-started shell commands; the
+      2.1.312 Write refusal after a truncated read extends instruction fact
+      G4-05, recorded in contracts/claude-code-instructions at 2.1.318) and
+      one redundant row (permissions.blockWritesOutsideWorkingDirectories
+      overlaps project_containment; the handler is kept), filed as ledger
+      00474 N569 to N572.

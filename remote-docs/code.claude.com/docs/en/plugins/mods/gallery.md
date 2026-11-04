@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/gallery
-fetched_at: '2026-10-23T16:45:14.351469+00:00'
+fetched_at: '2026-11-04T13:32:08.585561+00:00'
 fidelity: converted
-source_sha256: a13b81ab266fea5746844c72bbaa099a81cfa232d60b9c83ba4186bb86cfa7a1
+source_sha256: 1ae11cba5379f15bc10a1429618147ca051ed3b9fb33084cbe0007b39edabbd6
 licence: unreviewed
-stale_after: '2027-01-21'
+stale_after: '2027-02-02'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -18,17 +18,17 @@ fetch_method: agent-browser-lite-headless (accept-markdown)
 
 A mod draws its interface from elements: text, boxes, buttons, fields, and a few that format content for you. The samples here show the code that draws an element, and most come with a screenshot of the result in a terminal pane, so you can pick an element by how it looks.
 
-To learn how drawing works, start with [Draw in the interface](/docs/en/plugins/mods/interface.md). For the main props and which apps draw each element, see the [elements reference](/docs/en/plugins/mods/reference.md#elements). The [type declarations](/docs/en/plugins/mods/create.md#get-the-types-for-your-build) list every prop.
+To learn how drawing works, start with [Draw in the interface](https://code.claude.com/docs/en/plugins/mods/interface.md). For the main props and which apps draw each element, see the [elements reference](https://code.claude.com/docs/en/plugins/mods/reference.md#elements). The [type declarations](https://code.claude.com/docs/en/plugins/mods/create.md#get-the-types-for-your-build) list every prop.
 
 ## Try a sample
 
 The samples on this page are snippets, not whole mods. Each one is the code for one element and anything nested inside it.
 
-To see a sample in your own terminal, create the small mod in these steps and paste the sample into it. The mod adds a `/gallery` command that opens a pane and draws the sample there. A [pane](/docs/en/plugins/mods/interface.md#pick-where-to-draw) is a sidebar beside the transcript in a wide fullscreen terminal, or a framed region above the prompt otherwise.
+To see a sample in your own terminal, create the small mod in these steps and paste the sample into it. The mod adds a `/gallery` command that opens a pane and draws the sample there. A [pane](https://code.claude.com/docs/en/plugins/mods/interface.md#pick-where-to-draw) is a sidebar beside the transcript in a wide fullscreen terminal, or a framed region above the prompt otherwise.
 
 **1. Create the mod**
 
-Create a directory named `gallery` with `.claude-plugin` and `hooks` directories inside it. [Create a mod](/docs/en/plugins/mods/create.md#write-a-mod-yourself) explains the files.
+Create a directory named `gallery` with `.claude-plugin` and `hooks` directories inside it. [Create a mod](https://code.claude.com/docs/en/plugins/mods/create.md#write-a-mod-yourself) explains the files.
 
 Save the manifest as `gallery/.claude-plugin/plugin.json`:
 
@@ -229,9 +229,9 @@ The border stretches to the width of the pane.
 
 ## Take input
 
-`Button`, `Input`, and `Select` are controls: the user moves between them with Tab and uses the one that has the focus. [Keyboard focus and hotkeys](/docs/en/plugins/mods/interface.md#know-which-keys-your-mod-can-receive) covers which keys reach them.
+`Button`, `Input`, and `Select` are controls: the user moves between them with Tab and uses the one that has the focus. [Keyboard focus and hotkeys](https://code.claude.com/docs/en/plugins/mods/interface.md#know-which-keys-your-mod-can-receive) covers which keys reach them.
 
-Open a pane with `focus: true` to request keyboard focus for it. Typed letters reach an `Input` once it has the focus. To choose which field has the focus when the pane opens, see [Set a hotkey and the first focus](/docs/en/plugins/mods/interface.md#set-a-hotkey-and-the-first-focus).
+Open a pane with `focus: true` to request keyboard focus for it. Typed letters reach an `Input` once it has the focus. To choose which field has the focus when the pane opens, see [Set a hotkey and the first focus](https://code.claude.com/docs/en/plugins/mods/interface.md#set-a-hotkey-and-the-first-focus).
 
 ### `Button`
 
@@ -256,7 +256,7 @@ A button that has the focus draws in inverse video. Here the user has pressed Ta
 
 ### `Input`
 
-An `Input` is a one-line text field that runs `onSubmit` when the user presses Enter:
+An `Input` is a text field that holds one line by default and runs `onSubmit` when the user presses Enter:
 
 ```javascript theme={null}
 Input({
@@ -280,6 +280,26 @@ With the focus, the label turns bold, a cursor appears, and the `submitLabel` sh
 Typing replaces the placeholder:
 
 ![The same field holding the typed letters Rel, followed by the return sign and the word save.](https://mintcdn.com/claude-code/EXkwf0kKMewZsyod/images/mods-el-input-typed-light.png?fit=max\&auto=format\&n=EXkwf0kKMewZsyod\&q=85\&s=4eb6d4443763a21415dad4e426bc747a)
+
+Set `rows` to 2 or more for a field that holds several lines, such as a note or a commit message:
+
+```javascript theme={null}
+Input({
+  key: 'note',
+  label: 'Note',
+  placeholder: 'Write a note',
+  rows: 4,
+  onSubmit: noop,
+})
+```
+
+The terminal and the Desktop app draw the rows. In the VS Code extension, the field holds one line. `rows` requires Claude Code v2.1.301 or later. On earlier versions the field holds one line.
+
+The field takes up the number of rows you set, even when it's empty, up to the height of the pane or band it's drawn in. While the field has focus, longer text scrolls inside it.
+
+* In the terminal, Enter still submits. There, the user starts a new line by typing a backslash and then pressing Enter, or by pressing Shift+Enter where [the terminal emulator supports it](https://code.claude.com/docs/en/terminal-config.md#enter-multiline-prompts). Those are the same keys as in the prompt.
+* In the terminal, Up and Down move between the field's rows. From its first and last row they move to the control before or after.
+* `onSubmit` and `onInput` receive the whole text with its lines joined by `\n`.
 
 ### `Select`
 
@@ -317,7 +337,7 @@ After the user picks an option, the list closes:
 
 ### `Raster`
 
-A `Raster` is a grid of colored character cells, for a heat map, a sparkline, or a game board. The terminal draws it. This sample uses the `cellsOf` function in the starter module, which packs the cells into the string a `Raster` takes. [Draw a grid of colored cells](/docs/en/plugins/mods/interface.md#draw-a-grid-of-colored-cells) explains it:
+A `Raster` is a grid of colored character cells, for a heat map, a sparkline, or a game board. The terminal draws it. This sample uses the `cellsOf` function in the starter module, which packs the cells into the string a `Raster` takes. [Draw a grid of colored cells](https://code.claude.com/docs/en/plugins/mods/interface.md#draw-a-grid-of-colored-cells) explains it:
 
 ```javascript theme={null}
 Raster({
@@ -349,11 +369,11 @@ Svg({
 })
 ```
 
-In the terminal, a pane that returns only an `Svg` opens empty. To draw something else there, check [`e.surface`](/docs/en/plugins/mods/interface#pick-where-to-draw) and return a different tree.
+In the terminal, a pane that returns only an `Svg` opens empty. To draw something else there, check [`e.surface`](https://code.claude.com/docs/en/plugins/mods/interface#pick-where-to-draw) and return a different tree.
 
 ### `Image` and `Client`
 
-Two more elements have no sample here. `Image` draws a PNG or raw pixels in the terminal. `Client` is a region that a second file of yours draws, for animation and pointer input. The [elements reference](/docs/en/plugins/mods/reference.md#elements) lists their props.
+Two more elements have no sample here. `Image` draws a PNG or raw pixels in the terminal. `Client` is a region that a second file of yours draws, for animation and pointer input. The [elements reference](https://code.claude.com/docs/en/plugins/mods/reference.md#elements) lists their props.
 
 An `Image` draws as a picture in these terminals:
 
@@ -363,24 +383,47 @@ An `Image` draws as a picture in these terminals:
 
 In any other terminal, the user sees the `Image`'s `alt` text, dimmed, in place of the picture. Write `alt` text that stands on its own, because it also shows in these cases, among others:
 
-* **tmux and screen**: a session running inside tmux or screen, in any terminal.
-* **Background sessions**: every [background session](/docs/en/agent-view.md), whatever terminal it's attached from.
-* **iTerm2 outside fullscreen rendering**: in iTerm2 the picture draws only under [fullscreen rendering](/docs/en/fullscreen.md), and not while [`CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT`](/docs/en/env-vars) is set to `1`. To see the picture, run `/tui fullscreen` at the Claude Code prompt and leave that variable unset.
-* **A file path source in iTerm2**: iTerm2 draws an `Image` whose `source` prop holds `png` or `rgba` bytes, and shows the `alt` text for one whose `source` names a `file`. If your mod has iTerm2 users, pass the picture as base64 in `source.png` or `source.rgba` rather than as a path in `source.file`.
+* **GNU screen**: a session running inside screen, in any terminal.
+* **tmux**: a session running inside tmux that misses a [requirement for drawing inside tmux](#draw-an-image-inside-tmux).
+* **Background sessions**: every [background session](https://code.claude.com/docs/en/agent-view.md), whatever terminal it's attached from.
+* **iTerm2 outside fullscreen rendering**: in iTerm2 the picture draws only under [fullscreen rendering](https://code.claude.com/docs/en/fullscreen.md), and not while [`CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT`](https://code.claude.com/docs/en/env-vars) is set to `1`. To see the picture, run `/tui fullscreen` at the Claude Code prompt and leave that variable unset.
+* **A file path source in iTerm2 or tmux**: in iTerm2 and inside tmux, an `Image` whose `source` names a `file` shows the `alt` text instead of the picture. If your mod has iTerm2 or tmux users, pass the picture as base64 in `source.png` or `source.rgba` rather than as a path in `source.file`.
 
-If your mod's users see the dimmed text in a terminal that draws kitty graphics protocol images with Unicode placeholders, they can set [`CLAUDE_CODE_FORCE_TERMINAL_IMAGES`](/docs/en/env-vars) to `1`. Inside tmux or screen that doesn't help: the `alt` text goes away, and Claude Code sends the picture without wrapping it for tmux or screen passthrough.
+If your mod's users see the dimmed text in a terminal that draws kitty graphics protocol images with Unicode placeholders, they can set [`CLAUDE_CODE_FORCE_TERMINAL_IMAGES`](https://code.claude.com/docs/en/env-vars) to `1`. They shouldn't set it inside GNU screen, inside tmux older than 3.3, in a tmux popup, or with tmux's `allow-passthrough` off. There they see no picture and a box in place of the `alt` text.
+
+#### Draw an `Image` inside tmux
+
+If an `Image` shows its `alt` text inside tmux, check these requirements along with the [other `alt` text cases](#image-and-client) such as a background session:
+
+* Claude Code v2.1.310 or later
+* tmux 3.3 or later
+* Claude Code runs in a tmux pane, not a tmux popup
+* tmux runs inside kitty 0.28 or later, Ghostty, or iTerm2 3.5 or later
+* The tmux options `focus-events` and `allow-passthrough` are `on`. Inside kitty or Ghostty, `allow-passthrough` can also be `all`.
+* Inside iTerm2, tmux runs [without `-CC`](https://code.claude.com/docs/en/fullscreen#use-with-tmux), [fullscreen rendering](https://code.claude.com/docs/en/fullscreen.md) is on, and `CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT` is unset.
+* Inside iTerm2, the tmux window is no bigger than the iTerm2 window. To check, run `tmux display-message -p '#{window_bigger}'` in that tmux window. If it prints `1`, make the tmux window fit, then restart Claude Code.
+* The mod's author passes the picture as `png` or `rgba` bytes, not as a `file` path. If you use a mod you didn't write and the other requirements hold, ask its author to check this one.
+
+For each tmux option that isn't already set as required, run its command in your shell:
+
+```bash theme={null}
+tmux set -g allow-passthrough on
+tmux set -g focus-events on
+```
+
+Then detach from tmux, attach again, and restart Claude Code. Restart it again whenever you attach tmux from a different terminal. To keep both options across tmux server restarts, [add both lines to `~/.tmux.conf`](https://code.claude.com/docs/en/terminal-config#configure-tmux) too.
 
 ## See where a mod can draw
 
 The samples all draw in a pane. A mod can also draw in other places, and call Claude Code to show something for it:
 
-* **Pane and band**: [Pick where to draw](/docs/en/plugins/mods/interface.md#pick-where-to-draw)
-* **Claude Code's own rows, such as the spinner**: [Change what Claude Code already draws](/docs/en/plugins/mods/interface.md#change-what-claude-code-already-draws)
-* **Toast, status line, and log line**: [Show something without starting a turn](/docs/en/plugins/mods/api.md#show-something-without-starting-a-turn)
-* **Question dialog**: [Hold a tool call until the user decides](/docs/en/plugins/mods/events.md#hold-a-tool-call-until-the-user-decides)
+* **Pane and band**: [Pick where to draw](https://code.claude.com/docs/en/plugins/mods/interface.md#pick-where-to-draw)
+* **Claude Code's own rows, such as the spinner**: [Change what Claude Code already draws](https://code.claude.com/docs/en/plugins/mods/interface.md#change-what-claude-code-already-draws)
+* **Toast, status line, and log line**: [Show something without starting a turn](https://code.claude.com/docs/en/plugins/mods/api.md#show-something-without-starting-a-turn)
+* **Question dialog**: [Hold a tool call until the user decides](https://code.claude.com/docs/en/plugins/mods/events.md#hold-a-tool-call-until-the-user-decides)
 
 ## Next steps
 
-* [Draw in the interface](/docs/en/plugins/mods/interface.md): build a pane with tabs, step by step
-* [Test a drawing](/docs/en/plugins/mods/test.md#test-a-drawing): press your buttons from a test
-* [Elements reference](/docs/en/plugins/mods/reference.md#elements): each element's main props and the apps that draw it
+* [Draw in the interface](https://code.claude.com/docs/en/plugins/mods/interface.md): build a pane with tabs, step by step
+* [Test a drawing](https://code.claude.com/docs/en/plugins/mods/test.md#test-a-drawing): press your buttons from a test
+* [Elements reference](https://code.claude.com/docs/en/plugins/mods/reference.md#elements): each element's main props and the apps that draw it

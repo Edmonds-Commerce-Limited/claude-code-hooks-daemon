@@ -89,3 +89,25 @@ class TestShardMatrix:
             ]
         combined = workflow["jobs"]["coverage"]["env"]["SHARDS"].split()
         assert sorted(combined) == sorted(_shard_names())
+
+
+TMPDIR_EXPORT = 'echo "TMPDIR=/ci-tmp" >> "$GITHUB_ENV"'
+
+
+class TestTemporaryFilesLiveOnTheRootDisk:
+    """Runner image ubuntu26/20261101.64 caps /tmp, and the integration shard's tmp_path trees outgrew it.
+
+    Every test leg on that image failed with EDQUOT under /tmp/pytest-of-runner, while the same commit
+    passed on the previous image. TMPDIR must still be short, and must have no ancestor but `/`. RUNNER_TEMP
+    failed both tests: it sits under /home/runner, which holds a `.claude` directory that root-discovery
+    tests found, and its length broke the AF_UNIX socket path limit.
+    """
+
+    def test_the_tests_job_exports_tmpdir_before_running_the_shards(
+        self, workflow: dict[str, Any]
+    ) -> None:
+        steps: list[dict[str, Any]] = workflow["jobs"]["tests"]["steps"]
+        names = [str(step.get("name", "")) for step in steps]
+        exporting = [i for i, step in enumerate(steps) if TMPDIR_EXPORT in str(step.get("run", ""))]
+        assert exporting, "no step of the tests job exports TMPDIR=/ci-tmp"
+        assert exporting[0] < names.index("Run the shards")

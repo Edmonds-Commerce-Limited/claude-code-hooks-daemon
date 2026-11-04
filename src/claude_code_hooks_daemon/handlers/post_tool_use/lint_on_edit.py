@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_layer
+from claude_code_hooks_daemon.core.apply_once import ApplyOnce, LazyLanguageFilterMixin
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -84,7 +85,7 @@ LINT_TIMEOUT_NOTICE: Final[str] = (
 )
 
 
-class LintOnEditHandler(PostToolUseHandlerBase):
+class LintOnEditHandler(LazyLanguageFilterMixin[LintStrategyRegistry], PostToolUseHandlerBase):
     """Run language-aware lint validation on files after Write/Edit.
 
     Uses Strategy Pattern: delegates ALL language-specific decisions to LintStrategy
@@ -133,14 +134,14 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         # Config options: set via setattr AFTER __init__
         self._languages: list[str] | None = None
         self._command_overrides: dict[str, dict[str, str | None]] | None = None
-        self._languages_applied: bool = False
+        self._language_gate = ApplyOnce()
         # Per-language extended-lint timeout override in seconds (Plan 00309):
         # `options.timeouts.<Language>: <seconds>`. Unconfigured languages keep
         # `Timeout.LINT_CHECK`. Raw option value; validated lazily into
         # `_resolved_timeouts` on first use since options are set via setattr
         # AFTER __init__.
         self._timeouts: dict[str, object] | None = None
-        self._timeouts_applied: bool = False
+        self._timeouts_gate = ApplyOnce()
         self._resolved_timeouts: dict[str, float] = {}
         # Glob patterns exempted from linting entirely. Unions with the
         # project-wide daemon.exclude_paths the registry injects (Plan 00251,
@@ -154,15 +155,6 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         self._lint_bash_writes: bool = True
         self._formatter = RuleFormatter()
 
-    def _apply_language_filter(self) -> None:
-        """Apply language filter to registry on first use (lazy)."""
-        if self._languages_applied:
-            return
-        self._languages_applied = True
-        effective_languages = self._languages or self._project_languages
-        if effective_languages:
-            self._registry.filter_by_languages(effective_languages)
-
     def _apply_timeouts(self) -> None:
         """Validate `options.timeouts` into `_resolved_timeouts` on first use (lazy).
 
@@ -172,9 +164,10 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         value -- is logged and skipped, never crashes, and that language
         falls back to `Timeout.LINT_CHECK`.
         """
-        if self._timeouts_applied:
-            return
-        self._timeouts_applied = True
+        self._timeouts_gate.run(self._resolve_timeouts)
+
+    def _resolve_timeouts(self) -> None:
+        """Build the resolved map, publishing it only once complete."""
         if not self._timeouts:
             return
 

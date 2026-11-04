@@ -602,7 +602,7 @@ class TestEdgeCases:
             "tool_input": {"file_path": str(py_file)},
         }
         handler.matches(hook_input)
-        assert handler._languages_applied is True
+        assert handler._language_gate.done is True
 
         # Second call should return early (line 68)
         handler.matches(hook_input)

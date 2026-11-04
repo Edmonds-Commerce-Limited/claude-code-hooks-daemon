@@ -310,12 +310,17 @@ class CommandHintsHandler(PostToolUseHandlerBase):
 
     def _resolve_hints(self) -> list[CommandHint]:
         """Return the merged (default + project, or project-only) hint set, cached."""
-        if self._resolved_hints is None:
-            self._resolved_hints = self._build_hints()
+        resolved = self._resolved_hints
+        if resolved is None:
+            # Requests run on executor threads: build locally and publish the
+            # patterns BEFORE the hints list, which is the readiness flag, so
+            # no thread sees hints without their compiled patterns.
+            resolved = self._build_hints()
             self._compiled_patterns = {
-                hint.id: _compile_hint_pattern(hint.pattern) for hint in self._resolved_hints
+                hint.id: _compile_hint_pattern(hint.pattern) for hint in resolved
             }
-        return self._resolved_hints
+            self._resolved_hints = resolved
+        return resolved
 
     def _build_hints(self) -> list[CommandHint]:
         """Merge the built-in default hints with any project-configured hints.
