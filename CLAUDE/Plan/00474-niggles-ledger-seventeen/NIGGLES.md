@@ -144,11 +144,11 @@ remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedBy
 
 **N573 root cause**: the path is the WorktreeCreate seed symlink this project configures (`worktree_create.options.seed`,
 `default_mode: symlink`). `worktree_blockers` (`core/branch_cleanup.py`) rendered the symlink as a directory to match
-globs, and a symlink no glob named was reported as lost content, so EVERY `isolation: worktree` agent worktree was
-unremovable. A removal only unlinks a symlink; the target outside the worktree survives (now proven by a test that runs
+globs, and a symlink no glob named was reported as lost content, so every worktree holding a seeded symlink (every
+`isolation: worktree` agent worktree in this repository, three of three observed) was unremovable. A removal only unlinks a symlink; the target outside the worktree survives (now proven by a test that runs
 `git worktree remove`).
 
-**Status**: N573 ✅ fixed (merge `93f26ef07`; release note 002). N574 ✅ fixed (`0414d5291`, `8de7062b0`, `3a94db888`). N575 ✅ fixed (`852e25552`).
+**Status**: N573 ✅ fixed (merge `93f26ef07`; the real-removal test `98a9ee871`; release note 002). N574 ✅ fixed (`0414d5291`, `8de7062b0`, `3a94db888`). N575 ✅ fixed (`852e25552`).
 
 ### N569 to N572 — the v3.72.0 Claude Code changelog review (2.1.309 to 2.1.318): one conflict, two adopts, one redundant
 
