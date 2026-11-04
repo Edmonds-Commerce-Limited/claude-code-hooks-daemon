@@ -308,6 +308,40 @@ class TestHookPathNeverFetches:
         assert time.monotonic() - started < scaled_seconds(5.0)
 
 
+def _path_without_timeout(tmp_path: Path) -> str:
+    """A PATH whose tools are the host's, minus `timeout` and `gtimeout` (stock macOS)."""
+    shim = tmp_path / "no-timeout-bin"
+    shim.mkdir()
+    for directory in os.environ["PATH"].split(os.pathsep):
+        if not Path(directory).is_dir():
+            continue
+        for entry in Path(directory).iterdir():
+            if entry.name in {"timeout", "gtimeout"} or (shim / entry.name).exists():
+                continue
+            if entry.is_file() and os.access(entry, os.X_OK):
+                (shim / entry.name).symlink_to(entry)
+    return str(shim)
+
+
+class TestNoTimeoutBinary:
+    """Without `timeout` the scan still runs, unbounded, instead of always failing."""
+
+    def test_remote_number_is_still_seen_when_timeout_is_absent(
+        self, remote_and_clones: tuple[Path, Path, Path], tmp_path: Path
+    ) -> None:
+        _, clone_a, clone_b = remote_and_clones
+        assert _scaffold(clone_a, "from-a").returncode == 0
+        _commit_and_push(clone_a)
+
+        started = time.monotonic()
+        result = _scaffold(clone_b, "from-b", {"PATH": _path_without_timeout(tmp_path)})
+
+        assert time.monotonic() - started < scaled_seconds(15.0)
+        assert result.returncode == 0, result.stderr
+        assert _NOTICE not in result.stderr
+        assert (clone_b / _PLAN_SUBDIR / "00002-from-b").is_dir()
+
+
 class TestHungFetchIsCutOff:
     """A fetch that blocks is cut off at its budget and falls back to local numbers."""
 

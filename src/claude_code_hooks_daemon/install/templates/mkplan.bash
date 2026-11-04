@@ -301,7 +301,17 @@ remote_highest() {
         paths+=("$rel/$sub/")
     done
     local refs listing
-    if ! GIT_TERMINAL_PROMPT=0 timeout "$REMOTE_FETCH_TIMEOUT_SECONDS" \
+    # Stock macOS ships no `timeout` (coreutils installs it as `gtimeout`).
+    # With neither present the fetch runs WITHOUT a time limit rather than
+    # always failing, so a hung remote can stall here on such a host.
+    local -a limiter=()
+    if command -v timeout >/dev/null; then
+        limiter=(timeout "$REMOTE_FETCH_TIMEOUT_SECONDS")
+    elif command -v gtimeout >/dev/null; then
+        limiter=(gtimeout "$REMOTE_FETCH_TIMEOUT_SECONDS")
+    fi
+    # The ${arr[@]+...} form keeps an empty array safe under `set -u` on bash 3.2.
+    if ! GIT_TERMINAL_PROMPT=0 ${limiter[@]+"${limiter[@]}"} \
         git -C "$root" fetch --quiet --no-tags "$remote" >/dev/null; then
         return 1
     fi
