@@ -1,6 +1,6 @@
 # Plan 00561: worktree sub-agents load the root CLAUDE.md twice
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-03
 **Owner**: dev
 **Priority**: Medium
@@ -39,10 +39,10 @@ Claude Code's `claudeMdExcludes` setting takes absolute-path globs and skips the
 
 ## Success Criteria
 
-- [ ] The setting is in `.claude/settings.local.json`, and a test proves it covers every daemon worktree root.
-- [ ] `CLAUDE/Worktree.md` explains the setting.
-- [ ] No release-bound consequence: the change is this repository's own configuration and docs, and ships nothing to clients. So nothing goes to the pending-release holding area unless Q1 is answered "install".
-- [ ] GitHub #156 is commented on and closed.
+- [x] The setting is in `.claude/settings.local.json`, and a test proves it covers every daemon worktree root.
+- [x] `CLAUDE/Worktree.md` explains the setting.
+- [x] No release-bound consequence: the change is this repository's own configuration and docs, and ships nothing to clients. So nothing goes to the pending-release holding area unless Q1 is answered "install".
+- [x] GitHub #156 is commented on and closed. CI passed on 4957860d5 (full matrix) and f51cfe46d. The plan stays open only for owner question Q1.
 
 ## Delivery & Milestones
 

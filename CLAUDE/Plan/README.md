@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00561: worktree sub-agents load the root CLAUDE.md twice](00561-worktree-claudemd-duplicate-load/PLAN.md) - In Progress (GitHub #156: `claudeMdExcludes` skips the worktree-root copies; experiment verified live)
-
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - Not Started (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a consumption ledger with a stop gate shared with 00558, a scratch-shape allowlist and a SessionStart sweep)
 
 - [00559: daemon clone follows expected version after pull](00559-daemon-clone-follows-expected-version-after-pull/PLAN.md) - Not Started (#148, parked `agent-needs-human`: a pull that moves `expected_version` should re-provision from a trigger outside the stale daemon; owner to choose the trigger, the retry rule and whether to add a scheduled check)
@@ -213,6 +211,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00561: worktree sub-agents load the root CLAUDE.md twice](Completed/00561-worktree-claudemd-duplicate-load/PLAN.md) - Complete at merge `3d50b7077` + the archiving commit (#156: `claudeMdExcludes` skips the worktree-root `CLAUDE.md` copies, so a worktree agent loads the root file once; a test derives every worktree root from the code; no release-bound consequence; owner question Q1, whether to recommend or install it for clients, stays open)
+
 - [00556: secret guard bare dotted token mentions](Completed/00556-secret-guard-bare-dotted-token-mentions/PLAN.md) - Complete at merges `209c8d334`, `88d63f4b7`, `3b65a47dc`, `ef9a9042d`, `3ba274408` and the #145/#143 merges + the archiving commit (#141–#146, owner-approved: the secret-guard and write-protected-paths false positives fixed with every true-positive test still denying; release notes 012, 013, 014, 016, 018)
 
 - [00554: rust relay transport default](Completed/00554-rust-relay-transport-default/PLAN.md) - Complete at merge `654ec98e1`, reverted `bce74f191`, reapplied `0bef7acaa` + the archiving commit (owner request: the Rust relay is the default hook transport where the host can run it when `relay_enabled` is absent; `relay_enabled: false` is the legacy opt-in; release note 009)
@@ -269,8 +269,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00520: tdd_enforcement infers the Maven/Gradle source-set layout](Completed/00520-tdd-maven-gradle-source-set-layout/PLAN.md) - Complete at merge `da9fff6af` + the archiving commit (#111: Java and Kotlin sources under `src/main/<lang>/` are satisfied by a test in the sibling `src/test/<lang>/`; release note 057)
 
-- [00517: daemon version ssot and no stale venvs](Completed/00517-daemon-version-ssot-and-no-stale-venvs/PLAN.md) - Complete at `42f6de85a` (green full CI run 38491817681) + the archiving commit (owner direction: one source for the installed version and one staleness rule for every venv cleanup; UNPROVEN venvs surfaced at session start; release note 055)
-
 - [00518: full qa blocker exempt agent types](Completed/00518-full-qa-blocker-exempt-agent-types/PLAN.md) - Complete at merges `980d4fb67`, `7ff8cdcf1`, `7cb84135a` + the archiving commit (ledger 00474 N457: `exempt_agent_types` with a one-at-a-time lock, dogfooded with `qa-full-runner`; release note 053)
 
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
@@ -326,9 +324,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 561 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 476 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 477 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 62 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
