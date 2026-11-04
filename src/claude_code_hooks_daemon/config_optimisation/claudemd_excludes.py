@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
 from claude_code_hooks_daemon.core.worktree_naming import WORKTREES_SUBDIR
+from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 
 #: Worktree roots the daemon itself creates, relative to the project root.
 #: ``scripts/setup_worktree.sh`` owns the first, the WorktreeCreate handler the
@@ -32,7 +33,6 @@ RECOMMENDED_SETTINGS_FILE: str = ".claude/settings.local.json"
 
 _EXCLUDES_KEY: str = "claudeMdExcludes"
 _SAMPLE_WORKTREE: str = "example-worktree"
-_GIT_TIMEOUT_SECONDS: int = 10
 
 
 def glob_to_regex(glob: str) -> re.Pattern[str]:
@@ -61,20 +61,12 @@ def glob_to_regex(glob: str) -> re.Pattern[str]:
 def git_worktree_paths(project_root: Path) -> list[Path]:
     """Return every worktree path ``git worktree list --porcelain`` reports.
 
-    Not a repository, or no ``git`` on PATH, means there are no git worktrees to
-    report, so the result is empty: this is a probe of optional state, not a
-    requirement of the review.
+    Not a repository, no ``git`` on PATH, or a timeout (all a non-zero return
+    from :func:`run_git`) means there are no git worktrees to report, so the
+    result is empty: this is a probe of optional state, not a requirement of the
+    review.
     """
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(project_root), "worktree", "list", "--porcelain"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=_GIT_TIMEOUT_SECONDS,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return []
+    result = run_git(project_root, "worktree", "list", "--porcelain")
     if result.returncode != 0:
         return []
     prefix = "worktree "
@@ -101,9 +93,9 @@ def _worktree_targets(project_root: Path, git_worktrees: Sequence[Path]) -> dict
             targets[f"**/{root}/*/CLAUDE.md"] = sample
     for worktree in git_worktrees:
         resolved = worktree.resolve()
-        if resolved == project_root or not resolved.is_relative_to(project_root):
+        if resolved == project_root or not path_is_relative_to(resolved, project_root):
             continue
-        relative = resolved.relative_to(project_root)
+        relative = path_relative_to(resolved, project_root)
         if len(relative.parts) == 1:
             targets[f"**/{relative.as_posix()}/CLAUDE.md"] = resolved / "CLAUDE.md"
         else:
