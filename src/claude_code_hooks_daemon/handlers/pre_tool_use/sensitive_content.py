@@ -134,6 +134,7 @@ _FIELD_FILE_PATH: Final[str] = "file_path"
 
 # Public-safe location labels for a public-pattern deny. A match is never
 # named -- only the pattern and where it was found (owner ruling, issue #92).
+_EDITED_TEXT_SCOPE: Final[str] = "of the edited text"
 _UNLOCATED: Final[str] = "the text this call would record"
 _LOCATION_FILE_PATH: Final[str] = "the file path of this write"
 _LOCATION_COMMAND_TEXT: Final[str] = "text written by this command (message or body file content)"
@@ -474,6 +475,9 @@ class _Haystack(NamedTuple):
     public_patterns_apply: bool = True
     location: str = _UNLOCATED
     report_line: bool = False
+    # Set when ``text`` is only a fragment of the file (an Edit's new_string):
+    # its line numbers are not the file's, so the deny says what they count in.
+    line_scope: str = ""
 
 
 def _shell_tokens(command: str) -> list[str]:
@@ -1557,6 +1561,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                     public_patterns_apply=not faithful,
                     location=file_path,
                     report_line=True,
+                    line_scope=(
+                        _EDITED_TEXT_SCOPE
+                        if hook_input.get(HookInputField.TOOL_NAME) == ToolName.EDIT
+                        else ""
+                    ),
                 )
             )
         return haystacks
@@ -1721,11 +1730,16 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return _LOCATION_WITHHELD
 
     @staticmethod
-    def _line_of(hay: _Haystack, match: dict[str, str]) -> int | None:
-        """1-based line of ``match`` inside ``hay.text``, when the haystack reports lines."""
+    def _line_of(hay: _Haystack, match: dict[str, str]) -> str | None:
+        """1-based line of ``match`` inside ``hay.text``, when the haystack reports lines.
+
+        Qualified with its scope when ``text`` is a fragment of the file, so an
+        Edit's line is never presented as a line of the file.
+        """
         if not hay.report_line:
             return None
-        return hay.text.count("\n", 0, int(match[_OFFSET_KEY])) + 1
+        line = str(hay.text.count("\n", 0, int(match[_OFFSET_KEY])) + 1)
+        return f"{line} {hay.line_scope}" if hay.line_scope else line
 
     @classmethod
     def _metadata_location(cls, recording: str) -> str:
@@ -1745,7 +1759,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
 
     @staticmethod
     def _deny_public_pattern(
-        transcript_path: str | None, location: str, match: dict[str, str], line: int | None
+        transcript_path: str | None, location: str, match: dict[str, str], line: str | None
     ) -> GatingResult:
         """Deny a public-pattern match with a verbose-first/terse-after message.
 
