@@ -20,7 +20,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_context_budget impo
     STATE_HARD_ENGAGED,
     STATE_KIND,
 )
-from claude_code_hooks_daemon.handlers.stop.branch_stop_guard import (
+from claude_code_hooks_daemon.handlers.utils.branch_stop_guard_base import (
     BranchStopGuardBase,
     stop_guard_rule,
 )

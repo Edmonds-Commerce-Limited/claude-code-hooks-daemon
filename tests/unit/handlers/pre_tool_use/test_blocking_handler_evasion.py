@@ -71,6 +71,18 @@ _SENTINEL_PATTERN = {
 
 # class name -> (baseline that MUST already block, respellings that must ALSO block)
 _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "BranchCreationGuardHandler": (
+        "git checkout -b new-branch",
+        (
+            f"git -C {_SAFE_PATH} checkout -b new-branch",
+            "git --no-pager checkout -b new-branch",
+            "env git checkout -b new-branch",
+            "git \\\n  checkout -b new-branch",
+            "git switch -c new-branch",
+            f"git -C {_SAFE_PATH} switch -c new-branch",
+            "git branch new-branch",
+        ),
+    ),
     "DestructiveGitHandler": (
         "git reset --hard origin/main",
         (
@@ -350,6 +362,14 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
 # wrappers), never shapes built to defeat a parser: those are out of scope
 # (CLAUDE/ARCHITECTURE.md, "Threat model: the agent is careless, not hostile").
 _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
+    "BranchCreationGuardHandler": (
+        # Reading, switching to or deleting a branch creates none.
+        "git branch --list",
+        "git checkout existing-branch",
+        "git switch existing-branch",
+        "git branch -d old-branch",
+        'git commit -m "git checkout -b new-branch"',
+    ),
     "SubagentFullQaBlockerHandler": (
         # A mention is not a run, and a targeted run is the allowed path the
         # deny message sends the agent to. Denying either would get the guard

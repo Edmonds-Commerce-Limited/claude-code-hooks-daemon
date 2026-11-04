@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     BranchClassification,
     DeletionReport,
 )
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 
 _ENV = {
     "GIT_AUTHOR_NAME": "Test Author",
@@ -235,7 +236,10 @@ class TestCleanupAfterMerge:
         report = cleanup_after_merge(repo, ["feat"], config=_CONFIG, target="main", mode="advise")
         assert report.deleted == ()
         assert "feat" in _branches(repo)
-        assert "bin/hooks-daemon delete-branch feat --protected-ref main" in report.commands
+        assert (
+            f"{daemon_cli_command_for_docs('delete-branch')} feat --protected-ref main"
+            in report.commands
+        )
 
     def test_a_worktree_is_never_removed_only_advised(self, repo: Path) -> None:
         _merged(repo, "feat")
@@ -249,7 +253,7 @@ class TestCleanupAfterMerge:
         _patch_equivalent(repo, "picked")
         report = cleanup_after_merge(repo, ["picked"], config=_CONFIG, target="main", mode="act")
         assert report.deleted == ()
-        assert "bin/hooks-daemon branch-sweep --clean" in report.commands
+        assert daemon_cli_command_for_docs("branch-sweep", "--clean") in report.commands
 
     def test_an_exempt_branch_is_skipped(self, repo: Path) -> None:
         _merged(repo, "users/alice")

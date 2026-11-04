@@ -19,7 +19,6 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import branch_inventory
 from claude_code_hooks_daemon.core.branch_inventory import (
     CACHE_RELATIVE_PATH,
@@ -31,6 +30,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
 )
 from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from tests.support.git_fixtures import git_setup_timeout
 
 NOW = 1_800_000_000
 DAY = 86_400
@@ -622,7 +622,7 @@ class TestFailClosed:
         real = run_git
 
         def failing_merged(
-            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+            cwd: Path, *args: str, timeout: float = git_setup_timeout()
         ) -> subprocess.CompletedProcess[str]:
             if any(arg.startswith("--merged") for arg in args):
                 return subprocess.CompletedProcess(list(args), 1, "", "boom")
@@ -644,7 +644,7 @@ class TestEdges:
         real = run_git
 
         def no_atom(
-            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+            cwd: Path, *args: str, timeout: float = git_setup_timeout()
         ) -> subprocess.CompletedProcess[str]:
             if any("ahead-behind" in arg for arg in args):
                 return subprocess.CompletedProcess(list(args), 128, "", "unknown field")
@@ -661,7 +661,7 @@ class TestEdges:
         real = run_git
 
         def patched(
-            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+            cwd: Path, *args: str, timeout: float = git_setup_timeout()
         ) -> subprocess.CompletedProcess[str]:
             result = real(cwd, *args, timeout=timeout)
             if args[0] == "for-each-ref" and any("committerdate" in a for a in args):
@@ -715,7 +715,7 @@ class TestEdges:
         real = run_git
 
         def no_worktrees(
-            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+            cwd: Path, *args: str, timeout: float = git_setup_timeout()
         ) -> subprocess.CompletedProcess[str]:
             if args[0] == "worktree":
                 return subprocess.CompletedProcess(list(args), 1, "", "boom")
@@ -763,7 +763,7 @@ class TestEdges:
         calls: list[tuple[str, ...]] = []
 
         def recording(
-            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+            cwd: Path, *args: str, timeout: float = git_setup_timeout()
         ) -> subprocess.CompletedProcess[str]:
             calls.append(args)
             return real(cwd, *args, timeout=timeout)

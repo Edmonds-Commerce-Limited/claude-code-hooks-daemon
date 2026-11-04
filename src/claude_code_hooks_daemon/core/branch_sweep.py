@@ -26,12 +26,21 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     BranchState,
     Containment,
 )
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 
 #: Entry lines the SessionStart summary prints before "and N more".
 MAX_SUMMARY_LINES = 10
 
-SWEEP_COMMAND = "bin/hooks-daemon branch-sweep"
-DELETE_COMMAND = "bin/hooks-daemon delete-branch"
+
+def sweep_command() -> str:
+    """The ``branch-sweep`` invocation, spelled for this install's wrapper."""
+    return daemon_cli_command_for_docs("branch-sweep")
+
+
+def delete_command() -> str:
+    """The ``delete-branch`` invocation, spelled for this install's wrapper."""
+    return daemon_cli_command_for_docs("delete-branch")
+
 
 #: The ``branch_count_advisor`` options read for one release as fallbacks, and
 #: the ``branches.*`` key that replaces each (DESIGN.md section 1).
@@ -248,7 +257,7 @@ def delete_action(record: BranchRecord, inventory: BranchInventory, config: Bran
         if proven is not None and proven.startswith(remote_prefix):
             return f"remote only: git push {config.remote} --delete {record.name}"
         return f"remote only, proven by the unpushed {proven}: push {proven} first"
-    command = f"{DELETE_COMMAND} {record.name}"
+    command = f"{delete_command()} {record.name}"
     if record.merged_into is not None and record.merged_into != inventory.default_branch:
         command += f" --protected-ref {proven or record.merged_into}"
     return command
@@ -440,20 +449,20 @@ def session_summary(
         if groups.merged:
             noun = "branch is" if len(groups.merged) == 1 else "branches are"
             notes.append(
-                f"{len(groups.merged)} merged {noun} not deleted: run `{SWEEP_COMMAND}` "
+                f"{len(groups.merged)} merged {noun} not deleted: run `{sweep_command()}` "
                 "for the delete commands."
             )
         count = open_work_count(inventory)
         if count >= cap:
             notes.append(
                 f"Open work: {count} of {cap} (branches.wip.cap). Finish, park or delete "
-                f"branches; `{SWEEP_COMMAND}` lists them."
+                f"branches; `{sweep_command()}` lists them."
             )
     shown = entries[:MAX_SUMMARY_LINES]
     hidden = len(entries) - len(shown)
     lines = [*shown]
     if hidden:
-        lines.append(f"  and {hidden} more: run `{SWEEP_COMMAND}`")
+        lines.append(f"  and {hidden} more: run `{sweep_command()}`")
     lines += notes
     if deprecation is not None:
         lines.append(deprecation)
