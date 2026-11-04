@@ -53,10 +53,15 @@ most of them 139 to 650 commits behind `main`, some through 9 to 20 review
 rounds, and nine that were superseded copies of newer branches. Each rule below
 answers one of those failures.
 
-- **At most 3 open work branches at once.** Starting a fourth waits until one
-  merges or is dropped. Count the `worktree-*` branches and the `agent-*`
-  branches agent dispatch creates that exist; a branch whose worktree is gone
-  still counts until it is deleted.
+- **At most 10 open work branches at once.** This is the daemon's WIP cap
+  (`branches.wip.cap`), and `branch_creation_guard` enforces it: an 11th
+  creation is denied until one merges, is parked, or is deleted. Every
+  non-default branch counts, local and remote, including a branch whose
+  worktree is gone.
+- **Each sub-agent pushes its work branch before it stops.**
+  `branch_subagent_stop_guard` refuses a sub-agent stop that leaves commits no
+  remote holds, because a commit that exists only in a worktree is lost with
+  the workspace.
 - **Finish before starting.** A branch merges or is dropped within its batch.
   An unmerged branch falls behind `main`, and its merge cost grows with every
   commit it misses.

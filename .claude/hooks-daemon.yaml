@@ -1569,7 +1569,7 @@ branches:
   cleanup_after_merge:
     mode: act
   stop_guard:
-    unpushed_subagent: advise  # This repo's sub-agents commit without pushing and the coordinator merges locally, until the owner rules on Q5
+    unpushed_subagent: block  # Owner ruling on Plan 00558 Q5: sub-agents push their work branch before stopping
 
 # Project layout truths (Plan 00288): which dirs are source/test. Read only
 # through the ProjectLayout facade, which composes this with

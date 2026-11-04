@@ -58,7 +58,7 @@ Today nothing holds a limit (code facts with citations: [subagent-reports/261103
 - **Q2 (owner), answered 3 November 2026:** the WIP cap is repository-wide, default 10.
 - **Q3 (owner), answered 3 November 2026:** dormancy has three stages: an advisory at 7 days since the last commit, a noisy advisory at 14 days, and a block on new work at 30 days.
 - **Q4 (design), decided in Phase 1:** a `Parked-Reason:` trailer on an empty commit at the branch tip, set by `hooks-daemon branch-park` ([DESIGN.md](DESIGN.md) section 5).
-- **Q5 (owner):** `CLAUDE/Worktree.md` says at most 3 open work branches; the cap is 10. Keep 3 as a local working rule, or change it? And the Goal 6 default refuses a sub-agent stop with commits no remote holds, while this repository tells sub-agents not to push: should they push their work branch, or does this repository keep the advisory setting ([DESIGN.md](DESIGN.md) section 6)?
+- **Q5 (owner), answered 4 November 2026:** `CLAUDE/Worktree.md` now says 10 open work branches, matching the cap. Sub-agents push their work branch before stopping, and this repository sets `unpushed_subagent: block`.
 
 ## Tasks
 
