@@ -510,7 +510,6 @@ class TestScanDeadline:
         assert result.stderr.count(_NOTICE) == 1
 
 
-
 class TestRecordedNumberIncludesTheRemote:
     """The number plan_number_helper advertises is the number the recorder accepts."""
 
