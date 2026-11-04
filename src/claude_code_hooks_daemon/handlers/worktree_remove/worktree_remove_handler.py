@@ -9,8 +9,10 @@ an empty allow. What it did, and what it left, goes to the daemon log.
 2. Remove the worktree only when :func:`worktree_blockers` finds nothing a
    removal would lose: ``git worktree remove`` deletes ignored files, the
    scratch notes among them (issue #155). ``--force`` is added only when HEAD is
-   also contained in another ref (DESIGN.md section 11); otherwise git's own
-   refusal stands. A blocked worktree is left and its blocking paths logged.
+   also contained in another ref (DESIGN.md section 11). A detached worktree
+   whose HEAD no other ref holds is left too: git removes a clean one without
+   complaint and would orphan those commits. A blocked worktree is left and its
+   blocking paths logged.
 3. A branch WorktreeCreate made (creator route ``worktree_create``; with no
    creator record at all, the ``<slug>-<8 hex>`` name) is deleted through
    :func:`delete_if_merged` when the default or an integration line holds every
@@ -186,8 +188,18 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
                 ", ".join(blockers),
             )
             return
+        contained = _contained_elsewhere(record, clock)
+        if record.branch is None and not contained:
+            # Plain `git worktree remove` succeeds on a clean detached worktree and
+            # would orphan the commits only its HEAD holds.
+            logger.warning(
+                "worktree_remove: %s is left in place; its detached HEAD holds commits "
+                "no other ref contains (orphan work)",
+                record.path,
+            )
+            return
         args = ["worktree", "remove"]
-        if _contained_elsewhere(record, clock):
+        if contained:
             args.append("--force")
         removed = run_git(
             cwd, *args, str(record.path), timeout=clock.timeout(Timeout.GIT_WORKTREE, "the removal")

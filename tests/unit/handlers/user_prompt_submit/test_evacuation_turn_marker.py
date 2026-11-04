@@ -48,7 +48,7 @@ def test_prompt_expires_main_thread_records(tmp_path: Path) -> None:
     marker = EvacuationTurnMarkerHandler()
     marker._untracked_override = untracked
     marker.handle(_prompt())
-    works = evacuations(f"git -C {repo} show HEAD > {tmp_path}/p.patch", repo)
+    works = evacuations(f"git -C {repo} diff >{tmp_path}/p.patch", repo)
     record_evacuations(untracked, "s1", None, works)
     assert recorded_evacuations(untracked, "s1", None) != []
     result = marker.handle(_prompt())

@@ -132,6 +132,33 @@ class TestTurnRecords:
         record_evacuations(untracked, _SESSION, "a1", works)
         assert recorded_evacuations(untracked, _SESSION, "a1") == []
 
+    @pytest.mark.parametrize("revisions", ["main..lane", "main...lane", "main lane"])
+    def test_diff_of_committed_revisions_is_not_recorded(
+        self, repo: Path, wt: Path, revisions: str
+    ) -> None:
+        command = f"git -C {wt} diff {revisions} > {repo}/untracked/x.diff"
+        assert evacuations(command, repo) == []
+
+    def test_show_of_a_commit_is_not_recorded(self, repo: Path, wt: Path) -> None:
+        assert evacuations(f"git -C {wt} show HEAD > {repo}/untracked/s.patch", repo) == []
+
+    def test_format_patch_of_commits_is_not_recorded(self, repo: Path, wt: Path) -> None:
+        command = f"git -C {wt} format-patch main -o {repo}/untracked/p"
+        assert evacuations(command, repo) == []
+
+    @pytest.mark.parametrize(
+        "diff",
+        ["diff", "diff main", "diff --cached", "diff --staged main", "diff main -- lane.txt"],
+    )
+    def test_diff_touching_the_working_tree_or_index_is_recorded(
+        self, repo: Path, wt: Path, diff: str
+    ) -> None:
+        assert len(evacuations(f"git -C {wt} {diff} > {repo}/untracked/x.diff", repo)) == 1
+
+    def test_show_of_a_stash_is_recorded(self, repo: Path, wt: Path) -> None:
+        command = f"git -C {wt} show stash@{{0}} > {repo}/untracked/x.diff"
+        assert len(evacuations(command, repo)) == 1
+
     def test_corrupt_state_reads_as_empty(self, untracked: Path) -> None:
         record_evacuations(untracked, _SESSION, "a1", [])
         assert recorded_evacuations(untracked, _SESSION, "a1") == []
@@ -156,6 +183,13 @@ class TestDestroysRecorded:
         _git(repo, "worktree", "add", "-b", "other", str(other))
         works = evacuations(_evacuate(repo, wt), repo)
         assert destroys_recorded(f"git worktree remove {other}", repo, works) is None
+
+    @pytest.mark.parametrize("command", ["cd $D && rm -rf sub", "cd $D && git worktree remove x"])
+    def test_unresolvable_destruction_does_not_match_a_record(
+        self, repo: Path, wt: Path, command: str
+    ) -> None:
+        works = evacuations(_evacuate(repo, wt), repo)
+        assert destroys_recorded(command, repo, works) is None
 
     def test_no_records_never_matches(self, repo: Path, wt: Path) -> None:
         assert destroys_recorded(f"git worktree remove {wt}", repo, []) is None

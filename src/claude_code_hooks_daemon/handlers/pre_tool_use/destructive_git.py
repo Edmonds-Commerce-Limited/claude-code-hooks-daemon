@@ -370,11 +370,11 @@ _BRANCH_DELETE_VERBOSE: Final[str] = (
 _WORKTREE_REMOVE_VERBOSE: Final[str] = (
     "`git worktree remove` deletes the worktree directory. Even without `--force` git "
     "deletes its IGNORED files (scratch notes, reports, patches), and `--force` also "
-    "deletes modified and untracked files and any commit that only the worktree's HEAD "
-    "holds.\n\n"
+    "deletes modified and untracked files. Forced or not, a clean worktree on a detached "
+    "HEAD is removed too, and any commit that only that HEAD holds is orphaned.\n\n"
     "It is ALLOWED when nothing would be lost: `git status --porcelain` is empty (forced "
     "form), every ignored entry matches a `branches.cleanup_after_merge.regenerable` glob "
-    "(`untracked/scratch/` never does), and, when forced, the HEAD is held by a branch, tag "
+    "(`untracked/scratch/` never does), and the HEAD is held by a branch, tag "
     "or remote-tracking ref the same command does not delete.\n\n"
     "To proceed: commit or push the work on the lane's branch, move each listed path to a "
     "tracked home, or delete it deliberately, then retry. Ask a human if none of those fits."
@@ -649,16 +649,17 @@ class _ForceRemovalJudge:
                 f"worktree `{path}` holds {len(blockers)} path(s) the removal would lose: "
                 f"{preview_paths(blockers)}"
             )
-        if removal.forced:
-            self._hold(
-                _HeldTip(
-                    label=f"worktree `{path}` HEAD",
-                    rule_id=RuleID.GIT_WORKTREE_REMOVE_FORCE,
-                    directory=path,
-                    tip=_commit_of(path, "HEAD"),
-                    advice=f"commit it to a branch: `git -C {path} switch -c <name>`, then push",
-                )
+        # Forced or not: a clean detached worktree is removed by plain git too, and its
+        # HEAD commits then survive only if some ref holds them.
+        self._hold(
+            _HeldTip(
+                label=f"worktree `{path}` HEAD",
+                rule_id=RuleID.GIT_WORKTREE_REMOVE_FORCE,
+                directory=path,
+                tip=_commit_of(path, "HEAD"),
+                advice=f"commit it to a branch: `git -C {path} switch -c <name>`, then push",
             )
+        )
 
     def _prove(self) -> None:
         """Move every held tip no surviving ref contains onto ``_unheld``."""
@@ -1125,7 +1126,7 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
     (
         RuleID.GIT_WORKTREE_REMOVE_FORCE,
         "`git worktree remove [--force]` of a worktree holding dirty files, unregenerable "
-        "ignored content, or (forced) a HEAD no surviving ref holds",
+        "ignored content, or a HEAD no surviving ref holds (forced or not)",
         "The removal deletes that work with no recovery",
         "Commit, push or deliberately delete each listed path, then remove",
     ),
@@ -1485,8 +1486,8 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "`branches.force_removal.mode: off` trusts only remote-tracking refs |\n"
             "| `git worktree remove [--force]` "
             "| ALLOWED when nothing would be lost: every ignored entry matches a "
-            "`branches.cleanup_after_merge.regenerable` glob, and when forced the status "
-            "is clean and the HEAD is held by a surviving ref. Otherwise denied "
+            "`branches.cleanup_after_merge.regenerable` glob, the HEAD is held by a surviving "
+            "ref, and when forced the status is clean. Otherwise denied "
             "(R-GIT-WORKTREE-REMOVE-FORCE), listing each path to commit, push or delete |\n"
             "| copy out, then destroy, in ONE command "
             "| `git diff`/`format-patch`/`stash show -p`/`show` written by redirect, `tee` or "

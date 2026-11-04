@@ -220,6 +220,21 @@ class TestBranchCleanup:
         assert _has_branch(main_repo, "main")
 
 
+class TestDetachedHeadKept:
+    def test_a_detached_worktree_with_commits_no_ref_holds_is_kept(
+        self, main_repo: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        wt = main_repo / ".claude" / "worktrees" / "detached"
+        _git(main_repo, "worktree", "add", "--detach", str(wt))
+        (wt / "orphan.txt").write_text("work\n", encoding="utf-8")
+        _git(wt, "add", "-A")
+        _git(wt, "commit", "-q", "-m", "orphan work")
+        with caplog.at_level("WARNING"):
+            _handler().handle({"cwd": str(main_repo), "worktree_path": str(wt)})
+        assert wt.exists()
+        assert "orphan" in caplog.text
+
+
 class TestLosslessRemoval:
     def test_scratch_notes_keep_the_worktree(
         self, main_repo: Path, caplog: pytest.LogCaptureFixture

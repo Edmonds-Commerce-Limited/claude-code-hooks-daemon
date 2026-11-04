@@ -181,6 +181,26 @@ class TestWorktreeRemoveForce:
         assert rule == RuleID.GIT_WORKTREE_REMOVE_FORCE
         assert "1 commit" in reason
 
+    def test_unforced_removal_of_detached_head_with_unique_commits_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        _git(wt, "checkout", "--detach")
+        _commit(wt, "orphan")
+        rule, reason = _deny(handler, f"git worktree remove {wt}", repo)
+        assert rule == RuleID.GIT_WORKTREE_REMOVE_FORCE
+        assert "1 commit" in reason
+
+    def test_unforced_removal_of_detached_head_a_branch_holds_is_allowed(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        _git(wt, "checkout", "--detach")
+        assert _allowed(handler, f"git worktree remove {wt}", repo)
+
+    def test_unforced_removal_on_a_branch_is_allowed(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        assert _allowed(handler, f"git worktree remove {wt}", repo)
+
     def test_detached_head_a_branch_holds_is_allowed(
         self, handler: DestructiveGitHandler, repo: Path, wt: Path
     ) -> None:

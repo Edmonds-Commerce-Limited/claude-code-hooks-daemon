@@ -75,7 +75,7 @@ class EvacuationRecorderHandler(PostToolUseHandlerBase):
             "## evacuation_recorder — an evacuated worktree or branch stays protected this turn\n\n"
             "After a command copies a worktree's or branch's work to an untracked file "
             "(`git diff`, `format-patch`, `stash show -p` or `show` by redirect, `tee` or "
-            "`-o`), that worktree and branch are remembered for the current turn (the main "
+            "`-o`; a diff, show or format-patch of committed revisions only is not counted), that worktree and branch are remembered for the current turn (the main "
             "thread's turn ends at your next prompt; a sub-agent's is its lifetime). "
             "`destructive_git` denies `worktree remove`, `branch -d/-D`, `update-ref -d` and "
             "`rm -r` of them in a LATER command of the same turn (R-GIT-EVACUATE-THEN-DESTROY). "
