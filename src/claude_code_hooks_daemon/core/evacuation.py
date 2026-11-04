@@ -46,6 +46,8 @@ _SUMMARY_ONLY: Final[frozenset[str]] = frozenset(
     }
 )
 _PATCH_OPTIONS: Final[frozenset[str]] = frozenset({"-p", "--patch", "-u"})
+#: Options that bring the index (or untracked paths) into a ``diff``/``show``.
+_INDEX_OPTIONS: Final[frozenset[str]] = frozenset({"--cached", "--staged", "--no-index"})
 _OUTPUT_DIRECTORY_OPTIONS: Final[frozenset[str]] = frozenset({"-o", "--output-directory"})
 _RANGE_SEPARATOR: Final[re.Pattern[str]] = re.compile(r"\.\.\.?")
 _REVISION_SUFFIX: Final[re.Pattern[str]] = re.compile(r"[~^].*$")
@@ -123,6 +125,43 @@ def _evacuates(run: GitInvocation) -> bool:
     if run.subcommand == "stash":
         return run.arguments[:1] == ("show",) and bool(arguments & _PATCH_OPTIONS)
     return run.subcommand == "format-patch"
+
+
+def _is_commit(directory: Path, revision: str) -> bool:
+    return (
+        _git_line(directory, "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}")
+        is not None
+    )
+
+
+def _committed_only(run: GitInvocation, cwd: Path) -> bool:
+    """Whether ``run`` reads committed revisions only: no working tree, index or stash.
+
+    Anything that cannot be established reads as False, so it stays recorded.
+    """
+    if run.subcommand == "stash" or any(
+        "stash" in argument or argument in _INDEX_OPTIONS for argument in run.arguments
+    ):
+        return False
+    if run.subcommand in {"show", "format-patch"}:
+        return True
+    if run.subcommand != "diff":
+        return False
+    revisions = [
+        argument
+        for argument in run.arguments[
+            : run.arguments.index("--") if "--" in run.arguments else None
+        ]
+        if not argument.startswith("-")
+    ]
+    if len(revisions) == 1:
+        return _RANGE_SEPARATOR.search(revisions[0]) is not None
+    directory = _git_directory(run, cwd)
+    return (
+        len(revisions) == 2
+        and directory is not None
+        and all(_is_commit(directory, revision) for revision in revisions)
+    )
 
 
 def _output_directory(arguments: tuple[str, ...]) -> str | None:
@@ -287,9 +326,20 @@ def _destructions(step: SimpleCommand, cwd: Path) -> list[_Destruction]:
     ]
 
 
-def _same_work(evacuation: Evacuation, destruction: _Destruction) -> bool:
-    if evacuation.toplevel is None or not destruction.placed:
+def _same_work(
+    evacuation: Evacuation, destruction: _Destruction, *, unplaced_matches: bool = True
+) -> bool:
+    """Whether ``destruction`` removes the source of ``evacuation``.
+
+    ``unplaced_matches`` is the answer for what cannot be placed: True inside one
+    command, where the evacuation is certain to be this command's own; False
+    against a record of an earlier command, where a path nobody can resolve
+    (``cd $d``) gives no reason to read it as that earlier work.
+    """
+    if evacuation.toplevel is None:
         return True
+    if not destruction.placed:
+        return unplaced_matches
     if evacuation.branches & destruction.branches:
         return True
     path = destruction.path
@@ -326,11 +376,15 @@ def _has_evacuating_step(steps: list[SimpleCommand]) -> bool:
 
 
 def _first_match(
-    step: SimpleCommand, cwd: Path, works: Sequence[Evacuation]
+    step: SimpleCommand,
+    cwd: Path,
+    works: Sequence[Evacuation],
+    *,
+    unplaced_matches: bool = True,
 ) -> EvacuationMatch | None:
     for destruction in _destructions(step, cwd):
         for work in works:
-            if _same_work(work, destruction):
+            if _same_work(work, destruction, unplaced_matches=unplaced_matches):
                 return EvacuationMatch(
                     evacuation=work.text, landing=work.landing, destruction=destruction.text
                 )
@@ -346,12 +400,18 @@ def evacuations(command: str, cwd: Path) -> list[Evacuation]:
 
     Returns:
         The evacuations, each with the worktree toplevel (None when it cannot
-        be placed) and the branches whose work it read.
+        be placed) and the branches whose work it read. A ``diff``, ``show`` or
+        ``format-patch`` of committed revisions only is not one: it copies no
+        uncommitted work, so nothing is recorded for a later command to protect.
     """
     steps = simple_commands(command)
     if not _has_evacuating_step(steps):
         return []
-    found = (_evacuation(steps, index, cwd) for index in range(len(steps)))
+    found = (
+        _evacuation(steps, index, cwd)
+        for index, step in enumerate(steps)
+        if step.git is None or not _committed_only(step.git, cwd)
+    )
     return [work for work in found if work is not None]
 
 
@@ -372,7 +432,7 @@ def destroys_recorded(
         return None
     for step in simple_commands(command):
         if _destroys(step):
-            match = _first_match(step, cwd, works)
+            match = _first_match(step, cwd, works, unplaced_matches=False)
             if match is not None:
                 return match
     return None
