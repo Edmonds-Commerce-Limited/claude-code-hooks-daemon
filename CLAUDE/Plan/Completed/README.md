@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00518: full qa blocker exempt agent types](00518-full-qa-blocker-exempt-agent-types/PLAN.md) - Complete at merges `980d4fb67`, `7ff8cdcf1`, `7cb84135a` + the archiving commit (ledger 00474 N457: `exempt_agent_types` with a one-at-a-time lock, dogfooded with `qa-full-runner`; release note 053)
+
 - [00517: daemon version ssot and no stale venvs](00517-daemon-version-ssot-and-no-stale-venvs/PLAN.md) - Complete at `42f6de85a` (green full CI run 38491817681) + the archiving commit (owner direction: one source for the installed version and one staleness rule for every venv cleanup; UNPROVEN venvs surfaced at session start; release note 055)
 
 - [00514: sensitive content withheld match text](00514-sensitive-content-withheld-match-text/PLAN.md) - Complete at merge `17184f376` + the archiving commit (#92, owner ruling: a public-pattern deny names the pattern and where it matched, never the matched text; reverses Plan 00201's disclosure; release note 017)

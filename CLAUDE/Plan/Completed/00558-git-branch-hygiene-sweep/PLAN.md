@@ -1,6 +1,6 @@
 # Plan 00558: branch WIP limit and hygiene (v2)
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-02
 **Revised**: 2026-11-03 (v2; v1 was report-only, see [CRITIQUE-v1.md](CRITIQUE-v1.md))
 **Owner**: dev
@@ -99,7 +99,7 @@ Cleanup comes before enforcement: on the #152 commenter's 154 leftovers it alone
 
 - [x] ✅ **Task 5.1**: Write the handler guidance, docs and the `/hooks-daemon housekeeping` step. Housekeeping gains `branch-sweep` (report) and `branch-sweep-clean` (held); `HANDLER_REFERENCE.md` and `CONFIGURATION.md` cover every new handler and `branches:` key. Open owner question: `CLAUDE/Worktree.md` still says 3 against the `wip.cap` default of 10.
 - [x] ✅ **Task 5.2**: Add release notes in the pending-release holding area. Notes 023-032 in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`; 031 warns an upgrading repository that a branch already 30 days idle blocks creation from the first session start.
-- [ ] 🔄 **Task 5.3**: Dogfood on this repository: run the sweep, act on what it finds, and confirm the guards fire. The sweep has run and the guards have fired (journal); acting on the two branches at the dormancy block stage (`agent-a388f9611b6f8f3d1-1f7c8c8f`, `feature/00135-tmux-send-keys-injection`) is the owner's decision: park or delete.
+- [x] ✅ **Task 5.3**: Dogfood on this repository: run the sweep, act on what it finds, and confirm the guards fire. The sweep has run and the guards have fired (journal). The two branches at the dormancy block stage were parked, then deleted by the owner: `feature/00135-tmux-send-keys-injection` (Plan 00135 cancelled) and `agent-a388f9611b6f8f3d1-1f7c8c8f` (a superseded N350 fix). Both tips are kept in `untracked/dormant-branches-2026-11-04.bundle`.
 
 ## Success Criteria
 
