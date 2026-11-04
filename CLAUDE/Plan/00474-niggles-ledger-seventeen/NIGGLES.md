@@ -124,6 +124,32 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N569 to N572 — the v3.72.0 Claude Code changelog review (2.1.309 to 2.1.318): one conflict, two adopts, one redundant
+
+**Source**: RELEASING.md Step 1c for v3.72.0; the review is
+[subagent-reports/261104-claude-code-review-v3.72.0.md](subagent-reports/261104-claude-code-review-v3.72.0.md). The
+release host ran Claude Code 2.1.318.
+
+- **N569 (conflict, 2.1.312)**: usage-limit messages now call the 5-hour window the "5-hour limit", not the "session
+  limit". `handlers/user_prompt_submit/limit_rebrief.py` `_LIMIT_RE` (~line 82) matches only `session|weekly`, so a
+  5-hour-window kill is not recognised and no re-brief fires. Widen the regex and update the acceptance-test sentence.
+- **N570 (adopt, 2.1.314)**: hooks matching Bash now run on shell commands started by the Monitor tool (block or ask
+  only, no approve or rewrite), and `if` conditions such as `Monitor(tail *)` match its commands. The Bash command
+  guards (`pipe_blocker`, `sed_blocker`, destructive git, secret guards) select on tool name Bash; whether the payload
+  says Monitor or Bash is unverified. Check the shape and decide whether Monitor is treated as Bash.
+- **N571 (adopt, 2.1.312)**: Write now refuses to overwrite a very large subdirectory CLAUDE.md, rules file or
+  @-included file after Claude saw only its start, and asks Claude to read it all or edit in place. This extends
+  instruction fact G4-05. `write_clobber_guard` is complementary (it keys on "not read this session", not "read only
+  the start"), so no handler change.
+- **N572 (redundant, 2.1.314)**: `permissions.blockWritesOutsideWorkingDirectories` makes Write, Edit and
+  NotebookEdit refuse paths outside the working directories. It overlaps `project_containment`
+  (R-WRITE-OUTSIDE-PROJECT-ROOT) only in part: the daemon bounds by the repository root and also judges Bash
+  redirects. Keep the handler; the setting may be offered as defence in depth in the shipped settings template.
+
+**Status**: N569 and N570 🔄 being fixed in this release on branch `worktree-rel372-misc`. N571 ✅ recorded on
+`release/3.72.0`: G4-05 extended and the contract re-audited at 2.1.318 (META.json page hash `275fe39e…`; G3-05
+re-anchored because the page dropped its "unconditionally" sentence). N572 ✅ recorded, no change: the handler stays.
+
 ### N568 — a signalled scaffold-lock holder released the lock and carried on through the critical section
 
 **Source**: CI run 41488623264, job "QA (Python3.12)", 2026-11-02.
