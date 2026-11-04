@@ -920,3 +920,54 @@ class TestSupervisorIndicatorMessage:
             state=_SupervisorState.ACTIVE_ARMED,
         )
         assert segment == f"| {_BG_GREEN} {_ICON} {_ANSI_RESET}"
+
+
+class TestSharedLockNotHeldDuringIo:
+    """The lock is shared by every session, so no I/O may run under it."""
+
+    def test_lock_is_free_during_the_proc_walk_and_status_read(self, tmp_path: Path) -> None:
+        handler = SupervisorIndicatorHandler()
+        held_during: list[str] = []
+
+        def _probe(label: str) -> None:
+            if not handler._lock.acquire(blocking=False):
+                held_during.append(label)
+            else:
+                handler._lock.release()
+
+        def _scan(session_id: str) -> tuple[int, bool] | None:
+            _probe("walk")
+            return (4242, True)
+
+        def _status_path() -> Path:
+            _probe("status")
+            return tmp_path / "absent.json"
+
+        with (
+            patch(_STATUS_PATH_PATCH, side_effect=_status_path),
+            patch(_SCAN_PATCH, side_effect=_scan),
+            patch(_KILL_PATCH),
+        ):
+            state = handler._detect_state(_SESSION_ID)
+
+        assert held_during == []
+        assert state == _SupervisorState.ACTIVE_ARMED
+        assert _memo(handler).pid == 4242
+
+    def test_other_session_is_not_blocked_by_a_walk_in_progress(self, tmp_path: Path) -> None:
+        handler = SupervisorIndicatorHandler()
+        other_done: list[_SupervisorState] = []
+
+        def _scan(session_id: str) -> tuple[int, bool] | None:
+            if session_id == _SESSION_ID:
+                # While session A walks, session B must be able to render.
+                other_done.append(handler._detect_state("fake-session-b"))
+            return None
+
+        with (
+            patch(_STATUS_PATH_PATCH, return_value=tmp_path / "absent.json"),
+            patch(_SCAN_PATCH, side_effect=_scan),
+        ):
+            handler._detect_state(_SESSION_ID)
+
+        assert other_done == [_SupervisorState.NOT_CONFIGURED]
