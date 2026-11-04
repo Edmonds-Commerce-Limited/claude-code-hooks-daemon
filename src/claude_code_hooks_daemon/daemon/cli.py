@@ -7930,6 +7930,10 @@ def cmd_optimise_checklist(args: argparse.Namespace) -> int:
         render_report,
         report_as_json,
     )
+    from claude_code_hooks_daemon.config_optimisation.claudemd_excludes import (
+        git_worktree_paths,
+        suggest_claudemd_excludes,
+    )
     from claude_code_hooks_daemon.core.relevance import RelevanceContext
 
     override = getattr(args, "project_root", None)
@@ -7959,7 +7963,10 @@ def cmd_optimise_checklist(args: argparse.Namespace) -> int:
     if getattr(args, "format", "text") == "json":
         print(json.dumps(report_as_json(items), indent=2))
     else:
-        print(render_report(items, optional_suggestions(config_dict)), end="")
+        suggestions = optional_suggestions(config_dict) + suggest_claudemd_excludes(
+            project_root, git_worktree_paths(project_root)
+        )
+        print(render_report(items, suggestions), end="")
     return 0
 
 

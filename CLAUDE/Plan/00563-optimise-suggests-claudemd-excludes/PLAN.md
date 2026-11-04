@@ -1,6 +1,6 @@
 # Plan 00563: optimise suggests claudemd excludes
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-04
 **Owner**: dev
 **Priority**: Medium
@@ -27,14 +27,14 @@ Plan 00561 (GitHub #156) found that a sub-agent working in a worktree under the 
 
 ### Phase 1: implementation
 
-- [ ] ⬜ **Task 1.1**: Write failing tests for the detection: an uncovered root is recommended, a covered root is silent, and a project with no worktrees under its root is silent.
-- [ ] ⬜ **Task 1.2**: Add the recommendation to the optimise procedure, reusing the worktree-root derivation from `tests/integration/test_worktree_claudemd_excludes.py` rather than a copied list.
-- [ ] ⬜ **Task 1.3**: Document it in the optimise skill doc, and add a release note.
+- [x] ✅ **Task 1.1**: Write failing tests for the detection: an uncovered root is recommended, a covered root is silent, and a project with no worktrees under its root is silent.
+- [x] ✅ **Task 1.2**: Add the recommendation to the optimise procedure, reusing the worktree-root derivation from `tests/integration/test_worktree_claudemd_excludes.py` rather than a copied list.
+- [x] ✅ **Task 1.3**: Document it in the optimise skill doc, and add a release note.
 
 ## Success Criteria
 
-- [ ] The three detection cases are tested and pass.
-- [ ] A release note in the pending-release holding area (`CLAUDE/UPGRADES/UNRELEASED/`) describes the new recommendation, because it reaches clients.
+- [x] The three detection cases are tested and pass.
+- [x] A release note in the pending-release holding area (`CLAUDE/UPGRADES/UNRELEASED/`) describes the new recommendation, because it reaches clients.
 
 ## Delivery & Milestones
 
