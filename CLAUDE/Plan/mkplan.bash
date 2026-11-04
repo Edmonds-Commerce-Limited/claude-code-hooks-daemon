@@ -81,7 +81,10 @@ readonly CONFIG_LOCK_MAX_ATTEMPTS=30
 readonly CONFIG_LOCK_RETRY_SECONDS=0.1
 # Remote plan-number scan (GitHub #154). The fetch budget equals the daemon's
 # Timeout.GIT_FETCH_SESSION; a test pins the two together.
-readonly REMOTE_FETCH_TIMEOUT_SECONDS=30
+readonly REMOTE_FETCH_TIMEOUT_DEFAULT_SECONDS=30
+# MKPLAN_REMOTE_FETCH_TIMEOUT_SECONDS lowers (or raises) it, mainly for tests.
+REMOTE_FETCH_TIMEOUT_SECONDS="${MKPLAN_REMOTE_FETCH_TIMEOUT_SECONDS:-$REMOTE_FETCH_TIMEOUT_DEFAULT_SECONDS}"
+readonly REMOTE_FETCH_TIMEOUT_SECONDS
 readonly REMOTE_ARCHIVE_FOLDERS=(Completed Cancelled)
 
 # Journal assets (Plan 00163), also used by --journal (Plan 00427).
@@ -272,7 +275,9 @@ filesystem_highest() {
 # clones can take the same number. Mirrors remote_highest_plan_number
 # (handlers/utils/plan_numbering.py); the fetch budget is Timeout.GIT_FETCH_SESSION,
 # pinned by tests/unit/scripts/test_mkplan_remote_scan.py. READ-ONLY: it fetches
-# and lists tree names, and never pushes. The trailing slashes make ls-tree list
+# and lists tree names, and never pushes. mkplan is the only caller that fetches;
+# the daemon's hook path reads the already-fetched refs. A failed ls-tree on any
+# ref leaves the remote unchecked, as it does in the daemon. The trailing slashes make ls-tree list
 # a folder's CONTENTS rather than the folder itself.
 default_remote() {
     local root="$1" remotes
