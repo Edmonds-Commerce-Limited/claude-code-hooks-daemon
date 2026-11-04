@@ -38,6 +38,23 @@ def test_json_report(capsys: pytest.CaptureFixture[str]) -> None:
     assert "relevant" in data["summary"]
 
 
+def test_uncovered_worktree_root_is_recommended(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "untracked" / "worktrees" / "wt-one").mkdir(parents=True)
+    assert cmd_optimise_checklist(_args(project_root=str(tmp_path))) == 0
+    out = capsys.readouterr().out
+    assert "**/untracked/worktrees/*/CLAUDE.md" in out
+    assert "claudeMdExcludes" in out
+
+
+def test_no_worktree_root_adds_no_claudemd_recommendation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cmd_optimise_checklist(_args(project_root=str(tmp_path))) == 0
+    assert "claudeMdExcludes" not in capsys.readouterr().out
+
+
 def test_missing_config_is_an_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert cmd_optimise_checklist(_args(config=str(tmp_path / "absent.yaml"))) == 2
     assert "not found" in capsys.readouterr().err.lower()
