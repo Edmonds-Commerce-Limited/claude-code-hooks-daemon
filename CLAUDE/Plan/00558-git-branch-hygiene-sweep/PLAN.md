@@ -50,7 +50,7 @@ Today nothing holds a limit (code facts with citations: [subagent-reports/261103
 - Judging whether unmerged work is any good.
 - Deleting an integration line, the default branch or any exempt branch.
 - Replacing `git_upstream_checker`.
-- Plan-number collisions across clones (raised on #152; filed separately).
+- Plan-number collisions across clones (raised on #152; filed separately as Plan 00562, GitHub #154).
 
 ## Open questions
 

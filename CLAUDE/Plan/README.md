@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00562: cross clone plan number allocation](00562-cross-clone-plan-number-allocation/PLAN.md) - Not Started (#154, parked `agent-needs-human`: plan numbers collide across clones because both allocation sources are per-clone; owner to choose a read-only remote scan, a pushed reservation ref, or both)
+
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - Not Started (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a consumption ledger with a stop gate shared with 00558, a scratch-shape allowlist and a SessionStart sweep)
 
 - [00559: daemon clone follows expected version after pull](00559-daemon-clone-follows-expected-version-after-pull/PLAN.md) - Not Started (#148, parked `agent-needs-human`: a pull that moves `expected_version` should re-provision from a trigger outside the stale daemon; owner to choose the trigger, the retry rule and whether to add a scheduled check)
@@ -322,11 +324,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 561 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 562 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 477 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 62 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
