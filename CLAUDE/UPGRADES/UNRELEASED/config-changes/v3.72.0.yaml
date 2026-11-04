@@ -73,7 +73,8 @@ config_changes:
         may lose when it removes a linked worktree, read by `branch-sweep --clean`
         and the WorktreeRemove cleanup (venvs, QA output, caches, logs,
         `untracked/repair.log`/`repair.txt`, `untracked/.python-cmd-cache`,
-        `untracked/context-sidecar/`, `untracked/acceptance/`, `.coverage`,
+        `untracked/context-sidecar/`, `untracked/acceptance/`,
+        `untracked/spend-ledger/`, `.coverage`,
         `.CLAUDE.md.pre-inject`, `.claude/hooks-daemon/`, `*.egg-info/`). Any
         other ignored path blocks the removal; an empty directory never does, and
         a `store/` glob also covers a symlink of that name. `untracked/scratch/`

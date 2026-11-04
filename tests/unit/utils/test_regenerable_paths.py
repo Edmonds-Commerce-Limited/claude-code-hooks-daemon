@@ -43,6 +43,8 @@ class TestDefaults:
             "untracked/logs/daemon.log",
             "untracked/acceptance/",
             ".CLAUDE.md.pre-inject",
+            "untracked/spend-ledger/",
+            "untracked/spend-ledger/00000000-0000-0000-0000-000000000000/unmeasured/x.json",
         ],
     )
     def test_default_stores_are_regenerable(self, entry: str) -> None:

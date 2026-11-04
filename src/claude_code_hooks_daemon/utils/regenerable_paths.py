@@ -37,6 +37,7 @@ DEFAULT_REGENERABLE_STORES: tuple[str, ...] = (
     "untracked/context-sidecar/",
     "untracked/logs/",
     "untracked/acceptance/",
+    "untracked/spend-ledger/",
     "/.coverage",
     "/.CLAUDE.md.pre-inject",
     ".claude/hooks-daemon/",
