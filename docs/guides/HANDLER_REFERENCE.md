@@ -2564,7 +2564,7 @@ handlers:
 | **Type**       | Blocking            |
 | **Event**      | PreToolUse          |
 
-**Description:** Ensures `gh issue view` commands always include the `--comments` flag. Issue comments often contain critical context, clarifications, and updates not in the issue body. Blocks the command and suggests adding `--comments`.
+**Description:** Ensures `gh issue view` commands always include the `--comments` flag. Issue comments often contain critical context, clarifications, and updates not in the issue body. Blocks the command and suggests `--json title,body,state,comments`, which returns the body and the comments; `--comments` is still allowed, but without a terminal it prints only the comments and drops the body.
 
 **Example trigger:**
 
@@ -2630,9 +2630,9 @@ handlers:
 
 **Blocked:** `gh pr view 123`, `gh pr view 123 --repo owner/repo`
 
-**Allowed:** `gh pr view 123 --comments`, `gh pr view 123 --json title,body,comments`
+**Allowed:** `gh pr view 123 --json title,body,state,author,comments` (the suggested form), `gh pr view 123 --comments`
 
-When using `--json`, include `comments` in the field list instead of adding `--comments`.
+Without a terminal, `--comments` prints only the comments and drops the PR body, so the deny suggests the `--json` form. When using `--json`, include `comments` in the field list.
 
 **Config example:**
 
