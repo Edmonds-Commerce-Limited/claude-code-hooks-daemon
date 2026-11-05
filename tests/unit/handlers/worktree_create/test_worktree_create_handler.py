@@ -338,6 +338,67 @@ class TestLinkedWorktreeCwd:
         assert str(Path(result.worktree_path or "")).startswith(f"{repo}/.claude/worktrees/")
 
 
+class TestNestedWorktreeCreation:
+    """Issue #161: a worktree created FROM a daemon-created worktree (symlink seeds)."""
+
+    def _input(self, cwd: Path, name: str) -> dict:
+        return {
+            "hook_event_name": EventType.WORKTREE_CREATE.value,
+            "cwd": str(cwd),
+            "name": name,
+            "prompt_id": f"pid-{name}",
+            "session_id": "sid-456",
+        }
+
+    def _handler(self) -> WorktreeCreateHandler:
+        handler = WorktreeCreateHandler()
+        handler._seed = {
+            "entries": [
+                {"path": ".env.local", "mode": SEED_MODE_SYMLINK},
+                {"path": "localdir", "mode": SEED_MODE_SYMLINK},
+            ]
+        }
+        return handler
+
+    @pytest.fixture
+    def seeded_repo(self, repo: Path) -> Path:
+        (repo / ".env.local").write_text("SECRET=canonical\n", encoding="utf-8")
+        (repo / "localdir").mkdir()
+        (repo / "localdir" / "f.txt").write_text("x\n", encoding="utf-8")
+        return repo
+
+    def test_inner_worktree_is_created_under_main_and_seeded_from_main(
+        self, seeded_repo: Path
+    ) -> None:
+        outer = Path(self._handler().handle(self._input(seeded_repo, "outer")).worktree_path or "")
+        assert (outer / ".env.local").is_symlink()
+
+        inner = Path(self._handler().handle(self._input(outer, "inner")).worktree_path or "")
+
+        assert inner.parent == seeded_repo / ".claude" / "worktrees"
+        assert not (outer / ".claude" / "worktrees").exists()
+        assert (inner / ".env.local").resolve() == (seeded_repo / ".env.local").resolve()
+        assert (inner / "localdir").resolve() == (seeded_repo / "localdir").resolve()
+        assert (inner / ".env.local").read_text(encoding="utf-8") == "SECRET=canonical\n"
+
+    def test_seed_escaping_the_repository_is_still_rejected_from_a_nested_cwd(
+        self, seeded_repo: Path, tmp_path: Path
+    ) -> None:
+        outside = tmp_path / "outside-secret"
+        outside.write_text("nope\n", encoding="utf-8")
+        (seeded_repo / "escape").symlink_to(outside)
+        outer = Path(self._handler().handle(self._input(seeded_repo, "outer")).worktree_path or "")
+
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [{"path": "escape", "mode": SEED_MODE_SYMLINK}]}
+        with pytest.raises(WorktreeSeedError, match="outside the repository root"):
+            handler.handle(self._input(outer, "inner"))
+
+        assert not any(
+            p.name.startswith("inner") for p in (seeded_repo / ".claude" / "worktrees").iterdir()
+        )
+
+
 class TestFailureNamesTheReason:
     """N53: exit 127 reached the user with git's reason (stderr) discarded."""
 
