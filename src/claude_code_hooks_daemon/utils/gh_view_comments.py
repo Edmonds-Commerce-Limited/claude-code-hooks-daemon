@@ -85,10 +85,11 @@ def suggest_with_comments(command: str, view: str, noun: str) -> str:
     separates it from a chained command). `--comments` is never suggested: without a
     TTY it prints only the comments and omits the body.
 
-    Raises:
-        ValueError: If ``noun`` is not one of the nouns the guards cover.
     ``view`` is spliced where it appears in the command; a view read out of a
     `bash -c` body or otherwise not found verbatim is returned fixed on its own.
+
+    Raises:
+        ValueError: If ``noun`` is not one of the nouns the guards cover.
     """
     if noun not in _SUGGESTED_JSON_FIELDS:
         raise ValueError(f"Unknown gh noun: {noun!r}")

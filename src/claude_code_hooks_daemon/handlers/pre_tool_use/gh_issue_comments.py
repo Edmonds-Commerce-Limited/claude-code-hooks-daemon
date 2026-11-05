@@ -75,7 +75,7 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
             command: Original bash command
 
         Returns:
-            Corrected command string with --comments added
+            Corrected command string requesting the body and the comments
         """
         view = uncommented_view_segment(command, _NOUN)
         if view is None:  # pragma: no cover - handle() only calls this after a match
@@ -83,7 +83,7 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
         return suggest_with_comments(command, view, _NOUN)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block and suggest adding --comments flag."""
+        """Block and suggest a `--json` request for the body and the comments."""
         command = get_bash_command(hook_input)
         if not command:
             return GatingResult(decision=Decision.ALLOW)
