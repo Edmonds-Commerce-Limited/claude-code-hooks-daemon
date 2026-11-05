@@ -1106,6 +1106,38 @@ class TestLspCoverageFromPlugins:
         )
         assert result.decision == Decision.DENY
 
+    def _bash(self, command: str, cwd: Path) -> Any:
+        return self._handle({"tool_name": "Bash", "cwd": str(cwd), "tool_input": {"command": command}})
+
+    def test_two_extensionless_files_are_advised_not_denied(self, tmp_path: Path) -> None:
+        """Plan 00567: shell scripts with no suffix are not served by any server."""
+        (tmp_path / "bin").mkdir()
+        (tmp_path / "bin" / "tool1").write_text("echo 1\n")
+        (tmp_path / "bin" / "tool2").write_text("echo 2\n")
+        result = self._bash("grep -n foo_bar bin/tool1 bin/tool2", tmp_path)
+        assert result.decision == Decision.ALLOW
+        assert "LSP tool available" not in "\n".join(result.context)
+
+    def test_extensionless_files_get_the_same_verdict_by_directory(self, tmp_path: Path) -> None:
+        (tmp_path / "bin").mkdir()
+        (tmp_path / "bin" / "tool1").write_text("echo 1\n")
+        (tmp_path / "bin" / "tool2").write_text("echo 2\n")
+        by_files = self._bash("grep -n foo_bar bin/tool1 bin/tool2", tmp_path)
+        by_directory = self._bash("grep -rn foo_bar bin/", tmp_path)
+        assert by_directory.decision == Decision.ALLOW
+        assert by_files.decision == by_directory.decision
+
+    def test_a_served_file_in_a_mixed_list_is_enforced(self, tmp_path: Path) -> None:
+        (tmp_path / "mod.py").write_text("x = 1\n")
+        (tmp_path / "tool1").write_text("echo 1\n")
+        result = self._bash("grep -n foo_bar mod.py tool1", tmp_path)
+        assert result.decision == Decision.DENY
+
+    def test_a_nonexistent_file_target_keeps_the_covered_fallback(self, tmp_path: Path) -> None:
+        (tmp_path / "tool1").write_text("echo 1\n")
+        result = self._bash("grep -n foo_bar tool1 missing_tool", tmp_path)
+        assert result.decision == Decision.DENY
+
     def test_no_enabled_server_at_all_is_advised_by_default(
         self, lsp_servers: list[PluginLspServer]
     ) -> None:
