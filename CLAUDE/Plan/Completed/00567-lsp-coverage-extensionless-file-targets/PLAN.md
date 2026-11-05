@@ -1,6 +1,6 @@
 # Plan 00567: lsp coverage extensionless file targets
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-05
 **Owner**: dev
 **Priority**: Medium
@@ -35,19 +35,20 @@ through `xargs`.
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: Failing tests: two extensionless named files → allow (advisory); one `.py` plus one extensionless
+- [x] ✅ **Task 1.1**: Failing tests: two extensionless named files → allow (advisory); one `.py` plus one extensionless
   file with `.py` served → deny; a nonexistent target → the fallback is unchanged.
-- [ ] ⬜ **Task 1.2**: Implement in `_lsp_coverage` (and helpers); update the guidance if its wording changes.
-- [ ] ⬜ **Task 1.3**: Release callout; targeted QA; merge; comment and close #162.
+- [x] ✅ **Task 1.2**: Implement in `_lsp_coverage` (and helpers); update the guidance if its wording changes.
+- [x] ✅ **Task 1.3**: Release callout; targeted QA; merge; comment and close #162.
 
 ## Success Criteria
 
-- [ ] Same files, same verdict, whether named individually or searched by directory, proven by a test that failed
-  before the fix.
-- [ ] Targeted QA passes.
-- [ ] Release-bound consequence recorded in the pending-release holding area: a callout under
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] Same files, same verdict, whether named individually or searched by directory, proven by a test that failed
+  before the fix (red `18348ecf8`: two DENY where ALLOW was expected); verified live after the merge.
+- [x] Targeted QA passes (42/42 on the combined #161/#162 head, nothing unmapped).
+- [x] Release-bound consequence recorded in the pending-release holding area: callout
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/002-lsp-enforcement-extensionless-file-targets.md`.
 
 ## Delivery & Milestones
 
 - Plan filed from issue #162 triage.
+- Red tests `18348ecf8`; fix `e26195147`; merged to main via `6ab6b7bfb` (release note 002).

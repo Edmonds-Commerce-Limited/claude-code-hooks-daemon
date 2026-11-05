@@ -1,6 +1,6 @@
 # Plan 00566: nested worktree create root anchoring
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-05
 **Owner**: dev
 **Priority**: High
@@ -36,20 +36,23 @@ worktree parent, so a nested creation behaves exactly like a first-level one.
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: Failing test reproducing the issue: create an outer worktree with symlink-mode seeds, then
-  invoke the handler with `cwd` inside it; assert a seeded inner worktree is created under the main checkout's worktree
-  parent. Also cover a seed that genuinely escapes the repository (still rejected).
-- [ ] ⬜ **Task 1.2**: Resolve the main-checkout root (common git dir) in the handler and use it for seed sources and
-  the worktree path; check any other `_repo_root` callers in the same handler.
-- [ ] ⬜ **Task 1.3**: Release callout; targeted QA; merge; comment and close #161.
+- [x] ✅ **Task 1.1**: End-to-end test with real git: an outer worktree with symlink-mode seeds, then a handler call
+  from inside it; plus a seed that genuinely escapes the repository (still rejected). Both PASS on unmodified `main`:
+  the defect was already fixed (below), so there was no red run.
+- [x] ✅ **Task 1.2**: Not needed. `_repo_root` already returns `GitRepo.main_worktree_root()` (the first
+  `git worktree list` entry), from Plan 00474 N563 (`dc45486fa`), shipped in v3.72.0. The triage read the
+  `_repo_root(cwd)` call site but not the method body; the reporter ran 3.71.0.
+- [x] ✅ **Task 1.3**: No callout (no behaviour change); targeted QA green; tests merged; #161 answered "fixed in
+  v3.72.0" and closed.
 
 ## Success Criteria
 
-- [ ] A nested worktree creation succeeds and is seeded, proven by a test that failed before the fix.
-- [ ] Targeted QA passes.
-- [ ] Release-bound consequence recorded in the pending-release holding area: a callout under
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] A nested worktree creation succeeds and is seeded, now pinned by a regression test (it already did on `main`).
+- [x] Targeted QA passes (42/42 on the combined #161/#162 head).
+- [x] No release-bound consequence: the behaviour shipped in v3.72.0 under N563, and this plan adds tests only, so no
+  callout goes into the pending-release holding area.
 
 ## Delivery & Milestones
 
 - Plan filed from issue #161 triage.
+- Regression tests `34d012a19`, merged to main via `82673feec`. Plan complete as already delivered by N563.

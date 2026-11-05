@@ -4,10 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00567: lsp coverage extensionless file targets](00567-lsp-coverage-extensionless-file-targets/PLAN.md) - In Progress (GitHub #162: a symbol grep over named extensionless files is denied because `_lsp_coverage` falls back to "covered"; judge named files by their own suffixes)
-
-- [00566: nested worktree create root anchoring](00566-nested-worktree-create-root-anchoring/PLAN.md) - In Progress (GitHub #161: `worktree_create` from inside a linked worktree roots on that worktree, so seeding fails; anchor on the main checkout)
-
 - [00564: remote meta ref allocator](00564-remote-meta-ref-allocator/PLAN.md) - Not Started (owner proposal, not for the next release: plan numbers allocated by compare-and-swap on a remote metadata ref, `refs/hooks-daemon/meta`, with an offline fallback to Plan 00562's scan and a recovery step)
 
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
@@ -215,6 +211,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00567: lsp coverage extensionless file targets](Completed/00567-lsp-coverage-extensionless-file-targets/PLAN.md) - Complete at merge `6ab6b7bfb` + the archiving commit (GitHub #162: named file targets are judged by their own suffix, an extensionless file counts as unserved, so a grep over extensionless scripts gets the same advisory as a search of their directory; release note 002)
+
+- [00566: nested worktree create root anchoring](Completed/00566-nested-worktree-create-root-anchoring/PLAN.md) - Complete, already delivered (GitHub #161: Plan 00474 N563 `dc45486fa` had anchored `worktree_create` on the main checkout in v3.72.0; this plan adds regression tests only, merged via `82673feec`; no release-bound consequence)
+
 - [00565: gh view comments suggestion hides body](Completed/00565-gh-view-comments-suggestion-hides-body/PLAN.md) - Complete at merge `eed7fd934` + the archiving commit (GitHub #158: `gh_issue_comments` / `gh_pr_comments` suggest `--json title,body,state,comments` instead of `--comments`, which prints only comments without a TTY; release note 001)
 
 - [00563: optimise suggests claudemd excludes](Completed/00563-optimise-suggests-claudemd-excludes/PLAN.md) - Complete at merge `d95c988f1` + `3f5a5dff3` + the archiving commit (owner ruling on Plan 00561 Q1: `/hooks-daemon optimise` lists an unscored `claudeMdExcludes` suggestion for worktree roots under the project that no glob covers; never writes it; release note 001)
@@ -271,10 +271,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00528: worktree guard stale binding](Completed/00528-worktree-guard-stale-binding/PLAN.md) - Complete at the fix commit + the archiving commit (md-viewer field report via the desktop team: a sub-agent bound to a probe worktree it had already removed was denied its report write into the main checkout; a binding whose worktree is gone is now dropped; release note 064)
 
-- [00527: go development handler fit](Completed/00527-go-development-handler-fit/PLAN.md) - Complete at merges `86ec79011`, `agent-af51ee2ff28e8bc9b-580be854` and `agent-a20fee8441f62dcd7-b0782f70` + the archiving commit (owner request via the desktop team: idiomatic Go draws no false deny from the TDD, error-hiding, lint, suppression and LSP handlers, assuming only the Go toolchain; release notes 059, 061, 062, 063; field confirmation by the seats waits on the next release)
-
-- [00525: staged lint gate runs go vet from the module root](Completed/00525-staged-lint-gate-runs-go-vet-from-the-module-root/PLAN.md) - Complete at merge `132ca087e` + the archiving commit (#118: the commit gate vets a Go file from its `go.mod` directory on its package, through the resolver `lint_on_edit` shares, so a correct nested-module package commits and a real finding still blocks; release note 059)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -328,9 +324,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 567 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 481 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 483 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 63 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 61 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

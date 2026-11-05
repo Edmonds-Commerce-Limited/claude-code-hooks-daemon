@@ -4,6 +4,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00527: go development handler fit](00527-go-development-handler-fit/PLAN.md) - Complete at merges `86ec79011`, `agent-af51ee2ff28e8bc9b-580be854` and `agent-a20fee8441f62dcd7-b0782f70` + the archiving commit (owner request via the desktop team: idiomatic Go draws no false deny from the TDD, error-hiding, lint, suppression and LSP handlers, assuming only the Go toolchain; release notes 059, 061, 062, 063; field confirmation by the seats waits on the next release)
+
+- [00525: staged lint gate runs go vet from the module root](00525-staged-lint-gate-runs-go-vet-from-the-module-root/PLAN.md) - Complete at merge `132ca087e` + the archiving commit (#118: the commit gate vets a Go file from its `go.mod` directory on its package, through the resolver `lint_on_edit` shares, so a correct nested-module package commits and a real finding still blocks; release note 059)
+
 - [00522: the pytest text report reads pytest's final summary line](00522-pytest-text-report-reads-the-final-summary-line/PLAN.md) - Complete at merge `413432043` + the archiving commit (#115: every count comes from pytest's own final totals line, so a nested summary quoted in a failure message no longer replaces them; QA-script only, no release note)
 
 - [00521: tdd_enforcement treats a Write over an existing file as an edit](00521-tdd-write-overwrite-is-not-creation/PLAN.md) - Complete at merge `113a1705a` + the archiving commit (#114: a `Write` over an existing regular file is not gated, like an `Edit`; a creating `Write` is judged as before; release note 058)
