@@ -55,4 +55,4 @@ worktree parent, so a nested creation behaves exactly like a first-level one.
 ## Delivery & Milestones
 
 - Plan filed from issue #161 triage.
-- Regression tests `34d012a19`, merged to main via `82673feec`. Plan complete as already delivered by N563.
+- Regression tests merged to main via `82673feec` (the branch's report commit is `34d012a19`). Plan complete as already delivered by N563. Issue #161 closed after main CI run 42084490638 passed.

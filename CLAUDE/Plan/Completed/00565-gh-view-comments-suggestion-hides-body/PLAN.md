@@ -55,4 +55,4 @@ route. The block itself is unchanged.
 ## Delivery & Milestones
 
 - Plan filed from issue #158 triage.
-- Red tests `17c3bab80`; fix `3359d918d`; merged to main at `eed7fd934` (release note 001).
+- Red tests `17c3bab80`; fix `3359d918d`; merged to main at `eed7fd934` (release note 001). Issue #158 closed after main CI run 42079984103 passed.

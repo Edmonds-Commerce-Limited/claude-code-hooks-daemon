@@ -51,4 +51,4 @@ through `xargs`.
 ## Delivery & Milestones
 
 - Plan filed from issue #162 triage.
-- Red tests `18348ecf8`; fix `e26195147`; merged to main via `6ab6b7bfb` (release note 002).
+- Red tests `18348ecf8`; fix `e26195147`; merged to main via `6ab6b7bfb` (release note 002). Issue #162 closed after main CI run 42084490638 passed.
