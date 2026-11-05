@@ -156,6 +156,7 @@ class CleanupAfterMergeHandler(PostToolUseHandlerBase):
                 names,
                 config=self._branches,
                 target=target,
+                default=default,
                 mode=self._branches.cleanup_after_merge.mode,
             )
         except RuntimeError as exc:

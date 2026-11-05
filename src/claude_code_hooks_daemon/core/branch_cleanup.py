@@ -338,19 +338,24 @@ def cleanup_after_merge(
     config: BranchesConfig,
     target: str,
     mode: CleanupMode,
+    default: str | None = None,
 ) -> CleanupReport:
     """Delete (``act``) or advise deleting the branches just merged into ``target``.
 
     Only the merged tiers are deleted, with no bundle: the restore line is printed
     instead. A worktree holding the branch, and a patch-equivalent branch, are
     only ever advised.
+
+    ``default`` is the resolved default branch. It is never deleted, even when
+    ``target`` is an integration line; it falls back to ``target`` when not given.
     """
     if mode == "off":
         return CleanupReport()
     # A merge into an integration line proves nothing about another line: lines are
     # refused by name unless the target is the default branch itself.
     refuse_lines = matches_any_glob(target, config.integration_lines)
-    never_work = _never_work(config, target, refuse_lines=refuse_lines)
+    protected_default = default or target
+    never_work = (*_never_work(config, protected_default, refuse_lines=refuse_lines), target)
     targets = [target]
     lines: Sequence[str] = () if refuse_lines else config.integration_lines
     worktrees = linked_worktrees(repo)
@@ -361,7 +366,7 @@ def cleanup_after_merge(
         daemon_cli_command_for_docs("delete-branch") + " {name} --protected-ref " + target
     )
     for name in names:
-        refusal = policy_refusal(name, config, target, refuse_lines=refuse_lines)
+        refusal = policy_refusal(name, config, protected_default, refuse_lines=refuse_lines)
         if refusal is not None:
             skipped.append(f"{name}: {refusal}")
             continue
@@ -434,6 +439,9 @@ def delete_if_merged(
     probe_timeout: float = Timeout.GIT_CONTEXT,
 ) -> CleanupReport:
     """Delete ``name`` when the default or an integration line holds every commit.
+
+    For an integration-line ``name`` only the default counts: a line merged into
+    another line is left alone.
 
     The WorktreeRemove cleanup (DESIGN.md section 8). Only the merged tiers are
     deleted, with no bundle (the restore line is printed instead); anything else
@@ -509,6 +517,9 @@ def clean_sweep(
     if default is None:
         raise ValueError("cannot determine the default branch; set branches.default")
     targets = cleanup_targets(repo, config, default)
+    # Defence in depth: the inventory gives an integration line a state outside
+    # CLEAN_STATES, so no line is a candidate; the line arguments below keep the
+    # default-only proof in force should that filter ever change.
     line_targets = default_targets(repo, config, default)
     never_work = _never_work(config, default)
     worktrees = linked_worktrees(repo)
