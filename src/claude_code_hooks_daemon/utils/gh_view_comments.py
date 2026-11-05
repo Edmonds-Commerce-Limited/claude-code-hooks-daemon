@@ -25,6 +25,14 @@ _COMMENTS_SHORT_FLAG = "-c"
 _NO_FETCH_FLAGS = frozenset({"--help", "-h", "--web", "-w"})
 _JSON_FLAG = "--json"
 _COMMENTS_FIELD = "comments"
+#: Fields a suggested `--json` request carries, per noun. `--comments` alone prints ONLY
+#: the comments when stdout is not a TTY (the body is dropped), so the suggestion asks
+#: for the body and the comments together. `state` (and a PR's `author`) is cheap context
+#: that the interactive view would have shown.
+_SUGGESTED_JSON_FIELDS = {
+    "issue": "title,body,state,comments",
+    "pr": "title,body,state,author,comments",
+}
 
 
 def _view_pattern(noun: str) -> re.Pattern[str]:
@@ -69,23 +77,31 @@ def uncommented_view_segment(command: str, noun: str) -> str | None:
     return None
 
 
-def suggest_with_comments(command: str, view: str) -> str:
+def suggest_with_comments(command: str, view: str, noun: str) -> str:
     """``command`` with the comment request added to the view segment ``view``.
 
-    A `--json` field list gains `,comments`; any other view gains `--comments`
-    (inserted before the whitespace that separates it from a chained command).
+    A `--json` field list gains `,comments`; any other view gains a `--json` request
+    for the title, body and comments of ``noun`` (inserted before the whitespace that
+    separates it from a chained command). `--comments` is never suggested: without a
+    TTY it prints only the comments and omits the body.
+
     ``view`` is spliced where it appears in the command; a view read out of a
     `bash -c` body or otherwise not found verbatim is returned fixed on its own.
+
+    Raises:
+        ValueError: If ``noun`` is not one of the nouns the guards cover.
     """
+    if noun not in _SUGGESTED_JSON_FIELDS:
+        raise ValueError(f"Unknown gh noun: {noun!r}")
     trimmed = view.rstrip()
     trailing_ws = view[len(trimmed) :]
-    fixed = _with_comments(trimmed) + trailing_ws
+    fixed = _with_comments(trimmed, noun) + trailing_ws
     if view in command:
         return command.replace(view, fixed, 1)
     return fixed.strip()
 
 
-def _with_comments(view: str) -> str:
+def _with_comments(view: str, noun: str) -> str:
     spans = shell_word_spans(view)
     for index, (start, end) in enumerate(spans):
         word = resolve_shell_word(view[start:end])
@@ -93,7 +109,9 @@ def _with_comments(view: str) -> str:
             continue
         if word.startswith(_JSON_FLAG + "="):
             return view[:end] + ",comments" + view[end:]
-        if word == _JSON_FLAG and index + 1 < len(spans):
-            value_end = spans[index + 1][1]
-            return view[:value_end] + ",comments" + view[value_end:]
-    return f"{view} {_COMMENTS_FLAG}"
+        if word == _JSON_FLAG:
+            if index + 1 < len(spans):
+                value_end = spans[index + 1][1]
+                return view[:value_end] + ",comments" + view[value_end:]
+            return f"{view} {_SUGGESTED_JSON_FIELDS[noun]}"
+    return f"{view} {_JSON_FLAG} {_SUGGESTED_JSON_FIELDS[noun]}"

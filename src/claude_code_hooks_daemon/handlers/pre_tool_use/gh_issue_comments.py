@@ -37,7 +37,7 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
             blocked="`gh issue view` without `--comments`",
             why="Issue comments contain critical context, clarifications and "
             "updates not in the issue body",
-            fix="Add --comments, or include comments in --json fields",
+            fix="Use --json with body and comments (--comments alone omits the body)",
             verbose=(
                 "WHY REQUIRED:\n"
                 "  • Issue comments contain critical context and clarifications\n"
@@ -75,15 +75,15 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
             command: Original bash command
 
         Returns:
-            Corrected command string with --comments added
+            Corrected command string requesting the body and the comments
         """
         view = uncommented_view_segment(command, _NOUN)
         if view is None:  # pragma: no cover - handle() only calls this after a match
-            return f"{command} --comments"
-        return suggest_with_comments(command, view)
+            return suggest_with_comments(command, command, _NOUN)
+        return suggest_with_comments(command, view, _NOUN)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block and suggest adding --comments flag."""
+        """Block and suggest a `--json` request for the body and the comments."""
         command = get_bash_command(hook_input)
         if not command:
             return GatingResult(decision=Decision.ALLOW)
@@ -105,7 +105,10 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
         # regardless of disclosure state -- it is the concrete fix, not
         # teaching content.
         message += (
-            f"\n\nREQUIRED ACTION:\n  Add --comments to your command:\n\n  {suggested_command}\n"
+            "\n\nREQUIRED ACTION:\n"
+            "  Fetch the body AND the comments. `--comments` alone omits the body when output\n"
+            "  is not a terminal, which is always the case in this shell:\n\n"
+            f"  {suggested_command}\n"
         )
 
         return GatingResult(decision=Decision.DENY, reason=message)
@@ -116,9 +119,11 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
             "`gh issue view` without `--comments` is blocked. Issue comments often "
             "contain critical context, clarifications, and updates not in the issue body.\n\n"
             "**Blocked**: `gh issue view 123`, `gh issue view 123 --repo owner/repo`\n\n"
-            "**Allowed**: `gh issue view 123 --comments`, "
-            "`gh issue view 123 --json title,body,comments`\n\n"
-            "If using `--json`, include `comments` in the field list instead of adding `--comments`."
+            "**Allowed**: `gh issue view 123 --json title,body,state,comments`, "
+            "`gh issue view 123 --comments`\n\n"
+            "Prefer `--json title,body,state,comments`: in non-interactive output (always the "
+            "case in an agent's Bash tool) `--comments` alone omits the body and prints nothing "
+            "for an issue with no comments. If using `--json`, include `comments` in the field list."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

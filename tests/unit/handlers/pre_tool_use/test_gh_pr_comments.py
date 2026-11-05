@@ -245,7 +245,7 @@ class TestGhPrCommentsHandler:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert "--comments" in result.reason
-        assert "gh pr view 123 --comments" in result.reason
+        assert "gh pr view 123 --json title,body,state,author,comments" in result.reason
 
     def test_handle_suggests_corrected_command(self, handler: GhPrCommentsHandler) -> None:
         """Should suggest the corrected command with --comments."""
@@ -254,7 +254,9 @@ class TestGhPrCommentsHandler:
             "tool_input": {"command": "gh pr view 227 --repo example-org/example-api"},
         }
         result = handler.handle(hook_input)
-        expected_suggestion = "gh pr view 227 --repo example-org/example-api --comments"
+        expected_suggestion = (
+            "gh pr view 227 --repo example-org/example-api --json title,body,state,author,comments"
+        )
         assert result.reason is not None
         assert expected_suggestion in result.reason
 
@@ -308,8 +310,10 @@ class TestGhPrCommentsHandler:
         }
         result = handler.handle(hook_input)
         assert result.reason is not None
-        assert "gh pr view 123 --comments && echo done" in result.reason
-        assert "echo done --comments" not in result.reason
+        assert (
+            "gh pr view 123 --json title,body,state,author,comments && echo done" in result.reason
+        )
+        assert "echo done --json" not in result.reason
 
     def test_handle_does_not_borrow_a_json_flag_from_a_different_chained_command(
         self, handler: GhPrCommentsHandler
@@ -322,7 +326,10 @@ class TestGhPrCommentsHandler:
         }
         result = handler.handle(hook_input)
         assert result.reason is not None
-        assert "gh pr view 123 --comments && echo --json foo" in result.reason
+        assert (
+            "gh pr view 123 --json title,body,state,author,comments && echo --json foo"
+            in result.reason
+        )
         assert "foo,comments" not in result.reason
 
     def test_handle_allows_when_no_command(self, handler: GhPrCommentsHandler) -> None:
@@ -432,7 +439,7 @@ class TestDisclosureLadder:
         result = handler.handle(self._hook_input("gh pr view 456", transcript_path))
         assert result.reason is not None
         assert "WHY REQUIRED" not in result.reason
-        assert "gh pr view 456 --comments" in result.reason
+        assert "gh pr view 456 --json title,body,state,author,comments" in result.reason
 
     def test_missing_transcript_path_fails_toward_verbose_every_time(
         self, handler: GhPrCommentsHandler
