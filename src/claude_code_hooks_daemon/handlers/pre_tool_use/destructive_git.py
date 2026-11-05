@@ -1442,30 +1442,43 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 rule=unreadable.rule_id,
             )
 
-        note: str | None = None
         branches = self._branches
-        if not others:
+        # A remote delete is judged on its own proof wherever it sits in a chain, so a
+        # preceding worktree removal or local branch delete never changes its verdict
+        # and a denial always names the branch and the reason.
+        remote_note: str | None = None
+        if RuleID.GIT_PUSH_DELETE_REMOTE in rule_ids:
             try:
-                judged = _force_removal_note(command, self._cwd(hook_input), branches, rule_id)
-            except RuntimeError as exc:
-                logger.warning("destructive_git: removal not verified: %s", exc)
-                judged = rule_id, _with_principle(
-                    _unverified("the directory the command runs in is unknown")
-                )
-            if judged is None:
-                return GatingResult(decision=Decision.ALLOW)
-            rule_id, note = judged
-        elif rule_ids == [RuleID.GIT_PUSH_DELETE_REMOTE]:
-            # A remote delete has the same safe case, judged only when it is the sole rule.
-            try:
-                note = _remote_delete_note(command, self._cwd(hook_input), branches)
+                remote_note = _remote_delete_note(command, self._cwd(hook_input), branches)
             except RuntimeError as exc:
                 logger.warning("destructive_git: delete not verified: %s", exc)
-                note = _unverified("the directory the command runs in is unknown")
-            if note is None:
-                return GatingResult(decision=Decision.ALLOW)
+                remote_note = _unverified("the directory the command runs in is unknown")
 
-        return self._deny(rule_id, note, hook_input)
+        hard = [matched for matched in others if matched != RuleID.GIT_PUSH_DELETE_REMOTE]
+        if hard:
+            # Another rule with no safe case also matched: it denies, and the remote
+            # delete's own reason (if it has one) is shown beside it.
+            return self._deny(rule_id, remote_note, hook_input)
+
+        verdicts: list[tuple[str, str]] = []
+        lossless = [matched for matched in rule_ids if matched in _LOSSLESS_WHEN_PROVEN]
+        if lossless:
+            try:
+                judged = _force_removal_note(
+                    command, self._cwd(hook_input), branches, lossless[0]
+                )
+            except RuntimeError as exc:
+                logger.warning("destructive_git: removal not verified: %s", exc)
+                judged = lossless[0], _with_principle(
+                    _unverified("the directory the command runs in is unknown")
+                )
+            if judged is not None:
+                verdicts.append(judged)
+        if remote_note is not None:
+            verdicts.append((RuleID.GIT_PUSH_DELETE_REMOTE, remote_note))
+        if not verdicts:
+            return GatingResult(decision=Decision.ALLOW)
+        return self._deny(verdicts[0][0], "\n\n".join(note for _, note in verdicts), hook_input)
 
     def _deny(self, rule_id: str, note: str | None, hook_input: dict[str, Any]) -> GatingResult:
         """Deny under ``rule_id``: verbose on its first fire for an agent, terse after."""
