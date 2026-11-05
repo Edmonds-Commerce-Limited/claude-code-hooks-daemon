@@ -37,7 +37,7 @@ class GhPrCommentsHandler(PreToolUseHandlerBase):
             rule_id=RuleID.GH_PR_VIEW_NO_COMMENTS,
             blocked="`gh pr view` without `--comments`",
             why="PR comments contain review feedback and discussion context not in the PR body",
-            fix="Add --comments, or include comments in --json fields",
+            fix="Use --json with body and comments (--comments alone omits the body)",
             verbose=(
                 "WHY REQUIRED:\n"
                 "  • PR comments contain review feedback and discussion context\n"
@@ -79,8 +79,8 @@ class GhPrCommentsHandler(PreToolUseHandlerBase):
         """
         view = uncommented_view_segment(command, _NOUN)
         if view is None:  # pragma: no cover - handle() only calls this after a match
-            return f"{command} --comments"
-        return suggest_with_comments(command, view)
+            return suggest_with_comments(command, command, _NOUN)
+        return suggest_with_comments(command, view, _NOUN)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block and suggest adding --comments flag."""
@@ -105,7 +105,10 @@ class GhPrCommentsHandler(PreToolUseHandlerBase):
         # regardless of disclosure state -- it is the concrete fix, not
         # teaching content.
         message += (
-            f"\n\nREQUIRED ACTION:\n  Add --comments to your command:\n\n  {suggested_command}\n"
+            "\n\nREQUIRED ACTION:\n"
+            "  Fetch the body AND the comments. `--comments` alone omits the body when output\n"
+            "  is not a terminal, which is always the case in this shell:\n\n"
+            f"  {suggested_command}\n"
         )
 
         return GatingResult(decision=Decision.DENY, reason=message)
@@ -116,9 +119,12 @@ class GhPrCommentsHandler(PreToolUseHandlerBase):
             "`gh pr view` without `--comments` is blocked. PR comments often contain "
             "review feedback, reviewer requests, and decisions not in the PR body.\n\n"
             "**Blocked**: `gh pr view 123`, `gh pr view 123 --repo owner/repo`\n\n"
-            "**Allowed**: `gh pr view 123 --comments`, "
-            "`gh pr view 123 --json title,body,comments`\n\n"
-            "If using `--json`, include `comments` in the field list instead of adding `--comments`."
+            "**Allowed**: `gh pr view 123 --json title,body,state,author,comments`, "
+            "`gh pr view 123 --comments`\n\n"
+            "Prefer `--json title,body,state,author,comments`: in non-interactive output (always "
+            "the case in an agent's Bash tool) `--comments` alone omits the body and prints "
+            "nothing for a PR with no comments. If using `--json`, include `comments` in the "
+            "field list."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

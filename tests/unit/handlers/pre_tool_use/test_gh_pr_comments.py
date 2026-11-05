@@ -310,7 +310,9 @@ class TestGhPrCommentsHandler:
         }
         result = handler.handle(hook_input)
         assert result.reason is not None
-        assert "gh pr view 123 --json title,body,state,author,comments && echo done" in result.reason
+        assert (
+            "gh pr view 123 --json title,body,state,author,comments && echo done" in result.reason
+        )
         assert "echo done --json" not in result.reason
 
     def test_handle_does_not_borrow_a_json_flag_from_a_different_chained_command(
@@ -324,7 +326,10 @@ class TestGhPrCommentsHandler:
         }
         result = handler.handle(hook_input)
         assert result.reason is not None
-        assert "gh pr view 123 --json title,body,state,author,comments && echo --json foo" in result.reason
+        assert (
+            "gh pr view 123 --json title,body,state,author,comments && echo --json foo"
+            in result.reason
+        )
         assert "foo,comments" not in result.reason
 
     def test_handle_allows_when_no_command(self, handler: GhPrCommentsHandler) -> None:
