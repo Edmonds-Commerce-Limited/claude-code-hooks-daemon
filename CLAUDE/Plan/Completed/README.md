@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00522: the pytest text report reads pytest's final summary line](00522-pytest-text-report-reads-the-final-summary-line/PLAN.md) - Complete at merge `413432043` + the archiving commit (#115: every count comes from pytest's own final totals line, so a nested summary quoted in a failure message no longer replaces them; QA-script only, no release note)
+
 - [00521: tdd_enforcement treats a Write over an existing file as an edit](00521-tdd-write-overwrite-is-not-creation/PLAN.md) - Complete at merge `113a1705a` + the archiving commit (#114: a `Write` over an existing regular file is not gated, like an `Edit`; a creating `Write` is judged as before; release note 058)
 
 - [00520: tdd_enforcement infers the Maven/Gradle source-set layout](00520-tdd-maven-gradle-source-set-layout/PLAN.md) - Complete at merge `da9fff6af` + the archiving commit (#111: Java and Kotlin sources under `src/main/<lang>/` are satisfied by a test in the sibling `src/test/<lang>/`; release note 057)
