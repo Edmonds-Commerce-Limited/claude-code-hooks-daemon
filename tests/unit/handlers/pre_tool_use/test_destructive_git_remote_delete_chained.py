@@ -124,6 +124,10 @@ def test_tags_mirror_and_prune_stay_denied_when_chained(
     handler: DestructiveGitHandler, clone: Path
 ) -> None:
     worktree = clone.parent / "wt-merged"
-    for tail in ("git push origin --delete v1", "git push --mirror origin", "git push --prune origin"):
+    for tail in (
+        "git push origin --delete v1",
+        "git push --mirror origin",
+        "git push --prune origin",
+    ):
         result = handler.handle(_input(f"git worktree remove {worktree} && {tail}", clone))
         assert result.decision == "deny", tail

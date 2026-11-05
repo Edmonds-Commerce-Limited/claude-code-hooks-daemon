@@ -1464,9 +1464,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         lossless = [matched for matched in rule_ids if matched in _LOSSLESS_WHEN_PROVEN]
         if lossless:
             try:
-                judged = _force_removal_note(
-                    command, self._cwd(hook_input), branches, lossless[0]
-                )
+                judged = _force_removal_note(command, self._cwd(hook_input), branches, lossless[0])
             except RuntimeError as exc:
                 logger.warning("destructive_git: removal not verified: %s", exc)
                 judged = lossless[0], _with_principle(
