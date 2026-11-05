@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/interface
-fetched_at: '2026-11-04T13:32:09.229925+00:00'
+fetched_at: '2026-11-05T14:21:35.212925+00:00'
 fidelity: converted
 source_sha256: 1deecedffc218c3507f30f63d73f931a65403990d16811a7e4c8b74d0e26a423
 licence: unreviewed
-stale_after: '2027-02-02'
+stale_after: '2027-02-03'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
