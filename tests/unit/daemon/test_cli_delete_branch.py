@@ -145,6 +145,49 @@ class TestIntegrationLines:
         assert "release/1" in _git(repo, "branch", "--list")
         assert "not yet merged into" in capsys.readouterr().err
 
+    def test_an_unmerged_line_is_refused_whatever_protected_ref_names_another_line(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO())
+        repo = _line_repo(tmp_path, merged=False)
+        _git(repo, "branch", "release/2", "release/1")
+        exit_code = cmd_delete_branch(
+            _args(repo, branches=["release/1"], protected_ref="release/2", allow_unproven=False)
+        )
+        assert exit_code == _EXIT_REFUSED
+        assert "release/1" in _git(repo, "branch", "--list")
+        assert "not yet merged into" in capsys.readouterr().err
+
+    def test_an_unmerged_line_is_refused_when_protected_ref_is_its_own_sha(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO())
+        repo = _line_repo(tmp_path, merged=False)
+        own_sha = _git(repo, "rev-parse", "release/1").strip()
+        exit_code = cmd_delete_branch(
+            _args(repo, branches=["release/1"], protected_ref=own_sha, allow_unproven=False)
+        )
+        assert exit_code == _EXIT_REFUSED
+        assert "release/1" in _git(repo, "branch", "--list")
+
+    def test_every_line_is_refused_when_the_default_cannot_be_resolved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO())
+        repo = _line_repo(tmp_path, merged=True)
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.daemon.cli.git_sync.resolve_default_branch",
+            lambda *_a, **_k: None,
+        )
+        exit_code = cmd_delete_branch(
+            _args(repo, branches=["release/1"], protected_ref="main", allow_unproven=False)
+        )
+        assert exit_code == _EXIT_REFUSED
+        assert "release/1" in _git(repo, "branch", "--list")
+
     def test_the_default_branch_is_still_refused(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

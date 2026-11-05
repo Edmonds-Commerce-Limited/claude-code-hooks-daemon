@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -104,6 +105,46 @@ class TestSuggestClaudeMdExcludes:
         assert "cannot" in text.lower()
 
 
+class TestEdges:
+    """A worktree directly under the root, and an unreadable worktree root."""
+
+    def test_worktree_directly_under_the_root_is_excluded_by_its_own_name(
+        self, tmp_path: Path
+    ) -> None:
+        direct = tmp_path / "feature-a"
+        direct.mkdir()
+
+        text = "\n".join(suggest_claudemd_excludes(tmp_path, git_worktrees=[direct]))
+
+        assert '"**/feature-a/CLAUDE.md"' in text
+        assert "**/feature-a/*/CLAUDE.md" not in text
+
+    def test_worktree_directly_under_the_root_is_silent_once_covered(self, tmp_path: Path) -> None:
+        direct = tmp_path / "feature-a"
+        direct.mkdir()
+        _write_settings(tmp_path, "settings.local.json", ["**/feature-a/CLAUDE.md"])
+
+        assert suggest_claudemd_excludes(tmp_path, git_worktrees=[direct]) == []
+
+    def test_unreadable_worktree_root_is_reported_not_raised(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _make_worktree_dir(tmp_path, "untracked/worktrees")
+        real_iterdir = Path.iterdir
+
+        def deny(self: Path) -> Iterator[Path]:
+            if self.name == "worktrees":
+                raise PermissionError(13, "Permission denied", str(self))
+            return real_iterdir(self)
+
+        monkeypatch.setattr(Path, "iterdir", deny)
+
+        text = "\n".join(suggest_claudemd_excludes(tmp_path))
+
+        assert "cannot" in text.lower()
+        assert "Permission denied" in text
+
+
 class TestGlobToRegex:
     """``**`` crosses directories, ``*`` does not (moved from the integration test)."""
 
@@ -116,6 +157,13 @@ class TestGlobToRegex:
     def test_question_mark_matches_one_character(self) -> None:
         assert glob_to_regex("/a/?.md").match("/a/b.md")
         assert not glob_to_regex("/a/?.md").match("/a/bc.md")
+
+    def test_character_classes_and_braces_are_literal(self) -> None:
+        """Only ``**``, ``*`` and ``?`` are wildcards; ``[...]`` and ``{a,b}`` are not."""
+        assert glob_to_regex("/a/[bc].md").match("/a/[bc].md")
+        assert not glob_to_regex("/a/[bc].md").match("/a/b.md")
+        assert glob_to_regex("/a/{x,y}.md").match("/a/{x,y}.md")
+        assert not glob_to_regex("/a/{x,y}.md").match("/a/x.md")
 
 
 class TestGitWorktreePaths:
