@@ -124,6 +124,19 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N576 — the stand-in gate re-arms every three hours when every pending item is reserved
+
+**Source**: this session, 5 November 2026. After the 02:53 stand-in declined every pending item as RESERVED (Plan 00560
+Q5, a shipped client default; Plan 00564 Task 1.1, a push to the real remote; journal entries `025340Z` in both plans),
+each later `[awaiting-human]` stop was denied by R-STOP-STAND-IN-MISSING until another stand-in cron was scheduled, and
+each stand-in tick then costs a model turn to re-establish that nothing has changed.
+
+**Proposal**: once a stand-in has recorded a decline for every item the stop names, and no owner message or new item has
+arrived since, the gate should accept the stop without a new stand-in (or the stand-in declines should satisfy it until
+the item list changes).
+
+**Status**: ⬜ open.
+
 ### N573 to N575 — v3.72.0 release gate and post-release cleanup
 
 **Source**: the v3.72.0 release (PR #157) and the Plan 00563 merge, 4 November 2026.
