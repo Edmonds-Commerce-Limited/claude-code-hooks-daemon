@@ -326,9 +326,7 @@ class TestCleanupAfterMerge:
         self, repo: Path
     ) -> None:
         tip = _merged(repo, "release/1")
-        report = cleanup_after_merge(
-            repo, ["release/1"], config=_CONFIG, target="main", mode="act"
-        )
+        report = cleanup_after_merge(repo, ["release/1"], config=_CONFIG, target="main", mode="act")
         assert report.deleted == ("release/1",)
         assert f"git branch release/1 {tip}" in report.commands
         assert "release/1" not in _branches(repo)

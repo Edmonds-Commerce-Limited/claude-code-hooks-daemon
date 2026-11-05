@@ -637,9 +637,7 @@ def classify_branch(
     if is_line:
         # None falls back to the protected ref; an empty list means the caller has
         # no default ref to offer, so nothing proves the line and it is refused.
-        proof_targets: Sequence[str] = (
-            (protected_ref,) if line_targets is None else line_targets
-        )
+        proof_targets: Sequence[str] = (protected_ref,) if line_targets is None else line_targets
     else:
         proof_targets = targets or (protected_ref,)
     bases = [_protected_base_ref(repo, ref) for ref in proof_targets]
