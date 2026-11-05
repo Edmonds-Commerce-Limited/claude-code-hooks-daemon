@@ -52,7 +52,7 @@ from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.claude_config import session_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir, path_is_file
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 logger = logging.getLogger(__name__)
@@ -540,12 +540,8 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             )
         return frozenset(found)
 
-    def _searched_directories(self, hook_input: dict[str, Any]) -> list[Path]:
-        """The search's targets, resolved against the hook cwd, when ALL are directories.
-
-        Empty when any target is not an existing directory (or there is none),
-        because then the directories alone cannot say what is searched.
-        """
+    def _searched_targets(self, hook_input: dict[str, Any]) -> list[Path]:
+        """The search's file/directory targets, resolved against the hook cwd."""
         if hook_input.get(HookInputField.TOOL_NAME) == ToolName.GREP:
             tool_input = hook_input.get(HookInputField.TOOL_INPUT)
             targets = (
@@ -568,29 +564,43 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
                     invocation[: terminator.start()] if terminator else invocation
                 )[1:]
         base = self._search_base(hook_input)
-        directories = [base / target for target in targets]
-        # An unreadable target cannot be surveyed, so it counts as not a directory.
-        if not directories or not all(
-            path_is_dir(directory, unreadable_means=False) for directory in directories
-        ):
-            return []
-        return directories
+        return [base / target for target in targets]
+
+    def _judged_targets(self, hook_input: dict[str, Any]) -> tuple[list[Path], list[Path]] | None:
+        """The search's (directories, files), or None when any target cannot be judged.
+
+        Every target must be an existing directory or regular file. A missing
+        or unreadable target, or no target at all, cannot say what is searched.
+        """
+        targets = self._searched_targets(hook_input)
+        if not targets:
+            return None
+        directories = [t for t in targets if path_is_dir(t, unreadable_means=False)]
+        files = [t for t in targets if t not in directories]
+        if not all(path_is_file(f, unreadable_means=False) for f in files):
+            return None
+        return directories, files
 
     def _lsp_coverage(self, hook_input: dict[str, Any]) -> tuple[bool, frozenset[str]]:
         """Whether an enabled server covers this search, and the suffixes it names.
 
-        A search that names no file type is judged by the files its directory
-        targets hold, when a bounded survey can tell; otherwise any enabled
-        server covers it.
+        A search that names no file type is judged by its existing targets: a
+        named file by its own suffix (none means unserved) and a directory by
+        what a bounded survey finds. When a target cannot be judged (missing,
+        unreadable, or none named) any enabled server covers it.
         """
         searched = self._searched_suffixes(hook_input)
         served = self._served_suffixes(self._project_root(), hook_input)
         if searched:
             return bool(searched & served), searched
-        directories = self._searched_directories(hook_input) if served else []
-        if not directories:
+        judged = self._judged_targets(hook_input) if served else None
+        if judged is None:
             return bool(served), searched
-        surveyed: set[str] = set()
+        directories, files = judged
+        # A named file is judged by its own suffix; no suffix means unserved.
+        surveyed: set[str] = {f.suffix.lower() for f in files if f.suffix}
+        if surveyed & served:
+            return True, frozenset(surveyed)
         for directory in directories:
             survey = _survey_directory_suffixes(directory, served)
             if not survey.decided:
