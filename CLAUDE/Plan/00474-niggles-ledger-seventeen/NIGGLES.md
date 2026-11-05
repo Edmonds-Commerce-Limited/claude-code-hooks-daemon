@@ -124,6 +124,20 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N581 — the branch stop guard reports branches with a running work-queue agent as "abandoned"
+
+**Source**: this session, 5 November 2026, while the #161 and #162 implementation agents were working.
+
+**Evidence**: each coordinator stop drew "Branches abandoned at stop after 3 blocks: worktree-issue-161-nested-root,
+worktree-issue-162-lsp-extless". Both branches were recorded as `running` in `bin/hooks-daemon work-queue`, and their
+sub-agents were live and committing in those worktrees. The coordinator cannot "finish, park or hand over" a branch a
+sub-agent owns, so the guard's escalation gives it nothing to act on.
+
+**Proposal**: R-BRANCH-STOP-GUARD should treat a branch named by a `running` work-queue record (or a live sub-agent's
+worktree) as handed over, and say so instead of counting it as abandoned.
+
+**Status**: ⬜ open.
+
 ### N580 — the v3.72.1 release review found that `delete-branch` proves an integration line against `--protected-ref`
 
 **Source**: RELEASING.md Step 10 code review of v3.72.1, 5 November 2026
