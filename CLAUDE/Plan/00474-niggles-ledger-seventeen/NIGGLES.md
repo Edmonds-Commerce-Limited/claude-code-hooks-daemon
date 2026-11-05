@@ -142,7 +142,12 @@ after it is merged into the default branch. Local `git branch -d`/`-D`, `delete-
 branch, remote tip confirmed with `ls-remote`) may be deleted remotely by an agent; and document `integration_lines` as
 the release-branch-workflow setting in the branch-hygiene guidance.
 
-**Status**: ⬜ open.
+**Status**: ✅ fixed (`4d219dffa`). Owner ruling, 5 November 2026: "MUST be allowed to delete a merged release branch." An
+integration line is no longer refused by name by the remote-delete guard, `delete-branch`, `delete_if_merged` or
+`cleanup_after_merge`; it must be an ancestor of the DEFAULT branch only (another line is no proof) and the remote tip
+is still confirmed with `ls-remote`, else it is refused as an integration line not yet merged into the default branch.
+Default, exempt, protected names and tags are unchanged, and `branch-sweep --clean` and orphan pruning never offer a
+line. Release note `UNRELEASED/release-notes/003`.
 
 ### N576 — the stand-in gate re-arms every three hours when every pending item is reserved
 

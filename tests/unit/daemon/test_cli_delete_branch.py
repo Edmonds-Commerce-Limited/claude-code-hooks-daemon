@@ -99,6 +99,63 @@ def _args(repo: Path, **overrides: Any) -> argparse.Namespace:
     return argparse.Namespace(**defaults)
 
 
+def _line_repo(tmp_path: Path, *, merged: bool) -> Path:
+    """A repo declaring `release/*` as an integration line, with `release/1` on it."""
+    path = tmp_path / "linerepo"
+    path.mkdir()
+    (path / ".claude" / "hooks-daemon").mkdir(parents=True)
+    (path / ".claude" / "hooks-daemon.yaml").write_text(
+        "version: '2.0'\nbranches:\n  integration_lines: ['release/*']\n", encoding="utf-8"
+    )
+    _git(path, "init", "-b", "main")
+    _git(path, "remote", "add", "origin", "https://example.invalid/repo.git")
+    _commit(path, "base.txt", "base\n", "Initial commit")
+    _git(path, "checkout", "-b", "release/1")
+    _commit(path, "rel.txt", "release\n", "Release work")
+    _git(path, "checkout", "main")
+    if merged:
+        _git(path, "merge", "--no-ff", "-m", "Merge release/1", "release/1")
+    return path
+
+
+class TestIntegrationLines:
+    """An integration line merged into the default is deletable; an unmerged one is not."""
+
+    def test_a_merged_line_is_deleted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO())
+        repo = _line_repo(tmp_path, merged=True)
+        exit_code = cmd_delete_branch(
+            _args(repo, branches=["release/1"], allow_unproven=False, reason=None)
+        )
+        assert exit_code == 0
+        assert "release/1" not in _git(repo, "branch", "--list")
+
+    def test_an_unmerged_line_is_refused_even_with_allow_unproven(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO())
+        repo = _line_repo(tmp_path, merged=False)
+        exit_code = cmd_delete_branch(_args(repo, branches=["release/1"]))
+        assert exit_code == _EXIT_REFUSED
+        assert "release/1" in _git(repo, "branch", "--list")
+        assert "not yet merged into" in capsys.readouterr().err
+
+    def test_the_default_branch_is_still_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO())
+        repo = _line_repo(tmp_path, merged=True)
+        _git(repo, "checkout", "-b", "elsewhere")
+        exit_code = cmd_delete_branch(_args(repo, branches=["main"], allow_unproven=False))
+        assert exit_code == _EXIT_REFUSED
+        assert "main" in _git(repo, "branch", "--list")
+
+
 class TestTerminalDetection:
     """``_stdin_is_a_terminal`` decides whether a human can be asked."""
 

@@ -105,12 +105,14 @@ def _worktree(repo: Path, name: str) -> Path:
 
 
 class TestPolicy:
-    def test_default_lines_exempt_and_protected_are_refused(self) -> None:
+    def test_default_exempt_and_protected_are_refused(self) -> None:
         assert policy_refusal("main", _CONFIG, "main") is not None
-        assert policy_refusal("release/1.0", _CONFIG, "main") is not None
         assert policy_refusal("users/alice", _CONFIG, "main") is not None
         assert policy_refusal("develop", _CONFIG, "main") is not None
         assert policy_refusal("feature", _CONFIG, "main") is None
+
+    def test_an_integration_line_is_judged_by_proof_not_refused_by_name(self) -> None:
+        assert policy_refusal("release/1.0", _CONFIG, "main") is None
 
     def test_merge_target_must_be_default_or_a_line(self) -> None:
         assert merge_target_qualifies("main", _CONFIG, "main") is True
@@ -328,6 +330,13 @@ class TestCleanSweep:
         assert report.bundle is not None
         assert report.bundle.is_file()
 
+    def test_the_sweep_never_offers_an_integration_line(self, repo: Path, tmp_path: Path) -> None:
+        _merged(repo, "release/1")
+        _unproven(repo, "release/2")
+        report = clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b")
+        assert report.deleted == ()
+        assert {"release/1", "release/2"} <= _branches(repo)
+
     def test_removes_a_clean_worktree_with_only_regenerable_files(
         self, repo: Path, tmp_path: Path
     ) -> None:
@@ -515,6 +524,39 @@ class TestDeleteIfMerged:
         _git(repo, "checkout", "main")
         report = branch_cleanup.delete_if_merged(repo, "feat", config=_CONFIG, default="main")
         assert report.deleted == ("feat",)
+
+    def test_a_line_merged_into_the_default_is_deleted(self, repo: Path) -> None:
+        tip = _merged(repo, "release/1")
+        report = branch_cleanup.delete_if_merged(repo, "release/1", config=_CONFIG, default="main")
+        assert report.deleted == ("release/1",)
+        assert report.commands == (f"git branch release/1 {tip}",)
+        assert "release/1" not in _branches(repo)
+
+    def test_an_unmerged_line_is_refused_as_not_yet_merged_into_the_default(
+        self, repo: Path
+    ) -> None:
+        _unproven(repo, "release/1")
+        report = branch_cleanup.delete_if_merged(repo, "release/1", config=_CONFIG, default="main")
+        assert report.deleted == ()
+        assert "release/1" in _branches(repo)
+        assert "integration line" in report.skipped[0]
+        assert "not yet merged into" in report.skipped[0]
+
+    def test_a_line_merged_only_into_another_line_is_refused(self, repo: Path) -> None:
+        _unproven(repo, "release/1")
+        _git(repo, "checkout", "-b", "release/2", "release/1")
+        _commit(repo, "two.txt", "two\n", "Only on release/2")
+        _git(repo, "checkout", "main")
+        report = branch_cleanup.delete_if_merged(repo, "release/1", config=_CONFIG, default="main")
+        assert report.deleted == ()
+        assert {"release/1", "release/2"} <= _branches(repo)
+        assert "not yet merged into" in report.skipped[0]
+
+    def test_a_patch_equivalent_line_is_not_deleted(self, repo: Path) -> None:
+        _patch_equivalent(repo, "release/1")
+        report = branch_cleanup.delete_if_merged(repo, "release/1", config=_CONFIG, default="main")
+        assert report.deleted == ()
+        assert "release/1" in _branches(repo)
 
     def test_unmerged_and_patch_equivalent_are_left_for_the_sweep(self, repo: Path) -> None:
         _unproven(repo, "novel")

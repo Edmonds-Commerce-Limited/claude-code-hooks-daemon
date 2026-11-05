@@ -6617,14 +6617,11 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         )
         return 2
     # Never-work branches are refused whatever the proof says (DESIGN.md section 1):
-    # the protected names, the resolved default, and every integration-line and
-    # exempt glob, matched by `branch_safety.matches_any_glob`.
-    protected_names = (
-        *branches.protected_names,
-        *branches.integration_lines,
-        *branches.exempt,
-        protected_ref,
-    )
+    # the protected names, the resolved default and every exempt glob, matched by
+    # `branch_safety.matches_any_glob`. An integration line is not among them: it is
+    # deletable once `protected_ref` (the default) holds every commit, and refused
+    # otherwise, whatever `--allow-unproven` says.
+    protected_names = (*branches.protected_names, *branches.exempt, protected_ref)
 
     # Pass a confirmer ONLY when a human can actually answer it. Passing one
     # that always declines would report "a human declined" when in truth none
@@ -6643,6 +6640,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
             bundle_path=bundle_path,
             dry_run=args.dry_run,
             confirm=confirm,
+            line_names=branches.integration_lines,
         )
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)

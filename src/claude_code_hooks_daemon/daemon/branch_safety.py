@@ -80,6 +80,7 @@ REFUSAL_CURRENT_BRANCH = "current-branch"
 REFUSAL_WORKTREE = "checked-out-in-worktree"
 REFUSAL_PROTECTED = "protected-branch"
 REFUSAL_NOT_A_BRANCH = "not-a-local-branch"
+REFUSAL_UNMERGED_LINE = "integration-line-unmerged"
 
 # Branch names never deletable by this command regardless of proof. The model
 # default of `branches.protected_names` is the single source (Plan 00558).
@@ -572,10 +573,17 @@ def classify_branch(
     targets: Sequence[str] | None = None,
     ignore_worktree: bool = False,
     content_tier: bool = True,
+    line_names: Sequence[str] = (),
+    line_targets: Sequence[str] | None = None,
 ) -> BranchClassification:
     """Classify one branch, returning its tier or the reason it is refused.
 
     Args:
+        line_names: Globs naming integration lines. A branch matching one is proved
+            merged against ``line_targets`` ONLY (the default branch; ``protected_ref``
+            when None), never against another line, and is otherwise refused with
+            :data:`REFUSAL_UNMERGED_LINE`. Such a name must not also be in
+            ``protected_names``, which would refuse it outright.
         protected_ref: The single target when ``targets`` is not given.
         targets: Every ref a merge into counts as safe: the default ref plus the
             integration-line refs (Plan 00558, DESIGN.md section 2). The first
@@ -625,7 +633,12 @@ def classify_branch(
     # Resolve the BASE once, here, so every proof below measures against the same
     # unambiguous ref. Passing the bare name to git would let a same-named tag
     # answer for it — see :func:`_protected_base_ref`.
-    bases = [_protected_base_ref(repo, ref) for ref in (targets or (protected_ref,))]
+    is_line = matches_any_glob(name, line_names)
+    if is_line:
+        proof_targets: Sequence[str] = line_targets or (protected_ref,)
+    else:
+        proof_targets = targets or (protected_ref,)
+    bases = [_protected_base_ref(repo, ref) for ref in proof_targets]
     tip_ref = branch_ref(name)
 
     for base in bases:
@@ -642,6 +655,16 @@ def classify_branch(
             return BranchClassification(
                 name=name, tier=tier, detail=_TIER_DETAIL[tier], tip=tip, proven_against=base
             )
+
+    if is_line:
+        # An integration line is deletable only once the DEFAULT holds every commit.
+        # Not patch-equivalence, not content, and never an unproven-then-confirmed
+        # delete: `allow_unproven` cannot reach a REFUSAL.
+        return BranchClassification(
+            name=name,
+            refusal=REFUSAL_UNMERGED_LINE,
+            detail=f"is an integration line not yet merged into the default branch ({', '.join(bases)})",
+        )
 
     known_counts: list[int] = []
     for base in bases:
@@ -770,6 +793,8 @@ def delete_branches(
     confirm: ConfirmCallback | None = None,
     targets: Sequence[str] | None = None,
     content_tier: bool = True,
+    line_names: Sequence[str] = (),
+    line_targets: Sequence[str] | None = None,
 ) -> DeletionReport:
     """Classify every branch, then delete the batch.
 
@@ -801,6 +826,8 @@ def delete_branches(
         targets: Passed to :func:`classify_branch`; the default ref plus the
             integration-line refs. ``protected_ref`` alone when None.
         content_tier: Passed to :func:`classify_branch`.
+        line_names: Passed to :func:`classify_branch`; integration lines.
+        line_targets: Passed to :func:`classify_branch`; the default ref(s) only.
 
     Raises:
         ValueError: if ``allow_unproven`` is set without a reason.
@@ -819,6 +846,8 @@ def delete_branches(
             protected_names=protected_names,
             targets=targets,
             content_tier=content_tier,
+            line_names=line_names,
+            line_targets=line_targets,
         )
         for name in names
     )
