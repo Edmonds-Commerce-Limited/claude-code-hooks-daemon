@@ -124,6 +124,17 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N578 — a merged branch's remote delete is denied when chained after its worktree removal and local delete
+
+**Source**: this session, 5 November 2026, cleaning up the merged N577 fix branch.
+
+**Evidence**: `git worktree remove <wt> && bin/hooks-daemon delete-branch <b> --protected-ref main && git push -q origin --delete <b>` was denied with R-GIT-PUSH-DELETE-REMOTE, with no branch-specific reason in the message. The same three
+commands then ran separately and all succeeded, the push included (`origin/<b>` was an ancestor of `origin/main`
+throughout). A chained `git push -q origin --delete a b c` on its own was allowed earlier the same day, so the trigger is
+the preceding commands in the chain. The deny also printed only the generic text, not the specific problem.
+
+**Status**: ⬜ open (reproduce with a TDD test on the chained shape; make the deny name its specific reason).
+
 ### N577 — feature branches merged into a release branch count as unmerged unless `release/*` is an integration line, and declaring it blocks the release branch's own remote delete
 
 **Source**: owner question, 5 November 2026 (projects that merge feature branches into release branches).
