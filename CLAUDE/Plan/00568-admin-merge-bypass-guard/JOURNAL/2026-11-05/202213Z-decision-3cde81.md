@@ -1,0 +1,3 @@
+## 20:22 · decision · —   — Issue 160 triage: parked on owner questions
+
+Triage of issue #160 classified it as **needs human decision**: it is a feature request that touches a safety control and would add a default deny. The dedupe scout checked 61 of 61 live plans and found no live plan covering it. Plan 00502 is adjacent (it gates local merges) but does not overlap, and Plan 00207 is prior art for the `gh pr merge` parsing. Filed this plan with four owner questions, and parked the issue with `issue-validity 160 --park`. The first push of the filing commit was rejected server-side ("fatal error in commit_refs_rules"); an immediate retry succeeded.
