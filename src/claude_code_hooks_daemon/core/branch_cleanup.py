@@ -98,15 +98,30 @@ class CleanupReport:
     bundle: Path | None = None
 
 
-def _never_work(config: BranchesConfig, default: str) -> tuple[str, ...]:
-    """Names and globs no cleanup may delete (DESIGN.md section 1)."""
-    return (*config.protected_names, *config.integration_lines, *config.exempt, default)
+def _never_work(
+    config: BranchesConfig, default: str, *, refuse_lines: bool = False
+) -> tuple[str, ...]:
+    """Names and globs no cleanup may delete (DESIGN.md section 1).
+
+    An integration line is NOT among them unless ``refuse_lines``: a line is judged
+    by the proof, which accepts it only once the DEFAULT branch holds every commit.
+    """
+    lines = config.integration_lines if refuse_lines else []
+    return (*config.protected_names, *lines, *config.exempt, default)
 
 
-def policy_refusal(name: str, config: BranchesConfig, default: str) -> str | None:
-    """Why policy forbids deleting ``name``, or None when it may be judged."""
-    if matches_any_glob(name, _never_work(config, default)):
-        return "the default, an integration line, protected or exempt"
+def policy_refusal(
+    name: str, config: BranchesConfig, default: str, *, refuse_lines: bool = False
+) -> str | None:
+    """Why policy forbids deleting ``name``, or None when it may be judged.
+
+    ``refuse_lines`` refuses an integration line by name, for a caller that has no
+    merged-into-the-default proof to offer (orphan pruning, a merge into a line).
+    """
+    if matches_any_glob(name, _never_work(config, default, refuse_lines=refuse_lines)):
+        return "the default, protected or exempt" + (
+            " (or an integration line)" if refuse_lines else ""
+        )
     return None
 
 
@@ -121,6 +136,16 @@ def _ref_exists(repo: Path, ref: str) -> bool:
     return run_git(repo, "show-ref", "--verify", "--quiet", ref).returncode == 0
 
 
+def default_targets(repo: Path, config: BranchesConfig, default: str) -> list[str]:
+    """The default branch refs that exist (local, then the remote's): the only proof
+    an integration line's own deletion accepts."""
+    targets = [default] if _ref_exists(repo, branch_ref(default)) else []
+    remote_default = f"refs/remotes/{config.remote}/{default}"
+    if _ref_exists(repo, remote_default):
+        targets.append(remote_default)
+    return targets
+
+
 def cleanup_targets(repo: Path, config: BranchesConfig, default: str) -> list[str]:
     """The refs a merge into counts as safe, only those that exist.
 
@@ -128,10 +153,7 @@ def cleanup_targets(repo: Path, config: BranchesConfig, default: str) -> list[st
     default, and every integration-line branch local and remote. A missing ref is
     left out because the ancestry and patch proofs fail on it.
     """
-    targets = [default] if _ref_exists(repo, branch_ref(default)) else []
-    remote_default = f"refs/remotes/{config.remote}/{default}"
-    if _ref_exists(repo, remote_default):
-        targets.append(remote_default)
+    targets = default_targets(repo, config, default)
     if not config.integration_lines:
         return targets
     remote_prefix = f"refs/remotes/{config.remote}/"
@@ -293,6 +315,8 @@ def _classify(
     targets: Sequence[str],
     never_work: Sequence[str],
     *,
+    lines: Sequence[str] = (),
+    line_targets: Sequence[str] | None = None,
     ignore_worktree: bool = False,
 ) -> BranchClassification:
     return classify_branch(
@@ -302,6 +326,8 @@ def _classify(
         targets=targets,
         ignore_worktree=ignore_worktree,
         content_tier=False,
+        line_names=lines,
+        line_targets=line_targets,
     )
 
 
@@ -321,8 +347,12 @@ def cleanup_after_merge(
     """
     if mode == "off":
         return CleanupReport()
-    never_work = _never_work(config, target)
+    # A merge into an integration line proves nothing about another line: lines are
+    # refused by name unless the target is the default branch itself.
+    refuse_lines = matches_any_glob(target, config.integration_lines)
+    never_work = _never_work(config, target, refuse_lines=refuse_lines)
     targets = [target]
+    lines: Sequence[str] = () if refuse_lines else config.integration_lines
     worktrees = linked_worktrees(repo)
     deleted: list[str] = []
     skipped: list[str] = []
@@ -331,12 +361,20 @@ def cleanup_after_merge(
         daemon_cli_command_for_docs("delete-branch") + " {name} --protected-ref " + target
     )
     for name in names:
-        refusal = policy_refusal(name, config, target)
+        refusal = policy_refusal(name, config, target, refuse_lines=refuse_lines)
         if refusal is not None:
             skipped.append(f"{name}: {refusal}")
             continue
         held_by = worktrees.get(name)
-        verdict = _classify(repo, name, targets, never_work, ignore_worktree=held_by is not None)
+        verdict = _classify(
+            repo,
+            name,
+            targets,
+            never_work,
+            lines=lines,
+            line_targets=targets,
+            ignore_worktree=held_by is not None,
+        )
         if verdict.refusal is not None:
             skipped.append(f"{name}: {verdict.detail}")
             continue
@@ -360,6 +398,8 @@ def cleanup_after_merge(
                 targets=targets,
                 bundle_path=None,
                 content_tier=False,
+                line_names=lines,
+                line_targets=targets,
             )
             if name not in report.deleted:
                 skipped += [f"{name}: {blocker}" for blocker in report.blockers]
@@ -405,11 +445,19 @@ def delete_if_merged(
     refusal = policy_refusal(name, config, default)
     if refusal is not None:
         return CleanupReport(skipped=(f"{name}: {refusal}",))
-    targets = cleanup_targets(repo, config, default)
+    is_line = matches_any_glob(name, config.integration_lines)
+    line_targets = default_targets(repo, config, default)
+    targets = line_targets if is_line else cleanup_targets(repo, config, default)
     if not targets or not _merged_into_any(repo, name, targets, probe_timeout):
+        if is_line:
+            return CleanupReport(
+                skipped=(f"{name}: an integration line not yet merged into {default}",)
+            )
         return CleanupReport(skipped=(f"{name}: not merged; left for {sweep_clean_command()}",))
     never_work = _never_work(config, default)
-    verdict = _classify(repo, name, targets, never_work)
+    verdict = _classify(
+        repo, name, targets, never_work, lines=config.integration_lines, line_targets=line_targets
+    )
     if verdict.refusal is not None or verdict.tier not in MERGED_TIERS:
         return CleanupReport(skipped=(f"{name}: {verdict.detail}",))
     report = delete_branches(
@@ -419,6 +467,8 @@ def delete_if_merged(
         targets=targets,
         bundle_path=None,
         content_tier=False,
+        line_names=config.integration_lines,
+        line_targets=line_targets,
     )
     if name not in report.deleted:
         return CleanupReport(skipped=tuple(f"{name}: {b}" for b in report.blockers))
@@ -459,6 +509,7 @@ def clean_sweep(
     if default is None:
         raise ValueError("cannot determine the default branch; set branches.default")
     targets = cleanup_targets(repo, config, default)
+    line_targets = default_targets(repo, config, default)
     never_work = _never_work(config, default)
     worktrees = linked_worktrees(repo)
     candidates = sorted(
@@ -482,7 +533,15 @@ def clean_sweep(
                     f"would lose: {preview_paths(blockers)}"
                 )
                 continue
-        verdict = _classify(repo, name, targets, never_work, ignore_worktree=held_by is not None)
+        verdict = _classify(
+            repo,
+            name,
+            targets,
+            never_work,
+            lines=config.integration_lines,
+            line_targets=line_targets,
+            ignore_worktree=held_by is not None,
+        )
         if not verdict.is_safe:
             skipped.append(f"{name}: {verdict.detail}")
             continue
@@ -511,6 +570,8 @@ def clean_sweep(
             targets=targets,
             bundle_path=bundle_dir / f"branch-cleanup-{stamp}.bundle",
             content_tier=False,
+            line_names=config.integration_lines,
+            line_targets=line_targets,
         )
         deleted, bundle = report.deleted, report.bundle
         skipped += list(report.blockers)

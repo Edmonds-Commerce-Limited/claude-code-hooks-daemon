@@ -130,9 +130,12 @@ class TestDeleteBranch:
 
 
 class TestDeleteBranchRefusesNeverWorkBranches:
-    """Exempt, integration-line and protected-name matches are refused like the default."""
+    """Exempt and protected-name matches are refused like the default.
 
-    @pytest.mark.parametrize("name", ["users/alice", "release/1.0", "keep"])
+    An integration line is judged by the proof instead (see ``test_cli_delete_branch``).
+    """
+
+    @pytest.mark.parametrize("name", ["users/alice", "keep"])
     def test_refused_although_merged(
         self, tmp_path: Path, name: str, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -173,7 +176,9 @@ class TestDeleteBranchRefusesNeverWorkBranches:
             tmp_path, "  default: trunk\n  exempt: ['users/*']\n  integration_lines: ['rel/*']\n"
         )
         cmd_delete_branch(_delete_args(repo, None))
-        assert {"users/*", "rel/*", "trunk"} <= set(captured_delete["protected_names"])
+        assert {"users/*", "trunk"} <= set(captured_delete["protected_names"])
+        assert "rel/*" not in captured_delete["protected_names"]
+        assert list(captured_delete["line_names"]) == ["rel/*"]
 
 
 class TestClassifyBranchGlobs:

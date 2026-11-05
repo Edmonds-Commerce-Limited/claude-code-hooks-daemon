@@ -121,7 +121,9 @@ def _line_repo(tmp_path: Path, *, merged: bool) -> Path:
 class TestIntegrationLines:
     """An integration line merged into the default is deletable; an unmerged one is not."""
 
-    def test_a_merged_line_is_deleted(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_a_merged_line_is_deleted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setattr("sys.stdin", io.StringIO())
         repo = _line_repo(tmp_path, merged=True)
         exit_code = cmd_delete_branch(

@@ -619,7 +619,7 @@ def _prunable(repo_root: Path, name: str, base_branch: str, config: BranchesConf
     only when its creator record says WorktreeCreate made it, because the
     ``<slug>-<8 hex>`` shape alone also matches ``release-20261104``.
     """
-    if policy_refusal(name, config, base_branch) is not None:
+    if policy_refusal(name, config, base_branch, refuse_lines=True) is not None:
         return False
     if name.startswith(AGENT_BRANCH_PREFIX):
         return True

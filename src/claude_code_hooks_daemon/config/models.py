@@ -2401,8 +2401,10 @@ class BranchesConfig(BaseModel):
         default: The default branch name, or ``auto`` to ask git
             (``origin/HEAD``, then local ``main``, then ``master``)
         remote: The remote whose refs count and whose deletes are judged
-        integration_lines: Globs naming merge targets that are never counted
-            and never deleted remotely by an agent
+        integration_lines: Globs naming merge targets (e.g. ``release/*``) that are
+            never counted. A line is deletable, locally and on the remote, only once
+            the DEFAULT branch holds every commit; being merged into another line
+            is no proof, and an unmerged line is refused
         exempt: Globs naming branches never counted, judged or deleted
         protected_names: Branch names no delete command will remove
     """

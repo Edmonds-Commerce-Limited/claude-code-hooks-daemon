@@ -390,10 +390,12 @@ _PUSH_DELETE_VERBOSE: Final[str] = (
     "default branch or an integration line (`branches.integration_lines`; one "
     "`git for-each-ref --merged` per target) AND `git ls-remote` shows the remote's live tip "
     "equal to it (a stale tracking ref is denied: run `git fetch` and retry), judged in the "
-    "repository the command runs in; nothing is lost then. Tags, the default branch, an "
-    "integration line, an exempt or protected name (`branches.exempt`, "
-    "`branches.protected_names`), an unmerged branch and anything the check cannot "
-    "establish are denied.\n\n"
+    "repository the command runs in; nothing is lost then. An integration line itself is "
+    "judged against the DEFAULT branch only (merged into another line does not count). "
+    "Tags, the default branch, an exempt or protected name (`branches.exempt`, "
+    "`branches.protected_names`), an unmerged branch (an integration line not yet merged "
+    "into the default branch included) and anything the check cannot establish are "
+    "denied.\n\n"
     "Otherwise do not run it, and do not look for another spelling of it. Stop and ask the "
     "human to run it themselves: tell them the remote, the ref and why it should go.\n\n"
     "Local clean-up is not affected: `git tag -d <tag>` and `git branch -d <name>` only touch "
@@ -794,8 +796,6 @@ def _refusal(name: str, default: str, branches: BranchesConfig) -> str | None:
     """Why ``name`` may never be deleted remotely by an agent, whatever the proof."""
     if name == default:
         return f"`{name}` is the default branch"
-    if matches_any_glob(name, branches.integration_lines):
-        return f"`{name}` is an integration line (`branches.integration_lines`)"
     if matches_any_glob(name, branches.exempt):
         return f"`{name}` is exempt (`branches.exempt`)"
     if matches_any_glob(name, branches.protected_names):
@@ -853,16 +853,24 @@ def _merged_into(directory: Path, target: str, refnames: list[str]) -> set[str] 
     return set(merged.stdout.splitlines())
 
 
+def _default_proof_targets(
+    remote: str, default: str, refs: dict[str, tuple[str, str]]
+) -> list[str]:
+    """The existing default-branch refs: the only proof an integration line accepts."""
+    tracking_prefix = f"{_REMOTES_PREFIX}{remote}/"
+    return [
+        ref
+        for ref in (f"{tracking_prefix}{default}", branch_ref(default))
+        if ref in refs and refs[ref][1] == "commit"
+    ]
+
+
 def _proof_targets(
     remote: str, default: str, branches: BranchesConfig, refs: dict[str, tuple[str, str]]
 ) -> list[str]:
     """The existing refs a merged branch may be an ancestor of: default, then lines."""
     tracking_prefix = f"{_REMOTES_PREFIX}{remote}/"
-    targets = [
-        ref
-        for ref in (f"{tracking_prefix}{default}", branch_ref(default))
-        if ref in refs and refs[ref][1] == "commit"
-    ]
+    targets = _default_proof_targets(remote, default, refs)
     for refname, (_object, kind) in refs.items():
         line = refname.removeprefix(tracking_prefix)
         if (
@@ -882,7 +890,8 @@ def _merged_tracking_tips(
 
     Proven means: ``refs/remotes/<remote>/<name>`` exists, no tag shares the name, and
     the tip is an ancestor of the default branch (its remote-tracking ref or the local
-    one) or of any existing ``refs/remotes/<remote>/<line>`` for an integration line.
+    one) or, for an ordinary branch, of any existing ``refs/remotes/<remote>/<line>``
+    for an integration line. An integration line is proved against the default only.
     One listing call, then one ``for-each-ref --merged`` per target over all the named
     refs, so the cost does not grow with the number of branches. Judged from local git
     only; the remote's live tip is checked afterwards by :func:`_remote_tip_problems`.
@@ -913,8 +922,21 @@ def _merged_tracking_tips(
             tips[name] = listed[0]
     proven: set[str] = set()
     if tips:
+        default_targets = _default_proof_targets(remote, default, refs)
+        # An integration line is proved against the default branch ONLY: being merged
+        # into another line is no evidence the line may go.
+        feature_tracking = [
+            tracking[name]
+            for name in tips
+            if not matches_any_glob(name, branches.integration_lines)
+        ]
         for target in _proof_targets(remote, default, branches, refs):
-            merged = _merged_into(directory, target, [tracking[name] for name in tips])
+            checked = (
+                [tracking[name] for name in tips] if target in default_targets else feature_tracking
+            )
+            if not checked:
+                continue
+            merged = _merged_into(directory, target, checked)
             if merged is None:
                 failed = [
                     f"`git for-each-ref --merged={target}` failed, so `{n}` could not be " "checked"
@@ -926,7 +948,13 @@ def _merged_tracking_tips(
     for name in list(tips):
         if tracking[name] not in proven:
             del tips[name]
-            problems.append(f"`{name}` is not merged into `{default}`{lines}")
+            if matches_any_glob(name, branches.integration_lines):
+                problems.append(
+                    f"`{name}` is an integration line not yet merged into the default "
+                    f"branch `{default}` (another line does not count)"
+                )
+            else:
+                problems.append(f"`{name}` is not merged into `{default}`{lines}")
     return tips, problems
 
 
@@ -1022,8 +1050,8 @@ def _remote_delete_note(command: str, cwd: Path, branches: BranchesConfig) -> st
     return (
         "Not deleted: " + "; ".join(problems) + ". A remote branch that is already merged into "
         "the default branch or an integration line may be deleted by an agent; an unmerged "
-        "branch, the default, an integration line, an exempt or protected name (or any tag) "
-        "is human-only, so ask the human to run it."
+        "branch, an integration line not yet merged into the default, the default, an exempt "
+        "or protected name (or any tag) is human-only, so ask the human to run it."
     )
 
 
@@ -1513,8 +1541,9 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "and `git ls-remote` confirms the remote's live tip equals it, so a stale "
             "tracking ref is denied until `git fetch`; `git -C` and `cd` are honoured). "
             "Otherwise HUMAN ONLY — an "
-            "unmerged branch, a tag, the default branch, an integration line, an exempt or "
-            "protected name, a missing remote-tracking ref or "
+            "unmerged branch, a tag, the default branch, an integration line not yet merged "
+            "into the default branch (merged only into another line does not count), an "
+            "exempt or protected name, a missing remote-tracking ref or "
             "any check failure is denied: stop and ask the human to run it. "
             "`git push --mirror` and `git push --prune` delete remote refs the command "
             "never names, so they are always HUMAN ONLY. Local "
