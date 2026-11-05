@@ -215,13 +215,6 @@ rules:
     tests: [tests/unit/screen/test_hooks_screen_binary.py]
     why: the hooks-screen crate and its vendored dependencies; the test builds the
       binary offline and locked, so a changed or corrupted vendored file fails it
-  - glob: "src/claude_code_hooks_daemon/handlers/pre_tool_use/destructive_git.py"
-    tests:
-      - tests/unit/handlers/pre_tool_use/test_destructive_git_remote_delete_chained.py
-      - tests/unit/handlers/pre_tool_use/test_destructive_git_remote_delete_merged.py
-      - tests/unit/handlers/pre_tool_use/test_destructive_git_remote_ref_deletion.py
-    why: its test files are too many for the name mapping to run, so the remote-delete
-      suites (the rule most often edited here) are declared
   - glob: "scripts/qa/changed_tests_map.yaml"
     tests: [tests/unit/qa/test_run_changed_tests.py]
     why: this file
