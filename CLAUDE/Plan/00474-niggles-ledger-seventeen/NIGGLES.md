@@ -138,7 +138,7 @@ about another": a mutant with `refuse_lines = False` passes 146 tests. S1–S5 a
 a custom-named default branch is missing from never_work (this predates the release); and `claudemd_excludes` has an
 OSError crash, glob classes and an untested root-level worktree.
 
-**Status**: ⬜ open; being fixed on the release branch before tagging (every finding that describes a defect is fixed, blocking-labelled or not, RELEASING.md Step 10).
+**Status**: ✅ fixed on the release branch (`debdbd355` tests, `17771a14f` fixes, merged `fc9050800`) before tagging (every finding that describes a defect is fixed, blocking-labelled or not, RELEASING.md Step 10).
 
 ### N579 — the release blocker denies a stop whose only remaining work is background jobs that will wake the session
 

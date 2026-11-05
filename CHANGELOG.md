@@ -23,6 +23,7 @@ _A patch release on the branch-hygiene line. `optimise` suggests `claudeMdExclud
 ### Fixed
 
 - The `git worktree remove` guard (R-GIT-WORKTREE-REMOVE-FORCE) no longer lists an ignored symlink, such as a file `worktree_create` seeds with `default_mode: symlink`, as content the removal would lose; real ignored files and non-empty ignored directories still block (Plan 00474, N573).
+- Release-review fixes (Plan 00474, N580): `delete-branch` proves an integration line against the default branch alone, whatever `--protected-ref` names, and refuses every line when no default resolves; `classify_branch` refuses a line given an empty proof-target list; `cleanup_after_merge` always protects the resolved default branch, even after a merge into an integration line; `optimise`'s `claudeMdExcludes` check reports an unreadable worktree directory instead of crashing.
 
 ## [3.72.0] - 2026-11-04
 
