@@ -130,7 +130,9 @@ class TestGhViewCommandPosition:
         view = f"gh {noun} view"
         result = handler.handle(_bash(f'echo "{view} 1"; {view} 2'))
         assert result.decision == Decision.DENY
-        assert f"{view} 2 --comments" in result.reason
+        assert f"{view} 2 --json " in result.reason
+        assert ",body," in result.reason
+        assert f"{view} 2 --comments" not in result.reason
 
     def test_handle_extends_json_equals_field_list(self, noun_handler: tuple[str, Any]) -> None:
         noun, handler = noun_handler
@@ -142,7 +144,23 @@ class TestGhViewCommandPosition:
         noun, handler = noun_handler
         view = f"gh {noun} view"
         result = handler.handle(_bash(f"{view} 2 --jq '.a | .b'"))
-        assert f"{view} 2 --jq '.a | .b' --comments" in result.reason
+        assert f"{view} 2 --jq '.a | .b' --json title,body," in result.reason
+
+    def test_deny_text_warns_comments_alone_omits_the_body(
+        self, noun_handler: tuple[str, Any]
+    ) -> None:
+        noun, handler = noun_handler
+        result = handler.handle(_bash(f"gh {noun} view 2"))
+        assert "omits the body" in result.reason
+
+    def test_claude_md_warns_comments_alone_omits_the_body(
+        self, noun_handler: tuple[str, Any]
+    ) -> None:
+        _noun, handler = noun_handler
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "omits the body" in guidance
+        assert "--json" in guidance
 
     def test_acceptance_test_is_parse_only(self, noun_handler: tuple[str, Any]) -> None:
         _noun, handler = noun_handler

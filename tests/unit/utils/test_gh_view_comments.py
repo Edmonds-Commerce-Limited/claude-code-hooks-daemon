@@ -41,33 +41,54 @@ class TestUncommentedViewSegment:
 
 
 class TestSuggestWithComments:
-    def test_appends_flag(self) -> None:
-        assert suggest_with_comments("gh pr view 5", "gh pr view 5") == "gh pr view 5 --comments"
+    """A bare view gains a `--json` request: `--comments` alone drops the body without a TTY."""
+
+    def test_bare_pr_view_gets_json_with_body_and_comments(self) -> None:
+        assert (
+            suggest_with_comments("gh pr view 5", "gh pr view 5", "pr")
+            == "gh pr view 5 --json title,body,state,author,comments"
+        )
+
+    def test_bare_issue_view_gets_json_with_body_and_comments(self) -> None:
+        assert (
+            suggest_with_comments("gh issue view 5", "gh issue view 5", "issue")
+            == "gh issue view 5 --json title,body,state,comments"
+        )
+
+    def test_suggestion_never_appends_the_comments_flag(self) -> None:
+        assert "--comments" not in suggest_with_comments("gh pr view 5", "gh pr view 5", "pr")
 
     def test_keeps_gap_before_chained_command(self) -> None:
-        command = "gh pr view 5 && echo done"
+        command = "gh issue view 5 && echo done"
         assert (
-            suggest_with_comments(command, "gh pr view 5 ")
-            == "gh pr view 5 --comments && echo done"
+            suggest_with_comments(command, "gh issue view 5 ", "issue")
+            == "gh issue view 5 --json title,body,state,comments && echo done"
         )
 
     def test_extends_json_field_list(self) -> None:
         assert (
-            suggest_with_comments("gh pr view 5 --json title", "gh pr view 5 --json title")
+            suggest_with_comments("gh pr view 5 --json title", "gh pr view 5 --json title", "pr")
             == "gh pr view 5 --json title,comments"
         )
 
     def test_extends_json_equals_field_list(self) -> None:
         assert (
-            suggest_with_comments("gh pr view 5 --json=title", "gh pr view 5 --json=title")
+            suggest_with_comments("gh pr view 5 --json=title", "gh pr view 5 --json=title", "pr")
             == "gh pr view 5 --json=title,comments"
         )
 
-    def test_json_flag_without_value_gets_comments_flag(self) -> None:
+    def test_json_flag_without_value_gets_the_field_list(self) -> None:
         assert (
-            suggest_with_comments("gh pr view 5 --json", "gh pr view 5 --json")
-            == "gh pr view 5 --json --comments"
+            suggest_with_comments("gh issue view 5 --json", "gh issue view 5 --json", "issue")
+            == "gh issue view 5 --json title,body,state,comments"
         )
 
     def test_view_not_in_command_is_fixed_on_its_own(self) -> None:
-        assert suggest_with_comments("bash -c 'x'", "gh pr view 5") == "gh pr view 5 --comments"
+        assert (
+            suggest_with_comments("bash -c 'x'", "gh issue view 5", "issue")
+            == "gh issue view 5 --json title,body,state,comments"
+        )
+
+    def test_unknown_noun_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="noun"):
+            suggest_with_comments("gh repo view 5", "gh repo view 5", "repo")
