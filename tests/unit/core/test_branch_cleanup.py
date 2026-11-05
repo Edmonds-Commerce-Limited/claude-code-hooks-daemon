@@ -309,6 +309,42 @@ class TestCleanupAfterMerge:
         assert "git push origin --delete feat" in report.commands
         assert "feat" in _git(bare, "branch")
 
+    def test_a_line_merged_into_another_line_is_refused(self, repo: Path) -> None:
+        _git(repo, "branch", "release/2", "main")
+        _git(repo, "checkout", "-b", "release/1")
+        _commit(repo, "one.txt", "one\n", "Release one")
+        _git(repo, "checkout", "release/2")
+        _git(repo, "merge", "--no-ff", "-m", "Merge release/1", "release/1")
+        report = cleanup_after_merge(
+            repo, ["release/1"], config=_CONFIG, target="release/2", mode="act"
+        )
+        assert report.deleted == ()
+        assert "release/1" in _branches(repo)
+        assert any("integration line" in line for line in report.skipped)
+
+    def test_a_line_merged_into_the_default_is_deleted_with_its_restore_line(
+        self, repo: Path
+    ) -> None:
+        tip = _merged(repo, "release/1")
+        report = cleanup_after_merge(repo, ["release/1"], config=_CONFIG, target="main", mode="act")
+        assert report.deleted == ("release/1",)
+        assert f"git branch release/1 {tip}" in report.commands
+        assert "release/1" not in _branches(repo)
+
+    def test_the_resolved_default_is_never_deleted_when_the_target_is_a_line(
+        self, repo: Path
+    ) -> None:
+        """A default named outside ``protected_names`` stays protected on a line merge."""
+        config = BranchesConfig(default="prod", integration_lines=["release/*"])
+        _git(repo, "branch", "-m", "main", "prod")
+        _git(repo, "checkout", "-b", "release/2")
+        report = cleanup_after_merge(
+            repo, ["prod"], config=config, target="release/2", mode="act", default="prod"
+        )
+        assert report.deleted == ()
+        assert "prod" in _branches(repo)
+        assert report.skipped
+
 
 class TestCleanSweep:
     def test_dry_run_touches_nothing(self, repo: Path, tmp_path: Path) -> None:

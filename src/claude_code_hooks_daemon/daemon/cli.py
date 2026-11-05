@@ -6599,6 +6599,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         0 if the requested branches were deleted (or dry-run classified), 1 if
         any branch was refused, 2 on a usage error.
     """
+    from claude_code_hooks_daemon.core import branch_cleanup
     from claude_code_hooks_daemon.daemon.branch_safety import (
         TIER_UNPROVEN,
         delete_branches,
@@ -6608,7 +6609,10 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     bundle_path = None if args.no_bundle else Path(args.bundle)
 
     branches = _branches_config(repo)
-    protected_ref = args.protected_ref or git_sync.resolve_default_branch(branches, repo)
+    # The default is resolved independently of `--protected-ref`: an integration
+    # line is proved against the default alone, whatever ref the caller names.
+    resolved_default = git_sync.resolve_default_branch(branches, repo)
+    protected_ref = args.protected_ref or resolved_default
     if protected_ref is None:
         print(
             "ERROR: cannot determine the default branch (branches.default is 'auto' and "
@@ -6620,8 +6624,16 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     # the protected names, the resolved default and every exempt glob, matched by
     # `branch_safety.matches_any_glob`. An integration line is not among them: it is
     # deletable once `protected_ref` (the default) holds every commit, and refused
-    # otherwise, whatever `--allow-unproven` says.
+    # otherwise, whatever `--allow-unproven` says. With no resolvable default there
+    # is nothing to prove a line against, so every line is refused.
     protected_names = (*branches.protected_names, *branches.exempt, protected_ref)
+    if resolved_default is not None:
+        protected_names = (*protected_names, resolved_default)
+    line_targets = (
+        branch_cleanup.default_targets(repo, branches, resolved_default)
+        if resolved_default is not None
+        else []
+    )
 
     # Pass a confirmer ONLY when a human can actually answer it. Passing one
     # that always declines would report "a human declined" when in truth none
@@ -6641,6 +6653,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
             dry_run=args.dry_run,
             confirm=confirm,
             line_names=branches.integration_lines,
+            line_targets=line_targets,
         )
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)

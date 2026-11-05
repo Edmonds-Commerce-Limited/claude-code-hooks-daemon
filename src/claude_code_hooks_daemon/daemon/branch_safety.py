@@ -635,7 +635,9 @@ def classify_branch(
     # answer for it — see :func:`_protected_base_ref`.
     is_line = matches_any_glob(name, line_names)
     if is_line:
-        proof_targets: Sequence[str] = line_targets or (protected_ref,)
+        # None falls back to the protected ref; an empty list means the caller has
+        # no default ref to offer, so nothing proves the line and it is refused.
+        proof_targets: Sequence[str] = (protected_ref,) if line_targets is None else line_targets
     else:
         proof_targets = targets or (protected_ref,)
     bases = [_protected_base_ref(repo, ref) for ref in proof_targets]
