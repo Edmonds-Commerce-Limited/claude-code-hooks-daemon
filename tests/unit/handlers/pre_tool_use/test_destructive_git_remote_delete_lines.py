@@ -78,11 +78,49 @@ def test_without_the_line_configured_the_same_branch_is_unmerged(clone: Path) ->
     assert "not merged" in (result.reason or "")
 
 
-def test_the_integration_line_itself_is_refused(clone: Path) -> None:
+def test_an_unmerged_integration_line_is_denied_as_not_yet_merged(clone: Path) -> None:
     result = _handler().handle(_input("git push origin --delete release/x", clone))
     assert result.decision == "deny"
     assert "`release/x`" in (result.reason or "")
     assert "integration line" in (result.reason or "")
+    assert "not yet merged into" in (result.reason or "")
+    assert "`main`" in (result.reason or "")
+
+
+@pytest.fixture
+def merged_line_clone(clone: Path) -> Path:
+    """`release/x` has been merged into `main` and `main` pushed."""
+    run_git(clone, "merge", "--no-ff", "-m", "Merge release/x", "release/x")
+    run_git(clone, "push", "origin", "main")
+    run_git(clone, "fetch", "origin")
+    return clone
+
+
+def test_a_line_merged_into_the_default_branch_is_allowed(merged_line_clone: Path) -> None:
+    result = _handler().handle(_input("git push origin --delete release/x", merged_line_clone))
+    assert result.decision == "allow"
+
+
+def test_a_merged_line_is_still_held_to_the_live_remote_tip(merged_line_clone: Path) -> None:
+    run_git(merged_line_clone, "checkout", "release/x")
+    run_git(merged_line_clone, "commit", "--allow-empty", "-m", "pushed since the last fetch")
+    run_git(merged_line_clone, "push", "origin", "release/x")
+    run_git(merged_line_clone, "update-ref", "refs/remotes/origin/release/x", "release/x~1")
+    run_git(merged_line_clone, "checkout", "main")
+    result = _handler().handle(_input("git push origin --delete release/x", merged_line_clone))
+    assert result.decision == "deny"
+    assert "remote tip" in (result.reason or "")
+
+
+def test_a_line_merged_only_into_another_line_is_denied(clone: Path) -> None:
+    run_git(clone, "checkout", "-b", "release/y", "release/x")
+    run_git(clone, "commit", "--allow-empty", "-m", "only on release/y")
+    run_git(clone, "push", "-u", "origin", "release/y")
+    run_git(clone, "checkout", "main")
+    run_git(clone, "fetch", "origin")
+    result = _handler().handle(_input("git push origin --delete release/x", clone))
+    assert result.decision == "deny"
+    assert "not yet merged into" in (result.reason or "")
 
 
 def test_an_exempt_name_is_refused_although_merged(clone: Path) -> None:
