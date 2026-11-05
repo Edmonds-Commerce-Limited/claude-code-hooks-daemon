@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/memory
-fetched_at: '2026-11-04T13:31:58.848143+00:00'
+fetched_at: '2026-11-05T14:21:26.186053+00:00'
 fidelity: converted
 source_sha256: 275fe39e8501741ad308ab8ecd4552327cf34e53654841d7a121de80fbe6b595
 licence: unreviewed
-stale_after: '2027-02-02'
+stale_after: '2027-02-03'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 

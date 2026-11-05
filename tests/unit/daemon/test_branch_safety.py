@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     REFUSAL_CURRENT_BRANCH,
     REFUSAL_NOT_A_BRANCH,
     REFUSAL_PROTECTED,
+    REFUSAL_UNMERGED_LINE,
     REFUSAL_WORKTREE,
     TIER_CONTENT_PRESERVED,
     TIER_MERGED,
@@ -1620,6 +1621,22 @@ class TestIntegrationLineTargets:
         _merged_branch(repo, "feature")
         with pytest.raises(ValueError, match="target"):
             classify_branch(repo, "feature", targets=())
+
+    def test_an_empty_line_target_list_refuses_the_line(self, repo: Path) -> None:
+        """No default ref to prove against means no integration line is deletable."""
+        _merged_branch(repo, "line-y")
+        result = classify_branch(
+            repo, "line-y", protected_ref="main", line_names=["line-*"], line_targets=[]
+        )
+        assert result.refusal == REFUSAL_UNMERGED_LINE
+
+    def test_absent_line_targets_fall_back_to_the_protected_ref(self, repo: Path) -> None:
+        _merged_branch(repo, "line-y")
+        result = classify_branch(
+            repo, "line-y", protected_ref="main", line_names=["line-*"], line_targets=None
+        )
+        assert result.refusal is None
+        assert result.proven_against == "refs/heads/main"
 
 
 class TestCleanupKeywords:

@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/statusline
-fetched_at: '2026-11-04T13:32:17.058577+00:00'
+fetched_at: '2026-11-05T14:21:42.728312+00:00'
 fidelity: converted
 source_sha256: 6da886d1d49d40461586165d5f246cd8a049123b194caa1ebc755d8b33038cff
 licence: unreviewed
-stale_after: '2027-02-02'
+stale_after: '2027-02-03'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 value_swaps:
 - kind: session-uuid

@@ -128,3 +128,14 @@ releases:
       one redundant row (permissions.blockWritesOutsideWorkingDirectories
       overlaps project_containment; the handler is kept), filed as ledger
       00474 N569 to N572.
+  v3.72.1:
+    claude_code_version: unknown
+    evidence: ""
+    review_date: "2026-11-05"
+    reviewed_through: "2.1.318"
+    review_report: CLAUDE/Plan/00474-niggles-ledger-seventeen/subagent-reports/261105-claude-code-review-v3.72.1.md
+    note: >-
+      The release host still ran Claude Code 2.1.318, the version v3.72.0's
+      review already covered, so the review range was empty and nothing was
+      filed. The hook contract is not re-audited at 2.1.318, so it is not
+      recorded as the tested version.

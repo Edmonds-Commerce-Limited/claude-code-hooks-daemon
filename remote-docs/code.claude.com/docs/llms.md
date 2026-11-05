@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/llms.txt
-fetched_at: '2026-11-04T13:32:18.516530+00:00'
+fetched_at: '2026-11-05T14:21:44.244489+00:00'
 fidelity: converted
 source_sha256: 173e13fd948351b8541918d56e7d0fa6ac931ff2c2b5dbf9b1c231cf11e1024f
 licence: unreviewed
-stale_after: '2027-02-02'
+stale_after: '2027-02-03'
 fetch_method: agent-browser-lite-headless (text)
 ---
 

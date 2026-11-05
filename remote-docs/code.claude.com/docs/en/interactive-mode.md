@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/interactive-mode.md
-fetched_at: '2026-11-04T13:31:57.712551+00:00'
+fetched_at: '2026-11-05T14:21:25.258885+00:00'
 fidelity: converted
 source_sha256: a65ae049ed86648acb993fcf1810b7c71f15e1c20f3187200c17e104735689f4
 licence: unreviewed
-stale_after: '2027-02-02'
+stale_after: '2027-02-03'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 

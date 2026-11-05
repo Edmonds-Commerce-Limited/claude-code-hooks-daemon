@@ -124,6 +124,36 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N580 — the v3.72.1 release review found that `delete-branch` proves an integration line against `--protected-ref`
+
+**Source**: RELEASING.md Step 10 code review of v3.72.1, 5 November 2026
+(`untracked/release-artifacts/code-review-v3.72.1.md`, probes reproduced).
+
+**Evidence**: I1 — `cmd_delete_branch` passes `line_names` but no `line_targets`, so `classify_branch` falls back to the
+caller's `--protected-ref`. `delete-branch release/1 --protected-ref release/2`, or `--protected-ref <its own sha>`,
+deletes a line that the default branch does not hold. That contradicts N577's contract: a line may be deleted only once
+the DEFAULT branch holds it. I2 — nothing tests cleanup_after_merge's rule that "a merge into one line proves nothing
+about another": a mutant with `refuse_lines = False` passes 146 tests. S1–S5 are lesser findings: an empty
+`line_targets` is treated as "not given"; the clean_sweep line plumbing cannot be reached; a docstring is out of date;
+a custom-named default branch is missing from never_work (this predates the release); and `claudemd_excludes` has an
+OSError crash, glob classes and an untested root-level worktree.
+
+**Status**: ✅ fixed on the release branch (`debdbd355` tests, `17771a14f` fixes, merged `fc9050800`) before tagging (every finding that describes a defect is fixed, blocking-labelled or not, RELEASING.md Step 10).
+
+### N579 — the release blocker denies a stop whose only remaining work is background jobs that will wake the session
+
+**Source**: this session, 5 November 2026, during the v3.72.1 release.
+
+**Evidence**: CI was running in the background (`gh run watch`, Step 8c), along with the Step 12.0 gates and two agents.
+Every completion notifies and wakes the session. A `STOPPING BECAUSE:` naming those jobs was still denied by
+R-RELEASE-IN-PROGRESS, so the only way to comply was a bounded foreground busy-wait, which costs turns and adds
+nothing. RELEASING.md Step 8c itself tells you to wait in the background.
+
+**Proposal**: let `release_blocker` allow a stop while a tracked background task or a running sub-agent of this session
+is live, the same way the background-process tracker already knows them, and keep denying when nothing is in flight.
+
+**Status**: ⬜ open.
+
 ### N578 — a merged branch's remote delete is denied when chained after its worktree removal and local delete
 
 **Source**: this session, 5 November 2026, cleaning up the merged N577 fix branch.

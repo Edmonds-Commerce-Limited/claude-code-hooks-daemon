@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/marketplace-reference
-fetched_at: '2026-11-04T13:32:05.411375+00:00'
+fetched_at: '2026-11-05T14:21:31.683037+00:00'
 fidelity: converted
 source_sha256: 2b353a0f227f1637b8c5f5709d3de843054a31c81e38d769d00fb00544f3635c
 licence: unreviewed
-stale_after: '2027-02-02'
+stale_after: '2027-02-03'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 

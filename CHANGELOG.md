@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.72.1] - 2026-11-05
+
+_A patch release on the branch-hygiene line. `optimise` suggests `claudeMdExcludes` for worktrees kept under the project root (Plan 00563), a merged integration line such as `release/*` becomes deletable by an agent (Plan 00474, N577), and removing a worktree no longer refuses over a seeded symlink (Plan 00474, N573). Release-branch workflows should declare `branches.integration_lines: ["release/*"]`. No breaking change, no config-changes manifest, no pre-upgrade or post-upgrade task._
+
+### Added
+
+- `hooks-daemon optimise` prints an unscored suggestion with the exact `claudeMdExcludes` globs to add when git worktrees live under the project root and no glob in `.claude/settings.json` or `.claude/settings.local.json` covers them; it only suggests and writes nothing unless confirmed at the apply prompt (Plan 00563; Addresses #156).
+
+### Changed
+
+- A merged integration line (a `branches.integration_lines` glob such as `release/*`) is judged by the same proof as any other branch, against the default branch only, so an agent may delete it locally (`delete-branch`, the WorktreeRemove cleanup) and on the remote (R-GIT-PUSH-DELETE-REMOTE) once its remote-tracking tip is an ancestor of the default branch and `git ls-remote` confirms the live tip. An unmerged line is still refused with a message saying so; the default branch, `branches.exempt`, `branches.protected_names` and tags are refused as before (Plan 00474, N577).
+- Feature branches merged into a declared integration line count as merged for the remote-delete guard, the WorktreeRemove cleanup and the post-merge cleanup, and the line itself is never counted toward the branch caps (Plan 00474, N577).
+- Maintenance: `scripts/release/check_release_ci.py` made executable (Plan 00474, N575).
+- Vendored remote docs refreshed, and the Claude Code version record for this release added (Claude Code 2.1.318, empty review range).
+
+### Fixed
+
+- The `git worktree remove` guard (R-GIT-WORKTREE-REMOVE-FORCE) no longer lists an ignored symlink, such as a file `worktree_create` seeds with `default_mode: symlink`, as content the removal would lose; real ignored files and non-empty ignored directories still block (Plan 00474, N573).
+- Release-review fixes (Plan 00474, N580): `delete-branch` proves an integration line against the default branch alone, whatever `--protected-ref` names, and refuses every line when no default resolves; `classify_branch` refuses a line given an empty proof-target list; `cleanup_after_merge` always protects the resolved default branch, even after a merge into an integration line; `optimise`'s `claudeMdExcludes` check reports an unreadable worktree directory instead of crashing.
+
 ## [3.72.0] - 2026-11-04
 
 _A branch-hygiene, relay-by-default and hardening release. A new top-level `branches:` block and nine handlers keep branch work from piling up (a repository-wide WIP cap, a dormancy block, lossless forced removal, an evacuate-then-destroy deny, creator and touch records, a branch stop guard, post-merge cleanup and a `branch-sweep` report; Plan 00558); the Rust relay is the default hook transport on Linux (Plan 00554); a venv whose Python changed underneath it is rebuilt and a daemon that cannot start no longer locks the session out (Plan 00555); `mkplan.bash` reads remote plan numbers before allocating (Plan 00562); a merge conflict can no longer brick a session through the hook stubs (Plan 00552); and `secret_file_guard` stops denying read-only commands on six false-positive shapes (Plan 00556). `breaking: false` in the config-changes manifest: its `renamed` and `changed` entries all keep working on an existing config (the old keys are read as aliases for one release, an explicit `relay_enabled: false` is kept), and no pre-upgrade or post-upgrade task ships. Check `bin/hooks-daemon branch-sweep` before upgrading a repository that holds a branch idle for 30 days or more: new branches are blocked until it is merged, parked or deleted._

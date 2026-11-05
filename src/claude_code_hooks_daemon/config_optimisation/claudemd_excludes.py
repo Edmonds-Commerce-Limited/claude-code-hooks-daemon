@@ -36,7 +36,12 @@ _SAMPLE_WORKTREE: str = "example-worktree"
 
 
 def glob_to_regex(glob: str) -> re.Pattern[str]:
-    """Translate a glob over absolute paths: ``**`` crosses directories, ``*`` does not."""
+    """Translate a glob over absolute paths: ``**`` crosses directories, ``*`` does not.
+
+    ``?`` matches one non-separator character. Character classes (``[ab]``) and
+    braces (``{a,b}``) are NOT supported: they match themselves literally, so a
+    glob that relies on them is reported as uncovering the worktree root.
+    """
     parts: list[str] = []
     i = 0
     while i < len(glob):
@@ -144,7 +149,13 @@ def suggest_claudemd_excludes(project_root: Path, git_worktrees: Sequence[Path] 
         such root is already covered; otherwise the lines to show the user.
     """
     root = project_root.resolve()
-    targets = _worktree_targets(root, git_worktrees)
+    try:
+        targets = _worktree_targets(root, git_worktrees)
+    except OSError as exc:
+        return [
+            f"cannot read a worktree directory under the project root ({exc}); cannot check "
+            f"`{_EXCLUDES_KEY}` coverage - fix its permissions and re-run"
+        ]
     if not targets:
         return []
     try:
