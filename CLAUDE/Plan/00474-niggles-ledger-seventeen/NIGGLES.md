@@ -124,6 +124,26 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N577 — feature branches merged into a release branch count as unmerged unless `release/*` is an integration line, and declaring it blocks the release branch's own remote delete
+
+**Source**: owner question, 5 November 2026 (projects that merge feature branches into release branches).
+
+**Evidence**: three automatic paths judge "merged" against the default branch plus `branches.integration_lines` only
+(default: empty): the remote-delete proof (`destructive_git.py` `_proof_targets`, ~line 856), the WorktreeRemove cleanup
+(`core/branch_cleanup.py` `delete_if_merged` via `cleanup_targets`, ~line 408), and post-merge cleanup
+(`handlers/post_tool_use/cleanup_after_merge.py` `merge_target_qualifies`, ~line 148). A feature branch merged only into
+`release/x` is therefore denied a remote delete and left by both cleanups. Declaring `integration_lines: ["release/*"]`
+fixes all three, but integration lines are "never deleted remotely by an agent" (`config/models.py` ~2404), so the
+release branch's own `git push origin --delete release/x` (RELEASING.md Step 15 in this repo) would then be denied even
+after it is merged into the default branch. Local `git branch -d`/`-D`, `delete-branch --protected-ref <line>` and
+`git worktree remove` do not depend on this.
+
+**Proposal**: an integration line that is itself an ancestor of the default branch (proven the same way as any merged
+branch, remote tip confirmed with `ls-remote`) may be deleted remotely by an agent; and document `integration_lines` as
+the release-branch-workflow setting in the branch-hygiene guidance.
+
+**Status**: ⬜ open.
+
 ### N576 — the stand-in gate re-arms every three hours when every pending item is reserved
 
 **Source**: this session, 5 November 2026. After the 02:53 stand-in declined every pending item as RESERVED (Plan 00560
