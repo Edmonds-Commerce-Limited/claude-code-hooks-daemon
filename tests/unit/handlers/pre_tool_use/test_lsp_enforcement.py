@@ -1107,7 +1107,9 @@ class TestLspCoverageFromPlugins:
         assert result.decision == Decision.DENY
 
     def _bash(self, command: str, cwd: Path) -> Any:
-        return self._handle({"tool_name": "Bash", "cwd": str(cwd), "tool_input": {"command": command}})
+        return self._handle(
+            {"tool_name": "Bash", "cwd": str(cwd), "tool_input": {"command": command}}
+        )
 
     def test_two_extensionless_files_are_advised_not_denied(self, tmp_path: Path) -> None:
         """Plan 00567: shell scripts with no suffix are not served by any server."""
