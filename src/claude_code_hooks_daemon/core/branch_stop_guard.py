@@ -63,6 +63,8 @@ class StopFinding:
     commands: tuple[str, ...]
     #: True when the finding is reported but does not hold the stop.
     advisory: bool = False
+    #: True when the remote holds a copy of the branch (names ``--clean --remote``).
+    on_remote: bool = False
 
 
 @dataclass(frozen=True)
@@ -275,7 +277,11 @@ def _judge_branch(
         if not handoff and not _never_worked(repo, record.name, budget):
             findings.append(
                 StopFinding(
-                    record.name, StopCheck.MERGED, tip, _merged_commands(record, config.remote)
+                    record.name,
+                    StopCheck.MERGED,
+                    tip,
+                    _merged_commands(record, config.remote),
+                    on_remote=record.remote_tip is not None,
                 )
             )
         return findings, finished

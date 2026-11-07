@@ -18,21 +18,27 @@ permissions:
   actions: read
 
 concurrency:
-  group: qa-${{ github.ref }}
+  # On main, one group per (event, sha), so every push gets its own run and a
+  # verdict (Plan 00572 Task 1.3). GitHub keeps only ONE pending run per
+  # group: with one group for all of main, a third push cancelled the queued
+  # second before it started (zero jobs, no verdict; 11 of 30 main runs on
+  # 2026-11-05). Main runs now run side by side instead of queueing; runners
+  # are separate VMs, so they share no socket, cache or full-QA lock. The
+  # classify job's base is still right: scripts/ci/last_verdict_sha.py takes
+  # the newest COMPLETED main run with a verdict, so a run that starts while
+  # an earlier one is still going diffs from an older tested sha (a larger
+  # range, never a smaller one).
+  #
+  # Elsewhere one group per ref, and a superseded run is cancelled: on a PR
+  # branch only the tip matters.
+  group: >-
+    qa-${{ github.ref == 'refs/heads/main'
+    && format('{0}-{1}', github.event_name, github.sha)
+    || github.ref }}
   # Never KILL a running run on the default branch. Plan 00359's release-slate
   # gate requires HEAD's EXACT sha to be CI-green, and plan completion criteria
   # cite a specific commit, so killing a run on main destroys the only evidence
-  # either one can use. Superseded runs are still cancelled on a PR branch,
-  # where only the tip matters.
-  #
-  # LIMIT, do not mis-read this as a per-sha guarantee (Plan 00400 N3): false
-  # protects the run that is ALREADY RUNNING, and nothing more. GitHub allows
-  # only ONE pending run per concurrency group, so while one run is in progress
-  # a third push cancels the second before it ever starts — it ends with zero
-  # jobs, which is a cancellation rather than a failure and so reads as noise.
-  # The property holds for two concurrent pushes and breaks from the third on.
-  # A sha pushed into a busy window and superseded before it starts therefore
-  # gets NO result at all; cite a later green sha that contains it instead.
+  # either one can use.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -88,10 +94,10 @@ jobs:
           HOOKS_DAEMON_PYTHON="$(command -v python)" bash scripts/ci/emit_tier.bash \
             | tee -a "$GITHUB_OUTPUT"
 
-  # The docs and code tiers: one Python, the change's own checks. A full-suite
-  # run on that one Python replaces the mapped tests when the mapper cannot map
-  # a changed file (unmapped or too broad), so a change is never verified by
-  # tests that did not cover it.
+  # The docs and code tiers: one Python, the change's own checks. When the
+  # mapper cannot map a changed file (unmapped or too broad), the sharded
+  # fallback-tests job runs the whole suite instead of the mapped tests, so a
+  # change is never verified by tests that did not cover it.
   targeted:
     # A name built from a job output does not render while the job is skipped
     # (it shows the literal expression), so the name is a fixed string.
@@ -99,9 +105,9 @@ jobs:
     needs: classify
     if: needs.classify.outputs.tier != 'full'
     runs-on: ubuntu-latest
-    # A code-tier change the mapper cannot map runs the whole suite on one
-    # Python: ~45 min measured.
-    timeout-minutes: 120
+    # Static checks plus mapped tests: about 10 min measured; the whole-suite
+    # fallback runs in its own sharded job.
+    timeout-minutes: 60
     env:
       RANGE: ${{ needs.classify.outputs.base }}..${{ needs.classify.outputs.head }}
       TIER: ${{ needs.classify.outputs.tier }}
@@ -196,21 +202,49 @@ jobs:
         if: "!cancelled() && env.TIER == 'code'"
         run: python scripts/qa/run_pyright_check.py --json
 
+      # Plan 00572 Task 1.2: ask the mapper BEFORE running anything. When it
+      # cannot cover a changed file the whole suite runs, and the mapped tests
+      # are a subset of it, so running them first only delays the verdict
+      # (about 6 min measured on the code tier). An empty answer (the step
+      # failed) keeps the mapped tests: skipping them needs a positive count.
+      - name: Ask the mapper which changed files it cannot cover
+        id: mapper
+        if: "!cancelled()"
+        run: |
+          set -euo pipefail
+          selection="${RUNNER_TEMP}/selection.json"
+          python scripts/qa/run_changed_tests.py --range "$RANGE" --select-only > "$selection"
+          unmapped="$(jq '.unmapped | length' "$selection")"
+          echo "unmapped files: ${unmapped}"
+          echo "unmapped=${unmapped}" >> "$GITHUB_OUTPUT"
+
       # Docs tier: the whole-tree doc and plan checks, then the mapper tests.
       # Code tier: the tests the mapper selects, plus the fast tools llm_qa
-      # changed carries. --allow-unmapped lets the run finish so the next step
-      # can decide what to do about files the mapper could not cover.
+      # changed carries. --allow-unmapped lets the run finish: files the mapper
+      # could not cover are the fallback-tests job's. When the mapper reported
+      # unmapped files, changed_tests is left out (above).
       - name: Targeted QA (docs tier)
         if: "!cancelled() && env.TIER == 'docs'"
-        run: ./scripts/qa/llm_qa.py docs_qa plan_qa changed_tests --range "$RANGE" --allow-unmapped
+        env:
+          UNMAPPED: ${{ steps.mapper.outputs.unmapped }}
+        run: |
+          if [ -n "$UNMAPPED" ] && [ "$UNMAPPED" != "0" ]; then
+            ./scripts/qa/llm_qa.py docs_qa plan_qa
+          else
+            ./scripts/qa/llm_qa.py docs_qa plan_qa changed_tests --range "$RANGE" --allow-unmapped
+          fi
 
       - name: Targeted QA (code tier)
         if: "!cancelled() && env.TIER == 'code'"
-        run: ./scripts/qa/llm_qa.py changed --range "$RANGE" --allow-unmapped
-
-      - name: Full suite fallback (only when the mapper cannot cover a file)
-        if: "!cancelled()"
-        run: bash scripts/ci/full_suite_if_unmapped.bash
+        env:
+          UNMAPPED: ${{ steps.mapper.outputs.unmapped }}
+        run: |
+          if [ -n "$UNMAPPED" ] && [ "$UNMAPPED" != "0" ]; then
+            read -r -a checks <<< "$(python -c 'import sys; sys.path.insert(0, "scripts/qa"); import llm_qa; print(" ".join(n for n in llm_qa.CHANGED_TOOL_NAMES if n != "changed_tests"))')"
+            ./scripts/qa/llm_qa.py "${checks[@]}"
+          else
+            ./scripts/qa/llm_qa.py changed --range "$RANGE" --allow-unmapped
+          fi
 
       # The summary names a failing test but its message lives in the per-check
       # JSON (ledger 00474 N544), so keep untracked/qa/ when the job fails.
@@ -221,6 +255,7 @@ jobs:
           name: qa-targeted-output
           path: untracked/qa/
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Security (bandit)
         if: "!cancelled() && env.TIER == 'code'"
@@ -230,15 +265,17 @@ jobs:
         if: "!cancelled() && env.TIER == 'code'"
         run: deptry src/
 
-  # The full three-Python matrix. Job id qa and the matrix key are read by
-  # scripts/qa/run_test_matrix.py and tests/integration/test_ci_provisions_the_relay.py.
+  # The full tier's static checks and project-handler tests, per Python. The
+  # suite itself runs sharded in full-tests (below). Job id qa and its matrix
+  # key are read by scripts/qa/run_test_matrix.py: the local tests stage runs
+  # every Python listed here.
   qa:
     needs: classify
     if: needs.classify.outputs.tier == 'full'
-    name: QA (Python${{ matrix.python-version }})
+    name: QA static (Python${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    # The whole suite per Python: 66-76 min measured.
-    timeout-minutes: 150
+    # Install plus static checks: about 6 min measured.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -334,17 +371,6 @@ jobs:
           test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
           echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
 
-      # Runner image ubuntu26/20261101.64 caps /tmp, which the integration
-      # tests' tmp_path trees outgrow (EDQUOT under /tmp/pytest-of-runner);
-      # release-gate.yml's tests job carries the same step and says why the
-      # directory is /ci-tmp rather than RUNNER_TEMP.
-      - name: Keep temporary files off the capped /tmp
-        run: |
-          sudo install -d -o "$(id -u)" -g "$(id -g)" /ci-tmp
-          echo "TMPDIR=/ci-tmp" >> "$GITHUB_ENV"
-          df -h /tmp /ci-tmp
-          findmnt --target /tmp
-
       # The tools are invoked directly rather than through scripts/qa/run_all.sh.
       # That script resolves its interpreter via the daemon's fingerprint-keyed
       # venv resolver, which only exists on an installed daemon — it is a
@@ -384,166 +410,8 @@ jobs:
         if: ${{ !cancelled() }}
         run: python scripts/qa/run_pyright_check.py --json
 
-      # Plan 00250: the acceptance gates RELEASING.md Step 12.0 declares
-      # BLOCKING have never run here. They open a socket under untracked/ and
-      # skip when they cannot find one, so without a daemon they are reported
-      # as neither pass nor fail — the exact silence this workflow exists to
-      # remove. 16 of them across four files, measured in a worktree that
-      # reproduces the runner's no-daemon condition.
-      #
-      # DO NOT add `python install.py --self-install` here. It was tried, and
-      # the runner proved it destructive: `create_daemon_config` and
-      # `create_settings_json` do NOT skip an existing file — they RENAME it to
-      # `.bak` and write a default template over it. The `force` flag only
-      # controls whether that backup is taken, so BOTH paths overwrite. On the
-      # runner it replaced this repo's 1188-line hooks-daemon.yaml, and the
-      # daemon then refused to start because the template it wrote is invalid
-      # against the current schema (`Unknown field 'min_confidence_score' at:
-      # handlers.session_start.min_confidence_score`).
-      #
-      # Nothing needs installing. A checkout already has the config, the
-      # forwarders and the package; the ONLY missing piece is
-      # `.claude/hooks-daemon.env`, which `init.sh`'s repo guard
-      # (init.sh:246-264) accepts on mere existence. It is gitignored
-      # (.claude/.gitignore:16), so writing it leaves the tree clean.
-      #
-      # No venv variable is needed here or anywhere: the Install step built
-      # the venv at the fingerprint path the CLI resolves on its own, which is
-      # also what the CLI the tests spawn (with a stripped environment) finds.
-      #
-      # Full evidence: CLAUDE/Plan/00250-*/RESEARCH-ci-install.md
-      - name: Start daemon (for the acceptance gates)
-        if: ${{ !cancelled() }}
-        run: |
-          # blocking_gate_guard.py (tests/acceptance/) only escalates a skip
-          # of a declared release-gate file to a failure when this is set
-          # (Plan 00466 N39 widened) -- without it, a daemon that failed to
-          # start here would leave those tests skipping quietly instead of
-          # failing the job, exactly the Plan 00250 silence this workflow
-          # exists to remove. Persisted via GITHUB_ENV for the pytest step
-          # below. Written FIRST, before restart/status: `run:` steps use
-          # `bash -e`, so a failure in either of those would otherwise abort
-          # the script before this line runs, leaving the acceptance tests
-          # to skip quietly instead of failing loudly alongside the red
-          # start step (Plan 00466 N39 review1 LOW-1).
-          echo "HOOKS_DAEMON_RELEASE_GATE=1" >> "$GITHUB_ENV"
-          printf 'HOOKS_DAEMON_ROOT_DIR="%s"\n' "$GITHUB_WORKSPACE" \
-            > .claude/hooks-daemon.env
-          ./bin/hooks-daemon restart
-          ./bin/hooks-daemon status
-
-      # Plan 00350: fourteen transport gates skipped on every runner for want
-      # of a compiled binary — 11 in test_transport_toggle_cycle.py and 3 in
-      # test_relay_guard_fail_open.py. Same defect as the daemon socket above,
-      # one artefact over, and the same answer: provision it.
-      #
-      # TWO paths, and building without deploying fixes only 3 of the 14.
-      # relay/build.sh writes untracked/relay-build/hooks-relay-<target>, which
-      # is what the three fail-open tests open directly; the eleven
-      # toggle-cycle tests resolve the DEPLOYED untracked/bin/hooks-relay. The
-      # copy below is what relay_deploy.deploy_relay_from_build does after the
-      # build, reduced to the two steps CI needs (no route marker: that records
-      # how an INSTALL obtained the binary, and this is not an install).
-      #
-      # Cost measured, not estimated: ~1s for the whole build. It is a single
-      # crate-less source file compiled by plain rustc — no cargo, no
-      # dependency graph — so there is nothing a cache would save, and a cache
-      # that missed and skipped would reproduce the very skip being removed.
-      #
-      # `rustup target add` is the only provisioning needed. A runner's
-      # preinstalled rustc carries the host target only. musl-gcc is NOT
-      # required: rustc's self-contained linking handles it, verified by
-      # building with a deliberately poisoned musl-gcc first on PATH.
-      - name: Build the relay (for the transport gates)
-        if: ${{ !cancelled() }}
-        run: |
-          rustup target add x86_64-unknown-linux-musl
-          bash relay/build.sh
-          install -D -m 755 \
-            untracked/relay-build/hooks-relay-x86_64-unknown-linux-musl \
-            untracked/bin/hooks-relay
-
-      # 95% is the threshold CLAUDE.md and CONTRIBUTING.md both state, so CI
-      # enforces it rather than merely reporting it — an unenforced claim is
-      # the gap this workflow exists to close. Measured at 95.59% on a clean
-      # checkout, so the margin is real but thin; a drop below 95 is a genuine
-      # signal, not CI flake. That figure was taken with NO daemon running,
-      # which the two steps above have just changed — waking 16 skipped
-      # acceptance tests moves coverage, and can also surface long-standing
-      # failures in tests that only ever ran without a daemon. Per Plan 00250
-      # those are pre-existing, not regressions from this workflow edit.
-      #
-      # -rs names every SKIPPED test and its reason in the log. A skip is a test
-      # that did not run, and this workflow exists because tests that quietly do
-      # not run are indistinguishable from tests that pass: four upgrade gates
-      # sat skipped here for want of `uv` on the runner, and adding uv turned
-      # them straight into failures. Without -rs the only way to notice the next
-      # such skip is to compare totals between two runs by hand.
-      # Plan 00250 Task 2.4e: playbook probe #144 (Swift lint, expected DENY)
-      # flaked to "no decision" on single interpreters across three runs. The
-      # verdict now quotes what it observed, and the quote named the cause:
-      # "Swift lint check timed out after 15s ... the write was ALLOWED
-      # without this check passing". The runner image ships swiftc, and its
-      # FIRST invocation builds the stdlib module cache, which on a busy runner
-      # can exceed lint_on_edit's 15s budget. Warming the toolchain here moves
-      # that cold start out of the timed probe. The budget is deliberately NOT
-      # raised: 15s is the right ceiling for a warm toolchain, and widening it
-      # would hide a genuinely slow linter from every client.
-      - name: Warm the Swift toolchain
-        if: ${{ !cancelled() }}
-        run: |
-          if command -v swiftc >/dev/null 2>&1; then
-            printf 'let warm = 1\n' > "${RUNNER_TEMP}/warm.swift"
-            time swiftc -typecheck "${RUNNER_TEMP}/warm.swift"
-          else
-            echo "swiftc not on this runner; probe #144 will skip via required_tools"
-          fi
-
-      # Same shape for Go. Playbook probe #155 (Go lint, expected DENY) flaked
-      # to "no decision" on one run in three, and the verdict quoted the cause:
-      # "Go lint check timed out after 15s for invalid.go - the write was
-      # ALLOWED without this check passing". The first `go vet` on a runner
-      # compiles the standard library into an empty GOCACHE, which on a busy
-      # runner can exceed the budget; warming it here moves that cold start out
-      # of the timed probe. As above, the budget is not raised.
-      - name: Warm the Go toolchain
-        if: ${{ !cancelled() }}
-        run: |
-          if command -v go >/dev/null 2>&1; then
-            mkdir -p "${RUNNER_TEMP}/warm-go"
-            printf 'module warm\n\ngo 1.21\n' > "${RUNNER_TEMP}/warm-go/go.mod"
-            printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("warm") }\n' \
-              > "${RUNNER_TEMP}/warm-go/main.go"
-            (cd "${RUNNER_TEMP}/warm-go" && time go vet ./...)
-          else
-            echo "go not on this runner; probe #155 will skip via required_tools"
-          fi
-
-      # Plan 00463 round 9: `tests/conftest.py` refuses a whole-suite-sized
-      # pytest run unless it holds the host-wide full-QA lock (the sink; see
-      # claude_code_hooks_daemon.qa.full_qa_gate). A CI runner is single-tenant
-      # so there is never real contention, but the sink does not know that —
-      # it enforces the same rule everywhere, which is the point. Acquire the
-      # SAME lock file (`<git-common-dir>/hooksdaemon-full-qa.lock`) the same
-      # way `scripts/qa/run_tests.sh` does, so this step is not a special case.
-      - name: Tests + coverage
-        if: ${{ !cancelled() }}
-        run: |
-          GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
-          exec {FULL_QA_LOCK_FD}>> "${GIT_COMMON_DIR}/hooksdaemon-full-qa.lock"
-          flock "${FULL_QA_LOCK_FD}"
-          # perf_sweep tests run alone in the perf-sweep job, not under this
-          # run's coverage and suite load.
-          pytest tests/ \
-            -rs \
-            -m "not perf_sweep" \
-            --cov=src \
-            --cov-report=term-missing \
-            --cov-report=xml \
-            --cov-fail-under=95
-
-      # The project handlers sit outside pyproject's `testpaths`, so `pytest
-      # tests/` above cannot reach them and CI was as blind to them as the local
+      # The project handlers sit outside pyproject's `testpaths`, so the
+      # sharded suite (full-tests) cannot reach them and CI was as blind to them as the local
       # suite was. Both are terminal handlers that DENY — release_blocker denies
       # the Stop event, enforce_llm_qa denies a Bash command — and
       # scripts/qa/gate-scope.bash excuses them from mypy on the grounds that
@@ -559,13 +427,6 @@ jobs:
         if: ${{ !cancelled() }}
         run: pytest .claude/project-handlers --import-mode=importlib -p no:claude_code_hooks_daemon.qa.full_qa_gate
 
-      - name: Upload coverage
-        if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage
-          path: coverage.xml
-
       - name: Security (bandit)
         # Filter ONLY B101 (asserts) - identical to scripts/qa/run_security_check.sh
         # and .pre-commit-config.yaml. Do NOT reintroduce `-c pyproject.toml`: that
@@ -577,6 +438,80 @@ jobs:
       - name: Dependencies (deptry)
         if: ${{ !cancelled() }}
         run: deptry src/
+
+  # Plan 00572 Task 2.1: does the code or docs tier need the whole suite?
+  # Only when the change mapper cannot cover a changed file (unmapped, which
+  # includes too broad). Its own job, so the sharded fallback starts as soon
+  # as the answer is known instead of after the targeted job's static work.
+  map:
+    name: Map the change to tests
+    needs: classify
+    if: needs.classify.outputs.tier != 'full'
+    runs-on: ubuntu-latest
+    # Install plus a --select-only mapper call: about 2 min.
+    timeout-minutes: 15
+    outputs:
+      unmapped: ${{ steps.mapper.outputs.unmapped }}
+    env:
+      RANGE: ${{ needs.classify.outputs.base }}..${{ needs.classify.outputs.head }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install --user uv
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
+            bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
+          UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
+            uv sync --frozen --all-extras --python "$(command -v python)"
+          test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
+          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
+
+      # A failure here fails the job, and the fallback (which needs this job)
+      # is then skipped: the QA gate fails on this job, never quietly passes.
+      - name: Ask the mapper which changed files it cannot cover
+        id: mapper
+        run: |
+          set -euo pipefail
+          selection="${RUNNER_TEMP}/selection.json"
+          python scripts/qa/run_changed_tests.py --range "$RANGE" --select-only > "$selection"
+          unmapped="$(jq '.unmapped | length' "$selection")"
+          echo "unmapped files: ${unmapped}"
+          jq -r '.unmapped_reasons | to_entries[] | "  \(.key): \(.value)"' "$selection"
+          echo "unmapped=${unmapped}" >> "$GITHUB_OUTPUT"
+
+  # The full-suite fallback, sharded over runners: the `fallback` profile of
+  # scripts/ci/shard_legs.yaml (one Python, no coverage). It replaces the
+  # mapped tests whenever the mapper cannot cover a changed file, so a change
+  # is never verified by tests that did not cover it.
+  fallback-tests:
+    name: Full suite fallback
+    needs: [classify, map]
+    if: needs.map.outputs.unmapped != '0'
+    uses: ./.github/workflows/test-shards.yml
+    with:
+      profile: fallback
+
+  # The full tier's suite: the `full` profile (three Pythons, coverage on
+  # 3.13 combined and held to 95%), the same legs release-gate.yml runs.
+  full-tests:
+    name: Full suite
+    needs: classify
+    if: needs.classify.outputs.tier == 'full'
+    uses: ./.github/workflows/test-shards.yml
+    with:
+      profile: full
 
   # Plan 00476 Design 6: the CPU-timing sweeps (marker perf_sweep), alone on
   # the runner. The whole-suite steps above deselect them because their own
@@ -704,3 +639,30 @@ jobs:
 
           print("All handler modules imported cleanly.")
           PY
+
+  # Plan 00572 Task 1.1: the single verdict of a run, mirroring release-gate's
+  # `Release gate` job. Each tier skips the jobs it does not need, so a
+  # skipped job counts as passed; anything else (failure, cancelled) fails
+  # it. Make THIS the one required check, so the jobs behind it can be
+  # reshaped without touching branch protection.
+  qa-gate:
+    name: QA gate
+    needs: [classify, targeted, map, fallback-tests, qa, full-tests, perf-sweep, shell, daemon-load]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every QA job passed or was not needed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          # Plan 00572 Task 1.4: the verdict on the run's summary page.
+          {
+            echo "### QA gate"
+            echo
+            echo "| Job | Result |"
+            echo "| --- | ------ |"
+            echo "$RESULTS" | jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")' > /dev/null

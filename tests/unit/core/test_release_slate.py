@@ -454,37 +454,61 @@ def _job(name: str, conclusion: str | None) -> dict[str, object]:
     return {"name": name, "conclusion": conclusion}
 
 
-class TestFullMatrixGreenReadsTheJobConclusions:
-    def test_all_matrix_jobs_successful_is_green(self) -> None:
-        jobs = [
-            _job("Classify change", "success"),
-            _job("QA (Python3.11)", "success"),
-            _job("QA (Python3.12)", "success"),
-            _job("QA (Python3.13)", "success"),
-        ]
-        assert full_matrix_green(jobs)
+_STATIC = "QA static (Python{})"
+_SUITE = "Full suite / tests py{} unit-handlers (coverage)"
 
-    def test_a_tier_run_has_no_matrix_job_and_is_not_green(self) -> None:
+
+def _full_run() -> list[dict[str, object]]:
+    return [
+        _job("Classify change", "success"),
+        *[_job(_STATIC.format(v), "success") for v in ("3.11", "3.12", "3.13")],
+        _job("Full suite / tests py3.13 unit-handlers (coverage)", "success"),
+        _job("Full suite / tests py3.13 integration", "success"),
+        _job("QA gate", "success"),
+    ]
+
+
+class TestFullMatrixGreenReadsTheJobConclusions:
+    def test_static_and_suite_jobs_all_successful_is_green(self) -> None:
+        assert full_matrix_green(_full_run())
+
+    def test_a_tier_run_has_no_full_tier_job_and_is_not_green(self) -> None:
         jobs = [_job("Classify change", "success"), _job("QA (docs or code tier)", "success")]
         assert not full_matrix_green(jobs)
 
-    def test_a_skipped_matrix_job_is_not_green(self) -> None:
+    def test_static_jobs_without_the_suite_are_not_green(self) -> None:
+        jobs = [j for j in _full_run() if not str(j["name"]).startswith("Full suite")]
+        assert not full_matrix_green(jobs)
+
+    def test_suite_jobs_without_static_jobs_are_not_green(self) -> None:
+        jobs = [j for j in _full_run() if not str(j["name"]).startswith("QA static")]
+        assert not full_matrix_green(jobs)
+
+    def test_the_code_tier_fallback_is_not_full_tier_evidence(self) -> None:
+        jobs = [
+            _job(_STATIC.format("3.11"), "success"),
+            _job("Full suite fallback / tests py3.13 integration", "success"),
+        ]
+        assert not full_matrix_green(jobs)
+
+    def test_a_skipped_templated_static_job_is_not_green(self) -> None:
         jobs = [
             _job("Classify change", "success"),
-            _job("QA (Python${{ matrix.python-version }})", "skipped"),
+            _job("QA static (Python${{ matrix.python-version }})", "skipped"),
         ]
         assert not full_matrix_green(jobs)
 
-    def test_one_failed_matrix_job_is_not_green(self) -> None:
-        jobs = [
-            _job("QA (Python3.11)", "success"),
-            _job("QA (Python3.12)", "failure"),
-            _job("QA (Python3.13)", "success"),
-        ]
+    def test_one_failed_static_job_is_not_green(self) -> None:
+        jobs = _full_run()
+        jobs[2] = _job(_STATIC.format("3.12"), "failure")
         assert not full_matrix_green(jobs)
 
-    def test_a_matrix_job_still_running_is_not_green(self) -> None:
-        jobs = [_job("QA (Python3.11)", "success"), _job("QA (Python3.12)", None)]
+    def test_one_failed_suite_job_is_not_green(self) -> None:
+        jobs = [*_full_run(), _job("Full suite / tests py3.12 unit-core", "failure")]
+        assert not full_matrix_green(jobs)
+
+    def test_a_suite_job_still_running_is_not_green(self) -> None:
+        jobs = [*_full_run(), _job("Full suite / tests py3.12 unit-core", None)]
         assert not full_matrix_green(jobs)
 
     def test_no_jobs_is_not_green(self) -> None:
@@ -492,13 +516,21 @@ class TestFullMatrixGreenReadsTheJobConclusions:
 
 
 class TestCarriesMatrixJobs:
-    def test_executed_matrix_jobs_count(self) -> None:
-        assert carries_matrix_jobs([_job("QA (Python3.11)", "failure")])
+    def test_executed_static_jobs_count(self) -> None:
+        assert carries_matrix_jobs([_job("QA static (Python3.11)", "failure")])
 
-    def test_a_skipped_templated_matrix_job_does_not_count(self) -> None:
-        assert not carries_matrix_jobs([_job("QA (Python${{ matrix.python-version }})", "skipped")])
+    def test_executed_suite_jobs_count(self) -> None:
+        assert carries_matrix_jobs([_job("Full suite / tests py3.13 integration", "failure")])
 
-    def test_no_matrix_job_does_not_count(self) -> None:
+    def test_a_skipped_templated_static_job_does_not_count(self) -> None:
+        assert not carries_matrix_jobs(
+            [_job("QA static (Python${{ matrix.python-version }})", "skipped")]
+        )
+
+    def test_the_fallback_does_not_count(self) -> None:
+        assert not carries_matrix_jobs([_job("Full suite fallback / tests py3.13 x", "success")])
+
+    def test_no_full_tier_job_does_not_count(self) -> None:
         assert not carries_matrix_jobs([_job("QA (docs or code tier)", "success")])
 
 

@@ -409,11 +409,19 @@ QA here is the Targeted tier in [../QA.md](../QA.md), "QA Tiers". The full
 suite is a release step and is not run for an issue. The sub-agent has already
 run targeted QA on its branch. Check that result first: when the sub-agent
 reported none, run the static checks in "Before Merging: the Coordinator's
-Check" in QA.md. Create an integration branch and worktree from current `main`.
-Merge the reported head `--no-ff` into it, together with any other branch that
-is ready. Then run `./scripts/qa/llm_qa.py changed` once on the combined head.
+Check" in QA.md.
+
+When this issue's branch is the only one ready, do not open a second branch:
+in the issue's own worktree, merge current `main` into the issue branch
+(`git merge --no-ff main`) and run `./scripts/qa/llm_qa.py changed` there. An
+integration branch is for combining SEVERAL ready branches; for one, it only
+doubles the branches to clean up, and the creation guard's own hint ("a branch
+for this work may already exist") fires on it. When several branches are ready,
+create an integration branch and worktree from current `main`, merge each
+reported head `--no-ff` into it, and run `./scripts/qa/llm_qa.py changed` once
+on the combined head.
 When it is red, find which branch broke it before blaming this issue's branch,
-and follow "A red batch" in QA.md. Commit any docs to the integration branch
+and follow "A red batch" in QA.md. Commit any docs to the branch under test
 before that run, so the run covers them.
 
 A file the run reports as unmapped, or too broad, is never waved through: fix it
@@ -445,8 +453,8 @@ Red QA ends the tick: report, leave `agent-working` on, do not merge.
 
 ## Step 7 — merge
 
-The branch was already merged `--no-ff` in the integration worktree at Step 5,
-and that head is what passed the targeted run. From the main checkout, on the
+At Step 5 `main` was merged into the issue branch (or the branches into an
+integration branch), and that head is what passed the targeted run. From the main checkout, on the
 default branch, `git merge --ff-only <that head's sha>` (the SHA, never the
 branch name), restart the daemon and check `bin/hooks-daemon status`, then
 `git push`. If the daemon fails after the fast-forward, do not push.
@@ -458,7 +466,7 @@ commit, `HEAD^1..HEAD` names only the regenerated block, so any range check afte
 the merge must start from the pre-merge `main` sha.
 
 If `--ff-only` refuses, `main` moved after Step 5: merge `main` into the
-integration branch, run `./scripts/qa/llm_qa.py changed` again, and repeat.
+branch under test again, run `./scripts/qa/llm_qa.py changed` again, and repeat.
 CI on the pushed head is the second line, in the tier the change needs
 ([../QA.md](../QA.md), "CI tiers"), and a red CI is a red `main`.
 

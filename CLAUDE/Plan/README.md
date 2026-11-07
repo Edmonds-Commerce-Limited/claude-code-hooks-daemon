@@ -4,15 +4,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00574: plan decisions log document](00574-plan-decisions-log-document/PLAN.md) - Not Started (owner request, for later: a per-plan `PLAN-DECISIONS.md`, pre-created by mkplan, as an unbounded, parseable decision log keyed by task id, so PLAN.md stays the front page of tasks and progress and JOURNAL/ stays ad hoc; adversarial review in progress)
+
 - [00573: admin seat issue assignment override](00573-admin-seat-issue-assignment-override/PLAN.md) - In Progress (owner ruling: a repository admin seat is never blocked by a non-admin's issue assignment; it gets an advisory, and `issue-validity --claim` performs a recorded takeover; non-admin seats and other admins' claims keep the duplicate-work block)
 
-- [00572: ci wall clock sharding arm and hygiene](00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - Not Started, pending the owner's go-ahead (owner request: shard `qa.yml`'s serial pytest across runners by reusing release-gate's shard matrix, give every `main` push a verdict, build and release aarch64 relay and hooks-screen on `ubuntu-24.04-arm`, and close the practice gaps the [analysis](00572-ci-wall-clock-sharding-arm-and-hygiene/ANALYSIS.md) ranks)
+- [00572: ci wall clock sharding arm and hygiene](00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - In Progress (owner request: shard `qa.yml`'s serial pytest across runners by reusing release-gate's shard matrix, give every `main` push a verdict, build and release aarch64 relay and hooks-screen on `ubuntu-24.04-arm`, and close the practice gaps the [analysis](00572-ci-wall-clock-sharding-arm-and-hygiene/ANALYSIS.md) ranks)
 
 - [00571: branch pools parked merged caps](00571-branch-pools-parked-merged-caps/PLAN.md) - In Progress (GitHub #165 plus the owner's ruling: open, parked and merged branches become three pools, each with its own cap; parked and merged-kept branches carry a reason and a max age; one safe command clears merged branches locally and remotely behind an accumulating recovery bundle)
-
-- [00570: branch containment remote archive refs](00570-branch-containment-remote-archive-refs/PLAN.md) - In Progress (GitHub #166: branch-sweep and delete-branch accept a remote ref outside `refs/remotes`, such as an archive namespace, as proof of containment via one bounded `ls-remote`; the offline wording says only what it checked)
-
-- [00569: hooks screen target by host arch](00569-hooks-screen-target-by-host-arch/PLAN.md) - In Progress (GitHub #174: the ccy supervisor and `screen/build.sh` choose the hooks-screen musl target triple from the host architecture, x86_64 or aarch64, instead of pinning x86_64)
 
 - [00568: admin merge bypass guard](00568-admin-merge-bypass-guard/PLAN.md) - Not Started (GitHub #160, parked on owner questions: a configurable Bash handler denying `gh pr merge --admin`, the REST merge endpoint and the `mergePullRequest` mutation, so an admin token cannot merge past branch protection)
 
@@ -223,6 +221,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00570: branch containment remote archive refs](Completed/00570-branch-containment-remote-archive-refs/PLAN.md) - Complete at merge `df4a928e9` (green CI run 42404687976) + the archiving commit (GitHub #166: branch-sweep and delete-branch accept a remote ref outside `refs/remotes`, such as an archive namespace, as proof of containment via one bounded `ls-remote`; the offline wording says only what it checked; release note 004)
+
+- [00569: hooks screen target by host arch](Completed/00569-hooks-screen-target-by-host-arch/PLAN.md) - Complete at merge `ae0af5761` (green CI run 42404687976) + the archiving commit (GitHub #174: the ccy supervisor and `screen/build.sh` choose the hooks-screen musl target triple from the host architecture, x86_64 or aarch64, and the failure note names the architecture; release note 003)
+
 - [00567: lsp coverage extensionless file targets](Completed/00567-lsp-coverage-extensionless-file-targets/PLAN.md) - Complete at merge `6ab6b7bfb` + the archiving commit (GitHub #162: named file targets are judged by their own suffix, an extensionless file counts as unserved, so a grep over extensionless scripts gets the same advisory as a search of their directory; release note 002)
 
 - [00566: nested worktree create root anchoring](Completed/00566-nested-worktree-create-root-anchoring/PLAN.md) - Complete, already delivered (GitHub #161: Plan 00474 N563 `dc45486fa` had anchored `worktree_create` on the main checkout in v3.72.0; this plan adds regression tests only, merged via `82673feec`; no release-bound consequence)
@@ -279,10 +281,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00531: project tuned plan fact checker](Completed/00531-project-tuned-plan-fact-checker/PLAN.md) - Complete at `37dfd0b11` + the archiving commit (owner request during the v3.70.0 release: the feed dispatches the project's `tuned_agent`, the generic agent tells a project once how to tune it, and `deployed_artefact_drift` reports a tuned copy whose derived-from marker is behind the shipped template; release note 081, post-upgrade task 03)
 
-- [00529: owner decision on rust helpers from 00495 assessment](Completed/00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md) - Complete (the owner decided: the Rust relay is the default, starting with the status line; Rust is welcome where measured; no silent fallbacks. Relay default-on `59320d842`, status line `901e59a7a`, loud missing relay `376612d38`, a broken relay binary never runs a call unguarded (release note 019), CI follow-up `95aba97b5`)
-
-- [00528: worktree guard stale binding](Completed/00528-worktree-guard-stale-binding/PLAN.md) - Complete at the fix commit + the archiving commit (md-viewer field report via the desktop team: a sub-agent bound to a probe worktree it had already removed was denied its report write into the main checkout; a binding whose worktree is gone is now dropped; release note 064)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -334,11 +332,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 573 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 574 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 483 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 485 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 67 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 66 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

@@ -1,0 +1,30 @@
+# Drafted during the v3.73.0 release (Step 7 documentation review).
+version: "3.73.0"
+
+truth_changes:
+  - topic: blocking-handlers
+    was: >
+      To read a GitHub issue or pull request with its discussion, run
+      `gh issue view N --comments` / `gh pr view N --comments`.
+    now: >
+      Without a terminal, `gh ... view --comments` prints only the comments and
+      drops the body. Use `gh issue view N --json title,body,state,comments`
+      (add `author` for `gh pr view`), which returns both. The daemon's
+      gh_issue_comments / gh_pr_comments guards now suggest this form.
+
+      IF YOUR PROJECT'S DOCS TELL AN AGENT TO USE `--comments` TO READ AN
+      ISSUE OR PULL REQUEST, UPDATE THEM TO THE `--json` FORM.
+  - topic: git-safety
+    was: >
+      `delete-branch` and `branch-sweep --clean` save deleted branches to
+      `untracked/deleted-branches.bundle`, which is overwritten on every call.
+    now: >
+      Each call writes its own bundle under `untracked/deleted-branches/`
+      (UTC time plus a random suffix) and prints one exact
+      `git fetch <bundle> refs/heads/<name>:refs/heads/<name>` restore line
+      per deleted branch. `branch-sweep --clean --remote` also deletes merged
+      remote branches behind the same bundle.
+
+      IF YOUR PROJECT'S DOCS TELL AN AGENT TO RESTORE FROM
+      `untracked/deleted-branches.bundle`, UPDATE THEM: USE THE RESTORE LINE
+      THE COMMAND PRINTS.

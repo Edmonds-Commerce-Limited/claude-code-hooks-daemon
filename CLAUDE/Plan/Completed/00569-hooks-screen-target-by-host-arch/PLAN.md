@@ -1,6 +1,6 @@
 # Plan 00569: hooks screen target by host arch
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-07
 **Owner**: joseph
 **Priority**: High
@@ -42,28 +42,30 @@ it searched for.
 
 ### Phase 1: Host-architecture target selection
 
-- [ ] ⬜ **Task 1.1**: Failing tests: machine-to-triple mapping for both
+- [x] ✅ **Task 1.1**: Failing tests: machine-to-triple mapping for both
   architectures, their aliases and an unknown one; the resolver on aarch64
   finds the aarch64 build and not the x86_64 one; the unsupported case; the
   failure note's content.
-- [ ] ⬜ **Task 1.2**: Implement the mapping in the supervisor (stdlib only,
+- [x] ✅ **Task 1.2**: Implement the mapping in the supervisor (stdlib only,
   injectable machine value) and use it in `resolve_screen_binary` and the
   failure note.
-- [ ] ⬜ **Task 1.3**: `screen/build.sh` takes its default target from
+- [x] ✅ **Task 1.3**: `screen/build.sh` takes its default target from
   `uname -m`; update the screen docs that state the x86_64-only default.
-- [ ] ⬜ **Task 1.4**: Targeted QA, merge, and a release note.
+- [x] ✅ **Task 1.4**: Targeted QA, merge, and a release note.
 
 ## Success Criteria
 
-- [ ] Tests that failed before the fix cover both architectures and pass after it.
-- [ ] No architecture-pinned triple remains as the supervisor's only screen
+- [x] Tests that failed before the fix cover both architectures and pass after it.
+- [x] No architecture-pinned triple remains as the supervisor's only screen
   target.
-- [ ] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` records the
+- [x] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` records the
   user-visible change, the pending-release holding area for this plan's
   release-bound consequence: a client can drop any exclude of the deployed
   supervisor added for this defect.
-- [ ] Issue #174 is commented and closed after a verified merge and green CI.
+- [x] Issue #174 is commented and closed after a verified merge and green CI.
 
 ## Delivery & Milestones
 
-- Pending.
+- Fix merged at `ae0af5761`; main CI green (run 42404687976, on `4b1317734`).
+  Release note 003 is in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`. #174
+  commented and closed.

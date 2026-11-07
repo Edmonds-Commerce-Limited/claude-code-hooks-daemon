@@ -200,4 +200,9 @@ class TestTheDeclaredShards:
                 assert (PROJECT_ROOT / path).exists(), f"{shard.name}: {path} does not exist"
 
     def test_there_are_a_handful_of_shards(self, shards: list[Shard]) -> None:
-        assert 4 <= len(shards) <= 8
+        """A handful, not a file each: every shard is a local checkpoint and a CI leg's unit.
+
+        Plan 00572 Task 2.2 split integration and the handler unit tests to
+        balance the CI legs, taking the count from 7 to 9.
+        """
+        assert 4 <= len(shards) <= 12

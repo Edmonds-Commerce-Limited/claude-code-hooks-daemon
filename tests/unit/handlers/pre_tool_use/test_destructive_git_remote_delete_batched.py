@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import remote_branch_proof
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.handlers.pre_tool_use import destructive_git
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import DestructiveGitHandler
@@ -79,6 +80,7 @@ def _listing_of(tips: dict[str, str]) -> Callable[[tuple[str, ...]], Any]:
 def install(monkeypatch: pytest.MonkeyPatch) -> Callable[[_FakeGit], _FakeGit]:
     def _install(fake: _FakeGit) -> _FakeGit:
         monkeypatch.setattr(destructive_git, "run_git", fake)
+        monkeypatch.setattr(remote_branch_proof, "run_git", fake)
         monkeypatch.setattr(
             destructive_git, "resolve_default_branch", lambda _config, _directory: "main"
         )
@@ -175,4 +177,6 @@ def test_a_huge_delete_is_chunked_not_one_giant_argv(
     result = _handle("git push origin --delete " + " ".join(names), tmp_path)
     assert result.decision == "allow"
     assert len(fake.ls_remote_calls) == 3
-    assert max(len(call) - 2 for call in fake.ls_remote_calls) == destructive_git._LS_REMOTE_CHUNK
+    assert (
+        max(len(call) - 2 for call in fake.ls_remote_calls) == remote_branch_proof.LS_REMOTE_CHUNK
+    )

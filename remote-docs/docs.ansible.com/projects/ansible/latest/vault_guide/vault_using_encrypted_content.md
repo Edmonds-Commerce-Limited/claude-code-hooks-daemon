@@ -1,10 +1,10 @@
 ---
 source_url: https://docs.ansible.com/projects/ansible/latest/vault_guide/vault_using_encrypted_content.html
-fetched_at: '2026-11-05T14:21:47.630142+00:00'
+fetched_at: '2026-11-07T20:13:12.339565+00:00'
 fidelity: converted
 source_sha256: 684767527941a99e152b91b0c34437ed515fa097787d7f604ec29db0570c6978
 licence: unreviewed
-stale_after: '2027-02-03'
+stale_after: '2027-02-05'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 

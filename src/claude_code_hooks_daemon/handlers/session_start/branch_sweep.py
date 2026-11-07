@@ -123,8 +123,10 @@ class BranchSweepHandler(SessionStartHandlerBase):
         return (
             "## branch_sweep — branches that need attention\n\n"
             "At SessionStart the branch inventory is summarised: a branch whose commits no "
-            "remote ref holds is named on EVERY session start as `CONTAINED NOWHERE`, with "
-            "the `git push -u` that secures it; on a new session it also names dormant "
+            "fetched remote-tracking ref holds is named on EVERY session start as "
+            "`CONTAINED NOWHERE`, with the `git push -u` that secures it (the summary makes no "
+            "network call, so a remote that holds it outside `refs/heads` is not seen; "
+            "`branch-sweep` and `delete-branch` ask the remote once); on a new session it also names dormant "
             "branches, work branches more than `branches.sweep.behind_threshold` commits "
             "behind the default, the count of merged branches not yet deleted, and the "
             "open-work count "

@@ -89,22 +89,47 @@ Root-cause detail with file:line: [ROOTCAUSE.md](ROOTCAUSE.md).
 
 ### Phase 2: Safe removal tooling first (needed by everything else)
 
-- [ ] ⬜ **Task 2.1**: The recovery bundle accumulates: one bundle per call,
+- [x] ✅ **Task 2.1**: The recovery bundle accumulates: one bundle per call,
   timestamped with a random suffix, as `branch-sweep --clean` already does,
   and a restore line per branch with full refspecs. Test five sequential
   deletes, then restore all five.
-- [ ] ⬜ **Task 2.2**: `branch-sweep --clean` also removes provably merged
+
+- [x] ✅ **Task 2.2**: `branch-sweep --clean` also removes provably merged
   REMOTE branches (opt-in flag, or the default under a config key), and
   respects keep-records.
-- [ ] ⬜ **Task 2.3**: The sweep, the cap deny and the stop guard name
+
+- [x] ✅ **Task 2.3**: The sweep, the cap deny and the stop guard name
   `branch-sweep --clean` whenever a merged branch is listed.
-- [ ] ⬜ **Task 2.4**: `worktree-reap --reap-branches` reports each merged
+
+- [x] ✅ **Task 2.4**: `worktree-reap --reap-branches` reports each merged
   branch it skipped because of its name, and points at `branch-sweep --clean`.
-- [ ] ⬜ **Task 2.5**: The branch stop guard treats a branch named by a
+
+- [x] ✅ **Task 2.5**: The branch stop guard treats a branch named by a
   `running` work-queue record as handed over, not abandoned. This is niggle
   N581, reproduced while this plan's own sub-agent was committing to
   `worktree-plan-00571-branch-pools`: the coordinator's stop was told to push
   or finish that branch, with "abandoned" threatened at the third block.
+
+- [x] ✅ **Task 2.6**: `CLAUDE/development/IssueSdlc.md` Step 5 stops
+  requiring a separate integration branch when only one branch is ready. It
+  merges current `main` into the issue branch itself and runs the targeted
+  check there. Found dogfooding: every issue opened two branches, and the
+  creation guard's own hint ("continue there instead of opening another")
+  fired on the runbook's second one.
+
+- [ ] ⬜ **Task 2.7**: Reconcile the remote-proof helpers. Plan 00570 added
+  `utils/remote_refs.py` (one lazy `ls-remote` for `branch-sweep` and
+  `delete-branch`). This plan's remote `--clean` must reuse it, not add a
+  second module. Also make `core/branch_stop_gate.py`'s
+  `_running_queue_branches` delegate to `core/agent_ownership.running_holds`
+  rather than keep its own copy of the queue read.
+
+- [x] ✅ **Task 2.8**: `branch-sweep --clean [--remote]` and `worktree-reap`
+  leave a live agent's worktree and branch alone: a `running` work-queue
+  record, a worktree under the harness's `.claude/worktrees/` (`--clean`
+  only), or a git lock. Found dogfooding: a dry run would have removed a sub-agent's
+  fresh isolation worktree, whose branch sat at main's tip and so read as
+  merged. Logic in `core/agent_ownership.py`.
 
 ### Phase 3: Pools
 

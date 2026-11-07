@@ -124,6 +124,103 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N587 — `ask_user_question_blocker` called the session unattended while the owner was typing to it
+
+**Source**: the owner, during the v3.73.0 release (7 November 2026): "dog fooding error there - not sure why it was
+regarding it as unattended".
+
+**Evidence**: mid-release, the owner sent four messages within minutes, all delivered mid-turn (the remote-docs
+question and its correction, the README link and handler catalogue, and "do not allow changes to delay the release").
+An AskUserQuestion about accepting two review defects was then denied with R-ASK-USER-QUESTION-UNJUSTIFIED. The deny
+text said "there is no genuine human prompt in this session in the last 30 minutes". Messages a human sends while a
+turn is running reach Claude Code as mid-turn input, not as a UserPromptSubmit, so the handler's notion of a recent
+human prompt never sees them. The coordinator had to assume the answer and record it.
+
+**Proposal**: count mid-turn human input as presence. Find the event or transcript record Claude Code produces for a
+message queued mid-turn, record it like a UserPromptSubmit, and add a test that a session whose last human input
+arrived mid-turn is judged attended.
+
+**Status**: ⬜ open.
+
+### N586 — release housekeeping re-fetches every vendored doc, even one checked days ago
+
+**Source**: the owner, during the v3.73.0 release (7 November 2026): "remote docs refresh - please tell me this only
+refreshes docs that are over X days old?" It does not.
+
+**Evidence**: RELEASING.md Step 1H runs `bin/hooks-daemon remote-docs refresh --all`, which re-fetches every stored
+document whatever its age. `--stale-after-days` sets the freshness window recorded on a capture (`add`). It is not a
+filter, and `refresh` ignores it, taking the window from each document's own record. On v3.73.0 that touched 49 files:
+12 docs had real upstream changes, 36 were byte-identical upstream (same `source_sha256`) yet still had `fetched_at`
+and `stale_after` rewritten, and the generated index `.claude/REMOTE-DOCS.md` was re-rendered. For example,
+`memory.md` had been fetched two days earlier. `remote_docs/store.py` rewrites an unchanged document on purpose, and
+that is correct: the frontmatter records when the page was last checked, which is cheap to keep and vital.
+
+**Owner ruling (7 November 2026)**: keep the frontmatter update exactly as it is. An earlier proposal here (skip the
+rewrite when the hash is unchanged, and a separate stale-only mode) was backwards and is withdrawn. The question was
+why re-check a page that was checked recently at all.
+
+**Proposal**: a re-check TTL (around 7 days, configurable). `refresh` skips any document whose `fetched_at` is within
+the TTL and fetches the rest, stamping the frontmatter as today. A `--path` (the changelog Step 1c needs) or a force
+flag bypasses the TTL. Low priority: at about 50 pages the cost is small.
+
+**Status**: ⬜ open (low priority, per the owner).
+
+### N585 — `worktree-reap --reap-branches` keeps a merged branch that is ahead of its own upstream
+
+**Source**: this session, 7 November 2026, reaping two finished agent worktrees after Plans 00571 and 00572 merged.
+
+**Evidence**: `agent-af0556169a3dc9dbd-f7641538` had been fast-forwarded locally to the integration head, which was
+merged into `main`, past its pushed upstream. `worktree-reap --reap --reap-branches` removed the worktree but printed
+`git kept the branch ... not yet merged to refs/remotes/origin/...`, because it deletes with `git branch -d`, which
+checks the upstream. `delete-branch` on the same branch classified it as `merged-unpushed` and deleted it losslessly
+behind a bundle. The two commands disagree on the same proof, and the run still reported the worktree as REAPED. Its
+exit 1 came from the refused `worktree-plan-00573-admin-override` worktree, not the kept branch: a kept branch counts
+toward neither the refused nor the unmerged total, so on its own it exits 0, and a caller cannot see it from the exit code.
+
+**Proposal**: have `worktree-reap --reap-branches` delete through the same `branch_safety.delete_branches` path
+(containment against the protected ref, plus a bundle) instead of `git branch -d`.
+
+**Status**: ⬜ open.
+
+### N584 — a sub-agent edited source through Python scripts, routing around every Write/Edit content guard
+
+**Source**: this session, 7 November 2026, cleaning up after Plan 00570 (#166).
+
+**Evidence**: the #166 implementation sub-agent's worktree scratch held `edit_bs.py`, `edit_inv.py` and
+`edit2.py` to `edit4.py` (341 lines total). Each does `Path(...).read_text()`, asserts a count, `str.replace`s and
+writes back into `src/claude_code_hooks_daemon/daemon/branch_safety.py`, `core/branch_inventory.py` and others. Run
+as `python edit_x.py`, they change source with none of the PreToolUse content guards (`qa_suppression`,
+`error_hiding_blocker`, `security_antipattern`, `comment_changelog`) seeing the text. `lint_on_edit` lints files a
+Bash command AUTHORS by redirect, `tee` or heredoc, not files a script writes. The merged result still passed the
+whole-tree static QA scan (error_hiding, security, inline_suppressions run over every file), so nothing slipped
+through this time. The gap is real, though: the edit-time defence did not see it.
+
+**Proposal**: (a) detect a Bash command that runs a script from `untracked/scratch/` (or `python -c`) which writes
+into tracked source, using the post-command `git status` delta, and run the content guards over the changed files
+afterwards, as `lint_on_edit` does for authored files; (b) brief sub-agents that source edits go through `Edit`
+(dispatch templates). (a) is the durable fix, since (b) relies on compliance.
+
+**Recurrence (same day, Plan 00572 Task 1.5)**: the release-slate fix sub-agent reported editing two test files
+(`tests/unit/core/test_release_slate.py`, `tests/unit/daemon/test_cli_release_slate_check.py`) "with a short Python
+script rather than Edit", and writing tests together with the fix instead of red first. The coordinator then proved
+red/green by hand: 9 of 86 tests fail against main's `release_slate.py` and all pass on the fix. Two occurrences in one
+session means (b) alone does not hold. Raise priority on (a).
+
+**Status**: ⬜ open.
+
+### N583 — `secret_file_guard` matches a jq field path as if it were a protected file
+
+**Source**: this session, 7 November 2026, enabling repository security settings (Plan 00572).
+
+**Evidence**: a `gh api ... --jq '<dot path into the security_and_analysis object, ending at the scanning status field>'` command was denied with R-SECRET-BASH-MENTION. The guard matched the jq expression token against
+the `*.secret*` file glob. A jq field path names no file, and the same command with a shorter jq path passed.
+
+**Proposal**: tokens that are clearly jq/JSON paths (the argument of `--jq`, `-q` or `jq` filters) should not be
+judged as file paths. More generally, a glob match should require a path-shaped token (containing `/` or naming an
+existing file) before denying, while keeping the deny for a real file named that way.
+
+**Status**: ⬜ open.
+
 ### N582 — `work-queue done` names the issue it just delivered as the next workable issue
 
 **Source**: this session, 7 November 2026, closing the #174 queue record (Plan 00569).

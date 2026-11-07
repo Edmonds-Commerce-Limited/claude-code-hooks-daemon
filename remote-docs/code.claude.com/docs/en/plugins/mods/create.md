@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/create
-fetched_at: '2026-11-05T14:21:33.525577+00:00'
+fetched_at: '2026-11-07T20:12:58.858554+00:00'
 fidelity: converted
 source_sha256: aebd3b13e89ea35f269c3ce04d6e70ffbcc17e010cda44e7e5831705492415ef
 licence: unreviewed
-stale_after: '2027-02-03'
+stale_after: '2027-02-05'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 value_swaps:
 - kind: session-uuid

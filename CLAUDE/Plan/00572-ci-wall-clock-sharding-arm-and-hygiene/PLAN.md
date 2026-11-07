@@ -1,6 +1,6 @@
 # Plan 00572: ci wall clock sharding arm and hygiene
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-07
 **Owner**: joseph
 **Priority**: High
@@ -48,34 +48,44 @@ What the measurements found:
   share sockets inside one runner. Only an experiment on unit shards is in scope.
 - Changing what QA checks, as opposed to where and when it runs.
 
-## Owner actions (repository settings, which no workflow edit can make)
+## Repository settings
 
-- Switch branch protection's required check to the new `QA gate` aggregator
-  once it exists (Phase 1).
-- Enable CodeQL default setup, secret scanning and push protection, and
-  confirm the current settings (ANALYSIS.md section 5, rows 11-12).
+Checked with the admin token: `main` has no branch protection and no rulesets,
+so no job name is a required check and the jobs can be reshaped freely. Adding
+protection is a separate decision. This repository's workflow fast-forwards
+and pushes `main` directly, which required pull requests would block.
+
+On the owner's instruction, enabled: secret scanning, Dependabot vulnerability
+alerts and security updates, and CodeQL default setup. Still off: push
+protection. This repository's tests and fixtures deliberately carry
+credential-shaped strings for the security guards, and push protection could
+refuse those pushes, so check what it would flag before enabling it.
 
 ## Tasks
 
 ### Phase 1: Quick wins (no timing risk)
 
-- [ ] ⬜ **Task 1.1**: Add a `QA gate` aggregator job to `qa.yml`, mirroring
+- [x] ✅ **Task 1.1**: Add a `QA gate` aggregator job to `qa.yml`, mirroring
   release-gate's, so the jobs behind it can be reshaped without breaking
   branch protection.
-- [ ] ⬜ **Task 1.2**: Skip the mapped pytest step when the mapper reports
+- [x] ✅ **Task 1.2**: Skip the mapped pytest step when the mapper reports
   unmapped files, so the full-suite fallback is not preceded by a redundant run.
-- [ ] ⬜ **Task 1.3**: Give each `main` push its own concurrency group, so
+- [x] ✅ **Task 1.3**: Give each `main` push its own concurrency group, so
   queued runs are never cancelled.
-- [ ] ⬜ **Task 1.4**: Write a short QA verdict to `$GITHUB_STEP_SUMMARY`,
+- [x] ✅ **Task 1.4**: Write a short QA verdict to `$GITHUB_STEP_SUMMARY`,
   and set `retention-days` on QA and coverage artifacts.
+- [x] ✅ **Task 1.5**: Regression from the job rename: `release_slate.py`
+  keyed on the old `QA (Python3.x)` job name, so `release-slate-check` could
+  never see a full-tier run. Key it on the new `QA static` and `Full suite`
+  jobs, with a test tying the names to `qa.yml`.
 
 ### Phase 2: Shard the slow paths
 
-- [ ] ⬜ **Task 2.1**: Extract release-gate's shard matrix and coverage
+- [x] ✅ **Task 2.1**: Extract release-gate's shard matrix and coverage
   combine into a reusable workflow (`workflow_call`), used by release-gate,
   `qa.yml`'s full-suite fallback and the nightly.
-- [ ] ⬜ **Task 2.2**: Rebalance the `integration` and `unit-handlers` shards
-  with pytest-split over committed durations.
+- [x] ✅ **Task 2.2**: Rebalance the `integration` and `unit-handlers` shards
+  over measured durations (legs declared in `scripts/ci/shard_legs.yaml`).
 - [ ] ⬜ **Task 2.3**: A composite `setup-env` action replacing the 8+ copies
   of the install block, with a uv cache keyed on `uv.lock`.
 
@@ -110,4 +120,6 @@ What the measurements found:
 
 ## Delivery & Milestones
 
-- Pending owner go-ahead (CI and branch protection changes).
+- Phases 1 and 2 merged to `main` at 4b1317734 through PR #178, whose CI
+  exercised the new workflows. Task 1.5 fixed the release-slate regression.
+- Phases 3 and 4 follow the release.
