@@ -87,8 +87,11 @@ class TestBudgetOrdering:
         def fake_run_git(cwd: Path, *args: str, timeout: float = 0, **_: Any) -> Any:
             timeouts.append(timeout)
             if args[0] == "for-each-ref":
-                row = "refs/heads/a\x00" + "1" * 40 + "\x000\x00\n"
-                return subprocess.CompletedProcess(["git", *args], 0, row, "")
+                # The default's ref is listed, so the --merged call runs too.
+                rows = "".join(
+                    f"refs/heads/{name}\x00" + "1" * 40 + "\x000\x00\x00\n" for name in ("a", "main")
+                )
+                return subprocess.CompletedProcess(["git", *args], 0, rows, "")
             return subprocess.CompletedProcess(["git", *args], 1, "", "boom")
 
         config = BranchesConfig(default="main", wip=BranchWipConfig(cap=1))

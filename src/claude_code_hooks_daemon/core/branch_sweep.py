@@ -160,9 +160,7 @@ def pool_count(inventory: BranchInventory, pool: Pool) -> int:
     one.
     """
     work = {
-        name: record
-        for name, record in inventory.records.items()
-        if pool_of(record.state) == pool
+        name: record for name, record in inventory.records.items() if pool_of(record.state) == pool
     }
     seen: set[str] = set()
     groups = 0

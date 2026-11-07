@@ -188,8 +188,10 @@ class TestReport:
         assert "bin/hooks-daemon delete-branch done" in out
         assert "work" in out
         assert "users/me" in out  # not exempt: no branches: block
-        # done and users/me share a tip, so they count once.
-        assert "Open work: 2 of 10 (branches.wip.cap)" in out
+        # done and users/me are merged and share a tip: one merged branch, and
+        # only work is open (Plan 00571 pools).
+        assert "Open work: 1 of 10 (branches.wip.cap)" in out
+        assert "Merged, not deleted: 1 of 10 (branches.merged.cap)" in out
 
     def test_exempt_shown_only_with_all(
         self, project: Path, capsys: pytest.CaptureFixture[str]
@@ -203,7 +205,8 @@ class TestReport:
     def test_json_report(self, project: Path, capsys: pytest.CaptureFixture[str]) -> None:
         assert cmd_branch_sweep(_args(project, as_json=True)) == 0
         document = json.loads(capsys.readouterr().out)
-        assert document["open_work"] == 2
+        assert document["open_work"] == 1
+        assert document["pools"]["merged"]["count"] == 1
         names = {record["name"] for record in document["branches"]}
         assert names == {"main", "done", "users/me", "work"}
         assert all(tuple(record) == JSON_RECORD_KEYS for record in document["branches"])
@@ -211,7 +214,7 @@ class TestReport:
     def test_explicit_cap(self, project: Path, capsys: pytest.CaptureFixture[str]) -> None:
         _config(project, "branches:\n  wip:\n    cap: 2\n")
         cmd_branch_sweep(_args(project))
-        assert "Open work: 2 of 2" in capsys.readouterr().out
+        assert "Open work: 1 of 2" in capsys.readouterr().out
 
     def test_legacy_cap_through_the_alias(
         self, project: Path, capsys: pytest.CaptureFixture[str]
@@ -223,7 +226,9 @@ class TestReport:
         )
         cmd_branch_sweep(_args(project))
         out = capsys.readouterr().out
-        assert "Open work: 2 of 4" in out
+        assert "Open work: 1 of 4" in out
+        # An unset pool cap follows the WIP cap, legacy option included.
+        assert "Merged, not deleted: 1 of 4 (branches.merged.cap)" in out
         assert "Deprecated" in out
 
 

@@ -64,6 +64,20 @@ merged into only A and a ref merged into only B are both listed with
 - `daemon/init_config.py` template blocks for `parked:`/`merged:`/`bot_owned:`
   are not yet added.
 
+## Fixes after merging origin/main (166a28103)
+
+- `Timeout.GIT_BRANCH_CREATION_CALLS` 2 -> 3 (the `--merged` call), so the
+  WorktreeCreate budget grows by one `GIT_CONTEXT` and `init.sh`'s
+  WorktreeCreate client wait is now 90 seconds, not 85. **The release note
+  (slice e) must say so**, as v3.72.0's note 030 did for 85.
+- `tests/unit/daemon/test_cli_branch_sweep.py` and
+  `tests/unit/constants/test_event_budgets.py` updated to the pool counts and the
+  five-field listing.
+- `tests/unit/supervise/test_walk_opens_regular_files_only.py` came from main
+  unformatted; the QA format step reformatted it and that is committed here.
+- Main's early allow for a non-work `new_name` (N593) sits before every pool
+  computation in `creation_verdict`; keep it there in slices b and c.
+
 ## QA
 
 See the journal entry for this slice's targeted QA verdict on d6b19f4ef.
