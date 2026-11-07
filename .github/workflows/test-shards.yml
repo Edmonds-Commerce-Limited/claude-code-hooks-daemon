@@ -27,9 +27,9 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       coverage-shards: ${{ steps.plan.outputs.coverage-shards }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -61,12 +61,12 @@ jobs:
     steps:
       # Full history and tags: the acceptance conftest clones this checkout
       # and runs `git describe --tags` on it (see qa.yml's qa job).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -195,7 +195,7 @@ jobs:
 
       - name: Upload test output
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: qa-tests-${{ inputs.profile }}-${{ matrix.python }}-${{ strategy.job-index }}
           path: |
@@ -208,7 +208,7 @@ jobs:
       # combined in the coverage job. Hidden files need opting in.
       - name: Upload coverage data
         if: matrix.coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-data-${{ inputs.profile }}-${{ strategy.job-index }}
           path: untracked/qa/.coverage.*
@@ -230,9 +230,9 @@ jobs:
     env:
       SHARDS: ${{ needs.plan.outputs.coverage-shards }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -250,7 +250,7 @@ jobs:
           test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
           echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: coverage-data-${{ inputs.profile }}-*
           path: untracked/qa/
