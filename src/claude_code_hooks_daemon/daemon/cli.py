@@ -6502,7 +6502,7 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     repo = get_project_path(getattr(args, "project_root", None))
     config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
     branches = config.branches
-    if args.clean or args.dry_run:
+    if args.clean or args.dry_run or getattr(args, "remote", False):
         return _branch_sweep_clean(args, repo, branches)
     legacy = handler_options(config.handlers.session_start.get(HandlerID.BRANCH_SWEEP.config_key))
     try:
@@ -6562,22 +6562,27 @@ _BRANCH_CLEANUP_BUNDLE_DIR = Path("untracked") / "branch-cleanup"
 
 
 def _branch_sweep_clean(args: argparse.Namespace, repo: Path, branches: BranchesConfig) -> int:
-    """``branch-sweep --clean [--dry-run]``: delete merged and patch-equivalent branches.
+    """``branch-sweep --clean [--remote] [--dry-run]``: delete merged branches.
 
     Returns:
         0 when the sweep ran, 1 when it could not, 2 on a usage error.
     """
     from claude_code_hooks_daemon.core import branch_cleanup, branch_inventory
 
+    remote = bool(getattr(args, "remote", False))
     if not args.clean:
-        print("ERROR: --dry-run only applies to --clean", file=sys.stderr)
+        print("ERROR: --dry-run and --remote only apply to --clean", file=sys.stderr)
         return 2
     if args.json or args.all:
         print("ERROR: --clean does not take --json or --all", file=sys.stderr)
         return 2
     try:
         report = branch_cleanup.clean_sweep(
-            repo, branches, dry_run=args.dry_run, bundle_dir=repo / _BRANCH_CLEANUP_BUNDLE_DIR
+            repo,
+            branches,
+            dry_run=args.dry_run,
+            bundle_dir=repo / _BRANCH_CLEANUP_BUNDLE_DIR,
+            remote=remote,
         )
     except (branch_inventory.BranchInventoryError, ValueError) as e:
         print(f"ERROR: branch-sweep --clean could not run for {repo}: {e}", file=sys.stderr)
@@ -13088,6 +13093,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="With --clean: print what would be removed and deleted, change nothing",
+    )
+    parser_branch_sweep.add_argument(
+        "--remote",
+        action="store_true",
+        help="With --clean: also delete every merged branch on branches.remote, by the same "
+        "proof the remote-delete guard uses (ancestor of the default or an integration line, "
+        "live tip confirmed with ls-remote), each under a lease on its proven tip and bundled "
+        "first. Contacts the remote",
     )
     parser_branch_sweep.set_defaults(func=cmd_branch_sweep)
 

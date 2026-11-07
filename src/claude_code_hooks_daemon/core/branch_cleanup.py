@@ -21,7 +21,7 @@ only a merged or patch-equivalent branch can ever be deleted here.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal
@@ -29,7 +29,12 @@ from typing import Final, Literal
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import branch_inventory
-from claude_code_hooks_daemon.core.branch_inventory import BranchState
+from claude_code_hooks_daemon.core.branch_inventory import BranchRecord, BranchState
+from claude_code_hooks_daemon.core.remote_branch_proof import (
+    REMOTES_PREFIX,
+    named_ref_problem,
+    prove_remote_merged,
+)
 from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_MERGED,
     TIER_MERGED_NOT_IN_HEAD,
@@ -41,11 +46,13 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     delete_branches,
     matches_any_glob,
     new_bundle_path,
+    write_recovery_bundle,
 )
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
+    HEADS_PREFIX,
     branch_ref,
     parse_worktree_porcelain,
     run_git,
@@ -88,6 +95,7 @@ class CleanupReport:
         skipped: ``"<name>: <reason>"`` for every branch left alone.
         commands: Commands to run by hand (advice, restore lines, remote deletes).
         bundle: The recovery bundle written, if any.
+        deleted_remote: Remote branches removed, as ``<remote>/<name>``.
     """
 
     deleted: tuple[str, ...] = ()
@@ -95,6 +103,7 @@ class CleanupReport:
     skipped: tuple[str, ...] = ()
     commands: tuple[str, ...] = ()
     bundle: Path | None = None
+    deleted_remote: tuple[str, ...] = ()
 
 
 def _never_work(
@@ -500,8 +509,13 @@ def clean_sweep(
     *,
     dry_run: bool,
     bundle_dir: Path,
+    remote: bool = False,
 ) -> CleanupReport:
     """Delete every merged and patch-equivalent local branch, behind a bundle.
+
+    With ``remote`` (``--clean --remote``) every merged branch the remote holds is
+    deleted there too, by the remote-delete guard's proof, its tip in the same
+    bundle. That path contacts the remote (``ls-remote``, ``push``).
 
     Each candidate is classified on its own first, because ``delete_branches`` is
     all-or-nothing: only the proven ones are batched. A linked worktree is removed
@@ -569,9 +583,24 @@ def clean_sweep(
             removed.append(held_by)
         proven.append(name)
 
+    remote_tips: dict[str, str] = {}
+    if remote:
+        remote_tips, problems = _proven_remote(repo, config, default, inventory.records)
+        skipped += [f"{config.remote}/{name}: {why}" for name, why in problems.items()]
+    tracking = {name: f"{REMOTES_PREFIX}{config.remote}/{name}" for name in remote_tips}
+    if dry_run:
+        commands += [f"would delete remote {config.remote}/{name}" for name in remote_tips]
+        for name in proven:
+            advice = remote_delete_command(repo, config.remote, name)
+            if advice is not None and name not in remote_tips:
+                commands.append(advice)
+        return CleanupReport(
+            removed_worktrees=tuple(removed), skipped=tuple(skipped), commands=tuple(commands)
+        )
+
     deleted: tuple[str, ...] = ()
     bundle: Path | None = None
-    if proven and not dry_run:
+    if proven:
         report = delete_branches(
             repo,
             proven,
@@ -581,22 +610,111 @@ def clean_sweep(
             content_tier=False,
             line_names=config.integration_lines,
             line_targets=line_targets,
+            extra_bundle_refs=list(tracking.values()),
         )
         deleted, bundle = report.deleted, report.bundle
         skipped += list(report.blockers)
-        if bundle is not None:
-            commands += [bundle_restore_command(bundle, branch_ref(name)) for name in deleted]
-    for name in proven if dry_run else deleted:
-        remote = remote_delete_command(repo, config.remote, name)
-        if remote is not None:
-            commands.append(remote)
+    elif tracking:
+        bundle = write_recovery_bundle(
+            repo,
+            [],
+            new_bundle_path(bundle_dir, "branch-cleanup"),
+            extra_refs=list(tracking.values()),
+        )
+    if bundle is not None:
+        commands += [bundle_restore_command(bundle, branch_ref(name)) for name in deleted]
+    deleted_remote: list[str] = []
+    if bundle is not None and remote_tips:
+        gone, push_refusals = _push_deletes(repo, config.remote, remote_tips)
+        skipped += push_refusals
+        deleted_remote = [f"{config.remote}/{name}" for name in gone]
+        commands += [
+            f"{bundle_restore_command(bundle, tracking[name])} && "
+            f"git push {config.remote} {tracking[name]}:{branch_ref(name)}"
+            for name in gone
+        ]
+    for name in deleted:
+        advice = remote_delete_command(repo, config.remote, name)
+        if advice is not None and name not in remote_tips:
+            commands.append(advice)
     return CleanupReport(
         deleted=deleted,
         removed_worktrees=tuple(removed),
         skipped=tuple(skipped),
         commands=tuple(commands),
         bundle=bundle,
+        deleted_remote=tuple(deleted_remote),
     )
+
+
+def _proven_remote(
+    repo: Path,
+    config: BranchesConfig,
+    default: str,
+    records: Mapping[str, BranchRecord],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """``(name -> live tip, name -> problem)`` for every merged branch the remote holds.
+
+    Candidates are the inventory's merged and patch-equivalent records with a remote
+    copy, past the cleanup policy; each is then judged by the remote-delete guard's
+    own proof (:func:`prove_remote_merged`), so this deletes nothing the guard would
+    refuse an agent. A patch-equivalent remote branch fails that proof and is kept.
+    """
+    names: list[str] = []
+    problems: dict[str, str] = {}
+    for name in sorted(records):
+        record = records[name]
+        if (
+            record.state not in CLEAN_STATES
+            or record.remote_tip is None
+            or policy_refusal(name, config, default) is not None
+        ):
+            continue
+        problem = named_ref_problem(config.remote, name, default, config)
+        if problem is None:
+            names.append(name)
+        else:
+            problems[name] = problem
+    if not names:
+        return {}, problems
+    proof = prove_remote_merged(repo, config.remote, names, default, config)
+    return proof.tips, {**problems, **proof.problems}
+
+
+def _push_deletes(repo: Path, remote: str, tips: Mapping[str, str]) -> tuple[list[str], list[str]]:
+    """Delete each remote branch under a lease on its proven tip: ``(deleted, refusals)``.
+
+    The lease makes git reject a ref whose remote tip moved after the proof, so a
+    commit pushed meanwhile is never lost. Results are read per ref from
+    ``--porcelain``: ``-`` is a deleted ref, anything else is git's refusal.
+    """
+    leases = [f"--force-with-lease={branch_ref(name)}:{tip}" for name, tip in tips.items()]
+    deletes = [f":{branch_ref(name)}" for name in tips]
+    result = run_git(
+        repo,
+        "push",
+        "--porcelain",
+        *leases,
+        remote,
+        *deletes,
+        timeout=Timeout.GIT_FETCH_SESSION,
+        env={"GIT_TERMINAL_PROMPT": "0"},
+    )
+    outcomes: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        flag, _, rest = line.partition("\t")
+        spec, _, summary = rest.partition("\t")
+        name = spec.removeprefix(":").removeprefix(HEADS_PREFIX)
+        if name in tips:
+            outcomes[name] = "-" if flag == "-" else summary or flag
+    gone = [name for name in tips if outcomes.get(name) == "-"]
+    detail = result.stderr.strip() or f"git push exited {result.returncode}"
+    refused = [
+        f"{remote}/{name}: git refused the remote delete: {outcomes.get(name) or detail}"
+        for name in tips
+        if name not in gone
+    ]
+    return gone, refused
 
 
 def render(report: CleanupReport) -> list[str]:
@@ -605,6 +723,8 @@ def render(report: CleanupReport) -> list[str]:
     lines += [f"Removed worktree: {path}" for path in report.removed_worktrees]
     if report.deleted:
         lines.append(f"Deleted branch(es): {', '.join(report.deleted)}")
+    if report.deleted_remote:
+        lines.append(f"Deleted remote branch(es): {', '.join(report.deleted_remote)}")
     if report.bundle is not None:
         lines.append(f"Recovery bundle: {report.bundle}")
     lines += [f"Skipped {line}" for line in report.skipped]

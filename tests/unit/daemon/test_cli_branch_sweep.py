@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.core.branch_cleanup import CleanupReport
 from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError
 from claude_code_hooks_daemon.core.branch_sweep import JSON_RECORD_KEYS
 from claude_code_hooks_daemon.daemon.cli import build_parser, cmd_branch_sweep
@@ -71,9 +72,15 @@ def _args(
     show_all: bool = False,
     clean: bool = False,
     dry_run: bool = False,
+    remote: bool = False,
 ) -> argparse.Namespace:
     return argparse.Namespace(
-        project_root=project, json=as_json, all=show_all, clean=clean, dry_run=dry_run
+        project_root=project,
+        json=as_json,
+        all=show_all,
+        clean=clean,
+        dry_run=dry_run,
+        remote=remote,
     )
 
 
@@ -114,7 +121,12 @@ class TestClean:
 
     @pytest.mark.parametrize(
         "kwargs",
-        [{"dry_run": True}, {"clean": True, "as_json": True}, {"clean": True, "show_all": True}],
+        [
+            {"dry_run": True},
+            {"clean": True, "as_json": True},
+            {"clean": True, "show_all": True},
+            {"remote": True},
+        ],
     )
     def test_flag_misuse_is_a_usage_error(
         self, project: Path, capsys: pytest.CaptureFixture[str], kwargs: dict[str, bool]
@@ -131,6 +143,11 @@ class TestClean:
         with patch(_CLEAN, side_effect=error):
             assert cmd_branch_sweep(_args(project, clean=True)) == 1
         assert str(error) in capsys.readouterr().err
+
+    def test_remote_is_passed_to_the_sweep(self, project: Path) -> None:
+        with patch(_CLEAN, return_value=CleanupReport()) as clean:
+            assert cmd_branch_sweep(_args(project, clean=True, remote=True)) == 0
+        assert clean.call_args.kwargs["remote"] is True
 
 
 class TestParser:
@@ -150,7 +167,9 @@ class TestParser:
         assert args.clean is True
         assert args.dry_run is True
         plain = build_parser().parse_args(["branch-sweep"])
-        assert (plain.clean, plain.dry_run) == (False, False)
+        assert (plain.clean, plain.dry_run, plain.remote) == (False, False, False)
+        remote = build_parser().parse_args(["branch-sweep", "--clean", "--remote"])
+        assert remote.remote is True
 
     def test_help_documents_the_json_keys(self) -> None:
         parser = build_parser()

@@ -18,6 +18,7 @@ from tests.support.git_fixtures import run_git
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.core import remote_branch_proof
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.handlers.pre_tool_use import destructive_git
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import DestructiveGitHandler
@@ -191,6 +192,7 @@ class _FakeGit:
 def install(monkeypatch: pytest.MonkeyPatch) -> Callable[[_FakeGit], _FakeGit]:
     def _install(fake: _FakeGit) -> _FakeGit:
         monkeypatch.setattr(destructive_git, "run_git", fake)
+        monkeypatch.setattr(remote_branch_proof, "run_git", fake)
         monkeypatch.setattr(
             destructive_git, "resolve_default_branch", lambda _config, _directory: "main"
         )
@@ -251,6 +253,7 @@ def test_a_failed_listing_denies(
         return fake(cwd, *args, **kwargs)
 
     monkeypatch.setattr(destructive_git, "run_git", failing)
+    monkeypatch.setattr(remote_branch_proof, "run_git", failing)
     result = _handler().handle(_input("git push origin --delete b0", tmp_path))
     assert result.decision == "deny"
     assert "`b0`" in (result.reason or "")

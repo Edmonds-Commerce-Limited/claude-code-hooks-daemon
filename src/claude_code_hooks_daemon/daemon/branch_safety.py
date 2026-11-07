@@ -769,8 +769,10 @@ def bundle_restore_command(bundle: Path, ref: str) -> str:
     return f"git fetch {bundle} {ref}:{ref}"
 
 
-def write_recovery_bundle(repo: Path, names: Sequence[str], bundle_path: Path) -> Path:
-    """Bundle every named branch so a deletion can be undone.
+def write_recovery_bundle(
+    repo: Path, names: Sequence[str], bundle_path: Path, *, extra_refs: Sequence[str] = ()
+) -> Path:
+    """Bundle every named branch, plus ``extra_refs`` (full ref names), so a deletion can be undone.
 
     Written BEFORE any ref is removed, so a failure here aborts the deletion
     rather than leaving branches gone and no way back.
@@ -786,6 +788,7 @@ def write_recovery_bundle(repo: Path, names: Sequence[str], bundle_path: Path) -
         "create",
         str(bundle_path),
         *(branch_ref(n) for n in names),
+        *extra_refs,
         timeout=Timeout.GIT_BUNDLE_CREATE,
     )
     return bundle_path
@@ -828,6 +831,7 @@ def delete_branches(
     content_tier: bool = True,
     line_names: Sequence[str] = (),
     line_targets: Sequence[str] | None = None,
+    extra_bundle_refs: Sequence[str] = (),
 ) -> DeletionReport:
     """Classify every branch, then delete the batch.
 
@@ -861,6 +865,9 @@ def delete_branches(
         content_tier: Passed to :func:`classify_branch`.
         line_names: Passed to :func:`classify_branch`; integration lines.
         line_targets: Passed to :func:`classify_branch`; the default ref(s) only.
+        extra_bundle_refs: Further full ref names the caller will delete itself
+            (``branch-sweep --clean --remote``'s remote-tracking refs), bundled with
+            the branches. The bundle is then kept even when no branch is deleted.
 
     Raises:
         ValueError: if ``allow_unproven`` is set without a reason.
@@ -919,7 +926,12 @@ def delete_branches(
 
     bundle: Path | None = None
     if bundle_path is not None:
-        bundle = write_recovery_bundle(repo, [c.name for c in classifications], bundle_path)
+        bundle = write_recovery_bundle(
+            repo,
+            [c.name for c in classifications],
+            bundle_path,
+            extra_refs=extra_bundle_refs,
+        )
 
     deleted: list[str] = []
     failures: list[str] = []
@@ -962,7 +974,7 @@ def delete_branches(
         # finding it later would reasonably read it as evidence the branch was
         # gone. Where something WAS deleted the bundle is the recovery route, so
         # it stays.
-        if bundle is not None and not deleted:
+        if bundle is not None and not deleted and not extra_bundle_refs:
             problem = _discard_unused_bundle(bundle)
             if problem is None:
                 bundle = None
