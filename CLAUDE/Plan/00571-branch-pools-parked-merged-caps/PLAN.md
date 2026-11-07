@@ -110,7 +110,7 @@ Root-cause detail with file:line: [ROOTCAUSE.md](ROOTCAUSE.md).
   `worktree-plan-00571-branch-pools`: the coordinator's stop was told to push
   or finish that branch, with "abandoned" threatened at the third block.
 
-- [ ] ⬜ **Task 2.6**: `CLAUDE/development/IssueSdlc.md` Step 5 stops
+- [x] ✅ **Task 2.6**: `CLAUDE/development/IssueSdlc.md` Step 5 stops
   requiring a separate integration branch when only one branch is ready. It
   merges current `main` into the issue branch itself and runs the targeted
   check there. Found dogfooding: every issue opened two branches, and the
