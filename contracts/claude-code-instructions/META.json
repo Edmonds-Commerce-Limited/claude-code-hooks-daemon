@@ -4,6 +4,6 @@
   "docs_bytes": 55677,
   "docs_sha256": "275fe39e8501741ad308ab8ecd4552327cf34e53654841d7a121de80fbe6b595",
   "vendored_path": "remote-docs/code.claude.com/docs/en/memory.md",
-  "last_audited_claude_code_version": "2.1.318",
+  "last_audited_claude_code_version": "2.1.319",
   "refresh_procedure": "docs/guides/HOOK-CONTRACT-REFRESH.md"
 }

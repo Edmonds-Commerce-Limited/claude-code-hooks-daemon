@@ -139,3 +139,20 @@ releases:
       review already covered, so the review range was empty and nothing was
       filed. The hook contract is not re-audited at 2.1.318, so it is not
       recorded as the tested version.
+  v3.73.0:
+    claude_code_version: unknown
+    evidence: ""
+    review_date: "2026-11-07"
+    reviewed_through: "2.1.319"
+    review_report: CLAUDE/Plan/00474-niggles-ledger-seventeen/subagent-reports/261107-claude-code-review-v3.73.0.md
+    note: >-
+      The release host ran Claude Code 2.1.319, but the hook contract
+      (contracts/claude-code-hooks/META.json) has not been re-audited at that
+      version, so 2.1.319 is not recorded as the tested version. The review
+      ran FROM 2.1.318 (v3.72.1's reviewed_through) to 2.1.319, a single
+      changelog entry: no adopt, redundant or conflict rows, and no
+      instruction-loading change (the instructions contract's audited
+      version is bumped to 2.1.319). Two no-impact watch items are in the
+      report: permissions.denyInsteadOfPrompting may hide requests from
+      PermissionRequest handlers, and PostToolUse hooks now also run after
+      an interrupt.
