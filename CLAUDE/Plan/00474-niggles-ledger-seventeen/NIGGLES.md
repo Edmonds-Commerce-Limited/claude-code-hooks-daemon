@@ -124,6 +124,49 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N590 — `hooks-daemon --version` is refused as an unrecognised argument
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026). Reproduced here: `bin/hooks-daemon --version`
+prints the usage text and refuses the flag.
+
+**Proposal**: add an argparse `--version` action on the top-level parser that prints the installed package version.
+Test it through the CLI entry point.
+
+**Status**: ⬜ open.
+
+### N589 — `restart` detects a venv stale for the source and names `repair`, but does not repair it
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026), from the host seat's v3.73.0 restart.
+Reproduced in this session: SessionStart reported "DAEMON VENV NOT BUILT FOR THIS SOURCE", and `restart` prints "restart
+does not build a venv; it reuses this one".
+
+**Evidence**: after an upgrade, every other seat sharing the checkout has a venv whose `lock_hash` no longer matches
+`pyproject.toml` plus `uv.lock`. Each seat then has to run restart (which warns and names repair), then repair, then
+restart again.
+
+**Proposal**: when restart's own staleness check fires, run the repair and continue in one step, reporting that it
+did. Related open issues: #148 (sync after a pull) and #168 (provision says nothing to do while the venv is stale).
+Fold it into whichever of those is worked first.
+
+**Status**: ⬜ open.
+
+### N588 — the upgrade's `modified_files` lists every dirty file in the tree, not what the upgrade wrote
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026), upgrading to v3.73.0 (their e9607df9c).
+
+**Evidence**: `scripts/upgrade.sh:975-983` fills `UPGRADE_METADATA`'s `modified_files` from
+`git status --porcelain` over the whole project tree, so it names every uncommitted file. The tree held 33 unrelated
+uncommitted files from another agent beside the 4 the upgrade changed, and all 37 were listed. The comment there says
+the project agent filters by daemon-owned prefixes, but fedora-desktop's bash-limits gate exempts a file as daemon-owned
+while an upgrade commit lists it in `modified_files`. Pasting the block as instructed would have silently exempted the
+33 unrelated files. The client recorded the 4 real files by hand.
+
+**Proposal**: snapshot `git status --porcelain` (with content hashes for files already dirty) before the deploy and
+list only paths that are new or changed afterwards. Alternatively, refuse to start on a dirty tree and name the files.
+Add a test with a pre-dirty unrelated file that must not appear. Client-visible, so a release note is required.
+
+**Status**: ⬜ open.
+
 ### N587 — `ask_user_question_blocker` called the session unattended while the owner was typing to it
 
 **Source**: the owner, during the v3.73.0 release (7 November 2026): "dog fooding error there - not sure why it was
