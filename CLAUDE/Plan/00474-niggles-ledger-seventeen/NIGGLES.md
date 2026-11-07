@@ -130,10 +130,13 @@ remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedBy
 refreshes docs that are over X days old?" It does not.
 
 **Evidence**: RELEASING.md Step 1H runs `bin/hooks-daemon remote-docs refresh --all`, which re-fetches every stored
-document whatever its age; `--stale-after-days` sets the freshness window recorded on a capture, it is not a filter.
-On v3.73.0 that touched 49 files: 12 had real upstream changes, about 37 were byte-identical upstream (same
-`source_sha256`) yet still had `fetched_at` and `stale_after` rewritten. For example, `memory.md` had been fetched two
-days earlier. Commit 158f6f967 on `release/3.73.0` is mostly timestamp churn.
+document whatever its age. `--stale-after-days` sets the freshness window recorded on a capture (`add`). It is not a
+filter, and `refresh` ignores it, taking the window from each document's own record. On v3.73.0 that touched 49 files:
+12 docs had real upstream changes, 36 were byte-identical upstream (same `source_sha256`) yet still had `fetched_at`
+and `stale_after` rewritten, and the generated index `.claude/REMOTE-DOCS.md` was re-rendered. For example,
+`memory.md` had been fetched two days earlier. Commit 158f6f967 on `release/3.73.0` is mostly timestamp churn. The
+rewrite is deliberate: `remote_docs/store.py` computes `unchanged` and writes the file anyway, so the provenance guard
+sees a fresh stamp. Proposal (b) has to keep that guard satisfied another way.
 
 **Proposal**: (a) `remote-docs refresh --stale` (or making it the default with no `--all`): refresh only documents past
 their `stale_after`, plus any named with `--path` (the release names the changelog, which Step 1c always needs fresh);
