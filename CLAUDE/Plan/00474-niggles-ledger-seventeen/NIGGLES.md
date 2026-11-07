@@ -124,6 +124,35 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N595 — `lint_on_edit` lints Go files under `testdata/`, which Go never builds
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026), dogfooding v3.73.0.
+
+**Evidence**: Go analyzer fixtures for go/analysis rules live under `testdata/` and are deliberately wrong code. The
+go tool ignores any directory named `testdata` (and those starting with `.` or `_`). `lint_on_edit` lints them anyway
+and denies the write.
+
+**Proposal**: the Go lint strategy skips a path with a `testdata` component, matching the go tool's own rule, with a
+test for a fixture under `pkg/x/testdata/src/a/a.go`. Check whether other languages' strategies have an equivalent
+never-built fixture convention.
+
+**Status**: ⬜ open.
+
+### N594 — `lint_on_edit` reports "ruff not found" while ruff is on the session's PATH
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026), dogfooding v3.73.0.
+
+**Evidence**: a Python write drew "ruff not found", although ruff is on PATH in the session. The project pins ruff,
+and its `./scripts/qa-changed.bash` finds and runs it. So the handler resolves ruff differently from the session,
+most likely with the daemon process's PATH (started earlier, or from another environment) rather than the
+project's pinned tool location.
+
+**Proposal**: reproduce with a daemon whose PATH lacks the tool and a project that pins it (a project venv or tool
+directory). Make the lookup also try the project's declared or venv tool locations before reporting not-found. The
+message should name the PATH that was searched. Test both.
+
+**Status**: ⬜ open.
+
 ### N593 — the acceptance harness failed in CI because the repository reached its own branch cap
 
 **Source**: the coordinator, from PR #183's CI (run 42415884106, 7 November 2026). `test_playbook_harness` failed with
