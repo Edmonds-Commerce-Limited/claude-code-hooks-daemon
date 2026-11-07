@@ -272,6 +272,13 @@ class TestResolveBinary:
         env = {"CCY_HOOKS_SCREEN": str(override)}
         assert resolve_screen_binary(tmp_path, env, machine="riscv64") == override
 
+    def test_non_executable_is_skipped(self, tmp_path: Path) -> None:
+        path = tmp_path / "untracked" / "bin" / "hooks-screen"
+        path.parent.mkdir(parents=True)
+        path.write_text("x")
+        path.chmod(0o644)
+        assert resolve_screen_binary(tmp_path, {}) is None
+
 
 class TestScreenTargetTriple:
     @pytest.mark.parametrize(
@@ -304,18 +311,11 @@ class TestMissingBinaryNote:
         assert "riscv64" in note
         assert "no hooks-screen build" in note
 
-    def test_check_logs_the_note_and_fails_open(self, tmp_path: Path) -> None:
+    def test_check_logs_the_note_and_fails_open(self) -> None:
         logged: list[str] = []
         check = _check(None, log=logged.append, missing_note="no binary; arch riscv64")
         assert check.verdict() == "unknown"
         assert logged == ["screen check failed open: no binary; arch riscv64"]
-
-    def test_non_executable_is_skipped(self, tmp_path: Path) -> None:
-        path = tmp_path / "untracked" / "bin" / "hooks-screen"
-        path.parent.mkdir(parents=True)
-        path.write_text("x")
-        path.chmod(0o644)
-        assert resolve_screen_binary(tmp_path, {}) is None
 
 
 class TestInputActivityDecision:
