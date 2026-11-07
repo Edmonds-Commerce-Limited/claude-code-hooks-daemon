@@ -143,13 +143,15 @@ never-built fixture convention.
 **Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026), dogfooding v3.73.0.
 
 **Evidence**: a Python write drew "ruff not found", although ruff is on PATH in the session. The project pins ruff,
-and its `./scripts/qa-changed.bash` finds and runs it. So the handler resolves ruff differently from the session,
-most likely with the daemon process's PATH (started earlier, or from another environment) rather than the
-project's pinned tool location.
+and its `./scripts/qa-changed.bash` finds and runs it. The lookup already tries the workspace `bin_dirs` first
+(`.venv/bin` and `venv/bin` by default), then the daemon interpreter's bin, then the DAEMON's PATH (`strategies/lint/ common.py:39-73`, fact-check 261107-fact-check-n594-n595.md). So the miss is a ruff pinned somewhere else (a uv tool
+directory, a project script's own location) that no declared `bin_dirs` names, while the session's PATH holds it and
+the daemon's does not.
 
-**Proposal**: reproduce with a daemon whose PATH lacks the tool and a project that pins it (a project venv or tool
-directory). Make the lookup also try the project's declared or venv tool locations before reporting not-found. The
-message should name the PATH that was searched. Test both.
+**Proposal**: find out where fedora-desktop pins ruff and how `qa-changed.bash` finds it. Then either document
+`bin_dirs` for that layout, or teach the lookup that location. The not-found message already lists the directories
+it searched (`lint_on_edit.py:437-446`); add the PATH value it used, so a daemon-versus-session PATH gap is visible.
+Test with a daemon PATH lacking the tool.
 
 **Status**: ⬜ open.
 
