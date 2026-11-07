@@ -132,7 +132,9 @@ remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedBy
 merged into `main`, past its pushed upstream. `worktree-reap --reap --reap-branches` removed the worktree but printed
 `git kept the branch ... not yet merged to refs/remotes/origin/...`, because it deletes with `git branch -d`, which
 checks the upstream. `delete-branch` on the same branch classified it as `merged-unpushed` and deleted it losslessly
-behind a bundle. The two commands disagree on the same proof, and the run still said REAPED with exit 1.
+behind a bundle. The two commands disagree on the same proof, and the run still reported the worktree as REAPED. Its
+exit 1 came from the refused `worktree-plan-00573-admin-override` worktree, not the kept branch: a kept branch counts
+toward neither the refused nor the unmerged total, so on its own it exits 0, and a caller cannot see it from the exit code.
 
 **Proposal**: have `worktree-reap --reap-branches` delete through the same `branch_safety.delete_branches` path
 (containment against the protected ref, plus a bundle) instead of `git branch -d`.
