@@ -1,6 +1,6 @@
 # Plan 00573: admin seat issue assignment override
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-07
 **Owner**: joseph
 **Priority**: High
@@ -69,8 +69,9 @@ comment naming the previous assignee, so the hand-over is visible to them.
 ## Success Criteria
 
 - [x] Tests for each table row fail before the change and pass after it.
-- [ ] Dogfood: with this seat as admin, a plan whose `**GitHub Issue**` names
+- [x] Dogfood: with this seat as admin, a plan whose `**GitHub Issue**` names
   an issue assigned to a non-admin is editable, and the advisory is shown.
+  Verified live on issue #155 (see the JOURNAL entry).
 - [x] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` records the
   change in the pending-release holding area, with a truth-changes entry,
   because the documented "never claim an issue held by someone else" becomes
@@ -78,4 +79,6 @@ comment naming the previous assignee, so the hand-over is visible to them.
 
 ## Delivery & Milestones
 
-- Implemented on branch worktree-plan-00573-admin-override; dogfood criterion pending merge (needs the live admin seat).
+- Merged to main at `a2b7f27e9` after targeted QA 42/42 (4517 tests). Dogfood
+  verified live on issue #155. Ships in the release after v3.73.0 (release note
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/004-admin-seat-issue-assignment-override.md`).
