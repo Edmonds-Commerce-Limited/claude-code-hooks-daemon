@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00571: branch pools parked merged caps](00571-branch-pools-parked-merged-caps/PLAN.md) - In Progress (GitHub #165 plus the owner's ruling: open, parked and merged branches become three pools, each with its own cap; parked and merged-kept branches carry a reason and a max age; one safe command clears merged branches locally and remotely behind an accumulating recovery bundle)
+
 - [00570: branch containment remote archive refs](00570-branch-containment-remote-archive-refs/PLAN.md) - In Progress (GitHub #166: branch-sweep and delete-branch accept a remote ref outside `refs/remotes`, such as an archive namespace, as proof of containment via one bounded `ls-remote`; the offline wording says only what it checked)
 
 - [00569: hooks screen target by host arch](00569-hooks-screen-target-by-host-arch/PLAN.md) - In Progress (GitHub #174: the ccy supervisor and `screen/build.sh` choose the hooks-screen musl target triple from the host architecture, x86_64 or aarch64, instead of pinning x86_64)
@@ -328,11 +330,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 570 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 571 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 483 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 64 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 65 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
