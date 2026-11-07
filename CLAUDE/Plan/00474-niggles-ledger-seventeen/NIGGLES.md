@@ -124,7 +124,28 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N582 — `work-queue done` names the issue it just delivered as the next workable issue
+
+**Source**: this session, 7 November 2026, closing the #174 queue record (Plan 00569).
+
+**Evidence**: `bin/hooks-daemon work-queue done issue-174-screen-arch --sha ae0af5761e8e` printed
+"next workable issue: #174 - start it now". #174 was the issue that record had just delivered. It was still open and
+labelled `agent-working`, because the runbook runs `done` at Step 7, before Step 8 closes the issue.
+
+**Root cause** (Plan 00571 `ROOTCAUSE.md`, item 3): `_next_issue_line` (`daemon/work_queue_cli.py`) takes the first
+entry of `workable_numbers` (`utils/workable_issues.py`), which never excludes `agent-working`. The queue record stores
+no issue number, so `done` cannot exclude its own issue. The cache is also ordered newest-first, while the runbook
+selects oldest-first, and the idle-stop gate reads the same cache.
+
+**Proposal**: exclude `agent-working` (and `agent-needs-human`) issues from the workable set. Store an optional
+`--issue N` on `work-queue add` and exclude it in `done`. Order oldest-first in one function that the stop gate shares.
+
+**Status**: ⬜ open.
+
 ### N581 — the branch stop guard reports branches with a running work-queue agent as "abandoned"
+
+**Reproduced again** 7 November 2026 on `worktree-plan-00571-branch-pools` while its sub-agent was committing. Taken
+into Plan 00571 as Task 2.5.
 
 **Source**: this session, 5 November 2026, while the #161 and #162 implementation agents were working.
 

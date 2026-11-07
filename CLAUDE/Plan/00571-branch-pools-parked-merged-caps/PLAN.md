@@ -61,10 +61,8 @@ Root-cause detail with file:line: [ROOTCAUSE.md](ROOTCAUSE.md).
 - Changing dormancy for open work, or the containment proof (Plan 00570, #166).
 - Deleting anything without proof, or deleting a kept branch inside its age.
 - `work-queue done` naming the issue it just delivered as the next workable one
-  ([ROOTCAUSE.md](ROOTCAUSE.md) item 3). It is recorded here because the open
-  niggles ledger (Plan 00474) cannot take new entries: its `**GitHub Issue**`
-  header names #59, which is assigned to another account, so the issue
-  assignment guard denies every edit to it. It needs its own small fix plan.
+  ([ROOTCAUSE.md](ROOTCAUSE.md) item 3). Recorded as N582 in the open niggles
+  ledger (Plan 00474).
 
 ## Design decisions to settle in Phase 1 (with evidence, before code)
 
