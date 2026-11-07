@@ -202,6 +202,7 @@ jobs:
             untracked/qa/
             untracked/daemon-keepalive.log
           if-no-files-found: warn
+          retention-days: 14
 
       # Each coverage shard's data file (untracked/qa/.coverage.<shard>),
       # combined in the coverage job. Hidden files need opting in.
@@ -213,6 +214,8 @@ jobs:
           path: untracked/qa/.coverage.*
           include-hidden-files: true
           if-no-files-found: error
+          # Read only by this run's coverage job.
+          retention-days: 3
 
   # The coverage verdict over every shard of the coverage Python, held to
   # pyproject's fail_under (95), as the local stage's combine does. A missing
@@ -254,10 +257,25 @@ jobs:
           merge-multiple: true
 
       - name: Combine and judge
+        env:
+          PROFILE: ${{ inputs.profile }}
         run: |
+          set -euo pipefail
           files=()
           for shard in $SHARDS; do
             files+=("untracked/qa/.coverage.$shard")
           done
           python -m coverage combine --keep --data-file=untracked/qa/coverage-combined.data "${files[@]}"
-          python -m coverage report --data-file=untracked/qa/coverage-combined.data
+          # The summary is written whatever the verdict, then the verdict is
+          # returned: a run below fail_under shows its total on the run page.
+          status=0
+          python -m coverage report --data-file=untracked/qa/coverage-combined.data \
+            | tee untracked/qa/coverage-report.txt || status=$?
+          {
+            echo "### Coverage (${PROFILE})"
+            echo
+            echo '```'
+            tail -n 3 untracked/qa/coverage-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

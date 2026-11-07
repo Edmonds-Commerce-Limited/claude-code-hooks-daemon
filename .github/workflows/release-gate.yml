@@ -185,6 +185,7 @@ jobs:
           name: qa-checks-${{ matrix.group }}
           path: untracked/qa/
           if-no-files-found: warn
+          retention-days: 14
 
   # The `tests` check, sliced over runners by the shared test-shards workflow
   # (Plan 00572 Task 2.1), which qa.yml's full tier and fallback also call.
@@ -246,4 +247,11 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          {
+            echo "### Release gate"
+            echo
+            echo "| Job | Result |"
+            echo "| --- | ------ |"
+            echo "$RESULTS" | jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"'
+          } >> "$GITHUB_STEP_SUMMARY"
           echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' > /dev/null

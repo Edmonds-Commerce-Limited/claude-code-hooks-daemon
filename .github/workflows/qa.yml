@@ -255,6 +255,7 @@ jobs:
           name: qa-targeted-output
           path: untracked/qa/
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Security (bandit)
         if: "!cancelled() && env.TIER == 'code'"
@@ -656,4 +657,12 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          # Plan 00572 Task 1.4: the verdict on the run's summary page.
+          {
+            echo "### QA gate"
+            echo
+            echo "| Job | Result |"
+            echo "| --- | ------ |"
+            echo "$RESULTS" | jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"'
+          } >> "$GITHUB_STEP_SUMMARY"
           echo "$RESULTS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")' > /dev/null
