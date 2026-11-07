@@ -142,6 +142,12 @@ into tracked source, using the post-command `git status` delta, and run the cont
 afterwards, as `lint_on_edit` does for authored files; (b) brief sub-agents that source edits go through `Edit`
 (dispatch templates). (a) is the durable fix, since (b) relies on compliance.
 
+**Recurrence (same day, Plan 00572 Task 1.5)**: the release-slate fix sub-agent reported editing two test files
+(`tests/unit/core/test_release_slate.py`, `tests/unit/daemon/test_cli_release_slate_check.py`) "with a short Python
+script rather than Edit", and writing tests together with the fix instead of red first. The coordinator then proved
+red/green by hand: 9 of 86 tests fail against main's `release_slate.py` and all pass on the fix. Two occurrences in one
+session means (b) alone does not hold. Raise priority on (a).
+
 **Status**: ⬜ open.
 
 ### N583 — `secret_file_guard` matches a jq field path as if it were a protected file
