@@ -1241,25 +1241,33 @@ HOOKS_DAEMON_SKILL_SCRIPTS_DIR=untracked/worktrees/tag-vX.Y.Z/src/claude_code_ho
 git worktree remove untracked/worktrees/tag-vX.Y.Z
 ```
 
-### Relay binary (Plan 00290 Phase 5 — the `daemon.transport.relay_source: download` convenience asset)
+### Relay and hooks-screen binaries (CI-published, Plan 00572 Task 3.2)
 
-**Only if a musl-capable `rustc` is available on this machine** (`rustc --print target-list | grep x86_64-unknown-linux-musl`). Build-from-source stays the
-FIRST-CLASS route for clients regardless (`relay/hooks_relay.rs` +
-`relay/build.sh` ship in every release, no cargo/crates needed) — this step
-only produces the CONVENIENCE download asset for clients who choose
-`relay_source: download` over `relay_source: build`. Skip this block entirely
-if no toolchain is available here; a release missing the relay asset is still
-valid — the download route just has nothing to fetch until a later release
-adds it, and `install/relay_deploy.py` reports that as an advisory, never a
-hard failure.
+Nothing to build or upload here. Pushing the tag starts
+`.github/workflows/release-assets.yml`, which builds the relay and hooks-screen
+natively on an x86_64 and an aarch64 runner, writes one `SHA256SUMS` over all
+four binaries, attests them with `actions/attest-build-provenance`, waits up
+to 45 minutes for the release created above, and uploads them with
+`--clobber`. These are the convenience assets for clients who choose
+`daemon.transport.relay_source: download`; `install/relay_deploy.py` picks
+`hooks-relay-<host triple>` by the host's architecture. Build-from-source
+(`relay/build.sh`) stays the first-class route.
+
+Confirm the run passed and the release lists the five assets:
 
 ```bash
-scripts/release/build_relay_release_assets.sh untracked/release-artifacts
-
-gh release upload vX.Y.Z \
-  untracked/release-artifacts/hooks-relay-x86_64-unknown-linux-musl \
-  untracked/release-artifacts/SHA256SUMS
+gh run list --workflow release-assets.yml --branch vX.Y.Z --limit 1
+gh release view vX.Y.Z --json assets --jq '.assets[].name' \
+  | grep -E '^(hooks-relay-|hooks-screen-)(x86_64|aarch64)-unknown-linux-musl$|^SHA256SUMS$'
+gh release download vX.Y.Z --pattern 'hooks-relay-aarch64-*' --dir untracked/scratch --clobber
+gh attestation verify untracked/scratch/hooks-relay-aarch64-unknown-linux-musl \
+  --repo Edmonds-Commerce-Limited/claude-code-hooks-daemon
 ```
+
+If the run failed because the release did not exist within the wait, re-run it
+once it does: `gh workflow run release-assets.yml -f tag=vX.Y.Z`. A release
+without these assets is still valid: the download route reports the missing
+asset as an advisory and never fails the install.
 
 **Verification before continuing**:
 

@@ -231,7 +231,8 @@ the same line.
 dependency tree — whenever a musl-capable toolchain is present, and is
 preferred over downloading. `relay_source: download` fetches a
 sha256-digest-verified precompiled asset from the GitHub release matching
-the installed version as a convenience; a fetch failure or a digest
+the installed version as a convenience, choosing the x86_64 or aarch64 asset
+by the host's architecture; a fetch failure or a digest
 mismatch is always an advisory, never a hard install/upgrade failure. The
 relay's own source (`relay/hooks_relay.rs`) ships in the package
 **regardless of which route is chosen or whether the rung is enabled at
