@@ -39,8 +39,23 @@ class RunningHolds:
     worktrees: frozenset[str]
 
 
-def running_holds(untracked: Path) -> RunningHolds:
-    """The holds of every ``running`` record; empty when the queue is unreadable."""
+def canonical_path(path: Path | str, project_root: Path) -> str:
+    """``path`` as one absolute, symlink-free, separator-trimmed string.
+
+    A relative path is taken relative to ``project_root`` (the work queue records
+    it that way); ``Path`` already drops a trailing separator.
+    """
+    return str((project_root / path).resolve())
+
+
+def running_holds(untracked: Path, project_root: Path | None = None) -> RunningHolds:
+    """The holds of every ``running`` record; empty when the queue is unreadable.
+
+    Worktree holds are stored canonical (see :func:`canonical_path`), so the
+    spelling a record was written in does not decide whether it matches.
+    ``project_root`` defaults to the parent of ``untracked``.
+    """
+    root = project_root if project_root is not None else untracked.parent
     try:
         records = active_records(read_queue(untracked / WORK_QUEUE_FILENAME))
     except WorkQueueError as exc:
@@ -53,7 +68,7 @@ def running_holds(untracked: Path) -> RunningHolds:
         return RunningHolds(frozenset(), frozenset())
     return RunningHolds(
         branches=frozenset(r.branch for r in records if r.branch),
-        worktrees=frozenset(r.worktree for r in records if r.worktree),
+        worktrees=frozenset(canonical_path(r.worktree, root) for r in records if r.worktree),
     )
 
 
@@ -76,7 +91,9 @@ def ownership_refusal(
     command (``worktree-reap``) whose job is to reap exactly those worktrees, behind
     its own liveness checks.
     """
-    if branch in holds.branches or (worktree is not None and str(worktree) in holds.worktrees):
+    if branch in holds.branches or (
+        worktree is not None and canonical_path(worktree, Path("/")) in holds.worktrees
+    ):
         return "a running work-queue agent owns it; left alone"
     if worktree is None:
         return None

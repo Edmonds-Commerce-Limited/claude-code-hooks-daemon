@@ -9579,6 +9579,7 @@ def cmd_worktree_reap(
     """
     from claude_code_hooks_daemon.core import agent_ownership, branch_cleanup
     from claude_code_hooks_daemon.core.worktree_reaping import (
+        PruneOutcome,
         collect_orphaned_branches,
         collect_skipped_merged_branches,
         collect_worktree_states,
@@ -9662,7 +9663,7 @@ def cmd_worktree_reap(
 
     # A live agent's worktree and branch are never reaped: a `running` work-queue
     # record or a git lock marks them, whatever the predicate below says.
-    holds = agent_ownership.running_holds(_daemon_untracked_dir(repo_root))
+    holds = agent_ownership.running_holds(_daemon_untracked_dir(repo_root), repo_root)
     listing = (run_fn if run_fn is not None else run_git)(
         repo_root, "worktree", "list", "--porcelain"
     )
@@ -9705,11 +9706,30 @@ def cmd_worktree_reap(
         # with `--reap` in a script agreed to remove worktrees and the branches
         # attached to them, and must not start deleting standalone branches
         # because this command learned a new trick.
-        branch_outcome = prune_branch(
-            repo_root, branch, dry_run=not reap_branches, **collect_kwargs
+        try:
+            branch_outcome = prune_branch(
+                repo_root,
+                branch,
+                base_branch=base_branch,
+                bundle_dir=repo_root / _DELETE_BRANCH_BUNDLE_DIR,
+                dry_run=not reap_branches,
+            )
+        except subprocess.CalledProcessError as exc:
+            # An unclassifiable git failure (an expired budget) deleted nothing.
+            logger.warning("worktree-reap: git failed pruning %s: %s", branch.name, exc)
+            branch_outcome = PruneOutcome(
+                branch.name,
+                deleted=False,
+                kept=True,
+                detail=f"kept the branch {branch.name}: git failed ({exc.stderr or exc.returncode})",
+            )
+        label = (
+            "PRUNED " if branch_outcome.deleted else "KEPT   " if branch_outcome.kept else "ORPHAN "
         )
-        print(f"{'PRUNED ' if branch_outcome.deleted else 'ORPHAN '} {branch_outcome.detail}")
-        if not branch_outcome.deleted and not branch.merged_into_base:
+        print(f"{label} {branch_outcome.detail}")
+        # A merged branch the delete was asked to remove and did not is as much a
+        # leftover as an unmerged one: the exit code must say so.
+        if branch_outcome.kept or (not branch_outcome.deleted and not branch.merged_into_base):
             unmerged += 1
 
     if not reap:

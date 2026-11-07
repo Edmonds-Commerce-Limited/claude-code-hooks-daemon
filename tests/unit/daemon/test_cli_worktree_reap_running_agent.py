@@ -67,7 +67,7 @@ def _run(**overrides: object) -> int:
 @pytest.fixture
 def running(monkeypatch: pytest.MonkeyPatch) -> None:
     holds = RunningHolds(branches=frozenset({"agent-live", "agent-q"}), worktrees=frozenset())
-    monkeypatch.setattr(agent_ownership, "running_holds", lambda _untracked: holds)
+    monkeypatch.setattr(agent_ownership, "running_holds", lambda _untracked, _root=None: holds)
 
 
 def test_a_running_queue_worktree_is_kept(
