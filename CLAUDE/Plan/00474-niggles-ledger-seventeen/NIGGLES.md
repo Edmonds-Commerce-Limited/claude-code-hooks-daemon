@@ -124,6 +124,19 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N583 — `secret_file_guard` matches a jq field path as if it were a protected file
+
+**Source**: this session, 7 November 2026, enabling repository security settings (Plan 00572).
+
+**Evidence**: a `gh api ... --jq '<dot path into the security_and_analysis object, ending at the scanning status field>'` command was denied with R-SECRET-BASH-MENTION. The guard matched the jq expression token against
+the `*.secret*` file glob. A jq field path names no file, and the same command with a shorter jq path passed.
+
+**Proposal**: tokens that are clearly jq/JSON paths (the argument of `--jq`, `-q` or `jq` filters) should not be
+judged as file paths. More generally, a glob match should require a path-shaped token (containing `/` or naming an
+existing file) before denying, while keeping the deny for a real file named that way.
+
+**Status**: ⬜ open.
+
 ### N582 — `work-queue done` names the issue it just delivered as the next workable issue
 
 **Source**: this session, 7 November 2026, closing the #174 queue record (Plan 00569).
