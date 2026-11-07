@@ -128,17 +128,24 @@ remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedBy
 
 **Source**: coordinator, main CI run 42421806919 at a000ed4c6 (7 November 2026), shard `integration-slow`.
 
-**Evidence**: `tests/integration/test_provision_sh.py:1349` (via `_outcome` -> `_state`, line 1117) asserted
+**Evidence**: `tests/integration/test_provision_sh.py:1349` (via `_outcome` line 1278 -> `_state`, line 1117) asserted
 `no state recorded at .../.claude/hooks-daemon/untracked/background-sync/v9.9.9.state`. 313 passed, 1 failed, in a
 1,491 s shard. The next main run (42423929870, 83044eb95), whose only change was this ledger, passed, so the failure
-is timing, not the N588 merge. The test runs the real forwarder, which starts the sync detached (`setsid ... &`) after
-the hook answers; a loaded runner can leave the detached sync with no state file written by the time `_outcome`
-reads it.
+is timing, not the N588 merge. The test runs the real forwarder (`.claude/hooks/session-start` lines 25-28), which
+starts `provision.sh --background` detached with `setsid` after the hook answers.
 
-**Proposal**: read how `_outcome` waits (a bounded poll for the state file, and whether its bound goes through
-`tests.load_scaling.scaled_seconds` like N222's fixes). If it reads the file once, or polls on a bare number, make it
-poll to a scaled bound for the state file to exist AND reach a terminal state. Reproduce first by slowing the detached
-start (a stub sleep before the state write) so the test fails red without the fix.
+`_outcome` is a bounded poll (bare `timeout=60.0`, not load-scaled) and calls `_state` only after `path.is_file()` was
+true; a state file never written would have raised "did not finish within 60.0s" instead (fact-check
+[261107-fact-check-n596.md](subagent-reports/261107-fact-check-n596.md)). So the file EXISTED and was gone a moment
+later, when `_state` checked it again: the background sync's state write leaves a window with no file (a remove then
+write, or a replace that is not one atomic rename). A real reader (the status line, a second `provision.sh`) can hit
+the same window and read "no sync recorded".
+
+**Proposal**: find where `provision.sh` / the sync module writes `v<version>.state`; make every write a temp file plus
+one `rename` into place, so the path is never absent once created. Test first: a reader polling the path while the
+sync rewrites it repeatedly never sees it missing after its first appearance. Separately, make `_outcome` read once
+per iteration (no second `is_file`) and treat a vanished file as "keep polling", and route its bound through
+`tests.load_scaling.scaled_seconds` per N222.
 
 **Status**: ⬜ open.
 
