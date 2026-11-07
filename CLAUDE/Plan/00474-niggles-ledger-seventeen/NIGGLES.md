@@ -157,9 +157,9 @@ ever. Their owner's rule allows no exclude for a daemon-owned file, so fedora-de
 fixes it.
 
 **Status**: ✅ fixed on main. `_read_regular_text` opens with `O_NONBLOCK` and reads only when `fstat` reports a
-regular file, otherwise raising `OSError`, which every caller already handles. All 17 signal and `/proc` reads go
+regular file, otherwise raising `OSError`, which every caller already handles. All 16 signal and `/proc` reads go
 through it. Test: `tests/unit/supervise/test_walk_opens_regular_files_only.py`, which plants a FIFO matching each
-loader's glob (12 loaders) and requires a return within 5 seconds. Release note 009.
+of 11 loaders' globs, plus one under a `/proc`-shaped root, and requires a return within 5 seconds. Release note 009.
 
 ### N591 — the remote-delete guard denies a merged branch when the same command also removes its worktree and local branch
 
@@ -220,7 +220,10 @@ while an upgrade commit lists it in `modified_files`. Pasting the block as instr
 list only paths that are new or changed afterwards. Alternatively, refuse to start on a dirty tree and name the files.
 Add a test with a pre-dirty unrelated file that must not appear. Client-visible, so a release note is required.
 
-**Status**: ⬜ open.
+**Status**: ✅ fixed on `agent-ac4f3ae9be87cf434-a6fe075d`: `upgrade.sh` Step 1b snapshots every dirty path with a
+content hash before Step 3, and `modified_files` lists only paths new to the dirty set or whose content changed
+(renames list both sides; spaces and deletions handled). Release note `008`. Test:
+`tests/integration/test_upgrade_sh_modified_files_scope.py`.
 
 ### N587 — `ask_user_question_blocker` called the session unattended while the owner was typing to it
 

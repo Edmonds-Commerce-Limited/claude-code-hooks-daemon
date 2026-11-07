@@ -57,7 +57,10 @@ _NOW = 1_800_000_000.0
 _LOADERS: list[tuple[str, Callable[[Path], object]]] = [
     ("x.json", lambda d: _mod._scan_sidecars(d)),
     ("x.compacting", lambda d: _mod.load_compaction_signal(d, now=_NOW, ttl_seconds=60.0)),
-    (f"x{_mod._USAGE_PAUSE_SUFFIX}", lambda d: _mod.load_usage_pause(d, now=_NOW, own_sessions=None)),
+    (
+        f"x{_mod._USAGE_PAUSE_SUFFIX}",
+        lambda d: _mod.load_usage_pause(d, now=_NOW, own_sessions=None),
+    ),
     ("x.goal-clear", lambda d: _mod.load_goal_clear_signal(d, now=_NOW)),
     ("x.goal-intent", lambda d: _mod.load_goal_signal(d, now=_NOW)),
     ("x.standing-auth-intent", lambda d: _mod.load_standing_auth_signal(d, now=_NOW)),
@@ -70,7 +73,10 @@ _LOADERS: list[tuple[str, Callable[[Path], object]]] = [
         _mod._MODEL_DOWNGRADE_SIGNAL_GLOB.replace("*", "x"),
         lambda d: _mod.load_model_downgrade_signal(d),
     ),
-    (_mod._OPERATOR_SIGNAL_GLOB.replace("*", "x"), lambda d: _mod.load_operator_signal(d, now=_NOW)),
+    (
+        _mod._OPERATOR_SIGNAL_GLOB.replace("*", "x"),
+        lambda d: _mod.load_operator_signal(d, now=_NOW),
+    ),
     (
         f"x{_mod._SESSION_MODES_SUFFIX}",
         lambda d: _mod.load_session_modes(d, now=_NOW, own_sessions=None),
