@@ -17,3 +17,39 @@ truth_changes:
 
       IF YOUR PROJECT'S DOCS SAY "NEVER CLAIM AN ISSUE HELD BY SOMEONE ELSE",
       MAKE THAT CONDITIONAL ON THE SEAT NOT BEING A REPOSITORY ADMIN.
+
+  # Plan 00571 Phase 3: three branch pools (issue #165).
+  - topic: git-safety
+    was: >
+      A parked branch (`branch-park`) is exempt from the dormancy stages but
+      still counts against `branches.wip.cap`.
+    now: >
+      A parked branch is in the parked pool, with its own cap
+      (`branches.parked.cap`, default `wip.cap`) and a maximum age
+      (`branches.parked.max_age_days`, default the dormancy preset's
+      `block_days`). It no longer counts against `wip.cap`. A full parked pool
+      or a park older than its age denies branch creation
+      (`R-BRANCH-PARKED-POOL`); a re-park needs a NEW reason (the same reason
+      exits 2).
+  - topic: git-safety
+    was: >
+      A merged branch that has not been deleted counts against
+      `branches.wip.cap` until `branch-sweep --clean` removes it.
+    now: >
+      A merged or patch-equivalent branch is in the merged pool
+      (`branches.merged.cap`, default `wip.cap`), not the open-work count. An
+      unkept merged branch is cleanup debt at once and denies branch creation
+      (`R-BRANCH-MERGED-POOL`) until `branch-sweep --clean` (plus `--remote`
+      for a remote copy) removes it; a worktree holding it defers that.
+      `branch-keep <name> --reason "<text>"` keeps it for
+      `branches.merged.max_age_days`, and `--clean` skips a branch kept inside
+      that age.
+  - topic: git-safety
+    was: >
+      With `branches.wip.count_remote: true` every remote-only branch counts
+      as open work.
+    now: >
+      Branches matching `branches.bot_owned` (default `dependabot/*`) are in
+      no pool: never counted, never judged by the creation guard, and never
+      deleted by `branch-sweep --clean`. The sweep lists them in their own
+      `bot-owned` section.

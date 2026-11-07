@@ -319,7 +319,7 @@ paragraph above.
 
 ## Branches (`branches:`)
 
-The top-level `branches:` block holds the branch hygiene settings: the open-work cap (`wip.cap`, default 10), duplicate warnings, cleanup after merge and dormancy. Dormancy ages an unmerged, unparked branch from its tip's commit date and applies three stages:
+The top-level `branches:` block holds the branch hygiene settings: the three branch pools (open work under `wip.cap`, default 10; parked; merged), duplicate warnings, cleanup after merge and dormancy. Dormancy ages an unmerged, unparked branch from its tip's commit date and applies three stages:
 
 - advisory: one line per branch in the SessionStart summary of a new session.
 - noisy: the same line in every SessionStart, plus a context line on every allowed branch creation.
@@ -343,7 +343,33 @@ branches:
 
 ### Parking a branch
 
-`bin/hooks-daemon branch-park <name> --reason "<text>"` writes an empty commit with `Parked-Reason` and `Parked-By` trailers at the branch tip (no checkout), then pushes the branch with a plain fast-forward `git push`. A parked branch is exempt from the dormancy stages, but still counts against the WIP cap. A failed push is reported with the command to retry; the local park stands. A later commit on the branch ends the park, and `bin/hooks-daemon branch-park --clear <name>` writes an `Unparked` commit to restart the clock without a code change.
+`bin/hooks-daemon branch-park <name> --reason "<text>"` writes an empty commit with `Parked-Reason` and `Parked-By` trailers at the branch tip (no checkout), then pushes the branch with a plain fast-forward `git push`. A parked branch is exempt from the dormancy stages and moves from the open-work count to the parked pool (below). A failed push is reported with the command to retry; the local park stands. A later commit on the branch ends the park, and `bin/hooks-daemon branch-park --clear <name>` writes an `Unparked` commit to restart the clock without a code change. Re-parking an already-parked branch needs a new reason: the same reason exits 2.
+
+### Branch pools: open, parked, merged
+
+Every work branch is in exactly one pool, and each pool has a cap, a maximum age and a mode:
+
+| Pool      | Members                                             | Cap                             | Stale when                                                                           | Deny rule              |
+| --------- | --------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------ | ---------------------- |
+| open work | unmerged, unparked branches                         | `wip.cap` (10)                  | the dormancy block stage                                                             | `R-BRANCH-WIP-CAP`     |
+| parked    | branches whose tip carries `Parked-Reason`          | `parked.cap` (null = `wip.cap`) | the park is older than `parked.max_age_days` (null = `block_days`)                   | `R-BRANCH-PARKED-POOL` |
+| merged    | merged or patch-equivalent branches not yet deleted | `merged.cap` (null = `wip.cap`) | unkept: at once (unless a worktree holds it); kept: older than `merged.max_age_days` | `R-BRANCH-MERGED-POOL` |
+
+In `block` mode, creating a branch is denied while a pool is at its cap or holds a stale member, and the deny names that pool's own way out: merge, re-park with a new reason, or delete a parked branch; `branch-sweep --clean` (plus `--remote` when a remote copy exists) for merged ones. `warn` turns the deny into a context line and `off` stops counting the pool. `preset: strict` shortens every default age together, and leaves the caps alone.
+
+`bin/hooks-daemon branch-keep <name> --reason "<text>"` keeps a merged branch (a release you still need, say) for `merged.max_age_days`. The keep is a git note on the branch tip under `refs/notes/hooks-daemon/keep`, pushed to `branches.remote`, so every clone sees it; a new commit on the branch moves its tip and ends the keep. A kept branch is skipped by `branch-sweep --clean` and reported; a lapsed keep is cleaned like an unkept branch. A same-reason re-keep exits 2, and a branch that is not merged exits 1 (park it instead).
+
+`branches.bot_owned` (default `["dependabot/*"]`) names branches a bot manages. They are in no pool: never counted, never judged by the creation guard and never deleted by `branch-sweep --clean`. `branch-sweep` lists them in their own `bot-owned` section.
+
+```yaml
+branches:
+  parked:
+    cap: 5
+    max_age_days: 60
+  merged:
+    mode: warn
+  bot_owned: ["dependabot/*", "renovate/*"]
+```
 
 ### Other branch settings
 
@@ -364,7 +390,7 @@ Every deny from these guards ends with the same principle text: the limit exists
 
 Recovery bundles accumulate: `delete-branch` writes a new file per call under `untracked/deleted-branches/` and `branch-sweep --clean` one per run under `untracked/branch-cleanup/`, each named by UTC time plus a random suffix, so a later deletion never overwrites an earlier one. Both print one `git fetch <bundle> refs/heads/<name>:refs/heads/<name>` restore line per deleted branch. `delete-branch --bundle PATH` refuses a PATH that already exists. When git refuses every delete, the run says nothing was deleted and keeps no bundle, because nothing needs recovering.
 
-`branch-sweep --clean --remote` also deletes merged branches on `branches.remote`, so one command clears local and remote alike. It deletes only what the remote-delete guard would let an agent delete: the branch's tip is an ancestor of the default branch (or, for an ordinary branch, of an integration line), and `git ls-remote` confirms the remote's live tip is that same commit. A patch-equivalent remote branch is listed as skipped, not deleted. Each delete carries a lease on its proven tip, and the remote tips go into the same recovery bundle with a restore line that fetches the ref back and pushes it. `--dry-run` works with `--remote`. The flag contacts the remote; plain `--clean` never does.
+`branch-sweep --clean --remote` also deletes merged branches on `branches.remote`, so one command clears local and remote alike. It deletes only what the remote-delete guard would let an agent delete: the branch's tip is an ancestor of the default branch (or, for an ordinary branch, of an integration line), and `git ls-remote` confirms the remote's live tip is that same commit. A patch-equivalent remote branch is listed as skipped, not deleted. It first fetches the keep notes from the remote, so a keep made in another clone protects the branch; if that fetch fails, the remote half is refused and only local branches are cleaned. Each delete carries a lease on its proven tip, and the remote tips go into the same recovery bundle with a restore line that fetches the ref back and pushes it. `--dry-run` works with `--remote`. The flag contacts the remote; plain `--clean` never does.
 
 `branch-sweep --clean` leaves a live agent's worktree and branch alone, locally and on the remote, and prints `Skipped <name>: ...` with the reason. Three signals mark one: a `running` work-queue record naming the branch or worktree, a worktree under `.claude/worktrees/` (Claude Code creates and cleans those itself), and a worktree git reports `locked`. `worktree-reap` honours the work-queue and lock signals too.
 
