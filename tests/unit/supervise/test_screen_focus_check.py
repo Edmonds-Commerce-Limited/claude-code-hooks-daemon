@@ -241,12 +241,36 @@ class TestResolveBinary:
         built = self._exe(
             proj / "untracked" / "screen-build" / "hooks-screen-x86_64-unknown-linux-musl"
         )
-        assert resolve_screen_binary(proj, {}) == built
+        assert resolve_screen_binary(proj, {}, machine="x86_64") == built
         deployed = self._exe(proj / "untracked" / "bin" / "hooks-screen")
-        assert resolve_screen_binary(proj, {}) == deployed
+        assert resolve_screen_binary(proj, {}, machine="x86_64") == deployed
 
     def test_nothing_found_is_none(self, tmp_path: Path) -> None:
         assert resolve_screen_binary(tmp_path, {}) is None
+
+    def test_aarch64_finds_the_aarch64_build_not_the_x86_64_one(self, tmp_path: Path) -> None:
+        build = tmp_path / "untracked" / "screen-build"
+        self._exe(build / "hooks-screen-x86_64-unknown-linux-musl")
+        assert resolve_screen_binary(tmp_path, {}, machine="aarch64") is None
+        arm = self._exe(build / "hooks-screen-aarch64-unknown-linux-musl")
+        assert resolve_screen_binary(tmp_path, {}, machine="aarch64") == arm
+
+    def test_x86_64_ignores_the_aarch64_build(self, tmp_path: Path) -> None:
+        build = tmp_path / "untracked" / "screen-build"
+        self._exe(build / "hooks-screen-aarch64-unknown-linux-musl")
+        assert resolve_screen_binary(tmp_path, {}, machine="x86_64") is None
+
+    def test_unsupported_architecture_skips_build_but_keeps_deployed_and_override(
+        self, tmp_path: Path
+    ) -> None:
+        build = tmp_path / "untracked" / "screen-build"
+        self._exe(build / "hooks-screen-x86_64-unknown-linux-musl")
+        assert resolve_screen_binary(tmp_path, {}, machine="riscv64") is None
+        deployed = self._exe(tmp_path / "untracked" / "bin" / "hooks-screen")
+        assert resolve_screen_binary(tmp_path, {}, machine="riscv64") == deployed
+        override = self._exe(tmp_path / "mine")
+        env = {"CCY_HOOKS_SCREEN": str(override)}
+        assert resolve_screen_binary(tmp_path, env, machine="riscv64") == override
 
     def test_non_executable_is_skipped(self, tmp_path: Path) -> None:
         path = tmp_path / "untracked" / "bin" / "hooks-screen"
@@ -254,6 +278,44 @@ class TestResolveBinary:
         path.write_text("x")
         path.chmod(0o644)
         assert resolve_screen_binary(tmp_path, {}) is None
+
+
+class TestScreenTargetTriple:
+    @pytest.mark.parametrize(
+        ("machine", "triple"),
+        [
+            ("x86_64", "x86_64-unknown-linux-musl"),
+            ("amd64", "x86_64-unknown-linux-musl"),
+            ("aarch64", "aarch64-unknown-linux-musl"),
+            ("arm64", "aarch64-unknown-linux-musl"),
+            ("riscv64", None),
+            ("", None),
+        ],
+    )
+    def test_mapping(self, machine: str, triple: str | None) -> None:
+        assert _mod.screen_target_triple(machine) == triple
+
+    def test_default_reads_platform_machine(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(_mod.platform, "machine", lambda: "arm64")
+        assert _mod.screen_target_triple() == "aarch64-unknown-linux-musl"
+
+
+class TestMissingBinaryNote:
+    def test_names_the_architecture_and_triple_searched(self) -> None:
+        note = _mod.screen_binary_missing_note("aarch64")
+        assert "aarch64" in note
+        assert "hooks-screen-aarch64-unknown-linux-musl" in note
+
+    def test_unsupported_architecture_says_no_build(self) -> None:
+        note = _mod.screen_binary_missing_note("riscv64")
+        assert "riscv64" in note
+        assert "no hooks-screen build" in note
+
+    def test_check_logs_the_note_and_fails_open(self) -> None:
+        logged: list[str] = []
+        check = _check(None, log=logged.append, missing_note="no binary; arch riscv64")
+        assert check.verdict() == "unknown"
+        assert logged == ["screen check failed open: no binary; arch riscv64"]
 
 
 class TestInputActivityDecision:

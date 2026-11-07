@@ -10,12 +10,28 @@
 #
 # Usage: bash screen/build.sh
 #   CARGO=<path>           override cargo (default ~/.cargo/bin/cargo)
-#   SCREEN_TARGET=<triple> override the target (default x86_64-unknown-linux-musl)
+#   SCREEN_TARGET=<triple> override the target. Default from `uname -m`:
+#                          x86_64|amd64   -> x86_64-unknown-linux-musl
+#                          aarch64|arm64  -> aarch64-unknown-linux-musl
+#                          anything else  -> error; set SCREEN_TARGET.
+#                          (Same mapping as screen_target_triple in
+#                          .claude/ccy/claude-supervise.py.)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CARGO="${CARGO:-$HOME/.cargo/bin/cargo}"
-TARGET="${SCREEN_TARGET:-x86_64-unknown-linux-musl}"
+if [ -z "${SCREEN_TARGET:-}" ]; then
+    HOST_ARCH="$(uname -m)"
+    case "$HOST_ARCH" in
+        x86_64 | amd64) SCREEN_TARGET="x86_64-unknown-linux-musl" ;;
+        aarch64 | arm64) SCREEN_TARGET="aarch64-unknown-linux-musl" ;;
+        *)
+            echo "ERROR: no default hooks-screen target for architecture '$HOST_ARCH'; set SCREEN_TARGET=<triple>" >&2
+            exit 1
+            ;;
+    esac
+fi
+TARGET="$SCREEN_TARGET"
 SCREEN_DIR="$REPO_ROOT/screen"
 OUT_DIR="$REPO_ROOT/untracked/screen-build"
 TARGET_DIR="$OUT_DIR/cargo-target"

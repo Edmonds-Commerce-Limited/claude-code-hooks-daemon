@@ -341,7 +341,9 @@ up.
 - With no latch, nothing is rendered and nothing holds. With a latch,
   `InputActivity.effective_focus_hold` spawns `hooks-screen` (a Rust binary,
   `screen/src/main.rs`, built by `bash screen/build.sh` to
-  `untracked/screen-build/`) with a 200 ms timeout. It feeds the buffer plus
+  `untracked/screen-build/`, target triple from the host architecture via
+  `screen_target_triple`; an unsupported architecture skips that candidate and
+  the fail-open note names it) with a 200 ms timeout. It feeds the buffer plus
   the terminal size and reads one word. The render is rate-limited to once a
   second and skipped while no new output arrived.
 - Only `transcript` and `panel-selected` hold. `main`, `unknown`, a missing
