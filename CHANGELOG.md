@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.73.0] - 2026-11-07
+
+_A branch-hygiene and hardening release. `branch-sweep --clean --remote` clears merged branches on the remote as well as locally, and recovery bundles accumulate instead of overwriting each other (Plan 00571 Phase 2); branch containment sees a branch a remote keeps under a namespace the clone never fetches (Plan 00570); the ccy supervisor finds `hooks-screen` by host architecture, including arm64 (Plan 00569); the `gh` view guards suggest a command that returns the body (Plan 00565); and `lsp_enforcement` stops denying a grep over extensionless files (Plan 00567). CI is sharded by wall-clock time (Plan 00572 Phases 1-2). No breaking change, no config-changes manifest, no pre-upgrade or post-upgrade task._
+
+### Added
+
+- `branch-sweep --clean --remote` also deletes merged branches on `branches.remote`, using the proof the remote-delete guard applies to an agent's `git push --delete` (the tip is an ancestor of the default branch or an integration line and `git ls-remote` confirms the live tip); each delete carries a lease on that tip and the remote tips go into the same recovery bundle (Plan 00571; Addresses #165).
+- `delete-branch` and `branch-sweep` make one bounded `git ls-remote` when a branch would otherwise be unproven, and accept a remote ref at, or descending from, the branch tip (for example under `refs/archive/`) as proof the remote holds it; `delete-branch` names the new tier `remote-held` (Plan 00570; Addresses #166).
+- `screen/build.sh` defaults `SCREEN_TARGET` from `uname -m` (x86_64/amd64 or aarch64/arm64, both musl) and refuses an unknown architecture (Plan 00569; Addresses #174).
+- Every report that lists a merged branch (the sweep, the WIP-cap deny, the stop guard) names `branch-sweep --clean` as the one-step fix, and `worktree-reap --reap-branches` prints each merged branch it skipped because it is not agent-owned (Plan 00571; Addresses #165).
+- CI: a QA gate aggregator job in `qa.yml`, one reusable shard workflow shared by `release-gate.yml` and `qa.yml`, job summaries and artifact retention (Plan 00572 Phases 1-2).
+
+### Changed
+
+- `delete-branch` recovery bundles accumulate: each call writes its own bundle under `untracked/deleted-branches/` named by UTC time plus a random suffix and prints one exact restore line per deleted branch; `branch-sweep --clean` uses the same naming, and an explicit `--bundle PATH` that already exists is refused rather than overwritten (Plan 00571; Addresses #165).
+- `branch-sweep --clean` and `worktree-reap` leave running agents' worktrees and branches alone: a `running` work-queue record, a worktree under `.claude/worktrees/` or a `locked` worktree is skipped with a `Skipped <name>: ...` reason (Plan 00571).
+- The branch stop guard treats a running work-queue branch as handed over (Plan 00571 Task 2.5).
+- The ccy supervisor derives the `hooks-screen` build target from the host architecture instead of a name pinned to `x86_64-unknown-linux-musl`; an unsupported architecture skips that candidate and the fail-open note names the architecture and the build searched for (Plan 00569; Addresses #174).
+- The session-start branch summary and the branch creation guard stay network-free, and their text now says what was checked and points to `branch-sweep` for the remote check (Plan 00570; Addresses #166).
+- The `gh_issue_comments` and `gh_pr_comments` guards suggest `--json title,body,state,comments` (plus `author` for pull requests) instead of `--comments`, which drops the body in non-interactive output; what they match and block is unchanged (Plan 00565; Addresses #158).
+- CI: mapped tests are skipped when the full-suite fallback will run, one concurrency group per main push, and the integration and handler shards are rebalanced (Plan 00572 Phases 1-2).
+- The release slate check recognises the sharded full tier (`QA static` and `Full suite` jobs) (Plan 00572 Task 1.5).
+- Vendored remote docs refreshed (release housekeeping).
+
+### Fixed
+
+- `lsp_enforcement` no longer denies a symbol-like grep naming two or more extensionless files that no language server serves: named files are judged by their own suffix, so file and directory forms get the same advisory, while a served suffix is still enforced (Plan 00567; Addresses #162).
+- A branch a remote keeps outside `refs/heads` is no longer reported as contained nowhere, and the sweep no longer advises a `git push -u` that re-creates it (Plan 00570; Addresses #166).
+- A freshly spawned agent's branch, which sits at the default branch's tip and so looked merged, is no longer removed by `branch-sweep --clean` (Plan 00571).
+- Regression tests lock in that nested `WorktreeCreate` with symlink seeds works (already fixed by N563; Plan 00566; Addresses #161).
+
 ## [3.72.1] - 2026-11-05
 
 _A patch release on the branch-hygiene line. `optimise` suggests `claudeMdExcludes` for worktrees kept under the project root (Plan 00563), a merged integration line such as `release/*` becomes deletable by an agent (Plan 00474, N577), and removing a worktree no longer refuses over a seeded symlink (Plan 00474, N573). Release-branch workflows should declare `branches.integration_lines: ["release/*"]`. No breaking change, no config-changes manifest, no pre-upgrade or post-upgrade task._
