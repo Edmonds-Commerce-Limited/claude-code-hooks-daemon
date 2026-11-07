@@ -42,11 +42,14 @@ the two makes an alarming path count look like data loss when it is not.
 
 from __future__ import annotations
 
+import secrets
 import subprocess  # nosec B404 - trusted system tool (git), list form, no shell
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from fnmatch import fnmatchcase
 from pathlib import Path
+from typing import Final
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -784,8 +787,38 @@ def classify_branch(
     )
 
 
-def write_recovery_bundle(repo: Path, names: Sequence[str], bundle_path: Path) -> Path:
-    """Bundle every named branch so a deletion can be undone.
+#: UTC stamp in every recovery bundle name; sorts in time order.
+BUNDLE_STAMP: Final[str] = "%Y%m%dT%H%M%SZ"
+
+#: Random bytes after the stamp: the stamp has one-second resolution, so two
+#: runs in one second would otherwise name, and overwrite, the same file.
+_BUNDLE_SUFFIX_BYTES: Final[int] = 3
+
+
+def new_bundle_path(bundle_dir: Path, prefix: str) -> Path:
+    """A recovery bundle path in ``bundle_dir`` that no file holds yet.
+
+    ``<prefix>-<UTC stamp>-<6 hex>.bundle``: one file per run, so a later run
+    never overwrites the only copy of an earlier run's branches (Plan 00571).
+    Shared by ``delete-branch`` and ``branch-sweep --clean``.
+    """
+    stamp = datetime.now(UTC).strftime(BUNDLE_STAMP)
+    while True:
+        suffix = secrets.token_hex(_BUNDLE_SUFFIX_BYTES)
+        path = bundle_dir / f"{prefix}-{stamp}-{suffix}.bundle"
+        if not path.exists():
+            return path
+
+
+def bundle_restore_command(bundle: Path, ref: str) -> str:
+    """The fetch that restores ``ref`` (a full ref name) from ``bundle`` under the same name."""
+    return f"git fetch {bundle} {ref}:{ref}"
+
+
+def write_recovery_bundle(
+    repo: Path, names: Sequence[str], bundle_path: Path, *, extra_refs: Sequence[str] = ()
+) -> Path:
+    """Bundle every named branch, plus ``extra_refs`` (full ref names), so a deletion can be undone.
 
     Written BEFORE any ref is removed, so a failure here aborts the deletion
     rather than leaving branches gone and no way back.
@@ -801,6 +834,7 @@ def write_recovery_bundle(repo: Path, names: Sequence[str], bundle_path: Path) -
         "create",
         str(bundle_path),
         *(branch_ref(n) for n in names),
+        *extra_refs,
         timeout=Timeout.GIT_BUNDLE_CREATE,
     )
     return bundle_path
@@ -844,6 +878,7 @@ def delete_branches(
     line_names: Sequence[str] = (),
     line_targets: Sequence[str] | None = None,
     remote: str | None = None,
+    extra_bundle_refs: Sequence[str] = (),
 ) -> DeletionReport:
     """Classify every branch, then delete the batch.
 
@@ -879,6 +914,9 @@ def delete_branches(
         line_targets: Passed to :func:`classify_branch`; the default ref(s) only.
         remote: Name of the remote to ask, ONCE for the whole batch, what it holds
             outside the fetched refs. None makes no network call.
+        extra_bundle_refs: Further full ref names the caller will delete itself
+            (``branch-sweep --clean --remote``'s remote-tracking refs), bundled with
+            the branches. The bundle is then kept even when no branch is deleted.
 
     Raises:
         ValueError: if ``allow_unproven`` is set without a reason.
@@ -939,7 +977,12 @@ def delete_branches(
 
     bundle: Path | None = None
     if bundle_path is not None:
-        bundle = write_recovery_bundle(repo, [c.name for c in classifications], bundle_path)
+        bundle = write_recovery_bundle(
+            repo,
+            [c.name for c in classifications],
+            bundle_path,
+            extra_refs=extra_bundle_refs,
+        )
 
     deleted: list[str] = []
     failures: list[str] = []
@@ -982,7 +1025,7 @@ def delete_branches(
         # finding it later would reasonably read it as evidence the branch was
         # gone. Where something WAS deleted the bundle is the recovery route, so
         # it stays.
-        if bundle is not None and not deleted:
+        if bundle is not None and not deleted and not extra_bundle_refs:
             problem = _discard_unused_bundle(bundle)
             if problem is None:
                 bundle = None

@@ -176,6 +176,7 @@ from claude_code_hooks_daemon.utils.cli_command import (
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
+    branch_ref,
     git_visible_ancestor_dirs,
     git_visible_paths,
     project_path_is_protected,
@@ -6502,7 +6503,7 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     repo = get_project_path(getattr(args, "project_root", None))
     config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
     branches = config.branches
-    if args.clean or args.dry_run:
+    if args.clean or args.dry_run or getattr(args, "remote", False):
         return _branch_sweep_clean(args, repo, branches)
     legacy = handler_options(config.handlers.session_start.get(HandlerID.BRANCH_SWEEP.config_key))
     try:
@@ -6567,22 +6568,27 @@ _BRANCH_CLEANUP_BUNDLE_DIR = Path("untracked") / "branch-cleanup"
 
 
 def _branch_sweep_clean(args: argparse.Namespace, repo: Path, branches: BranchesConfig) -> int:
-    """``branch-sweep --clean [--dry-run]``: delete merged and patch-equivalent branches.
+    """``branch-sweep --clean [--remote] [--dry-run]``: delete merged branches.
 
     Returns:
         0 when the sweep ran, 1 when it could not, 2 on a usage error.
     """
     from claude_code_hooks_daemon.core import branch_cleanup, branch_inventory
 
+    remote = bool(getattr(args, "remote", False))
     if not args.clean:
-        print("ERROR: --dry-run only applies to --clean", file=sys.stderr)
+        print("ERROR: --dry-run and --remote only apply to --clean", file=sys.stderr)
         return 2
     if args.json or args.all:
         print("ERROR: --clean does not take --json or --all", file=sys.stderr)
         return 2
     try:
         report = branch_cleanup.clean_sweep(
-            repo, branches, dry_run=args.dry_run, bundle_dir=repo / _BRANCH_CLEANUP_BUNDLE_DIR
+            repo,
+            branches,
+            dry_run=args.dry_run,
+            bundle_dir=repo / _BRANCH_CLEANUP_BUNDLE_DIR,
+            remote=remote,
         )
     except (branch_inventory.BranchInventoryError, ValueError) as e:
         print(f"ERROR: branch-sweep --clean could not run for {repo}: {e}", file=sys.stderr)
@@ -6609,10 +6615,25 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.daemon.branch_safety import (
         TIER_UNPROVEN,
         delete_branches,
+        new_bundle_path,
     )
 
     repo = get_project_path(getattr(args, "project_root", None))
-    bundle_path = None if args.no_bundle else Path(args.bundle)
+    bundle_path: Path | None = None
+    if not args.no_bundle:
+        if args.bundle is None:
+            bundle_path = new_bundle_path(repo / _DELETE_BRANCH_BUNDLE_DIR, "delete-branch")
+        else:
+            bundle_path = Path(args.bundle)
+            if bundle_path.exists():
+                # Overwriting would destroy an earlier recovery (Plan 00571), and the
+                # "nothing deleted" cleanup below removes the file it wrote.
+                print(
+                    f"ERROR: --bundle {bundle_path} already exists; name a new file, or "
+                    "omit --bundle for a fresh timestamped one",
+                    file=sys.stderr,
+                )
+                return 2
 
     branches = _branches_config(repo)
     # The default is resolved independently of `--protected-ref`: an integration
@@ -6744,9 +6765,10 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         if report.bundle:
             # The ONLY recovery route for whatever was deleted above. Printed to
             # stderr so it travels with the refusal a human is reading.
-            print(f"\nRecovery bundle: {report.bundle}", file=sys.stderr)
+            _print_restore_lines(report.bundle, report.deleted, file=sys.stderr)
+        elif bundle_path is not None and not report.deleted and not args.dry_run:
             print(
-                f"  restore with: git fetch {report.bundle} <branch>:<branch>",
+                "No recovery bundle was kept: nothing was deleted, so nothing needs recovering.",
                 file=sys.stderr,
             )
         if any(c.tier == TIER_UNPROVEN for c in report.classifications):
@@ -6767,10 +6789,26 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         return 0
 
     if report.bundle:
-        print(f"\nRecovery bundle: {report.bundle}")
-        print(f"  restore with: git fetch {report.bundle} <branch>:<branch>")
+        _print_restore_lines(report.bundle, report.deleted, file=sys.stdout)
     print(f"Deleted {len(report.deleted)} branch(es).")
     return 0
+
+
+#: Where ``delete-branch`` writes one recovery bundle per call, relative to the project.
+_DELETE_BRANCH_BUNDLE_DIR = Path("untracked") / "deleted-branches"
+
+
+def _print_restore_lines(bundle: Path, deleted: Sequence[str], *, file: TextIO) -> None:
+    """The bundle path, then one exact restore command per deleted branch.
+
+    Full ``refs/heads/...`` refspecs, so a tag sharing the name can never be
+    fetched instead (the Plan 00254 ambiguity).
+    """
+    from claude_code_hooks_daemon.daemon.branch_safety import bundle_restore_command
+
+    print(f"\nRecovery bundle: {bundle}", file=file)
+    for name in deleted:
+        print(f"  restore {name}: {bundle_restore_command(bundle, branch_ref(name))}", file=file)
 
 
 def cmd_release_notes(args: argparse.Namespace) -> int:
@@ -9538,8 +9576,10 @@ def cmd_worktree_reap(
         0 when every worktree was reapable (or there are none), 1 when at least
         one needs a human. The refusals are the actionable output.
     """
+    from claude_code_hooks_daemon.core import branch_cleanup
     from claude_code_hooks_daemon.core.worktree_reaping import (
         collect_orphaned_branches,
+        collect_skipped_merged_branches,
         collect_worktree_states,
         default_process_cwds,
         default_worktree_age,
@@ -9591,6 +9631,21 @@ def cmd_worktree_reap(
             repo_root, base_branch, config=_branches_config(repo_root), **collect_kwargs
         )
     )
+    # Plan 00571: merged branches with no worktree that pruning skips for their NAME
+    # are named, so `--reap-branches` never silently leaves a merged branch behind.
+    skipped_merged = (
+        collect_skipped_merged_branches(
+            repo_root, base_branch, config=_branches_config(repo_root), **collect_kwargs
+        )
+        if reap_branches and not only
+        else ()
+    )
+    for name in skipped_merged:
+        print(
+            f"SKIPPED {name}: merged into {base_branch} with no worktree, but not agent-owned "
+            f"(not agent-* or WorktreeCreate-recorded); delete it with "
+            f"`{branch_cleanup.sweep_clean_command()}`"
+        )
     if not states and not orphans:
         print("No agent worktrees found.")
         return 0
@@ -12634,7 +12689,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--reap-branches",
         dest="reap_branches",
         action="store_true",
-        help="Also delete agent branches that have no worktree, if fully merged",
+        help="Also delete agent-* and WorktreeCreate-recorded branches that have no "
+        "worktree, if fully merged. Other merged branches with no worktree are listed as "
+        "SKIPPED, never deleted here: branch-sweep --clean deletes them",
     )
     parser_worktree_reap.set_defaults(func=cmd_worktree_reap)
 
@@ -13003,9 +13060,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_delete_branch.add_argument(
         "--bundle",
-        default="untracked/deleted-branches.bundle",
+        default=None,
         metavar="PATH",
-        help="Recovery bundle written before deletion (default: untracked/deleted-branches.bundle)",
+        help="Recovery bundle written before deletion. Default: a new file per call, "
+        "untracked/deleted-branches/delete-branch-<UTC stamp>-<hex>.bundle. An explicit "
+        "PATH must not exist yet: an existing file is refused, never overwritten",
     )
     parser_delete_branch.add_argument(
         "--no-bundle",
@@ -13061,6 +13120,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="With --clean: print what would be removed and deleted, change nothing",
+    )
+    parser_branch_sweep.add_argument(
+        "--remote",
+        action="store_true",
+        help="With --clean: also delete every merged branch on branches.remote, by the same "
+        "proof the remote-delete guard uses (ancestor of the default or an integration line, "
+        "live tip confirmed with ls-remote), each under a lease on its proven tip and bundled "
+        "first. Contacts the remote",
     )
     parser_branch_sweep.set_defaults(func=cmd_branch_sweep)
 

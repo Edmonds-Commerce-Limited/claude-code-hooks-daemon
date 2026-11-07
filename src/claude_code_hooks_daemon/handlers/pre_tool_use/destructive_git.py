@@ -29,9 +29,14 @@ from claude_code_hooks_daemon.core.force_removal import (
 )
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.remote_branch_proof import (
+    LITERAL_BRANCH_NAME,
+    branch_name,
+    named_ref_problem,
+    prove_remote_merged,
+)
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.daemon.branch_safety import matches_any_glob
 from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
     SUBCOMMAND_SEPARATOR_CHARS,
@@ -437,9 +442,8 @@ _OPTIONS_END: Final[str] = "--"
 # remote-tracking ref, for one) changes what is deleted, so it is unverifiable.
 _BRANCH_FLAG_LETTERS: Final[frozenset[str]] = frozenset("dDfq")
 _BRANCH_LONG_FLAGS: Final[frozenset[str]] = frozenset({_DELETE_LONG, "--force", "--quiet"})
-# A branch name that is safe to hand to git as one argument: no expansion,
-# quoting or option-looking characters survive it.
-_LITERAL_BRANCH_NAME: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9._/+@-]+")
+# A branch name that is safe to hand to git as one argument (shared with the remote proof).
+_LITERAL_BRANCH_NAME: Final[re.Pattern[str]] = LITERAL_BRANCH_NAME
 # Command and process substitution can run a git command this reading never sees.
 _SUBSTITUTION: Final[re.Pattern[str]] = re.compile(r"\$\(|`|[<>]\(")
 _UNVERIFIED_ADVICE: Final[str] = (
@@ -729,8 +733,6 @@ def _force_removal_note(
 
 
 _PUSH: Final[str] = "push"
-_REMOTES_PREFIX: Final[str] = "refs/remotes/"
-_TAGS_PREFIX: Final[str] = "refs/tags/"
 # `git push` flags a remote delete may carry without changing WHAT it deletes. Anything
 # else (`--repo`, `-o`, `--receive-pack`, ...) can redirect or reshape the push, so a
 # command using one is unverifiable.
@@ -739,10 +741,6 @@ _PUSH_LONG_FLAGS: Final[frozenset[str]] = frozenset(
     {_DELETE_LONG, "--quiet", "--verbose", "--dry-run", "--no-verify", "--set-upstream"}
 )
 _REFSPEC_SEPARATOR: Final[str] = ":"
-# Branch patterns per `git ls-remote` call. One call per remote is the aim; this only
-# bounds the argv (Linux caps one argument at 128 KiB and the whole argv near 2 MiB), and
-# 500 names of ~100 bytes stay far below both while a realistic delete is a single call.
-_LS_REMOTE_CHUNK: Final[int] = 500
 
 
 def _remote_delete_targets(run: GitInvocation) -> tuple[str, list[str]] | None:
@@ -787,226 +785,6 @@ def _remote_delete_targets(run: GitInvocation) -> tuple[str, list[str]] | None:
     return positional[0], refs
 
 
-def _branch_name(ref: str) -> str:
-    """The branch name a delete ``ref`` (``name`` or ``refs/heads/name``) refers to."""
-    return ref.removeprefix(HEADS_PREFIX)
-
-
-def _refusal(name: str, default: str, branches: BranchesConfig) -> str | None:
-    """Why ``name`` may never be deleted remotely by an agent, whatever the proof."""
-    if name == default:
-        return f"`{name}` is the default branch"
-    if matches_any_glob(name, branches.exempt):
-        return f"`{name}` is exempt (`branches.exempt`)"
-    if matches_any_glob(name, branches.protected_names):
-        return f"`{name}` is a protected name (`branches.protected_names`)"
-    return None
-
-
-def _named_ref_problem(remote: str, ref: str, default: str, branches: BranchesConfig) -> str | None:
-    """Why ``ref`` cannot be judged or is refused outright, before any git runs."""
-    name = _branch_name(ref)
-    if not _LITERAL_BRANCH_NAME.fullmatch(remote):
-        return f"`{remote}` is not a literal remote name"
-    if name.startswith(_TAGS_PREFIX) or not _LITERAL_BRANCH_NAME.fullmatch(name):
-        return f"`{ref}` is not a literal branch name (tags are never deleted by an agent)"
-    return _refusal(name, default, branches)
-
-
-_REF_FORMAT: Final[str] = "--format=%(objectname) %(objecttype) %(refname)"
-
-
-def _listed_refs(directory: Path, patterns: list[str]) -> dict[str, tuple[str, str]] | None:
-    """Map refname to ``(object, type)`` for every ref matching ``patterns``, in one call.
-
-    Keyed by the exact refname, so a pattern that also matches a longer ref never
-    lends it to another name. None when git fails or times out.
-    """
-    listing = run_git(
-        directory, "for-each-ref", _REF_FORMAT, *patterns, timeout=Timeout.GIT_CONTEXT
-    )
-    if listing.returncode != 0:
-        return None
-    refs: dict[str, tuple[str, str]] = {}
-    for line in listing.stdout.splitlines():
-        parts = line.split(" ", 2)
-        if len(parts) == 3:
-            refs[parts[2]] = (parts[0], parts[1])
-    return refs
-
-
-def _merged_into(directory: Path, target: str, refnames: list[str]) -> set[str] | None:
-    """Which of ``refnames`` are ancestors of ``target``: one ``for-each-ref --merged``.
-
-    None when git fails or times out.
-    """
-    merged = run_git(
-        directory,
-        "for-each-ref",
-        f"--merged={target}",
-        "--format=%(refname)",
-        *refnames,
-        timeout=Timeout.GIT_CONTEXT,
-    )
-    if merged.returncode != 0:
-        return None
-    return set(merged.stdout.splitlines())
-
-
-def _default_proof_targets(
-    remote: str, default: str, refs: dict[str, tuple[str, str]]
-) -> list[str]:
-    """The existing default-branch refs: the only proof an integration line accepts."""
-    tracking_prefix = f"{_REMOTES_PREFIX}{remote}/"
-    return [
-        ref
-        for ref in (f"{tracking_prefix}{default}", branch_ref(default))
-        if ref in refs and refs[ref][1] == "commit"
-    ]
-
-
-def _proof_targets(
-    remote: str, default: str, branches: BranchesConfig, refs: dict[str, tuple[str, str]]
-) -> list[str]:
-    """The existing refs a merged branch may be an ancestor of: default, then lines."""
-    tracking_prefix = f"{_REMOTES_PREFIX}{remote}/"
-    targets = _default_proof_targets(remote, default, refs)
-    for refname, (_object, kind) in refs.items():
-        line = refname.removeprefix(tracking_prefix)
-        if (
-            refname.startswith(tracking_prefix)
-            and kind == "commit"
-            and line not in (default, "HEAD")
-            and matches_any_glob(line, branches.integration_lines)
-        ):
-            targets.append(refname)
-    return targets
-
-
-def _merged_tracking_tips(
-    directory: Path, remote: str, names: list[str], default: str, branches: BranchesConfig
-) -> tuple[dict[str, str], list[str]]:
-    """``(name -> tracking tip for every proven name, problems for the rest)``.
-
-    Proven means: ``refs/remotes/<remote>/<name>`` exists, no tag shares the name, and
-    the tip is an ancestor of the default branch (its remote-tracking ref or the local
-    one) or, for an ordinary branch, of any existing ``refs/remotes/<remote>/<line>``
-    for an integration line. An integration line is proved against the default only.
-    One listing call, then one ``for-each-ref --merged`` per target over all the named
-    refs, so the cost does not grow with the number of branches. Judged from local git
-    only; the remote's live tip is checked afterwards by :func:`_remote_tip_problems`.
-    Fails closed: a missing ref, a failing git and a timeout all give a reason.
-    """
-    tracking = {name: f"{_REMOTES_PREFIX}{remote}/{name}" for name in names}
-    refs = _listed_refs(
-        directory,
-        [
-            f"{_REMOTES_PREFIX}{remote}",
-            branch_ref(default),
-            *[f"{_TAGS_PREFIX}{name}" for name in names],
-        ],
-    )
-    if refs is None:
-        return {}, [
-            f"`git for-each-ref` failed, so `{name}` could not be checked" for name in names
-        ]
-    tips: dict[str, str] = {}
-    problems: list[str] = []
-    for name in names:
-        listed = refs.get(tracking[name])
-        if f"{_TAGS_PREFIX}{name}" in refs:
-            problems.append(f"`{name}` is also the name of a tag, so the delete is ambiguous")
-        elif listed is None or listed[1] != "commit":
-            problems.append(f"`{name}` has no remote-tracking ref `{tracking[name]}` here")
-        else:
-            tips[name] = listed[0]
-    proven: set[str] = set()
-    if tips:
-        default_targets = _default_proof_targets(remote, default, refs)
-        # An integration line is proved against the default branch ONLY: being merged
-        # into another line is no evidence the line may go.
-        feature_tracking = [
-            tracking[name]
-            for name in tips
-            if not matches_any_glob(name, branches.integration_lines)
-        ]
-        for target in _proof_targets(remote, default, branches, refs):
-            checked = (
-                [tracking[name] for name in tips] if target in default_targets else feature_tracking
-            )
-            if not checked:
-                continue
-            merged = _merged_into(directory, target, checked)
-            if merged is None:
-                failed = [
-                    f"`git for-each-ref --merged={target}` failed, so `{n}` could not be " "checked"
-                    for n in tips
-                ]
-                return {}, problems + failed
-            proven |= merged
-    lines = " or any integration line" if branches.integration_lines else ""
-    for name in list(tips):
-        if tracking[name] not in proven:
-            del tips[name]
-            if matches_any_glob(name, branches.integration_lines):
-                problems.append(
-                    f"`{name}` is an integration line not yet merged into the default "
-                    f"branch `{default}` (another line does not count)"
-                )
-            else:
-                problems.append(f"`{name}` is not merged into `{default}`{lines}")
-    return tips, problems
-
-
-def _live_remote_tips(directory: Path, remote: str, names: list[str]) -> dict[str, str]:
-    """Map branch name to the tip ``remote`` reports, from one ``ls-remote`` per chunk.
-
-    Fails closed: a failed or timed-out listing contributes nothing, so its branches
-    are absent from the map. Lines are keyed by their exact ref, so a pattern that
-    also matches a longer name (``feat`` and ``feat-2``) or a foreign ref ending in
-    the name never lends its tip to another branch.
-    """
-    tips: dict[str, str] = {}
-    for start in range(0, len(names), _LS_REMOTE_CHUNK):
-        chunk = names[start : start + _LS_REMOTE_CHUNK]
-        listing = run_git(
-            directory,
-            "ls-remote",
-            remote,
-            *[f"{HEADS_PREFIX}{name}" for name in chunk],
-            timeout=Timeout.GIT_CONTEXT,
-            env={"GIT_TERMINAL_PROMPT": "0"},
-        )
-        if listing.returncode != 0:
-            continue
-        for line in listing.stdout.splitlines():
-            tip, separator, listed = line.partition("\t")
-            if separator and listed.startswith(HEADS_PREFIX):
-                tips[listed.removeprefix(HEADS_PREFIX)] = tip
-    return tips
-
-
-def _remote_tip_problems(directory: Path, remote: str, local_tips: dict[str, str]) -> list[str]:
-    """Why the remote's live tips are not the merged ``local_tips`` (name to tip).
-
-    The remote-tracking ref is only as fresh as the last fetch: a commit pushed since
-    would be lost by the delete. ``git ls-remote`` asks the remote itself, once for
-    all the branches (a delete of dozens of branches once exceeded the dispatch
-    budget at one call each); it never fetches. Fails closed: a mismatch, an absent
-    branch, a failure and a timeout all give a reason naming the branch.
-    """
-    if not local_tips:
-        return []
-    live = _live_remote_tips(directory, remote, list(local_tips))
-    return [
-        f"the remote tip of `{name}` could not be confirmed as merged (it differs from "
-        f"`{_REMOTES_PREFIX}{remote}/{name}`, is gone, or `git ls-remote {remote}` failed); "
-        "run `git fetch` and retry"
-        for name, tip in local_tips.items()
-        if live.get(name) != tip
-    ]
-
-
 def _remote_delete_note(command: str, cwd: Path, branches: BranchesConfig) -> str | None:
     """None when every remote ref ``command`` deletes is merged, else why not."""
     if _SUBSTITUTION.search(command):
@@ -1034,17 +812,15 @@ def _remote_delete_note(command: str, cwd: Path, branches: BranchesConfig) -> st
             return _unverified("the default branch could not be determined")
         judged: list[str] = []
         for ref in refs:
-            problem = _named_ref_problem(remote, ref, default, branches)
+            problem = named_ref_problem(remote, ref, default, branches)
             if problem is not None:
                 problems.append(problem)
-            elif _branch_name(ref) not in judged:
-                judged.append(_branch_name(ref))
+            elif branch_name(ref) not in judged:
+                judged.append(branch_name(ref))
         if judged:
-            local_tips, unproven = _merged_tracking_tips(
-                directory, remote, judged, default, branches
-            )
-            problems.extend(unproven)
-            problems.extend(_remote_tip_problems(directory, remote, local_tips))
+            # The same proof `branch-sweep --clean --remote` uses (Plan 00571).
+            proof = prove_remote_merged(directory, remote, judged, default, branches)
+            problems.extend(proof.problems.values())
     if not problems:
         return None
     return (

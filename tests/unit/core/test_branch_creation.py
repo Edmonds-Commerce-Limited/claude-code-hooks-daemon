@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.config.models import (
 )
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command
 from claude_code_hooks_daemon.core.branch_creation import (
     DENY_LIST_LIMIT,
     creation_verdict,
@@ -337,3 +338,32 @@ class TestLabels:
         assert read_labels(path) == {}
         path.write_text(json.dumps([1, 2]))
         assert read_labels(path) == {}
+
+
+class TestCapNamesTheCleanCommand:
+    """The WIP-cap deny names ``branch-sweep --clean`` for merged branches (Plan 00571)."""
+
+    def test_a_merged_branch_in_the_list_brings_the_clean_line(self, repo: Path) -> None:
+        _branch(repo, "alpha")
+        _branch(repo, "zulu")
+        labels = {"zulu": {"group": "merged", "action": "bin/hooks-daemon delete-branch zulu"}}
+        verdict = creation_verdict(repo, _config(cap=2), "fresh", labels=labels)
+        text = "\n".join(verdict.lines)
+        assert sweep_clean_command() in text
+        assert "--remote" not in text
+        assert "delete-branch zulu" in text
+
+    def test_a_merged_branch_with_a_remote_copy_adds_the_remote_flag(self, repo: Path) -> None:
+        _branch(repo, "alpha")
+        _branch(repo, "zulu")
+        sha = _git(repo, "rev-parse", "zulu").strip()
+        _git(repo, "update-ref", "refs/remotes/origin/zulu", sha)
+        labels = {"zulu": {"group": "merged", "action": "x"}}
+        verdict = creation_verdict(repo, _config(cap=2), "fresh", labels=labels)
+        assert sweep_clean_command(remote=True) in "\n".join(verdict.lines)
+
+    def test_no_merged_branch_no_clean_line(self, repo: Path) -> None:
+        _branch(repo, "alpha")
+        _branch(repo, "zulu")
+        verdict = creation_verdict(repo, _config(cap=2), "fresh")
+        assert "--clean" not in "\n".join(verdict.lines)
