@@ -363,6 +363,112 @@ PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)" # Resolve to absolute path
 [ -d "$PROJECT_ROOT" ] || _fail "Project root does not exist: $PROJECT_ROOT"
 _ok "Project root: $PROJECT_ROOT"
 
+# Step 1b: Record which project files are ALREADY uncommitted (ledger 00474 N588)
+#
+# UPGRADE_METADATA's modified_files must name only what THIS upgrade created,
+# modified or deleted. A client gate may exempt every listed path as
+# daemon-owned, so listing another agent's uncommitted work there silently
+# exempts it. Taken before Step 3, the first step that can write into the
+# project (it may clone the daemon there). Each dirty path is recorded with a
+# hash of its content, so a file that was dirty AND that the upgrade then
+# changed again is still listed. Inline, not a library: this script is fetched
+# standalone (test_upgrade_sh_tmp_self_contained.py). No associative arrays,
+# which macOS's bash 3.2 lacks. Pinned by
+# tests/integration/test_upgrade_sh_modified_files_scope.py.
+
+# _dirty_paths <root> <outfile> - write every path `git status` reports in
+# <root> to <outfile>, NUL-separated: both sides of a rename or copy, and each
+# untracked file individually. Paths are relative to <root>.
+_dirty_paths() {
+    local _root="$1" _out="$2" _listing _entry _rename_source="false"
+    _listing="$(mktemp "${TMPDIR:-/tmp}/hooks_daemon_upgrade_status_XXXXXX")"
+    if ! git -C "$_root" status --porcelain -z --untracked-files=all > "$_listing"; then
+        rm -f "$_listing"
+        return 1
+    fi
+    : > "$_out"
+    while IFS= read -r -d '' _entry; do
+        if [ "$_rename_source" = "true" ]; then
+            # The field after a rename/copy entry is its source path, bare.
+            _rename_source="false"
+            printf '%s\0' "$_entry" >> "$_out"
+            continue
+        fi
+        case "${_entry:0:2}" in
+            *R* | *C*) _rename_source="true" ;;
+        esac
+        printf '%s\0' "${_entry:3}" >> "$_out"
+    done < "$_listing"
+    rm -f "$_listing"
+}
+
+# _dirty_path_record <root> <path> - one line naming the path's current
+# content: "<state> <path>", the path %q-quoted so any name fits on one line.
+# <state> is the blob hash of a file, "link:" and the hash of a symlink's
+# target, "absent" for a
+# deleted path, or "other" for a directory (a nested repository or submodule).
+_dirty_path_record() {
+    local _root="$1" _path="$2" _state
+    if [ -L "$_root/$_path" ]; then
+        _state="link:$(readlink "$_root/$_path" | git -C "$_root" hash-object --stdin)" || return 1
+    elif [ -f "$_root/$_path" ]; then
+        _state="$(git -C "$_root" hash-object --no-filters -- "$_path")" || return 1
+    elif [ -e "$_root/$_path" ]; then
+        _state="other"
+    else
+        _state="absent"
+    fi
+    printf '%s %q\n' "$_state" "$_path"
+}
+
+# _dirty_path_states <root> - one _dirty_path_record line per dirty path.
+_dirty_path_states() {
+    local _root="$1" _paths _path _status=0
+    _paths="$(mktemp "${TMPDIR:-/tmp}/hooks_daemon_upgrade_paths_XXXXXX")"
+    if _dirty_paths "$_root" "$_paths"; then
+        while IFS= read -r -d '' _path; do
+            _dirty_path_record "$_root" "$_path" || { _status=1; break; }
+        done < "$_paths"
+    else
+        _status=1
+    fi
+    rm -f "$_paths"
+    return "$_status"
+}
+
+# _upgrade_changed_paths <root> <before> - comma-separated paths dirty now
+# whose record is not in <before> (a _dirty_path_states snapshot): new to the
+# dirty set, or with different content. A path the upgrade restored to its
+# committed content is clean, so it has nothing to commit and is not listed.
+_upgrade_changed_paths() {
+    local _root="$1" _before="$2" _paths _path _record _changed="" _status=0
+    _paths="$(mktemp "${TMPDIR:-/tmp}/hooks_daemon_upgrade_paths_XXXXXX")"
+    if _dirty_paths "$_root" "$_paths"; then
+        while IFS= read -r -d '' _path; do
+            _record="$(_dirty_path_record "$_root" "$_path")" || { _status=1; break; }
+            case $'\n'"$_before"$'\n' in
+                *$'\n'"$_record"$'\n'*) ;;
+                *) _changed="${_changed}${_path}," ;;
+            esac
+        done < "$_paths"
+    else
+        _status=1
+    fi
+    rm -f "$_paths"
+    [ "$_status" -eq 0 ] || return 1
+    printf '%s\n' "${_changed%,}"
+}
+
+_PRE_UPGRADE_DIRTY=""
+_PRE_UPGRADE_DIRTY_TAKEN="false"
+if [ -e "$PROJECT_ROOT/.git" ]; then
+    if _PRE_UPGRADE_DIRTY="$(_dirty_path_states "$PROJECT_ROOT")"; then
+        _PRE_UPGRADE_DIRTY_TAKEN="true"
+    else
+        _warn "Could not record which project files were already uncommitted; modified_files will be empty, so name the files this upgrade changed yourself"
+    fi
+fi
+
 # Step 2: Find compatible Python interpreter (3.11+)
 #
 # Plan 00104 Phase 7 Task 7.2: locate the daemon's pyproject.toml so the
@@ -972,13 +1078,17 @@ if [ -z "$_metadata_host" ]; then
     fi
 fi
 
-# modified_files: comma-separated relative paths in $PROJECT_ROOT that are
-# currently dirty (vs HEAD). Informational — the project agent filters by
-# daemon-owned prefixes before staging.
+# modified_files: comma-separated paths, relative to $PROJECT_ROOT, that THIS
+# upgrade created, modified or deleted (both sides of a rename): dirty now and
+# either clean before Step 1b's snapshot or with different content since. A
+# file another agent left uncommitted is never listed. Empty when the snapshot
+# could not be taken (a warning said so) or the upgrade changed nothing.
 _metadata_modified_files=""
-if [ -d "$PROJECT_ROOT/.git" ]; then
-    if _status_out="$(cd "$PROJECT_ROOT" && git status --porcelain 2>/dev/null | awk '{print $NF}' | tr '\n' ',')"; then
-        _metadata_modified_files="${_status_out%,}"
+if [ "$_PRE_UPGRADE_DIRTY_TAKEN" = "true" ]; then
+    if _changed_out="$(_upgrade_changed_paths "$PROJECT_ROOT" "$_PRE_UPGRADE_DIRTY")"; then
+        _metadata_modified_files="$_changed_out"
+    else
+        _warn "Could not list the files this upgrade changed; modified_files is empty, so name them yourself"
     fi
 fi
 

@@ -220,7 +220,10 @@ while an upgrade commit lists it in `modified_files`. Pasting the block as instr
 list only paths that are new or changed afterwards. Alternatively, refuse to start on a dirty tree and name the files.
 Add a test with a pre-dirty unrelated file that must not appear. Client-visible, so a release note is required.
 
-**Status**: ⬜ open.
+**Status**: ✅ fixed on `agent-ac4f3ae9be87cf434-a6fe075d`: `upgrade.sh` Step 1b snapshots every dirty path with a
+content hash before Step 3, and `modified_files` lists only paths new to the dirty set or whose content changed
+(renames list both sides; spaces and deletions handled). Release note `008`. Test:
+`tests/integration/test_upgrade_sh_modified_files_scope.py`.
 
 ### N587 — `ask_user_question_blocker` called the session unattended while the owner was typing to it
 
