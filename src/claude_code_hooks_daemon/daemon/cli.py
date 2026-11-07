@@ -9568,8 +9568,10 @@ def cmd_worktree_reap(
         0 when every worktree was reapable (or there are none), 1 when at least
         one needs a human. The refusals are the actionable output.
     """
+    from claude_code_hooks_daemon.core import branch_cleanup
     from claude_code_hooks_daemon.core.worktree_reaping import (
         collect_orphaned_branches,
+        collect_skipped_merged_branches,
         collect_worktree_states,
         default_process_cwds,
         default_worktree_age,
@@ -9621,6 +9623,21 @@ def cmd_worktree_reap(
             repo_root, base_branch, config=_branches_config(repo_root), **collect_kwargs
         )
     )
+    # Plan 00571: merged branches with no worktree that pruning skips for their NAME
+    # are named, so `--reap-branches` never silently leaves a merged branch behind.
+    skipped_merged = (
+        collect_skipped_merged_branches(
+            repo_root, base_branch, config=_branches_config(repo_root), **collect_kwargs
+        )
+        if reap_branches and not only
+        else ()
+    )
+    for name in skipped_merged:
+        print(
+            f"SKIPPED {name}: merged into {base_branch} with no worktree, but not agent-owned "
+            f"(not agent-* or WorktreeCreate-recorded); delete it with "
+            f"`{branch_cleanup.sweep_clean_command()}`"
+        )
     if not states and not orphans:
         print("No agent worktrees found.")
         return 0
@@ -12664,7 +12681,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--reap-branches",
         dest="reap_branches",
         action="store_true",
-        help="Also delete agent branches that have no worktree, if fully merged",
+        help="Also delete agent-* and WorktreeCreate-recorded branches that have no "
+        "worktree, if fully merged. Other merged branches with no worktree are listed as "
+        "SKIPPED, never deleted here: branch-sweep --clean deletes them",
     )
     parser_worktree_reap.set_defaults(func=cmd_worktree_reap)
 
