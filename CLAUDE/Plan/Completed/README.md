@@ -4,6 +4,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00529: owner decision on rust helpers from 00495 assessment](00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md) - Complete (the owner decided: the Rust relay is the default, starting with the status line; Rust is welcome where measured; no silent fallbacks. Relay default-on `59320d842`, status line `901e59a7a`, loud missing relay `376612d38`, a broken relay binary never runs a call unguarded (release note 019), CI follow-up `95aba97b5`)
+
+- [00528: worktree guard stale binding](00528-worktree-guard-stale-binding/PLAN.md) - Complete at the fix commit + the archiving commit (md-viewer field report via the desktop team: a sub-agent bound to a probe worktree it had already removed was denied its report write into the main checkout; a binding whose worktree is gone is now dropped; release note 064)
+
 - [00527: go development handler fit](00527-go-development-handler-fit/PLAN.md) - Complete at merges `86ec79011`, `agent-af51ee2ff28e8bc9b-580be854` and `agent-a20fee8441f62dcd7-b0782f70` + the archiving commit (owner request via the desktop team: idiomatic Go draws no false deny from the TDD, error-hiding, lint, suppression and LSP handlers, assuming only the Go toolchain; release notes 059, 061, 062, 063; field confirmation by the seats waits on the next release)
 
 - [00525: staged lint gate runs go vet from the module root](00525-staged-lint-gate-runs-go-vet-from-the-module-root/PLAN.md) - Complete at merge `132ca087e` + the archiving commit (#118: the commit gate vets a Go file from its `go.mod` directory on its package, through the resolver `lint_on_edit` shares, so a correct nested-module package commits and a real finding still blocks; release note 059)

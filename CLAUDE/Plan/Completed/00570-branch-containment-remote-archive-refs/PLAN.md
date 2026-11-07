@@ -1,6 +1,6 @@
 # Plan 00570: branch containment remote archive refs
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-07
 **Owner**: joseph
 **Priority**: High
@@ -52,23 +52,25 @@ Plan 00206 (the deterministic delete proof) and Plan 00249 (the
 
 ### Phase 1: Honest offline wording and remote proof
 
-- [ ] ⬜ **Task 1.1**: Failing tests in a scratch-repo fixture (bare remote,
+- [x] ✅ **Task 1.1**: Failing tests in a scratch-repo fixture (bare remote,
   branch pushed only under an archive namespace): the sweep's wording, the
   absent push advice, `delete-branch` accepting the ls-remote proof, the
   descendant case, and the network-failure fallback.
-- [ ] ⬜ **Task 1.2**: Implement the bounded ls-remote check for the CLI
+- [x] ✅ **Task 1.2**: Implement the bounded ls-remote check for the CLI
   paths only, and correct the offline wording.
-- [ ] ⬜ **Task 1.3**: Update the branch-hygiene docs that state the
+- [x] ✅ **Task 1.3**: Update the branch-hygiene docs that state the
   containment rule, plus a release note.
 
 ## Success Criteria
 
-- [ ] Tests reproduce the issue's scenario and fail before the fix.
-- [ ] No network call is added to any hook handler path (asserted by a test).
-- [ ] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` records the
+- [x] Tests reproduce the issue's scenario and fail before the fix.
+- [x] No network call is added to any hook handler path (asserted by a test).
+- [x] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` records the
   change in the pending-release holding area.
-- [ ] Issue #166 is commented and closed after a verified merge and green CI.
+- [x] Issue #166 is commented and closed after a verified merge and green CI.
 
 ## Delivery & Milestones
 
-- Pending.
+- Fix merged at `df4a928e9`; main CI green (run 42404687976, on `4b1317734`).
+  Release note 004 is in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`. #166
+  commented and closed.
