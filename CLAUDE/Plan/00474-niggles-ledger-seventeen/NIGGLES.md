@@ -124,6 +124,24 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N587 — `ask_user_question_blocker` called the session unattended while the owner was typing to it
+
+**Source**: the owner, during the v3.73.0 release (7 November 2026): "dog fooding error there - not sure why it was
+regarding it as unattended".
+
+**Evidence**: mid-release, the owner sent four messages within minutes, all delivered mid-turn (the remote-docs
+question and its correction, the README link and handler catalogue, and "do not allow changes to delay the release").
+An AskUserQuestion about accepting two review defects was then denied with R-ASK-USER-QUESTION-UNJUSTIFIED. The deny
+text said "there is no genuine human prompt in this session in the last 30 minutes". Messages a human sends while a
+turn is running reach Claude Code as mid-turn input, not as a UserPromptSubmit, so the handler's notion of a recent
+human prompt never sees them. The coordinator had to assume the answer and record it.
+
+**Proposal**: count mid-turn human input as presence. Find the event or transcript record Claude Code produces for a
+message queued mid-turn, record it like a UserPromptSubmit, and add a test that a session whose last human input
+arrived mid-turn is judged attended.
+
+**Status**: ⬜ open.
+
 ### N586 — release housekeeping re-fetches every vendored doc, even one checked days ago
 
 **Source**: the owner, during the v3.73.0 release (7 November 2026): "remote docs refresh - please tell me this only

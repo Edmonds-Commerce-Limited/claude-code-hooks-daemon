@@ -9,7 +9,7 @@
 
 *~100,000 lines of source, ~209,000 lines of tests — the test tree is 2.1× the size of the thing it tests.*
 
-Maintained by [Edmonds Commerce](https://github.com/Edmonds-Commerce-Limited).
+Maintained by [Edmonds Commerce](https://edmondscommerce.co.uk).
 
 **Deterministic guardrails for coding agents — policy enforcement and quality gates, evaluated on every tool call before it runs.**
 
