@@ -124,6 +124,24 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N596 — `test_a_pulled_upgrade_is_synced_after_the_hook_has_answered` failed once on main CI with no state file
+
+**Source**: coordinator, main CI run 42421806919 at a000ed4c6 (7 November 2026), shard `integration-slow`.
+
+**Evidence**: `tests/integration/test_provision_sh.py:1349` (via `_outcome` -> `_state`, line 1117) asserted
+`no state recorded at .../.claude/hooks-daemon/untracked/background-sync/v9.9.9.state`. 313 passed, 1 failed, in a
+1,491 s shard. The next main run (42423929870, 83044eb95), whose only change was this ledger, passed, so the failure
+is timing, not the N588 merge. The test runs the real forwarder, which starts the sync detached (`setsid ... &`) after
+the hook answers; a loaded runner can leave the detached sync with no state file written by the time `_outcome`
+reads it.
+
+**Proposal**: read how `_outcome` waits (a bounded poll for the state file, and whether its bound goes through
+`tests.load_scaling.scaled_seconds` like N222's fixes). If it reads the file once, or polls on a bare number, make it
+poll to a scaled bound for the state file to exist AND reach a terminal state. Reproduce first by slowing the detached
+start (a stub sleep before the state write) so the test fails red without the fix.
+
+**Status**: ⬜ open.
+
 ### N595 — `lint_on_edit` lints Go files under `testdata/`, which Go never builds
 
 **Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026), dogfooding v3.73.0.
