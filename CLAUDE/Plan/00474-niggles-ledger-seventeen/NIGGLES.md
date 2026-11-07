@@ -134,9 +134,10 @@ tip 9aecfe3f4 is an ancestor of `origin/main` (merged and pushed as 29920b2b0 be
 `git push -q origin --delete <name>` on its own, moments later, was allowed. An earlier
 `delete-branch X && git push origin --delete X` chain with no worktree removal was allowed too.
 
-**Proposal**: reproduce with a fixture repository and probe the compound command. Suspects: the guard judging the
-local ref or worktree state that the earlier statements remove, or a parse of the chained command picking the wrong
-target. Fix with a regression test. The work-around (run the remote delete as its own call) costs one call, so this
+**Proposal**: reproduce with a fixture repository and probe the compound command. `prove_remote_merged` reads only remote-tracking refs, never
+the local branch or worktree (fact-check 261107-n591-plan-fact-checker-sonnet.md). So the suspects are a parse of the
+chained command picking the wrong target, or remote-tracking refs judged stale at hook time. The tracking refs were
+updated by the push that merged the handoff, and nothing changed before the allowed retry except time. Fix with a regression test. The work-around (run the remote delete as its own call) costs one call, so this
 is low priority.
 
 **Status**: ⬜ open.
