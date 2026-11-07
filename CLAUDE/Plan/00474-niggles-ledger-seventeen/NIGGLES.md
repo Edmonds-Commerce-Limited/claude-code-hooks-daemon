@@ -124,6 +124,21 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N585 — `worktree-reap --reap-branches` keeps a merged branch that is ahead of its own upstream
+
+**Source**: this session, 7 November 2026, reaping two finished agent worktrees after Plans 00571 and 00572 merged.
+
+**Evidence**: `agent-af0556169a3dc9dbd-f7641538` had been fast-forwarded locally to the integration head, which was
+merged into `main`, past its pushed upstream. `worktree-reap --reap --reap-branches` removed the worktree but printed
+`git kept the branch ... not yet merged to refs/remotes/origin/...`, because it deletes with `git branch -d`, which
+checks the upstream. `delete-branch` on the same branch classified it as `merged-unpushed` and deleted it losslessly
+behind a bundle. The two commands disagree on the same proof, and the run still said REAPED with exit 1.
+
+**Proposal**: have `worktree-reap --reap-branches` delete through the same `branch_safety.delete_branches` path
+(containment against the protected ref, plus a bundle) instead of `git branch -d`.
+
+**Status**: ⬜ open.
+
 ### N584 — a sub-agent edited source through Python scripts, routing around every Write/Edit content guard
 
 **Source**: this session, 7 November 2026, cleaning up after Plan 00570 (#166).
