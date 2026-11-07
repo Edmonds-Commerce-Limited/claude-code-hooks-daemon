@@ -1,0 +1,19 @@
+# Plan 00572 Task 4.1: one grouped weekly pull request per ecosystem.
+# tests/integration/test_dependabot_config.py pins the shape.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]

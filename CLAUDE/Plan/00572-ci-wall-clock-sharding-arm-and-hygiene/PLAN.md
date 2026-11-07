@@ -102,7 +102,7 @@ refuse those pushes, so check what it would flag before enabling it.
 
 ### Phase 4: Supply chain
 
-- [ ] ⬜ **Task 4.1**: `.github/dependabot.yml` for `github-actions` and the
+- [x] ✅ **Task 4.1**: `.github/dependabot.yml` for `github-actions` and the
   Python dependencies, grouped.
 - [ ] ⬜ **Task 4.2**: Pin every `uses:` to a full commit SHA, with the tag in
   a trailing comment.
