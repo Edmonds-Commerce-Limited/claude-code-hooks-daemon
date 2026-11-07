@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00574: plan decisions log document](00574-plan-decisions-log-document/PLAN.md) - Not Started (owner request, for later: a per-plan `PLAN-DECISIONS.md`, pre-created by mkplan, as an unbounded, parseable decision log keyed by task id, so PLAN.md stays the front page of tasks and progress and JOURNAL/ stays ad hoc; adversarial review in progress)
+
 - [00573: admin seat issue assignment override](00573-admin-seat-issue-assignment-override/PLAN.md) - In Progress (owner ruling: a repository admin seat is never blocked by a non-admin's issue assignment; it gets an advisory, and `issue-validity --claim` performs a recorded takeover; non-admin seats and other admins' claims keep the duplicate-work block)
 
 - [00572: ci wall clock sharding arm and hygiene](00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - Not Started, pending the owner's go-ahead (owner request: shard `qa.yml`'s serial pytest across runners by reusing release-gate's shard matrix, give every `main` push a verdict, build and release aarch64 relay and hooks-screen on `ubuntu-24.04-arm`, and close the practice gaps the [analysis](00572-ci-wall-clock-sharding-arm-and-hygiene/ANALYSIS.md) ranks)
@@ -334,11 +336,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 573 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 574 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 483 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 67 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 68 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
