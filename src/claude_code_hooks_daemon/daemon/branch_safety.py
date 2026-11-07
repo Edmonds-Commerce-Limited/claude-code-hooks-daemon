@@ -51,6 +51,13 @@ from pathlib import Path
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
+from claude_code_hooks_daemon.utils.remote_refs import (
+    LazyRemoteRefs,
+    RemoteRefs,
+    RemoteSource,
+    holder_of,
+    resolve_source,
+)
 
 # Human gate for an ``unproven`` deletion: given the classifications and the
 # stated reason, return whether a person consented. Injected rather than called
@@ -62,6 +69,10 @@ TIER_MERGED = "merged"
 TIER_PATCH_EQUIVALENT = "patch-equivalent"
 TIER_CONTENT_PRESERVED = "content-preserved"
 TIER_UNPROVEN = "unproven"
+#: The remote holds the tip, or a descendant of it, under a ref this clone does not
+#: fetch (an archive namespace). Proved by ONE ``ls-remote`` the explicit command
+#: makes; never reached from a hook path (issue #166).
+TIER_REMOTE_HELD = "remote-held"
 #: Merged into the protected ref, but AHEAD of its own remote-tracking ref.
 #: Same ancestry proof as ``merged``; a separate tier only because git's safe
 #: delete refuses it, so it needs a different flag and a different explanation
@@ -250,6 +261,10 @@ _TIER_DETAIL = {
         "what git's safe delete measures it against, so git refuses it; deleting "
         "is still lossless because every commit is already in the protected ref"
     ),
+    TIER_REMOTE_HELD: (
+        "the remote holds this tip, or a commit descending from it, outside the refs "
+        "this clone fetches"
+    ),
     TIER_PATCH_EQUIVALENT: (
         "every commit is already upstream by patch-id — the shape a history rewrite produces"
     ),
@@ -278,6 +293,8 @@ class BranchClassification:
     #: The target ref that proved a merged or patch-equivalent tier, e.g.
     #: ``refs/heads/main`` or ``refs/heads/release/x``; "" otherwise.
     proven_against: str = ""
+    #: ``<remote>: <ref>`` that proved ``remote-held``; "" otherwise.
+    held_by: str = ""
 
     @property
     def is_safe(self) -> bool:
@@ -287,6 +304,7 @@ class BranchClassification:
             TIER_MERGED_UNPUSHED,
             TIER_MERGED_NOT_IN_HEAD,
             TIER_PATCH_EQUIVALENT,
+            TIER_REMOTE_HELD,
             TIER_CONTENT_PRESERVED,
         )
 
@@ -564,6 +582,16 @@ def _patch_equivalent(repo: Path, target: str, tip_ref: str) -> tuple[bool, int 
     return _has_merge_commits(repo, target, tip_ref) is False, 0
 
 
+def _remote_unchecked_note(listing: RemoteRefs | None) -> str:
+    """The sentence naming a remote that could not be listed, or "" when it was or was not asked."""
+    if listing is None or listing.failure is None:
+        return ""
+    return (
+        f"; the remote could not be checked (`git ls-remote {listing.remote}` failed: "
+        f"{listing.failure}), so only local refs were considered"
+    )
+
+
 def classify_branch(
     repo: Path,
     name: str,
@@ -575,6 +603,7 @@ def classify_branch(
     content_tier: bool = True,
     line_names: Sequence[str] = (),
     line_targets: Sequence[str] | None = None,
+    remote_listing: RemoteSource | None = None,
 ) -> BranchClassification:
     """Classify one branch, returning its tier or the reason it is refused.
 
@@ -591,6 +620,10 @@ def classify_branch(
         ignore_worktree: Skip ONLY the linked-worktree refusal, for the proof
             made before that worktree is removed. A delete never passes it, so
             it re-classifies with the worktree gone.
+        remote_listing: One ``ls-remote`` of the remote, made by the caller (never by a
+            hook). A ref at or descending from the tip proves ``remote-held`` after
+            ``patch-equivalent`` fails; a listing that failed is never proof and is
+            named in an ``unproven`` verdict.
         content_tier: When False, a branch neither merged nor patch-equivalent
             is ``unproven`` without the blob walk of every reachable object,
             which is too slow for a hook (Plan 00558 cleanup).
@@ -682,6 +715,19 @@ def classify_branch(
         if count is not None:
             known_counts.append(count)
     unique_commits = min(known_counts) if known_counts else 0
+    listing = resolve_source(remote_listing) if remote_listing is not None else None
+    if listing is not None:
+        held = holder_of(repo, listing, tip)
+        if held is not None:
+            held_by = f"{listing.remote}: {held}"
+            return BranchClassification(
+                name=name,
+                tier=TIER_REMOTE_HELD,
+                detail=f"{_TIER_DETAIL[TIER_REMOTE_HELD]} ({held_by})",
+                tip=tip,
+                held_by=held_by,
+            )
+    remote_note = _remote_unchecked_note(listing)
     patch_summary = (
         f"{unique_commits} commit(s) not upstream by patch-id"
         if known_counts
@@ -694,7 +740,7 @@ def classify_branch(
             tier=TIER_UNPROVEN,
             unique_commits=unique_commits,
             tip=tip,
-            detail=f"{patch_summary}; the content tier was not run",
+            detail=f"{patch_summary}; the content tier was not run{remote_note}",
         )
 
     # Commit-level uniqueness does not imply content loss: a stale branch is
@@ -733,7 +779,7 @@ def classify_branch(
             f"{len(content_unique_paths)} file(s) hold content found nowhere "
             f"in {where} ({len(unique_paths)} path(s) are new, but a "
             f"new path whose bytes already exist in {where} loses "
-            f"nothing)"
+            f"nothing){remote_note}"
         ),
     )
 
@@ -797,6 +843,7 @@ def delete_branches(
     content_tier: bool = True,
     line_names: Sequence[str] = (),
     line_targets: Sequence[str] | None = None,
+    remote: str | None = None,
 ) -> DeletionReport:
     """Classify every branch, then delete the batch.
 
@@ -830,6 +877,8 @@ def delete_branches(
         content_tier: Passed to :func:`classify_branch`.
         line_names: Passed to :func:`classify_branch`; integration lines.
         line_targets: Passed to :func:`classify_branch`; the default ref(s) only.
+        remote: Name of the remote to ask, ONCE for the whole batch, what it holds
+            outside the fetched refs. None makes no network call.
 
     Raises:
         ValueError: if ``allow_unproven`` is set without a reason.
@@ -840,6 +889,7 @@ def delete_branches(
             "on these branches may be destroyed"
         )
 
+    listing = LazyRemoteRefs(repo, remote) if remote is not None else None
     classifications = tuple(
         classify_branch(
             repo,
@@ -850,6 +900,7 @@ def delete_branches(
             content_tier=content_tier,
             line_names=line_names,
             line_targets=line_targets,
+            remote_listing=listing,
         )
         for name in names
     )

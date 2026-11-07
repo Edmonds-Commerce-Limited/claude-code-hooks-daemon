@@ -55,6 +55,13 @@ from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.remote_refs import (
+    RemoteRefs,
+    RemoteSource,
+    holder_of,
+    made_listing,
+    resolve_source,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +164,10 @@ class Containment(StrEnum):
     OWN_REMOTE = "on its own remote only"
     OTHER_WORK_BRANCH = "only in another work branch"
     NOWHERE = "nowhere"
+    #: The remote holds it outside every ref this clone fetches (an archive
+    #: namespace). Only an explicit ``ls-remote`` can show this, so it is granted
+    #: only when the caller passed a listing; the offline inventory never reports it.
+    REMOTE_UNFETCHED = "on the remote outside the fetched refs"
 
 
 @dataclass(frozen=True)
@@ -203,6 +214,8 @@ class BranchInventory:
     default_ref: str | None
     records: dict[str, BranchRecord]
     worktrees_known: bool = True
+    #: The one ``ls-remote`` the caller asked for, or None when the pass stayed offline.
+    remote_refs: RemoteRefs | None = None
 
 
 @dataclass(frozen=True)
@@ -681,10 +694,17 @@ def _stage(age_days: float, config: BranchesConfig) -> DormancyStage | None:
 class _Pass:
     """State for one inventory pass: the budget, the cache and the shared facts."""
 
-    def __init__(self, repo: Path, config: BranchesConfig, cache: _Cache) -> None:
+    def __init__(
+        self,
+        repo: Path,
+        config: BranchesConfig,
+        cache: _Cache,
+        remote_refs: RemoteSource | None = None,
+    ) -> None:
         self.repo = repo
         self.config = config
         self.cache = cache
+        self.remote_refs = remote_refs
         self.deadline = time.monotonic() + config.sweep.budget_ms / 1000
 
     def _within_budget(self) -> bool:
@@ -709,6 +729,23 @@ class _Pass:
         return computed
 
     def containment(
+        self, name: str, tip: str, default: str | None, refs_hash: str
+    ) -> tuple[Containment, str | None] | None:
+        """The offline answer, upgraded by the remote listing when one was passed.
+
+        The cache holds only the offline answer: a listing is a point-in-time
+        network reading and must not outlive its command.
+        """
+        found = self._offline_containment(name, tip, default, refs_hash)
+        if found is None or found[0] != Containment.NOWHERE or self.remote_refs is None:
+            return found
+        listing = resolve_source(self.remote_refs)
+        held = holder_of(self.repo, listing, tip)
+        if held is None:
+            return found
+        return Containment.REMOTE_UNFETCHED, f"{listing.remote}: {held}"
+
+    def _offline_containment(
         self, name: str, tip: str, default: str | None, refs_hash: str
     ) -> tuple[Containment, str | None] | None:
         key = f"{tip}:{refs_hash}:{name}"
@@ -752,9 +789,18 @@ def _group_rows(rows: list[_Row], remote: str) -> dict[str, tuple[_Row | None, _
 
 
 def build_inventory(
-    repo: Path, config: BranchesConfig, *, now: float | None = None
+    repo: Path,
+    config: BranchesConfig,
+    *,
+    now: float | None = None,
+    remote_refs: RemoteSource | None = None,
 ) -> BranchInventory:
     """Classify every local and remote branch of ``repo`` (DESIGN.md section 2).
+
+    ``remote_refs`` is the one ``ls-remote`` an explicit command (``branch-sweep``)
+    made; a branch otherwise CONTAINED NOWHERE whose tip a listed ref holds is
+    ``REMOTE_UNFETCHED``. The inventory itself never touches the network, so a hook
+    path that leaves it None stays offline.
 
     Raises:
         BranchInventoryError: The refs could not be listed (not a repository,
@@ -795,7 +841,7 @@ def build_inventory(
         moment=moment,
     )
     cache_path = repo / CACHE_RELATIVE_PATH
-    run = _Pass(repo, config, _load_cache(cache_path))
+    run = _Pass(repo, config, _load_cache(cache_path), remote_refs)
 
     records = {name: _record(run, context, name, *by_name[name]) for name in sorted(by_name)}
     records = _with_same_tips(records)
@@ -805,6 +851,7 @@ def build_inventory(
         default_ref=default_ref,
         records=records,
         worktrees_known=context.worktrees is not None,
+        remote_refs=made_listing(remote_refs),
     )
 
 

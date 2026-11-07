@@ -276,15 +276,40 @@ def _containment_text(record: BranchRecord) -> str:
     if record.containment is None:
         return "containment not measured"
     held = f" {record.contained_in}" if record.contained_in else ""
-    if record.containment in {Containment.DEFAULT, Containment.REMOTE_REF}:
+    if record.containment in {
+        Containment.DEFAULT,
+        Containment.REMOTE_REF,
+        Containment.REMOTE_UNFETCHED,
+    }:
         return f"contained in{held}: cleanup candidate"
     return f"{record.containment.value}{held}"
 
 
-def _nowhere_line(record: BranchRecord, config: BranchesConfig) -> str:
+def _nowhere_scope(inventory: BranchInventory, config: BranchesConfig) -> str:
+    """What was actually checked, said plainly, for the CONTAINED NOWHERE text."""
+    listing = inventory.remote_refs
+    if listing is None:
+        return (
+            f"no fetched remote-tracking ref of {config.remote} holds its commits (a remote "
+            "may hold it outside refs/heads, which the CLI `hooks-daemon branch-sweep` and "
+            "`delete-branch` can verify)"
+        )
+    if listing.failure is not None:
+        return (
+            f"no fetched remote-tracking ref of {config.remote} holds its commits, and the "
+            f"remote could not be checked (`git ls-remote {config.remote}` failed: "
+            f"{listing.failure})"
+        )
     return (
-        f"CONTAINED NOWHERE: {record.name} ({_age(record)}{_where(record)}): no remote ref "
-        f"holds its commits. Secure it: {push_command(record, config)}"
+        f"no fetched remote-tracking ref of {config.remote} holds its commits and the remote "
+        "was checked: none of its refs is at or above the tip"
+    )
+
+
+def _nowhere_line(record: BranchRecord, inventory: BranchInventory, config: BranchesConfig) -> str:
+    return (
+        f"CONTAINED NOWHERE: {record.name} ({_age(record)}{_where(record)}): "
+        f"{_nowhere_scope(inventory, config)}. Secure it: {push_command(record, config)}"
     )
 
 
@@ -320,9 +345,17 @@ def render_report(
         ]
     if not inventory.worktrees_known:
         out += ["WARNING: `git worktree list` failed; worktree paths are unknown.", ""]
+    listing = inventory.remote_refs
+    if listing is not None and listing.failure is not None:
+        out += [
+            f"WARNING: the remote could not be checked (`git ls-remote {config.remote}` failed: "
+            f"{listing.failure}); containment below covers fetched remote-tracking refs only.",
+            "",
+        ]
     out += _section(
-        "CONTAINED NOWHERE (no remote ref holds these commits):",
-        [f"  {_nowhere_line(r, config)}" for r in groups.contained_nowhere],
+        f"CONTAINED NOWHERE (no fetched remote-tracking ref of {config.remote} holds these "
+        "commits):",
+        [f"  {_nowhere_line(r, inventory, config)}" for r in groups.contained_nowhere],
     )
     out += _section(
         "Merged, not deleted:",
@@ -429,7 +462,7 @@ def session_summary(
     more" line.
     """
     groups = group_records(inventory)
-    entries = [_nowhere_line(r, config) for r in groups.contained_nowhere]
+    entries = [_nowhere_line(r, inventory, config) for r in groups.contained_nowhere]
     notes: list[str] = []
     if new_session:
         entries += [f"Dormant: {_dormant_line(r).strip()}" for r in groups.dormant]
