@@ -120,6 +120,8 @@ class BranchState(StrEnum):
     """DESIGN.md section 2 states; the first that matches wins."""
 
     EXEMPT = "exempt"
+    #: Matches ``branches.bot_owned`` (``dependabot/*``): in no pool, never cleaned.
+    BOT_OWNED = "bot-owned"
     DEFAULT = "default"
     INTEGRATION_LINE = "integration-line"
     PROTECTED = "protected"
@@ -138,6 +140,31 @@ _DONE_RANK = {
     BranchState.MERGED_LINE: 1,
     BranchState.PATCH_EQUIVALENT: 2,
 }
+
+
+class Pool(StrEnum):
+    """The three pools a work branch can be in (Plan 00571 DESIGN.md section 1)."""
+
+    OPEN = "open"
+    PARKED = "parked"
+    MERGED = "merged"
+
+
+_POOL_OF_STATE = {
+    BranchState.MERGED_DEFAULT: Pool.MERGED,
+    BranchState.MERGED_LINE: Pool.MERGED,
+    BranchState.PATCH_EQUIVALENT: Pool.MERGED,
+    BranchState.PARKED: Pool.PARKED,
+    BranchState.LIVE: Pool.OPEN,
+    BranchState.DORMANT: Pool.OPEN,
+    # Fail closed: a branch not yet classified is counted as open work.
+    BranchState.UNCLASSIFIED: Pool.OPEN,
+}
+
+
+def pool_of(state: BranchState) -> Pool | None:
+    """The pool of a record in ``state``; None for a branch that is never work."""
+    return _POOL_OF_STATE.get(state)
 
 
 class DormancyStage(StrEnum):
@@ -507,6 +534,8 @@ def _never_work(name: str, config: BranchesConfig, default: str | None) -> Branc
     """
     if branch_safety.matches_any_glob(name, config.exempt):
         return BranchState.EXEMPT
+    if branch_safety.matches_any_glob(name, config.bot_owned):
+        return BranchState.BOT_OWNED
     if name == default:
         return BranchState.DEFAULT
     if branch_safety.matches_any_glob(name, config.integration_lines):
@@ -572,10 +601,12 @@ def containment_of(
     own = f"{remote_prefix}{name}"
     head = f"{remote_prefix}{_REMOTE_HEAD}"
     others = sorted(ref for ref in result.stdout.splitlines() if ref and ref not in {head, own})
+    # A bot's branch is nobody's integration target, so it never vouches.
     vouching = [
         ref
         for ref in others
-        if _never_work(ref.removeprefix(remote_prefix), config, default) is not None
+        if _never_work(ref.removeprefix(remote_prefix), config, default)
+        not in (None, BranchState.BOT_OWNED)
     ]
     if vouching:
         return Containment.REMOTE_REF, _short(vouching[0])
@@ -1001,6 +1032,7 @@ def _weakest(verdicts: list[_Verdict]) -> _Verdict:
 
 _UNGROUPED = {
     BranchState.EXEMPT,
+    BranchState.BOT_OWNED,
     BranchState.DEFAULT,
     BranchState.INTEGRATION_LINE,
     BranchState.PROTECTED,

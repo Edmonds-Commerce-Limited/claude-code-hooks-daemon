@@ -165,8 +165,9 @@ class TestGroups:
         assert {r.name for r in groups.never_work} == {"main", "users/alice"}
 
     def test_open_work_counts_identical_tips_once(self, inventory: BranchInventory) -> None:
-        # merged-a, lost, idle-pushed, parked, and live/live-twin as one.
-        assert branch_sweep.open_work_count(inventory) == 5
+        # lost, idle-pushed, and live/live-twin as one (Plan 00571: parked and
+        # merged-a are in their own pools).
+        assert branch_sweep.open_work_count(inventory) == 3
 
     def test_unmeasured_dormant_containment_is_dormant_not_nowhere(self) -> None:
         unknown = _record("x", BranchState.DORMANT, dormancy_stage=DormancyStage.ADVISORY)
@@ -214,7 +215,7 @@ class TestReport:
         assert "git push -u origin lost" in text
         assert "bin/hooks-daemon delete-branch merged-a" in text
         assert "branch -D" not in text
-        assert "Open work: 5 of 10 (branches.wip.cap)" in text
+        assert "Open work: 3 of 10 (branches.wip.cap)" in text
 
     def test_exempt_only_with_all(self, inventory: BranchInventory) -> None:
         plain = "\n".join(branch_sweep.render_report(inventory, _CONFIG, cap=10, show_all=False))
@@ -257,7 +258,7 @@ class TestReport:
 class TestJson:
     def test_full_records_with_stable_keys(self, inventory: BranchInventory) -> None:
         document = json.loads(json.dumps(branch_sweep.report_json(inventory, cap=10)))
-        assert document["open_work"] == 5
+        assert document["open_work"] == 3
         assert document["cap"] == 10
         assert document["default_branch"] == "main"
         by_name = {b["name"]: b for b in document["branches"]}
@@ -292,8 +293,8 @@ class TestSessionSummary:
         assert "merged branch" not in text
 
     def test_over_cap_is_reported(self, inventory: BranchInventory) -> None:
-        text = "\n".join(branch_sweep.session_summary(inventory, _CONFIG, cap=5, new_session=True))
-        assert "Open work: 5 of 5" in text
+        text = "\n".join(branch_sweep.session_summary(inventory, _CONFIG, cap=3, new_session=True))
+        assert "Open work: 3 of 3" in text
 
     def test_output_is_capped(self) -> None:
         many = [

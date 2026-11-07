@@ -159,14 +159,14 @@ class TestCap:
         verdict = creation_verdict(repo, _config(cap=2, dup="off"), "fresh")
         assert any("and 3 more" in line for line in verdict.lines)
 
-    def test_labels_order_merged_first_with_action(self, repo: Path) -> None:
+    def test_labels_order_contained_nowhere_first_with_action(self, repo: Path) -> None:
         _branch(repo, "alpha")
         _branch(repo, "zulu")
-        labels = {"zulu": {"group": "merged", "action": "bin/hooks-daemon delete-branch zulu"}}
+        labels = {"zulu": {"group": "contained-nowhere", "action": "git push -u origin zulu"}}
         verdict = creation_verdict(repo, _config(cap=2), "fresh", labels=labels)
         listed = [line for line in verdict.lines if line.startswith("  - ")]
         assert "zulu" in listed[0]
-        assert "delete-branch zulu" in listed[0]
+        assert "git push -u origin zulu" in listed[0]
 
     def test_worktree_is_named(self, repo: Path, tmp_path: Path) -> None:
         _branch(repo, "one")
@@ -340,27 +340,18 @@ class TestLabels:
         assert read_labels(path) == {}
 
 
-class TestCapNamesTheCleanCommand:
-    """The WIP-cap deny names ``branch-sweep --clean`` for merged branches (Plan 00571)."""
+class TestWipCapLeavesMergedToItsOwnPool:
+    """A merged branch is in the merged pool, not the WIP count (Plan 00571 DESIGN.md s1)."""
 
-    def test_a_merged_branch_in_the_list_brings_the_clean_line(self, repo: Path) -> None:
+    def test_a_merged_label_takes_the_branch_out_of_the_wip_count(self, repo: Path) -> None:
         _branch(repo, "alpha")
         _branch(repo, "zulu")
         labels = {"zulu": {"group": "merged", "action": "bin/hooks-daemon delete-branch zulu"}}
         verdict = creation_verdict(repo, _config(cap=2), "fresh", labels=labels)
-        text = "\n".join(verdict.lines)
-        assert sweep_clean_command() in text
-        assert "--remote" not in text
-        assert "delete-branch zulu" in text
-
-    def test_a_merged_branch_with_a_remote_copy_adds_the_remote_flag(self, repo: Path) -> None:
-        _branch(repo, "alpha")
-        _branch(repo, "zulu")
-        sha = _git(repo, "rev-parse", "zulu").strip()
-        _git(repo, "update-ref", "refs/remotes/origin/zulu", sha)
-        labels = {"zulu": {"group": "merged", "action": "x"}}
-        verdict = creation_verdict(repo, _config(cap=2), "fresh", labels=labels)
-        assert sweep_clean_command(remote=True) in "\n".join(verdict.lines)
+        assert verdict.rule_id != RuleID.BRANCH_WIP_CAP
+        assert sweep_clean_command() not in "\n".join(
+            line for line in verdict.lines if "Open work branches" in line
+        )
 
     def test_no_merged_branch_no_clean_line(self, repo: Path) -> None:
         _branch(repo, "alpha")

@@ -40,7 +40,7 @@ _DONE_STATES = frozenset(
     {BranchState.MERGED_DEFAULT, BranchState.MERGED_LINE, BranchState.PATCH_EQUIVALENT}
 )
 #: Branches that are never a session's work, whatever the touch record says.
-_NEVER_JUDGED = frozenset({BranchState.EXEMPT, BranchState.PROTECTED})
+_NEVER_JUDGED = frozenset({BranchState.EXEMPT, BranchState.BOT_OWNED, BranchState.PROTECTED})
 #: Default and integration lines: judged only with ``include_default``.
 _LINES = frozenset({BranchState.DEFAULT, BranchState.INTEGRATION_LINE})
 
