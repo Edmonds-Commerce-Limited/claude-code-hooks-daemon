@@ -21,7 +21,12 @@ from claude_code_hooks_daemon.config.models import (
     BranchWipConfig,
     Config,
 )
-from claude_code_hooks_daemon.core.branch_creation import creation_verdict
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core.branch_creation import (
+    creation_verdict,
+    read_labels,
+    write_labels,
+)
 from claude_code_hooks_daemon.core.branch_inventory import (
     BranchState,
     Pool,
@@ -323,6 +328,120 @@ class TestPoolSplit:
         assert document["pools"]["open"] == {"count": 1, "cap": 10}
         assert document["pools"]["merged"] == {"count": 1, "cap": 10}
         assert document["pools"]["parked"] == {"count": 0, "cap": 10}
+
+
+# --- the parked pool ----------------------------------------------------------------------
+
+
+def _parked_repo(repo: Path, count: int, *, days_ago: float = 1) -> None:
+    for index in range(count):
+        _unique(repo, f"held{index}")
+        _park(repo, f"held{index}", days_ago=days_ago)
+
+
+class TestParkedPool:
+    def test_parked_pool_under_cap_and_fresh_allows(self, repo: Path) -> None:
+        _parked_repo(repo, 2)
+        config = _config(parked={"cap": 3})
+        assert creation_verdict(repo, config, "fresh", now=NOW).decision == "allow"
+
+    def test_parked_pool_at_cap_denies_with_its_own_rule(self, repo: Path) -> None:
+        _parked_repo(repo, 2)
+        verdict = creation_verdict(repo, _config(parked={"cap": 2}), "fresh", now=NOW)
+        assert verdict.decision == "deny"
+        assert verdict.rule_id == RuleID.BRANCH_PARKED_POOL
+        text = "\n".join(verdict.lines)
+        assert "Parked branches: 2 (cap 2" in text
+        assert "branches.parked.cap" in text
+        assert "held0" in text and "held1" in text
+        assert "branch-park held0 --clear" in text
+        assert "delete-branch" in text
+
+    def test_unset_parked_cap_follows_the_wip_cap(self, repo: Path) -> None:
+        _parked_repo(repo, 2)
+        assert creation_verdict(repo, _config(cap=2), "fresh", now=NOW).decision == "deny"
+
+    def test_a_stale_parked_branch_denies_under_the_cap(self, repo: Path) -> None:
+        _parked_repo(repo, 1, days_ago=31)
+        verdict = creation_verdict(repo, _config(), "fresh", now=NOW)
+        assert verdict.decision == "deny"
+        assert verdict.rule_id == RuleID.BRANCH_PARKED_POOL
+        text = "\n".join(verdict.lines)
+        assert "stale" in text.lower() and "31d" in text
+        assert "branches.parked.max_age_days" in text
+        assert "new reason" in text
+
+    def test_max_age_days_override_sets_staleness(self, repo: Path) -> None:
+        _parked_repo(repo, 1, days_ago=5)
+        assert creation_verdict(repo, _config(), "fresh", now=NOW).decision == "allow"
+        config = _config(parked={"max_age_days": 5})
+        assert creation_verdict(repo, config, "fresh", now=NOW).decision == "deny"
+
+    def test_warn_mode_warns_and_off_mode_ignores(self, repo: Path) -> None:
+        _parked_repo(repo, 2, days_ago=40)
+        warn = creation_verdict(repo, _config(parked={"cap": 2, "mode": "warn"}), "f", now=NOW)
+        assert warn.decision == "warn" and warn.rule_id is None
+        assert warn.lines
+        off = creation_verdict(repo, _config(parked={"cap": 2, "mode": "off"}), "f", now=NOW)
+        assert off.decision == "allow" and off.lines == ()
+
+    def test_wip_cap_still_wins_the_rule_id(self, repo: Path) -> None:
+        _parked_repo(repo, 2, days_ago=40)
+        _unique(repo, "open1")
+        verdict = creation_verdict(repo, _config(cap=1), "fresh", now=NOW)
+        assert verdict.rule_id == RuleID.BRANCH_WIP_CAP
+        assert "Parked branches" in "\n".join(verdict.lines)
+
+    def test_a_non_work_new_name_is_allowed_before_any_pool_is_judged(self, repo: Path) -> None:
+        _parked_repo(repo, 2, days_ago=40)
+        verdict = creation_verdict(repo, _config(parked={"cap": 1}), "main", now=NOW)
+        assert verdict.decision == "allow"
+
+    def test_inventory_marks_a_stale_parked_branch(self, repo: Path) -> None:
+        _unique(repo, "old")
+        _park(repo, "old", days_ago=31)
+        _unique(repo, "new")
+        _park(repo, "new", days_ago=1)
+        records = build_inventory(repo, _config(), now=NOW).records
+        assert records["old"].stale is True
+        assert records["new"].stale is False
+
+    def test_inventory_stale_respects_off_mode(self, repo: Path) -> None:
+        _unique(repo, "old")
+        _park(repo, "old", days_ago=31)
+        config = _config(parked={"mode": "off"})
+        assert build_inventory(repo, config, now=NOW).records["old"].stale is False
+
+    def test_inventory_counts_consecutive_reparks(self, repo: Path) -> None:
+        _unique(repo, "held")
+        _park(repo, "held", reason="one")
+        _park(repo, "held", reason="two")
+        _park(repo, "held", reason="three")
+        records = build_inventory(repo, _config(), now=NOW).records
+        assert records["held"].park_count == 3
+
+    def test_sweep_report_flags_stale_and_reparks(self, repo: Path) -> None:
+        _unique(repo, "held")
+        _park(repo, "held", days_ago=31, reason="one")
+        inventory = build_inventory(repo, _config(), now=NOW)
+        text = "\n".join(render_report(inventory, _config(), cap=10))
+        assert "STALE (past branches.parked.max_age_days 30)" in text
+        _park(repo, "held", days_ago=31, reason="two")
+        inventory = build_inventory(repo, _config(), now=NOW)
+        text = "\n".join(render_report(inventory, _config(), cap=10))
+        assert "re-parked 2 times" in text
+
+    def test_json_carries_stale_and_park_count(self, repo: Path) -> None:
+        _unique(repo, "held")
+        _park(repo, "held", days_ago=31)
+        document = report_json(build_inventory(repo, _config(), now=NOW), cap=10, config=_config())
+        record = next(r for r in document["branches"] if r["name"] == "held")
+        assert record["stale"] is True and record["park_count"] == 1
+
+    def test_labels_snapshot_round_trips_stale(self, tmp_path: Path) -> None:
+        path = tmp_path / "labels.json"
+        write_labels(path, [{"name": "a", "group": "parked", "stale": True}])
+        assert read_labels(path)["a"]["stale"] == "true"
 
 
 def test_duplicates_still_cover_parked_work(repo: Path) -> None:

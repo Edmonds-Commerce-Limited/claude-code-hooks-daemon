@@ -78,6 +78,8 @@ JSON_RECORD_KEYS: tuple[str, ...] = (
     "containment",
     "contained_in",
     "pool",
+    "stale",
+    "park_count",
     "action",
 )
 
@@ -334,6 +336,16 @@ def _work_line(record: BranchRecord) -> str:
     return f"  {record.name}: {_age(record)}{ahead}{twins}{_where(record)}"
 
 
+def _parked_line(record: BranchRecord, config: BranchesConfig) -> str:
+    line = f"{_work_line(record)}, reason: {record.parked_reason}"
+    if record.stale:
+        max_age = config.effective_pool_max_age(Pool.PARKED)
+        line += f", STALE (past branches.parked.max_age_days {max_age})"
+    if record.park_count is not None and record.park_count > 1:
+        line += f", re-parked {record.park_count} times"
+    return line
+
+
 # --- the CLI report --------------------------------------------------------------------
 
 
@@ -391,7 +403,7 @@ def render_report(
     out += _section("Live work:", [_work_line(r) for r in groups.live])
     out += _section(
         "Parked:",
-        [f"{_work_line(r)}, reason: {r.parked_reason}" for r in groups.parked],
+        [_parked_line(r, config) for r in groups.parked],
     )
     out += _section(
         "Not yet classified:",
@@ -474,6 +486,8 @@ def _record_json(
         "containment": record.containment.value if record.containment else None,
         "contained_in": record.contained_in,
         "pool": pool.value if (pool := pool_of(record.state)) is not None else None,
+        "stale": record.stale,
+        "park_count": record.park_count,
         "action": action,
     }
     return {key: document[key] for key in JSON_RECORD_KEYS}

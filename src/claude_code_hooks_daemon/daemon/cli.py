@@ -6540,7 +6540,11 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
         LABELS_RELATIVE_PATH,
         clear_label_stage,
     )
-    from claude_code_hooks_daemon.core.branch_park import BranchParkError, park_branch
+    from claude_code_hooks_daemon.core.branch_park import (
+        BranchParkError,
+        BranchParkSameReason,
+        park_branch,
+    )
 
     if args.clear and args.reason:
         print("ERROR: --clear takes no --reason", file=sys.stderr)
@@ -6551,6 +6555,9 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
         result = park_branch(
             repo, args.name, reason=args.reason, remote=branches.remote, clear=args.clear
         )
+    except BranchParkSameReason as e:
+        print(f"ERROR: branch-park: {e}", file=sys.stderr)
+        return 2
     except BranchParkError as e:
         print(f"ERROR: branch-park: {e}", file=sys.stderr)
         return 1

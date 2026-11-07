@@ -14,7 +14,11 @@ from claude_code_hooks_daemon.core.branch_creation import (
     write_labels,
 )
 from claude_code_hooks_daemon.core.branch_inventory import BranchState, build_inventory
-from claude_code_hooks_daemon.core.branch_park import BranchParkError, park_branch
+from claude_code_hooks_daemon.core.branch_park import (
+    BranchParkError,
+    BranchParkSameReason,
+    park_branch,
+)
 from tests.support.git_fixtures import git_setup_timeout
 
 
@@ -135,6 +139,31 @@ class TestPark:
         park_branch(repo, "work", reason="r", remote="origin")
         park_branch(repo, "work", reason=None, remote="origin", clear=True)
         assert "Unparked:" in _git(repo, "log", "-1", "--format=%B", "origin/work")
+
+    def test_a_same_reason_repark_is_refused_and_changes_nothing(self, repo: Path) -> None:
+        park_branch(repo, "work", reason="waiting", remote="origin")
+        parked = _git(repo, "rev-parse", "work")
+        with pytest.raises(BranchParkSameReason, match="new reason"):
+            park_branch(repo, "work", reason="waiting", remote="origin")
+        assert _git(repo, "rev-parse", "work") == parked
+
+    def test_a_new_reason_repark_is_accepted(self, repo: Path) -> None:
+        park_branch(repo, "work", reason="waiting", remote="origin")
+        park_branch(repo, "work", reason="still waiting on legal", remote="origin")
+        assert "Parked-Reason: still waiting on legal" in _git(
+            repo, "log", "-1", "--format=%B", "work"
+        )
+
+    def test_the_same_reason_is_fine_after_an_unpark(self, repo: Path) -> None:
+        park_branch(repo, "work", reason="waiting", remote="origin")
+        park_branch(repo, "work", reason=None, remote="origin", clear=True)
+        park_branch(repo, "work", reason="waiting", remote="origin")
+
+    def test_a_same_reason_remote_only_repark_is_refused(self, repo: Path) -> None:
+        _git(repo, "branch", "-D", "work")
+        park_branch(repo, "work", reason="waiting", remote="origin")
+        with pytest.raises(BranchParkSameReason):
+            park_branch(repo, "work", reason="waiting", remote="origin")
 
     @pytest.mark.parametrize("reason", ["", "  ", "two\nlines", None])
     def test_bad_reason_fails_before_any_change(self, repo: Path, reason: str | None) -> None:

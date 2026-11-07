@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     worktrees_by_branch,
 )
 from claude_code_hooks_daemon.utils import git_sync
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
@@ -147,6 +148,7 @@ def write_labels(path: Path, branches: list[dict[str, object]]) -> None:
             "group": record.get("group"),
             "action": record.get("action"),
             "stage": record.get("dormancy_stage"),
+            "stale": "true" if record.get("stale") else None,
         }
         for record in branches
     }
@@ -169,7 +171,7 @@ def clear_label_stage(path: Path, name: str) -> None:
     labels = read_labels(path)
     if name not in labels:
         return
-    labels[name] = {**labels[name], "group": "parked", "stage": None}
+    labels[name] = {**labels[name], "group": "parked", "stage": None, "stale": None}
     try:
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(labels, sort_keys=True), encoding="utf-8")
@@ -417,6 +419,50 @@ def _dormancy_context_lines(
     ]
 
 
+def _stale_parked(
+    parked: list[_Work], config: BranchesConfig, now: float
+) -> list[_Work]:
+    """Parked work whose park commit is at least ``parked.max_age_days`` old."""
+    max_age = config.effective_pool_max_age(Pool.PARKED)
+    return [work for work in parked if (now - work.committed) / _SECONDS_PER_DAY >= max_age]
+
+
+def _parked_pool_lines(
+    parked: list[_Work],
+    stale: list[_Work],
+    config: BranchesConfig,
+    now: float,
+    worktrees: Mapping[str, Path] | None,
+) -> list[str]:
+    cap = config.effective_pool_cap(Pool.PARKED)
+    stale_names = {work.name for work in stale}
+    head = f"Parked branches: {len(parked)} (cap {cap}, branches.parked.cap)"
+    if len(parked) >= cap:
+        head += " are at the cap"
+    if stale:
+        head += (
+            f"; {len(stale)} stale (past branches.parked.max_age_days "
+            f"{config.effective_pool_max_age(Pool.PARKED)})"
+        )
+    lines = [f"{head}. Clear or merge one before starting another:"]
+    park = daemon_cli_command_for_docs("branch-park")
+    delete = daemon_cli_command_for_docs("delete-branch")
+    ordered = sorted(
+        parked, key=lambda work: (work.name not in stale_names, work.committed, work.name)
+    )
+    for work in ordered[:DENY_LIST_LIMIT]:
+        flag = "  [STALE]" if work.name in stale_names else ""
+        action = f"{park} {work.name} --clear, then merge it; or {delete} {work.name}"
+        if work.name in stale_names:
+            action += f"; or re-park it with a new reason: {park} {work.name} --reason ..."
+        lines.append(f"  - {_detail(work, now, worktrees)}{flag}")
+        lines.append(f"      -> {action}")
+    if len(ordered) > DENY_LIST_LIMIT:
+        lines.append(f"  ... and {len(ordered) - DENY_LIST_LIMIT} more")
+    lines.append(BRANCH_LIMIT_PRINCIPLE)
+    return lines
+
+
 def _duplicates(new_name: str, groups: list[_Work], remote: str) -> list[_Work]:
     new_stem = stem(new_name, remote)
     new_numbers = number_tokens(new_stem)
@@ -483,7 +529,12 @@ def creation_verdict(
         else []
     )
     blocking, noisy = _dormant_work(groups, config, labels or {})
-    if not over_cap and not duplicates and not blocking and not noisy:
+    parked = [work for work in all_groups if work.pool == Pool.PARKED]
+    stale_parked = _stale_parked(parked, config, moment)
+    over_parked = config.parked.mode != "off" and (
+        len(parked) >= config.effective_pool_cap(Pool.PARKED) or bool(stale_parked)
+    )
+    if not (over_cap or duplicates or blocking or noisy or over_parked):
         return CreationVerdict("allow", ())
     worktrees = worktrees_by_branch(repo)
     lines: list[str] = []
@@ -499,11 +550,15 @@ def creation_verdict(
         lines.extend(_dormancy_deny_lines(blocking, moment, worktrees))
     elif noisy:
         lines.extend(_dormancy_context_lines(noisy, moment, worktrees))
+    if over_parked:
+        lines.extend(_parked_pool_lines(parked, stale_parked, config, moment, worktrees))
     cap_deny = over_cap and config.wip.mode == "block"
     if cap_deny:
         return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_WIP_CAP)
     if blocking:
         return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_DORMANT)
-    if over_cap or duplicates:
+    if over_parked and config.parked.mode == "block":
+        return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_PARKED_POOL)
+    if over_cap or duplicates or over_parked:
         return CreationVerdict("warn", tuple(lines))
     return CreationVerdict("allow", tuple(lines))

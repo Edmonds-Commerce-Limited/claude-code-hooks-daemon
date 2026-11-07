@@ -327,7 +327,9 @@ class TestLabels:
     def test_round_trip(self, tmp_path: Path) -> None:
         path = tmp_path / "x" / "labels.json"
         write_labels(path, [{"name": "a", "group": "merged", "action": "do"}])
-        assert read_labels(path) == {"a": {"group": "merged", "action": "do", "stage": None}}
+        assert read_labels(path) == {
+            "a": {"group": "merged", "action": "do", "stage": None, "stale": None}
+        }
 
     def test_absent_is_empty(self, tmp_path: Path) -> None:
         assert read_labels(tmp_path / "none.json") == {}
