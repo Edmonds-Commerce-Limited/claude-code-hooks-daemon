@@ -132,13 +132,15 @@ regarding it as unattended".
 **Evidence**: mid-release, the owner sent four messages within minutes, all delivered mid-turn (the remote-docs
 question and its correction, the README link and handler catalogue, and "do not allow changes to delay the release").
 An AskUserQuestion about accepting two review defects was then denied with R-ASK-USER-QUESTION-UNJUSTIFIED. The deny
-text said "there is no genuine human prompt in this session in the last 30 minutes". Messages a human sends while a
-turn is running reach Claude Code as mid-turn input, not as a UserPromptSubmit, so the handler's notion of a recent
-human prompt never sees them. The coordinator had to assume the answer and record it.
+text said "there is no genuine human prompt in this session in the last 30 minutes". The handler judges presence from
+the session transcript's tail, counting plain-text `user` records whose `origin.kind` is `human` (fact-check
+261107-plan-fact-checker-n584-n587-sonnet.md). So the miss is in how Claude Code records a message queued mid-turn (a
+different record shape or origin) or in the tail window being too short for a long, busy turn. The coordinator had to
+assume the answer and record it.
 
-**Proposal**: count mid-turn human input as presence. Find the event or transcript record Claude Code produces for a
-message queued mid-turn, record it like a UserPromptSubmit, and add a test that a session whose last human input
-arrived mid-turn is judged attended.
+**Proposal**: take this session's transcript, find the records the four mid-turn messages produced, and establish which
+of the two causes applies. Then count that record shape as human presence (or widen the window), with a test that a
+session whose last human input arrived mid-turn is judged attended.
 
 **Status**: ⬜ open.
 
