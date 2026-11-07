@@ -2272,6 +2272,36 @@ class BranchWipConfig(BaseModel):
     )
 
 
+class BranchPoolConfig(BaseModel):
+    """A pool other than open work: its cap, its member age limit and its mode.
+
+    ``cap`` None means ``wip.cap``; ``max_age_days`` None means the dormancy
+    preset's block stage (Plan 00571 DESIGN.md section 3).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    cap: Annotated[int, Field(ge=1)] | None = Field(
+        default=None, description="Branches allowed in this pool; null = branches.wip.cap"
+    )
+    max_age_days: Annotated[int, Field(ge=1)] | None = Field(
+        default=None, description="Age at which a member is stale; null = dormancy block_days"
+    )
+    mode: Literal["block", "warn", "off"] = Field(default="block")
+
+
+class BranchParkedConfig(BranchPoolConfig):
+    """``branches.parked``: branches whose tip carries a ``Parked-Reason`` trailer."""
+
+
+class BranchMergedConfig(BranchPoolConfig):
+    """``branches.merged``: merged or patch-equivalent branches not yet deleted.
+
+    ``max_age_days`` applies to a branch kept with ``branch-keep``; an unkept
+    merged branch is cleanup debt with no age allowance.
+    """
+
+
 class BranchDuplicatesConfig(BaseModel):
     """``branches.duplicates``: the duplicate-stem warning (never blocks)."""
 
@@ -2406,6 +2436,9 @@ class BranchesConfig(BaseModel):
             the DEFAULT branch holds every commit; being merged into another line
             is no proof, and an unmerged line is refused
         exempt: Globs naming branches never counted, judged or deleted
+        bot_owned: Globs naming branches a bot owns (``dependabot/*``): in no
+            pool, never cleaned, listed in their own sweep group. Separate from
+            ``exempt`` so a project's own exempt list does not drop the default
         protected_names: Branch names no delete command will remove
     """
 
@@ -2415,10 +2448,13 @@ class BranchesConfig(BaseModel):
     remote: str = Field(default="origin", min_length=1)
     integration_lines: list[str] = Field(default_factory=list)
     exempt: list[str] = Field(default_factory=list)
+    bot_owned: list[str] = Field(default_factory=lambda: ["dependabot/*"])
     protected_names: list[str] = Field(
         default_factory=lambda: ["main", "master", "develop", "trunk"]
     )
     wip: BranchWipConfig = Field(default_factory=BranchWipConfig)
+    parked: BranchParkedConfig = Field(default_factory=BranchParkedConfig)
+    merged: BranchMergedConfig = Field(default_factory=BranchMergedConfig)
     duplicates: BranchDuplicatesConfig = Field(default_factory=BranchDuplicatesConfig)
     dormancy: BranchDormancyConfig = Field(default_factory=BranchDormancyConfig)
     stop_guard: BranchStopGuardConfig = Field(default_factory=BranchStopGuardConfig)
@@ -2456,6 +2492,30 @@ class BranchesConfig(BaseModel):
         if self._legacy_wip_cap is not None:
             return self._legacy_wip_cap
         return self.wip.cap
+
+    def _pool_section(self, pool: str) -> BranchPoolConfig | None:
+        """The ``parked``/``merged`` section for ``pool`` (``core.branch_inventory.Pool``)."""
+        if pool == "parked":
+            return self.parked
+        if pool == "merged":
+            return self.merged
+        if pool == "open":
+            return None
+        raise ValueError(f"unknown branch pool: {pool!r}")
+
+    def effective_pool_cap(self, pool: str) -> int:
+        """The cap of ``pool``: its own ``cap`` when set, else the effective WIP cap."""
+        section = self._pool_section(pool)
+        if section is None or section.cap is None:
+            return self.effective_wip_cap()
+        return section.cap
+
+    def effective_pool_max_age(self, pool: str) -> int:
+        """Days after which a ``pool`` member is stale: its own key, else dormancy block_days."""
+        section = self._pool_section(pool)
+        if section is None or section.max_age_days is None:
+            return self.dormancy.effective_days[2]
+        return section.max_age_days
 
     def adopt_legacy_wip_cap(self, value: object) -> None:
         """Remember the retired ``max_open_branches`` while ``wip.cap`` is unset.

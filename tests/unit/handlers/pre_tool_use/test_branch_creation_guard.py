@@ -142,11 +142,11 @@ class TestHandle:
     ) -> None:
         write_labels(
             repo / LABELS_RELATIVE_PATH,
-            [{"name": "two", "group": "merged", "action": "bin/hooks-daemon delete-branch two"}],
+            [{"name": "two", "group": "contained-nowhere", "action": "git push -u origin two"}],
         )
         result = handler.handle(_bash("git switch -c fresh", repo))
         assert result.reason is not None
-        assert "delete-branch two" in result.reason
+        assert "git push -u origin two" in result.reason
 
     @pytest.mark.parametrize(
         "command",

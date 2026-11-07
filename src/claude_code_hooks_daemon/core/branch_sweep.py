@@ -26,6 +26,8 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     BranchRecord,
     BranchState,
     Containment,
+    Pool,
+    pool_of,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 
@@ -75,6 +77,7 @@ JSON_RECORD_KEYS: tuple[str, ...] = (
     "dormancy_stage",
     "containment",
     "contained_in",
+    "pool",
     "action",
 )
 
@@ -101,11 +104,14 @@ class SweepGroups:
     parked: tuple[BranchRecord, ...]
     unclassified: tuple[BranchRecord, ...]
     never_work: tuple[BranchRecord, ...]
+    bot_owned: tuple[BranchRecord, ...] = ()
 
 
 def _group_name(record: BranchRecord) -> str:
     """The report group of one record (the ``group`` key of the JSON)."""
     state = record.state
+    if state == BranchState.BOT_OWNED:
+        return "bot-owned"
     if state in _NEVER_WORK:
         return "not-work"
     if state in _MERGED:
@@ -142,21 +148,21 @@ def group_records(inventory: BranchInventory) -> SweepGroups:
         parked=take("parked"),
         unclassified=take("unclassified"),
         never_work=take("not-work"),
+        bot_owned=take("bot-owned"),
     )
 
 
-def open_work_count(inventory: BranchInventory) -> int:
-    """Open work branches, identical tips counted once (DESIGN.md section 3).
+def pool_count(inventory: BranchInventory, pool: Pool) -> int:
+    """Branches in ``pool``, identical tips counted once (Plan 00571 DESIGN.md section 1).
 
-    Every branch that is not exempt, the default, an integration line or a
-    protected name counts, merged and unclassified ones included: a branch
-    still exists until it is deleted. Names linked by ``same_tip_as`` count as
+    Membership is the record's state (:func:`pool_of`); an unclassified
+    branch is open work. Names of one pool linked by ``same_tip_as`` count as
     one.
     """
     work = {
         name: record
         for name, record in inventory.records.items()
-        if record.state not in _NEVER_WORK
+        if pool_of(record.state) == pool
     }
     seen: set[str] = set()
     groups = 0
@@ -172,6 +178,11 @@ def open_work_count(inventory: BranchInventory) -> int:
             seen.add(current)
             pending.extend(work[current].same_tip_as)
     return groups
+
+
+def open_work_count(inventory: BranchInventory) -> int:
+    """Open work branches (``branches.wip.cap``'s pool), identical tips counted once."""
+    return pool_count(inventory, Pool.OPEN)
 
 
 def effective_wip_cap(config: BranchesConfig, legacy_options: Mapping[str, Any]) -> int:
@@ -388,13 +399,47 @@ def render_report(
         "Not yet classified:",
         [f"  {r.name}: {r.reason}" for r in groups.unclassified],
     )
+    out += _section(
+        "Bot-owned (branches.bot_owned: in no pool, never cleaned; the bot removes them):",
+        [f"  {r.name}: {_age(r)}" for r in groups.bot_owned],
+    )
     if show_all:
         out += _section(
             "Not work (default, integration lines, protected, exempt):",
             [f"  {r.name}: {r.state.value}" for r in groups.never_work],
         )
-    out.append(f"Open work: {open_work_count(inventory)} of {cap} (branches.wip.cap)")
+    out += pool_count_lines(inventory, config, cap=cap)
     return out
+
+
+#: The footer label of each pool, with the config key that caps it.
+_POOL_LABELS: dict[Pool, tuple[str, str]] = {
+    Pool.OPEN: ("Open work", "branches.wip.cap"),
+    Pool.PARKED: ("Parked", "branches.parked.cap"),
+    Pool.MERGED: ("Merged, not deleted", "branches.merged.cap"),
+}
+
+
+def pool_caps(config: BranchesConfig, *, cap: int) -> dict[Pool, int]:
+    """Each pool's cap; ``cap`` is the WIP cap the caller resolved (legacy option included).
+
+    A pool whose own cap is unset follows ``cap``, so the report and the
+    creation guard agree even when only the retired option is set.
+    """
+    caps = {Pool.OPEN: cap}
+    for pool in (Pool.PARKED, Pool.MERGED):
+        own = config.parked.cap if pool == Pool.PARKED else config.merged.cap
+        caps[pool] = cap if own is None else own
+    return caps
+
+
+def pool_count_lines(inventory: BranchInventory, config: BranchesConfig, *, cap: int) -> list[str]:
+    """One ``<pool>: N of CAP (<key>)`` line per pool."""
+    caps = pool_caps(config, cap=cap)
+    return [
+        f"{label}: {pool_count(inventory, pool)} of {caps[pool]} ({key})"
+        for pool, (label, key) in _POOL_LABELS.items()
+    ]
 
 
 def _record_json(
@@ -430,6 +475,7 @@ def _record_json(
         "dormancy_stage": record.dormancy_stage.value if record.dormancy_stage else None,
         "containment": record.containment.value if record.containment else None,
         "contained_in": record.contained_in,
+        "pool": pool.value if (pool := pool_of(record.state)) is not None else None,
         "action": action,
     }
     return {key: document[key] for key in JSON_RECORD_KEYS}
@@ -446,6 +492,10 @@ def report_json(
         "worktrees_known": inventory.worktrees_known,
         "open_work": open_work_count(inventory),
         "cap": cap,
+        "pools": {
+            pool.value: {"count": pool_count(inventory, pool), "cap": pool_cap}
+            for pool, pool_cap in pool_caps(branches, cap=cap).items()
+        },
         "branches": [
             _record_json(inventory.records[name], inventory, branches)
             for name in sorted(inventory.records)
