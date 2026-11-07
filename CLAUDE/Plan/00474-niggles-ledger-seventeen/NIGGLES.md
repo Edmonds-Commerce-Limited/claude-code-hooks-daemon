@@ -182,7 +182,7 @@ toward neither the refused nor the unmerged total, so on its own it exits 0, and
 **Proposal**: have `worktree-reap --reap-branches` delete through the same `branch_safety.delete_branches` path
 (containment against the protected ref, plus a bundle) instead of `git branch -d`.
 
-**Status**: ⬜ open.
+**Status**: ✅ fixed on `fix-3730-review`: `prune_branch` deletes through `branch_safety.delete_branches` (recovery bundle under `untracked/deleted-branches/`), and a branch it keeps is reported `KEPT` and counted toward the non-zero exit. Tests: `test_cli_worktree_reap_merged_unpushed.py`.
 
 ### N584 — a sub-agent edited source through Python scripts, routing around every Write/Edit content guard
 

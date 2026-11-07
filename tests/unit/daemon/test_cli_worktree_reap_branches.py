@@ -16,7 +16,9 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.core import worktree_reaping
 from claude_code_hooks_daemon.core.worktree_reaping import RunGit
+from claude_code_hooks_daemon.daemon.branch_safety import DeletionReport
 from claude_code_hooks_daemon.daemon.cli import cmd_worktree_reap
 
 _LISTING = """worktree /repo
@@ -99,6 +101,19 @@ def git() -> _FakeGit:
     return _FakeGit()
 
 
+@pytest.fixture(autouse=True)
+def deletions(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Branch names handed to the delete engine (real-git behaviour is tested elsewhere)."""
+    handed_over: list[str] = []
+
+    def fake(_repo: Path, names: list[str], **_kwargs: object) -> DeletionReport:
+        handed_over.extend(names)
+        return DeletionReport(deleted=tuple(names))
+
+    monkeypatch.setattr(worktree_reaping, "delete_branches", fake)
+    return handed_over
+
+
 class TestTheReportNamesThem:
     def test_an_orphaned_branch_appears(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
@@ -136,16 +151,16 @@ class TestReapDoesNotTouchBranches:
 
 class TestActingOnBranchesNeedsItsOwnFlag:
     def test_the_merged_orphan_is_deleted(
-        self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
+        self, git: _FakeGit, deletions: list[str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         _reap(_args(reap_branches=True), run_fn=git)
-        assert ("branch", "-d", "agent-orphan-2") in git.branch_deletions
+        assert "agent-orphan-2" in deletions
 
-    def test_the_unmerged_orphan_gets_no_git_command(
-        self, git: _FakeGit, capsys: pytest.CaptureFixture[str]
+    def test_the_unmerged_orphan_is_never_handed_to_the_delete(
+        self, git: _FakeGit, deletions: list[str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         _reap(_args(reap_branches=True), run_fn=git)
-        assert not any("agent-orphan-3" in call[2] for call in git.branch_deletions)
+        assert "agent-orphan-3" not in deletions
 
     def test_no_branch_is_ever_deleted_with_capital_d(
         self, git: _FakeGit, capsys: pytest.CaptureFixture[str]

@@ -59,3 +59,51 @@ class TestOwnershipRefusal:
         holds = RunningHolds(frozenset({"b"}), frozenset())
         reason = ownership_refusal("b", None, locked=False, holds=holds)
         assert reason is not None and "running" in reason
+
+
+class TestWorktreePathNormalisation:
+    """A record's spelling of the path must not decide whether the hold matches."""
+
+    @staticmethod
+    def _refusal(untracked: Path, worktree: Path) -> str | None:
+        # A branch the record does not name, so only the worktree path can match.
+        return ownership_refusal(
+            "other-branch", worktree, locked=False, holds=running_holds(untracked)
+        )
+
+    def test_absolute_record_matches(self, tmp_path: Path) -> None:
+        untracked = tmp_path / "untracked"
+        wt = tmp_path / "wt" / "a"
+        wt.mkdir(parents=True)
+        _record(untracked, "a", "recorded", str(wt))
+        assert self._refusal(untracked, wt) is not None
+
+    def test_relative_record_resolves_against_the_project_root(self, tmp_path: Path) -> None:
+        untracked = tmp_path / "untracked"
+        wt = tmp_path / "wt" / "a"
+        wt.mkdir(parents=True)
+        _record(untracked, "a", "recorded", "wt/a")
+        assert self._refusal(untracked, wt) is not None
+
+    def test_trailing_slash_record_matches(self, tmp_path: Path) -> None:
+        untracked = tmp_path / "untracked"
+        wt = tmp_path / "wt" / "a"
+        wt.mkdir(parents=True)
+        _record(untracked, "a", "recorded", f"{wt}/")
+        assert self._refusal(untracked, wt) is not None
+
+    def test_symlinked_spelling_matches(self, tmp_path: Path) -> None:
+        untracked = tmp_path / "untracked"
+        wt = tmp_path / "real" / "a"
+        wt.mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        _record(untracked, "a", "recorded", str(tmp_path / "link" / "a"))
+        assert self._refusal(untracked, wt) is not None
+
+    def test_a_different_worktree_does_not_match(self, tmp_path: Path) -> None:
+        untracked = tmp_path / "untracked"
+        (tmp_path / "wt" / "a").mkdir(parents=True)
+        other = tmp_path / "wt" / "b"
+        other.mkdir()
+        _record(untracked, "a", "recorded", "wt/a")
+        assert self._refusal(untracked, other) is None

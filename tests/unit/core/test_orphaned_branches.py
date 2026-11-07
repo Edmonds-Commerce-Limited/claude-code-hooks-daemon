@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.core.worktree_reaping import (
     collect_orphaned_branches,
     prune_branch,
 )
+from claude_code_hooks_daemon.daemon.branch_safety import DeletionReport
 
 _LISTING = """worktree /repo
 HEAD abc123
@@ -124,54 +125,14 @@ class TestAmbiguousNamesCannotSlipThrough:
         found = collect_orphaned_branches(Path("/repo"), "main", run_fn=_FakeGit())
         assert [b.name for b in found] == ["agent-orphan-2", "agent-orphan-3"]
 
-    def test_the_delete_addresses_the_branch_by_its_bare_name(self) -> None:
-        """`git branch -d` resolves only inside `refs/heads/` and REJECTS an
-        already-qualified `refs/heads/<name>` argument outright — verified
-        live (Plan 00372). The bare name is unambiguous FOR THIS COMMAND: it
-        cannot resolve a same-named tag, because `branch -d` never looks
-        outside `refs/heads/` in the first place.
-        """
+    def test_the_delete_addresses_the_branch_by_its_bare_name(self, delete: _FakeDelete) -> None:
+        """The delete engine is handed the bare branch name (Plan 00372). Real git
+        semantics of the delete itself are covered against a real repository in
+        ``test_cli_worktree_reap_merged_unpushed.py``."""
         git = _FakeGit()
         orphans = {b.name: b for b in collect_orphaned_branches(Path("/repo"), "main", run_fn=git)}
-        prune_branch(Path("/repo"), orphans["agent-orphan-2"], run_fn=git)
-        assert git.deletions == [("branch", "-d", "agent-orphan-2")]
-
-
-class TestTheDeleteAgainstRealGitSemantics:
-    """`_FakeGit` above always answers "success" no matter the argv, so it
-    never caught the live bug: `git branch -d refs/heads/<name>` genuinely
-    fails with "not found", confirmed against a real git binary (Plan 00372).
-    """
-
-    class _RealisticFakeGit:
-        def __init__(
-            self, listing: str = _ALL_AGENT_BRANCHES, merged: str = _MERGED_AGENT_BRANCHES
-        ) -> None:
-            self.calls: list[tuple[str, ...]] = []
-            self._listing = listing
-            self._merged = merged
-
-        def __call__(self, cwd: Path, *args: str, **_: object) -> subprocess.CompletedProcess[str]:
-            self.calls.append(args)
-            if args[0] == "worktree":
-                return _ok(_LISTING)
-            if args[0] == "branch" and "--merged" in args:
-                return _ok(self._merged)
-            if args[0] == "branch" and "-d" in args:
-                target = args[-1]
-                if target.startswith("refs/heads/"):
-                    return _fail(f"error: branch '{target}' not found.")
-                return _ok("")
-            if args[0] == "branch":
-                return _ok(self._listing)
-            raise AssertionError(f"unexpected git call: {args}")
-
-    def test_the_merged_orphan_is_actually_deleted(self) -> None:
-        git = self._RealisticFakeGit()
-        orphans = {b.name: b for b in collect_orphaned_branches(Path("/repo"), "main", run_fn=git)}
-        outcome = prune_branch(Path("/repo"), orphans["agent-orphan-2"], run_fn=git)
-        assert outcome.deleted
-        assert outcome.detail == "deleted branch agent-orphan-2"
+        prune_branch(Path("/repo"), orphans["agent-orphan-2"], base_branch="main")
+        assert delete.calls == [["agent-orphan-2"]]
 
 
 class TestAFailedGitCallIsNeverReadAsSafe:
@@ -192,50 +153,95 @@ class TestAFailedGitCallIsNeverReadAsSafe:
         assert not any(branch.merged_into_base for branch in found)
 
 
+class _FakeDelete:
+    """Stands in for ``branch_safety.delete_branches``, recording each request."""
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+        self.kwargs: list[dict[str, object]] = []
+        self.report: DeletionReport | None = None
+
+    def __call__(self, repo: Path, names: list[str], **kwargs: object) -> DeletionReport:
+        self.calls.append(list(names))
+        self.kwargs.append(kwargs)
+        return self.report if self.report is not None else DeletionReport(deleted=tuple(names))
+
+
+@pytest.fixture
+def delete(monkeypatch: pytest.MonkeyPatch) -> _FakeDelete:
+    fake = _FakeDelete()
+    monkeypatch.setattr(worktree_reaping, "delete_branches", fake)
+    return fake
+
+
 class TestPruning:
     @staticmethod
     def _orphans(git: _FakeGit) -> dict[str, OrphanedBranch]:
         return {b.name: b for b in collect_orphaned_branches(Path("/repo"), "main", run_fn=git)}
 
-    def test_a_dry_run_deletes_nothing(self) -> None:
+    def test_a_dry_run_deletes_nothing(self, delete: _FakeDelete) -> None:
         git = _FakeGit()
-        prune_branch(Path("/repo"), self._orphans(git)["agent-orphan-2"], run_fn=git, dry_run=True)
-        assert git.deletions == []
+        prune_branch(
+            Path("/repo"), self._orphans(git)["agent-orphan-2"], base_branch="main", dry_run=True
+        )
+        assert delete.calls == []
 
-    def test_a_dry_run_still_says_what_it_would_do(self) -> None:
+    def test_a_dry_run_still_says_what_it_would_do(self, delete: _FakeDelete) -> None:
         git = _FakeGit()
         outcome = prune_branch(
-            Path("/repo"), self._orphans(git)["agent-orphan-2"], run_fn=git, dry_run=True
+            Path("/repo"), self._orphans(git)["agent-orphan-2"], base_branch="main", dry_run=True
         )
-        assert not outcome.deleted
+        assert not outcome.deleted and not outcome.kept
         assert "agent-orphan-2" in outcome.detail
 
-    def test_a_merged_branch_is_deleted_with_lowercase_d(self) -> None:
-        """`-D` would override git's own refusal, which is the second net."""
+    def test_a_merged_branch_is_proved_against_the_base_and_deleted(
+        self, delete: _FakeDelete
+    ) -> None:
         git = _FakeGit()
-        outcome = prune_branch(Path("/repo"), self._orphans(git)["agent-orphan-2"], run_fn=git)
+        outcome = prune_branch(
+            Path("/repo"), self._orphans(git)["agent-orphan-2"], base_branch="main"
+        )
         assert outcome.deleted
-        assert len(git.deletions) == 1
-        assert "-D" not in git.deletions[0]
+        assert delete.calls == [["agent-orphan-2"]]
+        assert delete.kwargs[0]["protected_ref"] == "main"
+        assert not delete.kwargs[0].get("allow_unproven")
 
-    def test_an_unmerged_branch_gets_no_git_command_at_all(self) -> None:
+    def test_a_bundle_dir_makes_the_delete_write_a_recovery_bundle(
+        self, delete: _FakeDelete, tmp_path: Path
+    ) -> None:
         git = _FakeGit()
-        outcome = prune_branch(Path("/repo"), self._orphans(git)["agent-orphan-3"], run_fn=git)
-        assert not outcome.deleted
-        assert git.deletions == []
+        prune_branch(
+            Path("/repo"),
+            self._orphans(git)["agent-orphan-2"],
+            base_branch="main",
+            bundle_dir=tmp_path,
+        )
+        bundle = delete.kwargs[0]["bundle_path"]
+        assert isinstance(bundle, Path) and bundle.parent == tmp_path
 
-    def test_the_refusal_says_why(self) -> None:
+    def test_an_unmerged_branch_gets_no_delete_at_all(self, delete: _FakeDelete) -> None:
         git = _FakeGit()
-        outcome = prune_branch(Path("/repo"), self._orphans(git)["agent-orphan-3"], run_fn=git)
+        outcome = prune_branch(
+            Path("/repo"), self._orphans(git)["agent-orphan-3"], base_branch="main"
+        )
+        assert not outcome.deleted and not outcome.kept
+        assert delete.calls == []
+
+    def test_the_refusal_says_why(self, delete: _FakeDelete) -> None:
+        git = _FakeGit()
+        outcome = prune_branch(
+            Path("/repo"), self._orphans(git)["agent-orphan-3"], base_branch="main"
+        )
         assert "not fully merged" in outcome.detail
 
-    def test_a_git_refusal_is_reported_not_retried(self) -> None:
-        """If git disagrees with the predicate, git wins."""
-        git = _FakeGit(delete=_fail("error: branch is not fully merged"))
-        outcome = prune_branch(Path("/repo"), self._orphans(git)["agent-orphan-2"], run_fn=git)
-        assert not outcome.deleted
-        assert "not fully merged" in outcome.detail
-        assert not any("-D" in call for call in git.calls)
+    def test_a_refused_delete_is_reported_as_kept(self, delete: _FakeDelete) -> None:
+        delete.report = DeletionReport(refused=True, blockers=("agent-orphan-2: git said no",))
+        git = _FakeGit()
+        outcome = prune_branch(
+            Path("/repo"), self._orphans(git)["agent-orphan-2"], base_branch="main"
+        )
+        assert not outcome.deleted and outcome.kept
+        assert "git said no" in outcome.detail
 
 
 class TestWorktreeCreateNamesAreEligible:

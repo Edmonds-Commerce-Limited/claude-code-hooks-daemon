@@ -580,7 +580,7 @@ def clean_sweep(
     never_work = _never_work(config, default)
     worktree_records = linked_worktree_records(repo)
     worktrees = {name: record.path for name, record in worktree_records.items()}
-    holds = running_holds(untracked if untracked is not None else get_untracked_dir(repo))
+    holds = running_holds(untracked if untracked is not None else get_untracked_dir(repo), repo)
     owned = {
         name: why
         for name in {*inventory.records, *worktree_records}

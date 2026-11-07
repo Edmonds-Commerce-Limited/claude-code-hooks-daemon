@@ -15,8 +15,10 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.core import worktree_reaping
 from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command
 from claude_code_hooks_daemon.core.worktree_reaping import collect_skipped_merged_branches
+from claude_code_hooks_daemon.daemon.branch_safety import DeletionReport
 from claude_code_hooks_daemon.daemon.cli import build_parser, cmd_worktree_reap
 
 _LISTING = """worktree /repo
@@ -56,6 +58,16 @@ def _args(**overrides: object) -> argparse.Namespace:
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
+
+
+@pytest.fixture(autouse=True)
+def _delete_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The delete engine is real-git work, covered in test_cli_worktree_reap_merged_unpushed."""
+
+    def fake(_repo: Path, names: list[str], **_kwargs: object) -> DeletionReport:
+        return DeletionReport(deleted=tuple(names))
+
+    monkeypatch.setattr(worktree_reaping, "delete_branches", fake)
 
 
 def _reap(args: argparse.Namespace) -> int:
