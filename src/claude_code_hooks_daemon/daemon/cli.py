@@ -176,6 +176,7 @@ from claude_code_hooks_daemon.utils.cli_command import (
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
+    branch_ref,
     git_visible_ancestor_dirs,
     git_visible_paths,
     project_path_is_protected,
@@ -6603,10 +6604,25 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.daemon.branch_safety import (
         TIER_UNPROVEN,
         delete_branches,
+        new_bundle_path,
     )
 
     repo = get_project_path(getattr(args, "project_root", None))
-    bundle_path = None if args.no_bundle else Path(args.bundle)
+    bundle_path: Path | None = None
+    if not args.no_bundle:
+        if args.bundle is None:
+            bundle_path = new_bundle_path(repo / _DELETE_BRANCH_BUNDLE_DIR, "delete-branch")
+        else:
+            bundle_path = Path(args.bundle)
+            if bundle_path.exists():
+                # Overwriting would destroy an earlier recovery (Plan 00571), and the
+                # "nothing deleted" cleanup below removes the file it wrote.
+                print(
+                    f"ERROR: --bundle {bundle_path} already exists; name a new file, or "
+                    "omit --bundle for a fresh timestamped one",
+                    file=sys.stderr,
+                )
+                return 2
 
     branches = _branches_config(repo)
     # The default is resolved independently of `--protected-ref`: an integration
@@ -6736,9 +6752,10 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         if report.bundle:
             # The ONLY recovery route for whatever was deleted above. Printed to
             # stderr so it travels with the refusal a human is reading.
-            print(f"\nRecovery bundle: {report.bundle}", file=sys.stderr)
+            _print_restore_lines(report.bundle, report.deleted, file=sys.stderr)
+        elif bundle_path is not None and not report.deleted and not args.dry_run:
             print(
-                f"  restore with: git fetch {report.bundle} <branch>:<branch>",
+                "No recovery bundle was kept: nothing was deleted, so nothing needs recovering.",
                 file=sys.stderr,
             )
         if any(c.tier == TIER_UNPROVEN for c in report.classifications):
@@ -6759,10 +6776,26 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         return 0
 
     if report.bundle:
-        print(f"\nRecovery bundle: {report.bundle}")
-        print(f"  restore with: git fetch {report.bundle} <branch>:<branch>")
+        _print_restore_lines(report.bundle, report.deleted, file=sys.stdout)
     print(f"Deleted {len(report.deleted)} branch(es).")
     return 0
+
+
+#: Where ``delete-branch`` writes one recovery bundle per call, relative to the project.
+_DELETE_BRANCH_BUNDLE_DIR = Path("untracked") / "deleted-branches"
+
+
+def _print_restore_lines(bundle: Path, deleted: Sequence[str], *, file: TextIO) -> None:
+    """The bundle path, then one exact restore command per deleted branch.
+
+    Full ``refs/heads/...`` refspecs, so a tag sharing the name can never be
+    fetched instead (the Plan 00254 ambiguity).
+    """
+    from claude_code_hooks_daemon.daemon.branch_safety import bundle_restore_command
+
+    print(f"\nRecovery bundle: {bundle}", file=file)
+    for name in deleted:
+        print(f"  restore {name}: {bundle_restore_command(bundle, branch_ref(name))}", file=file)
 
 
 def cmd_release_notes(args: argparse.Namespace) -> int:
@@ -12995,9 +13028,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_delete_branch.add_argument(
         "--bundle",
-        default="untracked/deleted-branches.bundle",
+        default=None,
         metavar="PATH",
-        help="Recovery bundle written before deletion (default: untracked/deleted-branches.bundle)",
+        help="Recovery bundle written before deletion. Default: a new file per call, "
+        "untracked/deleted-branches/delete-branch-<UTC stamp>-<hex>.bundle. An explicit "
+        "PATH must not exist yet: an existing file is refused, never overwritten",
     )
     parser_delete_branch.add_argument(
         "--no-bundle",

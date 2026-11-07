@@ -42,11 +42,14 @@ the two makes an alarming path count look like data loss when it is not.
 
 from __future__ import annotations
 
+import secrets
 import subprocess  # nosec B404 - trusted system tool (git), list form, no shell
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from fnmatch import fnmatchcase
 from pathlib import Path
+from typing import Final
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -736,6 +739,34 @@ def classify_branch(
             f"nothing)"
         ),
     )
+
+
+#: UTC stamp in every recovery bundle name; sorts in time order.
+BUNDLE_STAMP: Final[str] = "%Y%m%dT%H%M%SZ"
+
+#: Random bytes after the stamp: the stamp has one-second resolution, so two
+#: runs in one second would otherwise name, and overwrite, the same file.
+_BUNDLE_SUFFIX_BYTES: Final[int] = 3
+
+
+def new_bundle_path(bundle_dir: Path, prefix: str) -> Path:
+    """A recovery bundle path in ``bundle_dir`` that no file holds yet.
+
+    ``<prefix>-<UTC stamp>-<6 hex>.bundle``: one file per run, so a later run
+    never overwrites the only copy of an earlier run's branches (Plan 00571).
+    Shared by ``delete-branch`` and ``branch-sweep --clean``.
+    """
+    stamp = datetime.now(UTC).strftime(BUNDLE_STAMP)
+    while True:
+        suffix = secrets.token_hex(_BUNDLE_SUFFIX_BYTES)
+        path = bundle_dir / f"{prefix}-{stamp}-{suffix}.bundle"
+        if not path.exists():
+            return path
+
+
+def bundle_restore_command(bundle: Path, ref: str) -> str:
+    """The fetch that restores ``ref`` (a full ref name) from ``bundle`` under the same name."""
+    return f"git fetch {bundle} {ref}:{ref}"
 
 
 def write_recovery_bundle(repo: Path, names: Sequence[str], bundle_path: Path) -> Path:

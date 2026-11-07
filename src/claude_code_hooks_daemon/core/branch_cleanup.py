@@ -23,7 +23,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Literal
 
@@ -37,9 +36,11 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_MERGED_UNPUSHED,
     TIER_PATCH_EQUIVALENT,
     BranchClassification,
+    bundle_restore_command,
     classify_branch,
     delete_branches,
     matches_any_glob,
+    new_bundle_path,
 )
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
@@ -70,8 +71,6 @@ BLOCKER_PREVIEW = 10
 
 #: Width of the ``XY `` status prefix in ``git status --porcelain``.
 _STATUS_PREFIX = 3
-
-_BUNDLE_STAMP = "%Y%m%dT%H%M%SZ"
 
 
 def sweep_clean_command() -> str:
@@ -573,13 +572,12 @@ def clean_sweep(
     deleted: tuple[str, ...] = ()
     bundle: Path | None = None
     if proven and not dry_run:
-        stamp = datetime.now(UTC).strftime(_BUNDLE_STAMP)
         report = delete_branches(
             repo,
             proven,
             protected_names=never_work,
             targets=targets,
-            bundle_path=bundle_dir / f"branch-cleanup-{stamp}.bundle",
+            bundle_path=new_bundle_path(bundle_dir, "branch-cleanup"),
             content_tier=False,
             line_names=config.integration_lines,
             line_targets=line_targets,
@@ -587,9 +585,7 @@ def clean_sweep(
         deleted, bundle = report.deleted, report.bundle
         skipped += list(report.blockers)
         if bundle is not None:
-            commands += [
-                f"git fetch {bundle} refs/heads/{name}:refs/heads/{name}" for name in deleted
-            ]
+            commands += [bundle_restore_command(bundle, branch_ref(name)) for name in deleted]
     for name in proven if dry_run else deleted:
         remote = remote_delete_command(repo, config.remote, name)
         if remote is not None:

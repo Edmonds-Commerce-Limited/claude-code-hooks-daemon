@@ -360,6 +360,8 @@ branches:
 
 Every deny from these guards ends with the same principle text: the limit exists so work finishes, never so it disappears. `bin/hooks-daemon branch-sweep` reports every branch by state; `branch-sweep --clean` deletes the provably merged ones and writes a recovery bundle first. The same two commands are the `branch-sweep` (report) and `branch-sweep-clean` (held) steps of `/hooks-daemon housekeeping`.
 
+Recovery bundles accumulate: `delete-branch` writes a new file per call under `untracked/deleted-branches/` and `branch-sweep --clean` one per run under `untracked/branch-cleanup/`, each named by UTC time plus a random suffix, so a later deletion never overwrites an earlier one. Both print one `git fetch <bundle> refs/heads/<name>:refs/heads/<name>` restore line per deleted branch. `delete-branch --bundle PATH` refuses a PATH that already exists. When git refuses every delete, the run says nothing was deleted and keeps no bundle, because nothing needs recovering.
+
 ## Handler Configuration
 
 Handlers are grouped by the event type they respond to. Each handler has at minimum an `enabled` flag and a `priority` number.
