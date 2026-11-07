@@ -247,11 +247,12 @@ class TestHandedOverToTheWorkQueue:
     ) -> None:
         _unpushed_branch(repo, "feat-a", agent="sub-1")
         _queue(untracked, "feat-a")
-        for _ in range(MAX_STOP_BLOCKS + 1):
-            decision = _decide(repo, untracked)
+        decisions = [_decide(repo, untracked) for _ in range(MAX_STOP_BLOCKS + 1)]
+        for decision in decisions:
             assert decision.reason is None
             assert not any("abandoned at stop" in line for line in decision.context)
-        assert any("handed over" in line and "feat-a" in line for line in decision.context)
+        last = decisions[-1]
+        assert any("handed over" in line and "feat-a" in line for line in last.context)
 
     def test_a_finished_record_hands_nothing_over(self, repo: Path, untracked: Path) -> None:
         _unpushed_branch(repo, "feat-a", agent="sub-1")
