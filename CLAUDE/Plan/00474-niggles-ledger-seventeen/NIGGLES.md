@@ -124,6 +124,24 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N586 — release housekeeping re-fetches every vendored doc, and an unchanged doc is rewritten anyway
+
+**Source**: the owner, during the v3.73.0 release (7 November 2026): "remote docs refresh - please tell me this only
+refreshes docs that are over X days old?" It does not.
+
+**Evidence**: RELEASING.md Step 1H runs `bin/hooks-daemon remote-docs refresh --all`, which re-fetches every stored
+document whatever its age; `--stale-after-days` sets the freshness window recorded on a capture, it is not a filter.
+On v3.73.0 that touched 49 files: 12 had real upstream changes, about 37 were byte-identical upstream (same
+`source_sha256`) yet still had `fetched_at` and `stale_after` rewritten. For example, `memory.md` had been fetched two
+days earlier. Commit 158f6f967 on `release/3.73.0` is mostly timestamp churn.
+
+**Proposal**: (a) `remote-docs refresh --stale` (or making it the default with no `--all`): refresh only documents past
+their `stale_after`, plus any named with `--path` (the release names the changelog, which Step 1c always needs fresh);
+(b) when the fetched content hashes to the recorded `source_sha256`, do not rewrite the file (or record the check
+somewhere that is not the tracked file); (c) Step 1H runs the stale-only form.
+
+**Status**: ⬜ open.
+
 ### N585 — `worktree-reap --reap-branches` keeps a merged branch that is ahead of its own upstream
 
 **Source**: this session, 7 November 2026, reaping two finished agent worktrees after Plans 00571 and 00572 merged.
