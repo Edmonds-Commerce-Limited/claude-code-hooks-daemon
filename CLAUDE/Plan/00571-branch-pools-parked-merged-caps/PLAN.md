@@ -102,6 +102,11 @@ Root-cause detail with file:line: [ROOTCAUSE.md](ROOTCAUSE.md).
   `branch-sweep --clean` whenever a merged branch is listed.
 - [ ] ⬜ **Task 2.4**: `worktree-reap --reap-branches` reports each merged
   branch it skipped because of its name, and points at `branch-sweep --clean`.
+- [ ] ⬜ **Task 2.5**: The branch stop guard treats a branch named by a
+  `running` work-queue record as handed over, not abandoned. This is niggle
+  N581, reproduced while this plan's own sub-agent was committing to
+  `worktree-plan-00571-branch-pools`: the coordinator's stop was told to push
+  or finish that branch, with "abandoned" threatened at the third block.
 
 ### Phase 3: Pools
 
