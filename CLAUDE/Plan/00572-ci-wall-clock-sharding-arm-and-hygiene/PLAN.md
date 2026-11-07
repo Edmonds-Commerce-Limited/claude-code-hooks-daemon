@@ -74,7 +74,7 @@ refuse those pushes, so check what it would flag before enabling it.
   queued runs are never cancelled.
 - [x] ✅ **Task 1.4**: Write a short QA verdict to `$GITHUB_STEP_SUMMARY`,
   and set `retention-days` on QA and coverage artifacts.
-- [ ] 🔄 **Task 1.5**: Regression from the job rename: `release_slate.py`
+- [x] ✅ **Task 1.5**: Regression from the job rename: `release_slate.py`
   keyed on the old `QA (Python3.x)` job name, so `release-slate-check` could
   never see a full-tier run. Key it on the new `QA static` and `Full suite`
   jobs, with a test tying the names to `qa.yml`.
@@ -121,5 +121,5 @@ refuse those pushes, so check what it would flag before enabling it.
 ## Delivery & Milestones
 
 - Phases 1 and 2 merged to `main` at 4b1317734 through PR #178, whose CI
-  exercised the new workflows. Task 1.5 is the release blocker.
+  exercised the new workflows. Task 1.5 fixed the release-slate regression.
 - Phases 3 and 4 follow the release.
