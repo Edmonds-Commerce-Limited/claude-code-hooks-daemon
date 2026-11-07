@@ -1,0 +1,75 @@
+# Why the install looks like this (moved from qa.yml, Plans 00250 and 00346):
+#
+# - Provision from uv.lock with `--frozen`, never by resolving pyproject.toml:
+#   a bare `uv sync` re-resolves against PyPI and restores toolchain drift.
+#   The lock is universal, so one lockfile serves every interpreter.
+# - `--python` takes the resolved path of the setup-python interpreter, so uv
+#   pins that interpreter instead of downloading a managed one.
+# - uv is installed with `--user` into ~/.local/bin: the upgrade's Layer 2
+#   resets PATH to trusted locations and finds uv only there, and
+#   tests/integration/test_ensure_venv.py drives the real bootstrap with it.
+# - The venv is built AT THE FINGERPRINT PATH the resolver globs for, with no
+#   HOOKS_DAEMON_VENV_PATH exported: the suite's autouse fixture unsets that
+#   variable, and spawned CLIs then bootstrapped a venv from the wrong python.
+#   HOOKS_DAEMON_PYTHON is set for the one command that computes the target.
+# - The venv's bin goes on GITHUB_PATH: later steps invoke black, ruff, mypy
+#   and pytest directly, so PATH decides which copy of each they get.
+# - The uv cache is keyed on uv.lock (and the interpreter), replacing the old
+#   setup-python `cache: pip`, which cached nothing the uv install uses.
+name: Set up the CI Python environment
+description: >-
+  setup-python plus a uv install of the package with all extras from uv.lock,
+  with the uv download cache keyed on uv.lock. Run actions/checkout first.
+
+inputs:
+  python-version:
+    description: Interpreter to install and to pin the venv to.
+    required: true
+  venv-location:
+    description: >-
+      "fingerprint" builds the venv at the path scripts/lib/resolve_venv.sh
+      globs for, with uv in ~/.local/bin (a trusted location the upgrade's
+      Layer 2 searches). "project" builds ./.venv with a plain pip-installed
+      uv, for jobs that only import the package.
+    required: false
+    default: fingerprint
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Cache uv downloads
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/uv
+        key: uv-${{ runner.os }}-py${{ inputs.python-version }}-${{ hashFiles('uv.lock') }}
+        restore-keys: |
+          uv-${{ runner.os }}-py${{ inputs.python-version }}-
+
+    - name: Install
+      shell: bash
+      env:
+        VENV_LOCATION: ${{ inputs.venv-location }}
+      run: |
+        set -euo pipefail
+        python -m pip install --upgrade pip
+        if [ "$VENV_LOCATION" = "project" ]; then
+          pip install uv
+          uv sync --frozen --all-extras --python "$(command -v python)"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          exit 0
+        fi
+        pip install --user uv
+        export PATH="$HOME/.local/bin:$PATH"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
+          bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
+        echo "venv: $VENV_DIR"
+        UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
+          uv sync --frozen --all-extras --python "$(command -v python)"
+        test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
+        echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
