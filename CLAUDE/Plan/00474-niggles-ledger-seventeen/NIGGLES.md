@@ -124,6 +124,23 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N591 — the remote-delete guard denies a merged branch when the same command also removes its worktree and local branch
+
+**Source**: the coordinator, cleaning up after merging Plan 00571's Phase 3 handoff (7 November 2026).
+
+**Evidence**: `git worktree remove <wt> && git branch -d <name> && git push -q origin --delete <name>` was denied with
+R-GIT-PUSH-DELETE-REMOTE ("not merged into the default branch"). `<name>` was `agent-a2809a4ad9ef0a871-8d56f967`, whose
+tip 9aecfe3f4 is an ancestor of `origin/main` (merged and pushed as 29920b2b0 before the command ran). The same
+`git push -q origin --delete <name>` on its own, moments later, was allowed. An earlier
+`delete-branch X && git push origin --delete X` chain with no worktree removal was allowed too.
+
+**Proposal**: reproduce with a fixture repository and probe the compound command. Suspects: the guard judging the
+local ref or worktree state that the earlier statements remove, or a parse of the chained command picking the wrong
+target. Fix with a regression test. The work-around (run the remote delete as its own call) costs one call, so this
+is low priority.
+
+**Status**: ⬜ open.
+
 ### N590 — `hooks-daemon --version` is refused as an unrecognised argument
 
 **Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026). Reproduced here: `bin/hooks-daemon --version`
