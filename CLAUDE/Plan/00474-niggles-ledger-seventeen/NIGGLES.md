@@ -148,10 +148,19 @@ and its `./scripts/qa-changed.bash` finds and runs it. The lookup already tries 
 directory, a project script's own location) that no declared `bin_dirs` names, while the session's PATH holds it and
 the daemon's does not.
 
-**Proposal**: find out where fedora-desktop pins ruff and how `qa-changed.bash` finds it. Then either document
-`bin_dirs` for that layout, or teach the lookup that location. The not-found message already lists the directories
-it searched (`lint_on_edit.py:437-446`); add the PATH value it used, so a daemon-versus-session PATH gap is visible.
-Test with a daemon PATH lacking the tool.
+**Answered by the client**: ruff is a pipx install in the user's `~/.local/bin`, its version pinned in `.qa-versions`
+and placed by the project's IaC. `qa-changed.bash` runs a bare `ruff` from the session PATH, which has `~/.local/bin`.
+The daemon's PATH does not. `bin_dirs` cannot express it: `validate_bin_dirs_are_repo_relative` (config/models.py)
+rejects absolute and `~` entries on purpose, so there is no config work-around.
+
+**The class**: the daemon resolves a tool from its own process PATH, not the PATH of the session whose hook asked.
+The daemon is long-lived and shared, so its PATH is whatever the first starter had.
+
+**Proposal**: the hook forwarder runs in the session's environment, so it can carry the session's PATH in the event
+envelope. The lint lookup (and any other tool resolution on a hook path) then searches `bin_dirs`, then the
+interpreter bin, then the session PATH, then the daemon PATH. Keep it bounded (PATH only, never the whole
+environment) and recorded in the not-found message. Test with a daemon PATH lacking the tool and an event PATH that
+has it.
 
 **Status**: ⬜ open.
 
