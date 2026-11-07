@@ -229,6 +229,7 @@ def test_rules_guidance_and_acceptance_tests(handler: BranchCreationGuardHandler
         "R-BRANCH-WIP-CAP",
         "R-BRANCH-DORMANT",
         "R-BRANCH-PARKED-POOL",
+        "R-BRANCH-MERGED-POOL",
     ]
     guidance = handler.get_claude_md()
     assert guidance is not None and "wip.cap" in guidance

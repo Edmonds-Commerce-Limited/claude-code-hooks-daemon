@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     build_inventory,
     pool_of,
 )
+from claude_code_hooks_daemon.core.branch_keep import keep_branch
 from claude_code_hooks_daemon.core.branch_sweep import (
     group_records,
     open_work_count,
@@ -442,6 +443,109 @@ class TestParkedPool:
         path = tmp_path / "labels.json"
         write_labels(path, [{"name": "a", "group": "parked", "stale": True}])
         assert read_labels(path)["a"]["stale"] == "true"
+
+
+# --- the merged pool ----------------------------------------------------------------------
+
+
+def _merged_distinct(repo: Path, name: str) -> str:
+    """A branch at a fresh main tip, so each merged branch is its own piece of work."""
+    _git(repo, "commit", "-q", "--allow-empty", "-m", f"main {name}", days_ago=1)
+    _git(repo, "branch", name, "main")
+    return _git(repo, "rev-parse", name)
+
+
+def _keep(repo: Path, tip: str, *, days_ago: float, reason: str = "audit") -> None:
+    keep_branch(
+        repo, [tip], reason=reason, remote="origin", user="t", now=NOW - days_ago * DAY
+    )
+
+
+class TestMergedPool:
+    def test_unkept_merged_is_stale(self, repo: Path) -> None:
+        _merged_distinct(repo, "done")
+        record = build_inventory(repo, _config(), now=NOW).records["done"]
+        assert record.stale is True and record.kept_reason is None
+
+    def test_kept_merged_inside_its_age_is_not_stale(self, repo: Path) -> None:
+        _keep(repo, _merged_distinct(repo, "done"), days_ago=2)
+        record = build_inventory(repo, _config(), now=NOW).records["done"]
+        assert record.stale is False
+        assert record.kept_reason == "audit" and record.kept_by == "t"
+        assert record.kept_at == NOW - 2 * DAY
+
+    def test_a_lapsed_keep_is_stale_again(self, repo: Path) -> None:
+        _keep(repo, _merged_distinct(repo, "done"), days_ago=31)
+        record = build_inventory(repo, _config(), now=NOW).records["done"]
+        assert record.stale is True and record.kept_reason == "audit"
+
+    def test_merged_max_age_override(self, repo: Path) -> None:
+        _keep(repo, _merged_distinct(repo, "done"), days_ago=6)
+        config = _config(merged={"max_age_days": 5})
+        assert build_inventory(repo, config, now=NOW).records["done"].stale is True
+
+    def test_worktree_held_merged_is_not_stale(self, repo: Path, tmp_path: Path) -> None:
+        _merged_distinct(repo, "held")
+        _git(repo, "worktree", "add", "-q", str(tmp_path / "wt"), "held")
+        assert build_inventory(repo, _config(), now=NOW).records["held"].stale is False
+
+    def test_off_mode_never_stale(self, repo: Path) -> None:
+        _merged_distinct(repo, "done")
+        config = _config(merged={"mode": "off"})
+        assert build_inventory(repo, config, now=NOW).records["done"].stale is False
+
+    def test_merged_at_cap_denies_with_its_own_rule_and_clean_line(self, repo: Path) -> None:
+        for name in ("a", "b"):
+            _keep(repo, _merged_distinct(repo, name), days_ago=1)
+        verdict = creation_verdict(repo, _config(merged={"cap": 2}), "fresh", now=NOW)
+        assert verdict.decision == "deny"
+        assert verdict.rule_id == RuleID.BRANCH_MERGED_POOL
+        text = "\n".join(verdict.lines)
+        assert "Merged branches: 2 (cap 2, branches.merged.cap)" in text
+        assert "branch-sweep --clean" in text
+        assert "branch-keep a --reason" in text
+
+    def test_clean_line_names_remote_when_a_remote_copy_exists(self, repo: Path) -> None:
+        sha = _merged_distinct(repo, "a")
+        _remote_only(repo, "a", sha)
+        verdict = creation_verdict(repo, _config(merged={"cap": 1}), "fresh", now=NOW)
+        assert "branch-sweep --clean --remote" in "\n".join(verdict.lines)
+
+    def test_under_cap_with_no_stale_label_allows(self, repo: Path) -> None:
+        _merged_distinct(repo, "a")
+        assert creation_verdict(repo, _config(merged={"cap": 3}), "fresh", now=NOW).decision == (
+            "allow"
+        )
+
+    def test_a_stale_label_denies_under_the_cap(self, repo: Path) -> None:
+        _merged_distinct(repo, "a")
+        labels = {"a": {"group": "merged", "stale": "true"}}
+        verdict = creation_verdict(repo, _config(), "fresh", labels=labels, now=NOW)
+        assert verdict.rule_id == RuleID.BRANCH_MERGED_POOL
+        text = "\n".join(verdict.lines)
+        assert "stale" in text.lower() and "branches.merged.max_age_days" in text
+
+    def test_warn_and_off_modes(self, repo: Path) -> None:
+        _merged_distinct(repo, "a")
+        warn = creation_verdict(repo, _config(merged={"cap": 1, "mode": "warn"}), "f", now=NOW)
+        assert warn.decision == "warn" and warn.rule_id is None
+        off = creation_verdict(repo, _config(merged={"cap": 1, "mode": "off"}), "f", now=NOW)
+        assert off.decision == "allow"
+
+    def test_json_carries_kept_fields(self, repo: Path) -> None:
+        _keep(repo, _merged_distinct(repo, "done"), days_ago=2)
+        document = report_json(build_inventory(repo, _config(), now=NOW), cap=10, config=_config())
+        record = next(r for r in document["branches"] if r["name"] == "done")
+        assert record["kept_reason"] == "audit" and record["stale"] is False
+        assert record["kept_at"] == NOW - 2 * DAY
+
+    def test_sweep_report_shows_kept_and_stale(self, repo: Path) -> None:
+        _keep(repo, _merged_distinct(repo, "kept1"), days_ago=2)
+        _merged_distinct(repo, "loose")
+        inventory = build_inventory(repo, _config(), now=NOW)
+        text = "\n".join(render_report(inventory, _config(), cap=10))
+        assert "kept: audit" in text
+        assert "STALE" in text and "branch-keep" in text
 
 
 def test_duplicates_still_cover_parked_work(repo: Path) -> None:

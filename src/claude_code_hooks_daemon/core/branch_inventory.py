@@ -51,6 +51,7 @@ from typing import Any
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.branch_keep import read_keeps
 from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -230,6 +231,10 @@ class BranchRecord:
     stale: bool = False
     #: Consecutive empty park commits at a parked tip; above 1 it was re-parked.
     park_count: int | None = None
+    #: The keep note on a merged branch's tip (``branch-keep``), if any.
+    kept_reason: str | None = None
+    kept_by: str | None = None
+    kept_at: int | None = None
 
 
 @dataclass(frozen=True)
@@ -879,7 +884,7 @@ def build_inventory(
     run = _Pass(repo, config, _load_cache(cache_path), remote_refs)
 
     records = {name: _record(run, context, name, *by_name[name]) for name in sorted(by_name)}
-    records = _with_pools(repo, run.config, _with_same_tips(records))
+    records = _with_pools(repo, run.config, _with_same_tips(records), moment)
     _save_cache(cache_path, run.cache, set(sha_of.values()))
     return BranchInventory(
         default_branch=default,
@@ -1071,16 +1076,46 @@ def _park_count(repo: Path, tip: str) -> int | None:
     return count
 
 
-def _with_pools(
-    repo: Path, config: BranchesConfig, records: dict[str, BranchRecord]
+def _with_merged_pool(
+    repo: Path, config: BranchesConfig, records: dict[str, BranchRecord], moment: float
 ) -> dict[str, BranchRecord]:
-    """Fill ``stale`` and ``park_count`` for parked branches (Plan 00571 DESIGN.md section 3).
+    """Fill the keep fields and ``stale`` of every merged branch (one notes read per ref)."""
+    merged = {name: r for name, r in records.items() if pool_of(r.state) == Pool.MERGED}
+    if not merged:
+        return dict(records)
+    tips = {t for r in merged.values() for t in (r.local_tip, r.remote_tip) if t is not None}
+    keeps = read_keeps(repo, tips, config.remote)
+    max_age = config.effective_pool_max_age(Pool.MERGED)
+    updated = dict(records)
+    for name, record in merged.items():
+        held = [keeps[t] for t in (record.local_tip, record.remote_tip) if t in keeps]
+        keep = max(held, key=lambda candidate: candidate.at, default=None)
+        if keep is not None:
+            lapsed = (moment - keep.at) / _SECONDS_PER_DAY >= max_age
+        else:
+            lapsed = record.worktree is None and record.worktree_known
+        updated[name] = replace(
+            record,
+            stale=config.merged.mode != "off" and lapsed,
+            kept_reason=keep.reason if keep else None,
+            kept_by=keep.by if keep else None,
+            kept_at=keep.at if keep else None,
+        )
+    return updated
+
+
+def _with_pools(
+    repo: Path, config: BranchesConfig, records: dict[str, BranchRecord], moment: float
+) -> dict[str, BranchRecord]:
+    """Fill ``stale``, ``park_count`` and the keep fields (Plan 00571 DESIGN.md section 3).
 
     The tip of a parked branch IS the park commit, so its age is the park's age.
+    A merged branch is stale unless it is kept inside ``merged.max_age_days`` or a
+    worktree holds it; with the worktrees unknown it is not called stale.
     """
     parked = config.parked
     max_age = config.effective_pool_max_age(Pool.PARKED)
-    updated = dict(records)
+    updated = _with_merged_pool(repo, config, records, moment)
     for name, record in records.items():
         if record.state != BranchState.PARKED:
             continue

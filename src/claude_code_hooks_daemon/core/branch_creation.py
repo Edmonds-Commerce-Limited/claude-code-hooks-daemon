@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_line
 from claude_code_hooks_daemon.core.branch_inventory import (
     DormancyStage,
     Pool,
@@ -172,6 +173,22 @@ def clear_label_stage(path: Path, name: str) -> None:
     if name not in labels:
         return
     labels[name] = {**labels[name], "group": "parked", "stage": None, "stale": None}
+    try:
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(labels, sort_keys=True), encoding="utf-8")
+        temporary.replace(path)
+    except OSError as exc:
+        log_and_continue(
+            logger, exc, reason="the next SessionStart rewrites the snapshot from the inventory"
+        )
+
+
+def clear_label_stale(path: Path, name: str) -> None:
+    """Drop the stale mark of ``name`` so a fresh keep lifts the merged-pool block at once."""
+    labels = read_labels(path)
+    if name not in labels:
+        return
+    labels[name] = {**labels[name], "stale": None}
     try:
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(labels, sort_keys=True), encoding="utf-8")
@@ -463,6 +480,50 @@ def _parked_pool_lines(
     return lines
 
 
+def _stale_merged(merged: list[_Work], labels: Labels) -> list[_Work]:
+    """Merged work any of whose names the labels snapshot marks stale (unkept or lapsed)."""
+    return [
+        work
+        for work in merged
+        if any(labels.get(name, {}).get("stale") for name in (work.name, *work.names))
+    ]
+
+
+def _merged_pool_lines(
+    merged: list[_Work],
+    stale: list[_Work],
+    config: BranchesConfig,
+    now: float,
+    worktrees: Mapping[str, Path] | None,
+) -> list[str]:
+    cap = config.effective_pool_cap(Pool.MERGED)
+    stale_names = {work.name for work in stale}
+    head = f"Merged branches: {len(merged)} (cap {cap}, branches.merged.cap)"
+    if len(merged) >= cap:
+        head += " are at the cap"
+    if stale:
+        head += (
+            f"; {len(stale)} stale (unkept or keep lapsed, past "
+            f"branches.merged.max_age_days {config.effective_pool_max_age(Pool.MERGED)})"
+        )
+    keep = daemon_cli_command_for_docs("branch-keep")
+    lines = [
+        f"{head}. Delete the merged branches, or keep one with a reason:",
+        sweep_clean_line(remote=any(work.on_remote for work in merged)),
+    ]
+    ordered = sorted(
+        merged, key=lambda work: (work.name not in stale_names, work.committed, work.name)
+    )
+    for work in ordered[:DENY_LIST_LIMIT]:
+        flag = "  [STALE]" if work.name in stale_names else ""
+        lines.append(f"  - {_detail(work, now, worktrees)}{flag}")
+        lines.append(f"      -> keep it: {keep} {work.name} --reason ...")
+    if len(ordered) > DENY_LIST_LIMIT:
+        lines.append(f"  ... and {len(ordered) - DENY_LIST_LIMIT} more")
+    lines.append(BRANCH_LIMIT_PRINCIPLE)
+    return lines
+
+
 def _duplicates(new_name: str, groups: list[_Work], remote: str) -> list[_Work]:
     new_stem = stem(new_name, remote)
     new_numbers = number_tokens(new_stem)
@@ -534,7 +595,12 @@ def creation_verdict(
     over_parked = config.parked.mode != "off" and (
         len(parked) >= config.effective_pool_cap(Pool.PARKED) or bool(stale_parked)
     )
-    if not (over_cap or duplicates or blocking or noisy or over_parked):
+    merged = [work for work in all_groups if work.pool == Pool.MERGED]
+    stale_merged = _stale_merged(merged, labels)
+    over_merged = config.merged.mode != "off" and (
+        len(merged) >= config.effective_pool_cap(Pool.MERGED) or bool(stale_merged)
+    )
+    if not (over_cap or duplicates or blocking or noisy or over_parked or over_merged):
         return CreationVerdict("allow", ())
     worktrees = worktrees_by_branch(repo)
     lines: list[str] = []
@@ -552,6 +618,8 @@ def creation_verdict(
         lines.extend(_dormancy_context_lines(noisy, moment, worktrees))
     if over_parked:
         lines.extend(_parked_pool_lines(parked, stale_parked, config, moment, worktrees))
+    if over_merged:
+        lines.extend(_merged_pool_lines(merged, stale_merged, config, moment, worktrees))
     cap_deny = over_cap and config.wip.mode == "block"
     if cap_deny:
         return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_WIP_CAP)
@@ -559,6 +627,8 @@ def creation_verdict(
         return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_DORMANT)
     if over_parked and config.parked.mode == "block":
         return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_PARKED_POOL)
-    if over_cap or duplicates or over_parked:
+    if over_merged and config.merged.mode == "block":
+        return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_MERGED_POOL)
+    if over_cap or duplicates or over_parked or over_merged:
         return CreationVerdict("warn", tuple(lines))
     return CreationVerdict("allow", tuple(lines))

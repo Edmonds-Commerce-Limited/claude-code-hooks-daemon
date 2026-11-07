@@ -80,6 +80,9 @@ JSON_RECORD_KEYS: tuple[str, ...] = (
     "pool",
     "stale",
     "park_count",
+    "kept_reason",
+    "kept_by",
+    "kept_at",
     "action",
 )
 
@@ -280,8 +283,23 @@ def _done_line(record: BranchRecord, inventory: BranchInventory, config: Branche
     proof = f" (proven by {record.proven_by})" if record.proven_by else ""
     return (
         f"  {record.name}: {verb} {record.merged_into}{proof}, {_age(record)}{_where(record)}"
+        f"{_keep_text(record, config)}"
         f"\n      {delete_action(record, inventory, config)}"
+        f"\n      keep it instead: {daemon_cli_command_for_docs('branch-keep')} "
+        f"{record.name} --reason ..."
     )
+
+
+def _keep_text(record: BranchRecord, config: BranchesConfig) -> str:
+    """The keep and stale suffix of a merged line."""
+    max_age = f"branches.merged.max_age_days {config.effective_pool_max_age(Pool.MERGED)}"
+    text = ""
+    if record.kept_reason is not None:
+        text += f", kept: {record.kept_reason} (by {record.kept_by})"
+    if record.stale:
+        lapsed = "keep lapsed, " if record.kept_reason is not None else "unkept, "
+        text += f", STALE ({lapsed}past {max_age})"
+    return text
 
 
 def _containment_text(record: BranchRecord) -> str:
@@ -488,6 +506,9 @@ def _record_json(
         "pool": pool.value if (pool := pool_of(record.state)) is not None else None,
         "stale": record.stale,
         "park_count": record.park_count,
+        "kept_reason": record.kept_reason,
+        "kept_by": record.kept_by,
+        "kept_at": record.kept_at,
         "action": action,
     }
     return {key: document[key] for key in JSON_RECORD_KEYS}
