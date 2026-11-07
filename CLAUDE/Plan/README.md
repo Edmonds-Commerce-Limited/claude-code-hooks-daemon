@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00572: ci wall clock sharding arm and hygiene](00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - Not Started, pending the owner's go-ahead (owner request: shard `qa.yml`'s serial pytest across runners by reusing release-gate's shard matrix, give every `main` push a verdict, build and release aarch64 relay and hooks-screen on `ubuntu-24.04-arm`, and close the practice gaps the [analysis](00572-ci-wall-clock-sharding-arm-and-hygiene/ANALYSIS.md) ranks)
+
 - [00571: branch pools parked merged caps](00571-branch-pools-parked-merged-caps/PLAN.md) - In Progress (GitHub #165 plus the owner's ruling: open, parked and merged branches become three pools, each with its own cap; parked and merged-kept branches carry a reason and a max age; one safe command clears merged branches locally and remotely behind an accumulating recovery bundle)
 
 - [00570: branch containment remote archive refs](00570-branch-containment-remote-archive-refs/PLAN.md) - In Progress (GitHub #166: branch-sweep and delete-branch accept a remote ref outside `refs/remotes`, such as an archive namespace, as proof of containment via one bounded `ls-remote`; the offline wording says only what it checked)
@@ -330,11 +332,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 571 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 572 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 483 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 65 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 66 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
