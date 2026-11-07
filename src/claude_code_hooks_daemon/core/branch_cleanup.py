@@ -28,7 +28,7 @@ from typing import Final, Literal
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.core import branch_inventory
+from claude_code_hooks_daemon.core import branch_inventory, branch_keep
 from claude_code_hooks_daemon.core.agent_ownership import (
     RunningHolds,
     ownership_refusal,
@@ -564,10 +564,17 @@ def clean_sweep(
     work-queue record in ``untracked``, the harness's ``.claude/worktrees/``
     directory, a git lock) is skipped with its reason, locally and on the remote.
 
+    A merged branch kept inside ``branches.merged.max_age_days`` (``branch-keep``)
+    and any ``branches.bot_owned`` name are skipped, and the keep is reported; a
+    lapsed keep is cleaned. With ``remote`` the keep notes are fetched first, so a
+    keep written in another clone counts; if that fetch fails the remote half is
+    refused (a keep cannot be ruled out) and only the local half runs.
+
     Raises:
         branch_inventory.BranchInventoryError: The refs could not be listed.
         ValueError: No default branch can be resolved.
     """
+    keep_fetch_error = branch_keep.fetch_keeps(repo, config.remote) if remote else None
     inventory = branch_inventory.build_inventory(repo, config)
     default = inventory.default_branch
     if default is None:
@@ -586,6 +593,7 @@ def clean_sweep(
         for name in {*inventory.records, *worktree_records}
         if (why := _agent_owned(name, worktree_records, holds)) is not None
     }
+    spared = _spared(config, inventory.records)
     candidates = sorted(
         name
         for name, record in inventory.records.items()
@@ -598,6 +606,9 @@ def clean_sweep(
     skipped: list[str] = []
     commands: list[str] = []
     for name in candidates:
+        if name in spared:
+            skipped.append(f"{name}: {spared[name]}")
+            continue
         if name in owned:
             skipped.append(f"{name}: {owned[name]}")
             continue
@@ -637,11 +648,22 @@ def clean_sweep(
         proven.append(name)
 
     remote_tips: dict[str, str] = {}
-    if remote:
+    if remote and keep_fetch_error is not None:
+        skipped.append(
+            f"{config.remote}: keep notes could not be fetched ({keep_fetch_error}), "
+            "so the remote half was refused"
+        )
+    elif remote:
         remote_tips, problems = _proven_remote(
-            repo, config, default, inventory.records, spared=frozenset(owned)
+            repo, config, default, inventory.records, spared=frozenset({*owned, *spared})
         )
         skipped += [f"{config.remote}/{name}: {why}" for name, why in problems.items()]
+        skipped += [
+            f"{config.remote}/{name}: {spared[name]}"
+            for name in sorted(spared)
+            if inventory.records[name].remote_tip is not None
+            and inventory.records[name].state in CLEAN_STATES
+        ]
     tracking = {name: f"{REMOTES_PREFIX}{config.remote}/{name}" for name in remote_tips}
     if dry_run:
         commands += [f"would delete remote {config.remote}/{name}" for name in remote_tips]
@@ -700,6 +722,21 @@ def clean_sweep(
         bundle=bundle,
         deleted_remote=tuple(deleted_remote),
     )
+
+
+def _spared(config: BranchesConfig, records: Mapping[str, BranchRecord]) -> dict[str, str]:
+    """``name -> reason`` for every branch ``--clean`` must leave alone on both sides.
+
+    A keep inside its age, and any ``bot_owned`` name (defence in depth: the
+    inventory already gives those a state outside CLEAN_STATES).
+    """
+    spared: dict[str, str] = {}
+    for name, record in records.items():
+        if matches_any_glob(name, config.bot_owned):
+            spared[name] = "bot-owned (branches.bot_owned)"
+        elif record.kept_reason is not None and not record.stale:
+            spared[name] = f"kept: {record.kept_reason}"
+    return spared
 
 
 def _proven_remote(
