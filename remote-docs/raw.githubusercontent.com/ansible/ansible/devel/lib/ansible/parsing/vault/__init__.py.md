@@ -1,10 +1,10 @@
 ---
 source_url: https://raw.githubusercontent.com/ansible/ansible/devel/lib/ansible/parsing/vault/__init__.py
-fetched_at: '2026-11-05T14:21:50.744702+00:00'
+fetched_at: '2026-11-07T20:13:15.786862+00:00'
 fidelity: converted
 source_sha256: 22f1f7597eaa617b250c8717f679734b801b29ef25033f4225620f32797bf849
 licence: unreviewed
-stale_after: '2027-02-03'
+stale_after: '2027-02-05'
 fetch_method: agent-browser-lite-headless (text)
 ---
 
