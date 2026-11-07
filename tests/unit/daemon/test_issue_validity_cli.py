@@ -47,6 +47,8 @@ class FakeGh:
             if isinstance(self.identity, Exception):
                 raise self.identity
             return self.identity
+        if argv[:2] == ("api", "repos/{owner}/{repo}"):
+            return "false"
         if argv[:2] == ("issue", "view"):
             answer = self.issues[int(argv[2])]
             if isinstance(answer, Exception):
@@ -405,3 +407,97 @@ class TestPark:
         assert code == EXIT_USAGE
         assert "--park" in err
         assert gh.calls == []
+
+
+class AdminGh(FakeGh):
+    """The signed-in seat is a repository admin; assignees have the listed permissions."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.permissions: dict[str, str] = {}
+        self.comments: list[tuple[str, ...]] = []
+
+    def __call__(self, args: Sequence[str]) -> str:
+        argv = tuple(args)
+        if argv[:2] == ("api", "repos/{owner}/{repo}"):
+            self.calls.append(argv)
+            return "true"
+        if argv[0] == "api" and "/collaborators/" in argv[1]:
+            self.calls.append(argv)
+            return self.permissions.get(argv[1].split("/")[4], "write")
+        if argv[:2] == ("issue", "comment"):
+            self.calls.append(argv)
+            self.comments.append(argv)
+            return ""
+        if argv[:2] == ("issue", "edit") and "--remove-assignee" in argv:
+            if argv[argv.index("--remove-assignee") + 1] != "@me":
+                self.calls.append(argv)
+                current = self.issues[int(argv[2])]
+                assert isinstance(current, dict)
+                removed = set(argv[argv.index("--remove-assignee") + 1].split(","))
+                kept = [a for a in current["assignees"] if a["login"] not in removed]
+                current["assignees"] = [*kept, {"login": ME}]
+                return ""
+        return super().__call__(args)
+
+
+class TestAdminTakeover:
+    """Plan 00573: an admin seat may work, and take over, an issue held by a non-admin."""
+
+    def test_plain_check_is_valid_and_advises_the_takeover_without_writing(self) -> None:
+        gh = AdminGh()
+        gh.issues[5] = _issue(5, ["alice"])
+        code, out, _ = _run(gh, number=5)
+        assert code == EXIT_OK
+        assert "[advisory]" in out
+        assert "alice" in out
+        assert "--claim" in out
+        assert not [c for c in gh.calls if c[:2] == ("issue", "edit")]
+
+    def test_claim_takes_over_verifies_and_comments(self) -> None:
+        gh = AdminGh()
+        gh.issues[5] = _issue(5, ["alice", "carol"])
+        code, out, _ = _run(gh, number=5, claim=True)
+        assert code == EXIT_OK
+        issue = gh.issues[5]
+        assert isinstance(issue, dict)
+        assert issue["assignees"] == [{"login": ME}]
+        assert "claimed issue #5" in out
+        assert len(gh.comments) == 1
+        assert "alice" in gh.comments[0][-1] and "carol" in gh.comments[0][-1]
+
+    def test_claim_never_touches_an_issue_held_by_another_admin(self) -> None:
+        gh = AdminGh()
+        gh.permissions["alice"] = "admin"
+        gh.issues[5] = _issue(5, ["alice"])
+        code, _, _ = _run(gh, number=5, claim=True)
+        assert code == EXIT_BLOCKED
+        assert not [c for c in gh.calls if c[:2] == ("issue", "edit")]
+        assert gh.comments == []
+
+    def test_a_takeover_lost_to_a_race_says_why_and_posts_no_comment(self) -> None:
+        gh = AdminGh()
+        gh.issues[5] = _issue(5, ["alice"])
+
+        def racing(args: Sequence[str]) -> str:
+            out = gh(args)
+            if "--add-assignee" in args and "--remove-assignee" in args:
+                issue = gh.issues[5]
+                assert isinstance(issue, dict)
+                issue["assignees"].append({"login": "dave"})
+            return out
+
+        out, err = io.StringIO(), io.StringIO()
+        code = run_issue_validity(
+            number=5,
+            claim=True,
+            as_json=False,
+            list_eligible=False,
+            approved=None,
+            service=IssueValidityService(racing),
+            stdout=out,
+            stderr=err,
+        )
+        assert code != EXIT_OK
+        assert "claim failed" in err.getvalue()
+        assert gh.comments == []

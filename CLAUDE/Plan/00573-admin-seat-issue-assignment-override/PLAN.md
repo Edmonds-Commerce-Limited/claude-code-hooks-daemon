@@ -54,28 +54,28 @@ comment naming the previous assignee, so the hand-over is visible to them.
 
 ### Phase 1: Permission-aware assignment checks
 
-- [ ] ⬜ **Task 1.1**: Failing tests for every row of the table, plus the
+- [x] ✅ **Task 1.1**: Failing tests for every row of the table, plus the
   unknown-permission case (falls back to non-admin) and the `gh` lookup
   failing.
-- [ ] ⬜ **Task 1.2**: Implement viewer and assignee permission lookups in
+- [x] ✅ **Task 1.2**: Implement viewer and assignee permission lookups in
   `IssueValidityService` (one cached call each), and the new outcomes in
   `AssigneeCheck`: an ADVISORY or FIXABLE status with a takeover `FixAction`.
-- [ ] ⬜ **Task 1.3**: The guard allows an admin seat with the advisory
+- [x] ✅ **Task 1.3**: The guard allows an admin seat with the advisory
   context. `issue-validity N --claim` performs the takeover: switch the
   assignee, re-read and verify sole assignee, post the comment.
-- [ ] ⬜ **Task 1.4**: Update the runbook (`CLAUDE/development/IssueSdlc.md`
+- [x] ✅ **Task 1.4**: Update the runbook (`CLAUDE/development/IssueSdlc.md`
   claim table), the handler guidance, and add a release note.
 
 ## Success Criteria
 
-- [ ] Tests for each table row fail before the change and pass after it.
+- [x] Tests for each table row fail before the change and pass after it.
 - [ ] Dogfood: with this seat as admin, a plan whose `**GitHub Issue**` names
   an issue assigned to a non-admin is editable, and the advisory is shown.
-- [ ] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` records the
+- [x] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` records the
   change in the pending-release holding area, with a truth-changes entry,
   because the documented "never claim an issue held by someone else" becomes
   conditional on admin.
 
 ## Delivery & Milestones
 
-- Pending.
+- Implemented on branch worktree-plan-00573-admin-override; dogfood criterion pending merge (needs the live admin seat).

@@ -7,8 +7,10 @@ that is safe to do by code (claiming an unassigned issue). ``issue-validity
 
 Exit codes::
 
-    0  valid (all checks ok or not applicable); also: the listing succeeded
-    1  blocked (assigned only to others, or the author is not approved)
+    0  valid (all checks ok or not applicable, or an admin seat's advisory on an
+       issue held by non-admins); also: the listing succeeded
+    1  blocked (assigned to another admin, or to others when this seat is not an
+       admin, or the author is not approved)
     2  fixable and not fixed (unassigned, no ``--claim``, or the claim failed)
     3  unknown (a fact could not be read); the listing failed
     4  usage or configuration error
@@ -18,7 +20,11 @@ it exits non-zero, because the issue-sdlc runbook's author gate must never fail
 open. (The PreToolUse handler is the lenient caller and only advises.)
 
 **Nothing is written to an ineligible issue.** ``--claim`` acts only when the
-overall verdict is *fixable*, which excludes any blocked or unknown issue.
+overall verdict is *fixable*, which excludes any blocked or unknown issue. The
+one other case is an admin seat on an issue held only by non-admins (Plan
+00573): the verdict is *valid* with an advisory and ``--claim`` performs the
+recorded takeover (switch the assignee, verify sole assignee, comment the
+previous assignees).
 """
 
 from __future__ import annotations
@@ -35,8 +41,10 @@ from claude_code_hooks_daemon.daemon.validation import load_config_safe
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.github_issue_validity import (
     CLAIM_FIX_NAME,
+    TAKEOVER_FIX_NAME,
     AssigneeCheck,
     AuthorWhitelistCheck,
+    CheckStatus,
     FixAction,
     GhError,
     IssueValidityService,
@@ -93,12 +101,24 @@ def load_approved_authors(project_root: Path) -> tuple[str, ...] | None:
     return approved_authors_from_options(handler_options(block))
 
 
+_CLAIM_FIXES: Final[tuple[str, ...]] = (CLAIM_FIX_NAME, TAKEOVER_FIX_NAME)
+
+
+def _takeover_fixes(report: ValidityReport) -> list[FixAction]:
+    """The admin takeover on offer: a valid report whose assignee check is advisory."""
+    if report.verdict is not Verdict.VALID:
+        return []
+    return [r.fix for r in report.results if r.status is CheckStatus.ADVISORY and r.fix is not None]
+
+
 def _describe(report: ValidityReport) -> list[str]:
     lines = [f"issue #{report.number}: {report.verdict.value}"]
     for result in report.results:
         lines.append(f"  [{result.status.value}] {result.check}: {result.message}")
     if report.verdict is Verdict.FIXABLE:
         lines.append(f"  to claim it: {_claim_command(report.number)}")
+    elif _takeover_fixes(report):
+        lines.append(f"  to take it over: {_claim_command(report.number)}")
     return lines
 
 
@@ -121,23 +141,29 @@ def _check_one(
     checks: list[ValidityCheck] = [AuthorWhitelistCheck(approved), AssigneeCheck()]
     report = service.check_issue(number, checks)
     claimed = False
-    if claim and report.verdict is Verdict.FIXABLE:
+    failure_exit: int | None = None
+    if claim and (report.verdict is Verdict.FIXABLE or _takeover_fixes(report)):
         try:
             for fix in report.fixes:
-                if fix.name == CLAIM_FIX_NAME:
+                if fix.name in _CLAIM_FIXES:
                     claimed = service.claim(fix)
                     if not claimed:
                         stderr.write(
                             f"claim failed for #{number}: another account was assigned at the "
                             "same time; this claim backed off and the issue is not workable\n"
                         )
+                        failure_exit = EXIT_BLOCKED
         except GhError as exc:
             stderr.write(f"claim failed for #{number}: {exc}\n")
+            failure_exit = EXIT_FIXABLE
         else:
             report = service.check_issue(number, checks)
     if claimed and report.verdict is Verdict.VALID and not as_json:
         stdout.write(f"claimed issue #{number}\n")
     _emit(report, as_json, stdout)
+    if failure_exit is not None and report.verdict is Verdict.VALID:
+        # A takeover that did not happen leaves a valid advisory report; it must not exit 0.
+        return failure_exit
     return _VERDICT_EXIT[report.verdict]
 
 
