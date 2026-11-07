@@ -742,3 +742,22 @@ jobs:
 
           print("All handler modules imported cleanly.")
           PY
+
+  # Plan 00572 Task 1.1: the single verdict of a run, mirroring release-gate's
+  # `Release gate` job. Each tier skips the jobs it does not need, so a
+  # skipped job counts as passed; anything else (failure, cancelled) fails
+  # it. Make THIS the one required check, so the jobs behind it can be
+  # reshaped without touching branch protection.
+  qa-gate:
+    name: QA gate
+    needs: [classify, targeted, qa, perf-sweep, shell, daemon-load]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every QA job passed or was not needed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")' > /dev/null
