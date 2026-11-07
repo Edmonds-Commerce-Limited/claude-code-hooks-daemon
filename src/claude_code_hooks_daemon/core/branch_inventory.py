@@ -120,6 +120,8 @@ class BranchState(StrEnum):
     """DESIGN.md section 2 states; the first that matches wins."""
 
     EXEMPT = "exempt"
+    #: Matches ``branches.bot_owned`` (``dependabot/*``): in no pool, never cleaned.
+    BOT_OWNED = "bot-owned"
     DEFAULT = "default"
     INTEGRATION_LINE = "integration-line"
     PROTECTED = "protected"
@@ -138,6 +140,31 @@ _DONE_RANK = {
     BranchState.MERGED_LINE: 1,
     BranchState.PATCH_EQUIVALENT: 2,
 }
+
+
+class Pool(StrEnum):
+    """The three pools a work branch can be in (Plan 00571 DESIGN.md section 1)."""
+
+    OPEN = "open"
+    PARKED = "parked"
+    MERGED = "merged"
+
+
+_POOL_OF_STATE = {
+    BranchState.MERGED_DEFAULT: Pool.MERGED,
+    BranchState.MERGED_LINE: Pool.MERGED,
+    BranchState.PATCH_EQUIVALENT: Pool.MERGED,
+    BranchState.PARKED: Pool.PARKED,
+    BranchState.LIVE: Pool.OPEN,
+    BranchState.DORMANT: Pool.OPEN,
+    # Fail closed: a branch not yet classified is counted as open work.
+    BranchState.UNCLASSIFIED: Pool.OPEN,
+}
+
+
+def pool_of(state: BranchState) -> Pool | None:
+    """The pool of a record in ``state``; None for a branch that is never work."""
+    return _POOL_OF_STATE.get(state)
 
 
 class DormancyStage(StrEnum):
@@ -199,6 +226,10 @@ class BranchRecord:
     dormancy_stage: DormancyStage | None = None
     containment: Containment | None = None
     contained_in: str | None = None
+    #: Past the pool's ``max_age_days`` (a parked branch) or an unkept merged branch.
+    stale: bool = False
+    #: Consecutive empty park commits at a parked tip; above 1 it was re-parked.
+    park_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -507,6 +538,8 @@ def _never_work(name: str, config: BranchesConfig, default: str | None) -> Branc
     """
     if branch_safety.matches_any_glob(name, config.exempt):
         return BranchState.EXEMPT
+    if branch_safety.matches_any_glob(name, config.bot_owned):
+        return BranchState.BOT_OWNED
     if name == default:
         return BranchState.DEFAULT
     if branch_safety.matches_any_glob(name, config.integration_lines):
@@ -572,10 +605,12 @@ def containment_of(
     own = f"{remote_prefix}{name}"
     head = f"{remote_prefix}{_REMOTE_HEAD}"
     others = sorted(ref for ref in result.stdout.splitlines() if ref and ref not in {head, own})
+    # A bot's branch is nobody's integration target, so it never vouches.
     vouching = [
         ref
         for ref in others
-        if _never_work(ref.removeprefix(remote_prefix), config, default) is not None
+        if _never_work(ref.removeprefix(remote_prefix), config, default)
+        not in (None, BranchState.BOT_OWNED)
     ]
     if vouching:
         return Containment.REMOTE_REF, _short(vouching[0])
@@ -844,7 +879,7 @@ def build_inventory(
     run = _Pass(repo, config, _load_cache(cache_path), remote_refs)
 
     records = {name: _record(run, context, name, *by_name[name]) for name in sorted(by_name)}
-    records = _with_same_tips(records)
+    records = _with_pools(repo, run.config, _with_same_tips(records))
     _save_cache(cache_path, run.cache, set(sha_of.values()))
     return BranchInventory(
         default_branch=default,
@@ -1001,10 +1036,64 @@ def _weakest(verdicts: list[_Verdict]) -> _Verdict:
 
 _UNGROUPED = {
     BranchState.EXEMPT,
+    BranchState.BOT_OWNED,
     BranchState.DEFAULT,
     BranchState.INTEGRATION_LINE,
     BranchState.PROTECTED,
 }
+
+
+_PARK_LOG_DEPTH = 64
+_RECORD_SEP = "\x1e"
+
+
+def _park_count(repo: Path, tip: str) -> int | None:
+    """Consecutive park commits (empty, ``Parked-Reason``) at ``tip``; None if git failed."""
+    result = run_git(
+        repo,
+        "log",
+        "--first-parent",
+        "-n",
+        str(_PARK_LOG_DEPTH),
+        f"--format=%T{_UNIT}%(trailers:key={_PARK_REASON_KEY},valueonly,unfold){_RECORD_SEP}",
+        tip,
+        timeout=_GIT_TIMEOUT,
+    )
+    if result.returncode != 0:
+        return None
+    entries = [entry.lstrip("\n").split(_UNIT, 1) for entry in result.stdout.split(_RECORD_SEP)]
+    entries = [entry for entry in entries if len(entry) == 2]
+    count = 0
+    for index, (tree, trailer) in enumerate(entries[:-1]):
+        if not trailer.strip() or tree != entries[index + 1][0]:
+            break
+        count += 1
+    return count
+
+
+def _with_pools(
+    repo: Path, config: BranchesConfig, records: dict[str, BranchRecord]
+) -> dict[str, BranchRecord]:
+    """Fill ``stale`` and ``park_count`` for parked branches (Plan 00571 DESIGN.md section 3).
+
+    The tip of a parked branch IS the park commit, so its age is the park's age.
+    """
+    parked = config.parked
+    max_age = config.effective_pool_max_age(Pool.PARKED)
+    updated = dict(records)
+    for name, record in records.items():
+        if record.state != BranchState.PARKED:
+            continue
+        tip = record.local_tip or record.remote_tip
+        stale = (
+            parked.mode != "off" and record.age_days is not None and record.age_days >= max_age
+        )
+        updated[name] = replace(
+            record,
+            stale=stale,
+            park_count=_park_count(repo, tip) if tip is not None else None,
+        )
+    return updated
 
 
 def _with_same_tips(records: dict[str, BranchRecord]) -> dict[str, BranchRecord]:

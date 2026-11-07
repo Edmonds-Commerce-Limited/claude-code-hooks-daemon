@@ -11,6 +11,7 @@ import pytest
 from claude_code_hooks_daemon.config.models import (
     BranchDuplicatesConfig,
     BranchesConfig,
+    BranchParkedConfig,
     BranchWipConfig,
 )
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
@@ -99,6 +100,25 @@ class TestHandle:
         assert result.reason.startswith("BLOCKED [R-BRANCH-WIP-CAP]")
         assert "one" in result.reason and BRANCH_LIMIT_PRINCIPLE in result.reason
 
+    def test_a_full_parked_pool_is_denied_under_its_own_rule(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        tree = _git(repo, "rev-parse", "main^{tree}").strip()
+        message = "park\n\nParked-Reason: waiting\nParked-By: t\n"
+        sha = _git(repo, "commit-tree", tree, "-p", "main", "-m", message).strip()
+        _git(repo, "update-ref", "refs/heads/held", sha)
+        handler._branches = handler._branches.model_copy(
+            update={
+                "wip": BranchWipConfig(cap=9, mode="block"),
+                "parked": BranchParkedConfig(cap=1),
+            }
+        )
+        result = handler.handle(_bash("git checkout -b fresh", repo))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert result.reason.startswith("BLOCKED [R-BRANCH-PARKED-POOL]")
+        assert "branch-park held --clear" in result.reason
+
     def test_dash_c_directory_is_judged(
         self, handler: BranchCreationGuardHandler, repo: Path, tmp_path: Path
     ) -> None:
@@ -142,11 +162,11 @@ class TestHandle:
     ) -> None:
         write_labels(
             repo / LABELS_RELATIVE_PATH,
-            [{"name": "two", "group": "merged", "action": "bin/hooks-daemon delete-branch two"}],
+            [{"name": "two", "group": "contained-nowhere", "action": "git push -u origin two"}],
         )
         result = handler.handle(_bash("git switch -c fresh", repo))
         assert result.reason is not None
-        assert "delete-branch two" in result.reason
+        assert "git push -u origin two" in result.reason
 
     @pytest.mark.parametrize(
         "command",
@@ -208,6 +228,7 @@ def test_rules_guidance_and_acceptance_tests(handler: BranchCreationGuardHandler
     assert [rule.rule_id for rule in handler.get_rules()] == [
         "R-BRANCH-WIP-CAP",
         "R-BRANCH-DORMANT",
+        "R-BRANCH-PARKED-POOL",
     ]
     guidance = handler.get_claude_md()
     assert guidance is not None and "wip.cap" in guidance

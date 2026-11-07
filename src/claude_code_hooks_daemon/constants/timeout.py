@@ -177,8 +177,9 @@ class Timeout:
     GIT_WORKTREE_CLEANUP = GIT_CONTEXT
     GIT_WORKTREE_CLEANUP_CALLS = 4
     # Plan 00558 Task 4.2: the branch-cap verdict before the add -- one
-    # for-each-ref, and a worktree list when a deny or a warning names worktrees.
-    GIT_BRANCH_CREATION_CALLS = 2
+    # for-each-ref, the --merged for-each-ref that splits the pools (Plan
+    # 00571), and a worktree list when a deny or a warning names worktrees.
+    GIT_BRANCH_CREATION_CALLS = 3
     # Plan 00558 Task 4.2: the creator record after the add -- three git config
     # writes (creator, created, route).
     GIT_BRANCH_RECORD_CALLS = 3

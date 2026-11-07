@@ -82,11 +82,29 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
                 "  branches never trip it; `dormancy.mode: warn` stops at the noisy stage."
             ),
         )
+        self._parked_rule = Rule(
+            rule_id=RuleID.BRANCH_PARKED_POOL,
+            blocked="creating a branch while the parked pool is at `branches.parked.cap` "
+            "or holds a branch parked past `branches.parked.max_age_days`",
+            why="Parking is a pause, not a place to leave work for ever; an un-cleared "
+            "park is dormant work with a reason attached",
+            fix="Merge it, `branch-park <name> --clear`, delete it, or re-park it with a "
+            "NEW reason (a same-reason re-park is refused)",
+            verbose=(
+                "WHY:\n"
+                "  A park commit ages the branch from the day it was written. The list\n"
+                "  below shows each parked branch with the commands that clear it."
+            ),
+        )
+        self._rules_by_id: dict[str, Rule] = {
+            RuleID.BRANCH_DORMANT: self._dormant_rule,
+            RuleID.BRANCH_PARKED_POOL: self._parked_rule,
+        }
         self._formatter = RuleFormatter()
 
     def get_rules(self) -> list[Rule]:
         """Return the Rules backing this handler's deny paths."""
-        return [self._rule, self._dormant_rule]
+        return [self._rule, self._dormant_rule, self._parked_rule]
 
     def _project_root(self) -> Path:
         if self._project_root_override is not None:
@@ -144,7 +162,7 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
         worst = max((verdict.decision for verdict in verdicts), key=_SEVERITY.__getitem__)
         if worst == "deny":
             denying = next(verdict for verdict in verdicts if verdict.decision == "deny")
-            rule = self._dormant_rule if denying.rule_id == RuleID.BRANCH_DORMANT else self._rule
+            rule = self._rules_by_id.get(denying.rule_id or "", self._rule)
             reason = "\n".join([self._formatter.headline(rule), "", *lines])
             return GatingResult(decision=Decision.DENY, reason=reason)
         return GatingResult(decision=Decision.ALLOW, context=list(dict.fromkeys(lines)))

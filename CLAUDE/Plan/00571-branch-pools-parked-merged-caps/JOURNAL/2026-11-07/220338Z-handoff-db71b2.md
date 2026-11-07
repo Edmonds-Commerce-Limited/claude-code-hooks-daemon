@@ -1,0 +1,3 @@
+## 22:03 · handoff · —
+
+Phase 3 slice (a) landed on agent-aa87210ca7838e9c4-79b323ad (d6b19f4ef): branches.bot_owned (default dependabot/\*) puts bot branches in no pool, and open work now counts only unmerged, unparked branches, so the 5 Dependabot branches that filled half of the 10-of-10 deny no longer count. Repeated `--merged` in one for-each-ref ORs (git 2.47.3, tested in a scratch repo), so the creation guard makes one extra git call, not two. The merged-branch clean line left the WIP deny; slice (c) puts it in the merged-pool deny. Slices b-e are not started; the next agent starts from subagent-reports/phase-3-pools-impl.md. This agent stopped at its context budget.

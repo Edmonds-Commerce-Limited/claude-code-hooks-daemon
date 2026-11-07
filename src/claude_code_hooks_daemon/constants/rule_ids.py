@@ -74,6 +74,12 @@ class RuleID:
     #: creating a branch while an unmerged, unparked branch is at the dormancy block stage.
     BRANCH_DORMANT: str = "R-BRANCH-DORMANT"
 
+    #: creating a branch while the parked pool is at its cap or holds a stale parked branch.
+    BRANCH_PARKED_POOL: str = "R-BRANCH-PARKED-POOL"
+
+    #: creating a branch while the merged-not-deleted pool is at its cap or holds a stale branch.
+    BRANCH_MERGED_POOL: str = "R-BRANCH-MERGED-POOL"
+
     #: a stop that leaves a dirty worktree, unpushed commits or a merged branch behind.
     BRANCH_STOP_GUARD: str = "R-BRANCH-STOP-GUARD"
 
