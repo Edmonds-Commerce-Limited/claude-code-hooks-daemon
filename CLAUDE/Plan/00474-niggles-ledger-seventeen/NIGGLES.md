@@ -206,6 +206,10 @@ script rather than Edit", and writing tests together with the fix instead of red
 red/green by hand: 9 of 86 tests fail against main's `release_slate.py` and all pass on the fix. Two occurrences in one
 session means (b) alone does not hold. Raise priority on (a).
 
+**Third occurrence (same day, Plan 00573)**: the admin-override sub-agent's worktree scratch held `add_tests.py`,
+`impl_cli_guard.py`, `fix_cli.py`, `fix2.py` and `plan_edit.py`, found while reaping the merged worktree. Three of the
+session's implementation sub-agents edited source this way, so it is the default behaviour, not an outlier.
+
 **Status**: ⬜ open.
 
 ### N583 — `secret_file_guard` matches a jq field path as if it were a protected file
