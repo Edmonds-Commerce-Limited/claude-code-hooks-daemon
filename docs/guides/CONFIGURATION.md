@@ -366,6 +366,8 @@ Recovery bundles accumulate: `delete-branch` writes a new file per call under `u
 
 `branch-sweep --clean --remote` also deletes merged branches on `branches.remote`, so one command clears local and remote alike. It deletes only what the remote-delete guard would let an agent delete: the branch's tip is an ancestor of the default branch (or, for an ordinary branch, of an integration line), and `git ls-remote` confirms the remote's live tip is that same commit. A patch-equivalent remote branch is listed as skipped, not deleted. Each delete carries a lease on its proven tip, and the remote tips go into the same recovery bundle with a restore line that fetches the ref back and pushes it. `--dry-run` works with `--remote`. The flag contacts the remote; plain `--clean` never does.
 
+`branch-sweep --clean` leaves a live agent's worktree and branch alone, locally and on the remote, and prints `Skipped <name>: ...` with the reason. Three signals mark one: a `running` work-queue record naming the branch or worktree, a worktree under `.claude/worktrees/` (Claude Code creates and cleans those itself), and a worktree git reports `locked`. `worktree-reap` honours the work-queue and lock signals too.
+
 ## Handler Configuration
 
 Handlers are grouped by the event type they respond to. Each handler has at minimum an `enabled` flag and a `priority` number.
