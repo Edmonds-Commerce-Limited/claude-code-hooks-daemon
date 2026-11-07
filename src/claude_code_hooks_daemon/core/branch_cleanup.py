@@ -29,6 +29,11 @@ from typing import Final, Literal
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import branch_inventory
+from claude_code_hooks_daemon.core.agent_ownership import (
+    RunningHolds,
+    ownership_refusal,
+    running_holds,
+)
 from claude_code_hooks_daemon.core.branch_inventory import BranchRecord, BranchState
 from claude_code_hooks_daemon.core.remote_branch_proof import (
     REMOTES_PREFIX,
@@ -48,11 +53,13 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     new_bundle_path,
     write_recovery_bundle,
 )
+from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     HEADS_PREFIX,
+    WorktreeRecord,
     branch_ref,
     parse_worktree_porcelain,
     run_git,
@@ -188,13 +195,31 @@ def cleanup_targets(repo: Path, config: BranchesConfig, default: str) -> list[st
     return targets
 
 
-def linked_worktrees(repo: Path) -> dict[str, Path]:
-    """Branch name to path for every LINKED worktree (never the main one)."""
+def linked_worktree_records(repo: Path) -> dict[str, WorktreeRecord]:
+    """Branch name to porcelain record for every LINKED worktree (never the main one)."""
     listing = run_git(repo, "worktree", "list", "--porcelain")
     if listing.returncode != 0:
         raise RuntimeError(f"git worktree list failed: {listing.stderr.strip()}")
     records = parse_worktree_porcelain(listing.stdout)[1:]
-    return {r.branch: r.path for r in records if r.branch is not None}
+    return {r.branch: r for r in records if r.branch is not None}
+
+
+def linked_worktrees(repo: Path) -> dict[str, Path]:
+    """Branch name to path for every LINKED worktree (never the main one)."""
+    return {name: record.path for name, record in linked_worktree_records(repo).items()}
+
+
+def _agent_owned(
+    name: str, records: Mapping[str, WorktreeRecord], holds: RunningHolds
+) -> str | None:
+    """Why ``name`` belongs to a live agent (see :mod:`agent_ownership`), or None."""
+    record = records.get(name)
+    return ownership_refusal(
+        name,
+        record.path if record is not None else None,
+        locked=record.locked if record is not None else False,
+        holds=holds,
+    )
 
 
 def _expand(root: Path, entry: str) -> list[str]:
@@ -523,6 +548,7 @@ def clean_sweep(
     dry_run: bool,
     bundle_dir: Path,
     remote: bool = False,
+    untracked: Path | None = None,
 ) -> CleanupReport:
     """Delete every merged and patch-equivalent local branch, behind a bundle.
 
@@ -533,6 +559,10 @@ def clean_sweep(
     Each candidate is classified on its own first, because ``delete_branches`` is
     all-or-nothing: only the proven ones are batched. A linked worktree is removed
     first, and only when :func:`worktree_blockers` finds nothing it would lose.
+
+    A branch and worktree a live agent owns (:mod:`agent_ownership`: a ``running``
+    work-queue record in ``untracked``, the harness's ``.claude/worktrees/``
+    directory, a git lock) is skipped with its reason, locally and on the remote.
 
     Raises:
         branch_inventory.BranchInventoryError: The refs could not be listed.
@@ -548,7 +578,14 @@ def clean_sweep(
     # default-only proof in force should that filter ever change.
     line_targets = default_targets(repo, config, default)
     never_work = _never_work(config, default)
-    worktrees = linked_worktrees(repo)
+    worktree_records = linked_worktree_records(repo)
+    worktrees = {name: record.path for name, record in worktree_records.items()}
+    holds = running_holds(untracked if untracked is not None else get_untracked_dir(repo))
+    owned = {
+        name: why
+        for name in {*inventory.records, *worktree_records}
+        if (why := _agent_owned(name, worktree_records, holds)) is not None
+    }
     candidates = sorted(
         name
         for name, record in inventory.records.items()
@@ -561,6 +598,9 @@ def clean_sweep(
     skipped: list[str] = []
     commands: list[str] = []
     for name in candidates:
+        if name in owned:
+            skipped.append(f"{name}: {owned[name]}")
+            continue
         held_by = worktrees.get(name)
         if held_by is not None:
             blockers = worktree_blockers(held_by, config.cleanup_after_merge.regenerable)
@@ -598,7 +638,9 @@ def clean_sweep(
 
     remote_tips: dict[str, str] = {}
     if remote:
-        remote_tips, problems = _proven_remote(repo, config, default, inventory.records)
+        remote_tips, problems = _proven_remote(
+            repo, config, default, inventory.records, spared=frozenset(owned)
+        )
         skipped += [f"{config.remote}/{name}: {why}" for name, why in problems.items()]
     tracking = {name: f"{REMOTES_PREFIX}{config.remote}/{name}" for name in remote_tips}
     if dry_run:
@@ -665,6 +707,8 @@ def _proven_remote(
     config: BranchesConfig,
     default: str,
     records: Mapping[str, BranchRecord],
+    *,
+    spared: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, str], dict[str, str]]:
     """``(name -> live tip, name -> problem)`` for every merged branch the remote holds.
 
@@ -680,6 +724,7 @@ def _proven_remote(
         if (
             record.state not in CLEAN_STATES
             or record.remote_tip is None
+            or name in spared
             or policy_refusal(name, config, default) is not None
         ):
             continue

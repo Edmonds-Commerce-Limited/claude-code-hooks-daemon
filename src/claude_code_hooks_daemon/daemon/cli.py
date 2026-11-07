@@ -179,6 +179,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
     branch_ref,
     git_visible_ancestor_dirs,
     git_visible_paths,
+    parse_worktree_porcelain,
     project_path_is_protected,
     run_git,
 )
@@ -9576,7 +9577,7 @@ def cmd_worktree_reap(
         0 when every worktree was reapable (or there are none), 1 when at least
         one needs a human. The refusals are the actionable output.
     """
-    from claude_code_hooks_daemon.core import branch_cleanup
+    from claude_code_hooks_daemon.core import agent_ownership, branch_cleanup
     from claude_code_hooks_daemon.core.worktree_reaping import (
         collect_orphaned_branches,
         collect_skipped_merged_branches,
@@ -9659,8 +9660,29 @@ def cmd_worktree_reap(
             print(f"No agent worktree named {only!r}. Run without --only to list them.")
             return 1
 
+    # A live agent's worktree and branch are never reaped: a `running` work-queue
+    # record or a git lock marks them, whatever the predicate below says.
+    holds = agent_ownership.running_holds(_daemon_untracked_dir(repo_root))
+    listing = (run_fn if run_fn is not None else run_git)(
+        repo_root, "worktree", "list", "--porcelain"
+    )
+    locked_paths = {
+        record.path for record in parse_worktree_porcelain(listing.stdout) if record.locked
+    }
+
     refused = 0
     for state in states:
+        owned = agent_ownership.ownership_refusal(
+            state.branch or "",
+            state.path,
+            locked=state.path in locked_paths,
+            holds=holds,
+            harness_directory=False,
+        )
+        if owned is not None:
+            refused += 1
+            print(f"KEEP    {state.name}: {owned}")
+            continue
         if not is_reapable(state):
             refused += 1
             print(f"KEEP    {reap_refusal_reason(state)}")
@@ -9676,6 +9698,9 @@ def cmd_worktree_reap(
 
     unmerged = 0
     for branch in orphans:
+        if branch.name in holds.branches:
+            print(f"ORPHAN  {branch.name}: a running work-queue agent owns it; left alone")
+            continue
         # `--reap-branches` is deliberately NOT folded into `--reap`: someone
         # with `--reap` in a script agreed to remove worktrees and the branches
         # attached to them, and must not start deleting standalone branches

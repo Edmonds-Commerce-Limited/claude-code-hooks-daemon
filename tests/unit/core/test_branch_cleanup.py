@@ -520,7 +520,7 @@ class TestFailuresAndEdges:
         assert f"would remove the worktree {path}" in report.commands
         assert path.is_dir()
 
-    def test_a_locked_worktree_refusal_is_reported_verbatim(
+    def test_a_locked_worktree_is_skipped_before_git_is_asked(
         self, repo: Path, tmp_path: Path
     ) -> None:
         _merged(repo, "feat")
@@ -529,7 +529,7 @@ class TestFailuresAndEdges:
         report = clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b")
         assert report.deleted == ()
         assert path.is_dir()
-        assert any("git refused to remove" in line for line in report.skipped)
+        assert any("locked by git" in line for line in report.skipped)
 
     def test_the_sweep_prints_the_remote_delete(self, repo: Path, tmp_path: Path) -> None:
         bare = tmp_path / "remote.git"
