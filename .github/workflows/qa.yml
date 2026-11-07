@@ -196,17 +196,49 @@ jobs:
         if: "!cancelled() && env.TIER == 'code'"
         run: python scripts/qa/run_pyright_check.py --json
 
+      # Plan 00572 Task 1.2: ask the mapper BEFORE running anything. When it
+      # cannot cover a changed file the whole suite runs, and the mapped tests
+      # are a subset of it, so running them first only delays the verdict
+      # (about 6 min measured on the code tier). An empty answer (the step
+      # failed) keeps the mapped tests: skipping them needs a positive count.
+      - name: Ask the mapper which changed files it cannot cover
+        id: mapper
+        if: "!cancelled()"
+        run: |
+          set -euo pipefail
+          selection="${RUNNER_TEMP}/selection.json"
+          python scripts/qa/run_changed_tests.py --range "$RANGE" --select-only > "$selection"
+          unmapped="$(jq '.unmapped | length' "$selection")"
+          echo "unmapped files: ${unmapped}"
+          echo "unmapped=${unmapped}" >> "$GITHUB_OUTPUT"
+
       # Docs tier: the whole-tree doc and plan checks, then the mapper tests.
       # Code tier: the tests the mapper selects, plus the fast tools llm_qa
       # changed carries. --allow-unmapped lets the run finish so the next step
-      # can decide what to do about files the mapper could not cover.
+      # can decide what to do about files the mapper could not cover. When the
+      # mapper reported unmapped files, changed_tests is left out (above).
       - name: Targeted QA (docs tier)
         if: "!cancelled() && env.TIER == 'docs'"
-        run: ./scripts/qa/llm_qa.py docs_qa plan_qa changed_tests --range "$RANGE" --allow-unmapped
+        env:
+          UNMAPPED: ${{ steps.mapper.outputs.unmapped }}
+        run: |
+          if [ -n "$UNMAPPED" ] && [ "$UNMAPPED" != "0" ]; then
+            ./scripts/qa/llm_qa.py docs_qa plan_qa
+          else
+            ./scripts/qa/llm_qa.py docs_qa plan_qa changed_tests --range "$RANGE" --allow-unmapped
+          fi
 
       - name: Targeted QA (code tier)
         if: "!cancelled() && env.TIER == 'code'"
-        run: ./scripts/qa/llm_qa.py changed --range "$RANGE" --allow-unmapped
+        env:
+          UNMAPPED: ${{ steps.mapper.outputs.unmapped }}
+        run: |
+          if [ -n "$UNMAPPED" ] && [ "$UNMAPPED" != "0" ]; then
+            read -r -a checks <<< "$(python -c 'import sys; sys.path.insert(0, "scripts/qa"); import llm_qa; print(" ".join(n for n in llm_qa.CHANGED_TOOL_NAMES if n != "changed_tests"))')"
+            ./scripts/qa/llm_qa.py "${checks[@]}"
+          else
+            ./scripts/qa/llm_qa.py changed --range "$RANGE" --allow-unmapped
+          fi
 
       - name: Full suite fallback (only when the mapper cannot cover a file)
         if: "!cancelled()"
