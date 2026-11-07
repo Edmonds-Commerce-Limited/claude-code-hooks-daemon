@@ -1,6 +1,6 @@
 # Plan 00572: ci wall clock sharding arm and hygiene
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-07
 **Owner**: joseph
 **Priority**: High
@@ -48,12 +48,18 @@ What the measurements found:
   share sockets inside one runner. Only an experiment on unit shards is in scope.
 - Changing what QA checks, as opposed to where and when it runs.
 
-## Owner actions (repository settings, which no workflow edit can make)
+## Repository settings
 
-- Switch branch protection's required check to the new `QA gate` aggregator
-  once it exists (Phase 1).
-- Enable CodeQL default setup, secret scanning and push protection, and
-  confirm the current settings (ANALYSIS.md section 5, rows 11-12).
+Checked with the admin token: `main` has no branch protection and no rulesets,
+so no job name is a required check and the jobs can be reshaped freely. Adding
+protection is a separate decision. This repository's workflow fast-forwards
+and pushes `main` directly, which required pull requests would block.
+
+On the owner's instruction, enabled: secret scanning, Dependabot vulnerability
+alerts and security updates, and CodeQL default setup. Still off: push
+protection. This repository's tests and fixtures deliberately carry
+credential-shaped strings for the security guards, and push protection could
+refuse those pushes, so check what it would flag before enabling it.
 
 ## Tasks
 

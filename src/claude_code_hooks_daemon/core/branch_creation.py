@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_line
 from claude_code_hooks_daemon.core.branch_inventory import (
     DormancyStage,
     is_work_branch,
@@ -63,6 +64,9 @@ _GROUP_ORDER: Final[tuple[str, ...]] = (
     "live",
 )
 
+#: Snapshot groups ``branch-sweep --clean`` deletes, so the cap deny names it.
+_CLEANABLE: Final[frozenset[str | None]] = frozenset({"merged", "patch-equivalent"})
+
 Decision = Literal["allow", "warn", "deny"]
 Labels = Mapping[str, Mapping[str, str | None]]
 
@@ -91,6 +95,8 @@ class _Work:
     name: str
     names: frozenset[str]
     committed: float
+    #: A remote ref is among the refs that join this work.
+    on_remote: bool = False
 
 
 # --- naming ---------------------------------------------------------------------------
@@ -242,6 +248,7 @@ def _work_groups(refs: list[_Ref]) -> list[_Work]:
                 name=name,
                 names=frozenset(ref.name for ref in group),
                 committed=max(ref.committed for ref in group),
+                on_remote=any(not ref.local for ref in group),
             )
         )
     return groups
@@ -283,6 +290,9 @@ def _cap_lines(
         lines.append(f"  - {_detail(work, now, worktrees)}{suffix}")
     if len(ordered) > DENY_LIST_LIMIT:
         lines.append(f"  ... and {len(ordered) - DENY_LIST_LIMIT} more")
+    merged = [work for work in ordered if labels.get(work.name, {}).get("group") in _CLEANABLE]
+    if merged:
+        lines.append(sweep_clean_line(remote=any(work.on_remote for work in merged)))
     lines.append(BRANCH_LIMIT_PRINCIPLE)
     return lines
 
