@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+import warnings
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,7 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
     SkippedProbe,
     build_event,
     daemon_error,
+    environment_blocked,
     inconclusive_probe,
     inconclusive_skip_reason,
     is_lint_probe,
@@ -61,6 +63,13 @@ class _DaemonUnreachable(Exception):
     probe MISMATCHES, because their shape side by side is the diagnosis —
     but an unreachable daemon repeated 224 times says nothing the first one
     did not, and each repetition costs a `DAEMON_STARTUP_TIMEOUT`.
+    """
+
+
+class _EnvironmentBlocked(str):
+    """A probe the repository's branch state refused before its handler spoke.
+
+    Listed in a warning, never scored: see ``environment_blocked``.
     """
 
 
@@ -210,11 +219,14 @@ def _perform(actions: list[FixtureAction]) -> None:
             raise AssertionError(f"unknown fixture action kind: {action.kind!r}")
 
 
-def _run_probe(probe: ExecutableProbe, env: dict[str, str]) -> str | InconclusiveProbe | None:
+def _run_probe(
+    probe: ExecutableProbe, env: dict[str, str]
+) -> str | InconclusiveProbe | _EnvironmentBlocked | None:
     """Dispatch one probe, making the world match what its event claims.
 
-    `None` is a pass, a string the failure, and an `InconclusiveProbe` a probe
-    whose linter timed out before the handler reached a verdict (N455).
+    `None` is a pass, a string the failure, an `InconclusiveProbe` a probe
+    whose linter timed out before the handler reached a verdict (N455), and an
+    `_EnvironmentBlocked` a probe the repository's branch state refused first.
     """
     created: Path | None = None
     target = Path(probe.file_path) if probe.file_path else None
@@ -235,6 +247,9 @@ def _run_probe(probe: ExecutableProbe, env: dict[str, str]) -> str | Inconclusiv
         decision, text, error = _dispatch(probe, env)
         if error is not None:
             return f"the daemon rejected the event, so no handler ran: {error}"
+        blocked = environment_blocked(probe, decision, text)
+        if blocked is not None:
+            return _EnvironmentBlocked(blocked)
         return inconclusive_probe(probe, decision, text) or verdict(probe, decision, text)
     finally:
         if created is not None and created.exists():
@@ -305,6 +320,7 @@ class TestTheDeclaredProbesBehaveAsDeclared:
         env = wrapper_subprocess_env(daemon_socket)
         failures = []
         inconclusive: list[InconclusiveProbe] = []
+        branch_state: list[str] = []
         for probe in executable:
             try:
                 outcome = _run_probe(probe, env)
@@ -317,9 +333,18 @@ class TestTheDeclaredProbesBehaveAsDeclared:
                 )
             if isinstance(outcome, InconclusiveProbe):
                 inconclusive.append(outcome)
+            elif isinstance(outcome, _EnvironmentBlocked):
+                branch_state.append(outcome)
             elif outcome is not None:
                 failures.append(f"#{probe.test_number} {probe.handler_name}: {outcome}")
 
+        if branch_state:
+            warnings.warn(
+                f"{len(branch_state)} probe(s) were refused by the repository's branch "
+                "state before their handler answered, so they were not scored:\n"
+                + "\n".join(branch_state),
+                stacklevel=1,
+            )
         assert not failures, (
             f"{len(failures)} of {len(executable)} declared probes did not "
             "behave as the playbook says:\n" + "\n".join(failures)
