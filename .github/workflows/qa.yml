@@ -640,6 +640,57 @@ jobs:
           print("All handler modules imported cleanly.")
           PY
 
+  # Plan 00572 Task 3.1: the relay and hooks-screen are static musl binaries;
+  # building them on each architecture's own runner and EXECUTING them is the
+  # only check that an arm64 build actually runs. ubuntu-24.04-arm is free
+  # for public repositories. The docs tier skips it.
+  native-builds:
+    name: Native build (${{ matrix.triple_arch }})
+    needs: classify
+    if: needs.classify.outputs.tier != 'docs'
+    runs-on: ${{ matrix.runner }}
+    # Two small rustc/cargo builds, a few minutes at most.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            triple_arch: x86_64
+          - runner: ubuntu-24.04-arm
+            triple_arch: aarch64
+    env:
+      TRIPLE: ${{ matrix.triple_arch }}-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add the musl target
+        run: |
+          test "$(uname -m)" = "${{ matrix.triple_arch }}"
+          rustup target add "$TRIPLE"
+
+      - name: Build and run the relay
+        run: |
+          RUSTC="$(rustup which rustc)" RELAY_TARGET="$TRIPLE" bash relay/build.sh
+          BIN="untracked/relay-build/hooks-relay-$TRIPLE"
+          readelf -h "$BIN" | grep -E 'Machine:' | tee /dev/stderr \
+            | grep -qi "${{ matrix.triple_arch == 'x86_64' && 'X86-64' || 'AArch64' }}"
+          # No socket path is a usage error: exit 13 proves the binary ran.
+          rc=0
+          "$BIN" 2> relay.err || rc=$?
+          cat relay.err
+          test "$rc" -eq 13
+          grep -q 'usage: hooks-relay' relay.err
+
+      - name: Build and run hooks-screen
+        run: |
+          CARGO="$(rustup which cargo)" bash screen/build.sh
+          BIN="untracked/screen-build/hooks-screen-$TRIPLE"
+          readelf -h "$BIN" | grep -E 'Machine:' | tee /dev/stderr \
+            | grep -qi "${{ matrix.triple_arch == 'x86_64' && 'X86-64' || 'AArch64' }}"
+          printf 'native-ok\r\n' | "$BIN" --dump | tee screen.out
+          grep -q 'native-ok' screen.out
+
   # Plan 00572 Task 1.1: the single verdict of a run, mirroring release-gate's
   # `Release gate` job. Each tier skips the jobs it does not need, so a
   # skipped job counts as passed; anything else (failure, cancelled) fails
@@ -647,7 +698,7 @@ jobs:
   # reshaped without touching branch protection.
   qa-gate:
     name: QA gate
-    needs: [classify, targeted, map, fallback-tests, qa, full-tests, perf-sweep, shell, daemon-load]
+    needs: [classify, targeted, map, fallback-tests, qa, full-tests, perf-sweep, shell, daemon-load, native-builds]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
