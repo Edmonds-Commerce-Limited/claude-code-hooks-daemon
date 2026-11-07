@@ -100,7 +100,8 @@ def _make_unrelated_mess(root: Path) -> None:
     (root / "unrelated gone.txt").unlink()
     _git(root, "mv", "unrelated old.txt", "unrelated new.txt")
     (root / "notes dir").mkdir()
-    (root / "notes dir" / "scratch, with comma.txt").write_text("x\n", encoding="utf-8")
+    (root / "notes dir" / "scratch file.txt").write_text("x\n", encoding="utf-8")
+    (root / "unrelated link").symlink_to("unrelated edit.txt")
     (root / "both edit.txt").write_text("someone else's edit\n", encoding="utf-8")
 
 
@@ -110,6 +111,7 @@ def _do_upgrade_writes(root: Path) -> None:
     (root / ".claude" / "brand new.md").write_text("new\n", encoding="utf-8")
     (root / ".claude" / "removed.md").unlink()
     _git(root, "mv", ".claude/moved.md", ".claude/moved here.md")
+    (root / ".claude" / "new link").symlink_to("daemon owned.md")
     (root / "both edit.txt").write_text("someone else's edit\nplus the upgrade's\n", "utf-8")
 
 
@@ -143,7 +145,8 @@ class TestOnlyTheUpgradesOwnChangesAreListed:
             "unrelated gone.txt",
             "unrelated old.txt",
             "unrelated new.txt",
-            "notes dir/scratch, with comma.txt",
+            "notes dir/scratch file.txt",
+            "unrelated link",
         ):
             assert unrelated not in changed, (
                 f"{unrelated!r} was already uncommitted before the upgrade; listing it "
@@ -163,6 +166,7 @@ class TestOnlyTheUpgradesOwnChangesAreListed:
             ".claude/removed.md",
             ".claude/moved.md",
             ".claude/moved here.md",
+            ".claude/new link",
             "both edit.txt",
         } <= changed, changed
 
@@ -182,6 +186,7 @@ class TestOnlyTheUpgradesOwnChangesAreListed:
             ".claude/removed.md",
             ".claude/moved.md",
             ".claude/moved here.md",
+            ".claude/new link",
             "both edit.txt",
         }
 
@@ -196,6 +201,8 @@ class TestTheScriptWiring:
 
     def test_metadata_is_built_from_the_snapshot_not_the_whole_tree(self) -> None:
         source = _source()
-        emit = source[source.index("# modified_files:") : source.index("_find_new_config_backup() {")]
+        emit = source[
+            source.index("# modified_files:") : source.index("_find_new_config_backup() {")
+        ]
         assert "_upgrade_changed_paths" in emit
         assert "git status --porcelain" not in emit

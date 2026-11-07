@@ -404,12 +404,13 @@ _dirty_paths() {
 
 # _dirty_path_record <root> <path> - one line naming the path's current
 # content: "<state> <path>", the path %q-quoted so any name fits on one line.
-# <state> is the blob hash of a file, the target of a symlink, "absent" for a
+# <state> is the blob hash of a file, "link:" and the hash of a symlink's
+# target, "absent" for a
 # deleted path, or "other" for a directory (a nested repository or submodule).
 _dirty_path_record() {
     local _root="$1" _path="$2" _state
     if [ -L "$_root/$_path" ]; then
-        printf -v _state 'link:%q' "$(readlink "$_root/$_path")"
+        _state="link:$(readlink "$_root/$_path" | git -C "$_root" hash-object --stdin)" || return 1
     elif [ -f "$_root/$_path" ]; then
         _state="$(git -C "$_root" hash-object --no-filters -- "$_path")" || return 1
     elif [ -e "$_root/$_path" ]; then
