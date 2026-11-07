@@ -9,6 +9,7 @@ import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
+from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command
 from claude_code_hooks_daemon.core.branch_inventory import DormancyStage
 from claude_code_hooks_daemon.core.branch_records import TOUCHED_KEY
 from claude_code_hooks_daemon.core.branch_stop_gate import (
@@ -16,8 +17,10 @@ from claude_code_hooks_daemon.core.branch_stop_gate import (
     NOISY_INTERVAL_SECONDS,
     STATE_KIND,
     StopDecision,
+    _deny_reason,
     decide_stop,
 )
+from claude_code_hooks_daemon.core.branch_stop_guard import StopCheck, StopFinding
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path
 
 SESSION = "sess-1"
@@ -191,3 +194,25 @@ class TestNoisyLine:
         self, repo: Path, untracked: Path, stale: None
     ) -> None:
         assert _decide(repo, untracked, agent=AGENT).context == ()
+
+
+class TestMergedOneStep:
+    """A merged finding names ``branch-sweep --clean`` (Plan 00571 Task 2.3, #165)."""
+
+    def _finding(self, check: StopCheck, *, on_remote: bool = False) -> StopFinding:
+        return StopFinding("done", check, "a" * 40, ("git branch -d done",), on_remote=on_remote)
+
+    def test_a_merged_finding_names_the_clean_command(self) -> None:
+        reason = _deny_reason([self._finding(StopCheck.MERGED)], {}, block=1, handoff=False)
+        assert sweep_clean_command() in reason
+        assert "--remote" not in reason
+        assert "git branch -d done" in reason
+
+    def test_a_remote_copy_adds_the_remote_flag(self) -> None:
+        finding = self._finding(StopCheck.MERGED, on_remote=True)
+        reason = _deny_reason([finding], {}, block=1, handoff=False)
+        assert sweep_clean_command(remote=True) in reason
+
+    def test_no_merged_finding_no_clean_line(self) -> None:
+        reason = _deny_reason([self._finding(StopCheck.UNPUSHED)], {}, block=1, handoff=False)
+        assert "--clean" not in reason

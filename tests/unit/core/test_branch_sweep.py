@@ -18,6 +18,7 @@ import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.core import branch_sweep
+from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command
 from claude_code_hooks_daemon.core.branch_inventory import (
     BranchInventory,
     BranchRecord,
@@ -366,3 +367,32 @@ class TestBehindDefault:
         assert branch_sweep.effective_behind_threshold(BranchesConfig(), legacy) == 7
         explicit = BranchesConfig.model_validate({"sweep": {"behind_threshold": 9}})
         assert branch_sweep.effective_behind_threshold(explicit, legacy) == 9
+
+
+class TestOneStepClean:
+    """Every merged listing names ``branch-sweep --clean`` (Plan 00571 Task 2.3, #165)."""
+
+    def test_the_merged_section_names_the_clean_command(self) -> None:
+        merged = _record("done", BranchState.MERGED_DEFAULT, merged_into="main")
+        text = "\n".join(branch_sweep.render_report(_inventory(merged), _CONFIG, cap=10))
+        clean_line = next(line for line in text.splitlines() if "--clean" in line)
+        assert sweep_clean_command() in clean_line
+        assert "--remote" not in clean_line
+        assert "delete-branch done" in text
+
+    def test_a_remote_copy_adds_the_remote_flag(self) -> None:
+        merged = _record(
+            "done", BranchState.MERGED_DEFAULT, merged_into="main", remote_tip="b" * 40
+        )
+        text = "\n".join(branch_sweep.render_report(_inventory(merged), _CONFIG, cap=10))
+        assert sweep_clean_command(remote=True) in text
+
+    def test_no_merged_branch_no_clean_line(self) -> None:
+        live = _record("work", BranchState.LIVE)
+        text = "\n".join(branch_sweep.render_report(_inventory(live), _CONFIG, cap=10))
+        assert "--clean" not in text
+
+    def test_the_session_summary_names_the_clean_command(self) -> None:
+        merged = _record("done", BranchState.MERGED_DEFAULT, merged_into="main")
+        lines = branch_sweep.session_summary(_inventory(merged), _CONFIG, cap=10, new_session=True)
+        assert any(sweep_clean_command() in line for line in lines)

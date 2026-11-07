@@ -80,9 +80,22 @@ BLOCKER_PREVIEW = 10
 _STATUS_PREFIX = 3
 
 
-def sweep_clean_command() -> str:
-    """The ``branch-sweep --clean`` invocation, spelled for this install's wrapper."""
-    return daemon_cli_command_for_docs("branch-sweep", "--clean")
+def sweep_clean_command(*, remote: bool = False) -> str:
+    """The ``branch-sweep --clean`` invocation, spelled for this install's wrapper.
+
+    ``remote`` adds ``--remote``: name it wherever a listed merged branch has a
+    remote copy, so the one command clears that copy too.
+    """
+    flags = ("--clean", "--remote") if remote else ("--clean",)
+    return daemon_cli_command_for_docs("branch-sweep", *flags)
+
+
+def sweep_clean_line(*, remote: bool) -> str:
+    """The one-step fix line every merged-branch listing carries (Plan 00571 Task 2.3)."""
+    return (
+        f"Delete every provably merged branch in one step, behind a recovery bundle: "
+        f"`{sweep_clean_command(remote=remote)}`"
+    )
 
 
 @dataclass(frozen=True)
@@ -751,5 +764,6 @@ __all__ = [
     "remote_delete_command",
     "render",
     "sweep_clean_command",
+    "sweep_clean_line",
     "worktree_blockers",
 ]

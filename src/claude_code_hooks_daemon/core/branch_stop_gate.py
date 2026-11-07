@@ -17,13 +17,14 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
+from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_line
 from claude_code_hooks_daemon.core.branch_inventory import (
     BranchInventory,
     BranchInventoryError,
     DormancyStage,
     build_inventory,
 )
-from claude_code_hooks_daemon.core.branch_stop_guard import StopFinding, judge_stop
+from claude_code_hooks_daemon.core.branch_stop_guard import StopCheck, StopFinding, judge_stop
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path, write_state
 
@@ -69,6 +70,9 @@ def _deny_reason(
     lines = ["BRANCHES LEFT BEHIND: this stop leaves branch work unfinished."]
     for finding in findings:
         lines.extend(_describe(finding))
+    merged = [finding for finding in findings if finding.check == StopCheck.MERGED]
+    if merged:
+        lines.append(sweep_clean_line(remote=any(finding.on_remote for finding in merged)))
     if handoff:
         lines.append("Handoff: record these in the handoff note (branch @ tip):")
         lines.extend(f"  {name} @ {tip}" for name, tip in sorted(tips.items()))

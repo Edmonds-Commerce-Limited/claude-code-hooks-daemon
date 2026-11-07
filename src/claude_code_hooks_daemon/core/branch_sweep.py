@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
+from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command, sweep_clean_line
 from claude_code_hooks_daemon.core.branch_inventory import (
     BranchInventory,
     BranchRecord,
@@ -306,6 +307,11 @@ def _section(title: str, lines: list[str]) -> list[str]:
     return [title, *lines, ""] if lines else []
 
 
+def _with_clean_line(lines: list[str], *, remote: bool) -> list[str]:
+    """``lines`` plus the one-step ``branch-sweep --clean`` fix, when there are any."""
+    return [*lines, f"  {sweep_clean_line(remote=remote)}"] if lines else []
+
+
 def render_report(
     inventory: BranchInventory, config: BranchesConfig, *, cap: int, show_all: bool = False
 ) -> list[str]:
@@ -326,11 +332,18 @@ def render_report(
     )
     out += _section(
         "Merged, not deleted:",
-        [_done_line(r, inventory, config) for r in groups.merged],
+        _with_clean_line(
+            [_done_line(r, inventory, config) for r in groups.merged],
+            remote=any(r.remote_tip is not None for r in groups.merged),
+        ),
     )
+    # A patch-equivalent REMOTE branch fails the remote-delete proof, so --remote
+    # would not clear it; the local clean is the one step that applies.
     out += _section(
         "Patch-equivalent (every change already in the target):",
-        [_done_line(r, inventory, config) for r in groups.patch_equivalent],
+        _with_clean_line(
+            [_done_line(r, inventory, config) for r in groups.patch_equivalent], remote=False
+        ),
     )
     out += _section("Dormant:", [_dormant_line(r) for r in groups.dormant])
     out += _section("Live work:", [_work_line(r) for r in groups.live])
@@ -448,9 +461,11 @@ def session_summary(
             )
         if groups.merged:
             noun = "branch is" if len(groups.merged) == 1 else "branches are"
+            remote = any(r.remote_tip is not None for r in groups.merged)
             notes.append(
-                f"{len(groups.merged)} merged {noun} not deleted: run `{sweep_command()}` "
-                "for the delete commands."
+                f"{len(groups.merged)} merged {noun} not deleted: "
+                f"`{sweep_clean_command(remote=remote)}` deletes them in one step "
+                f"(`{sweep_command()}` lists them)."
             )
         count = open_work_count(inventory)
         if count >= cap:
