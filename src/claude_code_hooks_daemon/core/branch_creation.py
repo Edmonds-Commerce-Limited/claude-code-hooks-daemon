@@ -436,9 +436,7 @@ def _dormancy_context_lines(
     ]
 
 
-def _stale_parked(
-    parked: list[_Work], config: BranchesConfig, now: float
-) -> list[_Work]:
+def _stale_parked(parked: list[_Work], config: BranchesConfig, now: float) -> list[_Work]:
     """Parked work whose park commit is at least ``parked.max_age_days`` old."""
     max_age = config.effective_pool_max_age(Pool.PARKED)
     return [work for work in parked if (now - work.committed) / _SECONDS_PER_DAY >= max_age]

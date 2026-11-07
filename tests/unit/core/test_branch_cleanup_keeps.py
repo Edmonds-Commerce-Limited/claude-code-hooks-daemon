@@ -14,13 +14,13 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.config.models import BranchesConfig
+from claude_code_hooks_daemon.config.models import BranchesConfig, BranchMergedConfig
 from claude_code_hooks_daemon.core.branch_cleanup import CleanupReport, clean_sweep
 from claude_code_hooks_daemon.core.branch_keep import keep_branch
 from tests.support.git_fixtures import git_setup_timeout
 
 _DAY = 86_400
-_CONFIG = BranchesConfig(default="main", merged={"max_age_days": 7})
+_CONFIG = BranchesConfig(default="main", merged=BranchMergedConfig(max_age_days=7))
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -119,9 +119,7 @@ class TestLocalKeeps:
 
 
 class TestRemoteKeeps:
-    def test_a_kept_remote_branch_is_skipped(
-        self, repo: Path, bare: Path, tmp_path: Path
-    ) -> None:
+    def test_a_kept_remote_branch_is_skipped(self, repo: Path, bare: Path, tmp_path: Path) -> None:
         _keep(repo, _merged(repo, "kept", push=True))
         report = _sweep(repo, tmp_path, remote=True)
         assert report.deleted_remote == ()

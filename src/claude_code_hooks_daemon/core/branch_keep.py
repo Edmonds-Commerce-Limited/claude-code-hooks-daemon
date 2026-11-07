@@ -11,6 +11,7 @@ local keep standing and is reported with the command to retry.
 from __future__ import annotations
 
 import calendar
+import logging
 import re
 import time
 from collections.abc import Iterable
@@ -19,7 +20,10 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
+
+logger = logging.getLogger(__name__)
 
 KEEP_NOTES_REF: Final[str] = "refs/notes/hooks-daemon/keep"
 _TRACKING_ROOT: Final[str] = "refs/notes/hooks-daemon-remote"
@@ -59,10 +63,17 @@ def keep_tracking_ref(remote: str) -> str:
 
 
 def _epoch(stamp: str) -> int | None:
+    """``Kept-At`` as epoch seconds; None (logged) when it is not a valid UTC stamp."""
     try:
         return calendar.timegm(time.strptime(stamp, _ISO))
-    except ValueError:
-        return None
+    except ValueError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"branch_keep: Kept-At {stamp!r} is not a valid UTC stamp, so that "
+            "entry is not a keep and the branch reads as unkept",
+        )
+    return None
 
 
 def parse_keep_note(body: str) -> Keep | None:
@@ -93,7 +104,11 @@ def _kept_tips(repo: Path, ref: str) -> set[str]:
     result = run_git(repo, "notes", f"--ref={ref}", "list", timeout=Timeout.GIT_CONTEXT)
     if result.returncode != 0:
         return set()
-    return {parts[1] for parts in (line.split() for line in result.stdout.splitlines()) if len(parts) == 2}
+    return {
+        parts[1]
+        for parts in (line.split() for line in result.stdout.splitlines())
+        if len(parts) == 2
+    }
 
 
 def read_keeps(repo: Path, tips: Iterable[str], remote: str) -> dict[str, Keep]:
@@ -128,7 +143,11 @@ def fetch_keeps(repo: Path, remote: str) -> str | None:
 
 def _push(repo: Path, remote: str) -> str | None:
     result = run_git(
-        repo, "push", remote, f"{KEEP_NOTES_REF}:{KEEP_NOTES_REF}", timeout=Timeout.GIT_FETCH_SESSION
+        repo,
+        "push",
+        remote,
+        f"{KEEP_NOTES_REF}:{KEEP_NOTES_REF}",
+        timeout=Timeout.GIT_FETCH_SESSION,
     )
     return None if result.returncode == 0 else (result.stderr.strip() or "git push failed")
 

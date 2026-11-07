@@ -6613,13 +6613,7 @@ def cmd_branch_keep(args: argparse.Namespace) -> int:
         )
         return 1
     tips = [tip for tip in (record.local_tip, record.remote_tip) if tip is not None]
-    user = subprocess.run(
-        ["git", "-C", str(repo), "config", "user.name"],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=Timeout.GIT_CONTEXT,
-    ).stdout.strip()
+    user = run_git(repo, "config", "user.name", timeout=Timeout.GIT_CONTEXT).stdout.strip()
     try:
         result = keep_branch(
             repo,

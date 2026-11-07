@@ -1120,9 +1120,7 @@ def _with_pools(
         if record.state != BranchState.PARKED:
             continue
         tip = record.local_tip or record.remote_tip
-        stale = (
-            parked.mode != "off" and record.age_days is not None and record.age_days >= max_age
-        )
+        stale = parked.mode != "off" and record.age_days is not None and record.age_days >= max_age
         updated[name] = replace(
             record,
             stale=stale,

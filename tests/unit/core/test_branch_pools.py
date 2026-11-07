@@ -456,9 +456,7 @@ def _merged_distinct(repo: Path, name: str) -> str:
 
 
 def _keep(repo: Path, tip: str, *, days_ago: float, reason: str = "audit") -> None:
-    keep_branch(
-        repo, [tip], reason=reason, remote="origin", user="t", now=NOW - days_ago * DAY
-    )
+    keep_branch(repo, [tip], reason=reason, remote="origin", user="t", now=NOW - days_ago * DAY)
 
 
 class TestMergedPool:

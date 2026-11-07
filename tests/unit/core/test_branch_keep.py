@@ -78,7 +78,9 @@ class TestKeep:
             repo, [tip], reason="needed for audit", remote="origin", user="Tess", now=1_800_000_000
         )
         assert result.pushed is True
-        assert "Kept-Reason: needed for audit" in _git(repo, "notes", f"--ref={KEEP_NOTES_REF}", "show", tip)
+        assert "Kept-Reason: needed for audit" in _git(
+            repo, "notes", f"--ref={KEEP_NOTES_REF}", "show", tip
+        )
         assert _git(repo, "ls-remote", "origin", KEEP_NOTES_REF)
 
     def test_read_keeps_returns_only_requested_tips(self, repo: Path) -> None:
