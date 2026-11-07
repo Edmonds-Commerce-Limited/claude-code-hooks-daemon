@@ -104,8 +104,10 @@ refuse those pushes, so check what it would flag before enabling it.
 
 - [x] ✅ **Task 4.1**: `.github/dependabot.yml` for `github-actions` and the
   Python dependencies, grouped.
-- [ ] ⬜ **Task 4.2**: Pin every `uses:` to a full commit SHA, with the tag in
-  a trailing comment.
+- [x] ✅ **Task 4.2**: Pin every `uses:` to a full commit SHA, with the tag in
+  a trailing comment. Pinned at the release each floating tag pointed to;
+  `tests/integration/test_ci_actions_pinned.py` fails on any unpinned
+  external action.
 
 ## Success Criteria
 

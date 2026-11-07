@@ -64,14 +64,14 @@ jobs:
     steps:
       # Full history: the base may be any ancestor, and a base that is not in
       # history is itself classified as the full tier.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
       # The classifier scripts run on the interpreter set up here, passed to
       # emit_tier.bash as HOOKS_DAEMON_PYTHON, never on a PATH python3.
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
 
@@ -114,7 +114,7 @@ jobs:
     steps:
       # fetch-depth 0: the range diff needs both ends, and the acceptance
       # conftest needs tags (see the qa job for the full reasoning).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
@@ -234,7 +234,7 @@ jobs:
       # JSON (ledger 00474 N544), so keep untracked/qa/ when the job fails.
       - name: Upload QA output
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: qa-targeted-output
           path: untracked/qa/
@@ -275,7 +275,7 @@ jobs:
       # three interpreters. `fetch-tags: true` alone would NOT fix it: a
       # depth-1 clone has no ancestors, so a tag on any earlier commit is
       # unreachable from HEAD no matter how many tag refs are present.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
@@ -369,7 +369,7 @@ jobs:
     env:
       RANGE: ${{ needs.classify.outputs.base }}..${{ needs.classify.outputs.head }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
@@ -425,7 +425,7 @@ jobs:
     # Install dominates; the marked tests take seconds.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
@@ -445,7 +445,7 @@ jobs:
     # ~30 s measured.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: shellcheck
         run: |
@@ -471,7 +471,7 @@ jobs:
     # ~20 s measured.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Same lockfile provisioning as the qa job (Plan 00346). This job asserts
       # that every handler module IMPORTS, so the dependency versions it imports
@@ -539,7 +539,7 @@ jobs:
     env:
       TRIPLE: ${{ matrix.triple_arch }}-unknown-linux-musl
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Add the musl target
         run: |
