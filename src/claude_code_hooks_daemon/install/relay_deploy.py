@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import platform
 import shutil
 import subprocess  # nosec B404 - subprocess used only for the trusted, hardcoded rustc build invocation (no shell, no user input)
 import sys
@@ -37,13 +38,38 @@ from claude_code_hooks_daemon.utils.relay_host import (
     host_relay_target,
     relay_fix_subcommand,
     relay_supported_by_host,
+    relay_target_for_machine,
 )
 
-#: The one relay target this project publishes a prebuilt asset for today (design §3.2).
-#: Other supported hosts (aarch64 Linux) build from source.
+#: The default relay target: ``relay/build.sh``'s default and the toolchain probe's.
 RELAY_TARGET: str = "x86_64-unknown-linux-musl"
 RELAY_ASSET_NAME: str = f"hooks-relay-{RELAY_TARGET}"
 SHA256SUMS_ASSET_NAME: str = "SHA256SUMS"
+
+#: Every target a release publishes a prebuilt relay for. Built natively per
+#: architecture by ``.github/workflows/release-assets.yml`` (Plan 00572 Task 3.2).
+PUBLISHED_RELAY_TARGETS: tuple[str, ...] = (
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+)
+
+
+def relay_asset_name_for_target(target: str) -> str:
+    """The release asset name of the relay built for ``target``."""
+    return f"hooks-relay-{target}"
+
+
+def relay_asset_name(machine: str | None = None) -> str | None:
+    """The release asset this host (or ``machine``) downloads, or None when none is published.
+
+    ``machine`` is a ``platform.machine()`` spelling; it defaults to the host,
+    where a non-Linux OS also has no asset.
+    """
+    target = host_relay_target() if machine is None else relay_target_for_machine(machine)
+    if target is None or target not in PUBLISHED_RELAY_TARGETS:
+        return None
+    return relay_asset_name_for_target(target)
+
 
 #: GitHub release asset base — a version tag (``v3.57.0``) and an asset name
 #: joined onto this produce the download URL for that asset.
@@ -453,12 +479,14 @@ def deploy_relay_from_download(
         fetch_fn: Given a URL, returns the response body bytes or raises.
             Real network access is injected only outside unit tests.
     """
-    if host_relay_target() != RELAY_TARGET:
+    asset_name = relay_asset_name()
+    if asset_name is None:
         return RelayDeployResult(
             False,
             "download",
             (
-                f"no prebuilt relay is published for this host (only {RELAY_TARGET}); "
+                f"no prebuilt relay is published for this host ({sys.platform}/"
+                f"{platform.machine()}; published: {', '.join(PUBLISHED_RELAY_TARGETS)}); "
                 "build it from source instead",
             ),
         )
@@ -470,17 +498,15 @@ def deploy_relay_from_download(
         # ...); every one of them is the same "fetch failed" advisory here.
         return RelayDeployResult(False, "download", (f"failed to fetch {sums_url}: {exc}",))
 
-    expected_digest = _parse_sha256sums(
-        sums_bytes.decode("utf-8", errors="replace"), RELAY_ASSET_NAME
-    )
+    expected_digest = _parse_sha256sums(sums_bytes.decode("utf-8", errors="replace"), asset_name)
     if expected_digest is None:
         return RelayDeployResult(
             False,
             "download",
-            (f"{SHA256SUMS_ASSET_NAME} for {version_tag} has no entry for {RELAY_ASSET_NAME}",),
+            (f"{SHA256SUMS_ASSET_NAME} for {version_tag} has no entry for {asset_name}",),
         )
 
-    binary_url = _release_asset_url(version_tag, RELAY_ASSET_NAME)
+    binary_url = _release_asset_url(version_tag, asset_name)
     try:
         binary_bytes = fetch_fn(binary_url)
     except Exception as exc:  # see comment above — any transport failure
@@ -492,7 +518,7 @@ def deploy_relay_from_download(
             False,
             "download",
             (
-                f"sha256 mismatch for {RELAY_ASSET_NAME} ({version_tag}): "
+                f"sha256 mismatch for {asset_name} ({version_tag}): "
                 f"expected {expected_digest}, got {actual_digest} — refusing to deploy",
             ),
         )
@@ -577,10 +603,10 @@ def _deploy_auto(
     """``relay_source: auto`` - build when a musl toolchain exists, else download.
 
     The build is tried first (the first-class route). When it is not possible
-    or does not deploy, the digest-verified download is attempted - but only on
-    a host the published asset runs on; any other supported host (aarch64) has
-    the build as its only route. Messages from every attempt are kept, so a
-    failed build followed by a successful download is still reported.
+    or does not deploy, the digest-verified download of the host architecture's
+    asset is attempted - but only when a release publishes one for this host.
+    Messages from every attempt are kept, so a failed build followed by a
+    successful download is still reported.
     """
     host_target = host_relay_target()
     if host_target is None:
@@ -597,7 +623,7 @@ def _deploy_auto(
             f"from source (`rustup target add {host_target}` enables it)"
         )
 
-    if host_target != RELAY_TARGET:
+    if host_target not in PUBLISHED_RELAY_TARGETS:
         messages.append(
             f"no prebuilt relay is published for {host_target}, so there is no download fallback"
         )
@@ -666,7 +692,7 @@ def _failure_banner(
     if source_hint:
         lines.append("  - set daemon.transport.relay_source: auto in .claude/hooks-daemon.yaml")
     lines.append(f"  - install a musl-capable rustc: rustup target add {host_target}")
-    if host_target == RELAY_TARGET:
+    if host_target in PUBLISHED_RELAY_TARGETS:
         lines.append("  - or allow network access to the GitHub release (digest-verified asset)")
     lines.extend([f"Then run: {wrapper} transport on", rule])
     return tuple(lines)

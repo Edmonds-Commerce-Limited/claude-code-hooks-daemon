@@ -172,7 +172,7 @@ class TestDeployOnAarch64:
             run_fn=_toolchain_run("x86_64-unknown-linux-musl\n"),
         )
         assert result.deployed is False
-        assert fetched == []
+        assert not any("x86_64" in url for url in fetched)
         assert any("aarch64-unknown-linux-musl" in m for m in result.messages)
 
     def test_build_passes_the_host_target_and_reads_its_output(

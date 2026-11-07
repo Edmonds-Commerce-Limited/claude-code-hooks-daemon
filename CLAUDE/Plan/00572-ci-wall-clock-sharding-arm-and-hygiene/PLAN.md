@@ -94,7 +94,7 @@ refuse those pushes, so check what it would flag before enabling it.
 - [ ] ⬜ **Task 3.1**: A `native-builds` matrix (x86_64 on `ubuntu-latest`,
   aarch64 on `ubuntu-24.04-arm`) building and smoke-running the relay and
   hooks-screen.
-- [ ] ⬜ **Task 3.2**: Tag-triggered release assets for both triples with a
+- [x] ✅ **Task 3.2**: Tag-triggered release assets for both triples with a
   merged `SHA256SUMS` and `actions/attest-build-provenance`. The relay's
   download path selects its asset by architecture.
 - [ ] ⬜ **Task 3.3**: A non-blocking arm64 test leg. Make the tests that

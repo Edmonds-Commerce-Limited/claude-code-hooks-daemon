@@ -1,0 +1,160 @@
+# Plan 00572 Task 3.2: publish the relay and hooks-screen for both
+# architectures on every release, built natively, checksummed and attested.
+#
+# Each binary is built on its own architecture's runner (the recipe of qa.yml's
+# native-builds job), so the aarch64 asset is executed on aarch64 before it
+# ships. One SHA256SUMS covers every asset from both legs; that is the
+# manifest install/relay_deploy.py digest-verifies a download against, and it
+# picks hooks-relay-<host triple> by the host's architecture.
+#
+# The release session pushes the tag BEFORE it runs `gh release create`
+# (RELEASING.md Step 14), so on a tag push the release usually does not exist
+# yet. The publish job waits for it rather than creating it: creating it here
+# would make the session's own `gh release create` fail with "already exists"
+# and would publish a release with no notes. If the wait runs out, the job
+# fails loudly; re-run it once the release exists with workflow_dispatch and
+# the tag.
+name: Release assets
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to (re)publish assets for, e.g. v3.70.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-assets-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: Build (${{ matrix.triple_arch }})
+    runs-on: ${{ matrix.runner }}
+    # Two small rustc/cargo builds, a few minutes at most.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            triple_arch: x86_64
+            elf_machine: X86-64
+          - runner: ubuntu-24.04-arm
+            triple_arch: aarch64
+            elf_machine: AArch64
+    steps:
+      - name: Validate the tag
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]] || {
+            echo "::error::not a release tag: $TAG"; exit 1; }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Add the musl target
+        env:
+          ARCH: ${{ matrix.triple_arch }}
+        run: |
+          test "$(uname -m)" = "$ARCH"
+          echo "TRIPLE=$ARCH-unknown-linux-musl" >> "$GITHUB_ENV"
+          rustup target add "$ARCH-unknown-linux-musl"
+
+      - name: Build the relay and hooks-screen
+        run: |
+          RUSTC="$(rustup which rustc)" RELAY_TARGET="$TRIPLE" bash relay/build.sh
+          SCREEN_TARGET="$TRIPLE" CARGO="$(rustup which cargo)" bash screen/build.sh
+          mkdir -p dist
+          cp "untracked/relay-build/hooks-relay-$TRIPLE" "dist/hooks-relay-$TRIPLE"
+          cp "untracked/screen-build/hooks-screen-$TRIPLE" "dist/hooks-screen-$TRIPLE"
+
+      - name: Check each binary is for this architecture and runs
+        env:
+          ELF_MACHINE: ${{ matrix.elf_machine }}
+        run: |
+          for bin in "dist/hooks-relay-$TRIPLE" "dist/hooks-screen-$TRIPLE"; do
+            readelf -h "$bin" | grep -E 'Machine:' | tee /dev/stderr | grep -qi "$ELF_MACHINE"
+          done
+          # No socket path is a usage error: exit 13 proves the relay ran.
+          rc=0
+          "dist/hooks-relay-$TRIPLE" 2> relay.err || rc=$?
+          cat relay.err
+          test "$rc" -eq 13
+          printf 'release-ok\r\n' | "dist/hooks-screen-$TRIPLE" --dump | grep -q 'release-ok'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.triple_arch }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Checksum, attest and upload
+    needs: build
+    runs-on: ubuntu-latest
+    # Most of this is the wait for the release to exist (below).
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          path: dist
+          merge-multiple: true
+
+      - name: Merge one SHA256SUMS over every asset
+        working-directory: dist
+        run: |
+          export LC_ALL=C
+          sha256sum hooks-* > SHA256SUMS
+          cat SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq 4
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/hooks-*
+
+      - name: Wait for the GitHub release to exist
+        run: |
+          # The release session creates it right after pushing the tag.
+          for _ in $(seq 1 90); do
+            if gh release view "$TAG" --json tagName > /dev/null; then
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::release $TAG does not exist after 45 minutes; create it, then re-run this workflow with workflow_dispatch tag=$TAG"
+          exit 1
+
+      - name: Upload and read back
+        run: |
+          gh release upload "$TAG" dist/hooks-* dist/SHA256SUMS --clobber
+          published="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          for asset in dist/hooks-* dist/SHA256SUMS; do
+            grep -qxF "$(basename "$asset")" <<< "$published" || {
+              echo "::error::release $TAG does not list $(basename "$asset")"; exit 1; }
+          done
+          {
+            echo "### Release assets for $TAG"
+            echo
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
