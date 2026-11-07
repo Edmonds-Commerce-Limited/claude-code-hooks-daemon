@@ -8,9 +8,13 @@ The sources under `screen/vendor/` are the unmodified output of `cargo vendor`.
 `screen/.cargo/config.toml` replaces crates.io with that directory, and
 `screen/Cargo.lock` pins every version, so the build needs no network:
 
-    cargo build --release --offline --locked --target x86_64-unknown-linux-musl
+```
+cargo build --release --offline --locked --target x86_64-unknown-linux-musl
+```
 
-`bash screen/build.sh` does exactly that. Never edit files under `vendor/`:
+`bash screen/build.sh` does exactly that, taking the target from the host
+architecture (`uname -m`: x86_64 or aarch64, both musl); set `SCREEN_TARGET`
+for any other. Never edit files under `vendor/`:
 cargo verifies each file against its `.cargo-checksum.json`.
 
 | Crate         | Version | License           | Role                                 |
