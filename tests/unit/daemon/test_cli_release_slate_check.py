@@ -144,14 +144,15 @@ class TestJsonOutput:
 
 _MATRIX_JOBS = [
     {"name": "Classify change", "conclusion": "success"},
-    {"name": "QA (Python3.11)", "conclusion": "success"},
-    {"name": "QA (Python3.12)", "conclusion": "success"},
-    {"name": "QA (Python3.13)", "conclusion": "success"},
+    {"name": "QA static (Python3.11)", "conclusion": "success"},
+    {"name": "QA static (Python3.12)", "conclusion": "success"},
+    {"name": "QA static (Python3.13)", "conclusion": "success"},
+    {"name": "Full suite / tests py3.13 integration", "conclusion": "success"},
 ]
 _TIER_JOBS = [
     {"name": "Classify change", "conclusion": "success"},
     {"name": "QA (docs or code tier)", "conclusion": "success"},
-    {"name": "QA (Python${{ matrix.python-version }})", "conclusion": "skipped"},
+    {"name": "QA static (Python${{ matrix.python-version }})", "conclusion": "skipped"},
 ]
 
 
@@ -259,7 +260,10 @@ class TestTheCiLookupRequiresTheFullMatrix:
     def test_the_newest_full_matrix_run_wins_over_an_older_one(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        failed_jobs = [*_MATRIX_JOBS[:3], {"name": "QA (Python3.13)", "conclusion": "failure"}]
+        failed_jobs = [
+            *_MATRIX_JOBS[:3],
+            {"name": "QA static (Python3.13)", "conclusion": "failure"},
+        ]
         gh = _FakeGh([_run(3, conclusion="failure"), _run(2)], {3: failed_jobs, 2: _MATRIX_JOBS})
         _install(monkeypatch, gh)
         state = cli._gh_ci_lookup(_HEAD)
@@ -316,7 +320,10 @@ class TestTheCiLookupRequiresTheFullMatrix:
     def test_a_failed_matrix_run_is_not_green_and_is_named(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        failed_jobs = [*_MATRIX_JOBS[:3], {"name": "QA (Python3.13)", "conclusion": "failure"}]
+        failed_jobs = [
+            *_MATRIX_JOBS[:3],
+            {"name": "QA static (Python3.13)", "conclusion": "failure"},
+        ]
         _install(monkeypatch, _FakeGh([_run(1, conclusion="failure")], {1: failed_jobs}))
         state = cli._gh_ci_lookup(_HEAD)
         assert state is not None

@@ -356,7 +356,8 @@ What the report shows, and how each is read:
   `in_progress`, `cancelled` and *absent* are all not green. CI runs a tier
   (docs, code or full) per change, and a docs or code tier passes without
   running the three-Python matrix, so a release needs a `qa.yml` run on that
-  exact sha whose matrix jobs (`QA (Python3.x)`) all succeeded; a tier-only
+  exact sha whose full-tier jobs (`QA static (Python3.x)` and the
+  `Full suite / ...` test shards) all succeeded; a tier-only
   green is reported as such and is not green. The check reads the jobs with
   `gh run view`, and a `gh` failure or unreadable output is exit `1`, never
   green. Trigger the matrix with `gh workflow run qa.yml --ref main` (a manual
