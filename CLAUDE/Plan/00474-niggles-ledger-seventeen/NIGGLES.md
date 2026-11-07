@@ -124,6 +124,26 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N584 — a sub-agent edited source through Python scripts, routing around every Write/Edit content guard
+
+**Source**: this session, 7 November 2026, cleaning up after Plan 00570 (#166).
+
+**Evidence**: the #166 implementation sub-agent's worktree scratch held `edit_bs.py`, `edit_inv.py` and
+`edit2.py` to `edit4.py` (341 lines total). Each does `Path(...).read_text()`, asserts a count, `str.replace`s and
+writes back into `src/claude_code_hooks_daemon/daemon/branch_safety.py`, `core/branch_inventory.py` and others. Run
+as `python edit_x.py`, they change source with none of the PreToolUse content guards (`qa_suppression`,
+`error_hiding_blocker`, `security_antipattern`, `comment_changelog`) seeing the text. `lint_on_edit` lints files a
+Bash command AUTHORS by redirect, `tee` or heredoc, not files a script writes. The merged result still passed the
+whole-tree static QA scan (error_hiding, security, inline_suppressions run over every file), so nothing slipped
+through this time. The gap is real, though: the edit-time defence did not see it.
+
+**Proposal**: (a) detect a Bash command that runs a script from `untracked/scratch/` (or `python -c`) which writes
+into tracked source, using the post-command `git status` delta, and run the content guards over the changed files
+afterwards, as `lint_on_edit` does for authored files; (b) brief sub-agents that source edits go through `Edit`
+(dispatch templates). (a) is the durable fix, since (b) relies on compliance.
+
+**Status**: ⬜ open.
+
 ### N583 — `secret_file_guard` matches a jq field path as if it were a protected file
 
 **Source**: this session, 7 November 2026, enabling repository security settings (Plan 00572).
