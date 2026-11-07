@@ -402,6 +402,11 @@ def creation_verdict(
     if name_is_branch and new_name is not None:
         if any(ref.local and ref.name == new_name for ref in refs):
             return CreationVerdict("allow", ())
+        # The default branch and exempt/protected names are never counted as
+        # open work, so creating one (a local `main` in a detached CI checkout)
+        # cannot raise the count the cap and dormancy judge.
+        if not is_work_branch(new_name, config, default):
+            return CreationVerdict("allow", ())
     work_refs = [ref for ref in refs if is_work_branch(ref.name, config, default)]
     groups = _work_groups(work_refs)
     moment = time.time() if now is None else now

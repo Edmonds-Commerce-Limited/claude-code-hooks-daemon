@@ -124,6 +124,43 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N593 — the acceptance harness failed in CI because the repository reached its own branch cap
+
+**Source**: the coordinator, from PR #183's CI (run 42415884106, 7 November 2026). `test_playbook_harness` failed with
+two probes denied by R-BRANCH-WIP-CAP at 10 of 10: half of them were Dependabot's new remote branches, the rest live
+agent branches. The test is release Step 12.0's deterministic gate, so the failure would have blocked every release
+and every main CI run while the cap stayed full.
+
+**Evidence and causes**:
+
+- **#339, a guard defect.** The creation guard's probe `git branch -f main main` assumes `main` is in `refs/heads`. A
+  detached CI checkout has no local `main`, so the guard counted the default branch as new open work and denied it at
+  the cap. Neither the default branch nor any exempt or protected name is ever work.
+- **#365, a probe that depends on the environment.** The isolation advisor's "with worktree isolation" probe expects
+  allow, but at the cap the creation guard correctly denies any `isolation: worktree` dispatch. The probe measured
+  the repository's branch count, not its handler.
+
+**Status**: ✅ fixed on main.
+
+- `creation_verdict` allows any name `is_work_branch` rejects (`tests/unit/core/test_branch_creation_non_work_names.py`).
+- `playbook_harness.environment_blocked` reports a non-creation-guard probe refused by R-BRANCH-WIP-CAP or
+  R-BRANCH-DORMANT. The harness lists it by name in a warning and does not score it. The creation guard's own probes
+  stay fully scored (`tests/unit/daemon/test_playbook_harness_environment_blocked.py`).
+- Verified against the live daemon at 10 of 10: the harness passes with #365 listed. Release note 010.
+
+### N592 — the ccy supervisor opens walked signal-directory entries without checking they are regular files
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026). Their new QA gate,
+walk-opens-non-regular-file (their issue #191), flagged the deployed v3.73.0 `.claude/ccy/claude-supervise.py`. It found
+eleven glob or iterdir loops that `read_text` each entry, plus the session-modes walk. A FIFO makes the open block for
+ever. Their owner's rule allows no exclude for a daemon-owned file, so fedora-desktop's push is held until a release
+fixes it.
+
+**Status**: ✅ fixed on main. `_read_regular_text` opens with `O_NONBLOCK` and reads only when `fstat` reports a
+regular file, otherwise raising `OSError`, which every caller already handles. All 16 signal and `/proc` reads go
+through it. Test: `tests/unit/supervise/test_walk_opens_regular_files_only.py`, which plants a FIFO matching each
+of 11 loaders' globs, plus one under a `/proc`-shaped root, and requires a return within 5 seconds. Release note 009.
+
 ### N591 — the remote-delete guard denies a merged branch when the same command also removes its worktree and local branch
 
 **Source**: the coordinator, cleaning up after merging Plan 00571's Phase 3 handoff (7 November 2026).
