@@ -26,7 +26,10 @@ one plan header, and that read is cached per plan file against its mtime.
 - the issue is unassigned: deny, naming the ONE command that claims it,
   ``bin/hooks-daemon issue-validity N --claim``;
 - the issue is assigned only to others, or its author is not approved: deny;
-  do not work on it, do not claim it;
+  do not work on it, do not claim it. EXCEPT an admin seat on an issue held only
+  by non-admins (Plan 00573): allowed, with an advisory naming the assignee and
+  the takeover command. Another admin's assignment still denies. The guard
+  never takes over by itself, ``auto_claim`` included;
 - a fact could not be read (no ``gh``, offline, not signed in): allow with an
   advisory, once per failure window.
 
@@ -326,6 +329,16 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
         command = claim_command(number)
         return _rule_unassigned(), f"Issue #{number}:\n{details}\n\nRun: {command}\nThen retry."
 
+    @staticmethod
+    def _takeover_advisory(report: ValidityReport) -> str:
+        """Tell an admin seat who holds the issue and how to take it over."""
+        notes = "; ".join(report.messages(CheckStatus.ADVISORY))
+        return (
+            f"Work on #{report.number} is allowed because this seat is a repository admin. "
+            f"{notes} The assignee may be working on it: check before duplicating their "
+            f"work. To take it over (recorded in an issue comment): {claim_command(report.number)}"
+        )
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Judge each tied issue; deny on a settled problem, advise on an unknown."""
         service = self._service_for_judging()
@@ -336,6 +349,8 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
             report = self._claim_if_allowed(service, service.check_issue(number, checks), checks)
             if report.verdict in (Verdict.BLOCKED, Verdict.FIXABLE):
                 denials.append(self._denial(report))
+            elif report.verdict is Verdict.VALID and report.messages(CheckStatus.ADVISORY):
+                advisories.append(self._takeover_advisory(report))
             elif report.verdict is Verdict.UNKNOWN and report.fresh:
                 reasons = "; ".join(report.messages(CheckStatus.UNKNOWN))
                 advisories.append(
@@ -421,6 +436,12 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
             "- **Assigned only to someone else**, **two or more assignees**, or **author "
             "not approved**: do not work on it, do not claim it, write nothing to it; "
             "tell the user (several assignees need a human to leave exactly one).\n"
+            "- **Assigned to a non-admin while this seat is a repository admin**: work is "
+            "allowed with an advisory naming the assignee; the guard never reassigns by "
+            f"itself. To take it over, run `{claim_command('N')}` (switches the assignee, "
+            "verifies you are the only one, comments the previous assignee). Another "
+            "admin's assignment is still respected (denied); an unreadable permission "
+            "never grants the override.\n"
             "- `gh` missing, offline or not signed in: you get an advisory, never a block.\n\n"
             "Work not tied to an issue is never judged."
         )

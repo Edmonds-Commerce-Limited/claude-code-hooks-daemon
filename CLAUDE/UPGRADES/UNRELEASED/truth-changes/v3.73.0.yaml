@@ -1,0 +1,19 @@
+# Drafted by Plan 00573. The VERSION in the filename is a target, not a decision.
+version: "3.73.0"
+
+truth_changes:
+  - topic: issue-sdlc
+    was: >
+      An issue assigned to someone else is never claimed: `issue-validity N
+      --claim` exits 1 and an agent must not work it, whoever the agent's
+      account is.
+    now: >
+      That holds for a non-admin seat, and for any seat when the assignee is a
+      repository admin. A repository ADMIN seat may work an issue held only by
+      non-admins: `issue-validity N` exits 0 with an advisory, and `--claim`
+      performs a recorded takeover (switch the assignee, verify sole assignee,
+      comment the previous assignee). An unreadable permission counts as
+      non-admin for the seat and as protected for the assignee.
+
+      IF YOUR PROJECT'S DOCS SAY "NEVER CLAIM AN ISSUE HELD BY SOMEONE ELSE",
+      MAKE THAT CONDITIONAL ON THE SEAT NOT BEING A REPOSITORY ADMIN.
