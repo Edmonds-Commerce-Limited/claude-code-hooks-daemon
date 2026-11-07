@@ -137,15 +137,21 @@ starts `provision.sh --background` detached with `setsid` after the hook answers
 `_outcome` is a bounded poll (bare `timeout=60.0`, not load-scaled) and calls `_state` only after `path.is_file()` was
 true; a state file never written would have raised "did not finish within 60.0s" instead (fact-check
 [261107-fact-check-n596.md](subagent-reports/261107-fact-check-n596.md)). So the file EXISTED and was gone a moment
-later, when `_state` checked it again: the background sync's state write leaves a window with no file (a remove then
-write, or a replace that is not one atomic rename). A real reader (the status line, a second `provision.sh`) can hit
-the same window and read "no sync recorded".
+later, when `_state` checked it again.
 
-**Proposal**: find where `provision.sh` / the sync module writes `v<version>.state`; make every write a temp file plus
-one `rename` into place, so the path is never absent once created. Test first: a reader polling the path while the
-sync rewrites it repeatedly never sees it missing after its first appearance. Separately, make `_outcome` read once
-per iteration (no second `is_file`) and treat a vanished file as "keep polling", and route its bound through
-`tests.load_scaling.scaled_seconds` per N222.
+The state WRITE is not the cause: `_provision_background_record` (`.claude/provision.sh` ~917-926, also ~300-306)
+writes a temp file and `mv -f`s it into place. The window is the directory switch: `_provision_switch` (~772-788) moves
+the live `untracked/` (state file included) into the stage, renames `$DAEMON_DIR` aside, then renames the stage onto
+the live path, so for that interval the state path does not exist
+([261107-fact-check-n596-2.md](subagent-reports/261107-fact-check-n596-2.md)). A real reader (the status line, a
+second `provision.sh`) can plausibly hit the same window and read "no sync recorded"; not yet checked.
+
+**Proposal**: the test half first: `_outcome` reads once per iteration (no second `is_file`), treats a vanished file
+as "keep polling", and routes its bound through `tests.load_scaling.scaled_seconds` per N222. Then the product half:
+decide whether readers of `background-sync/*.state` must tolerate a missing file during a switch (treat absent as
+"unknown, retry") or the switch keeps the state directory out of the moved `untracked/` (for example, write state
+outside the swapped tree). Reproduce red by holding the switch between its two renames (a stub hook or a slowed `mv`)
+while a reader polls.
 
 **Status**: ⬜ open.
 
