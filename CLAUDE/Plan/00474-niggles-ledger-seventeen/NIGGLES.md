@@ -124,6 +124,19 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N592 — the ccy supervisor opens walked signal-directory entries without checking they are regular files
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026). Their new QA gate,
+walk-opens-non-regular-file (their issue #191), flagged the deployed v3.73.0 `.claude/ccy/claude-supervise.py`. It found
+eleven glob or iterdir loops that `read_text` each entry, plus the session-modes walk. A FIFO makes the open block for
+ever. Their owner's rule allows no exclude for a daemon-owned file, so fedora-desktop's push is held until a release
+fixes it.
+
+**Status**: ✅ fixed on main. `_read_regular_text` opens with `O_NONBLOCK` and reads only when `fstat` reports a
+regular file, otherwise raising `OSError`, which every caller already handles. All 17 signal and `/proc` reads go
+through it. Test: `tests/unit/supervise/test_walk_opens_regular_files_only.py`, which plants a FIFO matching each
+loader's glob (12 loaders) and requires a return within 5 seconds. Release note 009.
+
 ### N591 — the remote-delete guard denies a merged branch when the same command also removes its worktree and local branch
 
 **Source**: the coordinator, cleaning up after merging Plan 00571's Phase 3 handoff (7 November 2026).
