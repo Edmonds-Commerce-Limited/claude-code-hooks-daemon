@@ -84,7 +84,7 @@ Root-cause detail with file:line: [ROOTCAUSE.md](ROOTCAUSE.md).
 
 ### Phase 1: Design
 
-- [ ] ⬜ **Task 1.1**: Settle the decisions above in `DESIGN.md`, citing
+- [x] ✅ **Task 1.1**: Settle the decisions above in `DESIGN.md`, citing
   Plan 00558's design.
 
 ### Phase 2: Safe removal tooling first (needed by everything else)
@@ -117,7 +117,7 @@ Root-cause detail with file:line: [ROOTCAUSE.md](ROOTCAUSE.md).
   creation guard's own hint ("continue there instead of opening another")
   fired on the runbook's second one.
 
-- [ ] ⬜ **Task 2.7**: Reconcile the remote-proof helpers. Plan 00570 added
+- [x] ✅ **Task 2.7**: Reconcile the remote-proof helpers. Plan 00570 added
   `utils/remote_refs.py` (one lazy `ls-remote` for `branch-sweep` and
   `delete-branch`). This plan's remote `--clean` must reuse it, not add a
   second module. Also make `core/branch_stop_gate.py`'s

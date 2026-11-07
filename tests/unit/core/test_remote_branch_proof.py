@@ -9,15 +9,18 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
+from claude_code_hooks_daemon.core import remote_branch_proof
 from claude_code_hooks_daemon.core.remote_branch_proof import (
     branch_name,
     named_ref_problem,
     prove_remote_merged,
 )
+from claude_code_hooks_daemon.utils import remote_refs
 
 _ENV = {
     "GIT_AUTHOR_NAME": "Test Author",
@@ -116,6 +119,27 @@ class TestProveRemoteMerged:
         _commit(other, "late")
         _git(other, "push", "--quiet", "origin", "feat")
         proof = prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
+        assert proof.tips == {}
+        assert "could not be confirmed" in proof.problems["feat"]
+
+    def test_the_live_tip_comes_from_the_shared_remote_listing(self, repo: Path) -> None:
+        # Plan 00571 Task 2.7: one ls-remote implementation (utils/remote_refs.py),
+        # bounded to the judged names and run under the hook path's timeout.
+        tip = _pushed_branch(repo, "feat", merge=True)
+        with patch.object(
+            remote_branch_proof, "list_remote_refs", wraps=remote_refs.list_remote_refs
+        ) as spy:
+            proof = prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
+        assert proof.tips == {"feat": tip}
+        assert spy.call_count == 1
+        assert spy.call_args.kwargs["patterns"] == ("refs/heads/feat",)
+        assert spy.call_args.kwargs["timeout"] == remote_refs.Timeout.GIT_CONTEXT
+
+    def test_a_failed_listing_proves_nothing(self, repo: Path) -> None:
+        _pushed_branch(repo, "feat", merge=True)
+        failed = remote_refs.RemoteRefs("origin", failure="timed out")
+        with patch.object(remote_branch_proof, "list_remote_refs", return_value=failed):
+            proof = prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
         assert proof.tips == {}
         assert "could not be confirmed" in proof.problems["feat"]
 

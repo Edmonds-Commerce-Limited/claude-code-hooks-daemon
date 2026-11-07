@@ -124,6 +124,104 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N593 — the acceptance harness failed in CI because the repository reached its own branch cap
+
+**Source**: the coordinator, from PR #183's CI (run 42415884106, 7 November 2026). `test_playbook_harness` failed with
+two probes denied by R-BRANCH-WIP-CAP at 10 of 10: half of them were Dependabot's new remote branches, the rest live
+agent branches. The test is release Step 12.0's deterministic gate, so the failure would have blocked every release
+and every main CI run while the cap stayed full.
+
+**Evidence and causes**:
+
+- **#339, a guard defect.** The creation guard's probe `git branch -f main main` assumes `main` is in `refs/heads`. A
+  detached CI checkout has no local `main`, so the guard counted the default branch as new open work and denied it at
+  the cap. Neither the default branch nor any exempt or protected name is ever work.
+- **#365, a probe that depends on the environment.** The isolation advisor's "with worktree isolation" probe expects
+  allow, but at the cap the creation guard correctly denies any `isolation: worktree` dispatch. The probe measured
+  the repository's branch count, not its handler.
+
+**Status**: ✅ fixed on main.
+
+- `creation_verdict` allows any name `is_work_branch` rejects (`tests/unit/core/test_branch_creation_non_work_names.py`).
+- `playbook_harness.environment_blocked` reports a non-creation-guard probe refused by R-BRANCH-WIP-CAP or
+  R-BRANCH-DORMANT. The harness lists it by name in a warning and does not score it. The creation guard's own probes
+  stay fully scored (`tests/unit/daemon/test_playbook_harness_environment_blocked.py`).
+- Verified against the live daemon at 10 of 10: the harness passes with #365 listed. Release note 010.
+
+### N592 — the ccy supervisor opens walked signal-directory entries without checking they are regular files
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026). Their new QA gate,
+walk-opens-non-regular-file (their issue #191), flagged the deployed v3.73.0 `.claude/ccy/claude-supervise.py`. It found
+eleven glob or iterdir loops that `read_text` each entry, plus the session-modes walk. A FIFO makes the open block for
+ever. Their owner's rule allows no exclude for a daemon-owned file, so fedora-desktop's push is held until a release
+fixes it.
+
+**Status**: ✅ fixed on main. `_read_regular_text` opens with `O_NONBLOCK` and reads only when `fstat` reports a
+regular file, otherwise raising `OSError`, which every caller already handles. All 17 signal and `/proc` reads go
+through it. Test: `tests/unit/supervise/test_walk_opens_regular_files_only.py`, which plants a FIFO matching each
+loader's glob (12 loaders) and requires a return within 5 seconds. Release note 009.
+
+### N591 — the remote-delete guard denies a merged branch when the same command also removes its worktree and local branch
+
+**Source**: the coordinator, cleaning up after merging Plan 00571's Phase 3 handoff (7 November 2026).
+
+**Evidence**: `git worktree remove <wt> && git branch -d <name> && git push -q origin --delete <name>` was denied with
+R-GIT-PUSH-DELETE-REMOTE ("not merged into the default branch"). `<name>` was `agent-a2809a4ad9ef0a871-8d56f967`, whose
+tip 9aecfe3f4 is an ancestor of `origin/main` (merged and pushed as 29920b2b0 before the command ran). The same
+`git push -q origin --delete <name>` on its own, moments later, was allowed. An earlier
+`delete-branch X && git push origin --delete X` chain with no worktree removal was allowed too.
+
+**Proposal**: reproduce with a fixture repository and probe the compound command. `prove_remote_merged` reads only remote-tracking refs, never
+the local branch or worktree (fact-check 261107-n591-plan-fact-checker-sonnet.md). So the suspects are a parse of the
+chained command picking the wrong target, or remote-tracking refs judged stale at hook time. The tracking refs were
+updated by the push that merged the handoff, and nothing changed before the allowed retry except time. Fix with a regression test. The work-around (run the remote delete as its own call) costs one call, so this
+is low priority.
+
+**Status**: ⬜ open.
+
+### N590 — `hooks-daemon --version` is refused as an unrecognised argument
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026). Reproduced here: `bin/hooks-daemon --version`
+prints the usage text and refuses the flag.
+
+**Proposal**: add an argparse `--version` action on the top-level parser that prints the installed package version.
+Test it through the CLI entry point.
+
+**Status**: ⬜ open.
+
+### N589 — `restart` detects a venv stale for the source and names `repair`, but does not repair it
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026), from the host seat's v3.73.0 restart.
+Reproduced in this session: SessionStart reported "DAEMON VENV NOT BUILT FOR THIS SOURCE", and `restart` prints "restart
+does not build a venv; it reuses this one".
+
+**Evidence**: after an upgrade, every other seat sharing the checkout has a venv whose `lock_hash` no longer matches
+`pyproject.toml` plus `uv.lock`. Each seat then has to run restart (which warns and names repair), then repair, then
+restart again.
+
+**Proposal**: when restart's own staleness check fires, run the repair and continue in one step, reporting that it
+did. Related open issues: #148 (sync after a pull) and #168 (provision says nothing to do while the venv is stale).
+Fold it into whichever of those is worked first.
+
+**Status**: ⬜ open.
+
+### N588 — the upgrade's `modified_files` lists every dirty file in the tree, not what the upgrade wrote
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026), upgrading to v3.73.0 (their e9607df9c).
+
+**Evidence**: `scripts/upgrade.sh:975-983` fills `UPGRADE_METADATA`'s `modified_files` from
+`git status --porcelain` over the whole project tree, so it names every uncommitted file. The tree held 33 unrelated
+uncommitted files from another agent beside the 4 the upgrade changed, and all 37 were listed. The comment there says
+the project agent filters by daemon-owned prefixes, but fedora-desktop's bash-limits gate exempts a file as daemon-owned
+while an upgrade commit lists it in `modified_files`. Pasting the block as instructed would have silently exempted the
+33 unrelated files. The client recorded the 4 real files by hand.
+
+**Proposal**: snapshot `git status --porcelain` (with content hashes for files already dirty) before the deploy and
+list only paths that are new or changed afterwards. Alternatively, refuse to start on a dirty tree and name the files.
+Add a test with a pre-dirty unrelated file that must not appear. Client-visible, so a release note is required.
+
+**Status**: ⬜ open.
+
 ### N587 — `ask_user_question_blocker` called the session unattended while the owner was typing to it
 
 **Source**: the owner, during the v3.73.0 release (7 November 2026): "dog fooding error there - not sure why it was

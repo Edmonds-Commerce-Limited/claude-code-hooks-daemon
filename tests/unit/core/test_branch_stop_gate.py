@@ -9,6 +9,8 @@ import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
+from claude_code_hooks_daemon.core import branch_stop_gate
+from claude_code_hooks_daemon.core.agent_ownership import RunningHolds
 from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command
 from claude_code_hooks_daemon.core.branch_inventory import DormancyStage
 from claude_code_hooks_daemon.core.branch_records import TOUCHED_KEY
@@ -264,6 +266,42 @@ class TestHandedOverToTheWorkQueue:
         _queue(untracked, "feat-a")
         config = BranchesConfig.model_validate({"stop_guard": {"unpushed_subagent": "block"}})
         assert _decide(repo, untracked, agent="sub-1", config=config).reason is not None
+
+    def test_a_running_worktree_hold_hands_its_branch_over_in_any_path_spelling(
+        self, repo: Path, untracked: Path
+    ) -> None:
+        # Plan 00571 Task 2.7: the gate honours the same holds as running_holds, so a
+        # record naming the WORKTREE (relative, trailing separator) hands over the
+        # branch checked out there even when the record's branch field differs.
+        _unpushed_branch(repo, "feat-b", agent="sub-1")
+        _git(repo, "worktree", "add", "-q", str(repo.parent / "wt-feat-b"), "feat-b")
+        add_record(
+            untracked / WORK_QUEUE_FILENAME,
+            "agent-for-wt",
+            worktree="../wt-feat-b/",
+            branch="renamed-since",
+            brief="work",
+            brief_file=None,
+            last_sha="a" * 40,
+            now=1.0,
+        )
+        decision = _decide(repo, untracked)
+        assert decision.reason is None
+        assert any("handed over" in line and "feat-b" in line for line in decision.context)
+
+    def test_the_gate_delegates_to_running_holds(
+        self, repo: Path, untracked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _unpushed_branch(repo, "feat-a", agent="sub-1")
+        seen: list[tuple[Path, Path | None]] = []
+
+        def holds(where: Path, project_root: Path | None = None) -> RunningHolds:
+            seen.append((where, project_root))
+            return RunningHolds(frozenset({"feat-a"}), frozenset())
+
+        monkeypatch.setattr(branch_stop_gate, "running_holds", holds)
+        assert _decide(repo, untracked).reason is None
+        assert seen == [(untracked, repo)]
 
     def test_an_unreadable_queue_hands_nothing_over(self, repo: Path, untracked: Path) -> None:
         _unpushed_branch(repo, "feat-a", agent="sub-1")

@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.core import remote_branch_proof
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.handlers.pre_tool_use import destructive_git
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import DestructiveGitHandler
+from claude_code_hooks_daemon.utils import remote_refs
 
 _TIP = "a" * 40
 _OTHER = "b" * 40
@@ -81,6 +82,7 @@ def install(monkeypatch: pytest.MonkeyPatch) -> Callable[[_FakeGit], _FakeGit]:
     def _install(fake: _FakeGit) -> _FakeGit:
         monkeypatch.setattr(destructive_git, "run_git", fake)
         monkeypatch.setattr(remote_branch_proof, "run_git", fake)
+        monkeypatch.setattr(remote_refs, "run_git", fake)
         monkeypatch.setattr(
             destructive_git, "resolve_default_branch", lambda _config, _directory: "main"
         )
