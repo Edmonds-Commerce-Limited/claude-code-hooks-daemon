@@ -17,7 +17,8 @@ import yaml
 REPO = Path(__file__).resolve().parents[3]
 TESTS = REPO / "tests"
 WORKFLOW = REPO / ".github" / "workflows" / "qa.yml"
-FALLBACK_SCRIPT = REPO / "scripts" / "ci" / "full_suite_if_unmapped.bash"
+#: Every whole-suite run (release gate, full tier, fallback) is a leg of this one.
+SHARDS_WORKFLOW = REPO / ".github" / "workflows" / "test-shards.yml"
 
 MARKER = "perf_sweep"
 BOUND_HELPER = "scaled_cpu_seconds"
@@ -111,20 +112,18 @@ class TestTheMarkerIsRegistered:
         assert any(entry.startswith(f"{MARKER}:") for entry in markers)
 
 
-def _steps(job: str) -> list[dict[str, str]]:
-    document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    steps: list[dict[str, str]] = document["jobs"][job]["steps"]
-    return steps
-
-
 class TestTheLoadedStepsDeselectTheSweeps:
-    def test_the_full_suite_fallback_deselects_them(self) -> None:
-        text = FALLBACK_SCRIPT.read_text()
-        assert f'pytest tests/ -rs -m "not {MARKER}"' in text
+    def test_every_sharded_suite_leg_deselects_them(self) -> None:
+        document = yaml.safe_load(SHARDS_WORKFLOW.read_text(encoding="utf-8"))
+        step = next(
+            s for s in document["jobs"]["tests"]["steps"] if s.get("name") == "Run the shards"
+        )
+        assert step["env"]["PYTEST_ADDOPTS"] == f'-m "not {MARKER}"'
 
-    def test_the_matrix_whole_suite_step_deselects_them(self) -> None:
-        run = next(s["run"] for s in _steps("qa") if s.get("name") == "Tests + coverage")
-        assert f'-m "not {MARKER}"' in run
+    def test_qa_yml_runs_no_whole_suite_pytest_of_its_own(self) -> None:
+        """The suite runs only through the sharded workflow, which deselects the sweeps."""
+        runs = WORKFLOW.read_text(encoding="utf-8")
+        assert "pytest tests/ " not in runs.replace("pytest tests/ -rs -m perf_sweep", "")
 
 
 class TestTheDedicatedJob:

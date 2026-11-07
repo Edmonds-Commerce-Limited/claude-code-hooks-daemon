@@ -17,6 +17,8 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "release-gate.yml"
+SHARDS_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "test-shards.yml"
+SHARD_LEGS_SCRIPT = REPO_ROOT / "scripts" / "ci" / "shard_legs.py"
 SHARDS_PATH = REPO_ROOT / "scripts" / "qa" / "test_shards.yaml"
 QA_SCRIPTS_DIR = REPO_ROOT / "scripts" / "qa"
 CHECK_GROUPS = ("CHECKS_STATIC", "CHECKS_PYRIGHT", "CHECKS_DOCS", "CHECKS_CONTRACTS")
@@ -67,28 +69,39 @@ class TestCheckLists:
         assert sorted({check for check in listed if listed.count(check) > 1}) == []
 
 
-class TestShardMatrix:
-    def test_every_python_runs_every_shard(self, workflow: dict[str, Any]) -> None:
-        include: list[dict[str, Any]] = workflow["jobs"]["tests"]["strategy"]["matrix"]["include"]
-        by_python: dict[str, list[str]] = {}
-        for entry in include:
-            by_python.setdefault(str(entry["python"]), []).extend(entry["shards"].split())
-        names = sorted(_shard_names())
-        for python, chosen in by_python.items():
-            assert sorted(chosen) == names, f"Python {python} runs the wrong shards"
+def _shard_legs() -> Any:
+    spec = importlib.util.spec_from_file_location("shard_legs_for_release_gate", SHARD_LEGS_SCRIPT)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {SHARD_LEGS_SCRIPT}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
-    def test_coverage_is_one_python_and_combines_every_shard(
+
+class TestShardMatrix:
+    """The gate's tests run the `full` profile of scripts/ci/shard_legs.yaml (Plan 00572)."""
+
+    def test_the_tests_job_calls_the_shared_workflow_with_the_full_profile(
         self, workflow: dict[str, Any]
     ) -> None:
-        include: list[dict[str, Any]] = workflow["jobs"]["tests"]["strategy"]["matrix"]["include"]
-        coverage_pythons = {str(entry["python"]) for entry in include if entry["coverage"]}
-        assert len(coverage_pythons) == 1
-        for entry in include:
-            assert bool(entry["coverage"]) == (str(entry["python"]) in coverage_pythons), entry[
-                "name"
-            ]
-        combined = workflow["jobs"]["coverage"]["env"]["SHARDS"].split()
-        assert sorted(combined) == sorted(_shard_names())
+        job = workflow["jobs"]["tests"]
+        assert job["uses"] == "./.github/workflows/test-shards.yml"
+        assert job["with"]["profile"] == "full"
+
+    def test_every_python_runs_every_shard_and_coverage_is_one_python(self) -> None:
+        legs = _shard_legs()
+        full = legs.load_profiles()["full"]
+        assert legs.check("full", full, sorted(_shard_names())) == []
+        assert sorted(legs.coverage_shards(full)) == sorted(_shard_names())
+
+    def test_the_layout_job_runs_the_legs_check(self, workflow: dict[str, Any]) -> None:
+        runs = "\n".join(s.get("run", "") for s in workflow["jobs"]["layout"]["steps"])
+        assert "scripts/ci/shard_legs.py --check" in runs
+
+    def test_the_aggregator_still_needs_the_tests(self, workflow: dict[str, Any]) -> None:
+        assert "tests" in workflow["jobs"]["release-gate"]["needs"]
+        assert workflow["jobs"]["release-gate"]["name"] == "Release gate"
 
 
 TMPDIR_EXPORT = 'echo "TMPDIR=/ci-tmp" >> "$GITHUB_ENV"'
@@ -103,10 +116,9 @@ class TestTemporaryFilesLiveOnTheRootDisk:
     tests found, and its length broke the AF_UNIX socket path limit.
     """
 
-    def test_the_tests_job_exports_tmpdir_before_running_the_shards(
-        self, workflow: dict[str, Any]
-    ) -> None:
-        steps: list[dict[str, Any]] = workflow["jobs"]["tests"]["steps"]
+    def test_the_tests_job_exports_tmpdir_before_running_the_shards(self) -> None:
+        shards_workflow = yaml.safe_load(SHARDS_WORKFLOW_PATH.read_text(encoding="utf-8"))
+        steps: list[dict[str, Any]] = shards_workflow["jobs"]["tests"]["steps"]
         names = [str(step.get("name", "")) for step in steps]
         exporting = [i for i, step in enumerate(steps) if TMPDIR_EXPORT in str(step.get("run", ""))]
         assert exporting, "no step of the tests job exports TMPDIR=/ci-tmp"

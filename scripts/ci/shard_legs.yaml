@@ -1,0 +1,75 @@
+# The runner legs CI splits the test suite over (Plan 00572 Task 2.1).
+#
+# .github/workflows/test-shards.yml runs one profile: a job per leg, each
+# running its shards (scripts/qa/test_shards.yaml) serially through
+# scripts/qa/run_test_matrix.py. scripts/ci/shard_legs.py --check holds every
+# profile to two rules: each Python runs every shard exactly once, and coverage
+# is one Python's legs, all of them.
+#
+#   full      release-gate.yml and qa.yml's full tier (nightly, CI config
+#             changes, manual runs): three Pythons, coverage on 3.13.
+#   fallback  qa.yml's code or docs tier when the change mapper cannot cover a
+#             changed file: the whole suite on one Python, no coverage.
+#
+# daemon: the leg reaches the live daemon and the relay (acceptance and
+# transport gates), so the workflow starts both and keeps the daemon alive.
+# Quote every python version: YAML reads 3.10 as the number 3.1.
+profiles:
+  full:
+    - name: py3.11 unit
+      python: "3.11"
+      shards: [unit-handlers, unit-daemon, unit-core, unit-features, unit-tooling]
+      coverage: false
+      daemon: false
+    - name: py3.11 rest
+      python: "3.11"
+      shards: [integration, acceptance-and-other]
+      coverage: false
+      daemon: true
+    - name: py3.12 unit
+      python: "3.12"
+      shards: [unit-handlers, unit-daemon, unit-core, unit-features, unit-tooling]
+      coverage: false
+      daemon: false
+    - name: py3.12 rest
+      python: "3.12"
+      shards: [integration, acceptance-and-other]
+      coverage: false
+      daemon: true
+    - name: py3.13 unit-handlers (coverage)
+      python: "3.13"
+      shards: [unit-handlers]
+      coverage: true
+      daemon: false
+    - name: py3.13 unit other (coverage)
+      python: "3.13"
+      shards: [unit-daemon, unit-core, unit-features, unit-tooling]
+      coverage: true
+      daemon: false
+    - name: py3.13 integration (coverage)
+      python: "3.13"
+      shards: [integration]
+      coverage: true
+      daemon: true
+    - name: py3.13 acceptance-and-other (coverage)
+      python: "3.13"
+      shards: [acceptance-and-other]
+      coverage: true
+      daemon: true
+
+  fallback:
+    - name: py3.11 unit
+      python: "3.11"
+      shards: [unit-handlers, unit-daemon, unit-core, unit-features, unit-tooling]
+      coverage: false
+      daemon: false
+    - name: py3.11 integration
+      python: "3.11"
+      shards: [integration]
+      coverage: false
+      daemon: true
+    - name: py3.11 acceptance-and-other
+      python: "3.11"
+      shards: [acceptance-and-other]
+      coverage: false
+      daemon: true

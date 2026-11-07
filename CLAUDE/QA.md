@@ -73,8 +73,9 @@ A changed file that maps to no test FAILS `changed` and is named with its reason
 report then records that the file's remaining reach is covered only by a
 whole-suite run. Two things provide one:
 
-- CI: in the docs and code tiers, a changed file the mapper cannot cover sends
-  that one Python to the whole suite (`scripts/ci/full_suite_if_unmapped.bash`).
+- CI: in the docs and code tiers, a changed file the mapper cannot cover runs
+  the whole suite on one Python, sharded over runners (`qa.yml` job
+  `fallback-tests`, the `fallback` profile of `scripts/ci/shard_legs.yaml`).
 - The release's Full tier.
 
 So `--allow-unmapped` is a statement that the change is not fully certified
@@ -418,14 +419,14 @@ pull request, from the merge base to the PR tip. The rules live in
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `docs` | every changed path is `*.md`                                                                                                                                                                                                  | One Python (3.11): `llm_qa.py docs_qa plan_qa changed_tests --range`. The `shell` and `daemon-load` jobs are skipped.                                                  |
 | `code` | anything else                                                                                                                                                                                                                 | One Python (3.11): black, ruff, mypy, pyright, `llm_qa.py changed --range`, bandit, deptry, plus `shell` and `daemon-load`.                                            |
-| `full` | `pyproject.toml`, `uv.lock`, anything under `.github/`, `.claude/hooks-daemon.yaml`, `scripts/qa/changed_tests_map.yaml`, any `conftest.py`; an empty change set; an unknown base (no earlier verdict run, or not in history) | The three-Python matrix (job `qa`, unchanged), plus `shell` and `daemon-load`. Also every night on `main` (`schedule`) and on `workflow_dispatch`, which have no base. |
+| `full` | `pyproject.toml`, `uv.lock`, anything under `.github/`, `.claude/hooks-daemon.yaml`, `scripts/qa/changed_tests_map.yaml`, any `conftest.py`; an empty change set; an unknown base (no earlier verdict run, or not in history) | The three-Python static matrix (job `qa`) and the sharded suite (job `full-tests`, the `full` profile of `scripts/ci/shard_legs.yaml`), plus `shell` and `daemon-load`. Also every night on `main` (`schedule`) and on `workflow_dispatch`, which have no base. |
 
 Markdown is narrowed, never skipped: tests read the plan index, ledgers and
 docs, so the docs tier still runs the mapper's tests for the changed files.
 In the `docs` and `code` tiers a changed file the mapper cannot cover
-(unmapped, which includes `too-broad`) sends that one Python to the whole
-suite (`scripts/ci/full_suite_if_unmapped.bash`) rather than passing on tests
-that did not reach it.
+(unmapped, which includes `too-broad`) runs the whole suite on one Python,
+sharded over runners (job `fallback-tests`), rather than passing on tests that
+did not reach it.
 
 **CPU-timing sweeps run in their own job.** A test whose assertion is a
 `scaled_cpu_seconds` bound carries `@pytest.mark.perf_sweep`
