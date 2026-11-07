@@ -4,7 +4,10 @@ A remote can hold a branch's commits under a namespace the default refspec never
 fetches (``refs/archive/<name>``), so no remote-tracking ref shows them. The
 explicit CLI commands (``branch-sweep``, ``delete-branch``) list the remote once
 and accept a ref at, or descending from, a branch tip as proof the remote holds
-the content. Hook paths never call this: they stay network-free.
+the content. The inventory's hook paths never call this: they stay network-free.
+The remote-delete proof (``core/remote_branch_proof.py``, used by the guard on a
+``git push --delete`` and by ``branch-sweep --clean --remote``) lists through it
+too, bounded to the branches it judges and under its own timeout.
 
 A failed or timed-out listing carries its reason in ``failure`` and is never
 proof.
@@ -42,13 +45,25 @@ def parse_listing(stdout: str) -> tuple[tuple[str, str], ...]:
     return tuple(pairs)
 
 
-def list_remote_refs(repo: Path, remote: str) -> RemoteRefs:
-    """List ``remote`` with one bounded ``ls-remote``; a failure is returned, not raised."""
+def list_remote_refs(
+    repo: Path,
+    remote: str,
+    *,
+    patterns: tuple[str, ...] = (),
+    timeout: int = Timeout.GIT_LS_REMOTE,
+) -> RemoteRefs:
+    """List ``remote`` with one bounded ``ls-remote``; a failure is returned, not raised.
+
+    ``patterns`` narrows the listing to those refs (the remote-delete proof lists
+    only the branches it judges); ``timeout`` lets a hook-path caller keep its own
+    shorter bound.
+    """
     result = run_git(
         repo,
         "ls-remote",
         remote,
-        timeout=Timeout.GIT_LS_REMOTE,
+        *patterns,
+        timeout=timeout,
         env=_NO_PROMPT_ENV,
     )
     if result.returncode != 0:

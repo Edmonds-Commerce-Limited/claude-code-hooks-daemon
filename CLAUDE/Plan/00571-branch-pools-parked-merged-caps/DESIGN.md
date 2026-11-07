@@ -15,7 +15,9 @@ start with a top-level directory.
 
 A branch is in exactly one pool, decided by the inventory state that already
 exists (`core/branch_inventory.py` `BranchState`). Identical tips count once
-per pool, as `open_work_count` does today (`core/branch_sweep.py`). Each deny
+per pool, as `open_work_count` does today (`core/branch_sweep.py:148`). This
+replaces 00558 §3 (`00558 DESIGN.md:137`: "Merged-but-undeleted branches DO
+count ... Parked branches count"). Each deny
 lists only that pool's branches and only actions that lower that pool's count
 (the #165 defect is that the wip deny offered "park", which did not).
 
@@ -26,7 +28,8 @@ lists only that pool's branches and only actions that lower that pool's count
 `Kept-Reason: <text>`, `Kept-By: <git user>`, `Kept-At: <UTC ISO>`. It pushes
 that notes ref to `branches.remote` explicitly.
 
-Why a note, against 00558 §5, which rejected notes for the park marker:
+Why a note, against 00558 §5 (`00558 DESIGN.md:218`), which rejected notes for
+the park marker:
 
 - **A commit is out.** A park commit on a merged branch makes it unmerged
   (PLAN.md), which is the one thing a keep must not do.
@@ -68,23 +71,53 @@ branches:
     cap: null          # null = wip.cap
     max_age_days: null # null = the dormancy preset's block_days; applies to KEPT branches
     mode: block        # block | warn | off
+  bot_owned: ["dependabot/*"]  # section 7: in no pool, never cleaned
 ```
 
 No new number is introduced; every default derives from a value the owner
-already ruled on:
+already ruled on: `wip.cap` 10 (`config/models.py:2268`, 00558 Q2) and the
+dormancy presets `standard (7, 14, 30)` / `strict (3, 3, 7)`
+(`config/models.py:2254-2257`).
+
+**This repository's real counts** (`bin/hooks-daemon branch-sweep --all`,
+2026-11-07, on this branch):
+
+| Pool                    | Members today                                                                           | Ages     |
+| ----------------------- | --------------------------------------------------------------------------------------- | -------- |
+| open work (8 of 10)     | 2 agent branches, `worktree-n578-chained-push-delete`, **4 `dependabot/*` remote-only** | 0d-1d    |
+| parked (1)              | `worktree-476-ci-gate-trial` (Plan 00476 trial, not to be merged)                       | 2d (tip) |
+| merged, not deleted (2) | two `agent-*` branches whose live isolation worktrees hold them (Task 2.8 spares them)  | 0d       |
+
+and, from the #165 report that opened this plan (PLAN.md Overview), five
+58-day-old merged branches made up most of a 9-of-10 count. Read against the
+defaults:
+
+- Parked: 1 of 10, so the default cap does not bind; the one park is a
+  deliberate not-to-merge record and sits well inside 30 days.
+
+- Merged: the five 58-day-old branches would have been 5 of 10, not denied by
+  the cap, but each is UNKEPT, so it is cleanup debt the deny names from day 0
+  (below) and `branch-sweep --clean` clears in one call. The cap is the
+  backstop for kept branches, not the main pressure.
+
+- Open work: half of today's 8 are bot branches no agent can finish, park or
+  delete. That is section 7's exemption, not a reason to raise `wip.cap`.
 
 - **Caps default to `wip.cap`.** One owner number (10) governs how many
   branches may sit in any pool. Splitting the old single pool into three can
   only lower each pool's count relative to the old total, so no project that
   passes today's cap is denied by the new caps on upgrade.
+
 - **Max ages default to the effective dormancy `block_days`.** A park exempts
   dormancy (00558 §5), so it buys exactly one more dormancy lifetime before it
   must be dealt with; a keep likewise. `preset: strict` tightens all three ages
   together, which is what "strict" means; it still leaves the caps alone
   (00558 §4 "strict changes nothing else").
+
 - **An unkept merged branch has no age allowance**: it is cleanup debt from
   the moment it is merged, counted in `merged.cap`, and the deny names the one
   command (`branch-sweep --clean`, plus `--remote` when a remote copy exists).
+
 - **Modes mirror `wip.mode`**: `block` denies the creation routes (00558 §3)
   when the pool is at its cap or holds a stale member; `warn` turns both into
   context lines; `off` stops counting the pool. Staleness is staged like the
@@ -101,7 +134,7 @@ already ruled on:
   the clock costs a stated, different reason, as the owner ruled.
 - **The count stays visible**: every park commit stays in history, and the
   inventory already walks the tip's run of empty park commits (`_park_shas`,
-  `core/branch_inventory.py`). The sweep prints `re-parked N times` from that
+  `core/branch_inventory.py:438`, called at `:482`). The sweep prints `re-parked N times` from that
   run's length. No separate counter.
 - `branch-keep` on an already-kept tip replaces the note; the notes ref's own
   history (`git log refs/notes/hooks-daemon/keep`) keeps every earlier reason
@@ -111,14 +144,20 @@ already ruled on:
 
 - **Config:** additive keys only (section 3), every one with a model default,
   `extra="forbid"` like the existing `Branch*Config` models
-  (`config/models.py`). Phase 3 records a `config-changes` entry under
-  `CLAUDE/UPGRADES/UNRELEASED/config-changes/` listing the six keys as
-  `added`, `breaking: false`, none `recommended`.
+  (`config/models.py:2263-2272` is the `BranchWipConfig` shape to mirror).
+  Phase 3 records a `config-changes` entry under
+  `CLAUDE/UPGRADES/UNRELEASED/config-changes/` listing the six pool keys plus
+  `branches.bot_owned` (section 7) as `added`, `breaking: false`, none
+  `recommended`. A project that sets nothing gets three caps of `wip.cap`
+  and ages of its dormancy preset, so its existing `wip.cap` keeps meaning
+  "how many of anything".
 - **Truth changes** (Phase 3, `CLAUDE/UPGRADES/UNRELEASED/truth-changes/`):
   "a parked branch still counts against `branches.wip.cap`"
-  (`docs/guides/CONFIGURATION.md`, 00558 §3, §5) and "merged-but-undeleted
-  branches count against `branches.wip.cap`" (00558 §3) both become false;
-  each pool now has its own cap.
+  (`docs/guides/CONFIGURATION.md:346`, `00558 DESIGN.md:137`) and
+  "merged-but-undeleted branches count against `branches.wip.cap`"
+  (`00558 DESIGN.md:137`) both become false; each pool now has its own cap.
+  A third: "remote-only branches count" (`count_remote`,
+  `config/models.py:2270`) stops being true of `branches.bot_owned` branches.
 - `daemon/init_config.py`'s template gains the two blocks.
 
 ## 6. Phase 2 decisions (safe removal tooling)
@@ -155,6 +194,54 @@ already ruled on:
 - **Remote tips go into the same recovery bundle** as
   `refs/remotes/<remote>/<name>`, with a restore line that fetches the ref back
   and pushes it.
+- **One remote listing implementation (Task 2.7).** `--clean --remote`
+  (`core/branch_cleanup.py:705` `_proven_remote`) never listed the remote
+  twice in one run: the clean path builds its inventory offline and makes its
+  only `ls-remote` inside the proof. But that proof
+  (`core/remote_branch_proof.py:221` `live_remote_tips`) carried its own
+  `ls-remote` call and parser beside Plan 00570's
+  `utils/remote_refs.py`. It now lists through
+  `remote_refs.list_remote_refs(..., patterns=..., timeout=...)`
+  (`utils/remote_refs.py:48`), bounded to the judged `refs/heads/<name>`
+  patterns and kept on the hook timeout (`Timeout.GIT_CONTEXT`), because the
+  `destructive_git` guard runs the same proof on the hook path. A failed
+  listing is still no proof.
+- **One work-queue reader (Task 2.7).** The stop gate's
+  `_running_queue_branches` (`core/branch_stop_gate.py:113`) delegates to
+  `agent_ownership.running_holds` (`core/agent_ownership.py:51`), the reader
+  `--clean` and `worktree-reap` use. It now honours worktree holds too: a
+  branch checked out in a worktree a `running` record names, in any path
+  spelling, is handed over, so the gate and the sweep agree on what a live
+  agent owns.
+
+## 7. Bot-owned branches (`dependabot/*`)
+
+Dependabot was enabled for this repository by Plan 00572 Task 4.1
+(`.github/dependabot.yml`, weekly, grouped). Within hours its four branches
+were half of this repository's open-work count (section 3 table). They are
+remote-only (`count_remote: true` counts them, `config/models.py:2270`),
+unmerged, and owned by the bot: no agent can finish, park or delete one
+without closing the bot's pull request.
+
+**Decision:** a new key `branches.bot_owned: ["dependabot/*"]`. A branch
+matching it is in NO pool and is never a `--clean`/`--clean --remote`
+candidate, exactly as `exempt` behaves ("never counted, judged or deleted",
+`config/models.py:2408`), and is listed in its own "Bot-owned" sweep group so
+it is visible rather than silent.
+
+- **Why not reuse `exempt`:** `exempt` is a user list defaulting to `[]`
+  (`config/models.py:2417`); a model default of `["dependabot/*"]` there
+  would vanish the moment a project sets its own `exempt`, re-counting the
+  bot branches. A separate key keeps the bot default independent.
+- **Why not delete merged bot branches:** GitHub and Dependabot remove
+  their own head branches when the pull request closes. A
+  `--clean --remote` race on one gains nothing and can close an open PR
+  whose branch is at an old merged tip. The remote-delete guard is
+  unchanged: an agent's explicit `git push --delete dependabot/...` is still
+  judged by the proof, not blanket-allowed.
+- **The default names only the bot this repository runs.** `renovate/*` and
+  others are added by a project that uses them; the doc lists them as
+  examples rather than shipping globs for bots nobody here runs.
 
 ## Open questions (owner)
 
