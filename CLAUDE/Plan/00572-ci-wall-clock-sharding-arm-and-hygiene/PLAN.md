@@ -86,7 +86,7 @@ refuse those pushes, so check what it would flag before enabling it.
   `qa.yml`'s full-suite fallback and the nightly.
 - [x] ✅ **Task 2.2**: Rebalance the `integration` and `unit-handlers` shards
   over measured durations (legs declared in `scripts/ci/shard_legs.yaml`).
-- [ ] ⬜ **Task 2.3**: A composite `setup-env` action replacing the 8+ copies
+- [x] ✅ **Task 2.3**: A composite `setup-env` action replacing the 8+ copies
   of the install block, with a uv cache keyed on `uv.lock`.
 
 ### Phase 3: arm64

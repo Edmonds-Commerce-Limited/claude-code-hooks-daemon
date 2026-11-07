@@ -118,27 +118,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      # uv-from-lockfile provisioning (Plan 00346); the rationale lives in the
+      # setup-env action (ledger 00474 N271 for the `--user` uv).
+      - uses: ./.github/actions/setup-env
         with:
           python-version: "3.11"
-          cache: pip
-
-      # Same uv-from-lockfile provisioning as the qa job (Plan 00346), and the
-      # same `--user` uv in ~/.local/bin (a trusted location the upgrade's
-      # Layer 2 searches, ledger 00474 N271); the rationale is written out there.
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install --user uv
-          export PATH="$HOME/.local/bin:$PATH"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
-            bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
-          UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
-            uv sync --frozen --all-extras --python "$(command -v python)"
-          test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
-          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
 
       # Same daemon and relay provisioning as the qa job (Plan 00250, 00350):
       # mapped tests include acceptance and transport gates that skip without
@@ -295,81 +279,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      # Provisioned from uv.lock (Plan 00346); the rationale for every choice
+      # in the install is written out in the setup-env action.
+      - uses: ./.github/actions/setup-env
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      # uv is needed twice over, and the second reason predates the first.
-      #
-      # tests/integration/test_ensure_venv.py drives the REAL bootstrap
-      # (`ensure_venv` -> `create_venv_at_path` -> `uv sync`), which is the code
-      # path behind two field incidents (the v3.9.x ModuleNotFoundError class and
-      # the v3.10.0 stdout-capture SEV-1). Without uv on the runner those tests
-      # cannot build anything, so CI would have to skip them — and a skipped
-      # bootstrap test on all three interpreters is exactly the blindness this
-      # workflow exists to remove. The whole file measures ~15s including four
-      # real venv builds, so it is not worth trading that coverage for.
-      #
-      # `--user` puts uv in ~/.local/bin, the uv installer's own default. The
-      # upgrade's Layer 2 resets PATH to trusted locations and deliberately
-      # finds uv only there, so nothing on the caller's PATH picks what builds
-      # the venv. A plain `pip install uv` lands in the toolchain's bin, which
-      # Layer 2 never reads, and every upgrade test then fails "uv not found".
-      - name: Install uv
-        run: |
-          python -m pip install --upgrade pip
-          pip install --user uv
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      # Provision from uv.lock, NOT by resolving pyproject.toml (Plan 00346).
-      #
-      # `pip install -e ".[dev]"` never reads the lockfile — it resolves the
-      # lower bounds against PyPI — so this job's toolchain was whatever was
-      # newest that morning, on three interpreters drifting independently,
-      # while `run_dependency_check.sh` certified the lockfile's freshness with
-      # `uv lock --check` and nothing installed from it. A gate that runs an
-      # unpinned toolchain answers a different question every day.
-      #
-      # `--frozen` is the load-bearing flag: a bare `uv sync` UPDATES the lock
-      # to satisfy pyproject when the two disagree, re-resolving against PyPI
-      # and restoring the drift. The lock is universal (`requires-python
-      # = ">=3.11"`), so one lockfile serves the whole matrix.
-      #
-      # `--python` takes the resolved PATH of the interpreter setup-python
-      # installed, not the bare version string, so uv pins the matrix entry
-      # rather than downloading a managed interpreter that merely matches it.
-      #
-      # The venv is built AT THE FINGERPRINT PATH the resolver globs for
-      # (untracked/venv-<slug>-py<MM>-<hash>/), not at .venv, and no
-      # HOOKS_DAEMON_VENV_PATH is exported. Plan 00250 exported that variable
-      # job-wide so the CLI the tests spawn could find .venv — but the test
-      # suite's autouse `isolate_daemon_path_overrides` fixture UNSETS it for
-      # every test, so every spawned `bin/hooks-daemon` found no venv and
-      # auto-bootstrapped one with the runner's system python3: the 3.11 job
-      # ran its CLI subprocesses under a py312 venv, paid a uv sync inside the
-      # test run to do it, and the two resolutions disagreed. A venv where the
-      # resolver looks needs no variable, so nothing a test strips can hide it.
-      #
-      # HOOKS_DAEMON_PYTHON is set for the ONE command that computes the
-      # target: the fingerprint is derived from the interpreter that runs
-      # paths.py, and without it the bootstrap path would discover the newest
-      # python on the runner rather than the matrix entry.
-      #
-      # Adding the venv's bin to GITHUB_PATH is what carries the locked
-      # toolchain into every later step: they invoke
-      # black/ruff/mypy/pytest/bandit/deptry directly (see the note below), so
-      # PATH is the only thing that decides which copy of each they get.
-      - name: Install
-        run: |
-          VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
-            bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
-          echo "venv: $VENV_DIR"
-          UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
-            uv sync --frozen --all-extras --python "$(command -v python)"
-          test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
-          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
 
       # The tools are invoked directly rather than through scripts/qa/run_all.sh.
       # That script resolves its interpreter via the daemon's fingerprint-keyed
@@ -459,24 +373,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: ./.github/actions/setup-env
         with:
           python-version: "3.11"
-          cache: pip
-
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install --user uv
-          export PATH="$HOME/.local/bin:$PATH"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
-            bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
-          UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
-            uv sync --frozen --all-extras --python "$(command -v python)"
-          test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
-          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
 
       # A failure here fails the job, and the fallback (which needs this job)
       # is then skipped: the QA gate fails on this job, never quietly passes.
@@ -530,24 +429,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: ./.github/actions/setup-env
         with:
           python-version: "3.11"
-          cache: pip
-
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install --user uv
-          export PATH="$HOME/.local/bin:$PATH"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
-            bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
-          UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
-            uv sync --frozen --all-extras --python "$(command -v python)"
-          test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
-          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
 
       - name: Performance sweeps (perf_sweep tests only)
         run: pytest tests/ -rs -m perf_sweep
@@ -589,21 +473,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
       # Same lockfile provisioning as the qa job (Plan 00346). This job asserts
       # that every handler module IMPORTS, so the dependency versions it imports
       # against are the whole point — resolving them from PyPI would let it pass
-      # against a package set no other environment has.
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install uv
-          uv sync --frozen --all-extras --python "$(command -v python)"
-          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      # against a package set no other environment has. It keeps its ./.venv.
+      - uses: ./.github/actions/setup-env
+        with:
+          python-version: "3.12"
+          venv-location: project
 
       # CLAUDE/CodeLifecycle/*.md name daemon-load as the check unit tests
       # cannot substitute for: it is what catches import errors, circular
