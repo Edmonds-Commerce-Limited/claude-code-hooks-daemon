@@ -83,9 +83,7 @@ def _args(repo: Path, branches: list[str], **overrides: Any) -> argparse.Namespa
 
 
 def _restore_lines(text: str) -> list[tuple[str, str, str]]:
-    return [
-        (match.group(1), match.group(2), match.group(3)) for match in _RESTORE.finditer(text)
-    ]
+    return [(match.group(1), match.group(2), match.group(3)) for match in _RESTORE.finditer(text)]
 
 
 def _run_restore(repo: Path, line: tuple[str, str, str], target: str) -> str:
