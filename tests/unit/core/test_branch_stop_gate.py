@@ -22,6 +22,11 @@ from claude_code_hooks_daemon.core.branch_stop_gate import (
 )
 from claude_code_hooks_daemon.core.branch_stop_guard import StopCheck, StopFinding
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path
+from claude_code_hooks_daemon.utils.work_queue import (
+    WORK_QUEUE_FILENAME,
+    add_record,
+    update_record,
+)
 
 SESSION = "sess-1"
 AGENT = "agent-1"
@@ -216,3 +221,50 @@ class TestMergedOneStep:
     def test_no_merged_finding_no_clean_line(self) -> None:
         reason = _deny_reason([self._finding(StopCheck.UNPUSHED)], {}, block=1, handoff=False)
         assert "--clean" not in reason
+
+
+def _queue(untracked: Path, branch: str, *, status: str = "running") -> None:
+    path = untracked / WORK_QUEUE_FILENAME
+    add_record(
+        path,
+        f"agent-for-{branch}",
+        worktree=f"/wt/{branch}",
+        branch=branch,
+        brief="work",
+        brief_file=None,
+        last_sha="a" * 40,
+        now=1.0,
+    )
+    if status != "running":
+        update_record(path, f"agent-for-{branch}", status=status, now=2.0)
+
+
+class TestHandedOverToTheWorkQueue:
+    """A branch a running work-queue agent owns is handed over (Plan 00571 Task 2.5, N581)."""
+
+    def test_the_coordinator_is_not_held_on_a_running_agents_branch(
+        self, repo: Path, untracked: Path
+    ) -> None:
+        _unpushed_branch(repo, "feat-a", agent="sub-1")
+        _queue(untracked, "feat-a")
+        for _ in range(MAX_STOP_BLOCKS + 1):
+            decision = _decide(repo, untracked)
+            assert decision.reason is None
+            assert not any("abandoned at stop" in line for line in decision.context)
+        assert any("handed over" in line and "feat-a" in line for line in decision.context)
+
+    def test_a_finished_record_hands_nothing_over(self, repo: Path, untracked: Path) -> None:
+        _unpushed_branch(repo, "feat-a", agent="sub-1")
+        _queue(untracked, "feat-a", status="done")
+        assert _decide(repo, untracked).reason is not None
+
+    def test_the_sub_agent_itself_is_still_judged(self, repo: Path, untracked: Path) -> None:
+        _unpushed_branch(repo, "feat-a", agent="sub-1")
+        _queue(untracked, "feat-a")
+        config = BranchesConfig.model_validate({"stop_guard": {"unpushed_subagent": "block"}})
+        assert _decide(repo, untracked, agent="sub-1", config=config).reason is not None
+
+    def test_an_unreadable_queue_hands_nothing_over(self, repo: Path, untracked: Path) -> None:
+        _unpushed_branch(repo, "feat-a", agent="sub-1")
+        (untracked / WORK_QUEUE_FILENAME).write_text("not json", encoding="utf-8")
+        assert _decide(repo, untracked).reason is not None
