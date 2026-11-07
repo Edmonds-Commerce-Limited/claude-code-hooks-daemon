@@ -19,13 +19,14 @@ never fetches it. Such a branch is reported CONTAINED NOWHERE with the text
 sweep then advises `git push -u origin <name>`, which re-creates the archived
 branch under `refs/heads` on the remote.
 
-`delete-branch` uses the same lookup, so it refuses these branches as
-"content found nowhere", and no tool route accepts the remote's own copy as
-proof. A client with a few dozen archived local branches cannot remove them
+`delete-branch` refuses these branches as "content found nowhere" for a
+different reason: its `classify_branch` (`daemon/branch_safety.py`) compares
+only against the default branch and the integration-line bases, and never
+reads remote refs. So no tool route accepts the remote's own copy as proof. A client with a few dozen archived local branches cannot remove them
 through the tools at all, and they hold it over the WIP cap.
 
-This plan follows Plan 00558 (branch WIP limit and hygiene v2), which already
-makes an `ls-remote` check for integration-line tips (#153). It also extends
+This plan follows Plan 00558 (git branch hygiene sweep), whose remote-delete
+guard already makes a batched `ls-remote` check (#153). It also extends
 Plan 00206 (the deterministic delete proof) and Plan 00249 (the
 `delete-branch` crash fix). The remote proof reuses that machinery.
 
