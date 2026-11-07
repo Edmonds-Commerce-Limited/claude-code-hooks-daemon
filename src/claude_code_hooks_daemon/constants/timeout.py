@@ -243,6 +243,12 @@ class Timeout:
     # never be killed part-way: it is written before any ref is removed, so a
     # truncated bundle is a lost recovery rather than a slow one.
     GIT_BUNDLE_CREATE = 300
+    # 30 seconds (the one `git ls-remote <remote>` that `branch-sweep` and
+    # `delete-branch` make to learn what the remote holds outside the refs the
+    # clone fetches). A NETWORK call, so the hook-path GIT_CONTEXT five seconds
+    # would time out on ordinary latency; bounded so a dead remote cannot hang
+    # the CLI. A timeout is reported and never counts as proof.
+    GIT_LS_REMOTE = 30
     # 300 seconds (`git worktree remove` from `worktree-reap --reap`). Unlike
     # the metadata calls GIT_CONTEXT is sized for, this DELETES the whole tree,
     # and an agent worktree carries its own venv, so the runtime scales with the

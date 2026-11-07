@@ -360,6 +360,8 @@ branches:
 
 Every deny from these guards ends with the same principle text: the limit exists so work finishes, never so it disappears. `bin/hooks-daemon branch-sweep` reports every branch by state; `branch-sweep --clean` deletes the provably merged ones and writes a recovery bundle first. The same two commands are the `branch-sweep` (report) and `branch-sweep-clean` (held) steps of `/hooks-daemon housekeeping`.
 
+**What "contained" means.** The session-start summary and the branch creation guard read only the remote-tracking refs the clone has fetched, so their CONTAINED NOWHERE text says exactly that: no fetched remote-tracking ref of the remote holds the commits. A remote may still hold the branch outside `refs/heads` (an archive namespace the default refspec never fetches). `bin/hooks-daemon branch-sweep` and `bin/hooks-daemon delete-branch` make one bounded `git ls-remote` (only when a branch would otherwise be unproven) and accept a remote ref at, or descending from, the branch tip as proof, naming the ref they relied on. A failed listing falls back to the fetched-ref answer and reports that the remote could not be checked.
+
 ## Handler Configuration
 
 Handlers are grouped by the event type they respond to. Each handler has at minimum an `enabled` flag and a `priority` number.

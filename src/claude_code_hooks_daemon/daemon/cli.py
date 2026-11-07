@@ -6497,6 +6497,7 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     """
     from claude_code_hooks_daemon.config.models import handler_options
     from claude_code_hooks_daemon.core import branch_inventory, branch_sweep
+    from claude_code_hooks_daemon.utils.remote_refs import LazyRemoteRefs
 
     repo = get_project_path(getattr(args, "project_root", None))
     config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
@@ -6505,7 +6506,12 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
         return _branch_sweep_clean(args, repo, branches)
     legacy = handler_options(config.handlers.session_start.get(HandlerID.BRANCH_SWEEP.config_key))
     try:
-        inventory = branch_inventory.build_inventory(repo, branches)
+        # The one remote listing this explicit command may make (issue #166): lazy, so a
+        # sweep with nothing CONTAINED NOWHERE never touches the network. Hook paths
+        # call `build_inventory` without it.
+        inventory = branch_inventory.build_inventory(
+            repo, branches, remote_refs=LazyRemoteRefs(repo, branches.remote)
+        )
     except branch_inventory.BranchInventoryError as e:
         print(f"ERROR: no branch inventory for {repo}: {e}", file=sys.stderr)
         return 1
@@ -6654,6 +6660,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
             confirm=confirm,
             line_names=branches.integration_lines,
             line_targets=line_targets,
+            remote=branches.remote,
         )
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -6691,6 +6698,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
                             "unique_paths": list(c.unique_paths),
                             "content_unique_paths": list(c.content_unique_paths),
                             "detail": c.detail,
+                            "held_by": c.held_by or None,
                         }
                         for c in report.classifications
                     ],
