@@ -124,7 +124,7 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
-### N586 — release housekeeping re-fetches every vendored doc, and an unchanged doc is rewritten anyway
+### N586 — release housekeeping re-fetches every vendored doc, even one checked days ago
 
 **Source**: the owner, during the v3.73.0 release (7 November 2026): "remote docs refresh - please tell me this only
 refreshes docs that are over X days old?" It does not.
@@ -134,16 +134,18 @@ document whatever its age. `--stale-after-days` sets the freshness window record
 filter, and `refresh` ignores it, taking the window from each document's own record. On v3.73.0 that touched 49 files:
 12 docs had real upstream changes, 36 were byte-identical upstream (same `source_sha256`) yet still had `fetched_at`
 and `stale_after` rewritten, and the generated index `.claude/REMOTE-DOCS.md` was re-rendered. For example,
-`memory.md` had been fetched two days earlier. Commit 158f6f967 on `release/3.73.0` is mostly timestamp churn. The
-rewrite is deliberate: `remote_docs/store.py` computes `unchanged` and writes the file anyway, so the provenance guard
-sees a fresh stamp. Proposal (b) has to keep that guard satisfied another way.
+`memory.md` had been fetched two days earlier. `remote_docs/store.py` rewrites an unchanged document on purpose, and
+that is correct: the frontmatter records when the page was last checked, which is cheap to keep and vital.
 
-**Proposal**: (a) `remote-docs refresh --stale` (or making it the default with no `--all`): refresh only documents past
-their `stale_after`, plus any named with `--path` (the release names the changelog, which Step 1c always needs fresh);
-(b) when the fetched content hashes to the recorded `source_sha256`, do not rewrite the file (or record the check
-somewhere that is not the tracked file); (c) Step 1H runs the stale-only form.
+**Owner ruling (7 November 2026)**: keep the frontmatter update exactly as it is. An earlier proposal here (skip the
+rewrite when the hash is unchanged, and a separate stale-only mode) was backwards and is withdrawn. The question was
+why re-check a page that was checked recently at all.
 
-**Status**: ⬜ open.
+**Proposal**: a re-check TTL (around 7 days, configurable). `refresh` skips any document whose `fetched_at` is within
+the TTL and fetches the rest, stamping the frontmatter as today. A `--path` (the changelog Step 1c needs) or a force
+flag bypasses the TTL. Low priority: at about 50 pages the cost is small.
+
+**Status**: ⬜ open (low priority, per the owner).
 
 ### N585 — `worktree-reap --reap-branches` keeps a merged branch that is ahead of its own upstream
 
