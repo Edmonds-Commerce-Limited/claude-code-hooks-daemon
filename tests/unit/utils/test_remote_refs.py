@@ -35,6 +35,23 @@ class TestListRemoteRefs:
         assert spy.call_args.args[1:3] == ("ls-remote", "origin")
         assert spy.call_args.kwargs["timeout"] == remote_refs.Timeout.GIT_LS_REMOTE
 
+    def test_patterns_bound_the_listing_and_the_caller_sets_the_timeout(
+        self, scratch: archive_remote.ArchiveRepo
+    ) -> None:
+        # The remote-delete proof (Plan 00571 Task 2.7) lists only the names it judges,
+        # under the hook path's own timeout, through this one function.
+        with patch.object(remote_refs, "run_git", wraps=run_git) as spy:
+            listing = remote_refs.list_remote_refs(
+                scratch.clone,
+                "origin",
+                patterns=("refs/heads/main",),
+                timeout=remote_refs.Timeout.GIT_CONTEXT,
+            )
+        assert spy.call_args.args[1:] == ("ls-remote", "origin", "refs/heads/main")
+        assert spy.call_args.kwargs["timeout"] == remote_refs.Timeout.GIT_CONTEXT
+        assert listing.failure is None
+        assert [ref for ref, _sha in listing.refs] == ["refs/heads/main"]
+
     def test_failure_is_reported_never_raised(self, scratch: archive_remote.ArchiveRepo) -> None:
         listing = remote_refs.list_remote_refs(scratch.clone, "no-such-remote")
         assert listing.failure is not None

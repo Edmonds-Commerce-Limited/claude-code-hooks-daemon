@@ -17,7 +17,8 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
-from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_line
+from claude_code_hooks_daemon.core.agent_ownership import canonical_path, running_holds
+from claude_code_hooks_daemon.core.branch_cleanup import linked_worktrees, sweep_clean_line
 from claude_code_hooks_daemon.core.branch_inventory import (
     BranchInventory,
     BranchInventoryError,
@@ -27,12 +28,6 @@ from claude_code_hooks_daemon.core.branch_inventory import (
 from claude_code_hooks_daemon.core.branch_stop_guard import StopCheck, StopFinding, judge_stop
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path, write_state
-from claude_code_hooks_daemon.utils.work_queue import (
-    WORK_QUEUE_FILENAME,
-    WorkQueueError,
-    active_records,
-    read_queue,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -115,19 +110,31 @@ def _noisy_context(
     return (line,)
 
 
-def _running_queue_branches(untracked: Path) -> frozenset[str]:
-    """Branches named by a ``running`` work-queue record; empty when the queue is unreadable."""
+def _running_queue_branches(repo: Path, untracked: Path) -> frozenset[str]:
+    """Branches a ``running`` work-queue record holds, by the sweep's own holds.
+
+    :func:`agent_ownership.running_holds` is the one reader of the queue: a branch is
+    held when a record names it, or when it is checked out in a worktree a record
+    names, in whatever spelling (relative, trailing separator, symlink). Empty when
+    the queue is unreadable, so every finding stands.
+    """
+    holds = running_holds(untracked, repo)
+    if not holds.worktrees:
+        return holds.branches
     try:
-        records = read_queue(untracked / WORK_QUEUE_FILENAME)
-    except WorkQueueError as exc:
+        worktrees = linked_worktrees(repo)
+    except RuntimeError as exc:
         log_and_continue(
             logger,
             exc,
-            reason="branch_stop_guard: the work queue is unreadable, so no branch counts as "
-            "handed over and every finding stands",
+            reason="branch_stop_guard: the worktrees cannot be listed, so only branches a "
+            "running work-queue record names are handed over",
         )
-        return frozenset()
-    return frozenset(record.branch for record in active_records(records))
+        return holds.branches
+    by_worktree = {
+        name for name, path in worktrees.items() if canonical_path(path, repo) in holds.worktrees
+    }
+    return holds.branches | by_worktree
 
 
 def decide_stop(
@@ -166,7 +173,7 @@ def decide_stop(
     state = read_state(state_file)
     # N581: the coordinator cannot finish a branch a live work-queue agent owns, so it
     # is handed over, not left behind. A sub-agent's own stop is still judged in full.
-    handed = _running_queue_branches(untracked) if agent_id is None else frozenset()
+    handed = _running_queue_branches(repo, untracked) if agent_id is None else frozenset()
     findings = [f for f in judgement.findings if f.branch not in handed]
     blocking = [f for f in findings if not f.advisory]
     advisory = [f for f in findings if f.advisory]

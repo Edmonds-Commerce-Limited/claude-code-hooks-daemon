@@ -10,7 +10,8 @@ protected; no tag of the same name; a remote-tracking ref whose tip is an ancest
 of the default branch (tracking or local) or, for an ordinary branch, of an
 integration line's tracking ref; and the remote's LIVE tip, read with one batched
 ``git ls-remote`` per chunk, equal to that tracking tip. Every failure, timeout and
-mismatch is a reason, never a pass.
+mismatch is a reason, never a pass. The listing is ``utils/remote_refs.py``'s, the
+same one ``branch-sweep`` and ``delete-branch`` use, bounded to the named branches.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.branch_safety import matches_any_glob
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
+from claude_code_hooks_daemon.utils.remote_refs import list_remote_refs
 
 #: A name that is safe to hand to git as one argument: no expansion, quoting or
 #: option-looking characters survive it.
@@ -227,19 +229,16 @@ def live_remote_tips(directory: Path, remote: str, names: list[str]) -> dict[str
     tips: dict[str, str] = {}
     for start in range(0, len(names), LS_REMOTE_CHUNK):
         chunk = names[start : start + LS_REMOTE_CHUNK]
-        listing = run_git(
+        listing = list_remote_refs(
             directory,
-            "ls-remote",
             remote,
-            *[f"{HEADS_PREFIX}{name}" for name in chunk],
+            patterns=tuple(f"{HEADS_PREFIX}{name}" for name in chunk),
             timeout=Timeout.GIT_CONTEXT,
-            env={"GIT_TERMINAL_PROMPT": "0"},
         )
-        if listing.returncode != 0:
+        if listing.failure is not None:
             continue
-        for line in listing.stdout.splitlines():
-            tip, separator, listed = line.partition("\t")
-            if separator and listed.startswith(HEADS_PREFIX):
+        for listed, tip in listing.refs:
+            if listed.startswith(HEADS_PREFIX):
                 tips[listed.removeprefix(HEADS_PREFIX)] = tip
     return tips
 
