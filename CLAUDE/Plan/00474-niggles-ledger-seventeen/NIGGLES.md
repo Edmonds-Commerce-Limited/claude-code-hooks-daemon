@@ -129,8 +129,10 @@ remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedBy
 **Source**: coordinator, 7-8 November 2026 (Plan 00571 Phase 3 slice d/e dispatch).
 
 **Evidence**: with the branch WIP cap full, a `general-purpose` agent was dispatched WITHOUT `isolation: worktree` and
-told to call `EnterWorktree path=<existing worktree>` so it could continue an existing branch. The tool's own text says
-a switch from a pinned agent "only affects this agent"; this agent was not pinned, and the switch moved the parent
+told to call `EnterWorktree path=<existing worktree>` so it could continue an existing branch. The live tool
+description says a switch from a pinned agent (isolation or explicit cwd) "only affects this agent" (the vendored
+`remote-docs/code.claude.com/docs/en/tools-reference.md` ~312-319 covers only the pinned `path` form); this agent was
+not pinned, and the switch moved the parent
 session's working directory too. A concurrent fact-check agent (dispatched afterwards from the main checkout) then
 wrote its report into that worktree and could not commit it; the coordinator's own `git -C /workspace` was refused as
 "a worktree-isolated session" redirecting git. `ExitWorktree keep` from the coordinator restored `/workspace` once the
