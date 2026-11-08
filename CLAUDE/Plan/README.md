@@ -8,8 +8,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00574: plan decisions log document](00574-plan-decisions-log-document/PLAN.md) - Not Started (owner request, for later: a per-plan `PLAN-DECISIONS.md`, pre-created by mkplan, as an unbounded, parseable decision log keyed by task id, so PLAN.md stays the front page of tasks and progress and JOURNAL/ stays ad hoc; adversarial review in progress)
 
-- [00572: ci wall clock sharding arm and hygiene](00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - In Progress (owner request: shard `qa.yml`'s serial pytest across runners by reusing release-gate's shard matrix, give every `main` push a verdict, build and release aarch64 relay and hooks-screen on `ubuntu-24.04-arm`, and close the practice gaps the [analysis](00572-ci-wall-clock-sharding-arm-and-hygiene/ANALYSIS.md) ranks)
-
 - [00568: admin merge bypass guard](00568-admin-merge-bypass-guard/PLAN.md) - Not Started (GitHub #160, parked on owner questions: a configurable Bash handler denying `gh pr merge --admin`, the REST merge endpoint and the `mergePullRequest` mutation, so an admin token cannot merge past branch protection)
 
 - [00564: remote meta ref allocator](00564-remote-meta-ref-allocator/PLAN.md) - Not Started (owner proposal, not for the next release: plan numbers allocated by compare-and-swap on a remote metadata ref, `refs/hooks-daemon/meta`, with an offline fallback to Plan 00562's scan and a recovery step)
@@ -219,6 +217,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00572: ci wall clock sharding arm and hygiene](Completed/00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - Complete at merge `f2d532f89` (PR #187) + the archiving commit (owner request: `qa.yml` reuses release-gate's shard matrix, so the nightly fell from 116 to 28.5 min; every `main` push gets a verdict; native and released aarch64 relay and hooks-screen, a non-blocking arm64 test leg, SHA-pinned actions; release notes 006, 012)
+
 - [00571: branch pools parked merged caps](Completed/00571-branch-pools-parked-merged-caps/PLAN.md) - Complete at merge `9314a6e4c` (PR #186) + `7a917cff9` (green CI) + the archiving commit (GitHub #165, closed: open, parked and merged branches are three pools, each with its own cap, max age and deny rule; `branch-keep`, `branches.bot_owned`, safe `branch-sweep --clean --remote`; release note 007)
 
 - [00573: admin seat issue assignment override](Completed/00573-admin-seat-issue-assignment-override/PLAN.md) - Complete at merge `a2b7f27e9` + the archiving commit (owner ruling: a repository admin seat is never blocked by a non-admin's issue assignment; it gets an advisory, and `issue-validity --claim` performs a recorded takeover; non-admin seats and other admins' claims keep the duplicate-work block; dogfooded live on #155; ships in the release after v3.73.0, release note 004)
@@ -277,8 +277,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00537: supervisor holds sends off main focus](Completed/00537-supervisor-holds-sends-off-main-focus/PLAN.md) - Complete at merge `605d8ed4d` (green CI) + the archiving commit (#125: the ccy supervisor holds every send while the human's keys show focus may have left the main prompt, cleared by Esc; release note 003; follow-up Plan 00538)
 
-- [00533: dispatch saturation recovery](Completed/00533-dispatch-saturation-recovery/PLAN.md) - Complete at merges `b4e83885c` and `3dbbcfaeb` (green CI) + the archiving commit (#124: the recovery command always gets through a saturated pool, a configurable pool with a bounded wait, a saturation warning and a clean SIGTERM grace; release note 002; follow-ups 00534 to 00536)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -332,9 +330,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 575 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 487 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 488 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 65 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 64 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

@@ -1,6 +1,6 @@
 # Plan 00572: ci wall clock sharding arm and hygiene
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-07
 **Owner**: joseph
 **Priority**: High
@@ -113,8 +113,11 @@ refuse those pushes, so check what it would flag before enabling it.
 
 ## Success Criteria
 
-- [ ] Measured on real runs and journalled: after Phase 2, the code-tier
+- [x] Measured on real runs and journalled: after Phase 2, the code-tier
   too-broad path and the nightly each finish when their slowest shard does.
+  (Code tier: QA run 42427957281, on Plan 00571's PR #186 as a real code-tier
+  sample, 27.8 min, slowest shard 27.6. Nightly: run
+  42442365191, 28.5 min, slowest shard 27.9; it was 116 min before.)
 - [x] No `main` run ends `cancelled` with zero jobs because a later push
   queued behind it. (0 of 59 `main` QA runs since the Phase 2 merge.)
 - [x] CI builds both architectures' relay and hooks-screen on every code push.
@@ -125,6 +128,10 @@ refuse those pushes, so check what it would flag before enabling it.
 
 ## Delivery & Milestones
 
-- Phases 1 and 2 merged to `main` at 4b1317734 through PR #178, whose CI
-  exercised the new workflows. Task 1.5 fixed the release-slate regression.
-- Phases 3 and 4 follow the release.
+- Phase 1 and Tasks 2.1-2.2 merged to `main` at 4b1317734 through PR #178,
+  whose CI exercised the new workflows. Task 1.5 fixed the release-slate
+  regression. Task 2.3 merged through PR #184.
+- Phase 3 merged through PRs #180 (3.1), #183 (3.2) and #187 (3.3, merge
+  `f2d532f89`). Phase 4 landed as direct commits to `main`: `6e60e160f` (4.1)
+  and `965951009` (4.2).
+- The first sharded nightly (run 42442365191) was green.

@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00533: dispatch saturation recovery](00533-dispatch-saturation-recovery/PLAN.md) - Complete at merges `b4e83885c` and `3dbbcfaeb` (green CI) + the archiving commit (#124: the recovery command always gets through a saturated pool, a configurable pool with a bounded wait, a saturation warning and a clean SIGTERM grace; release note 002; follow-ups 00534 to 00536)
+
 - [00532: docs optimisation skill](00532-docs-optimisation-skill/PLAN.md) - Complete at merges `bb3eb552b`, `92c07d7bb` and `36b63400c` + the archiving commit (#123: a versioned Claude Code instruction-loading contract with a re-audit advisory, `docs-qa --footprint`, and the `docs-optimise` proposal skill; release note 001, truth change v3.71.0; follow-ups are ledger 00474 N513 to N515 and the deferred items F1 to F4 in RULINGS-fable.md)
 
 - [00531: project tuned plan fact checker](00531-project-tuned-plan-fact-checker/PLAN.md) - Complete at `37dfd0b11` + the archiving commit (owner request during the v3.70.0 release: the feed dispatches the project's `tuned_agent`, the generic agent tells a project once how to tune it, and `deployed_artefact_drift` reports a tuned copy whose derived-from marker is behind the shipped template; release note 081, post-upgrade task 03)
