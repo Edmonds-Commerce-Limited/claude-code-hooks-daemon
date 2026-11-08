@@ -82,11 +82,44 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
                 "  branches never trip it; `dormancy.mode: warn` stops at the noisy stage."
             ),
         )
+        self._parked_rule = Rule(
+            rule_id=RuleID.BRANCH_PARKED_POOL,
+            blocked="creating a branch while the parked pool is at `branches.parked.cap` "
+            "or holds a branch parked past `branches.parked.max_age_days`",
+            why="Parking is a pause, not a place to leave work for ever; an un-cleared "
+            "park is dormant work with a reason attached",
+            fix="Merge it, `branch-park <name> --clear`, delete it, or re-park it with a "
+            "NEW reason (a same-reason re-park is refused)",
+            verbose=(
+                "WHY:\n"
+                "  A park commit ages the branch from the day it was written. The list\n"
+                "  below shows each parked branch with the commands that clear it."
+            ),
+        )
+        self._merged_rule = Rule(
+            rule_id=RuleID.BRANCH_MERGED_POOL,
+            blocked="creating a branch while the merged pool is at `branches.merged.cap` "
+            "or holds an unkept merged branch",
+            why="A merged branch is finished work: it is deleted, or kept on purpose with a "
+            "reason, so merged branches never pile up unexplained",
+            fix="Run the `branch-sweep --clean` line below, or keep a branch with "
+            "`branch-keep <name> --reason ...`",
+            verbose=(
+                "WHY:\n"
+                "  An unkept merged branch is stale from day 0; a keep lapses after\n"
+                "  `branches.merged.max_age_days`. A branch a worktree holds is not stale."
+            ),
+        )
+        self._rules_by_id: dict[str, Rule] = {
+            RuleID.BRANCH_DORMANT: self._dormant_rule,
+            RuleID.BRANCH_PARKED_POOL: self._parked_rule,
+            RuleID.BRANCH_MERGED_POOL: self._merged_rule,
+        }
         self._formatter = RuleFormatter()
 
     def get_rules(self) -> list[Rule]:
         """Return the Rules backing this handler's deny paths."""
-        return [self._rule, self._dormant_rule]
+        return [self._rule, self._dormant_rule, self._parked_rule, self._merged_rule]
 
     def _project_root(self) -> Path:
         if self._project_root_override is not None:
@@ -144,20 +177,25 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
         worst = max((verdict.decision for verdict in verdicts), key=_SEVERITY.__getitem__)
         if worst == "deny":
             denying = next(verdict for verdict in verdicts if verdict.decision == "deny")
-            rule = self._dormant_rule if denying.rule_id == RuleID.BRANCH_DORMANT else self._rule
+            rule = self._rules_by_id.get(denying.rule_id or "", self._rule)
             reason = "\n".join([self._formatter.headline(rule), "", *lines])
             return GatingResult(decision=Decision.DENY, reason=reason)
         return GatingResult(decision=Decision.ALLOW, context=list(dict.fromkeys(lines)))
 
     def get_claude_md(self) -> str | None:
         return (
-            "## branch_creation_guard — open work branches are capped\n\n"
+            "## branch_creation_guard — three branch pools, each capped\n\n"
             "Creating a branch (`git switch -c`, `checkout -b`, `branch <name>`, "
             '`worktree add`, or an Agent dispatch with `isolation: "worktree"`) is '
-            "denied while the open work branches are at `branches.wip.cap` "
-            "(`wip.mode: warn` only warns). The deny lists every open branch, the "
-            "merged ones first with their delete command: merge, park or delete one, "
-            "or continue in an existing branch. A name already in `refs/heads` is a "
+            "denied while a pool is full: OPEN work at `branches.wip.cap`, PARKED "
+            "branches at `branches.parked.cap` (or one parked past "
+            "`branches.parked.max_age_days`), MERGED branches at `branches.merged.cap` "
+            "(or one unkept or kept past `branches.merged.max_age_days`). Each pool "
+            "has `mode: block|warn|off`. Merge, park or delete an open branch; clear "
+            "a park with `branch-park <name> --clear` or re-park with a NEW reason; "
+            "clear merged branches with `branch-sweep --clean` or keep one with "
+            "`branch-keep <name> --reason ...`. Bot-owned branches (`branches.bot_owned`) "
+            "are in no pool. A name already in `refs/heads` is a "
             "reset, never a creation. A name close to an existing branch's draws a "
             "duplicate warning naming it; that never blocks."
         )

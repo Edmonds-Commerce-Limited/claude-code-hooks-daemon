@@ -172,6 +172,15 @@ class TestConfigTemplate:
         block = yaml.safe_load(template)["branches"]
         assert BranchesConfig.model_validate(block) == BranchesConfig()
 
+    def test_full_template_writes_out_every_pool_key(self) -> None:
+        """Plan 00571: the parked and merged pools and bot_owned are spelled out."""
+        import yaml
+
+        block = yaml.safe_load(ConfigTemplate.generate_full())["branches"]
+        for pool in ("parked", "merged"):
+            assert block[pool] == {"cap": None, "max_age_days": None, "mode": "block"}
+        assert block["bot_owned"] == ["dependabot/*"]
+
 
 class TestGenerateConfig:
     """Tests for generate_config convenience function."""

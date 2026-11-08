@@ -685,7 +685,12 @@ def inconclusive_probe(
 
 #: Rules whose verdict is the repository's live branch state (how many open,
 #: how old), which a probe's event does not carry and the harness cannot set.
-BRANCH_STATE_RULE_IDS: Final[tuple[str, ...]] = (RuleID.BRANCH_WIP_CAP, RuleID.BRANCH_DORMANT)
+BRANCH_STATE_RULE_IDS: Final[tuple[str, ...]] = (
+    RuleID.BRANCH_WIP_CAP,
+    RuleID.BRANCH_DORMANT,
+    RuleID.BRANCH_PARKED_POOL,
+    RuleID.BRANCH_MERGED_POOL,
+)
 
 
 def environment_blocked(

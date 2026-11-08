@@ -6540,7 +6540,11 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
         LABELS_RELATIVE_PATH,
         clear_label_stage,
     )
-    from claude_code_hooks_daemon.core.branch_park import BranchParkError, park_branch
+    from claude_code_hooks_daemon.core.branch_park import (
+        BranchParkError,
+        BranchParkSameReason,
+        park_branch,
+    )
 
     if args.clear and args.reason:
         print("ERROR: --clear takes no --reason", file=sys.stderr)
@@ -6551,6 +6555,9 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
         result = park_branch(
             repo, args.name, reason=args.reason, remote=branches.remote, clear=args.clear
         )
+    except BranchParkSameReason as e:
+        print(f"ERROR: branch-park: {e}", file=sys.stderr)
+        return 2
     except BranchParkError as e:
         print(f"ERROR: branch-park: {e}", file=sys.stderr)
         return 1
@@ -6560,6 +6567,72 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
         clear_label_stage(repo / LABELS_RELATIVE_PATH, args.name)
     if not result.pushed:
         print(f"WARNING: the push failed ({result.push_error}); the local {verb.lower()} stands.")
+        print(f"Retry: {result.retry_command}")
+    return 0
+
+
+def cmd_branch_keep(args: argparse.Namespace) -> int:
+    """``branch-keep <name> --reason ...``: keep a merged branch on purpose (Plan 00571).
+
+    Returns:
+        0 when the keep stands (a failed push is reported, with its retry command),
+        1 when it could not be written or the branch is not merged, 2 when the branch
+        is already kept with this exact reason.
+    """
+    import time
+
+    from claude_code_hooks_daemon.core import branch_inventory
+    from claude_code_hooks_daemon.core.branch_cleanup import CLEAN_STATES
+    from claude_code_hooks_daemon.core.branch_creation import (
+        LABELS_RELATIVE_PATH,
+        clear_label_stale,
+    )
+    from claude_code_hooks_daemon.core.branch_keep import (
+        BranchKeepError,
+        BranchKeepSameReason,
+        keep_branch,
+    )
+
+    repo = get_project_path(getattr(args, "project_root", None))
+    branches = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml").branches
+    try:
+        inventory = branch_inventory.build_inventory(repo, branches)
+    except branch_inventory.BranchInventoryError as e:
+        print(f"ERROR: branch-keep: {e}", file=sys.stderr)
+        return 1
+    record = inventory.records.get(args.name)
+    if record is None:
+        print(f"ERROR: branch-keep: no branch {args.name}", file=sys.stderr)
+        return 1
+    if record.state not in CLEAN_STATES:
+        print(
+            f"ERROR: branch-keep: {args.name} is not merged ({record.state.value}); "
+            f"park it instead: {daemon_cli_command_for_docs('branch-park')} {args.name} "
+            "--reason ...",
+            file=sys.stderr,
+        )
+        return 1
+    tips = [tip for tip in (record.local_tip, record.remote_tip) if tip is not None]
+    user = run_git(repo, "config", "user.name", timeout=Timeout.GIT_CONTEXT).stdout.strip()
+    try:
+        result = keep_branch(
+            repo,
+            tips,
+            reason=args.reason or "",
+            remote=branches.remote,
+            user=user or "unknown",
+            now=time.time(),
+        )
+    except BranchKeepSameReason as e:
+        print(f"ERROR: branch-keep: {e}", file=sys.stderr)
+        return 2
+    except BranchKeepError as e:
+        print(f"ERROR: branch-keep: {e}", file=sys.stderr)
+        return 1
+    print(f"Kept {args.name}: {args.reason}")
+    clear_label_stale(repo / LABELS_RELATIVE_PATH, args.name)
+    if not result.pushed:
+        print(f"WARNING: the push failed ({result.push_error}); the local keep stands.")
         print(f"Retry: {result.retry_command}")
     return 0
 
@@ -13190,6 +13263,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Unpark: write an Unparked commit so the dormancy clock runs again",
     )
     parser_branch_park.set_defaults(func=cmd_branch_park)
+
+    # branch-keep command (Plan 00571 Phase 3)
+    parser_branch_keep = subparsers.add_parser(
+        "branch-keep",
+        help="Keep a merged branch on purpose (a note on its tip, pushed); an unkept merged "
+        "branch is stale, a keep lapses after branches.merged.max_age_days",
+    )
+    parser_branch_keep.add_argument("name", help="Merged branch to keep")
+    parser_branch_keep.add_argument("--reason", help="Why it is kept (one line)")
+    parser_branch_keep.set_defaults(func=cmd_branch_keep)
 
     # release-notes command
     parser_release_notes = subparsers.add_parser(
