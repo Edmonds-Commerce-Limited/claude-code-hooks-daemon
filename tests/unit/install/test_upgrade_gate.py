@@ -788,7 +788,9 @@ class TestReleaseKey:
     def test_every_spelling_of_a_release_shares_one_key(self, raw: str) -> None:
         assert release_key(raw) == "4.0.0"
 
-    @pytest.mark.parametrize("raw", ["4.0.0", "v4.0.0", "v4", "V4", "4.0", "4.0.0+main.abc1234", "v4.0"])
+    @pytest.mark.parametrize(
+        "raw", ["4.0.0", "v4.0.0", "v4", "V4", "4.0", "4.0.0+main.abc1234", "v4.0"]
+    )
     def test_a_release_still_reads_as_one(self, raw: str) -> None:
         assert is_release(raw)
 
