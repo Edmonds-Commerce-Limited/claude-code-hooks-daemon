@@ -63,9 +63,9 @@ def test_every_job_that_sets_up_the_suite_environment_uses_the_action() -> None:
         name for name, job in _jobs().items() if any(s.get("uses") == USES for s in job["steps"])
     ]
 
-    # qa.yml: targeted, qa, map, perf-sweep, daemon-load; release-gate: two;
-    # test-shards: two.
-    assert len(users) == 9, users
+    # qa.yml: targeted, qa, map, perf-sweep, daemon-load, arm64-tests;
+    # release-gate: two; test-shards: two.
+    assert len(users) == 10, users
 
 
 def test_checkout_precedes_the_action_in_every_job() -> None:
