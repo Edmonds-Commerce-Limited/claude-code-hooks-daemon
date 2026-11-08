@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.paths import ProjectPath
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.work_queue import (
     WORK_QUEUE_FILENAME,
@@ -102,6 +103,8 @@ def ownership_refusal(
     if harness_directory and in_harness_directory(worktree):
         return (
             f"the worktree {worktree} is under {ProjectPath.CLAUDE_WORKTREES_DIR}/, "
-            "which Claude Code owns; left alone"
+            "which Claude Code owns; left alone. "
+            f"`{daemon_cli_command_for_docs('worktree-reap', '--reap', '--only', branch)}` "
+            "removes it behind its own safety checks; then run this command again"
         )
     return None

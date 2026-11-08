@@ -148,21 +148,31 @@ Root-cause detail with file:line: [ROOTCAUSE.md](ROOTCAUSE.md).
 
 ### Phase 4: Dogfood
 
-- [ ] ⬜ **Task 4.1**: Run the sweep, `--clean` and the pools on this
-  repository and journal what each produced.
+- [x] ✅ **Task 4.1**: Run the sweep, `--clean` and the pools on this
+  repository and journal what each produced. Open work went from 10 of 10
+  (cap-blocked) to 1 of 10; three merged agent branches were reaped and
+  cleaned, remote included, behind one recovery bundle. The skip line for a
+  Claude-owned worktree now names `worktree-reap --reap --only <name>`.
 
 ## Success Criteria
 
-- [ ] Each pool's deny offers only actions that lower its own count (#165's
-  defect is gone).
-- [ ] Five sequential `delete-branch` calls leave all five restorable.
-- [ ] One command clears every provably merged, unkept branch, local and
-  remote.
-- [ ] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`, plus
-  config-changes and truth-changes entries, sit in the pending-release
-  holding area.
+- [x] Each pool's deny offers only actions that lower its own count (#165's
+  defect is gone): `tests/unit/core/test_branch_pools.py` (each pool denies
+  under its own rule; the WIP deny lists open work only).
+- [x] Five sequential `delete-branch` calls leave all five restorable:
+  `test_cli_delete_branch_bundles.py::test_five_sequential_deletes_are_all_restorable`.
+- [x] One command clears every provably merged, unkept branch, local and
+  remote: `branch-sweep --clean --remote`. A branch whose worktree is under
+  `.claude/worktrees/` (Claude Code's) is skipped by design and its skip
+  line names `worktree-reap --reap --only <name>`, which removes it first.
+- [x] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+  (`007-branch-pools-parked-merged-caps.md`), plus config-changes and
+  truth-changes entries, sit in the pending-release holding area.
 - [ ] Issue #165 is commented and closed after a verified merge and green CI.
 
 ## Delivery & Milestones
 
-- Pending.
+- Phases 1 and 2 merged to `main` earlier (Task 2.7 and its siblings).
+- Phase 3 merged at 9314a6e4c through PR #186, whose CI ran the full gate.
+- Phase 4 dogfood journalled on 2026-11-08; #165 closes after `main` CI is
+  green on the merge.

@@ -50,6 +50,15 @@ class TestOwnershipRefusal:
         reason = ownership_refusal("b", Path("/r/.claude/worktrees/b"), locked=False, holds=holds)
         assert reason is not None and ".claude/worktrees" in reason
 
+    def test_harness_directory_names_the_command_that_reaps_it(self) -> None:
+        """Plan 00571 Phase 4 dogfood: `branch-sweep --clean --remote` skipped
+        three merged agent worktrees with "left alone" and no way forward;
+        `worktree-reap --reap` is the command whose job they are."""
+        holds = RunningHolds(frozenset(), frozenset())
+        reason = ownership_refusal("b", Path("/r/.claude/worktrees/b"), locked=False, holds=holds)
+        assert reason is not None
+        assert "worktree-reap --reap --only b" in reason
+
     def test_locked(self) -> None:
         holds = RunningHolds(frozenset(), frozenset())
         reason = ownership_refusal("b", Path("/x/y"), locked=True, holds=holds)
