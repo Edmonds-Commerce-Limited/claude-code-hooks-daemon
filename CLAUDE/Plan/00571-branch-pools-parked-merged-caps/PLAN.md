@@ -133,17 +133,18 @@ Root-cause detail with file:line: [ROOTCAUSE.md](ROOTCAUSE.md).
 
 ### Phase 3: Pools
 
-- [ ] ⬜ **Task 3.1**: Failing tests: parked branches leave the wip count;
+- [x] ✅ **Task 3.1**: Failing tests: parked branches leave the wip count;
   the parked cap denies with park-specific actions; a stale park is surfaced
   and staged; merged branches leave the wip count; the merged cap denies
   naming `branch-sweep --clean`; a kept merged branch is exempt inside its age
   and stale past it.
-- [ ] ⬜ **Task 3.2**: Implement the config keys and pool counting in
+- [x] ✅ **Task 3.2**: Implement the config keys and pool counting in
   `core/branch_creation.py` and `core/branch_inventory.py`, plus the
   `branch-keep` (or equivalent) command for merged branches.
-- [ ] ⬜ **Task 3.3**: Update docs (`docs/guides/CONFIGURATION.md` branches
+- [x] ✅ **Task 3.3**: Update docs (`docs/guides/CONFIGURATION.md` branches
   section, handler guidance) and add the release note, config-changes and
-  truth-changes entries.
+  truth-changes entries. Done in five slices (a–e); report
+  [phase-3-pools-impl-be.md](subagent-reports/phase-3-pools-impl-be.md).
 
 ### Phase 4: Dogfood
 
