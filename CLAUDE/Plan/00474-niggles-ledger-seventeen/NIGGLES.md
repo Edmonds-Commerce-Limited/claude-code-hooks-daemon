@@ -132,13 +132,18 @@ remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedBy
 `test_playbook_harness.py ... skipped: INCONCLUSIVE, not passed: #224 LintOnEditHandler: the Kotlin linter timed out after 15s, so the handler's verdict was never reached`. The harness is a blocking release gate that treats any skip as a
 failure, so a JVM cold start on a slow runner turns main red.
 
-**Class**: same as N593 (fixed): the environment, not the handler, decided the probe. N593 warns, without scoring,
-when a branch-state rule refuses a creation probe; a linter timeout has no such path.
+**Class**: same as N593 (fixed): the environment, not the handler, decided the probe. The harness already recognises a
+lint timeout (`inconclusive_probe`, `lint_unusable_failure`, `inconclusive_skip_reason` in `daemon/playbook_harness.py`)
+but turns it into a skip, and `blocking_gate_guard.py` (~110-130) escalates any skip to a failure whenever
+`HOOKS_DAEMON_RELEASE_GATE=1`, which `qa.yml`, `test-shards.yml` and `scripts/qa/run_tests.sh` all set. N593's
+`environment_blocked` (now covering WIP_CAP, DORMANT, PARKED_POOL, MERGED_POOL) warns without scoring, but only for
+branch-state rules ([fact-check](subagent-reports/261108-fact-check-n599.md)).
 
-**Proposal**: give the harness the same treatment for a lint-tool timeout on a CI runner: report it in the warning
-list, do not score it, and keep the blocking skip for the release-time run (RELEASING.md Step 12.0) where the daemon is
-warm. Alternatively raise or load-scale the Kotlin lint budget for the probe only. Reproduce red with a stub linter that
-sleeps past the budget.
+**Proposal**: the budget is the generic `Timeout.LINT_CHECK = 15` (`constants/timeout.py`), and a per-language
+override already exists (`options.timeouts.Kotlin`; commented example in `.claude/hooks-daemon.yaml`). Cheapest fix:
+set a Kotlin override for CI (config only), or load-scale the probe's budget. The larger option, a warning instead of a
+skip for an environment timeout, needs a signal that tells a CI run from the release-time run (RELEASING.md Step
+12.0), since both set `HOOKS_DAEMON_RELEASE_GATE=1`. Reproduce red with a stub linter that sleeps past the budget.
 
 **Status**: ⬜ open.
 
