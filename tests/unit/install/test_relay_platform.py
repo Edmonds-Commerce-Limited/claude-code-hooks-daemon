@@ -110,7 +110,7 @@ class TestCheckMuslToolchainTarget:
     def test_probes_the_requested_target(self) -> None:
         run = _toolchain_run("aarch64-unknown-linux-musl\n")
         assert check_musl_toolchain(run_fn=run, target="aarch64-unknown-linux-musl") is True
-        assert check_musl_toolchain(run_fn=run) is False
+        assert check_musl_toolchain(run_fn=run, target="x86_64-unknown-linux-musl") is False
 
 
 class TestDeployOnUnsupportedHost:
