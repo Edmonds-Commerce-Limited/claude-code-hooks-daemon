@@ -97,8 +97,10 @@ refuse those pushes, so check what it would flag before enabling it.
 - [x] ✅ **Task 3.2**: Tag-triggered release assets for both triples with a
   merged `SHA256SUMS` and `actions/attest-build-provenance`. The relay's
   download path selects its asset by architecture.
-- [ ] ⬜ **Task 3.3**: A non-blocking arm64 test leg. Make the tests that
-  assume an x86_64 relay name arch-aware.
+- [x] ✅ **Task 3.3**: A non-blocking arm64 test leg. Make the tests that
+  assume an x86_64 relay name arch-aware. (qa.yml `arm64-tests`: unit shards,
+  `continue-on-error`, not in the gate's `needs`; relay/screen test paths now
+  come from `host_relay_target()`.)
 
 ### Phase 4: Supply chain
 

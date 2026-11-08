@@ -44,6 +44,8 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.utils.relay_host import host_relay_target
+
 #: The reasons the relay-dependent gates give when the binary is absent, as
 #: they are spelled at the `pytest.skip` / `skipif` sites. Asserted against
 #: those files in `test_relay_gate_skip_guard.py`, so a rewording that orphaned
@@ -98,7 +100,19 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _RELAY_SOURCE = _REPO_ROOT / "relay" / "hooks_relay.rs"
-_RELAY_BUILD = _REPO_ROOT / "untracked" / "relay-build" / "hooks-relay-x86_64-unknown-linux-musl"
+
+
+def host_relay_build_path() -> Path:
+    """Where `relay/build.sh` puts the relay built for THIS host's architecture.
+
+    The triple comes from the product's own mapping. A host with no relay build
+    gets a path that never exists, so the consuming tests skip on it.
+    """
+    target = host_relay_target() or "unsupported-host"
+    return _REPO_ROOT / "untracked" / "relay-build" / f"hooks-relay-{target}"
+
+
+_RELAY_BUILD = host_relay_build_path()
 
 
 def relay_build_stamp_path(binary: Path) -> Path:

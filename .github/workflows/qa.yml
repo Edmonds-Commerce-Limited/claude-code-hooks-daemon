@@ -568,6 +568,54 @@ jobs:
           printf 'native-ok\r\n' | "$BIN" --dump | tee screen.out
           grep -q 'native-ok' screen.out
 
+  # Plan 00572 Task 3.3: the unit suite on an arm64 runner, to see an
+  # architecture-specific regression. NON-BLOCKING: continue-on-error, and the
+  # QA gate below deliberately does not list it in `needs`. Promote it to a
+  # gate only after it has run clean for a while.
+  arm64-tests:
+    name: Unit tests (arm64, non-blocking)
+    needs: classify
+    if: needs.classify.outputs.tier != 'docs'
+    runs-on: ubuntu-24.04-arm
+    continue-on-error: true
+    # The unit shards take ~25 min on x86_64; margin for a cold arm runner.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-env
+        with:
+          python-version: "3.11"
+
+      - name: Build the relay natively
+        run: |
+          test "$(uname -m)" = "aarch64"
+          rustup target add aarch64-unknown-linux-musl
+          RUSTC="$(rustup which rustc)" RELAY_TARGET=aarch64-unknown-linux-musl bash relay/build.sh
+          install -D -m 755 \
+            untracked/relay-build/hooks-relay-aarch64-unknown-linux-musl \
+            untracked/bin/hooks-relay
+
+      - name: Run the unit shards
+        env:
+          PYTEST_ADDOPTS: -m "not perf_sweep"
+        run: |
+          python scripts/qa/run_test_matrix.py \
+            --shard unit-handlers-pre-tool-use --shard unit-handlers \
+            --shard unit-daemon --shard unit-core \
+            --shard unit-features --shard unit-tooling
+
+      - name: Upload test output
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-arm64-output
+          path: untracked/qa/
+          if-no-files-found: warn
+          retention-days: 14
+
   # Plan 00572 Task 1.1: the single verdict of a run, mirroring release-gate's
   # `Release gate` job. Each tier skips the jobs it does not need, so a
   # skipped job counts as passed; anything else (failure, cancelled) fails

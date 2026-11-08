@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import re
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -108,6 +110,10 @@ class TestNewBundlePath:
     ) -> None:
         suffixes = iter(["aaaaaa", "aaaaaa", "bbbbbb"])
         monkeypatch.setattr(branch_safety.secrets, "token_hex", lambda _n: next(suffixes))
+        # Both calls must share one stamp, or a second boundary between them
+        # makes the repeated suffix a fresh name and the collision never happens.
+        frozen = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+        monkeypatch.setattr(branch_safety, "datetime", SimpleNamespace(now=lambda _tz: frozen))
         first = new_bundle_path(tmp_path, "x")
         first.write_bytes(b"taken")
         second = new_bundle_path(tmp_path, "x")

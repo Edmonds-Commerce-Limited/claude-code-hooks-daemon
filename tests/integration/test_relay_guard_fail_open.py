@@ -59,13 +59,14 @@ from claude_code_hooks_daemon.utils.cli_command import install_recovery_command
 from tests.daemon_like_process import daemon_like_process
 from tests.deep_json import TOO_DEEP_FOR_ANY_PYTHON, nested_call
 from tests.load_scaling import scaled_seconds
+from tests.relay_gate_guard import host_relay_build_path
 
 #: A probe sent through a hook forwarder is marked (Plan 00466 N12).
 _MAIN_PROBE = {SYNTHETIC_SOURCE_FIELD: TEST_PROBE, PROBE_AS_FIELD: ProbeThread.MAIN.value}
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _INIT_SH = _REPO_ROOT / ".claude" / "init.sh"
-_RELAY_BINARY = _REPO_ROOT / "untracked" / "relay-build" / "hooks-relay-x86_64-unknown-linux-musl"
+_RELAY_BINARY = host_relay_build_path()
 
 # A build older than relay/hooks_relay.rs fails with one "rebuild" message (N319).
 pytestmark = pytest.mark.usefixtures("fresh_relay_build")
