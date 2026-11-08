@@ -115,10 +115,11 @@ refuse those pushes, so check what it would flag before enabling it.
 
 - [ ] Measured on real runs and journalled: after Phase 2, the code-tier
   too-broad path and the nightly each finish when their slowest shard does.
-- [ ] No `main` run ends `cancelled` with zero jobs because a later push
-  queued behind it.
-- [ ] CI builds both architectures' relay and hooks-screen on every code push.
-- [ ] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` records the
+- [x] No `main` run ends `cancelled` with zero jobs because a later push
+  queued behind it. (0 of 59 `main` QA runs since the Phase 2 merge.)
+- [x] CI builds both architectures' relay and hooks-screen on every code push.
+  (`native-builds` runs on every non-docs tier.)
+- [x] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` records the
   arm64 release assets in the pending-release holding area (client-visible).
   The CI-only phases have no release-bound consequences.
 
