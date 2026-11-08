@@ -124,6 +124,26 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N598 — an all-digit short SHA is read as a release, and the upgrade stops on a "MAJOR version change"
+
+**Source**: coordinator, main CI run 42426035473 at 965951009 (7 November 2026): `acceptance-and-other` failed on
+py3.11, 3.12 and 3.13 in `test_install_sh_end_to_end.py` (`test_upgrade_version_sh_end_to_end_produces_running_daemon`,
+`test_upgrade_through_a_link_replaces_a_daemon_naming_the_link`), both exit 3 with "MAJOR version change: v3.x ->
+v965951009.x".
+
+**Cause**: the tests upgrade to the current HEAD's short SHA. `scripts/upgrade_version.sh` `_target_release` matched the
+stamp against `^[vV]?[0-9]+(\.[0-9]+)*$`, and `install/upgrade_gate.py` `_RELEASE_RE` against
+`^[vV]?\d+(?:\.\d+){0,2}...`; both accept a bare run of digits, so `965951009` was release 965951009. A SHA with a letter
+fell through to the checkout's `version.py`. About 1.5% of 9-character SHAs are all decimal, so any commit could turn
+main red, and a client upgrading to such a commit is stopped.
+
+**Fix**: a release is `v`-prefixed or dotted, in both places (`is_release`, now public, and `_target_release`). Red
+first: `tests/unit/install/test_upgrade_gate.py` (5 failed) and `tests/integration/test_upgrade_target_release_digit_ref.py`
+(3 failed), then green. Class sweep: the other shell `=~` version tests (`upgrade.sh` ~586, ~770, `rollback.sh` ~61)
+only prefix `v` or read a Python version; `daemon/metadata.py` already requires `v` and dots. Release note 011.
+
+**Status**: ✅ fixed.
+
 ### N597 — a non-isolated sub-agent's `EnterWorktree` moves the whole session, so other agents write into that worktree
 
 **Source**: coordinator, 7-8 November 2026 (Plan 00571 Phase 3 slice d/e dispatch).

@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.install.upgrade_gate import (
     format_gate_report,
     gated_install_stamp,
     installed_version,
+    is_release,
     main,
     phasing_advice,
     record_gated_install,
@@ -467,6 +468,19 @@ class TestUnknownRange:
         report = _acked(daemon_dir, project, untracked, "3.64.0", "0123abc")
         assert report.verdict is GateVerdict.PROCEED
 
+    @pytest.mark.parametrize("ref", ["965951009", "1234567", "0123456789012"])
+    def test_a_commit_ref_made_only_of_digits_is_not_a_release(
+        self, daemon_dir: Path, project: Path, untracked: Path, ref: str
+    ) -> None:
+        """Ledger 00474 N598: main CI upgraded to its own short SHA ``965951009``,
+        and the gate read it as release 965951009.0.0, a MAJOR change from v3,
+        stopping the upgrade. About 1.5% of 9-character SHAs are all decimal
+        digits. Such a ref is treated like any other commit ref."""
+        report = _gate(daemon_dir, project, untracked, "3.64.0", ref)
+        assert not any("MAJOR" in reason for reason in report.escalations), report.escalations
+        assert "is not a release version" in format_gate_report(report)
+        assert _gate(daemon_dir, project, untracked, "3.64.0", "0123abc").guides == report.guides
+
     def test_an_unknown_previous_version_still_lists_every_guide_up_to_the_target(
         self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
     ) -> None:
@@ -773,6 +787,15 @@ class TestReleaseKey:
     @pytest.mark.parametrize("raw", ["4.0.0", "v4.0.0", "4.0.0+main.abc1234", "v4.0"])
     def test_every_spelling_of_a_release_shares_one_key(self, raw: str) -> None:
         assert release_key(raw) == "4.0.0"
+
+    @pytest.mark.parametrize("raw", ["4.0.0", "v4.0.0", "v4", "V4", "4.0", "4.0.0+main.abc1234", "v4.0"])
+    def test_a_release_still_reads_as_one(self, raw: str) -> None:
+        assert is_release(raw)
+
+    @pytest.mark.parametrize("raw", ["965951009", "4", "0123abc", "", "main"])
+    def test_a_bare_number_or_a_ref_is_not_a_release(self, raw: str) -> None:
+        """A release is ``v``-prefixed or dotted; a bare run of digits is a commit ref (N598)."""
+        assert not is_release(raw)
 
 
 class TestVerdictExitCodes:
