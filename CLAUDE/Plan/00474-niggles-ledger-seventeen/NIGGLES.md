@@ -124,6 +124,24 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N599 — a cold Kotlin linter on a loaded runner fails main CI through the playbook harness
+
+**Source**: coordinator, main CI run 42426085674 at 9dad36e98 (7 November 2026): only `Full suite / tests py3.12 acceptance-and-other` failed (607 passed, 1 failed); py3.11 and py3.13 passed the same tree.
+
+**Evidence**: the shard artifact's log (`qa-tests-full-3.12-7`, `tests-py3.12-rest-acceptance-and-other.log`):
+`test_playbook_harness.py ... skipped: INCONCLUSIVE, not passed: #224 LintOnEditHandler: the Kotlin linter timed out after 15s, so the handler's verdict was never reached`. The harness is a blocking release gate that treats any skip as a
+failure, so a JVM cold start on a slow runner turns main red.
+
+**Class**: same as N593 (fixed): the environment, not the handler, decided the probe. N593 warns, without scoring,
+when a branch-state rule refuses a creation probe; a linter timeout has no such path.
+
+**Proposal**: give the harness the same treatment for a lint-tool timeout on a CI runner: report it in the warning
+list, do not score it, and keep the blocking skip for the release-time run (RELEASING.md Step 12.0) where the daemon is
+warm. Alternatively raise or load-scale the Kotlin lint budget for the probe only. Reproduce red with a stub linter that
+sleeps past the budget.
+
+**Status**: ⬜ open.
+
 ### N598 — an all-digit short SHA is read as a release, and the upgrade stops on a "MAJOR version change"
 
 **Source**: coordinator, main CI run 42426035473 at 965951009 (7 November 2026): `acceptance-and-other` failed on
