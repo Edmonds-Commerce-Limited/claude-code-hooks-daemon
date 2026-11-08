@@ -124,6 +124,27 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N597 — a non-isolated sub-agent's `EnterWorktree` moves the whole session, so other agents write into that worktree
+
+**Source**: coordinator, 7-8 November 2026 (Plan 00571 Phase 3 slice d/e dispatch).
+
+**Evidence**: with the branch WIP cap full, a `general-purpose` agent was dispatched WITHOUT `isolation: worktree` and
+told to call `EnterWorktree path=<existing worktree>` so it could continue an existing branch. The tool's own text says
+a switch from a pinned agent "only affects this agent"; this agent was not pinned, and the switch moved the parent
+session's working directory too. A concurrent fact-check agent (dispatched afterwards from the main checkout) then
+wrote its report into that worktree and could not commit it; the coordinator's own `git -C /workspace` was refused as
+"a worktree-isolated session" redirecting git. `ExitWorktree keep` from the coordinator restored `/workspace` once the
+agent had stopped.
+
+**Class**: harness behaviour (Claude Code), not a daemon defect; the daemon's guidance has no word on it.
+
+**Proposal**: guidance, not code. Where the daemon tells a coordinator how to continue a branch when the WIP cap is
+full (the cap deny text and `CLAUDE/Worktree.md`), say: never have a non-isolated sub-agent call `EnterWorktree`;
+continue the branch from an isolated agent that merges it, or free a slot first. Consider whether
+`agent_isolation_advisor` should flag an `EnterWorktree` call from a non-isolated sub-agent while other agents run.
+
+**Status**: ⬜ open.
+
 ### N596 — `test_a_pulled_upgrade_is_synced_after_the_hook_has_answered` failed once on main CI with no state file
 
 **Source**: coordinator, main CI run 42421806919 at a000ed4c6 (7 November 2026), shard `integration-slow`.
