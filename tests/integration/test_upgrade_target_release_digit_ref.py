@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "upgrade_version.sh"
 CHECKOUT_VERSION = "3.73.0"
@@ -50,7 +52,7 @@ def _target_release(tmp_path: Path, stamp: str) -> str:
         env={"INSTALL_STAMP": stamp, "DAEMON_DIR": str(tmp_path), "PATH": "/usr/bin:/bin"},
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=Timeout.REQUEST_LONG,
         check=True,
     )
     return result.stdout.strip()
