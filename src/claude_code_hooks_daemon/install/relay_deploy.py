@@ -298,10 +298,11 @@ def _resolve_rustc() -> str:
     return shutil.which("rustc") or str(Path.home() / ".cargo" / "bin" / "rustc")
 
 
-def check_musl_toolchain(*, run_fn: RunFn = subprocess.run, target: str = RELAY_TARGET) -> bool:
+def check_musl_toolchain(*, run_fn: RunFn = subprocess.run, target: str | None = None) -> bool:
     """True when a musl-capable ``rustc`` is available (Task 5.2).
 
-    Checked via ``rustc --print target-list`` naming ``target`` (default :data:`RELAY_TARGET`) —
+    Checked via ``rustc --print target-list`` naming ``target``: by default the
+    host's own relay target (:func:`host_relay_target`), else :data:`RELAY_TARGET` —
     the same signal ``rustup target list`` itself derives from, and cheap
     enough to run on every install/upgrade. Does not attempt an actual
     compile (that is the build route's own job, and its own failure mode).
@@ -319,7 +320,8 @@ def check_musl_toolchain(*, run_fn: RunFn = subprocess.run, target: str = RELAY_
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return result.returncode == 0 and target in result.stdout
+    wanted = target or host_relay_target() or RELAY_TARGET
+    return result.returncode == 0 and wanted in result.stdout
 
 
 def _unsupported_host_result(route: str | None) -> RelayDeployResult:
