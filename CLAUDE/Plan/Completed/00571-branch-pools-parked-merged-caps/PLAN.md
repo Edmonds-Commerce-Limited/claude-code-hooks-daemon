@@ -1,6 +1,6 @@
 # Plan 00571: branch pools parked merged caps
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-07
 **Owner**: joseph
 **Priority**: High
@@ -168,11 +168,12 @@ Root-cause detail with file:line: [ROOTCAUSE.md](ROOTCAUSE.md).
 - [x] A release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
   (`007-branch-pools-parked-merged-caps.md`), plus config-changes and
   truth-changes entries, sit in the pending-release holding area.
-- [ ] Issue #165 is commented and closed after a verified merge and green CI.
+- [x] Issue #165 is commented and closed after a verified merge and green CI
+  (`main` run 42430377951 green at 7a917cff9).
 
 ## Delivery & Milestones
 
 - Phases 1 and 2 merged to `main` earlier (Task 2.7 and its siblings).
 - Phase 3 merged at 9314a6e4c through PR #186, whose CI ran the full gate.
-- Phase 4 dogfood journalled on 2026-11-08; #165 closes after `main` CI is
-  green on the merge.
+- Phase 4 dogfood journalled on 2026-11-08 (fix 7a917cff9); `main` CI green
+  at 7a917cff9; #165 commented and closed.

@@ -10,8 +10,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00572: ci wall clock sharding arm and hygiene](00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - In Progress (owner request: shard `qa.yml`'s serial pytest across runners by reusing release-gate's shard matrix, give every `main` push a verdict, build and release aarch64 relay and hooks-screen on `ubuntu-24.04-arm`, and close the practice gaps the [analysis](00572-ci-wall-clock-sharding-arm-and-hygiene/ANALYSIS.md) ranks)
 
-- [00571: branch pools parked merged caps](00571-branch-pools-parked-merged-caps/PLAN.md) - In Progress (GitHub #165 plus the owner's ruling: open, parked and merged branches become three pools, each with its own cap; parked and merged-kept branches carry a reason and a max age; one safe command clears merged branches locally and remotely behind an accumulating recovery bundle)
-
 - [00568: admin merge bypass guard](00568-admin-merge-bypass-guard/PLAN.md) - Not Started (GitHub #160, parked on owner questions: a configurable Bash handler denying `gh pr merge --admin`, the REST merge endpoint and the `mergePullRequest` mutation, so an admin token cannot merge past branch protection)
 
 - [00564: remote meta ref allocator](00564-remote-meta-ref-allocator/PLAN.md) - Not Started (owner proposal, not for the next release: plan numbers allocated by compare-and-swap on a remote metadata ref, `refs/hooks-daemon/meta`, with an offline fallback to Plan 00562's scan and a recovery step)
@@ -221,6 +219,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00571: branch pools parked merged caps](Completed/00571-branch-pools-parked-merged-caps/PLAN.md) - Complete at merge `9314a6e4c` (PR #186) + `7a917cff9` (green CI) + the archiving commit (GitHub #165, closed: open, parked and merged branches are three pools, each with its own cap, max age and deny rule; `branch-keep`, `branches.bot_owned`, safe `branch-sweep --clean --remote`; release note 007)
+
 - [00573: admin seat issue assignment override](Completed/00573-admin-seat-issue-assignment-override/PLAN.md) - Complete at merge `a2b7f27e9` + the archiving commit (owner ruling: a repository admin seat is never blocked by a non-admin's issue assignment; it gets an advisory, and `issue-validity --claim` performs a recorded takeover; non-admin seats and other admins' claims keep the duplicate-work block; dogfooded live on #155; ships in the release after v3.73.0, release note 004)
 
 - [00570: branch containment remote archive refs](Completed/00570-branch-containment-remote-archive-refs/PLAN.md) - Complete at merge `df4a928e9` (green CI run 42404687976) + the archiving commit (GitHub #166: branch-sweep and delete-branch accept a remote ref outside `refs/remotes`, such as an archive namespace, as proof of containment via one bounded `ls-remote`; the offline wording says only what it checked; release note 004)
@@ -279,8 +279,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00533: dispatch saturation recovery](Completed/00533-dispatch-saturation-recovery/PLAN.md) - Complete at merges `b4e83885c` and `3dbbcfaeb` (green CI) + the archiving commit (#124: the recovery command always gets through a saturated pool, a configurable pool with a bounded wait, a saturation warning and a clean SIGTERM grace; release note 002; follow-ups 00534 to 00536)
 
-- [00532: docs optimisation skill](Completed/00532-docs-optimisation-skill/PLAN.md) - Complete at merges `bb3eb552b`, `92c07d7bb` and `36b63400c` + the archiving commit (#123: a versioned Claude Code instruction-loading contract with a re-audit advisory, `docs-qa --footprint`, and the `docs-optimise` proposal skill; release note 001, truth change v3.71.0; follow-ups are ledger 00474 N513 to N515 and the deferred items F1 to F4 in RULINGS-fable.md)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -334,9 +332,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 575 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 486 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 487 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 66 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 65 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
