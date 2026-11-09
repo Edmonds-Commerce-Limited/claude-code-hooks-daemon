@@ -1350,3 +1350,56 @@ class TestBashGrepPatternStaysLinear:
             f"matches() cost grew {ratio:.0f}x for {SIZE_FACTOR}x the newline run "
             "-- _BASH_GREP_PATTERN is quadratic again"
         )
+
+
+def _bash(command: str) -> dict[str, Any]:
+    return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+
+class TestStdinGrepAndGitGrepAreNotLookups:
+    """Plan 00588 (GitHub #169): a grep that filters stdin or a git grep searches no project file."""
+
+    @pytest.fixture()
+    def handler(self) -> Any:
+        return lsp_enforcement.LspEnforcementHandler()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "printf 'a\\nresolve_venv noise\\n' | grep -v resolve_venv",
+            "cmd 2>&1 | grep -n resolve_venv",
+            "cmd | grep resolve_venv",
+            "cmd | rg resolve_venv",
+            "grep resolve_venv <<< 'text resolve_venv'",
+            "grep resolve_venv < out.txt",
+            "git grep -lF venv_lock_hash_matches HEAD -- CLAUDE/Security",
+            "git grep -lF venv_lock_hash_matches HEAD -- 'CLAUDE/*.md'",
+            "git grep -n venv_lock_hash_matches -- src/",
+            "git grep -n venv_lock_hash_matches",
+            "git -C some/dir grep -n venv_lock_hash_matches",
+        ],
+    )
+    def test_not_a_lookup(self, handler: Any, command: str) -> None:
+        assert handler.matches(_bash(command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -rn some_identifier src/",
+            "rg some_identifier",
+            "grep -rn some_identifier",
+            "grep some_identifier",
+            "cmd | grep -rn some_identifier src/",
+            "grep -rn some_identifier src/ | grep -v x",
+            "cmd | xargs grep some_identifier",
+        ],
+    )
+    def test_still_a_lookup(self, handler: Any, command: str) -> None:
+        assert handler.matches(_bash(command)) is True
+
+    def test_grep_tool_still_a_lookup(self, handler: Any) -> None:
+        hook_input = {
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "some_identifier", "path": "src"},
+        }
+        assert handler.matches(hook_input) is True

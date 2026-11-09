@@ -30,6 +30,7 @@ No-LSP modes (when no enabled plugin serves the searched file type):
 import logging
 import os
 import re
+import shlex
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final, NamedTuple
@@ -52,6 +53,7 @@ from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.claude_config import session_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.git_commit_parsing import SimpleCommand, simple_commands
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir, path_is_file
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
@@ -171,6 +173,39 @@ def _invocation_positionals(invocation: str) -> list[str]:
         elif not token.startswith("-"):
             positionals.append(token)
     return positionals
+
+
+_PIPE_OPERATORS: Final[frozenset[str]] = frozenset({"|", "|&"})
+
+
+def _reads_only_stdin(simple: SimpleCommand) -> bool:
+    """True for a grep/rg that names no file and is fed by a pipe or an input redirect."""
+    if not (simple.operator in _PIPE_OPERATORS or simple.reads_input):
+        return False
+    invocation = " ".join(simple.words)
+    # grep -r with no target searches the cwd, whatever is piped in.
+    if _RECURSIVE_SCAN_FLAG.search(invocation):
+        return False
+    return not _invocation_positionals(shlex.join(simple.words))[1:]
+
+
+def _has_lookup_grep(command: str) -> bool:
+    """False when every grep in ``command`` is a stdin filter or a ``git grep``.
+
+    A command with no grep this reading recognises (``xargs grep``, a grep inside
+    ``$( )``) stays a lookup, as does any command holding one real grep/rg.
+    """
+    skipped = False
+    for simple in simple_commands(command):
+        if simple.git is not None and simple.git.subcommand == "grep":
+            skipped = True
+        elif simple.words and Path(simple.words[0]).name in ("grep", "rg"):
+            if not _reads_only_stdin(simple):
+                return True
+            skipped = True
+        elif any(word in ("grep", "rg") for word in simple.words):
+            return True
+    return not skipped
 
 
 class _DirectorySurvey(NamedTuple):
@@ -651,6 +686,10 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             command = get_bash_command(hook_input)
             if command and self._is_single_file_bash_grep(command, self._search_base(hook_input)):
                 return False
+            # A grep that filters stdin, and `git grep` (content git holds, at a
+            # ref or not), search no file a language server indexes.
+            if command and not _has_lookup_grep(command):
+                return False
 
         # Extract the search pattern
         pattern = self._extract_search_pattern(hook_input, tool_name)
@@ -881,7 +920,10 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             "- Listing all symbols in a file → `documentSymbol`\n"
             "- Searching symbols across the project → `workspaceSymbol`\n\n"
             "**Grep/Bash grep is still appropriate for**: text patterns in content, "
-            "log searching, finding strings in config files.\n\n"
+            "log searching, finding strings in config files. A grep that filters "
+            "another command's output (`cmd | grep x`, or fed by `<` or `<<<`) and "
+            "`git grep` are never judged: they search no file a language server "
+            "indexes.\n\n"
             "Default mode (`block_once`): the first symbol-lookup grep in a session "
             "is denied with guidance; subsequent retries are allowed.\n\n"
             "It enforces only where an enabled Claude Code plugin provides a language "
