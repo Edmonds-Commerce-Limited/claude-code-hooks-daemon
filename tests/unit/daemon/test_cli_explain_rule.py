@@ -270,3 +270,24 @@ class TestProjectContextInitialisation:
         assert "could not initialise project context" in err.lower()
         assert "synthetic failure for test" in err
         assert not ProjectContext.is_initialized()
+
+
+class TestPluginHandlersResolveThroughTheCli:
+    """GitHub #171: the CLI answers for a handler loaded through ``plugins:``."""
+
+    @pytest.fixture(autouse=True)
+    def _plugin_project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from tests.unit.rule_explain.test_lookup import _plugin_project
+
+        root = _plugin_project(tmp_path)
+        monkeypatch.setattr(ProjectContext, "project_root", classmethod(lambda cls: root))
+
+    def test_explain_rule_resolves_plugin_rule(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert cmd_explain_rule(_rule_args(rule_id="R-DEMO-PLUGIN-RULE")) == 0
+        assert "demo verbose" in capsys.readouterr().out
+
+    def test_explain_handler_resolves_plugin_handler(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cmd_explain_handler(_handler_args(name="demo")) == 0
+        assert "demo plugin docs" in capsys.readouterr().out

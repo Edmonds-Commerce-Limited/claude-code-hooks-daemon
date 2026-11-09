@@ -11,12 +11,17 @@ wiring — new rules from sibling migrations appear automatically.
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Any
+
+import pytest
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.rule_explain.lookup import (
     HandlerRules,
@@ -283,3 +288,112 @@ class TestProjectHandlersAreDiscoverable:
         handler = find_handler(collected, "destructive_git")
         assert handler is not None
         assert "R-GIT-RESET-HARD" in {rule.rule_id for rule in handler.rules}
+
+
+_PLUGIN_SOURCE = """
+from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.core.rule import Rule
+
+
+class DemoHandler(Handler):
+    def __init__(self, config=None):
+        super().__init__(name="demo-plugin", priority=50, terminal=True)
+
+    def matches(self, hook_input: dict) -> bool:
+        return False
+
+    def handle(self, hook_input: dict) -> HookResult:
+        return HookResult(decision=Decision.DENY, reason="demo")
+
+    def get_rules(self) -> list:
+        return [
+            Rule(
+                rule_id="R-DEMO-PLUGIN-RULE",
+                blocked="a demo command",
+                why="plugin",
+                fix="none",
+                verbose="demo verbose",
+            )
+        ]
+
+    def get_claude_md(self) -> str | None:
+        return "demo plugin docs"
+
+    def get_acceptance_tests(self) -> list:
+        return []
+"""
+
+
+def _plugin_project(root: Path, *, source: str = _PLUGIN_SOURCE, enabled: bool = True) -> Path:
+    """Write a project whose only handler arrives through the ``plugins:`` section."""
+    (root / ".claude").mkdir()
+    (root / "handlers").mkdir()
+    (root / "handlers" / "demo.py").write_text(source)
+    (root / ".claude" / "hooks-daemon.yaml").write_text(
+        'version: "1.0"\n'
+        "plugins:\n"
+        "  paths: []\n"
+        "  plugins:\n"
+        "    - path: handlers/demo.py\n"
+        "      event_type: pre_tool_use\n"
+        "      handlers: [DemoHandler]\n"
+        f"      enabled: {'true' if enabled else 'false'}\n"
+    )
+    return root
+
+
+@pytest.fixture
+def plugin_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A project with one plugin handler, installed as the current project root."""
+    root = _plugin_project(tmp_path)
+    monkeypatch.setattr(ProjectContext, "project_root", classmethod(lambda cls: root))
+    return root
+
+
+class TestPluginHandlersAreDiscoverable:
+    """GitHub #171: a handler loaded through ``plugins:`` answers explain-rule."""
+
+    def test_plugin_rule_found_when_project_handlers_requested(self, plugin_project: Path) -> None:
+        collected = discover_handler_rules(include_project_handlers=True)
+
+        found = find_rule(collected, "R-DEMO-PLUGIN-RULE")
+        assert found is not None
+        assert found[0].class_name == "DemoHandler"
+        assert find_handler(collected, "demo") is not None
+
+    def test_plugin_handler_listed_exactly_once(self, plugin_project: Path) -> None:
+        collected = discover_handler_rules(include_project_handlers=True)
+
+        assert [entry.class_name for entry in collected].count("DemoHandler") == 1
+
+    def test_library_only_by_default(self, plugin_project: Path) -> None:
+        collected = discover_handler_rules()
+
+        assert find_rule(collected, "R-DEMO-PLUGIN-RULE") is None
+
+    def test_disabled_plugin_contributes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _plugin_project(tmp_path, enabled=False)
+        monkeypatch.setattr(ProjectContext, "project_root", classmethod(lambda cls: root))
+
+        collected = discover_handler_rules(include_project_handlers=True)
+
+        assert find_rule(collected, "R-DEMO-PLUGIN-RULE") is None
+
+    def test_plugin_that_fails_to_load_is_logged_and_library_lookup_survives(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        root = _plugin_project(tmp_path, source="def broken(:\n")
+        monkeypatch.setattr(ProjectContext, "project_root", classmethod(lambda cls: root))
+
+        with caplog.at_level(logging.ERROR):
+            collected = discover_handler_rules(include_project_handlers=True)
+
+        assert find_rule(collected, "R-DEMO-PLUGIN-RULE") is None
+        assert find_rule(collected, "R-GIT-RESET-HARD") is not None
+        assert any("plugin" in record.getMessage().lower() for record in caplog.records)

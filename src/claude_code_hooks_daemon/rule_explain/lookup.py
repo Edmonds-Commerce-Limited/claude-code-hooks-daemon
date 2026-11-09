@@ -150,7 +150,9 @@ def discover_handler_rules(
         if handler_class is not None
     ]
     if include_project_handlers:
-        handler_classes.extend(_project_handler_classes())
+        for extra in (*_project_handler_classes(), *_plugin_handler_classes()):
+            if extra not in handler_classes:
+                handler_classes.append(extra)
     return collect_handler_rules(handler_classes)
 
 
@@ -187,6 +189,36 @@ def _project_handler_classes() -> list[type[Handler]]:
             logger,
             exc,
             reason="project handlers that cannot be loaded contribute no rules ([]); the lookup still answers for the library handlers",
+            level=logging.ERROR,
+        )
+        return []
+
+
+def _plugin_handler_classes() -> list[type[Handler]]:
+    """Handler classes the ``plugins:`` config section loads, or nothing on failure.
+
+    Uses ``PluginLoader.load_from_plugins_config`` — the loader the daemon
+    itself runs — so the lookup sees exactly the handlers (and no disabled
+    ones) the daemon would. The loader raises when a configured plugin cannot
+    load; that is logged here and degrades to "no plugin rules" so the library
+    and project lookups still answer (GitHub #171).
+    """
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.plugins.loader import PluginLoader
+
+    try:
+        project_root = ProjectContext.project_root()
+        config = Config.find_and_load(project_root)
+        return [
+            type(handler)
+            for handler in PluginLoader.load_from_plugins_config(config.plugins, project_root)
+        ]
+    except Exception as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="plugin handlers that cannot be loaded contribute no rules ([]); the lookup still answers for the library and project handlers",
             level=logging.ERROR,
         )
         return []
