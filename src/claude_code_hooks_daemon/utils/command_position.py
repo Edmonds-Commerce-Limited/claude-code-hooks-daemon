@@ -348,15 +348,23 @@ _GIT_GREP_DATA_ROLES: frozenset[GitGrepRole | None] = frozenset(
 #: Text a git command or awk may RUN: a `!` alias body, an awk `system` call or pipe.
 _GIT_RUNNABLE_MARKERS: tuple[str, ...] = ("!",)
 _AWK_RUNNABLE_MARKERS: tuple[str, ...] = ("system", "|")
+_AWK_OUTPUT_REDIRECT: str = ">"
 
 
-def _blank_literal(word: str, runnable: tuple[str, ...], at_start: bool) -> str:
+def _blank_literal(
+    word: str, runnable: tuple[str, ...], at_start: bool, single_quote_is_literal: bool = False
+) -> str:
     """``word`` with its one quoted literal replaced by a placeholder.
 
     Kept as written when the literal holds no blank (`"stash"` is a token the
     guards read), has an expansion or escape, is not a single quoted span, or
     holds text in ``runnable``. ``at_start`` says the literal opens the word;
     otherwise it follows an attached option such as `--grep=`.
+
+    ``single_quote_is_literal`` reads `$`, a backtick and `<(` inside SINGLE
+    quotes as the plain characters bash makes them (an awk program's `$1`),
+    instead of as a possible expansion. Off by default: the callers that have
+    not opted in keep the conservative reading.
     """
     quote_at = 0 if at_start else min((word.find(q) for q in _QUOTES if q in word), default=-1)
     if quote_at < 0 or resolve_shell_word(word[quote_at:]) is None:
@@ -369,7 +377,10 @@ def _blank_literal(word: str, runnable: tuple[str, ...], at_start: bool) -> str:
         or literal[-1] != quote
         or literal.count(quote) != 2
         or not any(blank in body for blank in " \t")
-        or any(marker in body for marker in _EXPANSION_MARKERS)
+        or (
+            any(marker in body for marker in _EXPANSION_MARKERS)
+            and not (single_quote_is_literal and quote == "'")
+        )
         or (quote == '"' and any(active in body for active in _DOUBLE_QUOTE_ACTIVE))
         or any(marker in body for marker in runnable)
     ):
@@ -397,8 +408,12 @@ def _blank_git_text(segment: str, words: list[tuple[int, int]]) -> list[str]:
     return out
 
 
-def blank_quoted_text_arguments(segment: str) -> str:
+def blank_quoted_text_arguments(segment: str, awk_dollar_is_data: bool = False) -> str:
     """``segment`` with the quoted text arguments of `git`/`awk` blanked.
+
+    ``awk_dollar_is_data`` lets a single-quoted awk program holding `$1` be
+    blanked too: awk reads that `$` as a field, never the shell. The program's
+    own `system` and `|` still keep it as written.
 
     A guard asks "is this a destructive git command?". The value of `--grep`,
     `-S`, `-G`, `-e`, `--format` or `--pretty` on a read-only git subcommand,
@@ -414,8 +429,12 @@ def blank_quoted_text_arguments(segment: str) -> str:
     if head == "git":
         replaced = _blank_git_text(segment, words)
     else:
+        # An awk `print > "s.sh"` can write a script a later `sh s.sh` runs, so under
+        # the opt-in the program's own output redirect keeps it as written.
+        runnable = _AWK_RUNNABLE_MARKERS + (_AWK_OUTPUT_REDIRECT,) * awk_dollar_is_data
         replaced = [
-            _blank_literal(segment[start:end], _AWK_RUNNABLE_MARKERS, True) for start, end in words
+            _blank_literal(segment[start:end], runnable, True, awk_dollar_is_data)
+            for start, end in words
         ]
     pieces: list[str] = []
     previous_end = 0
@@ -427,12 +446,16 @@ def blank_quoted_text_arguments(segment: str) -> str:
     return "".join(pieces)
 
 
-def command_position_argument_segments(command: str) -> list[str]:
+def command_position_argument_segments(command: str, awk_dollar_is_data: bool = False) -> list[str]:
     """:func:`command_position_segments` with quoted text arguments blanked.
 
     A segment whose output a pipeline hands to anything but a known inert sink
     is left as written: `git log --format='git reset --hard' | sh` runs it.
+    ``awk_dollar_is_data`` is passed on to :func:`blank_quoted_text_arguments`,
+    except for a command that runs a script an earlier segment wrote
+    (:func:`_runs_written_script`): the text written IS the script.
     """
+    awk_dollar_is_data = awk_dollar_is_data and not _runs_written_script(command)
     view = command_position_view(command)
     spans = _segment_spans(view)
     segments = [view[start:end] for start, end in spans]
@@ -440,7 +463,7 @@ def command_position_argument_segments(command: str) -> list[str]:
         (
             segment
             if _pipeline_may_run_output(view, spans, segments, index)
-            else blank_quoted_text_arguments(segment)
+            else blank_quoted_text_arguments(segment, awk_dollar_is_data)
         )
         for index, segment in enumerate(segments)
     ]

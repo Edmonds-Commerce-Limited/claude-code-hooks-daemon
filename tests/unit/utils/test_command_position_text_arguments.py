@@ -56,6 +56,46 @@ class TestBlankQuotedTextArguments:
         assert [segment.strip() for segment in segments] == ["git log -S'_'", "git stash"]
 
 
+class TestAwkDollarIsDataOptIn:
+    PROGRAM = "awk '{print \"git worktree remove \" $1}'"
+
+    def test_default_keeps_a_program_holding_a_dollar(self) -> None:
+        assert blank_quoted_text_arguments(self.PROGRAM) == self.PROGRAM
+
+    def test_opt_in_blanks_it(self) -> None:
+        assert blank_quoted_text_arguments(self.PROGRAM, awk_dollar_is_data=True) == "awk '_'"
+
+    @pytest.mark.parametrize(
+        "segment",
+        [
+            "awk '{print \"git worktree remove \" $1 | \"sh\"}'",
+            "awk '{system(\"git worktree remove \" $1)}'",
+            'awk "{print \\"git worktree remove \\" $1}"',
+            "awk '{print \"git worktree remove \" $1 > \"s.sh\"}'",
+            "git log --grep='git reset $1'",
+            "ls 'a $b'",
+        ],
+    )
+    def test_opt_in_keeps_everything_that_can_run_or_is_not_awk_single_quoted(
+        self, segment: str
+    ) -> None:
+        assert blank_quoted_text_arguments(segment, awk_dollar_is_data=True) == segment
+
+    def test_segments_option_is_passed_on_and_a_piped_run_is_kept(self) -> None:
+        piped = f"{self.PROGRAM} | sh"
+        assert command_position_argument_segments(piped, awk_dollar_is_data=True)[0].strip() == (
+            self.PROGRAM
+        )
+        assert command_position_argument_segments(self.PROGRAM, awk_dollar_is_data=True) == [
+            "awk '_'"
+        ]
+
+    def test_a_script_an_earlier_segment_wrote_keeps_the_program(self) -> None:
+        command = f"{self.PROGRAM} > s.sh && sh s.sh"
+        joined = " ".join(command_position_argument_segments(command, awk_dollar_is_data=True))
+        assert "git worktree remove" in joined
+
+
 class TestHeredocReceivers:
     BODY = "\ngit reset --hard\nEOF"
 

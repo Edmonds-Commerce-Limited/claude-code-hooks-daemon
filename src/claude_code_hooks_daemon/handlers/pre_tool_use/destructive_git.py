@@ -1046,7 +1046,8 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         blanked before the quotes are removed.
         """
         return [
-            remove_word_quoting(segment) for segment in command_position_argument_segments(command)
+            remove_word_quoting(segment)
+            for segment in command_position_argument_segments(command, awk_dollar_is_data=True)
         ]
 
     def _segment_matches(self, pattern: re.Pattern[str], command: str) -> bool:
