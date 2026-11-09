@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00579: copy seeded files and worktree removal](00579-copy-seeded-files-and-worktree-removal/PLAN.md) - Blocked on the owner (GitHub #164, parked: the worktree-removal guard refuses a clean merged worktree whose only leftover is a copy-mode seeded file; treating such copies as regenerable weakens a safety control, safe only while byte-identical to the source; cluster with #167, #173)
+
 - [00578: local settings files untracked and guarded](00578-local-settings-files-untracked-and-guarded/PLAN.md) - Blocked on the owner (GitHub #189, parked: this repository tracks `.claude/settings.local.json` by Plan 00468's design, and nothing ignores or guards it or `CLAUDE.local.md` in clients; Q1-Q4 decide untracking, client `.gitignore` entries and a new staging guard)
 
 - [00575: release validated handler catalogue](00575-release-validated-handler-catalogue/PLAN.md) - Not Started (owner request, post-release: one generated catalogue of every handler with source and test links, validated by a CI test and a RELEASING.md gate)
@@ -330,11 +332,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 578 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 579 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 490 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 65 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 66 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
