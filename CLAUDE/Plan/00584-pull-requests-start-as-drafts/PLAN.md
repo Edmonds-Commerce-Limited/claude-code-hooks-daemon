@@ -53,7 +53,8 @@ standard: every deny says why and what to do next.
 - [ ] ⬜ **Task 1.1**: Decide the client default (enabled here; opt-in or advise-first for clients per Plan 00582) and
   how the handler reads the current title for `gh pr ready N` (one bounded `gh pr view --json title,isDraft`, or
   require the combined command form); record the rulings in this plan
-- [ ] ⬜ **Task 1.2**: Native-draft capability check. Repository facts are DETECTED from GitHub and cached, never
+- [ ] ⬜ **Task 1.2**: Native-draft capability check, read from Plan 00585's repository facts service (owner ruling:
+  a rich, automatically refreshed metadata object). Repository facts are DETECTED from GitHub and cached, never
   hand-maintained in tracked config: config would drift the day a repository goes public or its owner changes plan.
   The cache stores the capability a handler needs ("has native drafts"), not raw plan tiers. Prior art:
   `utils/github_issue_validity.py` already looks up repository permissions lazily with TTL caches. Decide whether to

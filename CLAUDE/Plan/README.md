@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00585: repository facts service](00585-repository-facts-service/PLAN.md) - Not Started (owner ruling: one rich, automatically refreshed cache of GitHub repository facts — visibility, native drafts, default branch, branch protection, the account's permission — with per-fact age and an `unknown` state, never hand-kept config; per-clone and untracked, not the Plan 00564 meta ref; Plan 00584 and `issue-validity` consume it)
+
 - [00584: pull requests start as drafts](00584-pull-requests-start-as-drafts/PLAN.md) - Not Started (owner request: every PR is created with a `[DRAFT]` title prefix everywhere, plus `--draft` where GitHub offers native drafts; leaving draft removes the prefix in the same step, `gh pr ready --undo` re-adds it; the release flows comply)
 
 - [00583: branch guard notices state intent and action](00583-branch-guard-notices-state-intent-and-action/PLAN.md) - In Progress (GitHub #192: the dormancy Stop line and `branch-sweep` name idle branches with no reason or action, and the `wip.cap` deny offers "continue in one of them" as an exit; every surface carries `BRANCH_LIMIT_PRINCIPLE` and a next action per branch)
@@ -338,11 +340,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 584 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 585 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 492 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 69 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 70 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
