@@ -39,10 +39,10 @@ the principle's text is reused unchanged here.
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED tests on the wording of each surface (Stop context line, `branch-sweep` Dormant section,
+- [x] ✅ **Task 1.1**: RED tests on the wording of each surface (Stop context line, `branch-sweep` Dormant section,
   `wip.cap` deny)
-- [ ] ⬜ **Task 1.2**: GREEN, reusing `BRANCH_LIMIT_PRINCIPLE` and the existing per-branch command builders
-- [ ] ⬜ **Task 1.3**: release-notes callout
+- [x] ✅ **Task 1.2**: GREEN, reusing `BRANCH_LIMIT_PRINCIPLE` and the existing per-branch command builders
+- [x] ✅ **Task 1.3**: release-notes callout
 
 ### Phase 2: Delivery
 
@@ -50,10 +50,13 @@ the principle's text is reused unchanged here.
 
 ## Success Criteria
 
-- [ ] The new tests failed before the fix and pass after it, on all three surfaces
-- [ ] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+- [x] The new tests failed before the fix and pass after it, on all three surfaces (3 failed before, per
+  `subagent-reports/261109-issue-192-implementer-sonnet.md`)
+- [x] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+  (`018-branch-guard-notices-state-intent-and-action.md`)
 - [ ] Merged to main with green CI; #192 closed
 
 ## Delivery & Milestones
 
-- (pending)
+- `d60da0fda`: the fix on all three surfaces, tests and release note; merged to main by fast-forward at
+  `7d954f213` (targeted QA 42/42)
