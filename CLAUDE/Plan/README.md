@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00577: forwarder stubs shellcheck clean](00577-forwarder-stubs-shellcheck-clean/PLAN.md) - In Progress (GitHub #163: generated hook stubs fail `shellcheck --severity=warning` with SC2034 on the relay variable, which the sourced init.sh reads; emit it with `export` and shellcheck every generated stub in a test)
+
 - [00575: release validated handler catalogue](00575-release-validated-handler-catalogue/PLAN.md) - Not Started (owner request, post-release: one generated catalogue of every handler with source and test links, validated by a CI test and a RELEASING.md gate)
 
 - [00574: plan decisions log document](00574-plan-decisions-log-document/PLAN.md) - Not Started (owner request, for later: a per-plan `PLAN-DECISIONS.md`, pre-created by mkplan, as an unbounded, parseable decision log keyed by task id, so PLAN.md stays the front page of tasks and progress and JOURNAL/ stays ad hoc; adversarial review in progress)
@@ -328,11 +330,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 576 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 577 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 489 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 64 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 65 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
