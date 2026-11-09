@@ -8,6 +8,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00587: containment follows a cd into compound command bodies](00587-containment-cd-into-compound-bodies/PLAN.md) - In Progress (GitHub #195: a `../` redirect inside a `for`/`while`/`if`/`{ }`/`( )` body after a `cd` is resolved from the repository root and denied; resolve it from the `cd` target, keeping real escapes denied)
+
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
 ### Next (ordered; work top to bottom)
@@ -297,11 +299,11 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Plan Statistics
 
-- **Total Plans Created**: 586 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 587 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 493 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 70 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 71 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
