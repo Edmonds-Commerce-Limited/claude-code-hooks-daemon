@@ -12,15 +12,15 @@
 
 The branch guards exist so that work FINISHES (`BRANCH_LIMIT_PRINCIPLE`, `constants/branch_guard.py:9`). The
 stop-guard deny says so, but the surfaces that name idle branches do not. The main-thread Stop context line built by
-`_noisy_line()` (`core/branch_stop_gate.py:88`) is only "Idle branches at the noisy dormancy stage or later:
+`_noisy_line()` (`core/branch_stop_gate.py`) is only "Idle branches at the noisy dormancy stage or later:
 <names>.", and `branch-sweep` lists the same branches under "Dormant:" with an age and no next action. An agent read
 that as a status report and left unfinished work branches in place across many stops. The `wip.cap` deny's fix text
 (`handlers/pre_tool_use/branch_creation_guard.py:64`) offers "or continue in one of them" as an exit, which reads as
 a way past the cap rather than a demand to finish open work.
 
 This is the first concrete case of the message standard Plan 00582 will write down: every guard surface says why it
-fired and what to do next. Plan 00560 (In Progress) shares `BRANCH_LIMIT_PRINCIPLE` for its scratch stop gate, so
-the principle's text is reused unchanged here.
+fired and what to do next. Plan 00560 reuses the `BRANCH_LIMIT_PRINCIPLE` text in its own message shape, so the
+principle's text is reused unchanged here.
 
 ## Goals
 
@@ -58,5 +58,6 @@ the principle's text is reused unchanged here.
 
 ## Delivery & Milestones
 
-- `d60da0fda`: the fix on all three surfaces, tests and release note; merged to main by fast-forward at
-  `7d954f213` (targeted QA 42/42)
+- `d60da0fda`: the fix on all three surfaces, tests and release note; the branch then merged main in
+  (`7d954f213`) and main fast-forwarded to that merge commit (targeted QA 42/42 on the branch, recorded in the
+  completion journal entry)
