@@ -124,7 +124,7 @@ class TestASupersededRunIsCancelled:
         assert "github.ref" in group
 
 
-TMPDIR_EXPORT ='echo "TMPDIR=/ci-tmp" >> "$GITHUB_ENV"'
+TMPDIR_EXPORT = 'echo "TMPDIR=/ci-tmp" >> "$GITHUB_ENV"'
 
 
 class TestTemporaryFilesLiveOnTheRootDisk:
