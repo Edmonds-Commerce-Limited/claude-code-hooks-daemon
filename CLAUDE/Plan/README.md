@@ -8,8 +8,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00583: branch guard notices state intent and action](00583-branch-guard-notices-state-intent-and-action/PLAN.md) - In Progress (GitHub #192: the dormancy Stop line and `branch-sweep` name idle branches with no reason or action, and the `wip.cap` deny offers "continue in one of them" as an exit; every surface carries `BRANCH_LIMIT_PRINCIPLE` and a next action per branch)
-
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
 ### Next (ordered; work top to bottom)
@@ -188,6 +186,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00583: branch guard notices state intent and action](Completed/00583-branch-guard-notices-state-intent-and-action/PLAN.md) - Complete at `d60da0fda` (merged via `7d954f213`; main CI run 42682133539, full suite, success) + the archiving commit (GitHub #192, closed: the dormancy Stop line, `branch-sweep`'s Dormant section and the `wip.cap` deny each carry `BRANCH_LIMIT_PRINCIPLE` and a next action per branch, and the session is told to take that work on first; release note 018)
+
 - [00581: provision repairs a stale venv](Completed/00581-provision-repairs-a-stale-venv/PLAN.md) - Complete at `cfa601263` (CI run 42650039659 success) + the archiving commit (GitHub #168, closed: at the expected version `provision.sh` checks the venv's lock hash; a foreground run repairs a stale venv through the bootstrap repair, a background run names `hooks-daemon repair`, an unreadable hash counts as stale; release note 017)
 
 - [00580: optional seed entries are not missing](Completed/00580-optional-seed-entries-are-not-missing/PLAN.md) - Complete at `1b1cbb079` (CI run 42636878356 success) + the archiving commit (GitHub #167, closed: `check-worktree-seed` no longer lists an absent `optional: true` seed entry as MISSING or tells the reader to remove it; an absent required entry still is; release note 016)
@@ -246,8 +246,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00543: journal file per entry](Completed/00543-journal-file-per-entry/PLAN.md) - Complete at merge `c127d7356` + `c05b91eeb` (green CI on `15127181d`) + the archiving commit (#135, owner-directed: one journal file per entry under `JOURNAL/YYYY-MM-DD/`, so concurrent branches never conflict; legacy day-files read alongside; any change to an existing journal file is denied except conflict-marker removal or an exact restore)
 
-- [00542: statusline fast path raw text](Completed/00542-statusline-fast-path-raw-text/PLAN.md) - Complete at merge `901e59a7a` + the archiving commit (#131: raw status text plus a builtin-only forwarder fast path through the Rust relay, about 0.006 CPU-s per tick against 0.077 before; every fast-path fault is a red line naming the fix, and only a daemon that is not running hands off to the start-up path)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -301,9 +299,9 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - **Total Plans Created**: 586 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 492 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 493 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 71 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 70 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

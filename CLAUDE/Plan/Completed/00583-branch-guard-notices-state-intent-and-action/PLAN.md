@@ -1,6 +1,6 @@
 # Plan 00583: branch guard notices state intent and action
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-09
 **Owner**: dev
 **Priority**: High
@@ -46,7 +46,7 @@ principle's text is reused unchanged here.
 
 ### Phase 2: Delivery
 
-- [ ] ⬜ **Task 2.1**: targeted QA, merge, verify CI, close #192
+- [x] ✅ **Task 2.1**: targeted QA, merge, verify CI, close #192
 
 ## Success Criteria
 
@@ -54,10 +54,13 @@ principle's text is reused unchanged here.
   `subagent-reports/261109-issue-192-implementer-sonnet.md`)
 - [x] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
   (`018-branch-guard-notices-state-intent-and-action.md`)
-- [ ] Merged to main with green CI; #192 closed
+- [x] Merged to main with green CI; #192 closed (main CI run 42682133539, full suite on 3.11/3.12/3.13, success on
+  `43f1a9a98`, which includes the fix)
 
 ## Delivery & Milestones
 
 - `d60da0fda`: the fix on all three surfaces, tests and release note; the branch then merged main in
   (`7d954f213`) and main fast-forwarded to that merge commit (targeted QA 42/42 on the branch, recorded in the
   completion journal entry)
+- The first `main` CI run after the merge (42676054890) failed on a `provision.sh` shellcheck finding from Plan 00581,
+  not from this plan; fixed in `43f1a9a98`, whose run 42682133539 (full suite) is green. #192 closed
