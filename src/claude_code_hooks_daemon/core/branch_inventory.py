@@ -783,7 +783,7 @@ class _Pass:
             return cached
         if not self.within_budget():
             return None
-        computed =_pair_facts(self.repo, tip, target.sha, want_lines=want_lines)
+        computed = _pair_facts(self.repo, tip, target.sha, want_lines=want_lines)
         if computed is not None:
             self.cache.pairs[key] = {
                 "ahead": computed.ahead,
