@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00580: optional seed entries are not missing](00580-optional-seed-entries-are-not-missing/PLAN.md) - In Progress (GitHub #167: `check-worktree-seed` lists an absent `optional: true` seed entry as MISSING and says to remove it; `diff_seed_config` ignores `SeedEntry.optional`)
-
 - [00579: copy seeded files and worktree removal](00579-copy-seeded-files-and-worktree-removal/PLAN.md) - Blocked on the owner (GitHub #164, parked: the worktree-removal guard refuses a clean merged worktree whose only leftover is a copy-mode seeded file; treating such copies as regenerable weakens a safety control, safe only while byte-identical to the source; related #173)
 
 - [00578: local settings files untracked and guarded](00578-local-settings-files-untracked-and-guarded/PLAN.md) - Blocked on the owner (GitHub #189, parked: this repository tracks `.claude/settings.local.json` by Plan 00468's design, and nothing ignores or guards it or `CLAUDE.local.md` in clients; Q1-Q4 decide untracking, client `.gitignore` entries and a new staging guard)
@@ -223,6 +221,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00580: optional seed entries are not missing](Completed/00580-optional-seed-entries-are-not-missing/PLAN.md) - Complete at `1b1cbb079` (CI run 42636878356 success) + the archiving commit (GitHub #167, closed: `check-worktree-seed` no longer lists an absent `optional: true` seed entry as MISSING or tells the reader to remove it; an absent required entry still is; release note 016)
+
 - [00577: forwarder stubs shellcheck clean](Completed/00577-forwarder-stubs-shellcheck-clean/PLAN.md) - Complete at `43250b5fb` (CI run 42627973690 success) + the archiving commit (GitHub #163, closed: generated hook stubs export the relay-unused marker the sourced init.sh reads, so `shellcheck --severity=warning` is clean with no suppression; a test shellchecks the stub generated for every event; release note 015)
 
 - [00576: hotfix release fast path](Completed/00576-hotfix-release-fast-path/PLAN.md) - Complete at merge `8bfcad71f` (PR #190) + the archiving commit (owner request after v3.73.1: `/release hotfix` runs the RELEASING.md "Hotfix fast path" and the state file and `release_blocker` name the mode; advise-severity plan/docs QA findings never fail CI; a test pins the release gate's cancel-in-progress concurrency, which the journal shows did cancel the superseded v3.73.1 run; release note 013)
@@ -281,8 +281,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00541: stale key advisory names orphaned transcripts dir](Completed/00541-stale-key-advisory-names-orphaned-transcripts-dir/PLAN.md) - Complete at merge `31c6a1454` (green CI) + the archiving commit (#52 part 1, a stand-in ruling: the `transcript_archiver` stale-key advisory names `untracked/transcripts/` and the reclaim action; part 2 stays owner-only; release note 006)
 
-- [00540: ccy wrapper migration interpreter prefix](Completed/00540-ccy-wrapper-migration-interpreter-prefix/PLAN.md) - Complete at merge `6e349af66` (green CI) + the archiving commit (#126: the upgrade rewrites a Python interpreter prefix to `sh`, repairs lines broken by 3.69.0/3.70.0, reports pins, and the integrity check warns; release note 005)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -336,9 +334,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 580 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 490 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 491 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 67 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 66 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

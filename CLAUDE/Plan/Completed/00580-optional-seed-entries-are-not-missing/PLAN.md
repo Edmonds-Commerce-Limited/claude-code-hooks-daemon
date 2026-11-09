@@ -1,6 +1,6 @@
 # Plan 00580: optional seed entries are not missing
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-09
 **Owner**: dev
 **Priority**: Medium
@@ -32,20 +32,23 @@ copy-mode seeds), so it is fixed on its own.
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED test: an absent optional entry is not in `missing`; an absent required entry still is
-- [ ] ⬜ **Task 1.2**: GREEN in `diff_seed_config`; check that the CLI's MISSING wording is correct for what remains
-- [ ] ⬜ **Task 1.3**: release-notes callout
+- [x] ✅ **Task 1.1**: RED test: an absent optional entry is not in `missing`; an absent required entry still is
+- [x] ✅ **Task 1.2**: GREEN in `diff_seed_config`; check that the CLI's MISSING wording is correct for what remains
+- [x] ✅ **Task 1.3**: release-notes callout
 
 ### Phase 2: Delivery
 
-- [ ] ⬜ **Task 2.1**: targeted QA, merge, verify CI, close #167
+- [x] ✅ **Task 2.1**: targeted QA, merge, verify CI, close #167
 
 ## Success Criteria
 
-- [ ] The new test failed before the fix and passes after it, in both directions (optional absent, required absent)
-- [ ] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
-- [ ] Merged to main with green CI; #167 closed
+- [x] The new test failed before the fix and passes after it, in both directions (optional absent, required absent)
+- [x] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+  (`016-optional-seed-entries-are-not-missing.md`)
+- [x] Merged to main with green CI; #167 closed
 
 ## Delivery & Milestones
 
-- (pending)
+- Fix: `f04e3329e`, then main merged in at `1b1cbb079` and fast-forwarded onto main (targeted QA 42/42, 0 unmapped);
+  CI run 42636878356 `success`; #167 closed
+- [Implementer report](subagent-reports/261109-issue-167-implementer-sonnet.md)
