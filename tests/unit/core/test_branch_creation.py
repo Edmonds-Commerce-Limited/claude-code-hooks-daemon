@@ -328,7 +328,14 @@ class TestLabels:
         path = tmp_path / "x" / "labels.json"
         write_labels(path, [{"name": "a", "group": "merged", "action": "do"}])
         assert read_labels(path) == {
-            "a": {"group": "merged", "action": "do", "stage": None, "stale": None}
+            "a": {
+                "group": "merged",
+                "action": "do",
+                "stage": None,
+                "stale": None,
+                "local_tip": None,
+                "remote_tip": None,
+            }
         }
 
     def test_absent_is_empty(self, tmp_path: Path) -> None:
@@ -348,7 +355,13 @@ class TestWipCapLeavesMergedToItsOwnPool:
     def test_a_merged_label_takes_the_branch_out_of_the_wip_count(self, repo: Path) -> None:
         _branch(repo, "alpha")
         _branch(repo, "zulu")
-        labels = {"zulu": {"group": "merged", "action": "bin/hooks-daemon delete-branch zulu"}}
+        labels = {
+            "zulu": {
+                "group": "merged",
+                "action": "bin/hooks-daemon delete-branch zulu",
+                "local_tip": _git(repo, "rev-parse", "zulu").strip(),
+            }
+        }
         verdict = creation_verdict(repo, _config(cap=2), "fresh", labels=labels)
         assert verdict.rule_id != RuleID.BRANCH_WIP_CAP
         assert sweep_clean_command() not in "\n".join(

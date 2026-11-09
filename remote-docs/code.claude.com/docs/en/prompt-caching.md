@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/prompt-caching.md
-fetched_at: '2026-11-07T20:13:05.694321+00:00'
+fetched_at: '2026-11-09T09:01:45.217711+00:00'
 fidelity: converted
 source_sha256: 29702480e9fab6834ab3bce0758c9eb45e25fe9c9e93f96716c20d08df2f50f2
 licence: unreviewed
-stale_after: '2027-02-05'
+stale_after: '2027-02-07'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 

@@ -20,7 +20,7 @@ import logging
 import re
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, Literal
 
@@ -109,6 +109,10 @@ class _Work:
     on_remote: bool = False
     #: OPEN if any ref is open work, else PARKED if any is parked, else MERGED.
     pool: Pool = Pool.OPEN
+    #: A ref still at its labelled tip carries the snapshot's stale mark.
+    stale: bool = False
+    #: The display label of the ref named ``name`` (see ``_display_label``).
+    label: Mapping[str, str | None] = field(default_factory=dict)
 
 
 # --- naming ---------------------------------------------------------------------------
@@ -150,6 +154,10 @@ def write_labels(path: Path, branches: list[dict[str, object]]) -> None:
             "action": record.get("action"),
             "stage": record.get("dormancy_stage"),
             "stale": "true" if record.get("stale") else None,
+            # The tips the verdict was reached at: the guard trusts a pool/stale
+            # label only while the ref it judges is still at the labelled tip.
+            "local_tip": record.get("local_tip"),
+            "remote_tip": record.get("remote_tip"),
         }
         for record in branches
     }
@@ -289,9 +297,33 @@ def _merged_refnames(
     return {line for line in result.stdout.splitlines() if line}
 
 
+def _tip_label(ref: _Ref, labels: Labels) -> Mapping[str, str | None]:
+    """The snapshot label for ``ref``, or ``{}`` when the ref has moved since it was written.
+
+    The snapshot is keyed by name and is written once per session, so a branch
+    that gained commits afterwards would otherwise keep a "merged" verdict that
+    no longer holds. A label with no recorded tip is not trusted either.
+    """
+    label = labels.get(ref.name, {})
+    recorded = label.get("local_tip" if ref.local else "remote_tip")
+    return label if recorded == ref.tip else {}
+
+
+def _display_label(ref: _Ref, labels: Labels) -> Mapping[str, str | None]:
+    """The label that orders and annotates ``ref`` in the deny list.
+
+    Looser than :func:`_tip_label`: a label with no recorded tip still orders the list,
+    but one recorded at a different tip describes a branch that has since moved, so its
+    group and suggested action would mislead and it is dropped.
+    """
+    label = labels.get(ref.name, {})
+    recorded = label.get("local_tip" if ref.local else "remote_tip")
+    return {} if recorded and recorded != ref.tip else label
+
+
 def _ref_pool(ref: _Ref, merged: set[str], labels: Labels) -> Pool:
     """One ref's pool: in the default (or labelled done) is MERGED, a park trailer PARKED."""
-    if ref.refname in merged or labels.get(ref.name, {}).get("group") in _CLEANABLE:
+    if ref.refname in merged or _tip_label(ref, labels).get("group") in _CLEANABLE:
         return Pool.MERGED
     if ref.parked:
         return Pool.PARKED
@@ -335,6 +367,11 @@ def _work_groups(
                 committed=max(ref.committed for ref in group),
                 on_remote=any(not ref.local for ref in group),
                 pool=_group_pool([_ref_pool(ref, merged or set(), labels or {}) for ref in group]),
+                stale=any(_tip_label(ref, labels or {}).get("stale") for ref in group),
+                label=next(
+                    (_display_label(ref, labels or {}) for ref in group if ref.name == name),
+                    {},
+                ),
             )
         )
     return groups
@@ -350,26 +387,24 @@ def _detail(work: _Work, now: float, worktrees: Mapping[str, Path] | None) -> st
     return f"{work.name} ({age}d old{place})"
 
 
-def _rank(work: _Work, labels: Labels) -> int:
-    group = labels.get(work.name, {}).get("group")
+def _rank(work: _Work) -> int:
+    group = work.label.get("group")
     return _GROUP_ORDER.index(group) if group in _GROUP_ORDER else len(_GROUP_ORDER)
 
 
 def _cap_lines(
     groups: list[_Work],
     config: BranchesConfig,
-    labels: Labels,
     now: float,
     worktrees: Mapping[str, Path] | None,
 ) -> list[str]:
-    ordered = sorted(groups, key=lambda work: (_rank(work, labels), work.committed, work.name))
+    ordered = sorted(groups, key=lambda work: (_rank(work), work.committed, work.name))
     lines = [
         f"Open work branches: {len(groups)} (cap {config.effective_wip_cap()}). "
         "Finish, park or delete one before starting another:"
     ]
     for work in ordered[:DENY_LIST_LIMIT]:
-        label = labels.get(work.name, {})
-        group, action = label.get("group"), label.get("action")
+        group, action = work.label.get("group"), work.label.get("action")
         suffix = f"  [{group}]" if group else ""
         if action:
             suffix += f"  -> {action}"
@@ -478,13 +513,9 @@ def _parked_pool_lines(
     return lines
 
 
-def _stale_merged(merged: list[_Work], labels: Labels) -> list[_Work]:
-    """Merged work any of whose names the labels snapshot marks stale (unkept or lapsed)."""
-    return [
-        work
-        for work in merged
-        if any(labels.get(name, {}).get("stale") for name in (work.name, *work.names))
-    ]
+def _stale_merged(merged: list[_Work]) -> list[_Work]:
+    """Merged work the labels snapshot marks stale (unkept or lapsed) at its current tip."""
+    return [work for work in merged if work.stale]
 
 
 def _merged_pool_lines(
@@ -594,7 +625,7 @@ def creation_verdict(
         len(parked) >= config.effective_pool_cap(Pool.PARKED) or bool(stale_parked)
     )
     merged = [work for work in all_groups if work.pool == Pool.MERGED]
-    stale_merged = _stale_merged(merged, labels)
+    stale_merged = _stale_merged(merged)
     over_merged = config.merged.mode != "off" and (
         len(merged) >= config.effective_pool_cap(Pool.MERGED) or bool(stale_merged)
     )
@@ -609,7 +640,7 @@ def creation_verdict(
                 " -- continue there instead of opening another."
             )
     if over_cap:
-        lines.extend(_cap_lines(groups, config, labels or {}, moment, worktrees))
+        lines.extend(_cap_lines(groups, config, moment, worktrees))
     if blocking:
         lines.extend(_dormancy_deny_lines(blocking, moment, worktrees))
     elif noisy:

@@ -59,6 +59,17 @@ class TestOwnershipRefusal:
         assert reason is not None
         assert "worktree-reap --reap --only b" in reason
 
+    def test_reap_hint_names_the_directory_not_the_branch(self) -> None:
+        """`worktree-reap --only` matches the worktree directory name, which git keeps
+        separate from the branch name."""
+        holds = RunningHolds(frozenset(), frozenset())
+        reason = ownership_refusal(
+            "worktree-foo", Path("/r/.claude/worktrees/foo"), locked=False, holds=holds
+        )
+        assert reason is not None
+        assert "worktree-reap --reap --only foo`" in reason
+        assert "--only worktree-foo" not in reason
+
     def test_locked(self) -> None:
         holds = RunningHolds(frozenset(), frozenset())
         reason = ownership_refusal("b", Path("/x/y"), locked=True, holds=holds)
