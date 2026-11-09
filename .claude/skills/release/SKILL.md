@@ -1,7 +1,7 @@
 ---
 name: release
 description: Automated release management - version updates, changelog generation, git tagging, and GitHub release creation
-argument-hint: "[major|minor|patch|X.Y.Z] [accept-wip]"
+argument-hint: "[major|minor|patch|X.Y.Z] [accept-wip|hotfix]"
 ---
 
 # /release - Automated Release Management Skill
@@ -36,7 +36,7 @@ Claude Code loads this markdown and nothing else — the file below is not run
 for you, and it holds the procedure to follow (Plan 00324):
 
 ```bash
-bash "${CLAUDE_SKILL_DIR:-.claude/skills/release}/invoke.sh" <major|minor|patch|X.Y.Z> [accept-wip]
+bash "${CLAUDE_SKILL_DIR:-.claude/skills/release}/invoke.sh" <major|minor|patch|X.Y.Z> [accept-wip|hotfix]
 ```
 
 Follow its output exactly; what is written here is orientation.
@@ -48,6 +48,8 @@ Follow its output exactly; what is written here is orientation.
 /release 2.2.0           # explicit version
 /release patch           # bump type: major | minor | patch
 /release 2.2.0 accept-wip  # proceed over in-flight work the slate gate reported
+/release hotfix          # emergency patch on the hotfix fast path
+/release 2.2.1 hotfix    # the same, explicit version
 ```
 
 ## What It Does
@@ -60,6 +62,10 @@ numbering and which are BLOCKING gates. In outline only: prepare on a
 gate, then — in this session, with the daemon live — run the acceptance tests,
 merge the pull request, tag the merge commit and publish. While the pull
 request is open, other merges to `main` are frozen (R-RELEASE-MERGE-FREEZE).
+
+`hotfix` selects RELEASING.md's "Hotfix fast path": a patch release that
+skips the scope-wide steps and keeps every gate on the published artefact.
+The section owns the step list.
 
 This skill does not restate any step; a step number anywhere in this file is
 RELEASING.md's numbering. Any blocking-gate failure ABORTS the release.

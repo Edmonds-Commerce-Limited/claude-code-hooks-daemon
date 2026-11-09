@@ -124,6 +124,10 @@ class ReleaseBlockerHandler(Handler):
 
     _FIELD_VERSION: ClassVar[str] = "version"
     _FIELD_LAST_COMPLETED_STEP: ClassVar[str] = "last_completed_step"
+    _FIELD_MODE: ClassVar[str] = "mode"
+
+    #: The one non-standard pipeline (Plan 00576). Absent `mode` = standard.
+    MODE_HOTFIX: ClassVar[str] = "hotfix"
 
     _UNKNOWN: ClassVar[str] = "unknown"
 
@@ -268,6 +272,40 @@ class ReleaseBlockerHandler(Handler):
 
         return True
 
+    @classmethod
+    def _pipeline_paragraph(cls, mode: object) -> str:
+        """Which pipeline the resumed release follows, from the state file's `mode`.
+
+        A resumed session learns the mode only from here, so a hotfix release
+        names its fast path. Anything other than the one known mode gets the
+        standard pipeline: an unrecognised mode must never become a shortcut.
+        """
+        standard = (
+            "Per the Acceptance Testing Gate in RELEASING.md (BLOCKING): you must "
+            "execute the full acceptance playbook, and all acceptance tests must "
+            "pass, before ending this session. "
+            "RELEASING.md is the source of truth for what that covers — generate "
+            "the current set with `./bin/hooks-daemon generate-playbook` rather "
+            "than trusting a count quoted here, which would drift."
+        )
+        if mode == cls.MODE_HOTFIX:
+            return (
+                f"This is a HOTFIX release (mode: {cls.MODE_HOTFIX}): follow the "
+                '"Hotfix fast path" section of RELEASING.md for every remaining '
+                "step. Its Acceptance Testing Gate (BLOCKING) is Step 12.0's "
+                "deterministic gates plus targeted acceptance tests for the "
+                "handlers the hotfix changed, and all of them must pass before "
+                "ending this session. The release pull request, the full Release "
+                "gate CI run, the start-up budget gate, the merge freeze and "
+                "Step 13 are unchanged."
+            )
+        if mode is None:
+            return standard
+        return (
+            f"The state file records mode {mode!r}, which is not a known release "
+            "mode, so the standard pipeline applies. " + standard
+        )
+
     def handle(self, hook_input: dict) -> HookResult:
         """Block Stop event, naming the release and where to resume it.
 
@@ -289,12 +327,7 @@ class ReleaseBlockerHandler(Handler):
             f"with last_completed_step: {last_step}. Resume from that step rather "
             "than restarting the release, and do not re-litigate whether it should "
             "happen — the file IS the authorisation.\n\n"
-            "Per the Acceptance Testing Gate in RELEASING.md (BLOCKING): you must "
-            "execute the full acceptance playbook, and all acceptance tests must "
-            "pass, before ending this session. "
-            "RELEASING.md is the source of truth for what that covers — generate "
-            "the current set with `./bin/hooks-daemon generate-playbook` rather "
-            "than trusting a count quoted here, which would drift.\n\n"
+            f"{self._pipeline_paragraph(state.get(self._FIELD_MODE))}\n\n"
             "Abandoning a part-done release is its own broken state: version "
             "bumped, UNRELEASED/ directories moved, nothing tagged. Finish it, or "
             "revert it deliberately.\n\n"

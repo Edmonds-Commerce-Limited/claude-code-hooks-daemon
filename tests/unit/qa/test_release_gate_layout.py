@@ -104,7 +104,27 @@ class TestShardMatrix:
         assert workflow["jobs"]["release-gate"]["name"] == "Release gate"
 
 
-TMPDIR_EXPORT = 'echo "TMPDIR=/ci-tmp" >> "$GITHUB_ENV"'
+class TestASupersededRunIsCancelled:
+    """Plan 00576: a new push to the release branch cancels the run it supersedes.
+
+    Every fix during a release is a push, and each push starts a run of the better part of an hour. Without
+    the group, the stale run keeps its runners until it ends, and Step 8c must tell it apart from the live one.
+    The group is keyed on the pull request (a manual run falls back to the ref) and prefixed with the
+    workflow's own name, so it never cancels a `qa.yml` run on the same branch.
+    """
+
+    def test_the_workflow_cancels_in_progress_runs_of_the_same_pull_request(
+        self, workflow: dict[str, Any]
+    ) -> None:
+        concurrency: dict[str, Any] = workflow["concurrency"]
+        assert concurrency["cancel-in-progress"] is True
+        group = str(concurrency["group"])
+        assert group.startswith("release-gate-")
+        assert "github.event.pull_request.number" in group
+        assert "github.ref" in group
+
+
+TMPDIR_EXPORT ='echo "TMPDIR=/ci-tmp" >> "$GITHUB_ENV"'
 
 
 class TestTemporaryFilesLiveOnTheRootDisk:

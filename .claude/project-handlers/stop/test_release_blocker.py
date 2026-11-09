@@ -560,3 +560,44 @@ class TestReleaseBlockerHandlerHandle:
         assert "4.1.2" in result.reason
         assert "9" in result.reason
         assert "untracked/release-state.json" in result.reason
+
+
+def _reason_for_state(root: Path, **fields: Any) -> str:
+    _write_state(root, **fields)
+    with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(root)):
+        result = ReleaseBlockerHandler().handle({})
+    assert result.reason is not None
+    return result.reason
+
+
+class TestTheReleaseModeIsNamed:
+    """Plan 00576: a resumed hotfix release follows the hotfix fast path.
+
+    The state file is the only record that survives a compaction, and this
+    deny message is where a resuming session reads it. Without the mode named
+    here, a session resuming `/release hotfix` would fall back to the standard
+    pipeline and re-run the full acceptance playbook the human chose to skip.
+    """
+
+    def test_a_hotfix_release_points_at_the_fast_path(self, tmp_path: Path) -> None:
+        reason = _reason_for_state(tmp_path, mode="hotfix")
+
+        assert "Hotfix fast path" in reason
+        assert "12.0" in reason
+        assert "full acceptance playbook" not in reason
+
+    def test_a_release_with_no_mode_is_the_standard_pipeline(self, tmp_path: Path) -> None:
+        reason = _reason_for_state(tmp_path)
+
+        assert "Hotfix fast path" not in reason
+        assert "full acceptance playbook" in reason
+
+    def test_an_unknown_mode_is_named_and_falls_back_to_the_standard_pipeline(
+        self, tmp_path: Path
+    ) -> None:
+        """Fail toward MORE gating: an unrecognised mode is never a shortcut."""
+        reason = _reason_for_state(tmp_path, mode="turbo")
+
+        assert "turbo" in reason
+        assert "Hotfix fast path" not in reason
+        assert "full acceptance playbook" in reason

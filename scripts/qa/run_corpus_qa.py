@@ -15,11 +15,11 @@ resolve the corpus directory; a second implementation of that here would be
 free to disagree with the one the handlers use, and a QA gate that disagrees
 with the gate it is meant to back up is worse than no gate.
 
-ANY finding fails, at either severity. The advise/block split governs whether
-a COMMIT is denied — it is about who gets blamed for inherited state. QA asks
-a different question: is the tree clean now. Everything the sweeps report is
-fixable, and each check that can legitimately fire has its own configured
-allowlist, so a finding left standing is a decision, not an accident.
+Only a BLOCK-severity finding fails (Plan 00576). An advise finding is
+reported and counted in the summary line, and the check still passes: an
+advisory is something worth knowing, and failing CI on one stalled the v3.73.1
+emergency patch on a plan-journal freshness note. A finding whose severity
+cannot be read fails, so an unrecognised severity is never a quiet pass.
 
 The CLI is invoked through the interpreter running this script, not through
 ``bin/hooks-daemon``: that wrapper re-resolves its own venv, and a worktree or
@@ -29,8 +29,8 @@ Usage:
     python scripts/qa/run_corpus_qa.py --corpus plan|docs [--json] [--root DIR]
 
 Exit codes:
-    0 - corpus clean
-    1 - findings reported
+    0 - no block finding (advise findings may be reported)
+    1 - a block finding, or one with no recognised severity
     2 - operational failure (the sweep produced no verdict)
 """
 
@@ -134,6 +134,11 @@ def _severity_of(finding: dict[str, Any]) -> str:
     return ""
 
 
+def is_failing(findings: list[dict[str, Any]]) -> bool:
+    """True when any finding is not an advisory: block, or no readable severity."""
+    return any(_severity_of(finding) != _SEVERITY_ADVISE for finding in findings)
+
+
 def build_report(corpus: str, findings: list[dict[str, Any]]) -> dict[str, Any]:
     """The QA artefact for one completed sweep.
 
@@ -144,7 +149,7 @@ def build_report(corpus: str, findings: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "tool": CORPORA[corpus].tool,
         "summary": {
-            "passed": not findings,
+            "passed": not is_failing(findings),
             "total_issues": len(findings),
             _SEVERITY_BLOCK: severities.count(_SEVERITY_BLOCK),
             _SEVERITY_ADVISE: severities.count(_SEVERITY_ADVISE),
@@ -238,7 +243,7 @@ def _verdict(corpus: str, exit_code: int, stdout: str, stderr: str) -> tuple[dic
             EXIT_OPERATIONAL,
         )
     report = build_report(corpus, findings)
-    return report, EXIT_ISSUES if findings else EXIT_SUCCESS
+    return report, EXIT_ISSUES if is_failing(findings) else EXIT_SUCCESS
 
 
 def main(argv: list[str] | None = None, *, run_sweep: SweepRunner = run_sweep) -> int:

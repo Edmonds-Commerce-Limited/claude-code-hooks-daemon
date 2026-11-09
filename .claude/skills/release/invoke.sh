@@ -4,12 +4,37 @@
 
 set -euo pipefail
 
-VERSION="${1:-auto}"
+EXIT_USAGE=2
+
+# Arguments, in any order: a version or bump type, `accept-wip`, `hotfix`.
 # Plan 00359: `accept-wip` is the ONLY way to proceed over in-flight work, and
 # it has to be typed by the human on the invocation — silence never proceeds.
-WIP_MODE="${2:-}"
+# Plan 00576: `hotfix` is typed by the human too, and it accepts the in-flight
+# work by itself (the slate report still prints).
+VERSION=""
+WIP_MODE=""
+RELEASE_MODE="standard"
+for arg in "$@"; do
+    case "${arg}" in
+        accept-wip) WIP_MODE="accept-wip" ;;
+        hotfix) RELEASE_MODE="hotfix" ;;
+        *) VERSION="${arg}" ;;
+    esac
+done
+
+if [[ "${RELEASE_MODE}" == "hotfix" ]]; then
+    case "${VERSION}" in
+        major | minor)
+            echo "/release hotfix is a patch bump; '${VERSION}' is not allowed with hotfix." >&2
+            exit "${EXIT_USAGE}"
+            ;;
+        "") VERSION="patch" ;;
+    esac
+fi
+VERSION="${VERSION:-auto}"
+
 SLATE_ACCEPT_FLAG=""
-if [[ "${WIP_MODE}" == "accept-wip" ]]; then
+if [[ "${WIP_MODE}" == "accept-wip" || "${RELEASE_MODE}" == "hotfix" ]]; then
     SLATE_ACCEPT_FLAG="--accept"
 fi
 
@@ -63,3 +88,34 @@ Read the exit code, not the prose:
   invoke the \`acceptance-test\` skill for it.
 - Update \`last_completed_step\` in the state file as each step completes.
 PROMPT
+
+if [[ "${RELEASE_MODE}" != "hotfix" ]]; then
+    exit 0
+fi
+
+cat <<'HOTFIX'
+
+## HOTFIX MODE — RELEASING.md "Hotfix fast path" overrides the steps above
+
+This invocation is `/release ... hotfix`: a patch release on the hotfix fast
+path. Read RELEASING.md "Hotfix fast path" now; where it differs from the
+numbered steps, it wins. In outline:
+
+- **State file**: write `"mode": "hotfix"` alongside the usual fields, so a
+  resumed session (and the `release_blocker` stop guard) follows this path.
+- **Step 1a**: `--accept` is passed above; the slate report still prints and
+  is shown to the human, the release does not stop on it.
+- **Skipped**: Step 1H (Housekeeping phase) and Step 1c (Claude Code changelog
+  review), and the Step 7 Opus documentation review. The release agent writes
+  a short changelog and release-notes entry; Step 6's UNRELEASED moves happen
+  exactly as in a standard release.
+- **Step 10**: review ONLY the hotfix commits: the range the human named, or
+  the commits since the last tag the human lists. Findings outside that range
+  are filed as plans, not fixed in this release.
+- **Step 12**: Step 12.0's deterministic gates plus targeted acceptance tests
+  for the handlers the hotfix changed; not the full playbook.
+- **Kept unchanged**: the release pull request, the full `Release gate` CI run
+  (Step 8c, whole test suite), the Step 8b start-up budget gate, the
+  merge freeze, Steps 9 and 11, Step 13 CI verification and merge, tagging and
+  publishing (Steps 14-15).
+HOTFIX
