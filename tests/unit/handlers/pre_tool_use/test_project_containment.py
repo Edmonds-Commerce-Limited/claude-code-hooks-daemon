@@ -1742,3 +1742,63 @@ class TestARedirectIsJudgedWhereTheChainsCdLandsIt:
         """Bash runs the last stage in a subshell, so `y` lands in the start directory."""
         hook_input = _bash(command, cwd=str(repo))
         assert not handler.matches(hook_input)
+
+
+class TestACompoundBodyRunsWhereTheChainsCdLanded:
+    """Plan 00587 (GitHub #195): a redirect inside a loop, `if`, group or
+    subshell body that follows a `cd` is joined to the `cd` target."""
+
+    @pytest.fixture()
+    def repo(self, tmp_path: Path, _project_root: Any) -> Path:
+        root = tmp_path / "repo"
+        (root / "sub").mkdir(parents=True)
+        (root / ".git").mkdir()
+        _project_root.return_value = root
+        return root
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd sub && for x in a; do echo hi 2>>../loop.err; done",
+            "cd sub && while true; do echo hi > ../x; done",
+            "cd sub && until false; do echo hi > ../x; done",
+            "cd sub && if true; then echo hi > ../x; fi",
+            "cd sub && { echo hi > ../x; }",
+            "cd sub && ( echo hi > ../x )",
+            "cd sub && for x in a; do echo hi | tee ../x; done",
+        ],
+    )
+    def test_a_body_target_that_stays_inside_is_allowed(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd=str(repo))) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd /tmp && for x in a; do echo hi > x; done",
+            "cd /tmp && while true; do echo hi > x; done",
+            "cd /tmp && until false; do echo hi > x; done",
+            "cd /tmp && if true; then echo hi > x; fi",
+            "cd /tmp && { echo hi > x; }",
+            "cd /tmp && ( echo hi > x )",
+            "cd sub && for x in a; do echo hi > ../../x; done",
+            "cd sub && if true; then echo hi > ../../x; fi",
+            "cd sub && { echo hi > ../../x; }",
+            "cd sub && ( echo hi > ../../x )",
+            "for x in a; do echo hi > ../x; done && cd sub",
+        ],
+    )
+    def test_a_body_target_that_lands_outside_is_still_denied(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        hook_input = _bash(command, cwd=str(repo))
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    def test_a_target_before_the_cd_is_judged_from_the_start_directory(
+        self, handler: ProjectContainmentHandler, repo: Path
+    ) -> None:
+        command = "for x in a; do echo hi > ../x; done; cd sub"
+        hook_input = _bash(command, cwd=str(repo))
+        assert handler.handle(hook_input).decision == Decision.DENY

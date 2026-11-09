@@ -953,3 +953,30 @@ class TestAStagingRunsStdinIsFedOnlyByItsOwnInput:
     def test_text_and_other_commands_inputs_do_not_feed_it(self, command: str) -> None:
         (staging,) = read_commit_form(command).stagings
         assert staging.stdin_fed is False
+
+
+class TestCompoundBodiesFollowACertainCd:
+    """GitHub #195: the opt-in reading of a body no `cd` of its own has moved."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd sub && for x in a; do echo hi > ../x; done",
+            "cd sub && if true; then echo hi > ../x; fi",
+            "cd sub && ( echo hi > ../x )",
+        ],
+    )
+    def test_the_body_is_certain_only_when_asked(self, command: str) -> None:
+        default = [s for s in git_commit_parsing.simple_commands(command) if s.redirects]
+        opted_in = [
+            s
+            for s in git_commit_parsing.simple_commands(command, bodies_follow_cd=True)
+            if s.redirects
+        ]
+        assert [s.moves_certain for s in default] == [False]
+        assert [s.moves_certain for s in opted_in] == [True]
+
+    def test_a_cd_inside_the_body_keeps_the_doubt(self) -> None:
+        command = "cd sub && for x in a; do cd ..; echo hi > y; done"
+        steps = git_commit_parsing.simple_commands(command, bodies_follow_cd=True)
+        assert [s.moves_certain for s in steps if s.redirects] == [False]

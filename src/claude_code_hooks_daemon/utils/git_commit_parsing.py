@@ -963,8 +963,13 @@ class SimpleCommand:
     reads_input: bool = False
 
 
-def simple_commands(command: str) -> list[SimpleCommand]:
-    """The simple commands of ``command`` (a string run by ``eval``/``sh -c`` is inlined)."""
+def simple_commands(command: str, *, bodies_follow_cd: bool = False) -> list[SimpleCommand]:
+    """The simple commands of ``command`` (a string run by ``eval``/``sh -c`` is inlined).
+
+    ``bodies_follow_cd`` reads a compound body (``for``/``while``/``if``/``( )``)
+    that no ``cd`` of its own has moved as certainly in the directory the ``&&``
+    chain before it reached; the default keeps the doubt, which the git gates rely on.
+    """
     return [
         SimpleCommand(
             words=tuple(segment),
@@ -983,7 +988,7 @@ def simple_commands(command: str) -> list[SimpleCommand]:
             operator,
             redirects,
             reads_input,
-        ) in enumerate(_walk(command_words(command), ()))
+        ) in enumerate(_walk(command_words(command), (), bodies_follow_cd=bodies_follow_cd))
     ]
 
 
@@ -1201,6 +1206,8 @@ def _walk(
     directory: tuple[str | None, ...],
     uncertain: bool = False,
     depth: int = 0,
+    *,
+    bodies_follow_cd: bool = False,
 ) -> list[_Step]:
     """The simple commands of ``words``: ``(segment, directory, uncertain, operator)``.
 
@@ -1265,7 +1272,14 @@ def _walk(
                 ):
                     pipelines.append((operator_depth, stage_start))
                 directory, uncertain = stage_start
-            if directory and previous_operator != _AND_OPERATOR:
+            # An operator inside a compound body (`for … ; do`, `( … )`) that
+            # follows no `cd` of the body's own casts no doubt on the chain: the
+            # body runs only if the `&&` chain leading to it did, so it starts
+            # in the directory that chain reached (GitHub #195).
+            in_unmoved_body = bodies_follow_cd and any(
+                frames and frames[-1][0] == directory for frames in (stack, groups)
+            )
+            if directory and previous_operator != _AND_OPERATOR and not in_unmoved_body:
                 uncertain = True
             if previous_operator not in _PIPE_OPERATORS:
                 stage_start = (directory, uncertain)
@@ -1322,7 +1336,14 @@ def _walk(
             directory, uncertain = stage_start = pipeline_began
         body = _evaluated_string(segment) if depth < MAX_EVAL_NESTING else None
         if body is not None:
-            found.extend(_walk(command_words(body), directory, uncertain, depth + 1))
+            found.extend(_walk(
+                    command_words(body),
+                    directory,
+                    uncertain,
+                    depth + 1,
+                    bodies_follow_cd=bodies_follow_cd,
+                )
+            )
         else:
             found.append(
                 (

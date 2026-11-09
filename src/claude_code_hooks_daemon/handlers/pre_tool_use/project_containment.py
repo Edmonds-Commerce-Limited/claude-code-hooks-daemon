@@ -581,7 +581,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         """
         if not command or not isinstance(cwd, str) or not Path(cwd).is_absolute():
             return []
-        steps = simple_commands(command)
+        steps = simple_commands(command, bodies_follow_cd=True)
         return steps if any(step.directory for step in steps) else []
 
     def _targets_after_cds(
