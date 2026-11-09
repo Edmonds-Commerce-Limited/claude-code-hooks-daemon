@@ -4,6 +4,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00583: branch guard notices state intent and action](00583-branch-guard-notices-state-intent-and-action/PLAN.md) - In Progress (GitHub #192: the dormancy Stop line and `branch-sweep` name idle branches with no reason or action, and the `wip.cap` deny offers "continue in one of them" as an exit; every surface carries `BRANCH_LIMIT_PRINCIPLE` and a next action per branch)
+
+- [00582: guard rollout and transitional grandfathering](00582-guard-rollout-and-transitional-grandfathering/PLAN.md) - Not Started (owner request: one best-practice document for introducing or tightening a guard, and a shared shrink-only, deadline-bound grandfather snapshot recorded by a command, adopted first by the branch guards; past the deadline the normal deny applies)
+
 - [00581: provision repairs a stale venv](00581-provision-repairs-a-stale-venv/PLAN.md) - In Progress (GitHub #168: `provision.sh` says "nothing to do" at the expected version without checking the venv's lock hash; a foreground run repairs a stale venv, a background run names the repair)
 
 - [00579: copy seeded files and worktree removal](00579-copy-seeded-files-and-worktree-removal/PLAN.md) - Blocked on the owner (GitHub #164, parked: the worktree-removal guard refuses a clean merged worktree whose only leftover is a copy-mode seeded file; treating such copies as regenerable weakens a safety control, safe only while byte-identical to the source; related #173)
@@ -334,11 +338,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 581 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 583 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 491 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 67 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 69 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
