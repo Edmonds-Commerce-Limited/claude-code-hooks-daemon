@@ -101,12 +101,14 @@ This invocation is `/release ... hotfix`: a patch release on the hotfix fast
 path. Read RELEASING.md "Hotfix fast path" now; where it differs from the
 numbered steps, it wins. In outline:
 
+- **Version**: an explicit X.Y.Z must be a patch bump of the last tag.
 - **State file**: write `"mode": "hotfix"` alongside the usual fields, so a
   resumed session (and the `release_blocker` stop guard) follows this path.
 - **Step 1a**: `--accept` is passed above; the slate report still prints and
   is shown to the human, the release does not stop on it.
-- **Skipped**: Step 1H (Housekeeping phase) and Step 1c (Claude Code changelog
-  review), and the Step 7 Opus documentation review. The release agent writes
+- **Skipped**: Step 1H (Housekeeping phase) with its post-release Step 15.1,
+  Step 1c (Claude Code changelog review), and the Step 7 Opus documentation
+  review. The release agent writes
   a short changelog and release-notes entry; Step 6's UNRELEASED moves happen
   exactly as in a standard release.
 - **Step 10**: review ONLY the hotfix commits: the range the human named, or

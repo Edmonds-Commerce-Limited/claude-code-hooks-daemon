@@ -59,7 +59,7 @@ class TestTheHotfixVariant:
     def test_hotfix_names_what_it_skips_and_what_it_keeps(self) -> None:
         out = _invoke("hotfix").stdout
 
-        for skipped in ("1H", "1c", "Step 7"):
+        for skipped in ("1H", "1c", "Step 7", "15.1"):
             assert skipped in out, f"the hotfix prompt does not mention skipping {skipped}"
         for kept in ("Release gate", "Step 8b", "Step 13", "merge freeze"):
             assert kept in out, f"the hotfix prompt does not say {kept} is kept"
