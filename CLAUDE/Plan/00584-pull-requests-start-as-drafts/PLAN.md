@@ -50,8 +50,8 @@ standard: every deny says why and what to do next.
 
 ### Phase 1: Design
 
-- [ ] ⬜ **Task 1.1**: Decide the client default (enabled here; opt-in or advise-first for clients per Plan 00582) and
-  how the handler reads the current title for `gh pr ready N` (one bounded `gh pr view --json title,isDraft`, or
+- [ ] ⬜ **Task 1.1**: Client default: ENABLED, here and in client projects (owner ruling, 2026-11-09). Decide how
+  the handler reads the current title for `gh pr ready N` (one bounded `gh pr view --json title,isDraft`, or
   require the combined command form); record the rulings in this plan
 - [ ] ⬜ **Task 1.2**: Native-draft capability check, read from Plan 00585's repository facts service (owner ruling:
   a rich, automatically refreshed metadata object). Repository facts are DETECTED from GitHub and cached, never

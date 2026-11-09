@@ -12,7 +12,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00582: guard rollout and transitional grandfathering](00582-guard-rollout-and-transitional-grandfathering/PLAN.md) - Not Started (owner request: one best-practice document for introducing or tightening a guard, and a shared shrink-only, deadline-bound grandfather snapshot recorded by a command, adopted first by the branch guards; past the deadline the normal deny applies)
 
-- [00579: copy seeded files and worktree removal](00579-copy-seeded-files-and-worktree-removal/PLAN.md) - Blocked on the owner (GitHub #164, parked: the worktree-removal guard refuses a clean merged worktree whose only leftover is a copy-mode seeded file; treating such copies as regenerable weakens a safety control, safe only while byte-identical to the source; related #173)
+- [00579: copy seeded files and worktree removal](00579-copy-seeded-files-and-worktree-removal/PLAN.md) - Not Started (GitHub #164, owner-ruled: a seeded copy identical to its source in the main checkout cannot be lost, so it never blocks a worktree removal; a diverged copy still blocks and is named; the guard reads the seed list directly; #173 stays separate)
 
 - [00578: local settings files untracked and guarded](00578-local-settings-files-untracked-and-guarded/PLAN.md) - Blocked on the owner (GitHub #189, parked: this repository tracks `.claude/settings.local.json` by Plan 00468's design, and nothing ignores or guards it or `CLAUDE.local.md` in clients; Q1-Q4 decide untracking, client `.gitignore` entries and a new staging guard)
 
