@@ -12,6 +12,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00590: daemon dir cd reads only command position](00590-daemon-dir-cd-reads-only-command-position/PLAN.md) - In Progress (GitHub #194: R-DAEMON-DIR-CD strips every quote, so a grep FOR `"cd "` over a daemon path is denied; judge `cd`/`pushd` only in command position, `bash -c "cd …"` keeps its deny)
 
+- [00591: claude md auto commit waits for handler sources](00591-claude-md-auto-commit-waits-for-handler-sources/PLAN.md) - In Progress (GitHub #172: the restart auto-commit of CLAUDE.md records a rule row while its project/plugin handler source is still uncommitted; hold the commit and log the file that held it)
+
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
 ### Next (ordered; work top to bottom)
@@ -299,11 +301,11 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Plan Statistics
 
-- **Total Plans Created**: 590 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 591 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 496 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 71 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 72 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
