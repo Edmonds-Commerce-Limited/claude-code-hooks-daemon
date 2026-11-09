@@ -95,21 +95,24 @@ superseded `Release gate` run was not shown to be cancelled by a test.
 
 ### Phase 4: Delivery
 
-- [ ] ⬜ **Task 4.1**: targeted QA (`llm_qa.py changed --range`), push, PR
+- [x] ✅ **Task 4.1**: targeted QA (`llm_qa.py changed --range`), push, PR
+- [x] ✅ **Task 4.2**: find out why superseded release-gate run 42598705633
+  seemed not to be cancelled (journal 11:27: the concurrency group did cancel
+  it; the red-run-keeps-running gap is out of scope)
 
 ## Success Criteria
 
-- [ ] An advise-only corpus report passes and a block report fails (tests)
-- [ ] A test asserts `release-gate.yml`'s cancel-in-progress concurrency group
-- [ ] `invoke.sh hotfix` / `invoke.sh X.Y.Z hotfix` print the fast path
+- [x] An advise-only corpus report passes and a block report fails (tests)
+- [x] A test asserts `release-gate.yml`'s cancel-in-progress concurrency group
+- [x] `invoke.sh hotfix` / `invoke.sh X.Y.Z hotfix` print the fast path
   and `--accept`; the standard invocation output is unchanged (tests)
-- [ ] `release_blocker` names hotfix mode from the state file (tests)
-- [ ] RELEASING.md has a "Hotfix fast path" section with the step list
-- [ ] Release-bound consequence recorded in the holding area:
+- [x] `release_blocker` names hotfix mode from the state file (tests)
+- [x] RELEASING.md has a "Hotfix fast path" section with the step list
+- [x] Release-bound consequence recorded in the holding area:
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/013-hotfix-release-fast-path.md`
-- [ ] Targeted QA green; PR open against main (merged by the coordinator
-  after the in-flight release)
+- [ ] Targeted QA green (41/42, then the one failure fixed and re-run green);
+  PR #190 merged to main with green CI
 
 ## Delivery & Milestones
 
-- PR: (pending)
+- PR: #190 ([fact-check](subagent-reports/261109-fact-check-plan-00576.md): 18 verified, 0 refuted)
