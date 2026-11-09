@@ -33,7 +33,7 @@ Using `Grep` or `Bash` (grep/rg) to find class definitions, function signatures,
 - Listing all symbols in a file → `documentSymbol`
 - Searching symbols across the project → `workspaceSymbol`
 
-**Grep/Bash grep is still appropriate for**: text patterns in content, log searching, finding strings in config files.
+**Grep/Bash grep is still appropriate for**: text patterns in content, log searching, finding strings in config files. A grep that filters another command's output (`cmd | grep x`, or fed by `<` or `<<<`) and `git grep` are never judged: they search no file a language server indexes.
 
 Default mode (`block_once`): the first symbol-lookup grep in a session is denied with guidance; subsequent retries are allowed.
 
