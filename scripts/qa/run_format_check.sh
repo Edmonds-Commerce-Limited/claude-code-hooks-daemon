@@ -96,10 +96,18 @@ if raw_file.exists():
             # old parser never looked for this line at all, so format.json
             # reported passed: true while the process correctly exited 123.
             # Example: "error: cannot format broken.py: Cannot parse ..."
-            if line.startswith("error: cannot format"):
+            # black >= 26.10 words a parse failure differently and puts the
+            # file at the END: "error: cannot parse for target version
+            # Python 3.13: broken.py:1:11" -- so match both shapes.
+            if line.startswith(("error: cannot format", "error: cannot parse")):
                 match = re.search(r'error: cannot format (.+?):\s*(.*)$', line)
+                parse_match = re.search(
+                    r'error: cannot parse.*?:\s*(.+?):\d+:\d+\s*$', line
+                )
                 if match:
                     file_path, reason = match.group(1), match.group(2)
+                elif parse_match:
+                    file_path, reason = parse_match.group(1), line
                 else:
                     file_path, reason = "", line
                 violations.append({
