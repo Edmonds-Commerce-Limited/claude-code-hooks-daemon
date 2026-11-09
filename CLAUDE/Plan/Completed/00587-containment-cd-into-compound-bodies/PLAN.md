@@ -65,5 +65,8 @@ Plan 00263 (the POSIX tokeniser).
 
 ## Delivery & Milestones
 
-- `f05530f35`: fix, tests and release note, merged to main by fast-forward (targeted QA 42/42; live probe both
-  directions). Main CI run 42697064932 green. #195 closed
+- `b4b2b0462`: fix, tests and release note; `f05530f35` (branch head, coordinator-review denial tests) merged to
+  main by fast-forward (targeted QA 42/42 and the live probe, recorded in the completion journal entry). Main CI
+  run 42697064932 green. #195 closed
+- Known limit (fact-check): a `cd` INSIDE a body keeps the doubt, which is pinned by a parser-level test in
+  `test_git_commit_parsing.py`, not yet by a containment-level deny test
