@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -22,6 +23,7 @@ from claude_code_hooks_daemon.config.models import (
     Config,
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import branch_inventory
 from claude_code_hooks_daemon.core.branch_creation import (
     creation_verdict,
     read_labels,
@@ -589,6 +591,58 @@ class TestMergedPool:
         text = "\n".join(render_report(inventory, _config(), cap=10))
         assert "kept: audit" in text
         assert "STALE" in text and "branch-keep" in text
+
+
+class TestPoolPassHonoursTheBudget:
+    """The pool pass shares the sweep's time budget and its cache (release review D4)."""
+
+    def test_an_exhausted_budget_makes_no_pool_git_calls(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _unique(repo, "held")
+        _park(repo, "held", days_ago=31)
+        _merged_distinct(repo, "done")
+        calls: list[str] = []
+        real_park_count = branch_inventory._park_count
+        real_read_keeps = branch_inventory.read_keeps
+
+        def park_count(*args: Any, **kwargs: Any) -> int | None:
+            calls.append("park_count")
+            return real_park_count(*args, **kwargs)
+
+        def read_keeps(*args: Any, **kwargs: Any) -> Any:
+            calls.append("read_keeps")
+            return real_read_keeps(*args, **kwargs)
+
+        monkeypatch.setattr(branch_inventory, "_park_count", park_count)
+        monkeypatch.setattr(branch_inventory, "read_keeps", read_keeps)
+        inventory = build_inventory(repo, _config(sweep={"budget_ms": 0}), now=NOW)
+        assert calls == []
+        assert inventory.records["held"].park_count is None
+        # Unknown is not stale: a skipped notes read must not call a kept branch stale.
+        assert inventory.records["done"].stale is False
+
+    def test_the_park_count_is_served_from_the_cache(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _unique(repo, "held")
+        _park(repo, "held", days_ago=31)
+        first = build_inventory(repo, _config(), now=NOW)
+        assert first.records["held"].park_count == 1
+
+        def fail(*args: Any, **kwargs: Any) -> int | None:
+            raise AssertionError("park count recomputed instead of read from the cache")
+
+        monkeypatch.setattr(branch_inventory, "_park_count", fail)
+        second = build_inventory(repo, _config(), now=NOW)
+        assert second.records["held"].park_count == 1
+
+    def test_a_cached_park_count_survives_an_exhausted_budget(self, repo: Path) -> None:
+        _unique(repo, "held")
+        _park(repo, "held", days_ago=31)
+        build_inventory(repo, _config(), now=NOW)
+        inventory = build_inventory(repo, _config(sweep={"budget_ms": 0}), now=NOW)
+        assert inventory.records["held"].park_count == 1
 
 
 def test_duplicates_still_cover_parked_work(repo: Path) -> None:

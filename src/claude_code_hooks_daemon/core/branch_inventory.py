@@ -290,6 +290,8 @@ class _PairFacts:
 class _Cache:
     pairs: dict[str, dict[str, Any]] = field(default_factory=dict)
     containment: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Consecutive park commits by tip sha: a count depends only on the tip.
+    park_counts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -646,9 +648,15 @@ def _load_cache(path: Path) -> _Cache:
         return _Cache()
     pairs = data.get("pairs")
     containment = data.get("containment")
+    park_counts = data.get("park_counts")
     return _Cache(
         pairs=pairs if isinstance(pairs, dict) else {},
         containment=containment if isinstance(containment, dict) else {},
+        park_counts={
+            tip: count
+            for tip, count in (park_counts if isinstance(park_counts, dict) else {}).items()
+            if isinstance(count, int)
+        },
     )
 
 
@@ -660,6 +668,7 @@ def _save_cache(path: Path, cache: _Cache, live_tips: set[str]) -> None:
         "containment": {
             k: v for k, v in cache.containment.items() if k.split(":", 1)[0] in live_tips
         },
+        "park_counts": {k: v for k, v in cache.park_counts.items() if k in live_tips},
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -747,8 +756,24 @@ class _Pass:
         self.remote_refs = remote_refs
         self.deadline = time.monotonic() + config.sweep.budget_ms / 1000
 
-    def _within_budget(self) -> bool:
+    def within_budget(self) -> bool:
+        """Whether the sweep's time budget (``sweep.budget_ms``) has not yet run out."""
         return time.monotonic() < self.deadline
+
+    def park_count(self, tip: str) -> int | None:
+        """Consecutive park commits at ``tip``: cached by tip, None when unknown.
+
+        Unknown means the budget ran out before the count was measured, or git failed.
+        """
+        cached = self.cache.park_counts.get(tip)
+        if cached is not None:
+            return cached
+        if not self.within_budget():
+            return None
+        count = _park_count(self.repo, tip)
+        if count is not None:
+            self.cache.park_counts[tip] = count
+        return count
 
     def facts(self, tip: str, target: _Target) -> _PairFacts | None:
         want_lines = target.is_default
@@ -756,9 +781,9 @@ class _Pass:
         cached = _facts_from_cache(self.cache.pairs.get(key))
         if cached is not None:
             return cached
-        if not self._within_budget():
+        if not self.within_budget():
             return None
-        computed = _pair_facts(self.repo, tip, target.sha, want_lines=want_lines)
+        computed =_pair_facts(self.repo, tip, target.sha, want_lines=want_lines)
         if computed is not None:
             self.cache.pairs[key] = {
                 "ahead": computed.ahead,
@@ -793,7 +818,7 @@ class _Pass:
         if isinstance(entry, dict) and entry.get("containment") in {c.value for c in Containment}:
             ref = entry.get("ref")
             return Containment(entry["containment"]), ref if isinstance(ref, str) else None
-        if not self._within_budget():
+        if not self.within_budget():
             return None
         found = containment_of(self.repo, name=name, tip=tip, config=self.config, default=default)
         if found is not None:
@@ -884,7 +909,7 @@ def build_inventory(
     run = _Pass(repo, config, _load_cache(cache_path), remote_refs)
 
     records = {name: _record(run, context, name, *by_name[name]) for name in sorted(by_name)}
-    records = _with_pools(repo, run.config, _with_same_tips(records), moment)
+    records = _with_pools(run, _with_same_tips(records), moment)
     _save_cache(cache_path, run.cache, set(sha_of.values()))
     return BranchInventory(
         default_branch=default,
@@ -1077,14 +1102,20 @@ def _park_count(repo: Path, tip: str) -> int | None:
 
 
 def _with_merged_pool(
-    repo: Path, config: BranchesConfig, records: dict[str, BranchRecord], moment: float
+    run: _Pass, records: dict[str, BranchRecord], moment: float
 ) -> dict[str, BranchRecord]:
-    """Fill the keep fields and ``stale`` of every merged branch (one notes read per ref)."""
+    """Fill the keep fields and ``stale`` of every merged branch (one notes read per ref).
+
+    The keep notes are not cached (``branch-keep`` writes them from other processes),
+    so with the budget spent they are not read: the branches stay unclassified, never
+    stale, as they are when the worktrees are unknown.
+    """
+    config = run.config
     merged = {name: r for name, r in records.items() if pool_of(r.state) == Pool.MERGED}
-    if not merged:
+    if not merged or not run.within_budget():
         return dict(records)
     tips = {t for r in merged.values() for t in (r.local_tip, r.remote_tip) if t is not None}
-    keeps = read_keeps(repo, tips, config.remote)
+    keeps = read_keeps(run.repo, tips, config.remote)
     max_age = config.effective_pool_max_age(Pool.MERGED)
     updated = dict(records)
     for name, record in merged.items():
@@ -1105,7 +1136,7 @@ def _with_merged_pool(
 
 
 def _with_pools(
-    repo: Path, config: BranchesConfig, records: dict[str, BranchRecord], moment: float
+    run: _Pass, records: dict[str, BranchRecord], moment: float
 ) -> dict[str, BranchRecord]:
     """Fill ``stale``, ``park_count`` and the keep fields (Plan 00571 DESIGN.md section 3).
 
@@ -1113,9 +1144,9 @@ def _with_pools(
     A merged branch is stale unless it is kept inside ``merged.max_age_days`` or a
     worktree holds it; with the worktrees unknown it is not called stale.
     """
-    parked = config.parked
-    max_age = config.effective_pool_max_age(Pool.PARKED)
-    updated = _with_merged_pool(repo, config, records, moment)
+    parked = run.config.parked
+    max_age = run.config.effective_pool_max_age(Pool.PARKED)
+    updated = _with_merged_pool(run, records, moment)
     for name, record in records.items():
         if record.state != BranchState.PARKED:
             continue
@@ -1124,7 +1155,7 @@ def _with_pools(
         updated[name] = replace(
             record,
             stale=stale,
-            park_count=_park_count(repo, tip) if tip is not None else None,
+            park_count=run.park_count(tip) if tip is not None else None,
         )
     return updated
 

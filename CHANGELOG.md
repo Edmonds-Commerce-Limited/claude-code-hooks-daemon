@@ -40,6 +40,7 @@ _A patch release. Branches now sit in three pools (open, parked, merged) with th
 - The branch creation guard trusts a SessionStart "merged" or "stale" label only while the branch is still at the tip the label recorded, so a merged branch that later gains commits no longer denies every branch creation with `R-BRANCH-MERGED-POOL` (a deny `branch-sweep --clean` and `branch-keep` both refuse to clear); it is judged by its live state instead (release review D1).
 - The "left alone" hint for a worktree under `.claude/worktrees/` names `worktree-reap --reap --only <directory>` with the worktree's directory name, which is what `--only` matches, instead of the branch name, so the suggested command acts when the two differ (release review D2).
 - An admin issue takeover that loses a race to another assignee puts the previous assignees back when it backs off, instead of leaving them silently unassigned (release review D3).
+- The branch inventory's pool pass honours `sweep.budget_ms` and the inventory cache: once the budget is spent it makes no further git calls (a parked branch's `park_count` stays unknown and a merged branch is not called stale), and park counts are cached by tip (release review D4).
 - Test hardening: a pinned clock in the bundle-path collision test, a `Timeout` constant in the target-release test, and a black-formatted FIFO test.
 
 ## [3.73.0] - 2026-11-07
