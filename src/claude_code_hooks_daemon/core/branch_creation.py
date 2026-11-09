@@ -401,7 +401,8 @@ def _cap_lines(
     ordered = sorted(groups, key=lambda work: (_rank(work), work.committed, work.name))
     lines = [
         f"Open work branches: {len(groups)} (cap {config.effective_wip_cap()}). "
-        "Finish, park or delete one before starting another:"
+        "Finish (merge) one, park it with a reason, or delete it once the guard proves "
+        "nothing is lost, before starting another:"
     ]
     for work in ordered[:DENY_LIST_LIMIT]:
         group, action = work.label.get("group"), work.label.get("action")

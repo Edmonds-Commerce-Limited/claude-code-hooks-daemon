@@ -61,7 +61,8 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             blocked="creating a branch while the open work branches are at `branches.wip.cap`",
             why="Work that is started and never finished piles up as branches nobody "
             "returns to; the cap makes an agent finish before it starts",
-            fix="Merge, park or delete one of the listed branches, or continue in one of them",
+            fix="Finish (merge) one of the listed branches, park it with a reason, or delete it "
+            "once the guard proves nothing is lost; only then start new work",
             verbose=(
                 "WHY:\n"
                 "  Every open branch is work someone must finish, park or delete.\n"
