@@ -6,6 +6,7 @@ network or the real ``gh`` binary.
 
 from __future__ import annotations
 
+import itertools
 import json
 from collections.abc import Sequence
 from typing import Any
@@ -768,7 +769,15 @@ class TestTakeoverClaim:
 
         svc = IssueValidityService(runner=racing)
         assert svc.claim(fix) is False
-        backoff = [c for c in admin_gh.calls if c[:2] == ("issue", "edit") and "@me" in c]
+        backoff = [
+            c
+            for c in admin_gh.calls
+            if c[:2] == ("issue", "edit")
+            and any(
+                flag == "--remove-assignee" and value == "@me"
+                for flag, value in itertools.pairwise(c)
+            )
+        ]
         assert backoff, "the losing claim must remove itself"
         assert admin_gh.comments == []
         # The takeover removed alice; losing the race must put her back, not strand her.

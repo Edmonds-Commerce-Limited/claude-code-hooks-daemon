@@ -564,6 +564,26 @@ class TestMergedPool:
         verdict = creation_verdict(repo, _config(cap=2), "fresh", labels=labels, now=NOW)
         assert verdict.rule_id == RuleID.BRANCH_WIP_CAP
 
+    def test_the_cap_list_does_not_show_a_moved_branch_by_its_old_label(self, repo: Path) -> None:
+        old_tip = _unique(repo, "one")
+        _unique(repo, "two")
+        labels = {
+            "one": {
+                "group": "merged",
+                "action": "delete-branch one",
+                "stale": None,
+                "local_tip": old_tip,
+                "remote_tip": None,
+            }
+        }
+        _git(repo, "checkout", "-q", "one")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "more")
+        _git(repo, "checkout", "-q", "main")
+        verdict = creation_verdict(repo, _config(cap=2), "fresh", labels=labels, now=NOW)
+        text = "\n".join(verdict.lines)
+        assert "[merged]" not in text
+        assert "delete-branch one" not in text
+
     def test_labels_snapshot_records_both_tips(self, tmp_path: Path) -> None:
         path = tmp_path / "labels.json"
         write_labels(path, [{"name": "a", "local_tip": "abc", "remote_tip": None}])
