@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00576: hotfix release fast path](00576-hotfix-release-fast-path/PLAN.md) - In Progress (owner request after v3.73.1: `/release hotfix` fast path, advise-severity plan/docs QA findings never fail CI, a test pinning the release gate's cancel-in-progress concurrency)
-
 - [00575: release validated handler catalogue](00575-release-validated-handler-catalogue/PLAN.md) - Not Started (owner request, post-release: one generated catalogue of every handler with source and test links, validated by a CI test and a RELEASING.md gate)
 
 - [00574: plan decisions log document](00574-plan-decisions-log-document/PLAN.md) - Not Started (owner request, for later: a per-plan `PLAN-DECISIONS.md`, pre-created by mkplan, as an unbounded, parseable decision log keyed by task id, so PLAN.md stays the front page of tasks and progress and JOURNAL/ stays ad hoc; adversarial review in progress)
@@ -219,6 +217,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00576: hotfix release fast path](Completed/00576-hotfix-release-fast-path/PLAN.md) - Complete at merge `8bfcad71f` (PR #190) + the archiving commit (owner request after v3.73.1: `/release hotfix` runs the RELEASING.md "Hotfix fast path" and the state file and `release_blocker` name the mode; advise-severity plan/docs QA findings never fail CI; a test pins the release gate's cancel-in-progress concurrency, which the journal shows did cancel the superseded v3.73.1 run; release note 013)
+
 - [00572: ci wall clock sharding arm and hygiene](Completed/00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - Complete at merge `f2d532f89` (PR #187) + the archiving commit (owner request: `qa.yml` reuses release-gate's shard matrix, so the nightly fell from 116 to 28.5 min; every `main` push gets a verdict; native and released aarch64 relay and hooks-screen, a non-blocking arm64 test leg, SHA-pinned actions; release notes 006, 012)
 
 - [00571: branch pools parked merged caps](Completed/00571-branch-pools-parked-merged-caps/PLAN.md) - Complete at merge `9314a6e4c` (PR #186) + `7a917cff9` (green CI) + the archiving commit (GitHub #165, closed: open, parked and merged branches are three pools, each with its own cap, max age and deny rule; `branch-keep`, `branches.bot_owned`, safe `branch-sweep --clean --remote`; release note 007)
@@ -277,8 +277,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00539: supervisor restart pending record](Completed/00539-supervisor-restart-pending-record/PLAN.md) - Complete at merge `bb7664cbd` (green CI) + the archiving commit (#127: a private restart-pending record written before `/exit` and exported to the child lets a SessionEnd hook tell a supervisor restart from a genuine exit; release note 004)
 
-- [00537: supervisor holds sends off main focus](Completed/00537-supervisor-holds-sends-off-main-focus/PLAN.md) - Complete at merge `605d8ed4d` (green CI) + the archiving commit (#125: the ccy supervisor holds every send while the human's keys show focus may have left the main prompt, cleared by Esc; release note 003; follow-up Plan 00538)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -332,9 +330,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 576 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 488 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 489 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 65 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 64 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

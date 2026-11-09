@@ -1,6 +1,6 @@
 # Plan 00576: hotfix release fast path
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-09
 **Owner**: joseph
 **Priority**: High
@@ -110,9 +110,11 @@ superseded `Release gate` run was not shown to be cancelled by a test.
 - [x] RELEASING.md has a "Hotfix fast path" section with the step list
 - [x] Release-bound consequence recorded in the holding area:
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/013-hotfix-release-fast-path.md`
-- [ ] Targeted QA green (41/42, then the one failure fixed and re-run green);
+- [x] Targeted QA green (41/42, then the one failure fixed and re-run green);
   PR #190 merged to main with green CI
 
 ## Delivery & Milestones
 
 - PR: #190 ([fact-check](subagent-reports/261109-fact-check-plan-00576.md): 18 verified, 0 refuted)
+- Merged: `8bfcad71f` (every required check green; the non-blocking arm64 leg was still pending)
+- Release-bound: release note 013 ships with the next release
