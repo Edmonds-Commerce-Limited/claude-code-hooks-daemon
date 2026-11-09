@@ -1,6 +1,6 @@
 # Plan 00587: containment follows a cd into compound command bodies
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-09
 **Owner**: dev
 **Priority**: High
@@ -42,21 +42,28 @@ Plan 00263 (the POSIX tokeniser).
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED tests: each compound shape after a `cd` into a subdirectory with a `../` redirect is
+- [x] ✅ **Task 1.1**: RED tests: each compound shape after a `cd` into a subdirectory with a `../` redirect is
   allowed; each with a `cd` outside the project, or a target escaping the root, is denied
-- [ ] ⬜ **Task 1.2**: GREEN in `project_containment.py`'s `cd` tracking
-- [ ] ⬜ **Task 1.3**: release-notes callout
+- [x] ✅ **Task 1.2**: GREEN. The cause was in the shared `utils/git_commit_parsing.py` (`_walk` marked a step after
+  a body's `;` or `(` as possibly not under the `cd`), not in `project_containment.py`: a `bodies_follow_cd`
+  reading, off by default and turned on only by `project_containment`, so the git gates are unchanged
+- [x] ✅ **Task 1.3**: release-notes callout
 
 ### Phase 2: Delivery
 
-- [ ] ⬜ **Task 2.1**: targeted QA, merge, verify CI, close #195
+- [x] ✅ **Task 2.1**: targeted QA, merge, verify CI, close #195
 
 ## Success Criteria
 
-- [ ] The new tests failed before the fix and pass after it, in both directions
-- [ ] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
-- [ ] Merged to main with green CI; #195 closed
+- [x] The new tests failed before the fix and pass after it, in both directions (6 failed before, per
+  `subagent-reports/261109-issue-195-implementer-sonnet.md`; the denial cases are regression guards, two added in
+  coordinator review for a `cd` that may have failed)
+- [x] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+  (`020-containment-follows-cd-into-compound-bodies.md`)
+- [x] Merged to main with green CI; #195 closed (main CI run 42697064932 success, including the full-suite fallback
+  on every py3.11 shard)
 
 ## Delivery & Milestones
 
-- (pending)
+- `f05530f35`: fix, tests and release note, merged to main by fast-forward (targeted QA 42/42; live probe both
+  directions). Main CI run 42697064932 green. #195 closed

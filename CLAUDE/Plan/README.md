@@ -8,8 +8,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00587: containment follows a cd into compound command bodies](00587-containment-cd-into-compound-bodies/PLAN.md) - In Progress (GitHub #195: a `../` redirect inside a `for`/`while`/`if`/`{ }`/`( )` body after a `cd` is resolved from the repository root and denied; resolve it from the `cd` target, keeping real escapes denied)
-
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
 ### Next (ordered; work top to bottom)
@@ -188,6 +186,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00587: containment follows a cd into compound command bodies](Completed/00587-containment-cd-into-compound-bodies/PLAN.md) - Complete at `f05530f35` (main CI run 42697064932 success) + the archiving commit (GitHub #195, closed: a `../` redirect in a loop, `if` or `( )` body after a `cd` is resolved from the `cd` target; a `cd` that may have failed still denies; release note 020)
+
 - [00583: branch guard notices state intent and action](Completed/00583-branch-guard-notices-state-intent-and-action/PLAN.md) - Complete at `d60da0fda` (merged via `7d954f213`; main CI run 42682133539, full suite, success) + the archiving commit (GitHub #192, closed: the dormancy Stop line, `branch-sweep`'s Dormant section and the `wip.cap` deny each carry `BRANCH_LIMIT_PRINCIPLE` and a next action per branch, and the session is told to take that work on first; release note 018)
 
 - [00581: provision repairs a stale venv](Completed/00581-provision-repairs-a-stale-venv/PLAN.md) - Complete at `cfa601263` (CI run 42650039659 success) + the archiving commit (GitHub #168, closed: at the expected version `provision.sh` checks the venv's lock hash; a foreground run repairs a stale venv through the bootstrap repair, a background run names `hooks-daemon repair`, an unreadable hash counts as stale; release note 017)
@@ -246,8 +246,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00544: issue validity claim without author list](Completed/00544-issue-validity-claim-without-author-list/PLAN.md) - Complete at merge `15127181d` (green CI) + the archiving commit (#129: `issue-validity N --claim` and a plain judge run with no author list, printing the author check as not applicable; only `--list-eligible` still refuses)
 
-- [00543: journal file per entry](Completed/00543-journal-file-per-entry/PLAN.md) - Complete at merge `c127d7356` + `c05b91eeb` (green CI on `15127181d`) + the archiving commit (#135, owner-directed: one journal file per entry under `JOURNAL/YYYY-MM-DD/`, so concurrent branches never conflict; legacy day-files read alongside; any change to an existing journal file is denied except conflict-marker removal or an exact restore)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -301,9 +299,9 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - **Total Plans Created**: 587 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 493 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 494 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 71 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 70 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

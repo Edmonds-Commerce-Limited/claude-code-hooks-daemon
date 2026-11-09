@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00543: journal file per entry](00543-journal-file-per-entry/PLAN.md) - Complete at merge `c127d7356` + `c05b91eeb` (green CI on `15127181d`) + the archiving commit (#135, owner-directed: one journal file per entry under `JOURNAL/YYYY-MM-DD/`, so concurrent branches never conflict; legacy day-files read alongside; any change to an existing journal file is denied except conflict-marker removal or an exact restore)
+
 - [00542: statusline fast path raw text](00542-statusline-fast-path-raw-text/PLAN.md) - Complete at merge `901e59a7a` + the archiving commit (#131: raw status text plus a builtin-only forwarder fast path through the Rust relay, about 0.006 CPU-s per tick against 0.077 before; every fast-path fault is a red line naming the fix, and only a daemon that is not running hands off to the start-up path)
 
 - [00541: stale key advisory names orphaned transcripts dir](00541-stale-key-advisory-names-orphaned-transcripts-dir/PLAN.md) - Complete at merge `31c6a1454` (green CI) + the archiving commit (#52 part 1, a stand-in ruling: the `transcript_archiver` stale-key advisory names `untracked/transcripts/` and the reclaim action; part 2 stays owner-only; release note 006)
