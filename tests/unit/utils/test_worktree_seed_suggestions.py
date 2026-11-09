@@ -248,6 +248,35 @@ class TestDiffSeedConfig:
         assert drift.has_drift
         assert [entry.path for entry in drift.missing] == [".env.gone"]
 
+    def test_absent_optional_entry_is_not_missing(self, repo: Path) -> None:
+        """Creation-time seeding skips an absent optional source, so it is not drift."""
+        drift = diff_seed_config(
+            repo, [SeedEntry(path=".env.gone", mode=SEED_MODE_SYMLINK, optional=True)]
+        )
+
+        assert drift.missing == ()
+        assert not drift.has_drift
+
+    def test_absent_required_entry_stays_missing_beside_an_optional_one(self, repo: Path) -> None:
+        drift = diff_seed_config(
+            repo,
+            [
+                SeedEntry(path=".env.opt", mode=SEED_MODE_SYMLINK, optional=True),
+                SeedEntry(path=".env.req", mode=SEED_MODE_SYMLINK),
+            ],
+        )
+
+        assert [entry.path for entry in drift.missing] == [".env.req"]
+
+    def test_present_optional_entry_is_not_missing(self, repo: Path) -> None:
+        (repo / ".env.local").write_text("SECRET=1\n", encoding="utf-8")
+
+        drift = diff_seed_config(
+            repo, [SeedEntry(path=".env.local", mode=SEED_MODE_SYMLINK, optional=True)]
+        )
+
+        assert drift.missing == ()
+
     def test_both_kinds_of_drift_are_reported_together(self, repo: Path) -> None:
         (repo / ".env.local").write_text("SECRET=1\n", encoding="utf-8")
 
