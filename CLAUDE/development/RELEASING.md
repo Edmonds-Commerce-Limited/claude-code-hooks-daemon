@@ -76,7 +76,13 @@ record of that pull request's CI run:
 "ci": {"pr_number": 12, "run_id": 987654, "head_sha": "<40-hex sha>", "conclusion": "success"}
 ```
 
-All four fields are required and no others are allowed; while the run is still
+A release on the [Hotfix fast path](#hotfix-fast-path) also carries
+`"mode": "hotfix"`, written with the file at Step 1a. No `mode` means the
+standard pipeline. The `release_blocker` stop guard reads it and tells a
+resumed session which pipeline it is on; an unrecognised value gets the
+standard pipeline.
+
+The `ci` record's four fields are required and no others are allowed; while the run is still
 going, `conclusion` is `pending`. The record is written as soon as the pull
 request and its run exist (Step 8), and rewritten whenever a new commit on the
 release branch starts a new run. Two things read it:
@@ -165,6 +171,7 @@ gh release delete vX.Y.Z --yes
 /release          # auto-detect bump
 /release 2.2.0   # explicit version
 /release patch    # bump type
+/release hotfix   # emergency patch: the Hotfix fast path below
 ```
 
 ## Pipeline Overview
@@ -189,6 +196,9 @@ RELEASE (in session, local daemon)
 14. Tag the Merge Commit & GitHub Release
 15. Post-Release Verification         15.1 Housekeeping phase, post-release items
 ```
+
+`/release hotfix` runs a shorter variant of this list:
+[Hotfix fast path](#hotfix-fast-path).
 
 There is **no local full QA run** anywhere in this pipeline. The whole gate
 (`llm_qa.py`'s every check, every supported Python, the performance sweeps)
@@ -257,6 +267,46 @@ the Step 10 review and the Step 12 acceptance run cover them as well.
 **Finishing or aborting lifts the freeze.** Finishing: Step 15 deletes the
 state file. Aborting: close the pull request, then delete the state file
 ([Rollback](#rollback)). Never edit `ci.pr_number` to let another merge through.
+
+## Hotfix fast path
+
+**Invocation**: `/release hotfix` (a patch bump) or `/release X.Y.Z hotfix`
+(X.Y.Z must be a patch bump of the last tag; `major`/`minor` with `hotfix` is
+refused). Only a human types it, like any `/release`.
+
+**Why it exists.** An emergency patch (Plan 00576) ran the whole pipeline, and
+most of its wall clock went on steps whose value is scope-wide (housekeeping,
+the Claude Code changelog review, the documentation review, a review of every
+commit since the last tag, the full acceptance playbook) rather than on the
+fix. The fast path drops those and keeps every gate that judges the artefact
+being published.
+
+**Kept, unchanged**: the release branch and pull request (Step 8a), the full
+`Release gate` CI run with the whole test suite (Step 8c), the start-up budget
+gate (Step 8b), the merge freeze, Steps 9 and 11, Step 13's CI verification
+and merge, tagging and publishing (Steps 14 and 15).
+
+| Step | Hotfix fast path                                                                                                                                                                                                         |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1a   | `release-slate-check --accept` (`invoke.sh` passes it): the report still prints and is shown to the human; in-flight plans do not stop the release. Exit `1` still ABORTS. Write the state file with `"mode": "hotfix"`. |
+| 1b   | Unchanged.                                                                                                                                                                                                               |
+| 1H   | **Skipped.**                                                                                                                                                                                                             |
+| 1c   | **Skipped.** No `claude-code-versions.yaml` entry is required for a hotfix version, so Step 7's check on it does not apply.                                                                                              |
+| 2–5  | Patch bump. The release agent writes a short changelog entry and release notes; pending callouts are still folded in.                                                                                                    |
+| 6    | Unchanged: every UNRELEASED move happens exactly as in a standard release.                                                                                                                                               |
+| 7    | **No Opus documentation review.** Step 7.1's commit is unchanged.                                                                                                                                                        |
+| 8–9  | Unchanged.                                                                                                                                                                                                               |
+| 10   | Review ONLY the hotfix commits: the range the invocation named, or the commits since the last tag that the human lists. A finding outside that range is filed as a plan, not fixed in this release.                      |
+| 11   | Unchanged.                                                                                                                                                                                                               |
+| 12   | Step 12.0's deterministic gates, plus targeted acceptance tests for the handlers the hotfix range changed. Not the full playbook.                                                                                        |
+| 13   | Unchanged.                                                                                                                                                                                                               |
+| 14   | Unchanged.                                                                                                                                                                                                               |
+| 15   | Unchanged, except Step 15.1 (post-release housekeeping) is skipped with 1H.                                                                                                                                              |
+
+A finding INSIDE the hotfix range follows "Review Early, Never Drop Findings"
+as normal: a defect is fixed before the tag. Resuming: the state file's `mode`
+keeps a resumed session on this path, and `release_blocker`'s deny message
+names it.
 
 ## 🚨 Review Early, Never Drop Findings (Plan 00157)
 

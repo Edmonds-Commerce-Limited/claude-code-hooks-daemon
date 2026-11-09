@@ -415,10 +415,10 @@ pull request, from the merge base to the PR tip. The rules live in
 `classify_changes.py`'s one table, tested in
 `tests/unit/scripts/test_classify_changes.py`.
 
-| Tier   | When                                                                                                                                                                                                                          | What runs                                                                                                                                                              |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs` | every changed path is `*.md`                                                                                                                                                                                                  | One Python (3.11): `llm_qa.py docs_qa plan_qa changed_tests --range`. The `shell` and `daemon-load` jobs are skipped.                                                  |
-| `code` | anything else                                                                                                                                                                                                                 | One Python (3.11): black, ruff, mypy, pyright, `llm_qa.py changed --range`, bandit, deptry, plus `shell` and `daemon-load`.                                            |
+| Tier   | When                                                                                                                                                                                                                          | What runs                                                                                                                                                                                                                                                       |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs` | every changed path is `*.md`                                                                                                                                                                                                  | One Python (3.11): `llm_qa.py docs_qa plan_qa changed_tests --range`. The `shell` and `daemon-load` jobs are skipped.                                                                                                                                           |
+| `code` | anything else                                                                                                                                                                                                                 | One Python (3.11): black, ruff, mypy, pyright, `llm_qa.py changed --range`, bandit, deptry, plus `shell` and `daemon-load`.                                                                                                                                     |
 | `full` | `pyproject.toml`, `uv.lock`, anything under `.github/`, `.claude/hooks-daemon.yaml`, `scripts/qa/changed_tests_map.yaml`, any `conftest.py`; an empty change set; an unknown base (no earlier verdict run, or not in history) | The three-Python static matrix (job `qa`) and the sharded suite (job `full-tests`, the `full` profile of `scripts/ci/shard_legs.yaml`), plus `shell` and `daemon-load`. Also every night on `main` (`schedule`) and on `workflow_dispatch`, which have no base. |
 
 Markdown is narrowed, never skipped: tests read the plan index, ledgers and
@@ -800,12 +800,12 @@ other checkers still take directories only.
 - **Dependencies** (Deptry) — missing (DEP001) and misplaced (DEP004)
 - **Plan QA** / **Docs QA** (`run_corpus_qa.py`) — the `plan-qa --sweep` and
   `docs-qa --sweep` catalogues, run through the shipped CLI so QA cannot
-  disagree with the gate it backs up. **ANY finding fails, at either
-  severity**: the advise/block split decides whether a COMMIT is denied,
-  while QA asks whether the tree is clean now. Fix the finding, or use the
-  check's own configured allowlist — a finding left standing should be a
-  decision, not an accident. A sweep that cannot run reports no-verdict
-  rather than the empty result a clean sweep produces
+  disagree with the gate it backs up. **Only a block-severity finding
+  fails** (Plan 00576): advise findings are counted in the summary line
+  (`N findings (B block, A advise)`) and the check still passes, locally, in
+  `qa.yml` and in the release gate. A finding with no recognised severity
+  fails. A sweep that cannot run reports no-verdict rather than the empty
+  result a clean sweep produces
 - **Generated-Doc Drift** (`check_generated_doc_drift.py`) — regenerates
   `.claude/HOOKS-DAEMON.md` through `generate-docs` into a throwaway directory
   and fails when the committed body differs. A daemon restart never rewrites
