@@ -57,6 +57,11 @@ SEGMENT_SEPARATORS: tuple[str, ...] = ("&&", "||", "|", "&", ";", "\n")
 #: ALLOWLIST: a missing entry costs a false positive, a wrong entry costs a guard.
 DATA_HEADS: frozenset[str] = frozenset({"echo", "printf", "grep", "egrep", "fgrep", "rg"})
 
+#: The subset of :data:`DATA_HEADS` that only SEARCHES its arguments. A guard that
+#: keeps judging a wrapped or rebound `echo`/`printf` can still opt into blanking
+#: just these, via the ``data_heads`` argument of :func:`command_position_view`.
+SEARCH_HEADS: frozenset[str] = frozenset({"grep", "egrep", "fgrep", "rg"})
+
 #: Shells that run the string given to `-c`.
 SHELL_NAMES: frozenset[str] = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
 
@@ -180,8 +185,16 @@ def _runs_written_script(command: str) -> bool:
     return False
 
 
-def command_position_view(command: str, _depth: int = 0, _keep_text: bool = False) -> str:
+def command_position_view(
+    command: str,
+    _depth: int = 0,
+    _keep_text: bool = False,
+    data_heads: frozenset[str] = DATA_HEADS,
+) -> str:
     """``command`` with every span that cannot run replaced by a placeholder.
+
+    ``data_heads`` names the heads whose arguments are blanked; an opt-in
+    narrower set (:data:`SEARCH_HEADS`) leaves the others judged as written.
 
     ``_keep_text`` is set for a `-c` body whose own output a pipeline may run:
     the git/awk search literals in it are then left as written.
@@ -196,7 +209,7 @@ def command_position_view(command: str, _depth: int = 0, _keep_text: bool = Fals
     for index, (start, end) in enumerate(spans):
         pieces.append(stripped[previous_end:start])
         may_run_output = _pipeline_may_run_output(stripped, spans, segments, index)
-        pieces.append(_narrow(segments[index], may_run_output, _depth, _keep_text))
+        pieces.append(_narrow(segments[index], may_run_output, _depth, _keep_text, data_heads))
         previous_end = end
     pieces.append(stripped[previous_end:])
     return "".join(pieces)
@@ -492,11 +505,17 @@ def _pipeline_may_run_output(
     return False
 
 
-def _narrow(segment: str, may_run_output: bool, depth: int, keep_text: bool = False) -> str:
+def _narrow(
+    segment: str,
+    may_run_output: bool,
+    depth: int,
+    keep_text: bool = False,
+    data_heads: frozenset[str] = DATA_HEADS,
+) -> str:
     head = _head(segment)
     if head is None:
         return segment
-    if head in DATA_HEADS:
+    if head in data_heads:
         if (
             may_run_output
             or any(marker in segment for marker in _EXPANSION_MARKERS)
@@ -505,7 +524,7 @@ def _narrow(segment: str, may_run_output: bool, depth: int, keep_text: bool = Fa
             return segment
         return f" {head} {_DATA_PLACEHOLDER} "
     if head in SHELL_NAMES and depth < _MAX_NESTING:
-        return _narrow_shell_body(segment, depth, keep_text or may_run_output)
+        return _narrow_shell_body(segment, depth, keep_text or may_run_output, data_heads)
     if head in _TEXT_ARGUMENT_HEADS and not (may_run_output or keep_text):
         # A search/format literal of a read-only git command (or an awk
         # program) is data for that command, in every guard and inside a
@@ -533,7 +552,9 @@ def is_shell_command_option(option: str) -> bool:
     return option.startswith("-") and not option.startswith("--") and "c" in option[1:]
 
 
-def _narrow_shell_body(segment: str, depth: int, keep_text: bool) -> str:
+def _narrow_shell_body(
+    segment: str, depth: int, keep_text: bool, data_heads: frozenset[str] = DATA_HEADS
+) -> str:
     """Replace a literal `-c` body with its own command-position view."""
     spans = shell_word_spans(segment)
     words = [segment[start:end] for start, end in spans]
@@ -556,7 +577,7 @@ def _narrow_shell_body(segment: str, depth: int, keep_text: bool) -> str:
             if body is None:
                 return segment
             start, end = spans[offset + 1]
-            body_view = command_position_view(body, depth + 1, keep_text)
+            body_view = command_position_view(body, depth + 1, keep_text, data_heads)
             if _is_elevated(words[:shell_at]):
                 body_view = _elevate_later_segments(body_view)
             return segment[:start] + body_view + segment[end:]

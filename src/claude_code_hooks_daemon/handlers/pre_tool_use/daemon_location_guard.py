@@ -15,11 +15,12 @@ from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
 )
-from claude_code_hooks_daemon.utils.command_position import is_plain_data_command
-from claude_code_hooks_daemon.utils.shell_segmentation import (
-    is_wholly_inert_command,
-    strip_inert_spans,
+from claude_code_hooks_daemon.utils.command_position import (
+    SEARCH_HEADS,
+    command_position_view,
+    is_plain_data_command,
 )
+from claude_code_hooks_daemon.utils.shell_segmentation import is_wholly_inert_command
 
 
 def _rule() -> Rule:
@@ -162,7 +163,17 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
         # keeps judging a wrapped head, an fd redirect or a rebound `echo`.
         if is_plain_data_command(command):
             return False
-        executable = _path_text(strip_inert_spans(command))
+        # A `grep`/`rg` argument is text that command only searches, so a `cd ` inside a quoted search pattern is not a directory
+        # change (Plan 00590, GitHub #194). Only the SEARCH heads are blanked, not
+        # `echo`/`printf`: this guard keeps judging a wrapped or rebound one (see
+        # `is_plain_data_command` above). The view blanks them ONLY when nothing
+        # could run the text: an expansion in the
+        # arguments, or a pipeline that carries the output to a shell, keeps the
+        # text as written. It also reads a literal `bash -c` body as commands and
+        # leaves `eval`, `$( )`, backticks and an executing heredoc untouched, so
+        # every executing twin is still judged. It runs BEFORE `_path_text`,
+        # which removes quotes and would otherwise join the pattern to the path.
+        executable = _path_text(command_position_view(command, data_heads=SEARCH_HEADS))
         return bool(_CD_INTO_DAEMON_DIR.search(executable))
 
     def get_rules(self) -> list[Rule]:

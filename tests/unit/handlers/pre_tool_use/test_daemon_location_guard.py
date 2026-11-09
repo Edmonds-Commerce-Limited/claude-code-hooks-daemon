@@ -418,3 +418,56 @@ class TestTheDenyMessageNamesBothVerbs:
         (rule,) = DaemonLocationGuardHandler().get_rules()
 
         assert "pushd" in rule.blocked
+
+
+class TestACdIsJudgedOnlyInCommandPosition:
+    """Plan 00590 / GitHub #194: a `cd ` inside a search pattern changes no directory.
+
+    `_path_text` removes every quote, so a quoted grep pattern's `cd` used to
+    join grep's file argument and read as `cd .claude/hooks-daemon/...`. The
+    executing twins (a shell that RUNS the text) must keep denying.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cd /workspace && grep -c "cd " .claude/hooks-daemon/CLAUDE.md',
+            'grep -n -E "def |cd " .claude/hooks-daemon/src/x.py | wc -l',
+            "grep -c 'cd ' .claude/hooks-daemon/x && echo ok",
+            'rg "pushd " .claude/hooks-daemon/ | wc -l',
+        ],
+    )
+    def test_a_search_pattern_naming_cd_is_not_a_directory_change(self, command: str) -> None:
+        assert _guard_matches(command) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'bash -c "cd .claude/hooks-daemon && ls"',
+            "sh -c 'cd .claude/hooks-daemon'",
+            'eval "cd .claude/hooks-daemon"',
+            "x=$(cd .claude/hooks-daemon && pwd)",
+            "x=`cd .claude/hooks-daemon && pwd`",
+            "(cd .claude/hooks-daemon)",
+            'cd ".claude/hooks-daemon"',
+            "cd '.claude'/hooks-daemon",
+            "bash <<'EOF'\ncd .claude/hooks-daemon\nEOF",
+            'echo "cd .claude/hooks-daemon" | sh',
+            'grep -c "cd " x.md; cd .claude/hooks-daemon',
+            'grep -c "cd " x.md && cd .claude/hooks-daemon',
+            'grep -c "cd " .claude/hooks-daemon/x\ncd .claude/hooks-daemon',
+            'grep "$(cd .claude/hooks-daemon && pwd)" x',
+        ],
+    )
+    def test_an_executing_twin_is_still_a_directory_change(self, command: str) -> None:
+        assert _guard_matches(command) is True
+
+    def test_the_search_head_opt_in_leaves_the_shared_default_alone(self) -> None:
+        from claude_code_hooks_daemon.utils.command_position import (
+            SEARCH_HEADS,
+            command_position_view,
+        )
+
+        assert "cd" not in command_position_view('grep "cd " f', data_heads=SEARCH_HEADS)
+        assert "cd" in command_position_view('echo "cd " f', data_heads=SEARCH_HEADS)
+        assert "cd" not in command_position_view('echo "cd " f')
