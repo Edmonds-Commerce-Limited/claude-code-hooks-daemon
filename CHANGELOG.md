@@ -38,6 +38,7 @@ _A patch release. Branches now sit in three pools (open, parked, merged) with th
 - The transport probe checks the host's own musl relay target (`aarch64-unknown-linux-musl` on arm64) instead of always asking for the x86_64 one (Plan 00572 Task 3.3).
 - The remote-delete guard no longer falsely denies a compound cleanup command (Plan 00474 N591).
 - The branch creation guard trusts a SessionStart "merged" or "stale" label only while the branch is still at the tip the label recorded, so a merged branch that later gains commits no longer denies every branch creation with `R-BRANCH-MERGED-POOL` (a deny `branch-sweep --clean` and `branch-keep` both refuse to clear); it is judged by its live state instead (release review D1).
+- The "left alone" hint for a worktree under `.claude/worktrees/` names `worktree-reap --reap --only <directory>` with the worktree's directory name, which is what `--only` matches, instead of the branch name, so the suggested command acts when the two differ (release review D2).
 - Test hardening: a pinned clock in the bundle-path collision test, a `Timeout` constant in the target-release test, and a black-formatted FIFO test.
 
 ## [3.73.0] - 2026-11-07
