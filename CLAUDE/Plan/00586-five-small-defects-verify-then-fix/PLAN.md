@@ -9,7 +9,7 @@
 
 ## Overview
 
-Six small defects were noticed in passing during other work and recorded nowhere. Owner ruling: a finding gets a plan
+Seven small defects were noticed in passing during other work and recorded nowhere. Owner ruling: a finding gets a plan
 (`CLAUDE/Worktree.md`, "Small Batches"). Three of them (A, B, D) came from review agents and have not been reproduced,
 so every task starts by reproducing the defect. A task whose defect does not reproduce closes with the evidence that it
 does not, and no change.
@@ -27,6 +27,11 @@ does not, and no change.
 - **F.** The `git restore` guard (R-GIT-RESTORE) refuses to restore a tracked file whose working copy is EMPTY, as a
   host reboot left one in this repository. Discarding an empty working copy loses nothing, since there is no content
   to lose, but the guard denies it and only a human can run the restore.
+- **G.** CI's change-to-test mapping does not select `tests/integration/test_client_owned_asset_lint.py` when a
+  client-shipped shell asset changes. Seen: Plan 00581 changed `provision.sh` (`cfa601263`); its CI run (42650039659)
+  skipped the full suite, the mapping did not pick the asset lint test, and the "Shell" job passed. The SC2030/SC2031
+  regression reached main and was caught only by a later full-suite fallback run (42676054890); fixed in
+  `43f1a9a98`.
 - **E.** The plan-number guard (`plan_number_helper`, R-PLAN-NUMBER-DISCOVERY) blocks a command that combines an
   `ls ... | awk` with `git add CLAUDE/Plan/...`, which discovers no plan number.
 
@@ -37,7 +42,7 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
 
 ## Goals
 
-- Each of A to F is either fixed with a test that failed before the fix, or closed with the evidence that it does not
+- Each of A to G is either fixed with a test that failed before the fix, or closed with the evidence that it does not
   reproduce.
 
 ## Non-Goals
@@ -51,20 +56,29 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
 
 - [ ] ⬜ **Task 1.1 (A)**: Reproduce: list every handler `check-config-migrations` can recommend and compare it with
   the registered handlers. RED test, then fix the source of the recommendation. Check Plan 00420 first
+
 - [ ] ⬜ **Task 1.2 (B)**: Reproduce with a config holding `daemon.languages: []`. Fact-check: plausibly real, the
   two readers disagree (`core/relevance.py` treats `[]` as an empty set, `core/apply_once.py` treats it as unset).
   Decide which reading the config documentation promises; RED test for that reading, then fix the loader (or the documentation, if the code matches
   what it promises)
+
 - [ ] ⬜ **Task 1.3 (C)**: Run the optimise procedure in this self-install checkout and record each wrong path. RED
   test, then fix through the existing install-mode path resolution
+
 - [ ] ⬜ **Task 1.4 (D)**: Confirm on a failed release-gate run that the other shards ran to the end. Fix in the
   release gate only (a fail-fast input to the shared `test-shards.yml`, default unchanged for `qa.yml`), keeping the
   final aggregate job's verdict
+
 - [ ] ⬜ **Task 1.6 (F)**: RED test: a restore of a tracked file whose working copy is zero bytes is allowed, and a
   restore of a non-empty modified file is still denied. GREEN in `destructive_git`, alongside its other
   lossless-removal judgements
+
 - [ ] ⬜ **Task 1.5 (E)**: RED test with the exact command shape, then narrow the discovery-idiom match so it is
   allowed, keeping the existing tests for real discovery commands red-to-green
+
+- [ ] ⬜ **Task 1.7 (G)**: Find why the mapping (and the "Shell" job, which likely lints under the repository's own
+  shellcheck config rather than the defaults this test uses) missed it. RED test in the mapping's own tests: a change
+  to any file the asset lint test checks selects that test. GREEN in the mapping
 
 ### Phase 2: Delivery
 
@@ -72,10 +86,10 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
 
 ## Success Criteria
 
-- [ ] Each of A to F: a test that failed before the fix and passes after it, or recorded evidence that it does not
+- [ ] Each of A to G: a test that failed before the fix and passes after it, or recorded evidence that it does not
   reproduce
 - [ ] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` for each
-  user-visible fix (A, B, C, E, F); D changes CI only and has no release-bound consequence
+  user-visible fix (A, B, C, E, F); D and G change CI only and have no release-bound consequence
 
 ## Delivery & Milestones
 
