@@ -24,19 +24,17 @@ _A patch release. Branches now sit in three pools (open, parked, merged) with th
 - Re-parking a branch needs a new reason; a same-reason re-park is refused (Plan 00571).
 - The WorktreeCreate wait `init.sh` allows is now 90 seconds (was 85) because the creation guard makes one more git call (Plan 00571).
 - `--clean` skip lines for Claude-owned worktrees under `.claude/worktrees/` now name `worktree-reap --reap --only <name>` (Plan 00571).
-- `UPGRADE_METADATA`'s `modified_files` lists only the files the upgrade created, modified or deleted; files uncommitted beforehand are recorded with a content hash and listed only if the upgrade changed them again (Plan 00474 N588).
-- The branch creation guard never counts the default branch, or a name matching `branches.exempt`, `branches.integration_lines` or `branches.protected_names`, as new work (Plan 00474 N593).
-- Relay-deploy tests and the toolchain check default to the host architecture (Plan 00572 Task 3.3).
-- Release housekeeping: vendored remote docs refreshed; the validated handler catalogue released (Plan 00575).
+- Release housekeeping: vendored remote docs refreshed.
 
 ### Fixed
 
+- `UPGRADE_METADATA`'s `modified_files` lists only the files the upgrade created, modified or deleted; files uncommitted beforehand are recorded with a content hash and listed only if the upgrade changed them again (Plan 00474 N588).
+- The branch creation guard never counts the default branch, or a name matching `branches.exempt`, `branches.integration_lines` or `branches.protected_names`, as new work (Plan 00474 N593).
 - `worktree-reap --reap-branches` deletes merged branches through the `delete-branch` path (containment proof, recovery bundle) instead of a plain `git branch -d`, reports a kept branch as `KEPT` with the reason and exits non-zero (Plan 00571 D2).
 - Running-agent worktree protection compares paths after resolving them against the project root, so relative paths, trailing separators and symlinked routes match (Plan 00571 D1).
 - The ccy supervisor no longer hangs on a FIFO, socket or device in a signal directory or `/proc`: entries are opened non-blocking and read only when regular files (Plan 00474 N592).
 - An upgrade to a commit whose short SHA is all digits is no longer stopped as a "MAJOR version change"; a release is recognised only when `v`-prefixed or dotted (Plan 00474 N598).
 - The transport probe checks the host's own musl relay target (`aarch64-unknown-linux-musl` on arm64) instead of always asking for the x86_64 one (Plan 00572 Task 3.3).
-- The remote-delete guard no longer falsely denies a compound cleanup command (Plan 00474 N591).
 - The branch creation guard trusts a SessionStart "merged" or "stale" label only while the branch is still at the tip the label recorded, so a merged branch that later gains commits no longer denies every branch creation with `R-BRANCH-MERGED-POOL` (a deny `branch-sweep --clean` and `branch-keep` both refuse to clear); it is judged by its live state instead (release review D1).
 - The "left alone" hint for a worktree under `.claude/worktrees/` names `worktree-reap --reap --only <directory>` with the worktree's directory name, which is what `--only` matches, instead of the branch name, so the suggested command acts when the two differ (release review D2).
 - An admin issue takeover that loses a race to another assignee puts the previous assignees back when it backs off, instead of leaving them silently unassigned (release review D3).
