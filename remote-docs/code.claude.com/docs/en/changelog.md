@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/changelog
-fetched_at: '2026-11-07T20:12:48.391915+00:00'
+fetched_at: '2026-11-09T09:01:29.006933+00:00'
 fidelity: converted
 source_sha256: a058698343515f68d9e8bd38f9424264a7560514f420392a30aa2f4f2ff5d9dc
 licence: unreviewed
-stale_after: '2027-02-05'
+stale_after: '2027-02-07'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 value_swaps:
 - kind: session-uuid

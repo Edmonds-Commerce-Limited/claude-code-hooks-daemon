@@ -690,7 +690,12 @@ class IssueValidityService:
                 self._comment_takeover(fix, identity)
             return True
         if any(a.casefold() == (identity or "").casefold() for a in facts.assignees):
-            self._runner(["issue", "edit", str(fix.issue), "--remove-assignee", SELF_ASSIGNEE])
+            back_off = ["issue", "edit", str(fix.issue), "--remove-assignee", SELF_ASSIGNEE]
+            if fix.previous:
+                # A takeover also removed the previous assignees; losing the race must
+                # leave them as they were rather than strand the issue without them.
+                back_off += ["--add-assignee", ",".join(fix.previous)]
+            self._runner(back_off)
         self.forget(fix.issue)
         return False
 

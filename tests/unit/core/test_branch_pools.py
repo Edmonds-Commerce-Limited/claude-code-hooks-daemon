@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -22,6 +23,7 @@ from claude_code_hooks_daemon.config.models import (
     Config,
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import branch_inventory
 from claude_code_hooks_daemon.core.branch_creation import (
     creation_verdict,
     read_labels,
@@ -282,8 +284,15 @@ class TestPoolSplit:
 
     def test_a_patch_equivalent_label_leaves_the_wip_count(self, repo: Path) -> None:
         _unique(repo, "one")
-        _unique(repo, "cherry")
-        labels = {"cherry": {"group": "patch-equivalent", "action": None, "stage": None}}
+        tip = _unique(repo, "cherry")
+        labels = {
+            "cherry": {
+                "group": "patch-equivalent",
+                "action": None,
+                "stage": None,
+                "local_tip": tip,
+            }
+        }
         verdict = creation_verdict(repo, _config(cap=2), "fresh", labels=labels, now=NOW)
         assert verdict.decision == "allow"
 
@@ -516,12 +525,70 @@ class TestMergedPool:
         )
 
     def test_a_stale_label_denies_under_the_cap(self, repo: Path) -> None:
-        _merged_distinct(repo, "a")
-        labels = {"a": {"group": "merged", "stale": "true"}}
+        tip = _merged_distinct(repo, "a")
+        labels = {"a": {"group": "merged", "stale": "true", "local_tip": tip}}
         verdict = creation_verdict(repo, _config(), "fresh", labels=labels, now=NOW)
         assert verdict.rule_id == RuleID.BRANCH_MERGED_POOL
         text = "\n".join(verdict.lines)
         assert "stale" in text.lower() and "branches.merged.max_age_days" in text
+
+    def test_a_label_whose_branch_gained_commits_is_not_trusted(self, repo: Path) -> None:
+        """A merged+stale label recorded at an old tip must not outlive new commits."""
+        old_tip = _merged_distinct(repo, "a")
+        labels = {
+            "a": {"group": "merged", "stale": "true", "local_tip": old_tip, "remote_tip": None}
+        }
+        _git(repo, "checkout", "-q", "a")
+        (repo / "new.txt").write_text("live work")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", "new live work")
+        _git(repo, "checkout", "-q", "main")
+        verdict = creation_verdict(repo, _config(), "fresh", labels=labels, now=NOW)
+        assert verdict.decision == "allow"
+
+    def test_a_label_still_at_its_tip_is_trusted(self, repo: Path) -> None:
+        tip = _merged_distinct(repo, "a")
+        labels = {"a": {"group": "merged", "stale": "true", "local_tip": tip, "remote_tip": None}}
+        verdict = creation_verdict(repo, _config(), "fresh", labels=labels, now=NOW)
+        assert verdict.rule_id == RuleID.BRANCH_MERGED_POOL
+
+    def test_a_moved_branch_counts_as_open_work(self, repo: Path) -> None:
+        old_tip = _unique(repo, "one")
+        _unique(repo, "two")
+        labels = {
+            "one": {"group": "merged", "stale": None, "local_tip": old_tip, "remote_tip": None}
+        }
+        _git(repo, "checkout", "-q", "one")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "more")
+        _git(repo, "checkout", "-q", "main")
+        verdict = creation_verdict(repo, _config(cap=2), "fresh", labels=labels, now=NOW)
+        assert verdict.rule_id == RuleID.BRANCH_WIP_CAP
+
+    def test_the_cap_list_does_not_show_a_moved_branch_by_its_old_label(self, repo: Path) -> None:
+        old_tip = _unique(repo, "one")
+        _unique(repo, "two")
+        labels = {
+            "one": {
+                "group": "merged",
+                "action": "delete-branch one",
+                "stale": None,
+                "local_tip": old_tip,
+                "remote_tip": None,
+            }
+        }
+        _git(repo, "checkout", "-q", "one")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "more")
+        _git(repo, "checkout", "-q", "main")
+        verdict = creation_verdict(repo, _config(cap=2), "fresh", labels=labels, now=NOW)
+        text = "\n".join(verdict.lines)
+        assert "[merged]" not in text
+        assert "delete-branch one" not in text
+
+    def test_labels_snapshot_records_both_tips(self, tmp_path: Path) -> None:
+        path = tmp_path / "labels.json"
+        write_labels(path, [{"name": "a", "local_tip": "abc", "remote_tip": None}])
+        assert read_labels(path)["a"]["local_tip"] == "abc"
+        assert read_labels(path)["a"]["remote_tip"] is None
 
     def test_warn_and_off_modes(self, repo: Path) -> None:
         _merged_distinct(repo, "a")
@@ -544,6 +611,58 @@ class TestMergedPool:
         text = "\n".join(render_report(inventory, _config(), cap=10))
         assert "kept: audit" in text
         assert "STALE" in text and "branch-keep" in text
+
+
+class TestPoolPassHonoursTheBudget:
+    """The pool pass shares the sweep's time budget and its cache (release review D4)."""
+
+    def test_an_exhausted_budget_makes_no_pool_git_calls(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _unique(repo, "held")
+        _park(repo, "held", days_ago=31)
+        _merged_distinct(repo, "done")
+        calls: list[str] = []
+        real_park_count = branch_inventory._park_count
+        real_read_keeps = branch_inventory.read_keeps
+
+        def park_count(*args: Any, **kwargs: Any) -> int | None:
+            calls.append("park_count")
+            return real_park_count(*args, **kwargs)
+
+        def read_keeps(*args: Any, **kwargs: Any) -> Any:
+            calls.append("read_keeps")
+            return real_read_keeps(*args, **kwargs)
+
+        monkeypatch.setattr(branch_inventory, "_park_count", park_count)
+        monkeypatch.setattr(branch_inventory, "read_keeps", read_keeps)
+        inventory = build_inventory(repo, _config(sweep={"budget_ms": 0}), now=NOW)
+        assert calls == []
+        assert inventory.records["held"].park_count is None
+        # Unknown is not stale: a skipped notes read must not call a kept branch stale.
+        assert inventory.records["done"].stale is False
+
+    def test_the_park_count_is_served_from_the_cache(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _unique(repo, "held")
+        _park(repo, "held", days_ago=31)
+        first = build_inventory(repo, _config(), now=NOW)
+        assert first.records["held"].park_count == 1
+
+        def fail(*args: Any, **kwargs: Any) -> int | None:
+            raise AssertionError("park count recomputed instead of read from the cache")
+
+        monkeypatch.setattr(branch_inventory, "_park_count", fail)
+        second = build_inventory(repo, _config(), now=NOW)
+        assert second.records["held"].park_count == 1
+
+    def test_a_cached_park_count_survives_an_exhausted_budget(self, repo: Path) -> None:
+        _unique(repo, "held")
+        _park(repo, "held", days_ago=31)
+        build_inventory(repo, _config(), now=NOW)
+        inventory = build_inventory(repo, _config(sweep={"budget_ms": 0}), now=NOW)
+        assert inventory.records["held"].park_count == 1
 
 
 def test_duplicates_still_cover_parked_work(repo: Path) -> None:

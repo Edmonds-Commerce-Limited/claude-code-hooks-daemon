@@ -104,7 +104,7 @@ def ownership_refusal(
         return (
             f"the worktree {worktree} is under {ProjectPath.CLAUDE_WORKTREES_DIR}/, "
             "which Claude Code owns; left alone. "
-            f"`{daemon_cli_command_for_docs('worktree-reap', '--reap', '--only', branch)}` "
+            f"`{daemon_cli_command_for_docs('worktree-reap', '--reap', '--only', worktree.name)}` "
             "removes it behind its own safety checks; then run this command again"
         )
     return None

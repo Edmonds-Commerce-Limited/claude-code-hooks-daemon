@@ -1,10 +1,10 @@
 ---
 source_url: https://raw.githubusercontent.com/anthropics/claude-code/main/mods/types/claude-code.d.ts
-fetched_at: '2026-11-07T20:13:16.827496+00:00'
+fetched_at: '2026-11-09T09:01:56.361529+00:00'
 fidelity: converted
 source_sha256: 20a1f8726b6a1511ca1c32e44054f9fc6041dfbb0da6df9b53b5f1b13d5d0662
 licence: unreviewed
-stale_after: '2027-02-05'
+stale_after: '2027-02-07'
 fetch_method: agent-browser-lite-headless (text)
 ---
 

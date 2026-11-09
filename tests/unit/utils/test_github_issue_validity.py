@@ -6,6 +6,7 @@ network or the real ``gh`` binary.
 
 from __future__ import annotations
 
+import itertools
 import json
 from collections.abc import Sequence
 from typing import Any
@@ -614,6 +615,21 @@ class AdminGh(FakeGh):
             if self.comment_error is not None:
                 raise self.comment_error
             return "https://github.com/o/r/issues/7#issuecomment-1\n"
+        if (
+            argv[:2] == ("issue", "edit")
+            and "--remove-assignee" in argv
+            and argv[argv.index("--remove-assignee") + 1] == "@me"
+            and "--add-assignee" in argv
+        ):
+            self.calls.append(argv)
+            current = self.issues[int(argv[2])]
+            assert isinstance(current, dict)
+            restored = [{"login": a} for a in argv[argv.index("--add-assignee") + 1].split(",")]
+            current["assignees"] = [
+                *(a for a in current["assignees"] if a["login"] != self.identity),
+                *restored,
+            ]
+            return "ok\n"
         if argv[:2] == ("issue", "edit") and "--remove-assignee" not in argv:
             self.calls.append(argv)
             current = self.issues[int(argv[2])]
@@ -746,14 +762,26 @@ class TestTakeoverClaim:
 
         def racing(args: Sequence[str]) -> str:
             out = real_call(admin_gh, args)
-            if "--add-assignee" in args and "--remove-assignee" in args:
+            if "--add-assignee" in args and "--remove-assignee" in args and not issue.get("raced"):
+                issue["raced"] = True
                 issue["assignees"].append({"login": "dave"})
             return out
 
         svc = IssueValidityService(runner=racing)
         assert svc.claim(fix) is False
-        assert ("issue", "edit", "7", "--remove-assignee", "@me") in admin_gh.calls
+        backoff = [
+            c
+            for c in admin_gh.calls
+            if c[:2] == ("issue", "edit")
+            and any(
+                flag == "--remove-assignee" and value == "@me"
+                for flag, value in itertools.pairwise(c)
+            )
+        ]
+        assert backoff, "the losing claim must remove itself"
         assert admin_gh.comments == []
+        # The takeover removed alice; losing the race must put her back, not strand her.
+        assert sorted(a["login"] for a in issue["assignees"]) == ["alice", "dave"]
 
     def test_a_failed_comment_does_not_undo_the_takeover(
         self, admin_gh: AdminGh, admin_service: IssueValidityService

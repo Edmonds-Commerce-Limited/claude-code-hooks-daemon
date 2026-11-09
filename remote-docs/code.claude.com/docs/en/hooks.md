@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/hooks.md
-fetched_at: '2026-11-07T20:12:50.912366+00:00'
+fetched_at: '2026-11-09T09:01:30.811110+00:00'
 fidelity: converted
 source_sha256: 302eb7b421958a10745425535de466903450dc2f4ee601ab182d54e1f747fa56
 licence: unreviewed
-stale_after: '2027-02-05'
+stale_after: '2027-02-07'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 value_swaps:
 - kind: session-uuid
