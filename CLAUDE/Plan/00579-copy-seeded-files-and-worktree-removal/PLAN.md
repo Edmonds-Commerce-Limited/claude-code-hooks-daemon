@@ -24,8 +24,9 @@ issue's own example is a file a tool writes permission grants into, which is why
 has changed in the worktree holds content the seed list cannot recreate, so treating every copy-mode seed as regenerable
 would let the guard delete real work.
 
-Related issues filed the same day, to be triaged together: #167 (`check-worktree-seed` reports an `optional: true` seed
-entry as missing) and #173 (`WorktreeCreate` cleanup cannot remove a worktree git left locked "initializing").
+A related issue filed the same day: #173 (`WorktreeCreate` cleanup cannot remove a worktree git left locked
+"initializing"). #167 (an `optional: true` seed entry reported as missing) does not interact with this one, and is fixed
+on its own by Plan 00580.
 
 ## Owner questions
 
@@ -33,7 +34,7 @@ entry as missing) and #173 (`WorktreeCreate` cleanup cannot remove a worktree gi
   byte-identical to its source in the main checkout. A copy that has diverged still blocks and is named in the deny.
 - **Q2.** If yes, should the seed list be read directly (one list, no drift), with `regenerable` still able to add to
   it?
-- **Q3.** Should #167 and #173 be planned with this one, as one worktree-seed and creation pass?
+- **Q3.** Should #173 be planned with this one, as one worktree-seed and creation pass?
 
 ## Goals
 
