@@ -80,6 +80,11 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
   shellcheck config rather than the defaults this test uses) missed it. RED test in the mapping's own tests: a change
   to any file the asset lint test checks selects that test. GREEN in the mapping
 
+- [ ] ⬜ **Task 1.8 (H)**: Plan 00587's fact-check found that a `cd` INSIDE a compound body (which must keep the
+  body's later targets in doubt) is pinned only by a parser-level test. Add the containment-level deny test
+  (`cd sub && for x in a; do cd /tmp; echo hi > x; done` denied) to `test_project_containment.py`; no code change
+  expected
+
 ### Phase 2: Delivery
 
 - [ ] ⬜ **Task 2.1**: targeted QA per task, merge each to main, verify CI
