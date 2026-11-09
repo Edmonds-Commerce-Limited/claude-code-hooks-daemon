@@ -66,7 +66,8 @@ class WorktreeSeedReport:
         configured: The entries currently configured, as parsed.
         unconfigured: Repository candidates the config does not mention.
             Informational — the project may have decided against each one.
-        missing: Configured entries whose source no longer exists. Urgent: the
+        missing: Configured required (non-optional) entries whose source no
+            longer exists; an absent optional entry is not listed. Urgent: the
             seeding executor fails fast on exactly this, so each one will abort
             the next worktree creation.
         seed_key_configured: Whether the ``seed`` option exists in the config at

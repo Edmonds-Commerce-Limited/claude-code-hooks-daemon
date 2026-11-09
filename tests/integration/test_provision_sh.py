@@ -468,6 +468,82 @@ class TestAnExistingCloneAtTheExpectedVersion:
         assert fresh.starts() == 1, "an equal version must not restart the daemon"
 
 
+def _venv_of(p: Provisioning) -> Path:
+    return p.clone / "untracked" / f"venv-{python_venv_fingerprint(p.clone)}"
+
+
+def _lock_hash(p: Provisioning) -> str:
+    metadata = json.loads((_venv_of(p) / ".daemon-metadata.json").read_text())
+    return str(metadata["lock_hash"])
+
+
+def _make_venv_stale(p: Provisioning) -> str:
+    """Record a lock hash the clone's pyproject.toml/uv.lock no longer yield; return the real one."""
+    path = _venv_of(p) / ".daemon-metadata.json"
+    metadata = json.loads(path.read_text())
+    real = str(metadata["lock_hash"])
+    metadata["lock_hash"] = "0" * len(real)
+    path.write_text(json.dumps(metadata))
+    return real
+
+
+class TestAnExistingCloneAtTheExpectedVersionWithAStaleVenv:
+    """Plan 00581: the version matches but the venv was built for another lock."""
+
+    def test_a_matching_venv_is_left_alone(self, fresh: Provisioning) -> None:
+        assert fresh.provision().returncode == 0
+        builds = len(fresh.box.uv_calls())
+
+        result = fresh.provision()
+
+        assert result.returncode == 0, _out(result)
+        assert "nothing to do" in _out(result)
+        assert len(fresh.box.uv_calls()) == builds, "a current venv is not rebuilt"
+
+    def test_a_foreground_run_repairs_it_and_says_so(self, fresh: Provisioning) -> None:
+        assert fresh.provision().returncode == 0
+        real = _make_venv_stale(fresh)
+        builds = len(fresh.box.uv_calls())
+
+        result = fresh.provision()
+
+        assert result.returncode == 0, _out(result)
+        assert "rebuilt" in _out(result)
+        assert "nothing to do" not in _out(result)
+        assert (
+            len(fresh.box.uv_calls()) > builds
+        ), "the stale venv goes through the bootstrap repair"
+        assert _lock_hash(fresh) == real
+        assert fresh.clone_version() == CLONE_VERSION
+
+    def test_a_venv_whose_lock_hash_cannot_be_read_is_not_a_match(
+        self, fresh: Provisioning
+    ) -> None:
+        assert fresh.provision().returncode == 0
+        (_venv_of(fresh) / ".daemon-metadata.json").write_text("not json\n")
+
+        result = fresh.provision()
+
+        assert result.returncode == 0, _out(result)
+        assert "nothing to do" not in _out(result)
+        assert "rebuilt" in _out(result)
+
+    def test_a_background_run_reports_it_and_rebuilds_nothing(self, fresh: Provisioning) -> None:
+        assert fresh.provision().returncode == 0
+        _make_venv_stale(fresh)
+        stale = _lock_hash(fresh)
+        builds = len(fresh.box.uv_calls())
+
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode == 0, _out(result)
+        assert "hooks-daemon repair" in _out(result)
+        assert "stale" in _out(result)
+        assert "nothing to do" not in _out(result)
+        assert len(fresh.box.uv_calls()) == builds, "a background run never rebuilds"
+        assert _lock_hash(fresh) == stale
+
+
 class TestSyncingAnExistingClone:
     def test_a_clean_clone_syncs_to_a_newer_tag(self, fresh: Provisioning) -> None:
         _provisioned_at(fresh, CLONE_VERSION)

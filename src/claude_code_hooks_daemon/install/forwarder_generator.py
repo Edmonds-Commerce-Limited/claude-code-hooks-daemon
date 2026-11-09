@@ -470,7 +470,11 @@ def build_relay_guard_block(
     lines.append("            shopt -u execfail\n")
     lines.append('            if [[ "$_rl_opts" == *e* ]]; then set -e; fi\n')
     lines.append("        fi\n")
-    lines.append(f'        {RELAY_UNUSED_ENV}="$_rl_bin"\n')
+    # `export`, because init.sh (sourced next, out of shellcheck's sight) reads
+    # and unsets it: shellcheck treats an exported variable as used externally,
+    # so SC2034 stays quiet without a suppression directive. The only process
+    # started before init.sh unsets it is the parse guard's `bash -n`.
+    lines.append(f'        export {RELAY_UNUSED_ENV}="$_rl_bin"\n')
     lines.append("    fi\n")
     lines.append("fi\n")
     lines.append(_GUARD_FOOTER)

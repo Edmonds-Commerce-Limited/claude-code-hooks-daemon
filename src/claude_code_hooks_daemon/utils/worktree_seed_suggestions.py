@@ -89,8 +89,9 @@ class SeedConfigDrift:
         unconfigured: Candidates present in the repository that the config does
             not mention. Informational — a project may have decided against
             each one, which is why this is a report rather than a change.
-        missing: Configured entries whose source no longer exists. These are
-            the urgent ones: the seeding executor fails fast on exactly this,
+        missing: Configured REQUIRED entries whose source no longer exists
+            (an absent ``optional`` entry is acceptable, so never listed).
+            These are the urgent ones: the seeding executor fails fast on exactly this,
             so each will abort the next worktree creation.
     """
 
@@ -199,6 +200,10 @@ def diff_seed_config(
         for entry in suggest_seed_entries(root, vendor_dirs=vendor_dirs)
         if entry.path not in configured_paths
     )
-    missing = tuple(entry for entry in configured if not (root / entry.path).exists())
+    # An absent OPTIONAL source is acceptable and creation-time seeding skips
+    # it, so only a required entry can abort a worktree creation.
+    missing = tuple(
+        entry for entry in configured if not entry.optional and not (root / entry.path).exists()
+    )
 
     return SeedConfigDrift(unconfigured=unconfigured, missing=missing)

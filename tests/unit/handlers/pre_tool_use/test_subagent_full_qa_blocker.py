@@ -3281,6 +3281,22 @@ class TestUnrecognisedInterpreterRunningInlineCode:
         )
         assert result.decision is Decision.DENY
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "[ -r /proc/1/stat ]",
+            "[ -e pyproject.toml ] && echo yes",
+            "test -e pyproject.toml",
+            "if [[ -r /proc/1/stat ]]; then echo yes; fi",
+        ],
+    )
+    def test_a_shell_file_test_is_not_inline_code(self, command: str) -> None:
+        """`[ -r FILE ]` and `test -e FILE` are file tests: `-r` is "readable",
+        `-e` "exists". Reading them as PHP's `-r` or Perl's `-e` judged
+        `bin/hooks-daemon status` UNSEEN, because the wrapper's own body holds
+        `[ -r /proc/$pid/stat ]`."""
+        assert find_full_qa_invocation(command, _patterns()) is None, command
+
     def test_an_unrecognised_program_with_no_inline_code_flag_is_unaffected(self) -> None:
         """The generic rule is the FLAG shape, not the bare program name --
         an ordinary invocation of an unrecognised program stays fully

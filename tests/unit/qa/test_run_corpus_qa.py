@@ -92,6 +92,30 @@ class TestTheReportShape:
         assert report["summary"]["total_issues"] == 2
         assert report["findings"] == findings
 
+    def test_advise_only_findings_pass(self) -> None:
+        """Plan 00576: an advisory never fails the check.
+
+        An advise-severity plan-QA finding (journal freshness) failed the
+        `Release gate` CI run for the v3.73.1 emergency patch. Advise means
+        "worth knowing", so it is reported and counted but is not a failure.
+        """
+        report = corpus_qa.build_report("plan", [_finding(severity="advise")] * 3)
+
+        assert report["summary"]["passed"] is True
+        assert report["summary"]["total_issues"] == 3
+        assert report["summary"]["advise"] == 3
+
+    def test_one_block_finding_fails_among_advisories(self) -> None:
+        findings = [_finding(severity="advise"), _finding(severity="block")]
+
+        assert corpus_qa.build_report("plan", findings)["summary"]["passed"] is False
+
+    def test_a_finding_with_no_recognised_severity_fails(self) -> None:
+        """Fail closed: a finding whose severity cannot be read is not an advisory."""
+        finding = {"check_id": "x", "message": "m", "path": None}
+
+        assert corpus_qa.build_report("docs", [finding])["summary"]["passed"] is False
+
     def test_the_severity_split_is_reported(self) -> None:
         """`0 block, 4 advise` is the first thing a reader wants to know."""
         findings = [
@@ -165,14 +189,31 @@ class TestTheCliVerdictIsHonoured:
 
         assert exit_code == corpus_qa.EXIT_SUCCESS
 
-    def test_findings_exit_one(self, tmp_path: Path) -> None:
-        payload = json.dumps([_finding()])
+    def test_block_findings_exit_one(self, tmp_path: Path) -> None:
+        payload = json.dumps([_finding(severity="block")])
         exit_code = corpus_qa.main(
             ["--corpus", "plan", "--json", "--root", str(tmp_path)],
             run_sweep=_sweep_returning(1, payload),
         )
 
         assert exit_code == corpus_qa.EXIT_ISSUES
+
+    def test_advise_only_findings_exit_zero_and_record_a_pass(self, tmp_path: Path) -> None:
+        """The CLI exits 1 on any finding; the QA verdict follows severity instead.
+
+        `llm_qa` fails a check when EITHER the JSON or the exit code says so,
+        so both have to agree that an advisory is a pass.
+        """
+        payload = json.dumps([_finding(severity="advise")])
+        exit_code = corpus_qa.main(
+            ["--corpus", "plan", "--json", "--root", str(tmp_path)],
+            run_sweep=_sweep_returning(1, payload),
+        )
+
+        assert exit_code == corpus_qa.EXIT_SUCCESS
+        written = json.loads((tmp_path / "untracked" / "qa" / "plan_qa.json").read_text())
+        assert written["summary"]["passed"] is True
+        assert written["summary"]["advise"] == 1
 
     def test_a_cli_operational_exit_is_operational_here_too(self, tmp_path: Path) -> None:
         """CLI exit 2 means "no verdict exists", even when stdout parses.
