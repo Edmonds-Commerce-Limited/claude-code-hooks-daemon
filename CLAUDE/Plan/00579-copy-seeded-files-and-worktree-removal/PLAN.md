@@ -1,6 +1,6 @@
 # Plan 00579: copy seeded files and worktree removal
 
-**Status**: Blocked on the owner (the questions below)
+**Status**: Not Started
 **Created**: 2026-11-09
 **Owner**: dev
 **Priority**: Medium
@@ -28,32 +28,48 @@ A related issue filed the same day: #173 (`WorktreeCreate` cleanup cannot remove
 "initializing"). #167 (an `optional: true` seed entry reported as missing) does not interact with this one, and is fixed
 on its own by Plan 00580.
 
-## Owner questions
+## Owner rulings (2026-11-09)
 
-- **Q1.** May the removal guard treat a copy-mode seeded file as regenerable? The proposed safe form: only while it is
-  byte-identical to its source in the main checkout. A copy that has diverged still blocks and is named in the deny.
-- **Q2.** If yes, should the seed list be read directly (one list, no drift), with `regenerable` still able to add to
-  it?
-- **Q3.** Should #173 be planned with this one, as one worktree-seed and creation pass?
+- **Q1, yes.** A worktree holding only seeded copies is of course fine to remove: a seeded copy cannot be lost, since
+  its source is in the main checkout. Confirm it has not diverged from that source; any difference might be work lost
+  by accident, so a diverged copy still blocks and is named in the deny.
+- **Q2, yes (follows from Q1).** The guard reads the `worktree_create` seed list directly, so no path is listed twice;
+  `regenerable` still adds to it.
+- **Q3, no.** #173 is a separate issue and goes through the issue loop on its own.
 
 ## Goals
 
-- To be set from the owner's answers.
+- The worktree-removal check treats a copy-mode seeded file as not losable while it is byte-identical to its source
+  in the main checkout, read from the seed list itself.
+- A diverged seeded copy blocks the removal, and the deny names it and says it differs from its source.
+- Symlink-mode seeds, `regenerable` globs and every other ignored entry behave as before.
 
 ## Non-Goals
 
-- No change to the removal guard before the owner answers.
+- #173 (a worktree git left locked "initializing").
+- No change to how seeds are created.
 
 ## Tasks
 
-### Phase 0: Owner decision
+### Phase 1: Fix
 
-- [ ] ⬜ **Task 0.1**: owner answers Q1-Q3; this plan is then re-planned into implementation phases
+- [ ] ⬜ **Task 1.1**: RED tests in real temporary repositories: a merged clean worktree whose only leftover is an
+  identical seeded copy is removable; the same with a diverged copy is denied and names the file; a missing source
+  counts as diverged
+- [ ] ⬜ **Task 1.2**: GREEN in `core/branch_cleanup.py` (and wherever the removal judge lists unregenerable ignored
+  entries), reading the seed entries through the existing seed-list loader
+- [ ] ⬜ **Task 1.3**: release-notes callout
+
+### Phase 2: Delivery
+
+- [ ] ⬜ **Task 2.1**: targeted QA, merge, verify CI, close #164
 
 ## Success Criteria
 
-- [ ] The owner has answered Q1-Q3, and the plan carries implementation phases that follow those answers
+- [ ] The new tests failed before the fix and pass after it, in every direction above
+- [ ] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+- [ ] Merged to main with green CI; #164 closed
 
 ## Delivery & Milestones
 
-- (pending the owner)
+- (pending)

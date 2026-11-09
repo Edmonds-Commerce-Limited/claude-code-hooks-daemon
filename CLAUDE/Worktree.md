@@ -65,6 +65,22 @@ answers one of those failures.
 - **Finish before starting.** A branch merges or is dropped within its batch.
   An unmerged branch falls behind `main`, and its merge cost grows with every
   commit it misses.
+- **Finish, do not park.** Work in progress is finished, not set aside. A
+  branch is parked (`branch-park <name> --reason ...`) only when it is
+  genuinely blocked, and the reason names the blocker: who or what it waits
+  on. A parked branch's blocker is worked on until it clears; a park is never
+  a place to leave work. When a session's notices list dormant or parked
+  branches, taking that work on comes before starting anything new.
+- **A branch that will never merge is deleted, not kept.** This is a standing
+  rule, not a question for the owner: record why in the plan or ledger entry,
+  then follow "Dropping is a deletion" below.
+- **Dependency updates merge as a matter of course.** Dependabot pull requests
+  are worked by [Routine 00003](Routine/00003-dependency-updates/ROUTINE.md):
+  a green one is merged, a red one is fixed in a worktree. They are never
+  left open waiting for permission.
+- **A finding gets a plan.** A defect noticed along the way and not fixed in
+  the current branch is filed with `CLAUDE/Plan/mkplan.bash` (after the dedupe
+  scout), never left in a report or a reply.
 - **The review cap is 3 rounds.** After the third, merge what is sound, or drop
   the branch. A fourth round is not the fix.
 - **Dropping is a deletion.** Record the reason in the ledger entry the branch
