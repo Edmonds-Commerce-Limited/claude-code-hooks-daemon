@@ -922,6 +922,10 @@ _INLINE_CODE_FLAG_TEXT_TOOLS: Final[frozenset[str]] = frozenset(
         "set",
         "echo",
         "read",
+        # Shell file tests: `[ -r FILE ]`, `test -e FILE` (readable, exists).
+        "[",
+        "[[",
+        "test",
         "declare",
         "local",
         "typeset",
