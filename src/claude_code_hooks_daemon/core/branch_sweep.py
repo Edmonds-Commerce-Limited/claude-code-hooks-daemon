@@ -15,11 +15,12 @@ unpushed local ref gets no delete command.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
+from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
 from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command, sweep_clean_line
 from claude_code_hooks_daemon.core.branch_inventory import (
     BranchInventory,
@@ -348,6 +349,25 @@ def _dormant_line(record: BranchRecord) -> str:
     return f"  {record.name}: {stage}, {_age(record)}, {_containment_text(record)}{_where(record)}"
 
 
+def dormant_action(name: str) -> str:
+    """The next step for an idle branch: finish it, park it, or delete it when nothing is lost."""
+    cli = daemon_cli_command_for_docs
+    return (
+        f"finish and merge it; or {cli('branch-park')} {name} --reason ...; "
+        f"or {cli('delete-branch')} {name} (only when the guard proves nothing is lost)"
+    )
+
+
+def _dormant_section(records: Sequence[BranchRecord]) -> list[str]:
+    """The Dormant lines, each with its next action, and the principle once."""
+    if not records:
+        return []
+    lines = [BRANCH_LIMIT_PRINCIPLE]
+    for record in records:
+        lines += [_dormant_line(record), f"      {dormant_action(record.name)}"]
+    return lines
+
+
 def _work_line(record: BranchRecord) -> str:
     ahead = "" if record.ahead is None else f", {record.ahead} ahead"
     twins = f", same tip as {', '.join(record.same_tip_as)}" if record.same_tip_as else ""
@@ -417,7 +437,7 @@ def render_report(
             [_done_line(r, inventory, config) for r in groups.patch_equivalent], remote=False
         ),
     )
-    out += _section("Dormant:", [_dormant_line(r) for r in groups.dormant])
+    out += _section("Dormant:", _dormant_section(groups.dormant))
     out += _section("Live work:", [_work_line(r) for r in groups.live])
     out += _section(
         "Parked:",

@@ -1024,9 +1024,12 @@ _provision_venv_is_current() {
 # pull that changed the lock file leaves stale (Plan 00581): a foreground run
 # repairs it through the bootstrap repair; a background run only reports it,
 # because a rebuild is not what a session-start sync may do unasked.
+# $1 is the resolved venv interpreter; it is passed in rather than read from
+# PYTHON_CMD here, because _provision_venv_healthy resets that global inside
+# its own subshell.
 _provision_equal_version() {
-    local venv_dir
-    venv_dir="$(dirname "$(dirname "$PYTHON_CMD")")"
+    local python_cmd="$1" venv_dir
+    venv_dir="$(dirname "$(dirname "$python_cmd")")"
     if _provision_venv_is_current "$venv_dir"; then
         _provision_say "The daemon clone is already at $TAG, the expected version: nothing to do."
         return 0
@@ -1063,7 +1066,7 @@ if _daemon_clone_present; then
                 "To move the whole project to another version, use: /hooks-daemon upgrade"
         fi
         if [[ "$PRESENT_VERSION" == "$VERSION" ]]; then
-            _provision_equal_version
+            _provision_equal_version "$PYTHON_CMD"
             exit 0
         fi
         if [[ "$BACKGROUND" == true ]]; then

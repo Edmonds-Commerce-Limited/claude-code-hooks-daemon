@@ -34,7 +34,9 @@ _WRAPPER_TIMEOUT_SECONDS = 300
 _UNFORMATTABLE_PYTHON = "def f(:\n    pass\n"
 
 
-def _run_gate(tmp_path: Path, *, paths: str) -> tuple[subprocess.CompletedProcess[str], dict]:
+def _run_gate(
+    tmp_path: Path, *, paths: str, black_bin: Path | None = None
+) -> tuple[subprocess.CompletedProcess[str], dict]:
     """Run the real wrapper with QA_FORMAT_* overrides; return (process, JSON).
 
     SECURITY: fixed argv, no shell, the repository's own QA wrapper.
@@ -45,6 +47,8 @@ def _run_gate(tmp_path: Path, *, paths: str) -> tuple[subprocess.CompletedProces
         "QA_FORMAT_OUTPUT_DIR": str(output_dir),
         "QA_FORMAT_PATHS": paths,
     }
+    if black_bin is not None:
+        env["QA_FORMAT_BLACK_BIN"] = str(black_bin)
     completed = subprocess.run(
         ["bash", str(_WRAPPER)],
         cwd=_REPO_ROOT,
@@ -86,3 +90,37 @@ class TestFormatGateAgreesWithExitCode:
         assert completed.returncode == 0, completed.stdout + completed.stderr
         assert output["summary"]["passed"] is True
         assert output["violations"] == []
+
+
+class TestEveryBlackParseFailureWording:
+    """black words an unparseable file differently across releases; name the file in each."""
+
+    @staticmethod
+    def _fake_black(tmp_path: Path, message: str) -> Path:
+        script = tmp_path / "fake-black"
+        script.write_text(f"#!/bin/sh\necho '{message}' >&2\nexit 123\n", encoding="utf-8")
+        script.chmod(0o755)
+        return script
+
+    def test_cannot_format_wording_names_the_file(self, tmp_path: Path) -> None:
+        """Pre-26.10 wording: the file comes right after 'cannot format'."""
+        fake = self._fake_black(tmp_path, "error: cannot format broken.py: Cannot parse: 1:6")
+
+        completed, output = _run_gate(tmp_path, paths="broken.py", black_bin=fake)
+
+        assert completed.returncode == 123
+        assert output["summary"]["passed"] is False
+        assert output["violations"][0]["file"] == "broken.py"
+
+    def test_cannot_parse_wording_names_the_file(self, tmp_path: Path) -> None:
+        """black >= 26.10 wording: the file trails as 'path:line:col'."""
+        fake = self._fake_black(
+            tmp_path,
+            "error: cannot parse for target version Python 3.13: broken.py:1:11",
+        )
+
+        completed, output = _run_gate(tmp_path, paths="broken.py", black_bin=fake)
+
+        assert completed.returncode == 123
+        assert output["summary"]["passed"] is False
+        assert output["violations"][0]["file"] == "broken.py"

@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     build_inventory,
 )
 from claude_code_hooks_daemon.core.branch_stop_guard import StopCheck, StopFinding, judge_stop
+from claude_code_hooks_daemon.core.branch_sweep import dormant_action
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path, write_state
 
@@ -91,10 +92,17 @@ def _noisy_line(inventory: BranchInventory) -> str | None:
     )
     if not names:
         return None
-    shown = ", ".join(names[:_MAX_NOISY_NAMES])
+    shown = names[:_MAX_NOISY_NAMES]
     more = len(names) - _MAX_NOISY_NAMES
-    suffix = f" (and {more} more)" if more > 0 else ""
-    return f"Idle branches at the noisy dormancy stage or later: {shown}{suffix}."
+    lines = [
+        "Idle branches at the noisy dormancy stage or later: unfinished work. This session "
+        "should take this work on now, before starting anything new.",
+        BRANCH_LIMIT_PRINCIPLE,
+    ]
+    lines.extend(f"  {name}: {dormant_action(name)}" for name in shown)
+    if more > 0:
+        lines.append(f"  (and {more} more; see `branch-sweep`)")
+    return "\n".join(lines)
 
 
 def _noisy_context(

@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
+from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
 from claude_code_hooks_daemon.core import branch_sweep
 from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command
 from claude_code_hooks_daemon.core.branch_inventory import (
@@ -216,6 +217,15 @@ class TestReport:
         assert "bin/hooks-daemon delete-branch merged-a" in text
         assert "branch -D" not in text
         assert "Open work: 3 of 10 (branches.wip.cap)" in text
+
+    def test_dormant_section_gives_each_branch_its_commands_and_the_principle_once(
+        self, inventory: BranchInventory
+    ) -> None:
+        text = "\n".join(branch_sweep.render_report(inventory, _CONFIG, cap=10, show_all=False))
+        dormant = text[text.index("Dormant:") : text.index("Live work")]
+        assert "branch-park idle-pushed --reason" in dormant
+        assert "delete-branch idle-pushed" in dormant
+        assert dormant.count(BRANCH_LIMIT_PRINCIPLE) == 1
 
     def test_exempt_only_with_all(self, inventory: BranchInventory) -> None:
         plain = "\n".join(branch_sweep.render_report(inventory, _CONFIG, cap=10, show_all=False))
