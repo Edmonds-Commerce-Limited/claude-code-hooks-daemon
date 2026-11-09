@@ -15,14 +15,6 @@
 # cannot see it: declare it here with a `path_glob` per pattern it reads.
 # tests/unit/qa/test_glob_readers_are_declared.py fails on an undeclared one.
 rules:
-  - path_glob: "src/claude_code_hooks_daemon/utils/git_commit_parsing.py"
-    tests:
-      - tests/unit/utils/test_git_commit_parsing.py
-      - tests/unit/utils/test_git_invocation_directory.py
-      - tests/unit/utils/test_git_facts_command_directory.py
-      - tests/unit/handlers/pre_tool_use/test_project_containment.py
-    why: too widely imported for the name mapping to choose tests; these cover its
-      cd/directory walk and its project_containment caller
   - path_glob: "README.md"
     tests: [tests/integration/test_documented_commands_are_not_self_denied.py]
     why: it checks every command in these documents (DOCUMENT_GLOBS)
