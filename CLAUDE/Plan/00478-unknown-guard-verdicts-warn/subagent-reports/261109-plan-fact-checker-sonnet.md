@@ -1,0 +1,11 @@
+# Fact check: Plan 00478 diff (Phase 0 delivered)
+
+| #   | Claim                                    | Verdict                    | Evidence                                                                                                                                                                                                                             |
+| --- | ---------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Commit `484ab6791` exists and is on main | VERIFIED                   | `git branch -r --contains 484ab6791` lists origin/main; subject "destructive_git reads git text in a single-quoted awk program as data (GitHub #170)"                                                                                |
+| 2   | Commit `0726efd70` exists and is on main | VERIFIED                   | `git merge-base --is-ancestor 0726efd70 origin/main` true                                                                                                                                                                            |
+| 3   | Main CI run 42713973768 is green         | VERIFIED                   | `gh run view --json`: conclusion success, event push, headBranch main, headSha 0726efd70 (the second claimed commit). QA gate job passed. Note: "QA static" and "Full suite" show as skipped, with the fallback legs run and passed. |
+| 4   | GitHub #170 is closed                    | VERIFIED                   | `gh issue view 170 --json state` returned CLOSED                                                                                                                                                                                     |
+| 5   | Task 0.1 is done (`[x]`)                 | UNVERIFIABLE-HERE (partly) | Commit subjects match the task's fix; the code was not re-tested here.                                                                                                                                                               |
+
+No REFUTED claims.
