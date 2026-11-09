@@ -1336,7 +1336,8 @@ def _walk(
             directory, uncertain = stage_start = pipeline_began
         body = _evaluated_string(segment) if depth < MAX_EVAL_NESTING else None
         if body is not None:
-            found.extend(_walk(
+            found.extend(
+                _walk(
                     command_words(body),
                     directory,
                     uncertain,
