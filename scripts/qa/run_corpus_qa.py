@@ -17,8 +17,8 @@ with the gate it is meant to back up is worse than no gate.
 
 Only a BLOCK-severity finding fails (Plan 00576). An advise finding is
 reported and counted in the summary line, and the check still passes: an
-advisory is something worth knowing, and failing CI on one stalled the v3.73.1
-emergency patch on a plan-journal freshness note. A finding whose severity
+advisory is something worth knowing, and failing CI on one stalled an
+emergency patch release on a plan-journal freshness note. A finding whose severity
 cannot be read fails, so an unrecognised severity is never a quiet pass.
 
 The CLI is invoked through the interpreter running this script, not through

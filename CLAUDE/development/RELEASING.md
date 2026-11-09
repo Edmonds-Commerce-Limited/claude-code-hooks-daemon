@@ -274,7 +274,7 @@ state file. Aborting: close the pull request, then delete the state file
 (X.Y.Z must be a patch bump of the last tag; `major`/`minor` with `hotfix` is
 refused). Only a human types it, like any `/release`.
 
-**Why it exists.** The v3.73.1 emergency patch ran the whole pipeline, and
+**Why it exists.** An emergency patch (Plan 00576) ran the whole pipeline, and
 most of its wall clock went on steps whose value is scope-wide (housekeeping,
 the Claude Code changelog review, the documentation review, a review of every
 commit since the last tag, the full acceptance playbook) rather than on the
