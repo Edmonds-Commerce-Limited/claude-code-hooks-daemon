@@ -8,7 +8,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00478: unknown guard verdicts warn](00478-unknown-guard-verdicts-warn/PLAN.md) - In Progress (owner ruling "warn dont block": a safety guard that cannot decide allows with an advisory; a positive match still denies; Phase 0 is GitHub #170, git text that stays data is no removal)
+- [00478: unknown guard verdicts warn](00478-unknown-guard-verdicts-warn/PLAN.md) - In Progress (owner ruling "warn dont block": a safety guard that cannot decide allows with an advisory; a positive match still denies; Phase 0 done, GitHub #170 closed: awk program text that stays data is no removal; Task 1.1 inventory next)
 
 - [00589: explain rule covers plugin handlers](00589-explain-rule-covers-plugin-handlers/PLAN.md) - In Progress (GitHub #171: `explain-rule`/`explain-handler` never consult the `plugins:` loader, so a plugin handler's rule listed in CLAUDE.md answers "unknown rule ID"; the lookup gains plugin handlers, a broken plugin contributes nothing)
 
