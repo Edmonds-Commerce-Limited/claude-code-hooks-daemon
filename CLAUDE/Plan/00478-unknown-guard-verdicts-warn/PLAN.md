@@ -51,7 +51,7 @@ plan states that cost; it does not re-decide the ruling.
 
 ### Phase 0: First slice, GitHub #170
 
-- [ ] 🔄 **Task 0.1**: `destructive_git`'s unreadable-removal route denies a command whose only git text is DATA:
+- [x] ✅ **Task 0.1**: `destructive_git`'s unreadable-removal route denies a command whose only git text is DATA:
   `printf p | awk '{print "git worktree remove " $1}'` (reproduced on `main`; GitHub #170). The raw-text pattern
   matches, the parser reads no removal, and the fail-closed branch denies. Fix the misreading, not the policy:
   git text that provably stays data (a quoted argument of a program that does not execute it) is no removal, so
@@ -81,3 +81,4 @@ plan states that cost; it does not re-decide the ruling.
 ## Delivery & Milestones
 
 - Ruling recorded here; implementation starts when the WIP limit allows.
+- Phase 0 (GitHub #170, closed): `484ab6791` + `0726efd70`, main CI run 42713973768 green.
