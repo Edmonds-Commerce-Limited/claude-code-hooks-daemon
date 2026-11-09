@@ -1,6 +1,6 @@
 # Drafted by Plan 00571. The VERSION in the filename is a target, not a decision.
-version: "3.73.0"
-date: "UNRELEASED"
+version: "3.73.1"
+date: "2026-11-09"
 
 breaking: false
 

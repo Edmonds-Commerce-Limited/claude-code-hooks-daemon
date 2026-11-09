@@ -1,5 +1,5 @@
 # Drafted by Plan 00573. The VERSION in the filename is a target, not a decision.
-version: "3.73.0"
+version: "3.73.1"
 
 truth_changes:
   - topic: issue-sdlc

@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.73.1] - 2026-11-09
+
+_A patch release. Branches now sit in three pools (open, parked, merged) with their own caps and ages (Plan 00571 Phase 3); a repository admin seat is no longer locked out by a non-admin's issue assignment (Plan 00573); releases ship attested arm64 relay and hooks-screen binaries (Plan 00572); and a run of fedora-desktop field reports is fixed (Plan 00474). Adds config keys only (`branches.parked.*`, `branches.merged.*`, `branches.bot_owned`). No breaking change, no pre-upgrade or post-upgrade task._
+
+### Added
+
+- Branch pools: parked and merged-but-undeleted branches no longer count against `branches.wip.cap`. Each is its own pool with a cap (`branches.parked.cap`, `branches.merged.cap`, default `wip.cap`), a maximum age (`branches.parked.max_age_days`, `branches.merged.max_age_days`, default the dormancy preset's `block_days`) and a `mode` (`block`, `warn`, `off`). Branch creation is denied while a pool is full or holds a stale member (`R-BRANCH-PARKED-POOL`, `R-BRANCH-MERGED-POOL`) (Plan 00571 Phase 3; Addresses #165).
+- `branch-keep <name> --reason "<text>"` keeps a merged branch for the merged pool's age, recorded as a git note every clone sees; `branch-sweep --clean --remote` fetches the keeps first and refuses the remote half if it cannot (Plan 00571).
+- `branches.bot_owned` (default `dependabot/*`): bot-owned branches are in no pool, never counted, never cleaned, and listed in their own sweep section (Plan 00571; Addresses #165).
+- `issue-validity N --claim` performs a recorded takeover when the signed-in account is a repository admin and every other assignee is a non-admin: it switches the assignee, verifies the admin is the sole assignee and comments the previous assignee(s) (Plan 00573).
+- Releases carry attested `hooks-relay-<triple>` and `hooks-screen-<triple>` binaries for x86_64 and aarch64, built natively on each runner, covered by one `SHA256SUMS` with GitHub build provenance; an arm64 Linux host can download its own digest-verified relay (Plan 00572 Task 3.2).
+- CI: a native-builds matrix that builds and runs the relay and hooks-screen on both architectures, a non-blocking arm64 unit-test job, a composite setup action with a `uv.lock`-keyed cache, grouped weekly Dependabot updates, and every external action pinned to a full commit SHA (Plan 00572).
+
+### Changed
+
+- The assignment guard and `issue-validity` allow a repository admin seat to work an issue held only by non-admins, with an advisory naming the assignee and the takeover command. Non-admin seats and another admin's assignment are unchanged; an unreadable permission never grants the override (Plan 00573).
+- Re-parking a branch needs a new reason; a same-reason re-park is refused (Plan 00571).
+- The WorktreeCreate wait `init.sh` allows is now 90 seconds (was 85) because the creation guard makes one more git call (Plan 00571).
+- `--clean` skip lines for Claude-owned worktrees under `.claude/worktrees/` now name `worktree-reap --reap --only <name>` (Plan 00571).
+- `UPGRADE_METADATA`'s `modified_files` lists only the files the upgrade created, modified or deleted; files uncommitted beforehand are recorded with a content hash and listed only if the upgrade changed them again (Plan 00474 N588).
+- The branch creation guard never counts the default branch, or a name matching `branches.exempt`, `branches.integration_lines` or `branches.protected_names`, as new work (Plan 00474 N593).
+- Relay-deploy tests and the toolchain check default to the host architecture (Plan 00572 Task 3.3).
+- Release housekeeping: vendored remote docs refreshed; the validated handler catalogue released (Plan 00575).
+
+### Fixed
+
+- `worktree-reap --reap-branches` deletes merged branches through the `delete-branch` path (containment proof, recovery bundle) instead of a plain `git branch -d`, reports a kept branch as `KEPT` with the reason and exits non-zero (Plan 00571 D2).
+- Running-agent worktree protection compares paths after resolving them against the project root, so relative paths, trailing separators and symlinked routes match (Plan 00571 D1).
+- The ccy supervisor no longer hangs on a FIFO, socket or device in a signal directory or `/proc`: entries are opened non-blocking and read only when regular files (Plan 00474 N592).
+- An upgrade to a commit whose short SHA is all digits is no longer stopped as a "MAJOR version change"; a release is recognised only when `v`-prefixed or dotted (Plan 00474 N598).
+- The transport probe checks the host's own musl relay target (`aarch64-unknown-linux-musl` on arm64) instead of always asking for the x86_64 one (Plan 00572 Task 3.3).
+- The remote-delete guard no longer falsely denies a compound cleanup command (Plan 00474 N591).
+- Test hardening: a pinned clock in the bundle-path collision test, a `Timeout` constant in the target-release test, and a black-formatted FIFO test.
+
 ## [3.73.0] - 2026-11-07
 
 _A branch-hygiene and hardening release. `branch-sweep --clean --remote` clears merged branches on the remote as well as locally, and recovery bundles accumulate instead of overwriting each other (Plan 00571 Phase 2); branch containment sees a branch a remote keeps under a namespace the clone never fetches (Plan 00570); the ccy supervisor finds `hooks-screen` by host architecture, including arm64 (Plan 00569); the `gh` view guards suggest a command that returns the body (Plan 00565); and `lsp_enforcement` stops denying a grep over extensionless files (Plan 00567). CI is sharded by wall-clock time (Plan 00572 Phases 1-2). No breaking change, no config-changes manifest, no pre-upgrade or post-upgrade task._
