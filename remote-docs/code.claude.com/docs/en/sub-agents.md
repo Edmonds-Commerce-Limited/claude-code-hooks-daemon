@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/sub-agents.md
-fetched_at: '2026-11-07T20:13:08.126997+00:00'
+fetched_at: '2026-11-09T09:01:47.455955+00:00'
 fidelity: converted
 source_sha256: db8a532d4c04d8cec27622b3afd68f86f8d96efa121f4b498dcb430e2bc543b8
 licence: unreviewed
-stale_after: '2027-02-05'
+stale_after: '2027-02-07'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
