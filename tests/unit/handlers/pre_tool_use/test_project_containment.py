@@ -1787,6 +1787,9 @@ class TestACompoundBodyRunsWhereTheChainsCdLanded:
             "cd sub && { echo hi > ../../x; }",
             "cd sub && ( echo hi > ../../x )",
             "for x in a; do echo hi > ../x; done && cd sub",
+            # The body runs even when the cd failed, so it may run from the start directory.
+            "cd sub ; for x in a; do echo hi > ../x; done",
+            "cd sub || echo no; for x in a; do echo hi > ../x; done",
         ],
     )
     def test_a_body_target_that_lands_outside_is_still_denied(
