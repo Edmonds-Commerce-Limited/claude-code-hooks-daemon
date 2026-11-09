@@ -66,8 +66,8 @@ standard: every deny says why and what to do next.
 
 ### Phase 2: Build
 
-- [ ] ⬜ **Task 2.1**: RED tests, then the handler: create, ready, edit, undo and REST routes, with the shared `gh`
-  command parsing
+- [ ] ⬜ **Task 2.1**: RED tests, then the handler: create, ready, edit, undo and REST routes, reusing an existing
+  handler's `gh` command parsing (see Task 2.2)
 - [ ] ⬜ **Task 2.2**: Update `RELEASING.md` (Step 8a's `gh pr create`, and the recap of it further down) to create a
   `[DRAFT]` draft and to mark it ready with the prefix removed; a test pins those commands against the handler. The
   `gh` command parsing is per handler today (no shared parser module): reuse the nearest existing one rather than

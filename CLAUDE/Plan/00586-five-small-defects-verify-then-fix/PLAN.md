@@ -9,17 +9,24 @@
 
 ## Overview
 
-Five defects were noticed in passing during other work and recorded nowhere. Owner ruling: a finding gets a plan
+Six small defects were noticed in passing during other work and recorded nowhere. Owner ruling: a finding gets a plan
 (`CLAUDE/Worktree.md`, "Small Batches"). Three of them (A, B, D) came from review agents and have not been reproduced,
 so every task starts by reproducing the defect. A task whose defect does not reproduce closes with the evidence that it
 does not, and no change.
 
 - **A.** `check-config-migrations` recommends handlers that have since been removed.
 - **B.** `daemon.languages: []` is read as "no languages" rather than as unset.
-- **C.** The `/hooks-daemon optimise` procedure (`scripts/optimise-invoke.sh`, `optimise.md`) gives wrong paths when
-  the daemon is self-installed, as in this repository.
+- **C.** The `/hooks-daemon optimise` procedure (`optimise.md` and
+  `src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/optimise-invoke.sh`) gives wrong paths when the daemon is
+  self-installed, as in this repository. Fact-check: the script itself already resolves the self-install daemon
+  directory, so the wrong paths, if real, are in the procedure text it prints.
 - **D.** In the release-gate workflow, a failing shard does not cancel the other shards, so a run that has already
-  failed keeps using runners.
+  failed keeps using runners. Fact-check: `fail-fast: false` is set in `release-gate.yml` and in the shared
+  `test-shards.yml`, and `qa.yml` says deliberately that one failing check must not hide the others. So the question
+  is whether the release gate, unlike the per-push run, should stop at the first failure.
+- **F.** The `git restore` guard (R-GIT-RESTORE) refuses to restore a tracked file whose working copy is EMPTY, as a
+  host reboot left one in this repository. Discarding an empty working copy loses nothing, since there is no content
+  to lose, but the guard denies it and only a human can run the restore.
 - **E.** The plan-number guard (`plan_number_helper`, R-PLAN-NUMBER-DISCOVERY) blocks a command that combines an
   `ls ... | awk` with `git add CLAUDE/Plan/...`, which discovers no plan number.
 
@@ -30,7 +37,7 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
 
 ## Goals
 
-- Each of A to E is either fixed with a test that failed before the fix, or closed with the evidence that it does not
+- Each of A to F is either fixed with a test that failed before the fix, or closed with the evidence that it does not
   reproduce.
 
 ## Non-Goals
@@ -44,13 +51,18 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
 
 - [ ] ⬜ **Task 1.1 (A)**: Reproduce: list every handler `check-config-migrations` can recommend and compare it with
   the registered handlers. RED test, then fix the source of the recommendation. Check Plan 00420 first
-- [ ] ⬜ **Task 1.2 (B)**: Reproduce with a config holding `daemon.languages: []`. Decide which reading the config
-  documentation promises; RED test for that reading, then fix the loader (or the documentation, if the code matches
+- [ ] ⬜ **Task 1.2 (B)**: Reproduce with a config holding `daemon.languages: []`. Fact-check: plausibly real, the
+  two readers disagree (`core/relevance.py` treats `[]` as an empty set, `core/apply_once.py` treats it as unset).
+  Decide which reading the config documentation promises; RED test for that reading, then fix the loader (or the documentation, if the code matches
   what it promises)
 - [ ] ⬜ **Task 1.3 (C)**: Run the optimise procedure in this self-install checkout and record each wrong path. RED
   test, then fix through the existing install-mode path resolution
-- [ ] ⬜ **Task 1.4 (D)**: Confirm in the release-gate workflow and on a failed run that the other shards ran to the
-  end. Fix with the workflow's fail-fast or a cancel step, keeping the final aggregate job's verdict
+- [ ] ⬜ **Task 1.4 (D)**: Confirm on a failed release-gate run that the other shards ran to the end. Fix in the
+  release gate only (a fail-fast input to the shared `test-shards.yml`, default unchanged for `qa.yml`), keeping the
+  final aggregate job's verdict
+- [ ] ⬜ **Task 1.6 (F)**: RED test: a restore of a tracked file whose working copy is zero bytes is allowed, and a
+  restore of a non-empty modified file is still denied. GREEN in `destructive_git`, alongside its other
+  lossless-removal judgements
 - [ ] ⬜ **Task 1.5 (E)**: RED test with the exact command shape, then narrow the discovery-idiom match so it is
   allowed, keeping the existing tests for real discovery commands red-to-green
 
@@ -60,10 +72,10 @@ and C), Plans 00227 and 00138 (earlier false-positive fixes of the same guard as
 
 ## Success Criteria
 
-- [ ] Each of A to E: a test that failed before the fix and passes after it, or recorded evidence that it does not
+- [ ] Each of A to F: a test that failed before the fix and passes after it, or recorded evidence that it does not
   reproduce
 - [ ] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` for each
-  user-visible fix (A, B, C, E); D changes CI only and has no release-bound consequence
+  user-visible fix (A, B, C, E, F); D changes CI only and has no release-bound consequence
 
 ## Delivery & Milestones
 
