@@ -14,6 +14,8 @@ from typing import Final
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
+
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _RELEASE_INVOKE: Final[Path] = _REPO_ROOT / ".claude" / "skills" / "release" / "invoke.sh"
 _RELEASING: Final[Path] = _REPO_ROOT / "CLAUDE" / "development" / "RELEASING.md"
@@ -30,7 +32,7 @@ def _invoke(*args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=Timeout.REQUEST_DEFAULT,
     )
 
 
