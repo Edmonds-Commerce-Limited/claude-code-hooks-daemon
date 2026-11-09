@@ -53,7 +53,9 @@ generated stub, which covers the class (any future warning in generated stub tex
 ## Success Criteria
 
 - [x] The new test failed before the fix (quoted in the sub-agent report) and passes after it
-- [x] `shellcheck --severity=warning .claude/hooks/*` (the stubs) exits 0 in this repository
+- [x] `shellcheck --severity=warning` over the 31 regular stub files in `.claude/hooks/` (not the `handlers/`
+  directory) exits 0 in this repository ([fact-check](subagent-reports/261109-fact-check-plan-00577.md): 11 verified,
+  0 refuted)
 - [x] The existing forwarder generator and relay tests pass unchanged
 - [x] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
   (`015-forwarder-stubs-shellcheck-clean.md`)
