@@ -1,6 +1,6 @@
 # Plan 00589: explain rule covers plugin handlers
 
-**Status**: In Progress
+**Status**: Complete (2026-11-09)
 **Created**: 2026-11-09
 **Owner**: dev
 **Priority**: Medium
@@ -37,17 +37,17 @@ adds the library package and `project_handlers:`, never the plugin loader.
 
 ### Phase 1: Lookup covers plugins
 
-- [ ] 🔄 **Task 1.1**: RED tests: a `plugins:` handler's rule resolves through
+- [x] ✅ **Task 1.1**: RED tests: a `plugins:` handler's rule resolves through
   `explain-rule` and its handler through `explain-handler`; a broken plugin entry
   leaves library lookups working. GREEN: collect plugin handler classes beside
   `_project_handler_classes()` under the same opt-in. Release note.
 
 ## Success Criteria
 
-- [ ] The issue's reproduction resolves `R-DEMO-PLUGIN-RULE` on `main`.
-- [ ] Release-bound consequence recorded as a release note in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] The issue's reproduction resolves `R-DEMO-PLUGIN-RULE` on `main`.
+- [x] Release-bound consequence recorded as a release note in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (`023-explain-rule-covers-plugin-handlers.md`).
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hash -->
+- `bb6dbcb58` (merge `5ba1d98a2`), main CI run 42718913878 green; GitHub #171 closed.

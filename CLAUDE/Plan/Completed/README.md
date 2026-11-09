@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00545: spend meter agents only segment](00545-spend-meter-agents-only-segment/PLAN.md) - Complete at merge `3503b65ad` (green CI on `9f7ad510e`) + the archiving commit (#133, a coordinator ruling the owner delegated: the spend segment shows only while sub-agents run, as count, families and largest context; the cumulative total leaves the bar; start-up transcripts are no longer unmeasured and real failures show red only when non-zero; release note 012)
+
 - [00544: issue validity claim without author list](00544-issue-validity-claim-without-author-list/PLAN.md) - Complete at merge `15127181d` (green CI) + the archiving commit (#129: `issue-validity N --claim` and a plain judge run with no author list, printing the author check as not applicable; only `--list-eligible` still refuses)
 
 - [00543: journal file per entry](00543-journal-file-per-entry/PLAN.md) - Complete at merge `c127d7356` + `c05b91eeb` (green CI on `15127181d`) + the archiving commit (#135, owner-directed: one journal file per entry under `JOURNAL/YYYY-MM-DD/`, so concurrent branches never conflict; legacy day-files read alongside; any change to an existing journal file is denied except conflict-marker removal or an exact restore)
