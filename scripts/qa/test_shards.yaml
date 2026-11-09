@@ -14,9 +14,16 @@
 # Sized by test-file count (unit ~1150 files, integration ~220, the rest ~40);
 # integration and acceptance files are the slow, process-spawning ones.
 shards:
+  # tests/unit/handlers split by directory (Plan 00572 Task 2.2): the handler
+  # suite was the slowest unit leg under coverage (1649 s), and pre_tool_use
+  # holds two thirds of its tests (11.8k of 17.8k collected).
+  - name: unit-handlers-pre-tool-use
+    scope: unit
+    paths: [tests/unit/handlers/pre_tool_use]
+
   - name: unit-handlers
     scope: unit
-    paths: [tests/unit/handlers]
+    remainder_of: tests/unit/handlers
 
   - name: unit-daemon
     scope: unit
@@ -48,9 +55,31 @@ shards:
     scope: unit
     remainder_of: tests/unit
 
+  # tests/integration is flat, so it is split by file (Plan 00572 Task 2.2):
+  # the integration shard set the release gate's floor (2880 s with coverage).
+  # integration-slow takes the files that dominated the slowest-50 durations
+  # of release-gate run 41884438839 (about 1200 s of its 2650 s of tests);
+  # integration is everything else, so a new file needs no edit here.
+  - name: integration-slow
+    scope: rest
+    paths:
+      - tests/integration/test_suite_passes_on_a_released_unreleased_tree.py
+      - tests/integration/test_upgrade_pre_deploy_phase_runs_on_layer1.py
+      - tests/integration/test_provision_sh.py
+      - tests/integration/test_qa_walkers_examine_files_from_any_checkout.py
+      - tests/integration/test_client_owned_asset_lint.py
+      - tests/integration/test_a_retried_hook_never_restarts_a_slow_start.py
+      - tests/integration/test_venv_bootstrap_driver.py
+      - tests/integration/test_startup_budget_planted_slowdown.py
+      - tests/integration/test_n34_deadline_probe_isolated_daemon.py
+      - tests/integration/test_daemon_smoke.py
+      - tests/integration/test_subprocess_spawns_are_bounded.py
+      - tests/integration/test_plugin_daemon_integration.py
+      - tests/integration/test_ensure_venv_lock.py
+
   - name: integration
     scope: rest
-    paths: [tests/integration]
+    remainder_of: tests/integration
 
   - name: acceptance-and-other
     scope: rest

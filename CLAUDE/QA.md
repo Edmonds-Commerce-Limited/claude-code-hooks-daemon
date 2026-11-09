@@ -73,8 +73,9 @@ A changed file that maps to no test FAILS `changed` and is named with its reason
 report then records that the file's remaining reach is covered only by a
 whole-suite run. Two things provide one:
 
-- CI: in the docs and code tiers, a changed file the mapper cannot cover sends
-  that one Python to the whole suite (`scripts/ci/full_suite_if_unmapped.bash`).
+- CI: in the docs and code tiers, a changed file the mapper cannot cover runs
+  the whole suite on one Python, sharded over runners (`qa.yml` job
+  `fallback-tests`, the `fallback` profile of `scripts/ci/shard_legs.yaml`).
 - The release's Full tier.
 
 So `--allow-unmapped` is a statement that the change is not fully certified
@@ -414,18 +415,18 @@ pull request, from the merge base to the PR tip. The rules live in
 `classify_changes.py`'s one table, tested in
 `tests/unit/scripts/test_classify_changes.py`.
 
-| Tier   | When                                                                                                                                                                                                                          | What runs                                                                                                                                                              |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs` | every changed path is `*.md`                                                                                                                                                                                                  | One Python (3.11): `llm_qa.py docs_qa plan_qa changed_tests --range`. The `shell` and `daemon-load` jobs are skipped.                                                  |
-| `code` | anything else                                                                                                                                                                                                                 | One Python (3.11): black, ruff, mypy, pyright, `llm_qa.py changed --range`, bandit, deptry, plus `shell` and `daemon-load`.                                            |
-| `full` | `pyproject.toml`, `uv.lock`, anything under `.github/`, `.claude/hooks-daemon.yaml`, `scripts/qa/changed_tests_map.yaml`, any `conftest.py`; an empty change set; an unknown base (no earlier verdict run, or not in history) | The three-Python matrix (job `qa`, unchanged), plus `shell` and `daemon-load`. Also every night on `main` (`schedule`) and on `workflow_dispatch`, which have no base. |
+| Tier   | When                                                                                                                                                                                                                          | What runs                                                                                                                                                                                                                                                       |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs` | every changed path is `*.md`                                                                                                                                                                                                  | One Python (3.11): `llm_qa.py docs_qa plan_qa changed_tests --range`. The `shell` and `daemon-load` jobs are skipped.                                                                                                                                           |
+| `code` | anything else                                                                                                                                                                                                                 | One Python (3.11): black, ruff, mypy, pyright, `llm_qa.py changed --range`, bandit, deptry, plus `shell` and `daemon-load`.                                                                                                                                     |
+| `full` | `pyproject.toml`, `uv.lock`, anything under `.github/`, `.claude/hooks-daemon.yaml`, `scripts/qa/changed_tests_map.yaml`, any `conftest.py`; an empty change set; an unknown base (no earlier verdict run, or not in history) | The three-Python static matrix (job `qa`) and the sharded suite (job `full-tests`, the `full` profile of `scripts/ci/shard_legs.yaml`), plus `shell` and `daemon-load`. Also every night on `main` (`schedule`) and on `workflow_dispatch`, which have no base. |
 
 Markdown is narrowed, never skipped: tests read the plan index, ledgers and
 docs, so the docs tier still runs the mapper's tests for the changed files.
 In the `docs` and `code` tiers a changed file the mapper cannot cover
-(unmapped, which includes `too-broad`) sends that one Python to the whole
-suite (`scripts/ci/full_suite_if_unmapped.bash`) rather than passing on tests
-that did not reach it.
+(unmapped, which includes `too-broad`) runs the whole suite on one Python,
+sharded over runners (job `fallback-tests`), rather than passing on tests that
+did not reach it.
 
 **CPU-timing sweeps run in their own job.** A test whose assertion is a
 `scaled_cpu_seconds` bound carries `@pytest.mark.perf_sweep`
@@ -799,12 +800,12 @@ other checkers still take directories only.
 - **Dependencies** (Deptry) — missing (DEP001) and misplaced (DEP004)
 - **Plan QA** / **Docs QA** (`run_corpus_qa.py`) — the `plan-qa --sweep` and
   `docs-qa --sweep` catalogues, run through the shipped CLI so QA cannot
-  disagree with the gate it backs up. **ANY finding fails, at either
-  severity**: the advise/block split decides whether a COMMIT is denied,
-  while QA asks whether the tree is clean now. Fix the finding, or use the
-  check's own configured allowlist — a finding left standing should be a
-  decision, not an accident. A sweep that cannot run reports no-verdict
-  rather than the empty result a clean sweep produces
+  disagree with the gate it backs up. **Only a block-severity finding
+  fails** (Plan 00576): advise findings are counted in the summary line
+  (`N findings (B block, A advise)`) and the check still passes, locally, in
+  `qa.yml` and in the release gate. A finding with no recognised severity
+  fails. A sweep that cannot run reports no-verdict rather than the empty
+  result a clean sweep produces
 - **Generated-Doc Drift** (`check_generated_doc_drift.py`) — regenerates
   `.claude/HOOKS-DAEMON.md` through `generate-docs` into a throwaway directory
   and fails when the committed body differs. A daemon restart never rewrites

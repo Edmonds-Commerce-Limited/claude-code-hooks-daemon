@@ -231,7 +231,8 @@ the same line.
 dependency tree — whenever a musl-capable toolchain is present, and is
 preferred over downloading. `relay_source: download` fetches a
 sha256-digest-verified precompiled asset from the GitHub release matching
-the installed version as a convenience; a fetch failure or a digest
+the installed version as a convenience, choosing the x86_64 or aarch64 asset
+by the host's architecture; a fetch failure or a digest
 mismatch is always an advisory, never a hard install/upgrade failure. The
 relay's own source (`relay/hooks_relay.rs`) ships in the package
 **regardless of which route is chosen or whether the rung is enabled at
@@ -2535,7 +2536,7 @@ handlers:
 | **Type**       | Blocking                |
 | **Event**      | PreToolUse              |
 
-**Description:** Denies a git command that creates a branch (`switch -c`, `checkout -b`, `branch <name>`, `worktree add`) or an Agent dispatch with `isolation: "worktree"` while the open work branches already number `branches.wip.cap` (rule `R-BRANCH-WIP-CAP`). The deny lists the open branches, merged ones first with their delete command. `branches.wip.mode: warn` only warns. A name already in `refs/heads` is never a creation, and a name close to an existing branch's draws a duplicate warning (`branches.duplicates.mode`) that never blocks. WorktreeCreate applies the same verdict before its `git worktree add`.
+**Description:** Denies a git command that creates a branch (`switch -c`, `checkout -b`, `branch <name>`, `worktree add`) or an Agent dispatch with `isolation: "worktree"` while the open work branches already number `branches.wip.cap` (rule `R-BRANCH-WIP-CAP`), a branch is at the dormancy block stage (`R-BRANCH-DORMANT`), the parked pool is at `branches.parked.cap` or holds a stale park (`R-BRANCH-PARKED-POOL`), or the merged pool is at `branches.merged.cap` or holds an unkept or lapsed merged branch (`R-BRANCH-MERGED-POOL`). Each deny lists that pool's branches with that pool's own actions (merged ones name `branch-sweep --clean`). Each `mode: warn` only warns. `branches.bot_owned` branches are never counted. A name already in `refs/heads` is never a creation, and a name close to an existing branch's draws a duplicate warning (`branches.duplicates.mode`) that never blocks. WorktreeCreate applies the same verdict before its `git worktree add`.
 
 **Example trigger (at the cap):**
 

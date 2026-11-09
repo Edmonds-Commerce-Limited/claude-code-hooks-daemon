@@ -33,11 +33,17 @@ _MAIN_BRANCH: Final[str] = "main"
 _CI_SUCCESS: Final[str] = "success"
 _CI_COMPLETED: Final[str] = "completed"
 _CI_SKIPPED: Final[str] = "skipped"
-# The full tier's jobs are named after the matrix key (`QA (Python3.11)`); the
-# tier job is `QA (docs or code tier)`, so the prefix tells them apart. A
-# skipped matrix job keeps the literal template name and so matches too, which
-# is right: it is a matrix job that did not succeed.
-_MATRIX_JOB_PREFIX: Final[str] = "QA (Python"
+# The full tier is two groups of jobs in qa.yml: the static-check matrix job
+# (`QA static (Python3.11)`) and the reusable-workflow caller `Full suite`,
+# whose jobs read `Full suite / tests py3.13 ...`. The tier job is
+# `QA (docs or code tier)` and the code-tier fallback reads
+# `Full suite fallback / ...`, so neither prefix matches them. A skipped static
+# job keeps the literal template name and so matches too, which is right: it is
+# a full-tier job that did not succeed. tests/integration/test_ci_job_timeouts.py
+# ties these prefixes to the jobs declared in qa.yml.
+STATIC_JOB_PREFIX: Final[str] = "QA static (Python"
+SUITE_JOB_PREFIX: Final[str] = "Full suite / "
+FULL_TIER_JOB_PREFIXES: Final[tuple[str, str]] = (STATIC_JOB_PREFIX, SUITE_JOB_PREFIX)
 # workflow_dispatch has no base to diff against, so scripts/ci/classify_changes.py
 # classifies it as the full tier.
 FULL_MATRIX_REMEDY: Final[str] = "gh workflow run qa.yml --ref main"
@@ -75,9 +81,9 @@ class CiRunState:
     status: str | None
     conclusion: str | None
     problem: str = ""
-    # Whether the run's three-Python matrix jobs all concluded success. A docs
-    # or code tier run succeeds without ever running the matrix (Plan 00475
-    # Task 3b.2), and a release needs the matrix, so this is part of "green".
+    # Whether the run's full-tier jobs (static checks and the full suite) all
+    # concluded success. A docs or code tier run succeeds without running
+    # them, and a release needs them, so this is part of "green".
     full_matrix: bool = True
     # The CI run this state was read from, so the output can name it when HEAD
     # has several runs. None when no run was found or the lookup failed.
@@ -119,25 +125,28 @@ class CiRunState:
 
 
 def carries_matrix_jobs(jobs: Sequence[Mapping[str, object]]) -> bool:
-    """True when the run executed at least one matrix job (a skipped one does not count).
+    """True when the run executed at least one full-tier job (a skipped one does not count).
 
-    A tier run lists the matrix job under its template name with a ``skipped``
-    conclusion; that is the absence of the matrix, not a matrix failure.
+    A tier run lists the static job under its template name with a ``skipped``
+    conclusion; that is the absence of the full tier, not a failure of it.
     """
     return any(
-        str(job.get("name", "")).startswith(_MATRIX_JOB_PREFIX)
+        str(job.get("name", "")).startswith(FULL_TIER_JOB_PREFIXES)
         and job.get("conclusion") != _CI_SKIPPED
         for job in jobs
     )
 
 
 def full_matrix_green(jobs: Sequence[Mapping[str, object]]) -> bool:
-    """True when the run has matrix jobs and every one concluded success.
+    """True when the run has static AND suite jobs and every one concluded success.
 
-    No matrix job at all means a tier run, which is not full-matrix evidence.
+    Missing either group means a tier run, which is not full-tier evidence.
     """
-    matrix = [job for job in jobs if str(job.get("name", "")).startswith(_MATRIX_JOB_PREFIX)]
-    return bool(matrix) and all(job.get("conclusion") == _CI_SUCCESS for job in matrix)
+    groups = [
+        [job for job in jobs if str(job.get("name", "")).startswith(prefix)]
+        for prefix in FULL_TIER_JOB_PREFIXES
+    ]
+    return all(group and all(j.get("conclusion") == _CI_SUCCESS for j in group) for group in groups)
 
 
 @dataclass(frozen=True)

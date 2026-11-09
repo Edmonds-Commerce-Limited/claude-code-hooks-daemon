@@ -20,7 +20,7 @@ import logging
 import re
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, Literal
 
@@ -28,12 +28,15 @@ from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_line
 from claude_code_hooks_daemon.core.branch_inventory import (
     DormancyStage,
+    Pool,
     is_work_branch,
     worktrees_by_branch,
 )
 from claude_code_hooks_daemon.utils import git_sync
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
@@ -46,7 +49,12 @@ DUPLICATE_LIST_LIMIT: Final[int] = 5
 _HEADS: Final[str] = "refs/heads/"
 _REMOTES: Final[str] = "refs/remotes/"
 _FIELD_SEP: Final[str] = "\x00"
-_FORMAT: Final[str] = "%(refname)%00%(objectname)%00%(committerdate:unix)%00%(symref)"
+_FORMAT: Final[str] = (
+    "%(refname)%00%(objectname)%00%(committerdate:unix)%00%(symref)"
+    "%00%(trailers:key=Parked-Reason,valueonly,unfold,separator=%x1f)"
+)
+_FIELD_COUNT: Final[int] = 5
+_UNIT_SEP: Final[str] = "\x1f\n "
 _SECONDS_PER_DAY: Final[float] = 86400.0
 _STEM_PREFIXES: Final[tuple[str, ...]] = ("worktree-", "agent-")
 _STEM_SUFFIX: Final[re.Pattern[str]] = re.compile(
@@ -62,6 +70,9 @@ _GROUP_ORDER: Final[tuple[str, ...]] = (
     "dormant",
     "live",
 )
+
+#: Snapshot groups ``branch-sweep --clean`` deletes, so the cap deny names it.
+_CLEANABLE: Final[frozenset[str | None]] = frozenset({"merged", "patch-equivalent"})
 
 Decision = Literal["allow", "warn", "deny"]
 Labels = Mapping[str, Mapping[str, str | None]]
@@ -82,6 +93,9 @@ class _Ref:
     tip: str
     committed: float
     local: bool
+    refname: str = ""
+    #: The tip carries a ``Parked-Reason`` trailer.
+    parked: bool = False
 
 
 @dataclass(frozen=True)
@@ -91,6 +105,14 @@ class _Work:
     name: str
     names: frozenset[str]
     committed: float
+    #: A remote ref is among the refs that join this work.
+    on_remote: bool = False
+    #: OPEN if any ref is open work, else PARKED if any is parked, else MERGED.
+    pool: Pool = Pool.OPEN
+    #: A ref still at its labelled tip carries the snapshot's stale mark.
+    stale: bool = False
+    #: The display label of the ref named ``name`` (see ``_display_label``).
+    label: Mapping[str, str | None] = field(default_factory=dict)
 
 
 # --- naming ---------------------------------------------------------------------------
@@ -131,6 +153,11 @@ def write_labels(path: Path, branches: list[dict[str, object]]) -> None:
             "group": record.get("group"),
             "action": record.get("action"),
             "stage": record.get("dormancy_stage"),
+            "stale": "true" if record.get("stale") else None,
+            # The tips the verdict was reached at: the guard trusts a pool/stale
+            # label only while the ref it judges is still at the labelled tip.
+            "local_tip": record.get("local_tip"),
+            "remote_tip": record.get("remote_tip"),
         }
         for record in branches
     }
@@ -153,7 +180,23 @@ def clear_label_stage(path: Path, name: str) -> None:
     labels = read_labels(path)
     if name not in labels:
         return
-    labels[name] = {**labels[name], "group": "parked", "stage": None}
+    labels[name] = {**labels[name], "group": "parked", "stage": None, "stale": None}
+    try:
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(labels, sort_keys=True), encoding="utf-8")
+        temporary.replace(path)
+    except OSError as exc:
+        log_and_continue(
+            logger, exc, reason="the next SessionStart rewrites the snapshot from the inventory"
+        )
+
+
+def clear_label_stale(path: Path, name: str) -> None:
+    """Drop the stale mark of ``name`` so a fresh keep lifts the merged-pool block at once."""
+    labels = read_labels(path)
+    if name not in labels:
+        return
+    labels[name] = {**labels[name], "stale": None}
     try:
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(labels, sort_keys=True), encoding="utf-8")
@@ -204,20 +247,100 @@ def _read_refs(repo: Path, config: BranchesConfig) -> tuple[list[_Ref], str | No
     # agree on the default whatever `wip.count_remote` says.
     default = git_sync.resolve_default_branch(config, repo)
     refs: list[_Ref] = []
-    for line in result.stdout.splitlines():
+    # Not splitlines(): it also breaks on \x1c-\x1e, which a trailer value may hold.
+    for line in result.stdout.split("\n"):
         fields = line.split(_FIELD_SEP)
-        if len(fields) != 4:
+        if len(fields) != _FIELD_COUNT:
             continue
-        refname, tip, committed, _symref = fields
+        refname, tip, committed, _symref, parked = fields
         if refname == head_ref:
             continue
         local = refname.startswith(_HEADS)
         name = refname.removeprefix(_HEADS) if local else refname.removeprefix(remote_prefix)
-        refs.append(_Ref(name, tip, float(committed or 0), local))
+        refs.append(
+            _Ref(name, tip, float(committed or 0), local, refname, bool(parked.strip(_UNIT_SEP)))
+        )
     return refs, default
 
 
-def _work_groups(refs: list[_Ref]) -> list[_Work]:
+def _merged_refnames(
+    repo: Path, config: BranchesConfig, refs: list[_Ref], default: str | None
+) -> set[str]:
+    """Refs already in the default branch (remote copy or local), in one git call.
+
+    Repeated ``--merged`` options OR together. A failed call returns the empty
+    set, which leaves every branch in the pool its other facts decide: the
+    guard then over-counts open work rather than under-counting it.
+    """
+    if default is None:
+        return set()
+    listed = {ref.refname for ref in refs}
+    targets = [
+        ref
+        for ref in (f"{_REMOTES}{config.remote}/{default}", f"{_HEADS}{default}")
+        if ref in listed
+    ]
+    if not targets:
+        return set()
+    namespaces = [_HEADS.rstrip("/"), f"{_REMOTES}{config.remote}"]
+    result = run_git(
+        repo,
+        "for-each-ref",
+        *(f"--merged={target}" for target in targets),
+        "--format=%(refname)",
+        *namespaces,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if result.returncode != 0:
+        logger.info("branch_creation: merged listing failed: %s", result.stderr.strip())
+        return set()
+    return {line for line in result.stdout.splitlines() if line}
+
+
+def _tip_label(ref: _Ref, labels: Labels) -> Mapping[str, str | None]:
+    """The snapshot label for ``ref``, or ``{}`` when the ref has moved since it was written.
+
+    The snapshot is keyed by name and is written once per session, so a branch
+    that gained commits afterwards would otherwise keep a "merged" verdict that
+    no longer holds. A label with no recorded tip is not trusted either.
+    """
+    label = labels.get(ref.name, {})
+    recorded = label.get("local_tip" if ref.local else "remote_tip")
+    return label if recorded == ref.tip else {}
+
+
+def _display_label(ref: _Ref, labels: Labels) -> Mapping[str, str | None]:
+    """The label that orders and annotates ``ref`` in the deny list.
+
+    Looser than :func:`_tip_label`: a label with no recorded tip still orders the list,
+    but one recorded at a different tip describes a branch that has since moved, so its
+    group and suggested action would mislead and it is dropped.
+    """
+    label = labels.get(ref.name, {})
+    recorded = label.get("local_tip" if ref.local else "remote_tip")
+    return {} if recorded and recorded != ref.tip else label
+
+
+def _ref_pool(ref: _Ref, merged: set[str], labels: Labels) -> Pool:
+    """One ref's pool: in the default (or labelled done) is MERGED, a park trailer PARKED."""
+    if ref.refname in merged or _tip_label(ref, labels).get("group") in _CLEANABLE:
+        return Pool.MERGED
+    if ref.parked:
+        return Pool.PARKED
+    return Pool.OPEN
+
+
+def _group_pool(pools: list[Pool]) -> Pool:
+    if Pool.OPEN in pools:
+        return Pool.OPEN
+    if Pool.PARKED in pools:
+        return Pool.PARKED
+    return Pool.MERGED
+
+
+def _work_groups(
+    refs: list[_Ref], merged: set[str] | None = None, labels: Labels | None = None
+) -> list[_Work]:
     """Union-find over names and tips: one entry per connected piece of work."""
     parent: dict[str, str] = {}
 
@@ -242,6 +365,13 @@ def _work_groups(refs: list[_Ref]) -> list[_Work]:
                 name=name,
                 names=frozenset(ref.name for ref in group),
                 committed=max(ref.committed for ref in group),
+                on_remote=any(not ref.local for ref in group),
+                pool=_group_pool([_ref_pool(ref, merged or set(), labels or {}) for ref in group]),
+                stale=any(_tip_label(ref, labels or {}).get("stale") for ref in group),
+                label=next(
+                    (_display_label(ref, labels or {}) for ref in group if ref.name == name),
+                    {},
+                ),
             )
         )
     return groups
@@ -257,26 +387,24 @@ def _detail(work: _Work, now: float, worktrees: Mapping[str, Path] | None) -> st
     return f"{work.name} ({age}d old{place})"
 
 
-def _rank(work: _Work, labels: Labels) -> int:
-    group = labels.get(work.name, {}).get("group")
+def _rank(work: _Work) -> int:
+    group = work.label.get("group")
     return _GROUP_ORDER.index(group) if group in _GROUP_ORDER else len(_GROUP_ORDER)
 
 
 def _cap_lines(
     groups: list[_Work],
     config: BranchesConfig,
-    labels: Labels,
     now: float,
     worktrees: Mapping[str, Path] | None,
 ) -> list[str]:
-    ordered = sorted(groups, key=lambda work: (_rank(work, labels), work.committed, work.name))
+    ordered = sorted(groups, key=lambda work: (_rank(work), work.committed, work.name))
     lines = [
         f"Open work branches: {len(groups)} (cap {config.effective_wip_cap()}). "
         "Finish, park or delete one before starting another:"
     ]
     for work in ordered[:DENY_LIST_LIMIT]:
-        label = labels.get(work.name, {})
-        group, action = label.get("group"), label.get("action")
+        group, action = work.label.get("group"), work.label.get("action")
         suffix = f"  [{group}]" if group else ""
         if action:
             suffix += f"  -> {action}"
@@ -343,6 +471,88 @@ def _dormancy_context_lines(
     ]
 
 
+def _stale_parked(parked: list[_Work], config: BranchesConfig, now: float) -> list[_Work]:
+    """Parked work whose park commit is at least ``parked.max_age_days`` old."""
+    max_age = config.effective_pool_max_age(Pool.PARKED)
+    return [work for work in parked if (now - work.committed) / _SECONDS_PER_DAY >= max_age]
+
+
+def _parked_pool_lines(
+    parked: list[_Work],
+    stale: list[_Work],
+    config: BranchesConfig,
+    now: float,
+    worktrees: Mapping[str, Path] | None,
+) -> list[str]:
+    cap = config.effective_pool_cap(Pool.PARKED)
+    stale_names = {work.name for work in stale}
+    head = f"Parked branches: {len(parked)} (cap {cap}, branches.parked.cap)"
+    if len(parked) >= cap:
+        head += " are at the cap"
+    if stale:
+        head += (
+            f"; {len(stale)} stale (past branches.parked.max_age_days "
+            f"{config.effective_pool_max_age(Pool.PARKED)})"
+        )
+    lines = [f"{head}. Clear or merge one before starting another:"]
+    park = daemon_cli_command_for_docs("branch-park")
+    delete = daemon_cli_command_for_docs("delete-branch")
+    ordered = sorted(
+        parked, key=lambda work: (work.name not in stale_names, work.committed, work.name)
+    )
+    for work in ordered[:DENY_LIST_LIMIT]:
+        flag = "  [STALE]" if work.name in stale_names else ""
+        action = f"{park} {work.name} --clear, then merge it; or {delete} {work.name}"
+        if work.name in stale_names:
+            action += f"; or re-park it with a new reason: {park} {work.name} --reason ..."
+        lines.append(f"  - {_detail(work, now, worktrees)}{flag}")
+        lines.append(f"      -> {action}")
+    if len(ordered) > DENY_LIST_LIMIT:
+        lines.append(f"  ... and {len(ordered) - DENY_LIST_LIMIT} more")
+    lines.append(BRANCH_LIMIT_PRINCIPLE)
+    return lines
+
+
+def _stale_merged(merged: list[_Work]) -> list[_Work]:
+    """Merged work the labels snapshot marks stale (unkept or lapsed) at its current tip."""
+    return [work for work in merged if work.stale]
+
+
+def _merged_pool_lines(
+    merged: list[_Work],
+    stale: list[_Work],
+    config: BranchesConfig,
+    now: float,
+    worktrees: Mapping[str, Path] | None,
+) -> list[str]:
+    cap = config.effective_pool_cap(Pool.MERGED)
+    stale_names = {work.name for work in stale}
+    head = f"Merged branches: {len(merged)} (cap {cap}, branches.merged.cap)"
+    if len(merged) >= cap:
+        head += " are at the cap"
+    if stale:
+        head += (
+            f"; {len(stale)} stale (unkept or keep lapsed, past "
+            f"branches.merged.max_age_days {config.effective_pool_max_age(Pool.MERGED)})"
+        )
+    keep = daemon_cli_command_for_docs("branch-keep")
+    lines = [
+        f"{head}. Delete the merged branches, or keep one with a reason:",
+        sweep_clean_line(remote=any(work.on_remote for work in merged)),
+    ]
+    ordered = sorted(
+        merged, key=lambda work: (work.name not in stale_names, work.committed, work.name)
+    )
+    for work in ordered[:DENY_LIST_LIMIT]:
+        flag = "  [STALE]" if work.name in stale_names else ""
+        lines.append(f"  - {_detail(work, now, worktrees)}{flag}")
+        lines.append(f"      -> keep it: {keep} {work.name} --reason ...")
+    if len(ordered) > DENY_LIST_LIMIT:
+        lines.append(f"  ... and {len(ordered) - DENY_LIST_LIMIT} more")
+    lines.append(BRANCH_LIMIT_PRINCIPLE)
+    return lines
+
+
 def _duplicates(new_name: str, groups: list[_Work], remote: str) -> list[_Work]:
     new_stem = stem(new_name, remote)
     new_numbers = number_tokens(new_stem)
@@ -392,17 +602,34 @@ def creation_verdict(
     if name_is_branch and new_name is not None:
         if any(ref.local and ref.name == new_name for ref in refs):
             return CreationVerdict("allow", ())
+        # The default branch and exempt/protected names are never counted as
+        # open work, so creating one (a local `main` in a detached CI checkout)
+        # cannot raise the count the cap and dormancy judge.
+        if not is_work_branch(new_name, config, default):
+            return CreationVerdict("allow", ())
     work_refs = [ref for ref in refs if is_work_branch(ref.name, config, default)]
-    groups = _work_groups(work_refs)
+    labels = labels or {}
+    all_groups = _work_groups(work_refs, _merged_refnames(repo, config, refs, default), labels)
+    groups = [work for work in all_groups if work.pool == Pool.OPEN]
     moment = time.time() if now is None else now
     over_cap = config.wip.mode != "off" and len(groups) >= config.effective_wip_cap()
     duplicates = (
-        _duplicates(new_name, groups, config.remote)
+        _duplicates(new_name, all_groups, config.remote)
         if new_name and config.duplicates.mode == "warn"
         else []
     )
     blocking, noisy = _dormant_work(groups, config, labels or {})
-    if not over_cap and not duplicates and not blocking and not noisy:
+    parked = [work for work in all_groups if work.pool == Pool.PARKED]
+    stale_parked = _stale_parked(parked, config, moment)
+    over_parked = config.parked.mode != "off" and (
+        len(parked) >= config.effective_pool_cap(Pool.PARKED) or bool(stale_parked)
+    )
+    merged = [work for work in all_groups if work.pool == Pool.MERGED]
+    stale_merged = _stale_merged(merged)
+    over_merged = config.merged.mode != "off" and (
+        len(merged) >= config.effective_pool_cap(Pool.MERGED) or bool(stale_merged)
+    )
+    if not (over_cap or duplicates or blocking or noisy or over_parked or over_merged):
         return CreationVerdict("allow", ())
     worktrees = worktrees_by_branch(repo)
     lines: list[str] = []
@@ -413,16 +640,24 @@ def creation_verdict(
                 " -- continue there instead of opening another."
             )
     if over_cap:
-        lines.extend(_cap_lines(groups, config, labels or {}, moment, worktrees))
+        lines.extend(_cap_lines(groups, config, moment, worktrees))
     if blocking:
         lines.extend(_dormancy_deny_lines(blocking, moment, worktrees))
     elif noisy:
         lines.extend(_dormancy_context_lines(noisy, moment, worktrees))
+    if over_parked:
+        lines.extend(_parked_pool_lines(parked, stale_parked, config, moment, worktrees))
+    if over_merged:
+        lines.extend(_merged_pool_lines(merged, stale_merged, config, moment, worktrees))
     cap_deny = over_cap and config.wip.mode == "block"
     if cap_deny:
         return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_WIP_CAP)
     if blocking:
         return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_DORMANT)
-    if over_cap or duplicates:
+    if over_parked and config.parked.mode == "block":
+        return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_PARKED_POOL)
+    if over_merged and config.merged.mode == "block":
+        return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_MERGED_POOL)
+    if over_cap or duplicates or over_parked or over_merged:
         return CreationVerdict("warn", tuple(lines))
     return CreationVerdict("allow", tuple(lines))

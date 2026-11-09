@@ -9,6 +9,7 @@ above the ``source init.sh`` line when it is enabled.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -937,3 +938,36 @@ def test_stripping_still_removes_a_guard_that_carries_the_checkout_test() -> Non
         _SAMPLE_SOURCE, "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
     )
     assert strip_relay_guard_block(generated) == _GUARDED_SAMPLE
+
+
+# ---------------------------------------------------------------------------
+# Generated stubs are shellcheck clean (GitHub #163)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(shutil.which("shellcheck") is None, reason="shellcheck is not on PATH")
+@pytest.mark.parametrize(
+    "hook_file",
+    sorted(p.name for p in _HOOKS_DIR.iterdir() if p.is_file() and p.name != "README.md"),
+)
+def test_generated_forwarder_passes_shellcheck(hook_file: str, tmp_path: Path) -> None:
+    """Every event's generated stub passes ``shellcheck --severity=warning``.
+
+    The extensionless stubs are not scanned by ``run_shell_check.sh``, so a
+    warning in generated text (SC2034 on the relay-unused marker) reached every
+    client unnoticed. Relay and nc are both on so every generated block is in.
+    """
+    source = (_HOOKS_DIR / hook_file).read_text()
+    transport = TransportConfig(relay_enabled=True, nc_enabled=True)
+    generated = generate_forwarder_content(source, hook_file, transport, _UNTRACKED, _ROOT)
+    stub = tmp_path / hook_file
+    stub.write_text(generated)
+
+    result = subprocess.run(
+        ["shellcheck", "--severity=warning", str(stub)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr

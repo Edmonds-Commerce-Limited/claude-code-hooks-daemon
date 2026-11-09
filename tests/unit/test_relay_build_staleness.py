@@ -5,10 +5,30 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
+
 from tests.relay_gate_guard import (
+    host_relay_build_path,
     relay_build_staleness_message,
     relay_build_stamp_path,
 )
+
+
+def test_host_build_path_is_named_for_the_hosts_own_triple(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sys.platform", "linux")
+    for machine, triple in (
+        ("x86_64", "x86_64-unknown-linux-musl"),
+        ("aarch64", "aarch64-unknown-linux-musl"),
+    ):
+        monkeypatch.setattr("platform.machine", lambda machine=machine: machine)
+        assert host_relay_build_path().name == f"hooks-relay-{triple}"
+
+
+def test_host_build_path_on_an_unsupported_host_never_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("platform.machine", lambda: "riscv64")
+    assert not host_relay_build_path().exists()
 
 
 def _source(tmp_path: Path, text: str = "fn main() {}\n") -> Path:

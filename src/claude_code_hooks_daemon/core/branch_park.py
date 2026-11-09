@@ -24,6 +24,10 @@ class BranchParkError(Exception):
     """The park could not be written; nothing changed."""
 
 
+class BranchParkSameReason(BranchParkError):
+    """The tip already carries this exact ``Parked-Reason``; a re-park needs a new one."""
+
+
 @dataclass(frozen=True)
 class ParkResult:
     """The new tip and whether the fast-forward push landed."""
@@ -45,6 +49,26 @@ def _message(reason: str | None, user: str, *, clear: bool) -> str:
     if clear:
         return f"Unpark branch\n\nUnparked: {user}\n"
     return f"Park branch: {reason}\n\nParked-Reason: {reason}\nParked-By: {user}\n"
+
+
+def _refuse_same_reason(repo: Path, tip: str, name: str, reason: str) -> None:
+    """Raise when ``tip`` is already parked with exactly ``reason``.
+
+    A re-park with the same reason would add an empty commit that renews the
+    park's age without anyone saying why the work is still waiting.
+    """
+    current = run_git(
+        repo,
+        "log",
+        "-1",
+        "--format=%(trailers:key=Parked-Reason,valueonly,unfold)",
+        tip,
+    )
+    if current.returncode == 0 and current.stdout.strip() == reason:
+        raise BranchParkSameReason(
+            f"{name} is already parked with this reason; a re-park needs a new reason "
+            "(say why it is still waiting), or merge or delete the branch"
+        )
 
 
 def _write_park_commit(repo: Path, parent: str, reason: str, *, clear: bool) -> str:
@@ -72,6 +96,8 @@ def _park_remote_only(
     a failed push parks nothing. On success the remote-tracking ref follows the
     push so the inventory sees the park without a fetch.
     """
+    if not clear:
+        _refuse_same_reason(repo, old, name, reason)
     new = _write_park_commit(repo, old, reason, clear=clear)
     pushed = run_git(
         repo,
@@ -128,6 +154,8 @@ def park_branch(
             repo, name, remote, remote_ref, remote_tip.stdout.strip(), stripped, clear=clear
         )
     old = verified.stdout.strip()
+    if not clear:
+        _refuse_same_reason(repo, old, name, stripped)
     new = _write_park_commit(repo, old, stripped, clear=clear)
     moved = run_git(repo, "update-ref", ref, new, old)
     if moved.returncode != 0:

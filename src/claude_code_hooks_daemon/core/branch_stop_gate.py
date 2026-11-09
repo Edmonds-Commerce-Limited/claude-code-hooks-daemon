@@ -17,13 +17,15 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
+from claude_code_hooks_daemon.core.agent_ownership import canonical_path, running_holds
+from claude_code_hooks_daemon.core.branch_cleanup import linked_worktrees, sweep_clean_line
 from claude_code_hooks_daemon.core.branch_inventory import (
     BranchInventory,
     BranchInventoryError,
     DormancyStage,
     build_inventory,
 )
-from claude_code_hooks_daemon.core.branch_stop_guard import StopFinding, judge_stop
+from claude_code_hooks_daemon.core.branch_stop_guard import StopCheck, StopFinding, judge_stop
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path, write_state
 
@@ -69,6 +71,9 @@ def _deny_reason(
     lines = ["BRANCHES LEFT BEHIND: this stop leaves branch work unfinished."]
     for finding in findings:
         lines.extend(_describe(finding))
+    merged = [finding for finding in findings if finding.check == StopCheck.MERGED]
+    if merged:
+        lines.append(sweep_clean_line(remote=any(finding.on_remote for finding in merged)))
     if handoff:
         lines.append("Handoff: record these in the handoff note (branch @ tip):")
         lines.extend(f"  {name} @ {tip}" for name, tip in sorted(tips.items()))
@@ -105,6 +110,33 @@ def _noisy_context(
     return (line,)
 
 
+def _running_queue_branches(repo: Path, untracked: Path) -> frozenset[str]:
+    """Branches a ``running`` work-queue record holds, by the sweep's own holds.
+
+    :func:`agent_ownership.running_holds` is the one reader of the queue: a branch is
+    held when a record names it, or when it is checked out in a worktree a record
+    names, in whatever spelling (relative, trailing separator, symlink). Empty when
+    the queue is unreadable, so every finding stands.
+    """
+    holds = running_holds(untracked, repo)
+    if not holds.worktrees:
+        return holds.branches
+    try:
+        worktrees = linked_worktrees(repo)
+    except RuntimeError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="branch_stop_guard: the worktrees cannot be listed, so only branches a "
+            "running work-queue record names are handed over",
+        )
+        return holds.branches
+    by_worktree = {
+        name for name, path in worktrees.items() if canonical_path(path, repo) in holds.worktrees
+    }
+    return holds.branches | by_worktree
+
+
 def decide_stop(
     repo: Path,
     branches: BranchesConfig,
@@ -139,11 +171,20 @@ def decide_stop(
     )
     state_file = state_path(untracked, session_id, STATE_KIND, agent_id or _MAIN_KEY)
     state = read_state(state_file)
-    blocking = [f for f in judgement.findings if not f.advisory]
-    advisory = [f for f in judgement.findings if f.advisory]
+    # N581: the coordinator cannot finish a branch a live work-queue agent owns, so it
+    # is handed over, not left behind. A sub-agent's own stop is still judged in full.
+    handed = _running_queue_branches(repo, untracked) if agent_id is None else frozenset()
+    findings = [f for f in judgement.findings if f.branch not in handed]
+    blocking = [f for f in findings if not f.advisory]
+    advisory = [f for f in findings if f.advisory]
     context: list[str] = [
         f"Branch left behind (advisory): {f.branch}: {f.check.value}" for f in advisory
     ]
+    over = sorted({f.branch for f in judgement.findings if f.branch in handed})
+    if over:
+        context.append(
+            "Branches handed over to running work-queue agents (not abandoned): " + ", ".join(over)
+        )
     reason: str | None = None
     if blocking and branches.stop_guard.mode == "warn":
         context.extend(f"Branch left behind: {f.branch}: {f.check.value}" for f in blocking)

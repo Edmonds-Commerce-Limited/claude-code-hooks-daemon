@@ -181,16 +181,28 @@ another account was assigned at the same moment, the claim backs off (removes
 itself) and exits 2. An issue with two or more assignees is blocked as
 ambiguous, even when this account is one of them: a human must leave exactly one.
 
-| exit | meaning                                                                 | action                                                                                                        |
-| ---- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| 0    | valid: assigned to this account (claimed now, or already)               | proceed                                                                                                       |
-| 1    | blocked: assigned to someone else or to several, or author not approved | **stop on this issue.** Do not work it, do not claim it, write nothing to it. Name it in the tick's stop line |
-| 2    | fixable but not fixed (the claim failed)                                | stop and report the printed error; change nothing                                                             |
-| 3    | unknown: `gh` could not answer                                          | stop and report; an unreadable issue is never treated as valid                                                |
+| exit | meaning                                                                                                                                       | action                                                                                                        |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| 0    | valid: assigned to this account (claimed now, or already), or an admin seat's advisory on an issue held only by non-admins                    | proceed (on an advisory without `--claim`, the takeover is still on offer)                                    |
+| 1    | blocked: assigned to someone else or to several (non-admin seat, or the assignee is an admin), author not approved, or a takeover lost a race | **stop on this issue.** Do not work it, do not claim it, write nothing to it. Name it in the tick's stop line |
+| 2    | fixable but not fixed (the claim or takeover failed)                                                                                          | stop and report the printed error; change nothing                                                             |
+| 3    | unknown: `gh` could not answer                                                                                                                | stop and report; an unreadable issue is never treated as valid                                                |
 
 The claim publishes one assignment to GitHub, which is why the code does it only
-for an issue that already passed every other check. An issue held by someone
-else is never claimed.
+for an issue that already passed every other check. A non-admin seat never
+claims an issue held by someone else.
+
+**Admin seat takeover (Plan 00573).** A repository admin seat (GitHub's own
+`permissions.admin`) is never blocked by a NON-admin's assignment: the guard
+allows the work with an advisory naming the assignee, and `--claim` performs a
+recorded takeover. It switches the assignee to this account, re-reads and
+verifies it is the sole assignee (backing off exactly as above if it lost a
+race), then posts one short comment naming the previous assignee(s). Several
+non-admin assignees are reduced to the admin the same way. An admin respects
+another admin's assignment (exit 1: a human settles it). An unreadable
+permission never grants the override: the seat then counts as non-admin, and an
+assignee whose permission cannot be read counts as protected. The guard itself
+never takes over, `auto_claim` included.
 
 ### Recovering a stalled issue — establish the state, do not infer it
 
@@ -397,11 +409,19 @@ QA here is the Targeted tier in [../QA.md](../QA.md), "QA Tiers". The full
 suite is a release step and is not run for an issue. The sub-agent has already
 run targeted QA on its branch. Check that result first: when the sub-agent
 reported none, run the static checks in "Before Merging: the Coordinator's
-Check" in QA.md. Create an integration branch and worktree from current `main`.
-Merge the reported head `--no-ff` into it, together with any other branch that
-is ready. Then run `./scripts/qa/llm_qa.py changed` once on the combined head.
+Check" in QA.md.
+
+When this issue's branch is the only one ready, do not open a second branch:
+in the issue's own worktree, merge current `main` into the issue branch
+(`git merge --no-ff main`) and run `./scripts/qa/llm_qa.py changed` there. An
+integration branch is for combining SEVERAL ready branches; for one, it only
+doubles the branches to clean up, and the creation guard's own hint ("a branch
+for this work may already exist") fires on it. When several branches are ready,
+create an integration branch and worktree from current `main`, merge each
+reported head `--no-ff` into it, and run `./scripts/qa/llm_qa.py changed` once
+on the combined head.
 When it is red, find which branch broke it before blaming this issue's branch,
-and follow "A red batch" in QA.md. Commit any docs to the integration branch
+and follow "A red batch" in QA.md. Commit any docs to the branch under test
 before that run, so the run covers them.
 
 A file the run reports as unmapped, or too broad, is never waved through: fix it
@@ -433,8 +453,8 @@ Red QA ends the tick: report, leave `agent-working` on, do not merge.
 
 ## Step 7 — merge
 
-The branch was already merged `--no-ff` in the integration worktree at Step 5,
-and that head is what passed the targeted run. From the main checkout, on the
+At Step 5 `main` was merged into the issue branch (or the branches into an
+integration branch), and that head is what passed the targeted run. From the main checkout, on the
 default branch, `git merge --ff-only <that head's sha>` (the SHA, never the
 branch name), restart the daemon and check `bin/hooks-daemon status`, then
 `git push`. If the daemon fails after the fast-forward, do not push.
@@ -446,7 +466,7 @@ commit, `HEAD^1..HEAD` names only the regenerated block, so any range check afte
 the merge must start from the pre-merge `main` sha.
 
 If `--ff-only` refuses, `main` moved after Step 5: merge `main` into the
-integration branch, run `./scripts/qa/llm_qa.py changed` again, and repeat.
+branch under test again, run `./scripts/qa/llm_qa.py changed` again, and repeat.
 CI on the pushed head is the second line, in the tier the change needs
 ([../QA.md](../QA.md), "CI tiers"), and a red CI is a red `main`.
 

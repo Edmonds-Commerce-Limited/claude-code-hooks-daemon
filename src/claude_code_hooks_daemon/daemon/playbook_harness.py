@@ -27,6 +27,7 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.constants.protocol import HookInputField
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PLAYBOOK_PROBE,
@@ -35,6 +36,9 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
 from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import (
     LINT_TIMEOUT_NOTICE,
     LintOnEditHandler,
+)
+from claude_code_hooks_daemon.handlers.pre_tool_use.branch_creation_guard import (
+    BranchCreationGuardHandler,
 )
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
@@ -677,6 +681,42 @@ def inconclusive_probe(
     if timeout is None:
         return None
     return InconclusiveProbe(label=f"#{probe.test_number} {probe.handler_name}", timeout=timeout)
+
+
+#: Rules whose verdict is the repository's live branch state (how many open,
+#: how old), which a probe's event does not carry and the harness cannot set.
+BRANCH_STATE_RULE_IDS: Final[tuple[str, ...]] = (
+    RuleID.BRANCH_WIP_CAP,
+    RuleID.BRANCH_DORMANT,
+    RuleID.BRANCH_PARKED_POOL,
+    RuleID.BRANCH_MERGED_POOL,
+)
+
+
+def environment_blocked(
+    probe: ExecutableProbe, observed_decision: str, observed_text: str
+) -> str | None:
+    """Why ``probe`` measured the repository's branches rather than its handler, or None.
+
+    Checked BEFORE ``verdict``. A probe for another handler that expected an
+    allow, refused by the creation guard's cap or dormancy rule, says only how
+    many branches this checkout holds (in CI every remote branch counts). It is
+    reported, never scored as that handler passing or failing. The creation
+    guard's own probes are scored as usual, and so is any other refusal.
+    """
+    if probe.handler_name == BranchCreationGuardHandler.__name__:
+        return None
+    if probe.expected_decision.strip().lower() in _REFUSAL_SPELLINGS:
+        return None
+    if (observed_decision or "").strip().lower() not in _REFUSAL_SPELLINGS:
+        return None
+    rule = next((rule for rule in BRANCH_STATE_RULE_IDS if f"[{rule}]" in observed_text), None)
+    if rule is None:
+        return None
+    return (
+        f"#{probe.test_number} {probe.handler_name}: refused by {rule}, the repository's "
+        "branch state, so its own verdict was never observed"
+    )
 
 
 def lint_unusable_failure(

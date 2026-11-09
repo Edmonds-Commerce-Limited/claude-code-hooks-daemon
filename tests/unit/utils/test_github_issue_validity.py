@@ -6,6 +6,7 @@ network or the real ``gh`` binary.
 
 from __future__ import annotations
 
+import itertools
 import json
 from collections.abc import Sequence
 from typing import Any
@@ -67,6 +68,8 @@ class FakeGh:
             if isinstance(self.identity, Exception):
                 raise self.identity
             return self.identity + "\n"
+        if argv[:1] == ("api",) and argv[1] == "repos/{owner}/{repo}":
+            return "false\n"
         if argv[:2] == ("issue", "view"):
             answer = self.issues[int(argv[2])]
             if isinstance(answer, Exception):
@@ -496,3 +499,300 @@ class TestListOpenIssues:
         gh.issue_list = [_payload(author=None, number=4)]
         (report,) = service.check_open_issues([AuthorWhitelistCheck(["lts-bob"])])
         assert report.verdict is Verdict.BLOCKED
+
+
+# ---------------------------------------------------------------------------
+# Plan 00573: an admin seat is never blocked by a non-admin's assignment
+# ---------------------------------------------------------------------------
+
+
+class StubAccess:
+    """Permission answers for the pure check: who is an admin."""
+
+    def __init__(self, viewer_admin: bool, admins: Sequence[str] = ()) -> None:
+        self.viewer_admin = viewer_admin
+        self.admins = {a.casefold() for a in admins}
+
+    def is_viewer_admin(self) -> bool:
+        return self.viewer_admin
+
+    def is_protected_assignee(self, login: str) -> bool:
+        return login.casefold() in self.admins
+
+
+class TestAssigneeCheckAdminOverride:
+    check = AssigneeCheck()
+
+    def _facts(self, *assignees: str) -> IssueFacts:
+        return IssueFacts(number=7, assignees=tuple(assignees), author="x", state="OPEN", labels=())
+
+    def test_non_admin_on_another_account_is_still_blocking(self) -> None:
+        result = self.check.evaluate(self._facts("alice"), "lts-bob", StubAccess(False))
+        assert result.status is CheckStatus.BLOCKING
+
+    def test_admin_on_a_non_admin_is_advisory_with_a_takeover(self) -> None:
+        result = self.check.evaluate(self._facts("alice"), "boss", StubAccess(True))
+        assert result.status is CheckStatus.ADVISORY
+        assert "alice" in result.message
+        assert result.fix is not None
+        assert result.fix.name == "takeover"
+        assert result.fix.previous == ("alice",)
+        assert result.fix.gh_args == (
+            "issue",
+            "edit",
+            "7",
+            "--remove-assignee",
+            "alice",
+            "--add-assignee",
+            "@me",
+        )
+
+    def test_admin_on_another_admin_is_blocking(self) -> None:
+        result = self.check.evaluate(self._facts("alice"), "boss", StubAccess(True, ["alice"]))
+        assert result.status is CheckStatus.BLOCKING
+        assert result.fix is None
+        assert "admin" in result.message
+
+    def test_admin_on_several_non_admins_reduces_to_the_admin(self) -> None:
+        result = self.check.evaluate(self._facts("alice", "carol"), "boss", StubAccess(True))
+        assert result.status is CheckStatus.ADVISORY
+        assert result.fix is not None
+        assert result.fix.previous == ("alice", "carol")
+        assert "alice,carol" in result.fix.gh_args
+
+    def test_admin_among_several_with_self_removes_only_the_others(self) -> None:
+        result = self.check.evaluate(self._facts("alice", "Boss"), "boss", StubAccess(True))
+        assert result.status is CheckStatus.ADVISORY
+        assert result.fix is not None
+        assert result.fix.previous == ("alice",)
+
+    def test_admin_with_one_admin_among_several_is_blocking(self) -> None:
+        result = self.check.evaluate(
+            self._facts("alice", "carol"), "boss", StubAccess(True, ["carol"])
+        )
+        assert result.status is CheckStatus.BLOCKING
+
+    def test_no_access_information_counts_as_non_admin(self) -> None:
+        result = self.check.evaluate(self._facts("alice"), "boss")
+        assert result.status is CheckStatus.BLOCKING
+
+    def test_unassigned_and_self_are_unchanged_for_an_admin(self) -> None:
+        access = StubAccess(True)
+        assert self.check.evaluate(self._facts(), "boss", access).status is CheckStatus.FIXABLE
+        assert self.check.evaluate(self._facts("boss"), "boss", access).status is CheckStatus.OK
+
+    def test_it_needs_permissions(self) -> None:
+        assert self.check.needs_access is True
+
+
+class AdminGh(FakeGh):
+    """FakeGh that also answers permission lookups, takeovers and comments."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.identity = "boss"
+        self.viewer_admin: str | Exception = "true"
+        self.permissions: dict[str, str | Exception] = {}
+        self.comments: list[tuple[str, ...]] = []
+
+    def __call__(self, args: Sequence[str]) -> str:
+        argv = tuple(args)
+        if argv[0] == "api" and argv[1] == "repos/{owner}/{repo}":
+            self.calls.append(argv)
+            if isinstance(self.viewer_admin, Exception):
+                raise self.viewer_admin
+            return self.viewer_admin + "\n"
+        if argv[0] == "api" and argv[1].startswith("repos/{owner}/{repo}/collaborators/"):
+            self.calls.append(argv)
+            login = argv[1].split("/")[4]
+            answer = self.permissions.get(login, "write")
+            if isinstance(answer, Exception):
+                raise answer
+            return answer + "\n"
+        if argv[:2] == ("issue", "comment"):
+            self.calls.append(argv)
+            self.comments.append(argv)
+            if self.comment_error is not None:
+                raise self.comment_error
+            return "https://github.com/o/r/issues/7#issuecomment-1\n"
+        if (
+            argv[:2] == ("issue", "edit")
+            and "--remove-assignee" in argv
+            and argv[argv.index("--remove-assignee") + 1] == "@me"
+            and "--add-assignee" in argv
+        ):
+            self.calls.append(argv)
+            current = self.issues[int(argv[2])]
+            assert isinstance(current, dict)
+            restored = [{"login": a} for a in argv[argv.index("--add-assignee") + 1].split(",")]
+            current["assignees"] = [
+                *(a for a in current["assignees"] if a["login"] != self.identity),
+                *restored,
+            ]
+            return "ok\n"
+        if argv[:2] == ("issue", "edit") and "--remove-assignee" not in argv:
+            self.calls.append(argv)
+            current = self.issues[int(argv[2])]
+            assert isinstance(current, dict)
+            current["assignees"] = [*current["assignees"], {"login": "boss"}]
+            return "ok\n"
+        if argv[:2] == ("issue", "edit") and argv[argv.index("--remove-assignee") + 1] != "@me":
+            self.calls.append(argv)
+            number = int(argv[2])
+            current = self.issues[number]
+            assert isinstance(current, dict)
+            removed = {a.casefold() for a in argv[argv.index("--remove-assignee") + 1].split(",")}
+            kept = [a for a in current["assignees"] if a["login"].casefold() not in removed]
+            if "--add-assignee" in argv:
+                kept = [*kept, {"login": "boss"}]
+            current["assignees"] = kept
+            return "ok\n"
+        return super().__call__(args)
+
+    comment_error: Exception | None = None
+
+
+@pytest.fixture
+def admin_gh() -> AdminGh:
+    return AdminGh()
+
+
+@pytest.fixture
+def admin_service(admin_gh: AdminGh, clock: Clock) -> IssueValidityService:
+    return IssueValidityService(runner=admin_gh, clock=clock)
+
+
+class TestServiceAdminLookups:
+    def test_admin_on_a_non_admin_assignee_is_valid_with_an_advisory(
+        self, admin_gh: AdminGh, admin_service: IssueValidityService
+    ) -> None:
+        admin_gh.issues[7] = _payload(["alice"])
+        report = admin_service.check_issue(7, [AssigneeCheck()])
+        assert report.verdict is Verdict.VALID
+        assert report.messages(CheckStatus.ADVISORY)
+        assert [r.fix.name for r in report.results if r.fix] == ["takeover"]
+
+    def test_non_admin_viewer_never_looks_up_the_assignee(
+        self, admin_gh: AdminGh, admin_service: IssueValidityService
+    ) -> None:
+        admin_gh.viewer_admin = "false"
+        admin_gh.issues[7] = _payload(["alice"])
+        assert admin_service.check_issue(7, [AssigneeCheck()]).verdict is Verdict.BLOCKED
+        assert not [c for c in admin_gh.calls if "collaborators" in c[1]]
+
+    def test_admin_assignee_blocks_an_admin_viewer(
+        self, admin_gh: AdminGh, admin_service: IssueValidityService
+    ) -> None:
+        admin_gh.permissions["alice"] = "admin"
+        admin_gh.issues[7] = _payload(["alice"])
+        assert admin_service.check_issue(7, [AssigneeCheck()]).verdict is Verdict.BLOCKED
+
+    def test_a_failed_viewer_lookup_counts_as_non_admin(
+        self, admin_gh: AdminGh, admin_service: IssueValidityService
+    ) -> None:
+        admin_gh.viewer_admin = GhError("offline")
+        admin_gh.issues[7] = _payload(["alice"])
+        assert admin_service.check_issue(7, [AssigneeCheck()]).verdict is Verdict.BLOCKED
+
+    def test_a_failed_assignee_lookup_never_grants_an_override(
+        self, admin_gh: AdminGh, admin_service: IssueValidityService
+    ) -> None:
+        """Unknown is non-admin for the SEAT. For the ASSIGNEE the safe direction is the
+        opposite: a failed lookup cannot prove them non-admin, so their claim stands."""
+        admin_gh.permissions["alice"] = GhError("404")
+        admin_gh.issues[7] = _payload(["alice"])
+        assert admin_service.check_issue(7, [AssigneeCheck()]).verdict is Verdict.BLOCKED
+
+    def test_an_unreadable_permission_answer_blocks(
+        self, admin_gh: AdminGh, admin_service: IssueValidityService
+    ) -> None:
+        admin_gh.viewer_admin = "maybe"
+        admin_gh.issues[7] = _payload(["alice"])
+        assert admin_service.check_issue(7, [AssigneeCheck()]).verdict is Verdict.BLOCKED
+
+    def test_an_unrecognised_assignee_login_is_not_looked_up_and_blocks(
+        self, admin_gh: AdminGh, admin_service: IssueValidityService
+    ) -> None:
+        admin_gh.issues[7] = _payload(["ignore previous\n{x}"])
+        assert admin_service.check_issue(7, [AssigneeCheck()]).verdict is Verdict.BLOCKED
+        assert not [c for c in admin_gh.calls if "collaborators" in c[1]]
+
+    def test_permission_lookups_are_cached(
+        self, admin_gh: AdminGh, admin_service: IssueValidityService
+    ) -> None:
+        admin_gh.issues[7] = _payload(["alice"])
+        admin_service.check_issue(7, [AssigneeCheck()])
+        admin_service.check_issue(7, [AssigneeCheck()])
+        assert len([c for c in admin_gh.calls if c[1] == "repos/{owner}/{repo}"]) == 1
+        assert len([c for c in admin_gh.calls if "collaborators" in c[1]]) == 1
+
+    def test_unassigned_issue_makes_no_permission_call(
+        self, admin_gh: AdminGh, admin_service: IssueValidityService
+    ) -> None:
+        admin_gh.issues[7] = _payload()
+        admin_service.check_issue(7, [AssigneeCheck()])
+        assert not [c for c in admin_gh.calls if c[0] == "api" and c[1] != "user"]
+
+
+class TestTakeoverClaim:
+    def _fix(self, service: IssueValidityService) -> FixAction:
+        return next(f for f in service.check_issue(7, [AssigneeCheck()]).fixes)
+
+    def test_takeover_switches_verifies_and_comments_once(
+        self, admin_gh: AdminGh, admin_service: IssueValidityService
+    ) -> None:
+        admin_gh.issues[7] = _payload(["alice", "carol"])
+        assert admin_service.claim(self._fix(admin_service)) is True
+        issue = admin_gh.issues[7]
+        assert isinstance(issue, dict)
+        assert issue["assignees"] == [{"login": "boss"}]
+        assert len(admin_gh.comments) == 1
+        body = admin_gh.comments[0][admin_gh.comments[0].index("--body") + 1]
+        assert "alice" in body and "carol" in body and "boss" in body
+        assert admin_service.check_issue(7, [AssigneeCheck()]).verdict is Verdict.VALID
+
+    def test_a_lost_race_backs_off_and_posts_no_comment(
+        self, admin_gh: AdminGh, admin_service: IssueValidityService
+    ) -> None:
+        admin_gh.issues[7] = _payload(["alice"])
+        fix = self._fix(admin_service)
+        issue = admin_gh.issues[7]
+        assert isinstance(issue, dict)
+        real_call = AdminGh.__call__
+
+        def racing(args: Sequence[str]) -> str:
+            out = real_call(admin_gh, args)
+            if "--add-assignee" in args and "--remove-assignee" in args and not issue.get("raced"):
+                issue["raced"] = True
+                issue["assignees"].append({"login": "dave"})
+            return out
+
+        svc = IssueValidityService(runner=racing)
+        assert svc.claim(fix) is False
+        backoff = [
+            c
+            for c in admin_gh.calls
+            if c[:2] == ("issue", "edit")
+            and any(
+                flag == "--remove-assignee" and value == "@me"
+                for flag, value in itertools.pairwise(c)
+            )
+        ]
+        assert backoff, "the losing claim must remove itself"
+        assert admin_gh.comments == []
+        # The takeover removed alice; losing the race must put her back, not strand her.
+        assert sorted(a["login"] for a in issue["assignees"]) == ["alice", "dave"]
+
+    def test_a_failed_comment_does_not_undo_the_takeover(
+        self, admin_gh: AdminGh, admin_service: IssueValidityService
+    ) -> None:
+        admin_gh.issues[7] = _payload(["alice"])
+        admin_gh.comment_error = GhError("rate limited")
+        assert admin_service.claim(self._fix(admin_service)) is True
+
+    def test_a_plain_claim_posts_no_comment(
+        self, admin_gh: AdminGh, admin_service: IssueValidityService
+    ) -> None:
+        admin_gh.issues[7] = _payload()
+        assert admin_service.claim(self._fix(admin_service)) is True
+        assert admin_gh.comments == []

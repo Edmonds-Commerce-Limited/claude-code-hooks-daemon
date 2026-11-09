@@ -15,12 +15,12 @@ import pytest
 from claude_code_hooks_daemon.config.models import TransportConfig
 from claude_code_hooks_daemon.install import relay_deploy
 from claude_code_hooks_daemon.install.relay_deploy import (
-    RELAY_ASSET_NAME,
     RELAY_DEFECT_MISSING,
     RELAY_DEFECT_NOT_A_FILE,
     RELAY_DEFECT_NOT_EXECUTABLE,
     RELAY_DEFECT_NOT_RUNNABLE,
     RELAY_PROVISION_FAILED_EXIT_CODE,
+    RELAY_TARGET,
     SHA256SUMS_ASSET_NAME,
     RelayDeployResult,
     check_musl_toolchain,
@@ -32,10 +32,17 @@ from claude_code_hooks_daemon.install.relay_deploy import (
     provision_relay_for_install,
     read_deployed_digest,
     read_deployed_route,
+    relay_asset_name_for_target,
     relay_binary_defect,
     relay_binary_missing_warning,
     resolve_relay_binary_path,
 )
+from claude_code_hooks_daemon.utils.relay_host import host_relay_target
+
+#: The relay target and release asset THIS host uses, from the product's own
+#: helpers, so the fixtures hold on x86_64 and on the arm64 CI leg alike.
+_HOST_TARGET = host_relay_target() or RELAY_TARGET
+_HOST_ASSET = relay_asset_name_for_target(_HOST_TARGET)
 
 
 def _fake_process(
@@ -95,7 +102,7 @@ class TestCheckMuslToolchain:
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/rustc")
 
         def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-            return _fake_process(0, stdout="x86_64-unknown-linux-musl\nother-target\n")
+            return _fake_process(0, stdout=f"{_HOST_TARGET}\nother-target\n")
 
         assert check_musl_toolchain(run_fn=fake_run) is True
 
@@ -103,9 +110,24 @@ class TestCheckMuslToolchain:
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/rustc")
 
         def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-            return _fake_process(0, stdout="aarch64-unknown-linux-musl\n")
+            return _fake_process(0, stdout="riscv64gc-unknown-linux-musl\n")
 
         assert check_musl_toolchain(run_fn=fake_run) is False
+
+    @pytest.mark.parametrize("host", ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"])
+    def test_with_no_target_it_checks_the_host_target(
+        self, monkeypatch: pytest.MonkeyPatch, host: str
+    ) -> None:
+        """Plan 00572 Task 3.3: on the arm64 CI leg, `transport_probe` (which
+        passes no target) reported the toolchain by whether the x86_64 target
+        existed. With no target, the host's own target is the one checked."""
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/rustc")
+        monkeypatch.setattr(relay_deploy, "host_relay_target", lambda: host)
+
+        def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            return _fake_process(0, stdout=f"{host}\n")
+
+        assert check_musl_toolchain(run_fn=fake_run) is True
 
     def test_false_on_subprocess_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/rustc")
@@ -169,7 +191,7 @@ class TestDeployRelayFromBuild:
         (daemon_dir / "relay" / "build.sh").write_text("#!/bin/bash\n")
         built_dir = daemon_dir / "untracked" / "relay-build"
         built_dir.mkdir(parents=True)
-        (built_dir / RELAY_ASSET_NAME).write_bytes(b"pretend-static-binary")
+        (built_dir / _HOST_ASSET).write_bytes(b"pretend-static-binary")
         project_root = tmp_path / "project"
         project_root.mkdir()
 
@@ -204,7 +226,7 @@ class TestDeployRelayFromBuild:
         (daemon_dir / "relay" / "build.sh").write_text("#!/bin/bash\n")
         built_dir = daemon_dir / "untracked" / "relay-build"
         built_dir.mkdir(parents=True)
-        (built_dir / RELAY_ASSET_NAME).write_bytes(b"pretend-static-binary")
+        (built_dir / _HOST_ASSET).write_bytes(b"pretend-static-binary")
         project_root = tmp_path / "project"
         project_root.mkdir()
 
@@ -232,7 +254,7 @@ class TestDeployRelayFromBuild:
         (daemon_dir / "relay" / "build.sh").write_text("#!/bin/bash\n")
         built_dir = daemon_dir / "untracked" / "relay-build"
         built_dir.mkdir(parents=True)
-        (built_dir / RELAY_ASSET_NAME).write_bytes(b"pretend-static-binary")
+        (built_dir / _HOST_ASSET).write_bytes(b"pretend-static-binary")
         project_root = tmp_path / "project"
         project_root.mkdir()
 
@@ -250,7 +272,7 @@ class TestDeployRelayFromBuild:
 
 
 class TestDeployRelayFromDownload:
-    def _sums(self, digest: str, name: str = RELAY_ASSET_NAME) -> bytes:
+    def _sums(self, digest: str, name: str = _HOST_ASSET) -> bytes:
         return f"{digest}  {name}\n".encode()
 
     def test_fetch_failure_on_sums(self, tmp_path: Path) -> None:
@@ -382,7 +404,7 @@ class TestDeployRelayIfConfigured:
         (daemon_dir / "relay" / "build.sh").write_text("#!/bin/bash\n")
         built_dir = daemon_dir / "untracked" / "relay-build"
         built_dir.mkdir(parents=True)
-        (built_dir / RELAY_ASSET_NAME).write_bytes(b"binary")
+        (built_dir / _HOST_ASSET).write_bytes(b"binary")
         project_root = tmp_path / "project"
         project_root.mkdir()
 
@@ -391,7 +413,7 @@ class TestDeployRelayIfConfigured:
             # The toolchain probe calls rustc directly; the build step calls
             # bash relay/build.sh. Distinguish by inspecting argv[0].
             if call_args and "rustc" in str(call_args[0]):
-                return _fake_process(0, stdout="x86_64-unknown-linux-musl\n")
+                return _fake_process(0, stdout=f"{_HOST_TARGET}\n")
             return _fake_process(0)
 
         result = deploy_relay_if_configured(
@@ -413,7 +435,7 @@ class TestDeployRelayIfConfigured:
 
         def fetch_fn(url: str) -> bytes:
             if url.endswith(SHA256SUMS_ASSET_NAME):
-                return f"{digest}  {RELAY_ASSET_NAME}\n".encode()
+                return f"{digest}  {_HOST_ASSET}\n".encode()
             return content
 
         result = deploy_relay_if_configured(
@@ -560,7 +582,7 @@ class TestRelayBinaryMissingWarning:
         assert "not executable" not in line
 
 
-_MUSL_TARGETS = "x86_64-unknown-linux-musl\n"
+_MUSL_TARGETS = f"{_HOST_TARGET}\n"
 
 
 def _good_fetch(content: bytes = b"downloaded-binary") -> relay_deploy.FetchFn:
@@ -570,7 +592,7 @@ def _good_fetch(content: bytes = b"downloaded-binary") -> relay_deploy.FetchFn:
 
     def fetch_fn(url: str) -> bytes:
         if url.endswith(SHA256SUMS_ASSET_NAME):
-            return f"{digest}  {RELAY_ASSET_NAME}\n".encode()
+            return f"{digest}  {_HOST_ASSET}\n".encode()
         return content
 
     return fetch_fn
@@ -586,7 +608,7 @@ def _daemon_dir_with_build_output(tmp_path: Path) -> Path:
     (daemon_dir / "relay" / "build.sh").write_text("#!/bin/bash\n")
     built_dir = daemon_dir / "untracked" / "relay-build"
     built_dir.mkdir(parents=True)
-    (built_dir / RELAY_ASSET_NAME).write_bytes(b"built-binary")
+    (built_dir / _HOST_ASSET).write_bytes(b"built-binary")
     return daemon_dir
 
 
@@ -793,7 +815,7 @@ class TestProvisionRelayForInstall:
         assert str(tmp_path / "bin" / "hooks-relay") in text
         assert "network is unreachable" in text
         assert "musl" in text
-        assert "rustup target add x86_64-unknown-linux-musl" in text
+        assert f"rustup target add {_HOST_TARGET}" in text
         assert str(tmp_path / "bin" / "hooks-daemon") in text
         assert "transport on" in text
         assert "bash" in text

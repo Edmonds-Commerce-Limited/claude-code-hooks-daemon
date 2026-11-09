@@ -17,13 +17,17 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.utils.relay_host import host_relay_target
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BUILD_SCRIPT = REPO_ROOT / "screen" / "build.sh"
 VENDOR_DIR = REPO_ROOT / "screen" / "vendor"
-BINARY = REPO_ROOT / "untracked" / "screen-build" / "hooks-screen-x86_64-unknown-linux-musl"
+# The triple is the product's own host mapping (screen/build.sh uses the same
+# one); an unsupported host falls back to x86_64 and skips on the missing target.
+TARGET = host_relay_target() or "x86_64-unknown-linux-musl"
+BINARY = REPO_ROOT / "untracked" / "screen-build" / f"hooks-screen-{TARGET}"
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "hooks_screen"
 CARGO = Path(os.environ.get("CARGO", Path.home() / ".cargo" / "bin" / "cargo"))
-TARGET = "x86_64-unknown-linux-musl"
 ESC = b"\x1b"
 RUN_TIMEOUT_SECONDS = 20
 COLD_BUILD_TIMEOUT_SECONDS = 300
@@ -160,7 +164,7 @@ class TestOfflineBuild:
                 "--offline",
                 "--locked",
                 "--target",
-                "x86_64-unknown-linux-musl",
+                TARGET,
                 "--target-dir",
                 str(tmp_path / "target"),
             ],

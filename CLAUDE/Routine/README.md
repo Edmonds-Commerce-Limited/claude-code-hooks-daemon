@@ -16,10 +16,11 @@ Design rationale, decisions and the research behind them:
 
 ## Active Routines
 
-| Routine                                                               | Trigger           | Covers                                                           |
-| --------------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------- |
-| [00001 security review full](00001-security-review-full/ROUTINE.md)   | schedule, 90 days | Every check in [CHECKS.md](00001-security-review-full/CHECKS.md) |
-| [00002 security review delta](00002-security-review-delta/ROUTINE.md) | release           | The delta-able checks only, over one release's diff              |
+| Routine                                                               | Trigger           | Covers                                                            |
+| --------------------------------------------------------------------- | ----------------- | ----------------------------------------------------------------- |
+| [00001 security review full](00001-security-review-full/ROUTINE.md)   | schedule, 90 days | Every check in [CHECKS.md](00001-security-review-full/CHECKS.md)  |
+| [00002 security review delta](00002-security-review-delta/ROUTINE.md) | release           | The delta-able checks only, over one release's diff               |
+| [00003 dependency updates](00003-dependency-updates/ROUTINE.md)       | schedule, 7 days  | Every open Dependabot pull request, merged or blocked with a plan |
 
 The two are a pair, not a duplicate. The delta sweep is structurally blind to
 any finding whose cause is not in the diff — a dependency that acquired a CVE

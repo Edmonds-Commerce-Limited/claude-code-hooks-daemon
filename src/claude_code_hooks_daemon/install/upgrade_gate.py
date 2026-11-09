@@ -102,7 +102,11 @@ _MANIFEST_RE: Final[re.Pattern[str]] = re.compile(r"^v(?P<version>\d+\.\d+\.\d+)
 _BREAKING_RE: Final[re.Pattern[str]] = re.compile(
     r"^breaking:\s*[\"']?(?:true|yes|on|y)[\"']?\s*(?:#.*)?$", re.MULTILINE | re.IGNORECASE
 )
-_RELEASE_RE: Final[re.Pattern[str]] = re.compile(r"^[vV]?\d+(?:\.\d+){0,2}(?:\+\S*)?$")
+#: ``v``-prefixed or dotted. A bare run of digits is a commit ref: about 1.5% of
+#: 9-character short SHAs are all decimal (ledger 00474 N598).
+_RELEASE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?:[vV]\d+(?:\.\d+){0,2}|\d+(?:\.\d+){1,2})(?:\+\S*)?$"
+)
 _DOC_MARKER_RE: Final[re.Pattern[str]] = re.compile(r"Generated on [^(\n]*\(v(\d+\.\d+\.\d+)\)")
 _DIGEST_LENGTH: Final[int] = 12
 _RULE: Final[str] = "=" * 70
@@ -171,7 +175,7 @@ class GateReport:
         return bool(self.guides or self.applicable or self.escalations)
 
 
-def _is_release(version: str | None) -> bool:
+def is_release(version: str | None) -> bool:
     return bool(version) and _RELEASE_RE.match(str(version)) is not None
 
 
@@ -181,7 +185,7 @@ def release_key(version: str) -> str:
 
 
 def _version_key(version: str | None) -> str:
-    return release_key(version) if version and _is_release(version) else UNKNOWN_VERSION
+    return release_key(version) if version and is_release(version) else UNKNOWN_VERSION
 
 
 def installed_version(installed_stamp: str | None, project_root: Path) -> tuple[str | None, str]:
@@ -192,7 +196,7 @@ def installed_version(installed_stamp: str | None, project_root: Path) -> tuple[
     and covers a fresh clone with no venv yet. Returns ``(None, "none")``
     when neither can be read.
     """
-    if installed_stamp and _is_release(installed_stamp):
+    if installed_stamp and is_release(installed_stamp):
         return release_key(installed_stamp), SOURCE_VENV_STAMP
     doc = project_root / HOOKS_DAEMON_DOC
     if doc.is_file():
@@ -487,7 +491,7 @@ def _unknown_range_report(
     findings: list[TaskFinding] = []
     guides: list[Path] = []
     escalations: list[str] = []
-    target_is_release = _is_release(to_version)
+    target_is_release = is_release(to_version)
     if not target_is_release:
         escalations.append(f"the target {to_version!r} is not a release version")
     else:
@@ -507,7 +511,7 @@ def _unknown_range_report(
         guides = _reading_list(upgrades_dir, _EARLIEST_RELEASE, to_version, include_unreleased)
     if unknown_reason is not None:
         escalations.append(unknown_reason)
-    elif not _is_release(from_version):
+    elif not is_release(from_version):
         escalations.append(
             "the installed version is unknown (no venv stamp and no version in "
             f"{HOOKS_DAEMON_DOC.as_posix()}), so no MAJOR bump or breaking change can be "
@@ -559,7 +563,7 @@ def evaluate_gate(
     ``--skip-reading-confirmation`` (None when it passed no flag); it counts
     only when it equals this listing's digest.
     """
-    ref = target_ref or (f"v{release_key(to_version)}" if _is_release(to_version) else to_version)
+    ref = target_ref or (f"v{release_key(to_version)}" if is_release(to_version) else to_version)
     if installed_stamp and target_stamp and installed_stamp == target_stamp:
         gated = gated_install_stamp(untracked_dir, daemon_dir=daemon_dir, project_root=project_root)
         if gated != target_stamp:
@@ -605,8 +609,8 @@ def evaluate_gate(
     if (
         from_untrusted
         and from_version is not None
-        and _is_release(from_version)
-        and _is_release(to_version)
+        and is_release(from_version)
+        and is_release(to_version)
         and release_tuple(from_version) >= release_tuple(to_version)
     ):
         return _unknown_range_report(
@@ -624,7 +628,7 @@ def evaluate_gate(
                 "be trusted to show there is nothing new to install"
             ),
         )
-    if from_version is None or not (_is_release(from_version) and _is_release(to_version)):
+    if from_version is None or not (is_release(from_version) and is_release(to_version)):
         return _unknown_range_report(
             daemon_dir=daemon_dir,
             project_root=project_root,

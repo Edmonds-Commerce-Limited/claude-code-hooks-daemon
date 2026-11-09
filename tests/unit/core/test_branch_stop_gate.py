@@ -9,6 +9,9 @@ import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
+from claude_code_hooks_daemon.core import branch_stop_gate
+from claude_code_hooks_daemon.core.agent_ownership import RunningHolds
+from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command
 from claude_code_hooks_daemon.core.branch_inventory import DormancyStage
 from claude_code_hooks_daemon.core.branch_records import TOUCHED_KEY
 from claude_code_hooks_daemon.core.branch_stop_gate import (
@@ -16,9 +19,16 @@ from claude_code_hooks_daemon.core.branch_stop_gate import (
     NOISY_INTERVAL_SECONDS,
     STATE_KIND,
     StopDecision,
+    _deny_reason,
     decide_stop,
 )
+from claude_code_hooks_daemon.core.branch_stop_guard import StopCheck, StopFinding
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path
+from claude_code_hooks_daemon.utils.work_queue import (
+    WORK_QUEUE_FILENAME,
+    add_record,
+    update_record,
+)
 
 SESSION = "sess-1"
 AGENT = "agent-1"
@@ -191,3 +201,109 @@ class TestNoisyLine:
         self, repo: Path, untracked: Path, stale: None
     ) -> None:
         assert _decide(repo, untracked, agent=AGENT).context == ()
+
+
+class TestMergedOneStep:
+    """A merged finding names ``branch-sweep --clean`` (Plan 00571 Task 2.3, #165)."""
+
+    def _finding(self, check: StopCheck, *, on_remote: bool = False) -> StopFinding:
+        return StopFinding("done", check, "a" * 40, ("git branch -d done",), on_remote=on_remote)
+
+    def test_a_merged_finding_names_the_clean_command(self) -> None:
+        reason = _deny_reason([self._finding(StopCheck.MERGED)], {}, block=1, handoff=False)
+        assert sweep_clean_command() in reason
+        assert "--remote" not in reason
+        assert "git branch -d done" in reason
+
+    def test_a_remote_copy_adds_the_remote_flag(self) -> None:
+        finding = self._finding(StopCheck.MERGED, on_remote=True)
+        reason = _deny_reason([finding], {}, block=1, handoff=False)
+        assert sweep_clean_command(remote=True) in reason
+
+    def test_no_merged_finding_no_clean_line(self) -> None:
+        reason = _deny_reason([self._finding(StopCheck.UNPUSHED)], {}, block=1, handoff=False)
+        assert "--clean" not in reason
+
+
+def _queue(untracked: Path, branch: str, *, status: str = "running") -> None:
+    path = untracked / WORK_QUEUE_FILENAME
+    add_record(
+        path,
+        f"agent-for-{branch}",
+        worktree=f"/wt/{branch}",
+        branch=branch,
+        brief="work",
+        brief_file=None,
+        last_sha="a" * 40,
+        now=1.0,
+    )
+    if status != "running":
+        update_record(path, f"agent-for-{branch}", status=status, now=2.0)
+
+
+class TestHandedOverToTheWorkQueue:
+    """A branch a running work-queue agent owns is handed over (Plan 00571 Task 2.5, N581)."""
+
+    def test_the_coordinator_is_not_held_on_a_running_agents_branch(
+        self, repo: Path, untracked: Path
+    ) -> None:
+        _unpushed_branch(repo, "feat-a", agent="sub-1")
+        _queue(untracked, "feat-a")
+        decisions = [_decide(repo, untracked) for _ in range(MAX_STOP_BLOCKS + 1)]
+        for decision in decisions:
+            assert decision.reason is None
+            assert not any("abandoned at stop" in line for line in decision.context)
+        last = decisions[-1]
+        assert any("handed over" in line and "feat-a" in line for line in last.context)
+
+    def test_a_finished_record_hands_nothing_over(self, repo: Path, untracked: Path) -> None:
+        _unpushed_branch(repo, "feat-a", agent="sub-1")
+        _queue(untracked, "feat-a", status="done")
+        assert _decide(repo, untracked).reason is not None
+
+    def test_the_sub_agent_itself_is_still_judged(self, repo: Path, untracked: Path) -> None:
+        _unpushed_branch(repo, "feat-a", agent="sub-1")
+        _queue(untracked, "feat-a")
+        config = BranchesConfig.model_validate({"stop_guard": {"unpushed_subagent": "block"}})
+        assert _decide(repo, untracked, agent="sub-1", config=config).reason is not None
+
+    def test_a_running_worktree_hold_hands_its_branch_over_in_any_path_spelling(
+        self, repo: Path, untracked: Path
+    ) -> None:
+        # Plan 00571 Task 2.7: the gate honours the same holds as running_holds, so a
+        # record naming the WORKTREE (relative, trailing separator) hands over the
+        # branch checked out there even when the record's branch field differs.
+        _unpushed_branch(repo, "feat-b", agent="sub-1")
+        _git(repo, "worktree", "add", "-q", str(repo.parent / "wt-feat-b"), "feat-b")
+        add_record(
+            untracked / WORK_QUEUE_FILENAME,
+            "agent-for-wt",
+            worktree="../wt-feat-b/",
+            branch="renamed-since",
+            brief="work",
+            brief_file=None,
+            last_sha="a" * 40,
+            now=1.0,
+        )
+        decision = _decide(repo, untracked)
+        assert decision.reason is None
+        assert any("handed over" in line and "feat-b" in line for line in decision.context)
+
+    def test_the_gate_delegates_to_running_holds(
+        self, repo: Path, untracked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _unpushed_branch(repo, "feat-a", agent="sub-1")
+        seen: list[tuple[Path, Path | None]] = []
+
+        def holds(where: Path, project_root: Path | None = None) -> RunningHolds:
+            seen.append((where, project_root))
+            return RunningHolds(frozenset({"feat-a"}), frozenset())
+
+        monkeypatch.setattr(branch_stop_gate, "running_holds", holds)
+        assert _decide(repo, untracked).reason is None
+        assert seen == [(untracked, repo)]
+
+    def test_an_unreadable_queue_hands_nothing_over(self, repo: Path, untracked: Path) -> None:
+        _unpushed_branch(repo, "feat-a", agent="sub-1")
+        (untracked / WORK_QUEUE_FILENAME).write_text("not json", encoding="utf-8")
+        assert _decide(repo, untracked).reason is not None

@@ -1,0 +1,7 @@
+## 00:02 · action · —   — Phase 3 complete: three branch pools
+
+Phase 3 (pools) is complete on branch `agent-ab77ce31393d94cc9-a05306f2`, built in five slices across four agents that each stopped at their context budget and handed over: (a) config, pool split, bot_owned; (b) parked cap and stale, R-BRANCH-PARKED-POOL, same-reason re-park refused; (c) merged cap and stale, `core/branch_keep.py` and `branch-keep`, R-BRANCH-MERGED-POOL with `branch-sweep --clean` in its deny; (d) `clean_sweep` fetches keeps before a remote clean and skips kept-in-age and bot-owned branches; (e) docs, init template, config-changes (seven keys, not breaking), three truth changes, release note 007 (WorktreeCreate client wait 85 -> 90 s). Targeted QA 42/42 on 9706f0263. Report: subagent-reports/phase-3-pools-impl-be.md.
+
+The superseded slice branches `agent-aa87210ca7838e9c4-79b323ad` (a) and `agent-a5e6c43d269df7fa9-29a107d6` (a+b) are contained in this branch and go once it merges.
+
+Process note: the (d)/(e) agent was dispatched without isolation and told to EnterWorktree into the existing worktree (the branch cap was full). That switch moved the whole session's working directory, not just the agent's, so a concurrent fact-check agent wrote its report into this worktree. The report was committed here unchanged (9706f0263); it belongs to ledger 00474 and is harmless on merge. Next: PR, full CI, merge, then Phase 4 dogfood and #165.

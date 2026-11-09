@@ -124,7 +124,369 @@ confirmed check had just covered (the N548 to N552 hunks), and nothing recompute
 delivery. **Fix**: `_reconcile` recomputes the diff from the record's own content; nothing left owes nothing, and a small
 remainder inside the correction window is absorbed. Tests: `TestRecordOutlivedByConfirmation`.
 
+### N599 — a cold Kotlin linter on a loaded runner fails main CI through the playbook harness
+
+**Source**: coordinator, main CI run 42426085674 at 9dad36e98 (7 November 2026): only `Full suite / tests py3.12 acceptance-and-other` failed (607 passed, 1 failed); py3.11 and py3.13 passed the same tree.
+
+**Evidence**: the shard artifact's log (`qa-tests-full-3.12-7`, `tests-py3.12-rest-acceptance-and-other.log`):
+`test_playbook_harness.py ... skipped: INCONCLUSIVE, not passed: #224 LintOnEditHandler: the Kotlin linter timed out after 15s, so the handler's verdict was never reached`. The harness is a blocking release gate that treats any skip as a
+failure, so a JVM cold start on a slow runner turns main red.
+
+**Class**: same as N593 (fixed): the environment, not the handler, decided the probe. The harness already recognises a
+lint timeout (`inconclusive_probe`, `lint_unusable_failure`, `inconclusive_skip_reason` in `daemon/playbook_harness.py`)
+but turns it into a skip, and `blocking_gate_guard.py` (~110-130) escalates any skip to a failure whenever
+`HOOKS_DAEMON_RELEASE_GATE=1`, which `qa.yml`, `test-shards.yml` and `scripts/qa/run_tests.sh` all set. N593's
+`environment_blocked` (now covering WIP_CAP, DORMANT, PARKED_POOL, MERGED_POOL) warns without scoring, but only for
+branch-state rules ([fact-check](subagent-reports/261108-fact-check-n599.md)).
+
+**Proposal**: the budget is the generic `Timeout.LINT_CHECK = 15` (`constants/timeout.py`), and a per-language
+override already exists (`options.timeouts.Kotlin`; commented example in `.claude/hooks-daemon.yaml`). Cheapest fix:
+set a Kotlin override for CI (config only), or load-scale the probe's budget. The larger option, a warning instead of a
+skip for an environment timeout, needs a signal that tells a CI run from the release-time run (RELEASING.md Step
+12.0), since both set `HOOKS_DAEMON_RELEASE_GATE=1`. Reproduce red with a stub linter that sleeps past the budget.
+
+**Status**: ⬜ open.
+
+### N598 — an all-digit short SHA is read as a release, and the upgrade stops on a "MAJOR version change"
+
+**Source**: coordinator, main CI run 42426035473 at 965951009 (7 November 2026): `acceptance-and-other` failed on
+py3.11, 3.12 and 3.13 in `test_install_sh_end_to_end.py` (`test_upgrade_version_sh_end_to_end_produces_running_daemon`,
+`test_upgrade_through_a_link_replaces_a_daemon_naming_the_link`), both exit 3 with "MAJOR version change: v3.x ->
+v965951009.x".
+
+**Cause**: the tests upgrade to the current HEAD's short SHA. `scripts/upgrade_version.sh` `_target_release` matched the
+stamp against `^[vV]?[0-9]+(\.[0-9]+)*$`, and `install/upgrade_gate.py` `_RELEASE_RE` against
+`^[vV]?\d+(?:\.\d+){0,2}...`; both accept a bare run of digits, so `965951009` was release 965951009. A SHA with a letter
+fell through to the checkout's `version.py`. About 1.5% of 9-character SHAs are all decimal, so any commit could turn
+main red, and a client upgrading to such a commit is stopped.
+
+**Fix**: a release is `v`-prefixed or dotted, in both places (`is_release`, now public, and `_target_release`). Red
+first: `tests/unit/install/test_upgrade_gate.py` (5 failed) and `tests/integration/test_upgrade_target_release_digit_ref.py`
+(3 failed), then green. Class sweep: the other shell `=~` version tests (`upgrade.sh` ~586, ~770, `rollback.sh` ~61)
+only prefix `v` or read a Python version; `daemon/metadata.py` already requires `v` and dots. Release note 011.
+
+**Status**: ✅ fixed.
+
+### N597 — a non-isolated sub-agent's `EnterWorktree` moves the whole session, so other agents write into that worktree
+
+**Source**: coordinator, 7-8 November 2026 (Plan 00571 Phase 3 slice d/e dispatch).
+
+**Evidence**: with the branch WIP cap full, a `general-purpose` agent was dispatched WITHOUT `isolation: worktree` and
+told to call `EnterWorktree path=<existing worktree>` so it could continue an existing branch. The live tool
+description says a switch from a pinned agent (isolation or explicit cwd) "only affects this agent" (the vendored
+`remote-docs/code.claude.com/docs/en/tools-reference.md` ~312-319 covers only the pinned `path` form); this agent was
+not pinned, and the switch moved the parent
+session's working directory too. A concurrent fact-check agent (dispatched afterwards from the main checkout) then
+wrote its report into that worktree and could not commit it; the coordinator's own `git -C /workspace` was refused as
+"a worktree-isolated session" redirecting git. `ExitWorktree keep` from the coordinator restored `/workspace` once the
+agent had stopped.
+
+**Class**: harness behaviour (Claude Code), not a daemon defect; the daemon's guidance has no word on it.
+
+**Proposal**: guidance, not code. Where the daemon tells a coordinator how to continue a branch when the WIP cap is
+full (the cap deny text and `CLAUDE/Worktree.md`), say: never have a non-isolated sub-agent call `EnterWorktree`;
+continue the branch from an isolated agent that merges it, or free a slot first. Consider whether
+`agent_isolation_advisor` should flag an `EnterWorktree` call from a non-isolated sub-agent while other agents run.
+
+**Status**: ⬜ open.
+
+### N596 — `test_a_pulled_upgrade_is_synced_after_the_hook_has_answered` failed once on main CI with no state file
+
+**Source**: coordinator, main CI run 42421806919 at a000ed4c6 (7 November 2026), shard `integration-slow`.
+
+**Evidence**: `tests/integration/test_provision_sh.py:1349` (via `_outcome` line 1278 -> `_state`, line 1117) asserted
+`no state recorded at .../.claude/hooks-daemon/untracked/background-sync/v9.9.9.state`. 313 passed, 1 failed, in a
+1,491 s shard. The next main run (42423929870, 83044eb95), whose only change was this ledger, passed, so the failure
+is timing, not the N588 merge. The test runs the real forwarder (`.claude/hooks/session-start` lines 25-28), which
+starts `provision.sh --background` detached with `setsid` after the hook answers.
+
+`_outcome` is a bounded poll (bare `timeout=60.0`, not load-scaled) and calls `_state` only after `path.is_file()` was
+true; a state file never written would have raised "did not finish within 60.0s" instead (fact-check
+[261107-fact-check-n596.md](subagent-reports/261107-fact-check-n596.md)). So the file EXISTED and was gone a moment
+later, when `_state` checked it again.
+
+The state WRITE is not the cause: `_provision_background_record` (`.claude/provision.sh` ~917-926, also ~300-306)
+writes a temp file and `mv -f`s it into place. The window is the directory switch: `_provision_switch` (~772-788) moves
+the live `untracked/` (state file included) into the stage, renames `$DAEMON_DIR` aside, then renames the stage onto
+the live path, so for that interval the state path does not exist
+([261107-fact-check-n596-2.md](subagent-reports/261107-fact-check-n596-2.md)). A real reader (the status line, a
+second `provision.sh`) can plausibly hit the same window and read "no sync recorded"; not yet checked.
+
+**Proposal**: the test half first: `_outcome` reads once per iteration (no second `is_file`), treats a vanished file
+as "keep polling", and routes its bound through `tests.load_scaling.scaled_seconds` per N222. Then the product half:
+decide whether readers of `background-sync/*.state` must tolerate a missing file during a switch (treat absent as
+"unknown, retry") or the switch keeps the state directory out of the moved `untracked/` (for example, write state
+outside the swapped tree). Reproduce red by holding the switch between its two renames (a stub hook or a slowed `mv`)
+while a reader polls.
+
+**Status**: ⬜ open.
+
+### N595 — `lint_on_edit` lints Go files under `testdata/`, which Go never builds
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026), dogfooding v3.73.0.
+
+**Evidence**: Go analyzer fixtures for go/analysis rules live under `testdata/` and are deliberately wrong code. The
+go tool ignores any directory named `testdata` (and those starting with `.` or `_`). `lint_on_edit` lints them anyway
+and denies the write.
+
+**Proposal**: the Go lint strategy skips a path with a `testdata` component, matching the go tool's own rule, with a
+test for a fixture under `pkg/x/testdata/src/a/a.go`. Check whether other languages' strategies have an equivalent
+never-built fixture convention.
+
+**Status**: ⬜ open.
+
+### N594 — `lint_on_edit` reports "ruff not found" while ruff is on the session's PATH
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026), dogfooding v3.73.0.
+
+**Evidence**: a Python write drew "ruff not found", although ruff is on PATH in the session. The project pins ruff,
+and its `./scripts/qa-changed.bash` finds and runs it. The lookup already tries the workspace `bin_dirs` first
+(`.venv/bin` and `venv/bin` by default), then the daemon interpreter's bin, then the DAEMON's PATH (`strategies/lint/ common.py:39-73`, fact-check 261107-fact-check-n594-n595.md). So the miss is a ruff pinned somewhere else (a uv tool
+directory, a project script's own location) that no declared `bin_dirs` names, while the session's PATH holds it and
+the daemon's does not.
+
+**Answered by the client**: ruff is a pipx install in the user's `~/.local/bin`, its version pinned in `.qa-versions`
+and placed by the project's IaC. `qa-changed.bash` runs a bare `ruff` from the session PATH, which has `~/.local/bin`.
+The daemon's PATH does not. `bin_dirs` cannot express it: `validate_bin_dirs_are_repo_relative` (config/models.py)
+rejects absolute and `~` entries on purpose, so there is no config work-around.
+
+**The class**: the daemon resolves a tool from its own process PATH, not the PATH of the session whose hook asked.
+The daemon is long-lived and shared, so its PATH is whatever the first starter had.
+
+**Proposal**: the hook forwarder runs in the session's environment, so it can carry the session's PATH in the event
+envelope. The lint lookup (and any other tool resolution on a hook path) then searches `bin_dirs`, then the
+interpreter bin, then the session PATH, then the daemon PATH. Keep it bounded (PATH only, never the whole
+environment) and recorded in the not-found message. Test with a daemon PATH lacking the tool and an event PATH that
+has it.
+
+**Status**: ⬜ open.
+
+### N593 — the acceptance harness failed in CI because the repository reached its own branch cap
+
+**Source**: the coordinator, from PR #183's CI (run 42415884106, 7 November 2026). `test_playbook_harness` failed with
+two probes denied by R-BRANCH-WIP-CAP at 10 of 10: half of them were Dependabot's new remote branches, the rest live
+agent branches. The test is release Step 12.0's deterministic gate, so the failure would have blocked every release
+and every main CI run while the cap stayed full.
+
+**Evidence and causes**:
+
+- **#339, a guard defect.** The creation guard's probe `git branch -f main main` assumes `main` is in `refs/heads`. A
+  detached CI checkout has no local `main`, so the guard counted the default branch as new open work and denied it at
+  the cap. Neither the default branch nor any exempt or protected name is ever work.
+- **#365, a probe that depends on the environment.** The isolation advisor's "with worktree isolation" probe expects
+  allow, but at the cap the creation guard correctly denies any `isolation: worktree` dispatch. The probe measured
+  the repository's branch count, not its handler.
+
+**Status**: ✅ fixed on main.
+
+- `creation_verdict` allows any name `is_work_branch` rejects (`tests/unit/core/test_branch_creation_non_work_names.py`).
+- `playbook_harness.environment_blocked` reports a non-creation-guard probe refused by R-BRANCH-WIP-CAP or
+  R-BRANCH-DORMANT. The harness lists it by name in a warning and does not score it. The creation guard's own probes
+  stay fully scored (`tests/unit/daemon/test_playbook_harness_environment_blocked.py`).
+- Verified against the live daemon at 10 of 10: the harness passes with #365 listed. Release note 010.
+
+### N592 — the ccy supervisor opens walked signal-directory entries without checking they are regular files
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026). Their new QA gate,
+walk-opens-non-regular-file (their issue #191), flagged the deployed v3.73.0 `.claude/ccy/claude-supervise.py`. It found
+eleven glob or iterdir loops that `read_text` each entry, plus the session-modes walk. A FIFO makes the open block for
+ever. Their owner's rule allows no exclude for a daemon-owned file, so fedora-desktop's push is held until a release
+fixes it.
+
+**Status**: ✅ fixed on main. `_read_regular_text` opens with `O_NONBLOCK` and reads only when `fstat` reports a
+regular file, otherwise raising `OSError`, which every caller already handles. All 16 signal and `/proc` reads go
+through it. Test: `tests/unit/supervise/test_walk_opens_regular_files_only.py`, which plants a FIFO matching each
+of 11 loaders' globs, plus one under a `/proc`-shaped root, and requires a return within 5 seconds. Release note 009.
+
+### N591 — the remote-delete guard denies a merged branch when the same command also removes its worktree and local branch
+
+**Source**: the coordinator, cleaning up after merging Plan 00571's Phase 3 handoff (7 November 2026).
+
+**Evidence**: `git worktree remove <wt> && git branch -d <name> && git push -q origin --delete <name>` was denied with
+R-GIT-PUSH-DELETE-REMOTE ("not merged into the default branch"). `<name>` was `agent-a2809a4ad9ef0a871-8d56f967`, whose
+tip 9aecfe3f4 is an ancestor of `origin/main` (merged and pushed as 29920b2b0 before the command ran). The same
+`git push -q origin --delete <name>` on its own, moments later, was allowed. An earlier
+`delete-branch X && git push origin --delete X` chain with no worktree removal was allowed too.
+
+**Proposal**: reproduce with a fixture repository and probe the compound command. `prove_remote_merged` reads only remote-tracking refs, never
+the local branch or worktree (fact-check 261107-n591-plan-fact-checker-sonnet.md). So the suspects are a parse of the
+chained command picking the wrong target, or remote-tracking refs judged stale at hook time. The tracking refs were
+updated by the push that merged the handoff, and nothing changed before the allowed retry except time. Fix with a regression test. The work-around (run the remote delete as its own call) costs one call, so this
+is low priority.
+
+**Status**: ⬜ open.
+
+### N590 — `hooks-daemon --version` is refused as an unrecognised argument
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026). Reproduced here: `bin/hooks-daemon --version`
+prints the usage text and refuses the flag.
+
+**Proposal**: add an argparse `--version` action on the top-level parser that prints the installed package version.
+Test it through the CLI entry point.
+
+**Status**: ⬜ open.
+
+### N589 — `restart` detects a venv stale for the source and names `repair`, but does not repair it
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026), from the host seat's v3.73.0 restart.
+Reproduced in this session: SessionStart reported "DAEMON VENV NOT BUILT FOR THIS SOURCE", and `restart` prints "restart
+does not build a venv; it reuses this one".
+
+**Evidence**: after an upgrade, every other seat sharing the checkout has a venv whose `lock_hash` no longer matches
+`pyproject.toml` plus `uv.lock`. Each seat then has to run restart (which warns and names repair), then repair, then
+restart again.
+
+**Proposal**: when restart's own staleness check fires, run the repair and continue in one step, reporting that it
+did. Related open issues: #148 (sync after a pull) and #168 (provision says nothing to do while the venv is stale).
+Fold it into whichever of those is worked first.
+
+**Status**: ⬜ open.
+
+### N588 — the upgrade's `modified_files` lists every dirty file in the tree, not what the upgrade wrote
+
+**Source**: fedora-desktop coordinator (desktop team bus, 7 November 2026), upgrading to v3.73.0 (their e9607df9c).
+
+**Evidence**: `scripts/upgrade.sh:975-983` fills `UPGRADE_METADATA`'s `modified_files` from
+`git status --porcelain` over the whole project tree, so it names every uncommitted file. The tree held 33 unrelated
+uncommitted files from another agent beside the 4 the upgrade changed, and all 37 were listed. The comment there says
+the project agent filters by daemon-owned prefixes, but fedora-desktop's bash-limits gate exempts a file as daemon-owned
+while an upgrade commit lists it in `modified_files`. Pasting the block as instructed would have silently exempted the
+33 unrelated files. The client recorded the 4 real files by hand.
+
+**Proposal**: snapshot `git status --porcelain` (with content hashes for files already dirty) before the deploy and
+list only paths that are new or changed afterwards. Alternatively, refuse to start on a dirty tree and name the files.
+Add a test with a pre-dirty unrelated file that must not appear. Client-visible, so a release note is required.
+
+**Status**: ✅ fixed on `agent-ac4f3ae9be87cf434-a6fe075d`: `upgrade.sh` Step 1b snapshots every dirty path with a
+content hash before Step 3, and `modified_files` lists only paths new to the dirty set or whose content changed
+(renames list both sides; spaces and deletions handled). Release note `008`. Test:
+`tests/integration/test_upgrade_sh_modified_files_scope.py`.
+
+### N587 — `ask_user_question_blocker` called the session unattended while the owner was typing to it
+
+**Source**: the owner, during the v3.73.0 release (7 November 2026): "dog fooding error there - not sure why it was
+regarding it as unattended".
+
+**Evidence**: mid-release, the owner sent four messages within minutes, all delivered mid-turn (the remote-docs
+question and its correction, the README link and handler catalogue, and "do not allow changes to delay the release").
+An AskUserQuestion about accepting two review defects was then denied with R-ASK-USER-QUESTION-UNJUSTIFIED. The deny
+text said "there is no genuine human prompt in this session in the last 30 minutes". The handler judges presence from
+the session transcript's tail, counting plain-text `user` records whose `origin.kind` is `human` (fact-check
+261107-plan-fact-checker-n584-n587-sonnet.md). So the miss is in how Claude Code records a message queued mid-turn (a
+different record shape or origin) or in the tail window being too short for a long, busy turn. The coordinator had to
+assume the answer and record it.
+
+**Proposal**: take this session's transcript, find the records the four mid-turn messages produced, and establish which
+of the two causes applies. Then count that record shape as human presence (or widen the window), with a test that a
+session whose last human input arrived mid-turn is judged attended.
+
+**Status**: ⬜ open.
+
+### N586 — release housekeeping re-fetches every vendored doc, even one checked days ago
+
+**Source**: the owner, during the v3.73.0 release (7 November 2026): "remote docs refresh - please tell me this only
+refreshes docs that are over X days old?" It does not.
+
+**Evidence**: RELEASING.md Step 1H runs `bin/hooks-daemon remote-docs refresh --all`, which re-fetches every stored
+document whatever its age. `--stale-after-days` sets the freshness window recorded on a capture (`add`). It is not a
+filter, and `refresh` ignores it, taking the window from each document's own record. On v3.73.0 that touched 49 files:
+12 docs had real upstream changes, 36 were byte-identical upstream (same `source_sha256`) yet still had `fetched_at`
+and `stale_after` rewritten, and the generated index `.claude/REMOTE-DOCS.md` was re-rendered. For example,
+`memory.md` had been fetched two days earlier. `remote_docs/store.py` rewrites an unchanged document on purpose, and
+that is correct: the frontmatter records when the page was last checked, which is cheap to keep and vital.
+
+**Owner ruling (7 November 2026)**: keep the frontmatter update exactly as it is. An earlier proposal here (skip the
+rewrite when the hash is unchanged, and a separate stale-only mode) was backwards and is withdrawn. The question was
+why re-check a page that was checked recently at all.
+
+**Proposal**: a re-check TTL (around 7 days, configurable). `refresh` skips any document whose `fetched_at` is within
+the TTL and fetches the rest, stamping the frontmatter as today. A `--path` (the changelog Step 1c needs) or a force
+flag bypasses the TTL. Low priority: at about 50 pages the cost is small.
+
+**Status**: ⬜ open (low priority, per the owner).
+
+### N585 — `worktree-reap --reap-branches` keeps a merged branch that is ahead of its own upstream
+
+**Source**: this session, 7 November 2026, reaping two finished agent worktrees after Plans 00571 and 00572 merged.
+
+**Evidence**: `agent-af0556169a3dc9dbd-f7641538` had been fast-forwarded locally to the integration head, which was
+merged into `main`, past its pushed upstream. `worktree-reap --reap --reap-branches` removed the worktree but printed
+`git kept the branch ... not yet merged to refs/remotes/origin/...`, because it deletes with `git branch -d`, which
+checks the upstream. `delete-branch` on the same branch classified it as `merged-unpushed` and deleted it losslessly
+behind a bundle. The two commands disagree on the same proof, and the run still reported the worktree as REAPED. Its
+exit 1 came from the refused `worktree-plan-00573-admin-override` worktree, not the kept branch: a kept branch counts
+toward neither the refused nor the unmerged total, so on its own it exits 0, and a caller cannot see it from the exit code.
+
+**Proposal**: have `worktree-reap --reap-branches` delete through the same `branch_safety.delete_branches` path
+(containment against the protected ref, plus a bundle) instead of `git branch -d`.
+
+**Status**: ✅ fixed on `fix-3730-review`: `prune_branch` deletes through `branch_safety.delete_branches` (recovery bundle under `untracked/deleted-branches/`), and a branch it keeps is reported `KEPT` and counted toward the non-zero exit. Tests: `test_cli_worktree_reap_merged_unpushed.py`.
+
+### N584 — a sub-agent edited source through Python scripts, routing around every Write/Edit content guard
+
+**Source**: this session, 7 November 2026, cleaning up after Plan 00570 (#166).
+
+**Evidence**: the #166 implementation sub-agent's worktree scratch held `edit_bs.py`, `edit_inv.py` and
+`edit2.py` to `edit4.py` (341 lines total). Each does `Path(...).read_text()`, asserts a count, `str.replace`s and
+writes back into `src/claude_code_hooks_daemon/daemon/branch_safety.py`, `core/branch_inventory.py` and others. Run
+as `python edit_x.py`, they change source with none of the PreToolUse content guards (`qa_suppression`,
+`error_hiding_blocker`, `security_antipattern`, `comment_changelog`) seeing the text. `lint_on_edit` lints files a
+Bash command AUTHORS by redirect, `tee` or heredoc, not files a script writes. The merged result still passed the
+whole-tree static QA scan (error_hiding, security, inline_suppressions run over every file), so nothing slipped
+through this time. The gap is real, though: the edit-time defence did not see it.
+
+**Proposal**: (a) detect a Bash command that runs a script from `untracked/scratch/` (or `python -c`) which writes
+into tracked source, using the post-command `git status` delta, and run the content guards over the changed files
+afterwards, as `lint_on_edit` does for authored files; (b) brief sub-agents that source edits go through `Edit`
+(dispatch templates). (a) is the durable fix, since (b) relies on compliance.
+
+**Recurrence (same day, Plan 00572 Task 1.5)**: the release-slate fix sub-agent reported editing two test files
+(`tests/unit/core/test_release_slate.py`, `tests/unit/daemon/test_cli_release_slate_check.py`) "with a short Python
+script rather than Edit", and writing tests together with the fix instead of red first. The coordinator then proved
+red/green by hand: 9 of 86 tests fail against main's `release_slate.py` and all pass on the fix. Two occurrences in one
+session means (b) alone does not hold. Raise priority on (a).
+
+**Third occurrence (same day, Plan 00573)**: the admin-override sub-agent's worktree scratch held `add_tests.py`,
+`impl_cli_guard.py`, `fix_cli.py`, `fix2.py` and `plan_edit.py`, found while reaping the merged worktree. Three of the
+session's implementation sub-agents edited source this way, so it is the default behaviour, not an outlier.
+
+**Status**: ⬜ open.
+
+### N583 — `secret_file_guard` matches a jq field path as if it were a protected file
+
+**Source**: this session, 7 November 2026, enabling repository security settings (Plan 00572).
+
+**Evidence**: a `gh api ... --jq '<dot path into the security_and_analysis object, ending at the scanning status field>'` command was denied with R-SECRET-BASH-MENTION. The guard matched the jq expression token against
+the `*.secret*` file glob. A jq field path names no file, and the same command with a shorter jq path passed.
+
+**Proposal**: tokens that are clearly jq/JSON paths (the argument of `--jq`, `-q` or `jq` filters) should not be
+judged as file paths. More generally, a glob match should require a path-shaped token (containing `/` or naming an
+existing file) before denying, while keeping the deny for a real file named that way.
+
+**Status**: ⬜ open.
+
+### N582 — `work-queue done` names the issue it just delivered as the next workable issue
+
+**Source**: this session, 7 November 2026, closing the #174 queue record (Plan 00569).
+
+**Evidence**: `bin/hooks-daemon work-queue done issue-174-screen-arch --sha ae0af5761e8e` printed
+"next workable issue: #174 - start it now". #174 was the issue that record had just delivered. It was still open and
+labelled `agent-working`, because the runbook runs `done` at Step 7, before Step 8 closes the issue.
+
+**Root cause** (Plan 00571 `ROOTCAUSE.md`, item 3): `_next_issue_line` (`daemon/work_queue_cli.py`) takes the first
+entry of `workable_numbers` (`utils/workable_issues.py`), which never excludes `agent-working`. The queue record stores
+no issue number, so `done` cannot exclude its own issue. The cache is also ordered newest-first, while the runbook
+selects oldest-first, and the idle-stop gate reads the same cache.
+
+**Proposal**: exclude `agent-working` (and `agent-needs-human`) issues from the workable set. Store an optional
+`--issue N` on `work-queue add` and exclude it in `done`. Order oldest-first in one function that the stop gate shares.
+
+**Status**: ⬜ open.
+
 ### N581 — the branch stop guard reports branches with a running work-queue agent as "abandoned"
+
+**Reproduced again** 7 November 2026 on `worktree-plan-00571-branch-pools` while its sub-agent was committing. Taken
+into Plan 00571 as Task 2.5.
 
 **Source**: this session, 5 November 2026, while the #161 and #162 implementation agents were working.
 

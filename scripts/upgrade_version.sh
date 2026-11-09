@@ -382,12 +382,13 @@ abort_before_deploy() {
 # pyproject version its stamp starts with. A direct call naming a commit no tag
 # describes has a sha for a stamp, so the checkout's own version.py answers
 # instead; "unknown" if even that is unreadable, which the gate treats as a
-# range it cannot read.
+# range it cannot read. A release is v-prefixed or dotted: a sha can be all
+# digits (about 1.5% of 9-character ones; ledger 00474 N598).
 _target_release() {
     local PATH
     PATH="$(_gate_trusted_path)"
     local release="${INSTALL_STAMP%%+*}"
-    if [[ "$release" =~ ^[vV]?[0-9]+(\.[0-9]+)*$ ]]; then
+    if [[ "$release" =~ ^([vV][0-9]+(\.[0-9]+)*|[0-9]+(\.[0-9]+)+)$ ]]; then
         echo "$release"
         return 0
     fi

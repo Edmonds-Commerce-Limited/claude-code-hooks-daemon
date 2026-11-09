@@ -1,0 +1,45 @@
+# Drafted by Plan 00571. The VERSION in the filename is a target, not a decision.
+version: "3.73.1"
+date: "2026-11-09"
+
+breaking: false
+
+config_changes:
+  added:
+    # Plan 00571: three branch pools (open / parked / merged), issue #165.
+    - key: branches.parked.cap
+      description: >-
+        Parked branches allowed before branch creation is denied
+        (`R-BRANCH-PARKED-POOL`). Null (the default) means `branches.wip.cap`.
+        Parked branches no longer count against `wip.cap`.
+    - key: branches.parked.max_age_days
+      description: >-
+        Age of a park at which the parked branch is stale and denies branch
+        creation until it is merged, re-parked with a new reason, or deleted.
+        Null (the default) means the dormancy preset's `block_days`.
+    - key: branches.parked.mode
+      description: >-
+        `block` (default) denies creation at the cap or with a stale member;
+        `warn` turns both into context lines; `off` stops counting the pool.
+    - key: branches.merged.cap
+      description: >-
+        Merged or patch-equivalent branches not yet deleted that are allowed
+        before branch creation is denied (`R-BRANCH-MERGED-POOL`). Null (the
+        default) means `branches.wip.cap`. An unkept merged branch denies at
+        once; `branch-sweep --clean` clears it.
+    - key: branches.merged.max_age_days
+      description: >-
+        How long a `branch-keep` keep protects a merged branch from the deny
+        and from `branch-sweep --clean`. Null (the default) means the dormancy
+        preset's `block_days`.
+    - key: branches.merged.mode
+      description: >-
+        `block` (default), `warn` or `off`, as for `branches.parked.mode`.
+    - key: branches.bot_owned
+      description: >-
+        Globs naming bot-owned branches (default `["dependabot/*"]`): in no
+        pool, never counted toward any cap, never deleted by
+        `branch-sweep --clean`, and listed in their own sweep section.
+      example_yaml: |
+        branches:
+          bot_owned: ["dependabot/*", "renovate/*"]

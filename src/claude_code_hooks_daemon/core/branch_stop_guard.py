@@ -40,7 +40,7 @@ _DONE_STATES = frozenset(
     {BranchState.MERGED_DEFAULT, BranchState.MERGED_LINE, BranchState.PATCH_EQUIVALENT}
 )
 #: Branches that are never a session's work, whatever the touch record says.
-_NEVER_JUDGED = frozenset({BranchState.EXEMPT, BranchState.PROTECTED})
+_NEVER_JUDGED = frozenset({BranchState.EXEMPT, BranchState.BOT_OWNED, BranchState.PROTECTED})
 #: Default and integration lines: judged only with ``include_default``.
 _LINES = frozenset({BranchState.DEFAULT, BranchState.INTEGRATION_LINE})
 
@@ -63,6 +63,8 @@ class StopFinding:
     commands: tuple[str, ...]
     #: True when the finding is reported but does not hold the stop.
     advisory: bool = False
+    #: True when the remote holds a copy of the branch (names ``--clean --remote``).
+    on_remote: bool = False
 
 
 @dataclass(frozen=True)
@@ -275,7 +277,11 @@ def _judge_branch(
         if not handoff and not _never_worked(repo, record.name, budget):
             findings.append(
                 StopFinding(
-                    record.name, StopCheck.MERGED, tip, _merged_commands(record, config.remote)
+                    record.name,
+                    StopCheck.MERGED,
+                    tip,
+                    _merged_commands(record, config.remote),
+                    on_remote=record.remote_tip is not None,
                 )
             )
         return findings, finished

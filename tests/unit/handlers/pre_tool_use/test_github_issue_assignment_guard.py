@@ -43,6 +43,8 @@ class FakeGh:
             if isinstance(self.identity, Exception):
                 raise self.identity
             return self.identity
+        if argv[:2] == ("api", "repos/{owner}/{repo}"):
+            return "false"
         if argv[:2] == ("issue", "view"):
             answer = self.assignees[int(argv[2])]
             if isinstance(answer, Exception):
@@ -471,3 +473,77 @@ class TestContract:
             {"approved_issue_authors": ["a"], "auto_claim": False}
         )
         assert problems == {}
+
+
+class AdminGh(FakeGh):
+    """The signed-in seat is a repository admin."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.permissions: dict[str, str] = {}
+
+    def __call__(self, args: Sequence[str]) -> str:
+        argv = tuple(args)
+        if argv[:2] == ("api", "repos/{owner}/{repo}"):
+            self.calls.append(argv)
+            return "true"
+        if argv[0] == "api" and "/collaborators/" in argv[1]:
+            self.calls.append(argv)
+            return self.permissions.get(argv[1].split("/")[4], "write")
+        return super().__call__(args)
+
+
+class TestAdminSeat:
+    """Plan 00573: an admin seat is never blocked by a non-admin assignment."""
+
+    def _tied(self, tmp_path: Path) -> Path:
+        return _write_plan(tmp_path, "00001-x", "#5")
+
+    def test_allowed_with_an_advisory_naming_the_assignee_and_the_takeover(
+        self, tmp_path: Path, make_handler: Factory
+    ) -> None:
+        gh = AdminGh()
+        gh.assignees[5] = ["alice"]
+        result = make_handler(gh).handle(_edit(self._tied(tmp_path)))
+        assert result.decision == Decision.ALLOW
+        text = "\n".join(result.context)
+        assert "alice" in text
+        assert "issue-validity" in text and "--claim" in text
+
+    def test_the_guard_never_takes_over_by_itself_even_with_auto_claim(
+        self, tmp_path: Path, make_handler: Factory
+    ) -> None:
+        gh = AdminGh()
+        gh.assignees[5] = ["alice"]
+        make_handler(gh, auto_claim=True).handle(_edit(self._tied(tmp_path)))
+        assert not [c for c in gh.calls if c[:2] == ("issue", "edit")]
+
+    def test_another_admin_assignment_is_still_denied(
+        self, tmp_path: Path, make_handler: Factory
+    ) -> None:
+        gh = AdminGh()
+        gh.permissions["alice"] = "admin"
+        gh.assignees[5] = ["alice"]
+        result = make_handler(gh).handle(_edit(self._tied(tmp_path)))
+        assert result.decision == Decision.DENY
+        assert result.rule == RuleID.GH_ISSUE_ASSIGNED_ELSEWHERE
+
+    def test_a_non_admin_seat_is_still_denied(self, tmp_path: Path, make_handler: Factory) -> None:
+        gh = FakeGh()
+        gh.assignees[5] = ["alice"]
+        result = make_handler(gh).handle(_edit(self._tied(tmp_path)))
+        assert result.decision == Decision.DENY
+
+    def test_the_advisory_repeats_on_every_edit(
+        self, tmp_path: Path, make_handler: Factory
+    ) -> None:
+        gh = AdminGh()
+        gh.assignees[5] = ["alice"]
+        handler = make_handler(gh)
+        plan = self._tied(tmp_path)
+        assert handler.handle(_edit(plan)).context
+        assert handler.handle(_edit(plan)).context
+
+    def test_guidance_describes_the_admin_override(self, make_handler: Factory) -> None:
+        guidance = make_handler(ForbiddenGh()).get_claude_md() or ""
+        assert "admin" in guidance

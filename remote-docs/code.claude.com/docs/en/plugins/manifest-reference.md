@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/manifest-reference
-fetched_at: '2026-11-05T14:21:30.511583+00:00'
+fetched_at: '2026-11-09T09:01:36.156948+00:00'
 fidelity: converted
 source_sha256: b0f8e2f9c1e5c05b3fd975f15a6c85fb9bae15cc81b07b90137b065af09b7fce
 licence: unreviewed
-stale_after: '2027-02-03'
+stale_after: '2027-02-07'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 

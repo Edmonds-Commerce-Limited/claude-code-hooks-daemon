@@ -1,0 +1,24 @@
+# Fact check: Plan 00572 Task 3.3 and Success Criteria 2-4
+
+Scope: claims the diff adds or changes, plus Task 3.3 and the Success Criteria section. Criterion 1 (nightly) is deliberately unticked and not counted.
+
+## REFUTED
+
+None.
+
+One precision note (not a refutation): the "0 of 59" count was true when written. At check time `gh run list` shows 60 `main` QA runs created since 2026-11-07 18:38 UTC, 2 of them still in progress. Zero have conclusion `cancelled`. The 16 completed failures are not cancellations.
+
+## Table
+
+| #   | Claim                                                                                                     | Verdict  | Evidence                                                                                                                                                                                                                                                                                               |
+| --- | --------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Task 3.3: qa.yml has an `arm64-tests` job running unit shards                                             | VERIFIED | `.github/workflows/qa.yml:575-609`; shards run via `run_test_matrix.py --shard unit-handlers-pre-tool-use ... unit-tooling`. All six shard names exist in `scripts/qa/test_shards.yaml` and `scripts/ci/shard_legs.yaml`.                                                                              |
+| 2   | `arm64-tests` is `continue-on-error`                                                                      | VERIFIED | `qa.yml:580`                                                                                                                                                                                                                                                                                           |
+| 3   | `arm64-tests` is not in the gate's `needs`                                                                | VERIFIED | `qa.yml:626`: `needs: [classify, targeted, map, fallback-tests, qa, full-tests, perf-sweep, shell, daemon-load, native-builds]` has no `arm64-tests`.                                                                                                                                                  |
+| 4   | Relay/screen test paths now come from `host_relay_target()`                                               | VERIFIED | `tests/unit/install/test_relay_deploy.py:44`, `tests/unit/screen/test_hooks_screen_binary.py:27`, `tests/relay_gate_guard.py:111`; defined at `src/claude_code_hooks_daemon/utils/relay_host.py:39`.                                                                                                   |
+| 5   | Criterion 2: no `main` run ends `cancelled`; 0 of 59 since the Phase 2 merge                              | VERIFIED | `gh run list --workflow QA --branch main --limit 100`: 60 runs created at or after 2026-11-07T18:38Z (the count has grown since the claim); 0 `cancelled`; 16 failure, 42 success, 2 in progress. The 24 cancelled runs in the 100-run window all pre-date the merge.                                  |
+| 6   | Criterion 3: `native-builds` runs on every non-docs tier                                                  | VERIFIED | `qa.yml:524-527`: `if: needs.classify.outputs.tier != 'docs'`; matrix builds x86_64 on `ubuntu-latest` and aarch64 on `ubuntu-24.04-arm`, for both relay (`qa.yml:549`) and hooks-screen (`qa.yml:562`).                                                                                               |
+| 7   | Criterion 3 wording "on every code push" fits "every non-docs tier"                                       | VERIFIED | The condition excludes only the docs tier; `native-builds` is in the gate's `needs`. Docs-only pushes skip it, which the parenthetical states.                                                                                                                                                         |
+| 8   | Criterion 4: a release note in UNRELEASED/release-notes records the arm64 release assets (client-visible) | VERIFIED | `CLAUDE/UPGRADES/UNRELEASED/release-notes/006-arm64-release-assets.md` (Plan 00572, Audience: client projects) covers arm64 relay and hooks-screen assets with SHA256SUMS and attestation. `012-arm64-toolchain-probe-checks-host-target.md` is a related client-facing note. Both are tracked in git. |
+
+Totals: 8 claims, 8 verified, 0 refuted, 0 unverifiable.

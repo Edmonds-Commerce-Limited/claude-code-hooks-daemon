@@ -26,10 +26,12 @@ import pytest
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "qa.yml"
+#: Every whole-suite run in CI (qa.yml's full tier and fallback, the release
+#: gate) is a leg of this reusable workflow (Plan 00572 Task 2.1).
+_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "test-shards.yml"
 
 #: The step that runs the suite the fourteen gates live in.
-_TEST_STEP = "Tests + coverage"
+_TEST_STEP = "Run the shards"
 
 #: What the build script produces, and where the deploy has to put it. Both
 #: are asserted because each is read by a different half of the fourteen.
@@ -39,7 +41,7 @@ _DEPLOYED_PATH = "untracked/bin/hooks-relay"
 
 def _qa_job_steps() -> list[dict]:
     workflow = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
-    return list(workflow["jobs"]["qa"]["steps"])
+    return list(workflow["jobs"]["tests"]["steps"])
 
 
 def _step_names() -> list[str]:

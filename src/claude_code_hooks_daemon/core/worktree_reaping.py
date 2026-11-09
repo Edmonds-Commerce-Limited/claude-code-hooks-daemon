@@ -50,6 +50,7 @@ from claude_code_hooks_daemon.core.branch_cleanup import policy_refusal
 from claude_code_hooks_daemon.core.branch_records import WORKTREE_CREATE_ROUTE, creator_route
 from claude_code_hooks_daemon.core.worktree_naming import is_worktree_create_name
 from claude_code_hooks_daemon.core.worktree_paths import WORKTREE_DIR_PATTERNS
+from claude_code_hooks_daemon.daemon.branch_safety import delete_branches, new_bundle_path
 from claude_code_hooks_daemon.utils.git_repo import (
     AGENT_BRANCH_PREFIX,
     GIT_TIMED_OUT,
@@ -584,7 +585,7 @@ _BRANCH_FORMAT = "--format=%(refname)"
 
 @dataclass(frozen=True)
 class OrphanedBranch:
-    """An `agent-*` branch that no worktree points at.
+    """An agent or WorktreeCreate-recorded branch that no worktree points at.
 
     Attributes:
         name: The branch name.
@@ -637,7 +638,7 @@ def collect_orphaned_branches(
     run_fn: RunGit = run_git,
     config: BranchesConfig | None = None,
 ) -> tuple[OrphanedBranch, ...]:
-    """Agent branches with no worktree, each tagged with its merge status.
+    """Agent and WorktreeCreate-recorded branches with no worktree, tagged with merge status.
 
     Read-only. Orphaned is defined as the agent branches git lists MINUS the
     branches a worktree points at — which is why this belongs beside the
@@ -649,33 +650,66 @@ def collect_orphaned_branches(
     there is nothing to classify; in both cases no candidates is the safe answer
     rather than a guess.
     """
+    unattached = _unattached_branches(repo_root, base_branch, run_fn)
+    if unattached is None:
+        return ()
+    names, merged = unattached
+    policy = config if config is not None else BranchesConfig()
+    return tuple(
+        OrphanedBranch(name=name, merged_into_base=name in merged)
+        for name in names
+        if is_daemon_created_branch(name) and _prunable(repo_root, name, base_branch, policy)
+    )
+
+
+def _unattached_branches(
+    repo_root: Path, base_branch: str, run_fn: RunGit
+) -> tuple[list[str], set[str]] | None:
+    """``(branches no worktree points at, those merged into base)``; None on a git failure.
+
+    An unreadable ``--merged`` listing means the merge status is UNKNOWN. Treating
+    unknown as merged would turn a git failure into a deletion, so every branch is
+    then reported unmerged and nothing is pruned.
+    """
     listing = run_fn(repo_root, "worktree", "list", "--porcelain")
     if listing.returncode != 0:
-        return ()
-
+        return None
     listed = _branch_names(run_fn(repo_root, "branch", "--list", _BRANCH_FORMAT))
     if listed is None:
-        return ()
-    policy = config if config is not None else BranchesConfig()
-    all_names = [
-        name
-        for name in listed
-        if is_daemon_created_branch(name) and _prunable(repo_root, name, base_branch, policy)
-    ]
-
+        return None
     merged_names = _branch_names(
         run_fn(repo_root, "branch", "--merged", base_branch, "--list", _BRANCH_FORMAT)
     )
-    # An unreadable --merged listing means the merge status is UNKNOWN. Treating
-    # unknown as merged would turn a git failure into a deletion, so every
-    # branch is marked unmerged and `prune_branch` refuses the lot.
-    merged = set(merged_names) if merged_names is not None else set()
-
     attached = _attached_branches(listing.stdout)
+    names = [name for name in listed if name not in attached]
+    return names, set(merged_names) if merged_names is not None else set()
+
+
+def collect_skipped_merged_branches(
+    repo_root: Path,
+    base_branch: str,
+    *,
+    run_fn: RunGit = run_git,
+    config: BranchesConfig | None = None,
+) -> tuple[str, ...]:
+    """Merged branches with no worktree that orphan pruning skips for their NAME.
+
+    The policy names (default, integration lines, protected, exempt) are not
+    skips and are left out; so is anything not merged into ``base_branch``. What
+    remains is exactly what ``--reap-branches`` declines because it is not
+    agent-owned (Plan 00571 Task 2.4): reported, never deleted here.
+    """
+    unattached = _unattached_branches(repo_root, base_branch, run_fn)
+    if unattached is None:
+        return ()
+    names, merged = unattached
+    policy = config if config is not None else BranchesConfig()
     return tuple(
-        OrphanedBranch(name=name, merged_into_base=name in merged)
-        for name in all_names
-        if name not in attached
+        name
+        for name in names
+        if name in merged
+        and policy_refusal(name, policy, base_branch, refuse_lines=True) is None
+        and not (is_daemon_created_branch(name) and _prunable(repo_root, name, base_branch, policy))
     )
 
 
@@ -686,22 +720,32 @@ class PruneOutcome:
     name: str
     deleted: bool
     detail: str
+    #: A merged branch the delete was asked to remove and did not. Distinct from a
+    #: dry run or an unmerged branch, which were never going to be deleted.
+    kept: bool = False
 
 
 def prune_branch(
     repo_root: Path,
     branch: OrphanedBranch,
     *,
-    run_fn: RunGit = run_git,
+    base_branch: str,
+    bundle_dir: Path | None = None,
     dry_run: bool = False,
 ) -> PruneOutcome:
     """Delete one orphaned branch, if it is fully merged into the base.
 
-    **Git is asked to disagree**, exactly as :func:`reap_worktree` does: the
-    delete is `-d`, never `-D`, so git independently refuses a branch that is
-    not fully merged even if the check above was wrong. A git refusal is
-    REPORTED, never retried with force — that is the whole value of asking, and
-    `-D` is a blocked operation in this project for the same reason.
+    The delete goes through :func:`branch_safety.delete_branches`, the engine behind
+    ``delete-branch``, so the two commands agree on every branch: containment is
+    proved against ``base_branch`` (which also covers a branch merged but ahead of
+    its upstream, where ``git branch -d`` refuses), git's own delete check still
+    runs, and a recovery bundle is written under ``bundle_dir`` when given. A
+    refusal is REPORTED as ``kept``, never retried with force. A git failure the engine
+    cannot classify (an expired budget) propagates as ``CalledProcessError``; the caller
+    reports it as kept.
+
+    Raises:
+        CalledProcessError: if git fails in a way the proof cannot classify.
     """
     if not branch.merged_into_base:
         return PruneOutcome(
@@ -717,17 +761,22 @@ def prune_branch(
     if dry_run:
         return PruneOutcome(branch.name, deleted=False, detail=f"would delete branch {branch.name}")
 
-    # Addressed by the BARE name, deliberately NOT `branch_ref()`: `git branch
-    # -d` resolves its argument only inside `refs/heads/` and REJECTS an
-    # already-qualified `refs/heads/<name>` outright — verified live (Plan
-    # 00372). `branch_ref()`'s tag-ambiguity rationale (Plan 00254) covers the
-    # general ref-resolving commands (`rev-parse`, `cherry`, `merge-base`),
-    # never the `branch` subcommand.
-    result = run_fn(repo_root, "branch", "-d", branch.name)
-    if result.returncode != 0:
+    report = delete_branches(
+        repo_root,
+        [branch.name],
+        protected_ref=base_branch,
+        protected_names=(base_branch,),
+        bundle_path=(
+            new_bundle_path(bundle_dir, "worktree-reap") if bundle_dir is not None else None
+        ),
+        content_tier=False,
+    )
+    if branch.name not in report.deleted:
         return PruneOutcome(
             branch.name,
             deleted=False,
-            detail=f"git kept the branch {branch.name}: {result.stderr.strip()}",
+            kept=True,
+            detail=f"kept the branch {branch.name}: {'; '.join(report.blockers) or 'not deleted'}",
         )
-    return PruneOutcome(branch.name, deleted=True, detail=f"deleted branch {branch.name}")
+    suffix = f" (recovery bundle {report.bundle})" if report.bundle is not None else ""
+    return PruneOutcome(branch.name, deleted=True, detail=f"deleted branch {branch.name}{suffix}")

@@ -51,10 +51,18 @@ from typing import Any
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.branch_keep import read_keeps
 from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.remote_refs import (
+    RemoteRefs,
+    RemoteSource,
+    holder_of,
+    made_listing,
+    resolve_source,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +121,8 @@ class BranchState(StrEnum):
     """DESIGN.md section 2 states; the first that matches wins."""
 
     EXEMPT = "exempt"
+    #: Matches ``branches.bot_owned`` (``dependabot/*``): in no pool, never cleaned.
+    BOT_OWNED = "bot-owned"
     DEFAULT = "default"
     INTEGRATION_LINE = "integration-line"
     PROTECTED = "protected"
@@ -131,6 +141,31 @@ _DONE_RANK = {
     BranchState.MERGED_LINE: 1,
     BranchState.PATCH_EQUIVALENT: 2,
 }
+
+
+class Pool(StrEnum):
+    """The three pools a work branch can be in (Plan 00571 DESIGN.md section 1)."""
+
+    OPEN = "open"
+    PARKED = "parked"
+    MERGED = "merged"
+
+
+_POOL_OF_STATE = {
+    BranchState.MERGED_DEFAULT: Pool.MERGED,
+    BranchState.MERGED_LINE: Pool.MERGED,
+    BranchState.PATCH_EQUIVALENT: Pool.MERGED,
+    BranchState.PARKED: Pool.PARKED,
+    BranchState.LIVE: Pool.OPEN,
+    BranchState.DORMANT: Pool.OPEN,
+    # Fail closed: a branch not yet classified is counted as open work.
+    BranchState.UNCLASSIFIED: Pool.OPEN,
+}
+
+
+def pool_of(state: BranchState) -> Pool | None:
+    """The pool of a record in ``state``; None for a branch that is never work."""
+    return _POOL_OF_STATE.get(state)
 
 
 class DormancyStage(StrEnum):
@@ -157,6 +192,10 @@ class Containment(StrEnum):
     OWN_REMOTE = "on its own remote only"
     OTHER_WORK_BRANCH = "only in another work branch"
     NOWHERE = "nowhere"
+    #: The remote holds it outside every ref this clone fetches (an archive
+    #: namespace). Only an explicit ``ls-remote`` can show this, so it is granted
+    #: only when the caller passed a listing; the offline inventory never reports it.
+    REMOTE_UNFETCHED = "on the remote outside the fetched refs"
 
 
 @dataclass(frozen=True)
@@ -188,6 +227,14 @@ class BranchRecord:
     dormancy_stage: DormancyStage | None = None
     containment: Containment | None = None
     contained_in: str | None = None
+    #: Past the pool's ``max_age_days`` (a parked branch) or an unkept merged branch.
+    stale: bool = False
+    #: Consecutive empty park commits at a parked tip; above 1 it was re-parked.
+    park_count: int | None = None
+    #: The keep note on a merged branch's tip (``branch-keep``), if any.
+    kept_reason: str | None = None
+    kept_by: str | None = None
+    kept_at: int | None = None
 
 
 @dataclass(frozen=True)
@@ -203,6 +250,8 @@ class BranchInventory:
     default_ref: str | None
     records: dict[str, BranchRecord]
     worktrees_known: bool = True
+    #: The one ``ls-remote`` the caller asked for, or None when the pass stayed offline.
+    remote_refs: RemoteRefs | None = None
 
 
 @dataclass(frozen=True)
@@ -241,6 +290,8 @@ class _PairFacts:
 class _Cache:
     pairs: dict[str, dict[str, Any]] = field(default_factory=dict)
     containment: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Consecutive park commits by tip sha: a count depends only on the tip.
+    park_counts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -494,6 +545,8 @@ def _never_work(name: str, config: BranchesConfig, default: str | None) -> Branc
     """
     if branch_safety.matches_any_glob(name, config.exempt):
         return BranchState.EXEMPT
+    if branch_safety.matches_any_glob(name, config.bot_owned):
+        return BranchState.BOT_OWNED
     if name == default:
         return BranchState.DEFAULT
     if branch_safety.matches_any_glob(name, config.integration_lines):
@@ -559,10 +612,12 @@ def containment_of(
     own = f"{remote_prefix}{name}"
     head = f"{remote_prefix}{_REMOTE_HEAD}"
     others = sorted(ref for ref in result.stdout.splitlines() if ref and ref not in {head, own})
+    # A bot's branch is nobody's integration target, so it never vouches.
     vouching = [
         ref
         for ref in others
-        if _never_work(ref.removeprefix(remote_prefix), config, default) is not None
+        if _never_work(ref.removeprefix(remote_prefix), config, default)
+        not in (None, BranchState.BOT_OWNED)
     ]
     if vouching:
         return Containment.REMOTE_REF, _short(vouching[0])
@@ -593,9 +648,15 @@ def _load_cache(path: Path) -> _Cache:
         return _Cache()
     pairs = data.get("pairs")
     containment = data.get("containment")
+    park_counts = data.get("park_counts")
     return _Cache(
         pairs=pairs if isinstance(pairs, dict) else {},
         containment=containment if isinstance(containment, dict) else {},
+        park_counts={
+            tip: count
+            for tip, count in (park_counts if isinstance(park_counts, dict) else {}).items()
+            if isinstance(count, int)
+        },
     )
 
 
@@ -607,6 +668,7 @@ def _save_cache(path: Path, cache: _Cache, live_tips: set[str]) -> None:
         "containment": {
             k: v for k, v in cache.containment.items() if k.split(":", 1)[0] in live_tips
         },
+        "park_counts": {k: v for k, v in cache.park_counts.items() if k in live_tips},
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -681,14 +743,37 @@ def _stage(age_days: float, config: BranchesConfig) -> DormancyStage | None:
 class _Pass:
     """State for one inventory pass: the budget, the cache and the shared facts."""
 
-    def __init__(self, repo: Path, config: BranchesConfig, cache: _Cache) -> None:
+    def __init__(
+        self,
+        repo: Path,
+        config: BranchesConfig,
+        cache: _Cache,
+        remote_refs: RemoteSource | None = None,
+    ) -> None:
         self.repo = repo
         self.config = config
         self.cache = cache
+        self.remote_refs = remote_refs
         self.deadline = time.monotonic() + config.sweep.budget_ms / 1000
 
-    def _within_budget(self) -> bool:
+    def within_budget(self) -> bool:
+        """Whether the sweep's time budget (``sweep.budget_ms``) has not yet run out."""
         return time.monotonic() < self.deadline
+
+    def park_count(self, tip: str) -> int | None:
+        """Consecutive park commits at ``tip``: cached by tip, None when unknown.
+
+        Unknown means the budget ran out before the count was measured, or git failed.
+        """
+        cached = self.cache.park_counts.get(tip)
+        if cached is not None:
+            return cached
+        if not self.within_budget():
+            return None
+        count = _park_count(self.repo, tip)
+        if count is not None:
+            self.cache.park_counts[tip] = count
+        return count
 
     def facts(self, tip: str, target: _Target) -> _PairFacts | None:
         want_lines = target.is_default
@@ -696,7 +781,7 @@ class _Pass:
         cached = _facts_from_cache(self.cache.pairs.get(key))
         if cached is not None:
             return cached
-        if not self._within_budget():
+        if not self.within_budget():
             return None
         computed = _pair_facts(self.repo, tip, target.sha, want_lines=want_lines)
         if computed is not None:
@@ -711,12 +796,29 @@ class _Pass:
     def containment(
         self, name: str, tip: str, default: str | None, refs_hash: str
     ) -> tuple[Containment, str | None] | None:
+        """The offline answer, upgraded by the remote listing when one was passed.
+
+        The cache holds only the offline answer: a listing is a point-in-time
+        network reading and must not outlive its command.
+        """
+        found = self._offline_containment(name, tip, default, refs_hash)
+        if found is None or found[0] != Containment.NOWHERE or self.remote_refs is None:
+            return found
+        listing = resolve_source(self.remote_refs)
+        held = holder_of(self.repo, listing, tip)
+        if held is None:
+            return found
+        return Containment.REMOTE_UNFETCHED, f"{listing.remote}: {held}"
+
+    def _offline_containment(
+        self, name: str, tip: str, default: str | None, refs_hash: str
+    ) -> tuple[Containment, str | None] | None:
         key = f"{tip}:{refs_hash}:{name}"
         entry = self.cache.containment.get(key)
         if isinstance(entry, dict) and entry.get("containment") in {c.value for c in Containment}:
             ref = entry.get("ref")
             return Containment(entry["containment"]), ref if isinstance(ref, str) else None
-        if not self._within_budget():
+        if not self.within_budget():
             return None
         found = containment_of(self.repo, name=name, tip=tip, config=self.config, default=default)
         if found is not None:
@@ -752,9 +854,18 @@ def _group_rows(rows: list[_Row], remote: str) -> dict[str, tuple[_Row | None, _
 
 
 def build_inventory(
-    repo: Path, config: BranchesConfig, *, now: float | None = None
+    repo: Path,
+    config: BranchesConfig,
+    *,
+    now: float | None = None,
+    remote_refs: RemoteSource | None = None,
 ) -> BranchInventory:
     """Classify every local and remote branch of ``repo`` (DESIGN.md section 2).
+
+    ``remote_refs`` is the one ``ls-remote`` an explicit command (``branch-sweep``)
+    made; a branch otherwise CONTAINED NOWHERE whose tip a listed ref holds is
+    ``REMOTE_UNFETCHED``. The inventory itself never touches the network, so a hook
+    path that leaves it None stays offline.
 
     Raises:
         BranchInventoryError: The refs could not be listed (not a repository,
@@ -795,16 +906,17 @@ def build_inventory(
         moment=moment,
     )
     cache_path = repo / CACHE_RELATIVE_PATH
-    run = _Pass(repo, config, _load_cache(cache_path))
+    run = _Pass(repo, config, _load_cache(cache_path), remote_refs)
 
     records = {name: _record(run, context, name, *by_name[name]) for name in sorted(by_name)}
-    records = _with_same_tips(records)
+    records = _with_pools(run, _with_same_tips(records), moment)
     _save_cache(cache_path, run.cache, set(sha_of.values()))
     return BranchInventory(
         default_branch=default,
         default_ref=default_ref,
         records=records,
         worktrees_known=context.worktrees is not None,
+        remote_refs=made_listing(remote_refs),
     )
 
 
@@ -954,10 +1066,98 @@ def _weakest(verdicts: list[_Verdict]) -> _Verdict:
 
 _UNGROUPED = {
     BranchState.EXEMPT,
+    BranchState.BOT_OWNED,
     BranchState.DEFAULT,
     BranchState.INTEGRATION_LINE,
     BranchState.PROTECTED,
 }
+
+
+_PARK_LOG_DEPTH = 64
+_RECORD_SEP = "\x1e"
+
+
+def _park_count(repo: Path, tip: str) -> int | None:
+    """Consecutive park commits (empty, ``Parked-Reason``) at ``tip``; None if git failed."""
+    result = run_git(
+        repo,
+        "log",
+        "--first-parent",
+        "-n",
+        str(_PARK_LOG_DEPTH),
+        f"--format=%T{_UNIT}%(trailers:key={_PARK_REASON_KEY},valueonly,unfold){_RECORD_SEP}",
+        tip,
+        timeout=_GIT_TIMEOUT,
+    )
+    if result.returncode != 0:
+        return None
+    entries = [entry.lstrip("\n").split(_UNIT, 1) for entry in result.stdout.split(_RECORD_SEP)]
+    entries = [entry for entry in entries if len(entry) == 2]
+    count = 0
+    for index, (tree, trailer) in enumerate(entries[:-1]):
+        if not trailer.strip() or tree != entries[index + 1][0]:
+            break
+        count += 1
+    return count
+
+
+def _with_merged_pool(
+    run: _Pass, records: dict[str, BranchRecord], moment: float
+) -> dict[str, BranchRecord]:
+    """Fill the keep fields and ``stale`` of every merged branch (one notes read per ref).
+
+    The keep notes are not cached (``branch-keep`` writes them from other processes),
+    so with the budget spent they are not read: the branches stay unclassified, never
+    stale, as they are when the worktrees are unknown.
+    """
+    config = run.config
+    merged = {name: r for name, r in records.items() if pool_of(r.state) == Pool.MERGED}
+    if not merged or not run.within_budget():
+        return dict(records)
+    tips = {t for r in merged.values() for t in (r.local_tip, r.remote_tip) if t is not None}
+    keeps = read_keeps(run.repo, tips, config.remote)
+    max_age = config.effective_pool_max_age(Pool.MERGED)
+    updated = dict(records)
+    for name, record in merged.items():
+        held = [keeps[t] for t in (record.local_tip, record.remote_tip) if t in keeps]
+        keep = max(held, key=lambda candidate: candidate.at, default=None)
+        if keep is not None:
+            lapsed = (moment - keep.at) / _SECONDS_PER_DAY >= max_age
+        else:
+            lapsed = record.worktree is None and record.worktree_known
+        updated[name] = replace(
+            record,
+            stale=config.merged.mode != "off" and lapsed,
+            kept_reason=keep.reason if keep else None,
+            kept_by=keep.by if keep else None,
+            kept_at=keep.at if keep else None,
+        )
+    return updated
+
+
+def _with_pools(
+    run: _Pass, records: dict[str, BranchRecord], moment: float
+) -> dict[str, BranchRecord]:
+    """Fill ``stale``, ``park_count`` and the keep fields (Plan 00571 DESIGN.md section 3).
+
+    The tip of a parked branch IS the park commit, so its age is the park's age.
+    A merged branch is stale unless it is kept inside ``merged.max_age_days`` or a
+    worktree holds it; with the worktrees unknown it is not called stale.
+    """
+    parked = run.config.parked
+    max_age = run.config.effective_pool_max_age(Pool.PARKED)
+    updated = _with_merged_pool(run, records, moment)
+    for name, record in records.items():
+        if record.state != BranchState.PARKED:
+            continue
+        tip = record.local_tip or record.remote_tip
+        stale = parked.mode != "off" and record.age_days is not None and record.age_days >= max_age
+        updated[name] = replace(
+            record,
+            stale=stale,
+            park_count=run.park_count(tip) if tip is not None else None,
+        )
+    return updated
 
 
 def _with_same_tips(records: dict[str, BranchRecord]) -> dict[str, BranchRecord]:

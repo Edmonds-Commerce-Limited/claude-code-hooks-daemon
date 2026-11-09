@@ -10,7 +10,11 @@ Two checks ship:
 
 - :class:`AssigneeCheck` - the issue must be assigned to the signed-in account.
   Unassigned is *fixable* (the fix is the claim ``gh issue edit N
-  --add-assignee @me``); assigned only to others is *blocking*.
+  --add-assignee @me``); assigned only to others is *blocking*, EXCEPT that a
+  repository admin seat may work an issue held only by non-admins (Plan 00573):
+  that is an *advisory* carrying a recorded ``takeover`` fix. An admin respects
+  another admin's assignment, and a permission that cannot be read never grants
+  an override (the seat counts as non-admin; an assignee counts as protected).
 - :class:`AuthorWhitelistCheck` - the issue's author must be on a configured
   list of approved GitHub logins (case-insensitive). No list configured means
   the check is not applicable, never a lockout.
@@ -46,11 +50,12 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Final, Protocol
+from typing import Any, Final, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ValidationError
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,7 +73,18 @@ FAILURE_TTL_SECONDS: Final[float] = 60.0
 
 #: The claim fix's name, and the placeholder GitHub resolves to the signed-in login.
 CLAIM_FIX_NAME: Final[str] = "claim"
+#: The admin's recorded takeover of an issue held by non-admins (Plan 00573).
+TAKEOVER_FIX_NAME: Final[str] = "takeover"
 SELF_ASSIGNEE: Final[str] = "@me"
+
+#: ``gh api`` paths (gh fills ``{owner}/{repo}`` from the working directory).
+_REPO_PATH: Final[str] = "repos/{owner}/{repo}"
+#: Collaborator permission names that are certainly not admin.
+_NON_ADMIN_PERMISSIONS: Final[frozenset[str]] = frozenset(
+    {"none", "read", "triage", "write", "maintain"}
+)
+
+_READABLE_ANSWERS: Final[frozenset[str]] = _NON_ADMIN_PERMISSIONS | {"admin", "true", "false"}
 
 _VIEW_FIELDS: Final[str] = "assignees,state,author,labels"
 _LIST_FIELDS: Final[str] = "number,assignees,state,author,labels"
@@ -126,6 +142,8 @@ class CheckStatus(StrEnum):
     """One check's outcome."""
 
     OK = "ok"
+    #: Allowed, with a note the caller should show (does not affect the verdict).
+    ADVISORY = "advisory"
     FIXABLE = "fixable"
     BLOCKING = "blocking"
     UNKNOWN = "unknown"
@@ -149,6 +167,8 @@ class FixAction:
     issue: int
     description: str
     gh_args: tuple[str, ...]
+    #: Assignees this fix removes; a takeover names them in its issue comment.
+    previous: tuple[str, ...] = ()
 
     @property
     def command(self) -> str:
@@ -241,18 +261,91 @@ class ValidityCheck(Protocol):
         ...
 
 
+@runtime_checkable
+class AccessInfo(Protocol):
+    """Repository permissions, looked up lazily and cached by the service."""
+
+    def is_viewer_admin(self) -> bool:
+        """True only when GitHub says the signed-in seat is a repository admin."""
+        ...
+
+    def is_protected_assignee(self, login: str) -> bool:
+        """True unless ``login`` is known NOT to be an admin (unknown protects)."""
+        ...
+
+
+@runtime_checkable
+class AccessAwareCheck(Protocol):
+    """A check that also reads repository permissions."""
+
+    name: str
+    needs_identity: bool
+    needs_access: bool
+
+    def evaluate(
+        self, facts: IssueFacts, identity: str | None, access: AccessInfo | None = None
+    ) -> CheckResult:
+        """Judge ``facts``; ``access`` None means no permission is known."""
+        ...
+
+
 class AssigneeCheck:
-    """The issue must be assigned to the signed-in account."""
+    """The issue must be assigned to the signed-in account (an admin may take over)."""
 
     name = "assignee"
     needs_identity = True
+    needs_access = True
 
-    def evaluate(self, facts: IssueFacts, identity: str | None) -> CheckResult:
-        """Only self: ok. Nobody: fixable by claiming. Several or others only: blocking."""
+    def _takeover(
+        self, facts: IssueFacts, identity: str, access: AccessInfo | None
+    ) -> CheckResult | None:
+        """The admin override, or None when it does not apply (seat or assignees decide)."""
+        others = tuple(a for a in facts.assignees if a.casefold() != identity.casefold())
+        if access is None or not others or not access.is_viewer_admin():
+            return None
+        protected = [a for a in others if access.is_protected_assignee(a)]
+        if protected:
+            return CheckResult(
+                self.name,
+                CheckStatus.BLOCKING,
+                f"issue #{facts.number} is assigned to {', '.join(protected)}, a repository "
+                f"admin (or one whose permission could not be read), and {identity} is an admin "
+                "too: one admin's claim is respected by another. A human must settle it.",
+            )
+        return CheckResult(
+            self.name,
+            CheckStatus.ADVISORY,
+            f"issue #{facts.number} is assigned to {', '.join(others)}, not {identity}. "
+            f"{identity} is a repository admin, so work may go ahead; the assignee may be "
+            "doing it too. A takeover reassigns it and comments the previous assignee.",
+            FixAction(
+                name=TAKEOVER_FIX_NAME,
+                issue=facts.number,
+                description=f"reassign #{facts.number} from {', '.join(others)} to {identity}",
+                gh_args=(
+                    "issue",
+                    "edit",
+                    str(facts.number),
+                    "--remove-assignee",
+                    ",".join(others),
+                    "--add-assignee",
+                    SELF_ASSIGNEE,
+                ),
+                previous=others,
+            ),
+        )
+
+    def evaluate(
+        self, facts: IssueFacts, identity: str | None, access: AccessInfo | None = None
+    ) -> CheckResult:
+        """Only self: ok. Nobody: fixable. Others: blocking, or an admin's advisory takeover."""
         if identity is None:
             return CheckResult(
                 self.name, CheckStatus.UNKNOWN, "the signed-in GitHub account is unknown"
             )
+        takeover = self._takeover(facts, identity, access)
+        if takeover is not None:
+            return takeover
         if len(facts.assignees) > 1:
             return CheckResult(
                 self.name,
@@ -413,6 +506,8 @@ class IssueValidityService:
         self._identity_failed_until = 0.0
         self._identity_login: str | None = None
         self._asked = False
+        # Permission answers: key -> (expiry, admin?). One gh call each while cached.
+        self._admin: dict[str, tuple[float, bool]] = {}
 
     def identity(self) -> str | None:
         """The signed-in login: cached for the process, a failure briefly."""
@@ -436,6 +531,44 @@ class IssueValidityService:
                 _LOGGER.info("gh returned an unreadable login; ignoring it")
                 self._identity_failed_until = now + self._failure_ttl
         return login
+
+    def _cached_admin(self, key: str, args: Sequence[str], is_admin: Callable[[str], bool]) -> bool:
+        """One cached permission lookup; a failed or unreadable answer is cached briefly.
+
+        ``is_admin`` maps gh's answer to the verdict. It is also called with ``""`` for a
+        failed lookup, which is how each caller's safe direction is expressed once.
+        """
+        now = self._clock()
+        cached = self._admin.get(key)
+        if cached is not None and cached[0] > now:
+            return cached[1]
+        self._asked = True
+        try:
+            answer = self._runner(args).strip()
+        except GhError as exc:
+            _LOGGER.info("gh could not read a repository permission: %s", exc)
+            self._admin[key] = (now + self._failure_ttl, is_admin(""))
+            return is_admin("")
+        result = is_admin(answer)
+        known = answer in _READABLE_ANSWERS
+        self._admin[key] = (now + (self._facts_ttl if known else self._failure_ttl), result)
+        return result
+
+    def is_viewer_admin(self) -> bool:
+        """True only when GitHub says the signed-in seat is an admin; unknown is False."""
+        return self._cached_admin(
+            "", ["api", _REPO_PATH, "--jq", ".permissions.admin"], lambda a: a == "true"
+        )
+
+    def is_protected_assignee(self, login: str) -> bool:
+        """True unless ``login`` is known not to be an admin; unknown is protected."""
+        if not _LOGIN_PATTERN.match(login):
+            return True
+        return self._cached_admin(
+            login.casefold(),
+            ["api", f"{_REPO_PATH}/collaborators/{login}/permission", "--jq", ".permission"],
+            lambda a: a not in _NON_ADMIN_PERMISSIONS,
+        )
 
     def _facts_for(self, number: int) -> tuple[IssueFacts | None, str | None]:
         now = self._clock()
@@ -469,8 +602,15 @@ class IssueValidityService:
             results = tuple(CheckResult(c.name, CheckStatus.UNKNOWN, message) for c in checks)
             return ValidityReport(number, results, fresh=self._asked)
         identity = self.identity() if any(c.needs_identity for c in checks) else None
-        results = tuple(c.evaluate(facts, identity) for c in checks)
+        results = tuple(self._evaluate(c, facts, identity) for c in checks)
         return ValidityReport(number, results, fresh=self._asked, labels=facts.labels)
+
+    def _evaluate(
+        self, check: ValidityCheck, facts: IssueFacts, identity: str | None
+    ) -> CheckResult:
+        if isinstance(check, AccessAwareCheck) and check.needs_access:
+            return check.evaluate(facts, identity, self)
+        return check.evaluate(facts, identity)
 
     def check_issue(self, number: int, checks: Sequence[ValidityCheck]) -> ValidityReport:
         """Run ``checks`` over issue ``number``."""
@@ -546,11 +686,35 @@ class IssueValidityService:
         if identity is not None and [a.casefold() for a in facts.assignees] == [
             identity.casefold()
         ]:
+            if fix.previous:
+                self._comment_takeover(fix, identity)
             return True
         if any(a.casefold() == (identity or "").casefold() for a in facts.assignees):
-            self._runner(["issue", "edit", str(fix.issue), "--remove-assignee", SELF_ASSIGNEE])
+            back_off = ["issue", "edit", str(fix.issue), "--remove-assignee", SELF_ASSIGNEE]
+            if fix.previous:
+                # A takeover also removed the previous assignees; losing the race must
+                # leave them as they were rather than strand the issue without them.
+                back_off += ["--add-assignee", ",".join(fix.previous)]
+            self._runner(back_off)
         self.forget(fix.issue)
         return False
+
+    def _comment_takeover(self, fix: FixAction, identity: str) -> None:
+        """Tell the previous assignees; the takeover already happened, so a failure only logs."""
+        previous = ", ".join(f"@{login}" for login in fix.previous)
+        body = (
+            f"Reassigned from {previous} to @{identity}: a repository admin took this "
+            "issue over. Reply here if you are still working on it."
+        )
+        try:
+            self._runner(["issue", "comment", str(fix.issue), "--body", body])
+        except GhError as exc:
+            log_and_continue(
+                _LOGGER,
+                exc,
+                reason=f"the takeover of #{fix.issue} already happened and cannot be undone "
+                "safely; a missing courtesy comment must not turn a done takeover into a failure",
+            )
 
 
 _DEFAULT_SERVICE: IssueValidityService | None = None

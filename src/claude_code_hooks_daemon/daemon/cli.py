@@ -176,8 +176,10 @@ from claude_code_hooks_daemon.utils.cli_command import (
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
+    branch_ref,
     git_visible_ancestor_dirs,
     git_visible_paths,
+    parse_worktree_porcelain,
     project_path_is_protected,
     run_git,
 )
@@ -6497,15 +6499,21 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     """
     from claude_code_hooks_daemon.config.models import handler_options
     from claude_code_hooks_daemon.core import branch_inventory, branch_sweep
+    from claude_code_hooks_daemon.utils.remote_refs import LazyRemoteRefs
 
     repo = get_project_path(getattr(args, "project_root", None))
     config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
     branches = config.branches
-    if args.clean or args.dry_run:
+    if args.clean or args.dry_run or getattr(args, "remote", False):
         return _branch_sweep_clean(args, repo, branches)
     legacy = handler_options(config.handlers.session_start.get(HandlerID.BRANCH_SWEEP.config_key))
     try:
-        inventory = branch_inventory.build_inventory(repo, branches)
+        # The one remote listing this explicit command may make (issue #166): lazy, so a
+        # sweep with nothing CONTAINED NOWHERE never touches the network. Hook paths
+        # call `build_inventory` without it.
+        inventory = branch_inventory.build_inventory(
+            repo, branches, remote_refs=LazyRemoteRefs(repo, branches.remote)
+        )
     except branch_inventory.BranchInventoryError as e:
         print(f"ERROR: no branch inventory for {repo}: {e}", file=sys.stderr)
         return 1
@@ -6532,7 +6540,11 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
         LABELS_RELATIVE_PATH,
         clear_label_stage,
     )
-    from claude_code_hooks_daemon.core.branch_park import BranchParkError, park_branch
+    from claude_code_hooks_daemon.core.branch_park import (
+        BranchParkError,
+        BranchParkSameReason,
+        park_branch,
+    )
 
     if args.clear and args.reason:
         print("ERROR: --clear takes no --reason", file=sys.stderr)
@@ -6543,6 +6555,9 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
         result = park_branch(
             repo, args.name, reason=args.reason, remote=branches.remote, clear=args.clear
         )
+    except BranchParkSameReason as e:
+        print(f"ERROR: branch-park: {e}", file=sys.stderr)
+        return 2
     except BranchParkError as e:
         print(f"ERROR: branch-park: {e}", file=sys.stderr)
         return 1
@@ -6556,27 +6571,98 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_branch_keep(args: argparse.Namespace) -> int:
+    """``branch-keep <name> --reason ...``: keep a merged branch on purpose (Plan 00571).
+
+    Returns:
+        0 when the keep stands (a failed push is reported, with its retry command),
+        1 when it could not be written or the branch is not merged, 2 when the branch
+        is already kept with this exact reason.
+    """
+    import time
+
+    from claude_code_hooks_daemon.core import branch_inventory
+    from claude_code_hooks_daemon.core.branch_cleanup import CLEAN_STATES
+    from claude_code_hooks_daemon.core.branch_creation import (
+        LABELS_RELATIVE_PATH,
+        clear_label_stale,
+    )
+    from claude_code_hooks_daemon.core.branch_keep import (
+        BranchKeepError,
+        BranchKeepSameReason,
+        keep_branch,
+    )
+
+    repo = get_project_path(getattr(args, "project_root", None))
+    branches = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml").branches
+    try:
+        inventory = branch_inventory.build_inventory(repo, branches)
+    except branch_inventory.BranchInventoryError as e:
+        print(f"ERROR: branch-keep: {e}", file=sys.stderr)
+        return 1
+    record = inventory.records.get(args.name)
+    if record is None:
+        print(f"ERROR: branch-keep: no branch {args.name}", file=sys.stderr)
+        return 1
+    if record.state not in CLEAN_STATES:
+        print(
+            f"ERROR: branch-keep: {args.name} is not merged ({record.state.value}); "
+            f"park it instead: {daemon_cli_command_for_docs('branch-park')} {args.name} "
+            "--reason ...",
+            file=sys.stderr,
+        )
+        return 1
+    tips = [tip for tip in (record.local_tip, record.remote_tip) if tip is not None]
+    user = run_git(repo, "config", "user.name", timeout=Timeout.GIT_CONTEXT).stdout.strip()
+    try:
+        result = keep_branch(
+            repo,
+            tips,
+            reason=args.reason or "",
+            remote=branches.remote,
+            user=user or "unknown",
+            now=time.time(),
+        )
+    except BranchKeepSameReason as e:
+        print(f"ERROR: branch-keep: {e}", file=sys.stderr)
+        return 2
+    except BranchKeepError as e:
+        print(f"ERROR: branch-keep: {e}", file=sys.stderr)
+        return 1
+    print(f"Kept {args.name}: {args.reason}")
+    clear_label_stale(repo / LABELS_RELATIVE_PATH, args.name)
+    if not result.pushed:
+        print(f"WARNING: the push failed ({result.push_error}); the local keep stands.")
+        print(f"Retry: {result.retry_command}")
+    return 0
+
+
 #: Where ``branch-sweep --clean`` writes its recovery bundle, relative to the project.
 _BRANCH_CLEANUP_BUNDLE_DIR = Path("untracked") / "branch-cleanup"
 
 
 def _branch_sweep_clean(args: argparse.Namespace, repo: Path, branches: BranchesConfig) -> int:
-    """``branch-sweep --clean [--dry-run]``: delete merged and patch-equivalent branches.
+    """``branch-sweep --clean [--remote] [--dry-run]``: delete merged branches.
 
     Returns:
         0 when the sweep ran, 1 when it could not, 2 on a usage error.
     """
     from claude_code_hooks_daemon.core import branch_cleanup, branch_inventory
 
+    remote = bool(getattr(args, "remote", False))
     if not args.clean:
-        print("ERROR: --dry-run only applies to --clean", file=sys.stderr)
+        print("ERROR: --dry-run and --remote only apply to --clean", file=sys.stderr)
         return 2
     if args.json or args.all:
         print("ERROR: --clean does not take --json or --all", file=sys.stderr)
         return 2
     try:
         report = branch_cleanup.clean_sweep(
-            repo, branches, dry_run=args.dry_run, bundle_dir=repo / _BRANCH_CLEANUP_BUNDLE_DIR
+            repo,
+            branches,
+            dry_run=args.dry_run,
+            bundle_dir=repo / _BRANCH_CLEANUP_BUNDLE_DIR,
+            remote=remote,
         )
     except (branch_inventory.BranchInventoryError, ValueError) as e:
         print(f"ERROR: branch-sweep --clean could not run for {repo}: {e}", file=sys.stderr)
@@ -6603,10 +6689,25 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.daemon.branch_safety import (
         TIER_UNPROVEN,
         delete_branches,
+        new_bundle_path,
     )
 
     repo = get_project_path(getattr(args, "project_root", None))
-    bundle_path = None if args.no_bundle else Path(args.bundle)
+    bundle_path: Path | None = None
+    if not args.no_bundle:
+        if args.bundle is None:
+            bundle_path = new_bundle_path(repo / _DELETE_BRANCH_BUNDLE_DIR, "delete-branch")
+        else:
+            bundle_path = Path(args.bundle)
+            if bundle_path.exists():
+                # Overwriting would destroy an earlier recovery (Plan 00571), and the
+                # "nothing deleted" cleanup below removes the file it wrote.
+                print(
+                    f"ERROR: --bundle {bundle_path} already exists; name a new file, or "
+                    "omit --bundle for a fresh timestamped one",
+                    file=sys.stderr,
+                )
+                return 2
 
     branches = _branches_config(repo)
     # The default is resolved independently of `--protected-ref`: an integration
@@ -6654,6 +6755,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
             confirm=confirm,
             line_names=branches.integration_lines,
             line_targets=line_targets,
+            remote=branches.remote,
         )
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -6691,6 +6793,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
                             "unique_paths": list(c.unique_paths),
                             "content_unique_paths": list(c.content_unique_paths),
                             "detail": c.detail,
+                            "held_by": c.held_by or None,
                         }
                         for c in report.classifications
                     ],
@@ -6736,9 +6839,10 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         if report.bundle:
             # The ONLY recovery route for whatever was deleted above. Printed to
             # stderr so it travels with the refusal a human is reading.
-            print(f"\nRecovery bundle: {report.bundle}", file=sys.stderr)
+            _print_restore_lines(report.bundle, report.deleted, file=sys.stderr)
+        elif bundle_path is not None and not report.deleted and not args.dry_run:
             print(
-                f"  restore with: git fetch {report.bundle} <branch>:<branch>",
+                "No recovery bundle was kept: nothing was deleted, so nothing needs recovering.",
                 file=sys.stderr,
             )
         if any(c.tier == TIER_UNPROVEN for c in report.classifications):
@@ -6759,10 +6863,26 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         return 0
 
     if report.bundle:
-        print(f"\nRecovery bundle: {report.bundle}")
-        print(f"  restore with: git fetch {report.bundle} <branch>:<branch>")
+        _print_restore_lines(report.bundle, report.deleted, file=sys.stdout)
     print(f"Deleted {len(report.deleted)} branch(es).")
     return 0
+
+
+#: Where ``delete-branch`` writes one recovery bundle per call, relative to the project.
+_DELETE_BRANCH_BUNDLE_DIR = Path("untracked") / "deleted-branches"
+
+
+def _print_restore_lines(bundle: Path, deleted: Sequence[str], *, file: TextIO) -> None:
+    """The bundle path, then one exact restore command per deleted branch.
+
+    Full ``refs/heads/...`` refspecs, so a tag sharing the name can never be
+    fetched instead (the Plan 00254 ambiguity).
+    """
+    from claude_code_hooks_daemon.daemon.branch_safety import bundle_restore_command
+
+    print(f"\nRecovery bundle: {bundle}", file=file)
+    for name in deleted:
+        print(f"  restore {name}: {bundle_restore_command(bundle, branch_ref(name))}", file=file)
 
 
 def cmd_release_notes(args: argparse.Namespace) -> int:
@@ -9530,8 +9650,11 @@ def cmd_worktree_reap(
         0 when every worktree was reapable (or there are none), 1 when at least
         one needs a human. The refusals are the actionable output.
     """
+    from claude_code_hooks_daemon.core import agent_ownership, branch_cleanup
     from claude_code_hooks_daemon.core.worktree_reaping import (
+        PruneOutcome,
         collect_orphaned_branches,
+        collect_skipped_merged_branches,
         collect_worktree_states,
         default_process_cwds,
         default_worktree_age,
@@ -9583,6 +9706,21 @@ def cmd_worktree_reap(
             repo_root, base_branch, config=_branches_config(repo_root), **collect_kwargs
         )
     )
+    # Plan 00571: merged branches with no worktree that pruning skips for their NAME
+    # are named, so `--reap-branches` never silently leaves a merged branch behind.
+    skipped_merged = (
+        collect_skipped_merged_branches(
+            repo_root, base_branch, config=_branches_config(repo_root), **collect_kwargs
+        )
+        if reap_branches and not only
+        else ()
+    )
+    for name in skipped_merged:
+        print(
+            f"SKIPPED {name}: merged into {base_branch} with no worktree, but not agent-owned "
+            f"(not agent-* or WorktreeCreate-recorded); delete it with "
+            f"`{branch_cleanup.sweep_clean_command()}`"
+        )
     if not states and not orphans:
         print("No agent worktrees found.")
         return 0
@@ -9596,8 +9734,29 @@ def cmd_worktree_reap(
             print(f"No agent worktree named {only!r}. Run without --only to list them.")
             return 1
 
+    # A live agent's worktree and branch are never reaped: a `running` work-queue
+    # record or a git lock marks them, whatever the predicate below says.
+    holds = agent_ownership.running_holds(_daemon_untracked_dir(repo_root), repo_root)
+    listing = (run_fn if run_fn is not None else run_git)(
+        repo_root, "worktree", "list", "--porcelain"
+    )
+    locked_paths = {
+        record.path for record in parse_worktree_porcelain(listing.stdout) if record.locked
+    }
+
     refused = 0
     for state in states:
+        owned = agent_ownership.ownership_refusal(
+            state.branch or "",
+            state.path,
+            locked=state.path in locked_paths,
+            holds=holds,
+            harness_directory=False,
+        )
+        if owned is not None:
+            refused += 1
+            print(f"KEEP    {state.name}: {owned}")
+            continue
         if not is_reapable(state):
             refused += 1
             print(f"KEEP    {reap_refusal_reason(state)}")
@@ -9613,15 +9772,37 @@ def cmd_worktree_reap(
 
     unmerged = 0
     for branch in orphans:
+        if branch.name in holds.branches:
+            print(f"ORPHAN  {branch.name}: a running work-queue agent owns it; left alone")
+            continue
         # `--reap-branches` is deliberately NOT folded into `--reap`: someone
         # with `--reap` in a script agreed to remove worktrees and the branches
         # attached to them, and must not start deleting standalone branches
         # because this command learned a new trick.
-        branch_outcome = prune_branch(
-            repo_root, branch, dry_run=not reap_branches, **collect_kwargs
+        try:
+            branch_outcome = prune_branch(
+                repo_root,
+                branch,
+                base_branch=base_branch,
+                bundle_dir=repo_root / _DELETE_BRANCH_BUNDLE_DIR,
+                dry_run=not reap_branches,
+            )
+        except subprocess.CalledProcessError as exc:
+            # An unclassifiable git failure (an expired budget) deleted nothing.
+            logger.warning("worktree-reap: git failed pruning %s: %s", branch.name, exc)
+            branch_outcome = PruneOutcome(
+                branch.name,
+                deleted=False,
+                kept=True,
+                detail=f"kept the branch {branch.name}: git failed ({exc.stderr or exc.returncode})",
+            )
+        label = (
+            "PRUNED " if branch_outcome.deleted else "KEPT   " if branch_outcome.kept else "ORPHAN "
         )
-        print(f"{'PRUNED ' if branch_outcome.deleted else 'ORPHAN '} {branch_outcome.detail}")
-        if not branch_outcome.deleted and not branch.merged_into_base:
+        print(f"{label} {branch_outcome.detail}")
+        # A merged branch the delete was asked to remove and did not is as much a
+        # leftover as an unmerged one: the exit code must say so.
+        if branch_outcome.kept or (not branch_outcome.deleted and not branch.merged_into_base):
             unmerged += 1
 
     if not reap:
@@ -12626,7 +12807,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--reap-branches",
         dest="reap_branches",
         action="store_true",
-        help="Also delete agent branches that have no worktree, if fully merged",
+        help="Also delete agent-* and WorktreeCreate-recorded branches that have no "
+        "worktree, if fully merged. Other merged branches with no worktree are listed as "
+        "SKIPPED, never deleted here: branch-sweep --clean deletes them",
     )
     parser_worktree_reap.set_defaults(func=cmd_worktree_reap)
 
@@ -12995,9 +13178,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_delete_branch.add_argument(
         "--bundle",
-        default="untracked/deleted-branches.bundle",
+        default=None,
         metavar="PATH",
-        help="Recovery bundle written before deletion (default: untracked/deleted-branches.bundle)",
+        help="Recovery bundle written before deletion. Default: a new file per call, "
+        "untracked/deleted-branches/delete-branch-<UTC stamp>-<hex>.bundle. An explicit "
+        "PATH must not exist yet: an existing file is refused, never overwritten",
     )
     parser_delete_branch.add_argument(
         "--no-bundle",
@@ -13054,6 +13239,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="With --clean: print what would be removed and deleted, change nothing",
     )
+    parser_branch_sweep.add_argument(
+        "--remote",
+        action="store_true",
+        help="With --clean: also delete every merged branch on branches.remote, by the same "
+        "proof the remote-delete guard uses (ancestor of the default or an integration line, "
+        "live tip confirmed with ls-remote), each under a lease on its proven tip and bundled "
+        "first. Contacts the remote",
+    )
     parser_branch_sweep.set_defaults(func=cmd_branch_sweep)
 
     # branch-park command (Plan 00558 Task 4.3)
@@ -13070,6 +13263,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Unpark: write an Unparked commit so the dormancy clock runs again",
     )
     parser_branch_park.set_defaults(func=cmd_branch_park)
+
+    # branch-keep command (Plan 00571 Phase 3)
+    parser_branch_keep = subparsers.add_parser(
+        "branch-keep",
+        help="Keep a merged branch on purpose (a note on its tip, pushed); an unkept merged "
+        "branch is stale, a keep lapses after branches.merged.max_age_days",
+    )
+    parser_branch_keep.add_argument("name", help="Merged branch to keep")
+    parser_branch_keep.add_argument("--reason", help="Why it is kept (one line)")
+    parser_branch_keep.set_defaults(func=cmd_branch_keep)
 
     # release-notes command
     parser_release_notes = subparsers.add_parser(

@@ -4,6 +4,24 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00541: stale key advisory names orphaned transcripts dir](00541-stale-key-advisory-names-orphaned-transcripts-dir/PLAN.md) - Complete at merge `31c6a1454` (green CI) + the archiving commit (#52 part 1, a stand-in ruling: the `transcript_archiver` stale-key advisory names `untracked/transcripts/` and the reclaim action; part 2 stays owner-only; release note 006)
+
+- [00540: ccy wrapper migration interpreter prefix](00540-ccy-wrapper-migration-interpreter-prefix/PLAN.md) - Complete at merge `6e349af66` (green CI) + the archiving commit (#126: the upgrade rewrites a Python interpreter prefix to `sh`, repairs lines broken by 3.69.0/3.70.0, reports pins, and the integrity check warns; release note 005)
+
+- [00539: supervisor restart pending record](00539-supervisor-restart-pending-record/PLAN.md) - Complete at merge `bb7664cbd` (green CI) + the archiving commit (#127: a private restart-pending record written before `/exit` and exported to the child lets a SessionEnd hook tell a supervisor restart from a genuine exit; release note 004)
+
+- [00537: supervisor holds sends off main focus](00537-supervisor-holds-sends-off-main-focus/PLAN.md) - Complete at merge `605d8ed4d` (green CI) + the archiving commit (#125: the ccy supervisor holds every send while the human's keys show focus may have left the main prompt, cleared by Esc; release note 003; follow-up Plan 00538)
+
+- [00533: dispatch saturation recovery](00533-dispatch-saturation-recovery/PLAN.md) - Complete at merges `b4e83885c` and `3dbbcfaeb` (green CI) + the archiving commit (#124: the recovery command always gets through a saturated pool, a configurable pool with a bounded wait, a saturation warning and a clean SIGTERM grace; release note 002; follow-ups 00534 to 00536)
+
+- [00532: docs optimisation skill](00532-docs-optimisation-skill/PLAN.md) - Complete at merges `bb3eb552b`, `92c07d7bb` and `36b63400c` + the archiving commit (#123: a versioned Claude Code instruction-loading contract with a re-audit advisory, `docs-qa --footprint`, and the `docs-optimise` proposal skill; release note 001, truth change v3.71.0; follow-ups are ledger 00474 N513 to N515 and the deferred items F1 to F4 in RULINGS-fable.md)
+
+- [00531: project tuned plan fact checker](00531-project-tuned-plan-fact-checker/PLAN.md) - Complete at `37dfd0b11` + the archiving commit (owner request during the v3.70.0 release: the feed dispatches the project's `tuned_agent`, the generic agent tells a project once how to tune it, and `deployed_artefact_drift` reports a tuned copy whose derived-from marker is behind the shipped template; release note 081, post-upgrade task 03)
+
+- [00529: owner decision on rust helpers from 00495 assessment](00529-owner-decision-on-rust-helpers-from-00495-assessment/PLAN.md) - Complete (the owner decided: the Rust relay is the default, starting with the status line; Rust is welcome where measured; no silent fallbacks. Relay default-on `59320d842`, status line `901e59a7a`, loud missing relay `376612d38`, a broken relay binary never runs a call unguarded (release note 019), CI follow-up `95aba97b5`)
+
+- [00528: worktree guard stale binding](00528-worktree-guard-stale-binding/PLAN.md) - Complete at the fix commit + the archiving commit (md-viewer field report via the desktop team: a sub-agent bound to a probe worktree it had already removed was denied its report write into the main checkout; a binding whose worktree is gone is now dropped; release note 064)
+
 - [00527: go development handler fit](00527-go-development-handler-fit/PLAN.md) - Complete at merges `86ec79011`, `agent-af51ee2ff28e8bc9b-580be854` and `agent-a20fee8441f62dcd7-b0782f70` + the archiving commit (owner request via the desktop team: idiomatic Go draws no false deny from the TDD, error-hiding, lint, suppression and LSP handlers, assuming only the Go toolchain; release notes 059, 061, 062, 063; field confirmation by the seats waits on the next release)
 
 - [00525: staged lint gate runs go vet from the module root](00525-staged-lint-gate-runs-go-vet-from-the-module-root/PLAN.md) - Complete at merge `132ca087e` + the archiving commit (#118: the commit gate vets a Go file from its `go.mod` directory on its package, through the resolver `lint_on_edit` shares, so a correct nested-module package commits and a real finding still blocks; release note 059)

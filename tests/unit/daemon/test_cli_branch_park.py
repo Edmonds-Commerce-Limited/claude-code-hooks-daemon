@@ -71,6 +71,13 @@ def test_missing_reason_exits_one(project: Path, capsys: pytest.CaptureFixture[s
     assert "reason" in capsys.readouterr().err
 
 
+def test_a_same_reason_repark_exits_two(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert _run(project, "work", "--reason", "w") == 0
+    capsys.readouterr()
+    assert _run(project, "work", "--reason", "w") == 2
+    assert "new reason" in capsys.readouterr().err
+
+
 def test_clear_unparks(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert _run(project, "work", "--reason", "w") == 0
     assert _run(project, "work", "--clear") == 0

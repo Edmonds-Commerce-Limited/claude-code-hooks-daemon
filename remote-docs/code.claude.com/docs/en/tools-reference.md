@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/tools-reference.md
-fetched_at: '2026-11-05T14:21:43.881852+00:00'
+fetched_at: '2026-11-09T09:01:47.802935+00:00'
 fidelity: converted
-source_sha256: fa3802969f81cca7ef50e86b5104667fa69cedf0a299d384d3f209387b63d875
+source_sha256: 026f6372203b928bbf1d8e1707e5ba9d9bc93d835008c1f90a0a94f1d8ca6665
 licence: unreviewed
-stale_after: '2027-02-03'
+stale_after: '2027-02-07'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -49,7 +49,7 @@ To add custom tools, connect an [MCP server](https://code.claude.com/docs/en/mcp
 | `Monitor` | Runs a command in the background and feeds each output line back to Claude, so it can react to log entries, file changes, or polled status mid-conversation. Can also open a WebSocket and treat each incoming message as an event. See [Monitor tool](#monitor-tool) | Yes |
 | `NotebookEdit` | Modifies Jupyter notebook cells. See [NotebookEdit tool behavior](#notebookedit-tool-behavior) | Yes |
 | `PowerShell` | Executes PowerShell commands natively. See [PowerShell tool](#powershell-tool) for availability | Yes |
-| `PushNotification` | Sends a desktop notification, and a phone push when [Remote Control](https://code.claude.com/docs/en/remote-control.md) is connected, so a long-running task or [session-scoped scheduled task](https://code.claude.com/docs/en/scheduled-tasks.md) can reach you when you step away. Push delivery runs through Anthropic-hosted infrastructure, which is not accessible from Amazon Bedrock, Claude Platform on AWS, Google Cloud's Agent Platform, or Microsoft Foundry | No |
+| `PushNotification` | Sends a desktop notification from a local session, and a phone push with [Remote Control](https://code.claude.com/docs/en/remote-control.md) or in a [cloud session](https://code.claude.com/docs/en/claude-code-on-the-web.md). Push delivery runs through Anthropic-hosted infrastructure, which is not accessible from Amazon Bedrock, Claude Platform on AWS, Google Cloud's Agent Platform, or Microsoft Foundry | No |
 | `Read` | Reads the contents of files. See [Read tool behavior](#read-tool-behavior) | No |
 | `ReadMcpResourceTool` | Reads a specific MCP resource by URI | No |
 | `RemoteTrigger` | Creates, updates, runs, and lists [cloud scheduled tasks](https://code.claude.com/docs/en/routines.md), formerly routines, on claude.ai. Backs the `/schedule` command. The [`RemoteTrigger` input reference](https://code.claude.com/docs/en/agent-sdk/typescript#remotetrigger) documents every action and the organization policies that remove the tool. Cloud scheduled tasks live on claude.ai and require a Pro, Max, Ultra, Team, or Enterprise plan. This tool is therefore not accessible from Amazon Bedrock, Claude Platform on AWS, Google Cloud's Agent Platform, or Microsoft Foundry | No |

@@ -27,11 +27,20 @@ _ELF_MACHINE_BY_TARGET: Final[dict[str, int]] = {
 }
 
 
+def relay_target_for_machine(machine: str) -> str | None:
+    """The Rust target triple for a ``platform.machine()`` spelling, or None when unsupported.
+
+    ``x86_64``/``amd64`` and ``aarch64``/``arm64`` (any case) map to their musl
+    triples; every other machine has no relay build.
+    """
+    return _TARGET_BY_MACHINE.get(machine.lower())
+
+
 def host_relay_target() -> str | None:
     """The Rust target triple of the relay this host can run, or None when unsupported."""
     if not sys.platform.startswith("linux"):
         return None
-    return _TARGET_BY_MACHINE.get(platform.machine().lower())
+    return relay_target_for_machine(platform.machine())
 
 
 def host_elf_machine() -> int | None:

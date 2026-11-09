@@ -1,10 +1,10 @@
 ---
 source_url: https://raw.githubusercontent.com/anthropics/claude-code/main/mods/sec-default/README.md
-fetched_at: '2026-11-05T14:21:51.326558+00:00'
+fetched_at: '2026-11-09T09:01:55.910020+00:00'
 fidelity: converted
 source_sha256: 97520d7ae32e2dc7f249f069aed6f35d8f3830bac13bf7c6ffa3097cfa462e75
 licence: unreviewed
-stale_after: '2027-02-03'
+stale_after: '2027-02-07'
 fetch_method: agent-browser-lite-headless (text)
 ---
 

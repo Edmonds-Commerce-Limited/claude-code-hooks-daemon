@@ -18,6 +18,7 @@ import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.core import branch_sweep
+from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command
 from claude_code_hooks_daemon.core.branch_inventory import (
     BranchInventory,
     BranchRecord,
@@ -164,8 +165,9 @@ class TestGroups:
         assert {r.name for r in groups.never_work} == {"main", "users/alice"}
 
     def test_open_work_counts_identical_tips_once(self, inventory: BranchInventory) -> None:
-        # merged-a, lost, idle-pushed, parked, and live/live-twin as one.
-        assert branch_sweep.open_work_count(inventory) == 5
+        # lost, idle-pushed, and live/live-twin as one (Plan 00571: parked and
+        # merged-a are in their own pools).
+        assert branch_sweep.open_work_count(inventory) == 3
 
     def test_unmeasured_dormant_containment_is_dormant_not_nowhere(self) -> None:
         unknown = _record("x", BranchState.DORMANT, dormancy_stage=DormancyStage.ADVISORY)
@@ -213,7 +215,7 @@ class TestReport:
         assert "git push -u origin lost" in text
         assert "bin/hooks-daemon delete-branch merged-a" in text
         assert "branch -D" not in text
-        assert "Open work: 5 of 10 (branches.wip.cap)" in text
+        assert "Open work: 3 of 10 (branches.wip.cap)" in text
 
     def test_exempt_only_with_all(self, inventory: BranchInventory) -> None:
         plain = "\n".join(branch_sweep.render_report(inventory, _CONFIG, cap=10, show_all=False))
@@ -256,7 +258,7 @@ class TestReport:
 class TestJson:
     def test_full_records_with_stable_keys(self, inventory: BranchInventory) -> None:
         document = json.loads(json.dumps(branch_sweep.report_json(inventory, cap=10)))
-        assert document["open_work"] == 5
+        assert document["open_work"] == 3
         assert document["cap"] == 10
         assert document["default_branch"] == "main"
         by_name = {b["name"]: b for b in document["branches"]}
@@ -291,8 +293,8 @@ class TestSessionSummary:
         assert "merged branch" not in text
 
     def test_over_cap_is_reported(self, inventory: BranchInventory) -> None:
-        text = "\n".join(branch_sweep.session_summary(inventory, _CONFIG, cap=5, new_session=True))
-        assert "Open work: 5 of 5" in text
+        text = "\n".join(branch_sweep.session_summary(inventory, _CONFIG, cap=3, new_session=True))
+        assert "Open work: 3 of 3" in text
 
     def test_output_is_capped(self) -> None:
         many = [
@@ -366,3 +368,32 @@ class TestBehindDefault:
         assert branch_sweep.effective_behind_threshold(BranchesConfig(), legacy) == 7
         explicit = BranchesConfig.model_validate({"sweep": {"behind_threshold": 9}})
         assert branch_sweep.effective_behind_threshold(explicit, legacy) == 9
+
+
+class TestOneStepClean:
+    """Every merged listing names ``branch-sweep --clean`` (Plan 00571 Task 2.3, #165)."""
+
+    def test_the_merged_section_names_the_clean_command(self) -> None:
+        merged = _record("done", BranchState.MERGED_DEFAULT, merged_into="main")
+        text = "\n".join(branch_sweep.render_report(_inventory(merged), _CONFIG, cap=10))
+        clean_line = next(line for line in text.splitlines() if "--clean" in line)
+        assert sweep_clean_command() in clean_line
+        assert "--remote" not in clean_line
+        assert "delete-branch done" in text
+
+    def test_a_remote_copy_adds_the_remote_flag(self) -> None:
+        merged = _record(
+            "done", BranchState.MERGED_DEFAULT, merged_into="main", remote_tip="b" * 40
+        )
+        text = "\n".join(branch_sweep.render_report(_inventory(merged), _CONFIG, cap=10))
+        assert sweep_clean_command(remote=True) in text
+
+    def test_no_merged_branch_no_clean_line(self) -> None:
+        live = _record("work", BranchState.LIVE)
+        text = "\n".join(branch_sweep.render_report(_inventory(live), _CONFIG, cap=10))
+        assert "--clean" not in text
+
+    def test_the_session_summary_names_the_clean_command(self) -> None:
+        merged = _record("done", BranchState.MERGED_DEFAULT, merged_into="main")
+        lines = branch_sweep.session_summary(_inventory(merged), _CONFIG, cap=10, new_session=True)
+        assert any(sweep_clean_command() in line for line in lines)
