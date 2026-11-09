@@ -1,6 +1,6 @@
 # Plan 00588: lsp_enforcement leaves stdin greps and git grep alone
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-09
 **Owner**: dev
 **Priority**: Medium
@@ -41,21 +41,27 @@ named target's suffix, with "covered" as the fallback for targets that cannot be
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED tests: a stdin grep in a later pipeline stage (with and without `-v`), `git grep` with and
+- [x] ✅ **Task 1.1**: RED tests: a stdin grep in a later pipeline stage (with and without `-v`), `git grep` with and
   without a ref, over code paths and markdown paths, are not lookups; the listed real lookups still are
-- [ ] ⬜ **Task 1.2**: GREEN in `handlers/pre_tool_use/lsp_enforcement.py`, reusing the existing command parsing
-- [ ] ⬜ **Task 1.3**: release-notes callout, and the handler guidance if it describes these shapes
+- [x] ✅ **Task 1.2**: GREEN in `handlers/pre_tool_use/lsp_enforcement.py`, reusing `simple_commands`. Decision
+  (implementer, accepted at review): `git grep` is never judged, with or without a ref, since telling a ref from a
+  pathspec needs a second parser; a `grep -r` in a pipe stage is still judged
+- [x] ✅ **Task 1.3**: release-notes callout, and the handler guidance if it describes these shapes
 
 ### Phase 2: Delivery
 
-- [ ] ⬜ **Task 2.1**: targeted QA, merge, verify CI, close #169
+- [x] ✅ **Task 2.1**: targeted QA, merge, verify CI, close #169
 
 ## Success Criteria
 
-- [ ] The new tests failed before the fix and pass after it, in both directions
-- [ ] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
-- [ ] Merged to main with green CI; #169 closed
+- [x] The new tests failed before the fix and pass after it, in both directions (11 failed before, per
+  `subagent-reports/261109-issue-169-implementer-sonnet.md`; the real-lookup cases are regression guards)
+- [x] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+  (`021-lsp-enforcement-stdin-greps-and-git-grep.md`)
+- [x] Merged to main with green CI; #169 closed (main CI run 42706023447 success)
 
 ## Delivery & Milestones
 
-- (pending)
+- `a0ac71f37`: fix, tests, guidance and release note; the branch merged main in (`a94cce609`, no source change)
+  and main fast-forwarded to it (targeted QA 42/42; live probe: a stdin `grep -v` draws no deny or advisory).
+  Main CI run 42706023447 green on `cf9c87da0` (the daemon's regenerated guidance commit). #169 closed

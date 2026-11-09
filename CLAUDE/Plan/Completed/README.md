@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00544: issue validity claim without author list](00544-issue-validity-claim-without-author-list/PLAN.md) - Complete at merge `15127181d` (green CI) + the archiving commit (#129: `issue-validity N --claim` and a plain judge run with no author list, printing the author check as not applicable; only `--list-eligible` still refuses)
+
 - [00543: journal file per entry](00543-journal-file-per-entry/PLAN.md) - Complete at merge `c127d7356` + `c05b91eeb` (green CI on `15127181d`) + the archiving commit (#135, owner-directed: one journal file per entry under `JOURNAL/YYYY-MM-DD/`, so concurrent branches never conflict; legacy day-files read alongside; any change to an existing journal file is denied except conflict-marker removal or an exact restore)
 
 - [00542: statusline fast path raw text](00542-statusline-fast-path-raw-text/PLAN.md) - Complete at merge `901e59a7a` + the archiving commit (#131: raw status text plus a builtin-only forwarder fast path through the Rust relay, about 0.006 CPU-s per tick against 0.077 before; every fast-path fault is a red line naming the fix, and only a daemon that is not running hands off to the start-up path)
