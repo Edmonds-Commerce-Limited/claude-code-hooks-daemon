@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00577: forwarder stubs shellcheck clean](00577-forwarder-stubs-shellcheck-clean/PLAN.md) - In Progress (GitHub #163: generated hook stubs fail `shellcheck --severity=warning` with SC2034 on the relay variable, which the sourced init.sh reads; emit it with `export` and shellcheck every generated stub in a test)
-
 - [00575: release validated handler catalogue](00575-release-validated-handler-catalogue/PLAN.md) - Not Started (owner request, post-release: one generated catalogue of every handler with source and test links, validated by a CI test and a RELEASING.md gate)
 
 - [00574: plan decisions log document](00574-plan-decisions-log-document/PLAN.md) - Not Started (owner request, for later: a per-plan `PLAN-DECISIONS.md`, pre-created by mkplan, as an unbounded, parseable decision log keyed by task id, so PLAN.md stays the front page of tasks and progress and JOURNAL/ stays ad hoc; adversarial review in progress)
@@ -219,6 +217,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00577: forwarder stubs shellcheck clean](Completed/00577-forwarder-stubs-shellcheck-clean/PLAN.md) - Complete at `43250b5fb` (CI run 42627973690 success) + the archiving commit (GitHub #163, closed: generated hook stubs export the relay-unused marker the sourced init.sh reads, so `shellcheck --severity=warning` is clean with no suppression; a test shellchecks the stub generated for every event; release note 015)
+
 - [00576: hotfix release fast path](Completed/00576-hotfix-release-fast-path/PLAN.md) - Complete at merge `8bfcad71f` (PR #190) + the archiving commit (owner request after v3.73.1: `/release hotfix` runs the RELEASING.md "Hotfix fast path" and the state file and `release_blocker` name the mode; advise-severity plan/docs QA findings never fail CI; a test pins the release gate's cancel-in-progress concurrency, which the journal shows did cancel the superseded v3.73.1 run; release note 013)
 
 - [00572: ci wall clock sharding arm and hygiene](Completed/00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - Complete at merge `f2d532f89` (PR #187) + the archiving commit (owner request: `qa.yml` reuses release-gate's shard matrix, so the nightly fell from 116 to 28.5 min; every `main` push gets a verdict; native and released aarch64 relay and hooks-screen, a non-blocking arm64 test leg, SHA-pinned actions; release notes 006, 012)
@@ -277,8 +277,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00540: ccy wrapper migration interpreter prefix](Completed/00540-ccy-wrapper-migration-interpreter-prefix/PLAN.md) - Complete at merge `6e349af66` (green CI) + the archiving commit (#126: the upgrade rewrites a Python interpreter prefix to `sh`, repairs lines broken by 3.69.0/3.70.0, reports pins, and the integrity check warns; release note 005)
 
-- [00539: supervisor restart pending record](Completed/00539-supervisor-restart-pending-record/PLAN.md) - Complete at merge `bb7664cbd` (green CI) + the archiving commit (#127: a private restart-pending record written before `/exit` and exported to the child lets a SessionEnd hook tell a supervisor restart from a genuine exit; release note 004)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -332,9 +330,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 577 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 489 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 490 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 65 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 64 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00539: supervisor restart pending record](00539-supervisor-restart-pending-record/PLAN.md) - Complete at merge `bb7664cbd` (green CI) + the archiving commit (#127: a private restart-pending record written before `/exit` and exported to the child lets a SessionEnd hook tell a supervisor restart from a genuine exit; release note 004)
+
 - [00537: supervisor holds sends off main focus](00537-supervisor-holds-sends-off-main-focus/PLAN.md) - Complete at merge `605d8ed4d` (green CI) + the archiving commit (#125: the ccy supervisor holds every send while the human's keys show focus may have left the main prompt, cleared by Esc; release note 003; follow-up Plan 00538)
 
 - [00533: dispatch saturation recovery](00533-dispatch-saturation-recovery/PLAN.md) - Complete at merges `b4e83885c` and `3dbbcfaeb` (green CI) + the archiving commit (#124: the recovery command always gets through a saturated pool, a configurable pool with a bounded wait, a saturation warning and a clean SIGTERM grace; release note 002; follow-ups 00534 to 00536)

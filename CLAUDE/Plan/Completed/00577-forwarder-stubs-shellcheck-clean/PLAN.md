@@ -1,6 +1,6 @@
 # Plan 00577: forwarder stubs shellcheck clean
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-09
 **Owner**: dev
 **Priority**: Medium
@@ -40,24 +40,27 @@ generated stub, which covers the class (any future warning in generated stub tex
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED test: generate the stubs (every event kind) and run `shellcheck --severity=warning`. It fails
+- [x] ✅ **Task 1.1**: RED test: generate the stubs (every event kind) and run `shellcheck --severity=warning`. It fails
   on SC2034
-- [ ] ⬜ **Task 1.2**: GREEN: the generator emits `export HOOKS_DAEMON_RELAY_UNUSED=...`; regenerate this repository's
+- [x] ✅ **Task 1.2**: GREEN: the generator emits `export HOOKS_DAEMON_RELAY_UNUSED=...`; regenerate this repository's
   `.claude/hooks/*`
-- [ ] ⬜ **Task 1.3**: release-notes callout
+- [x] ✅ **Task 1.3**: release-notes callout
 
 ### Phase 2: Delivery
 
-- [ ] ⬜ **Task 2.1**: targeted QA, merge, verify CI, close #163
+- [x] ✅ **Task 2.1**: targeted QA, merge, verify CI, close #163
 
 ## Success Criteria
 
-- [ ] The new test failed before the fix (quoted in the sub-agent report) and passes after it
-- [ ] `shellcheck --severity=warning .claude/hooks/*` (the stubs) exits 0 in this repository
-- [ ] The existing forwarder generator and relay tests pass unchanged
-- [ ] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
-- [ ] Merged to main with green CI; #163 closed
+- [x] The new test failed before the fix (quoted in the sub-agent report) and passes after it
+- [x] `shellcheck --severity=warning .claude/hooks/*` (the stubs) exits 0 in this repository
+- [x] The existing forwarder generator and relay tests pass unchanged
+- [x] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+  (`015-forwarder-stubs-shellcheck-clean.md`)
+- [x] Merged to main with green CI; #163 closed
 
 ## Delivery & Milestones
 
-- (pending)
+- Fix: `43250b5fb`, fast-forwarded onto main (RED: 27 stubs failed with SC2034; targeted QA 42/42 with the generator and
+  4 stubs too-broad, so covered by CI's whole-suite fallback); CI run 42627973690 `success`; #163 closed
+- [Implementer report](subagent-reports/261109-issue-163-implementer-sonnet.md)
