@@ -68,10 +68,10 @@ class TestAwkDollarIsDataOptIn:
     @pytest.mark.parametrize(
         "segment",
         [
-            "awk '{print \"git worktree remove \" $1 | \"sh\"}'",
+            'awk \'{print "git worktree remove " $1 | "sh"}\'',
             "awk '{system(\"git worktree remove \" $1)}'",
             'awk "{print \\"git worktree remove \\" $1}"',
-            "awk '{print \"git worktree remove \" $1 > \"s.sh\"}'",
+            'awk \'{print "git worktree remove " $1 > "s.sh"}\'',
             "git log --grep='git reset $1'",
             "ls 'a $b'",
         ],

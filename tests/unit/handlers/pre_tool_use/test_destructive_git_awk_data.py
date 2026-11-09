@@ -60,18 +60,20 @@ class TestAnythingThatMayRunTheTextStillDenies:
             "source <(" + _FEED + _PRINT + ")",
             'bash -c "$(' + _FEED + _PRINT + ')"',
             "$(" + _FEED + _PRINT + ")",
-            _FEED + "awk '{print \"git worktree remove \" $1 | \"sh\"}'",
+            _FEED + 'awk \'{print "git worktree remove " $1 | "sh"}\'',
             _FEED + "awk '{system(\"git worktree remove \" $1)}'",
             _FEED + "awk '{print \"git branch -D \" $1}' | sh",
             _FEED + _PRINT + " > s.sh && sh s.sh",
             _FEED + "awk '{print \"git worktree remove \" $(1)}' | sh",
-            _FEED + "awk '{print \"git worktree remove \" $1 > \"s.sh\"}'; sh s.sh",
+            _FEED + 'awk \'{print "git worktree remove " $1 > "s.sh"}\'; sh s.sh',
         ],
     )
     def test_it_is_still_denied(self, command: str, tmp_path: Path) -> None:
         assert not _allowed(command, tmp_path)
 
-    def test_a_real_removal_beside_the_awk_print_denies_on_the_removal(self, tmp_path: Path) -> None:
+    def test_a_real_removal_beside_the_awk_print_denies_on_the_removal(
+        self, tmp_path: Path
+    ) -> None:
         command = "git worktree remove /nonexistent/dirty; " + _FEED + _PRINT
         handler = DestructiveGitHandler()
         result = handler.handle(_event(command, tmp_path))
