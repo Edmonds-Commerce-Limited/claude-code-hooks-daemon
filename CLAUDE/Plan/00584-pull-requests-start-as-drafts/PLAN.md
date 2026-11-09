@@ -39,7 +39,8 @@ standard: every deny says why and what to do next.
 - `gh pr ready N` is denied unless the same command also removes the prefix; `gh pr edit --title` dropping the prefix
   is denied unless it also marks the PR ready; `gh pr ready --undo` requires the prefix back.
 - `gh pr create --web` and other routes the handler cannot judge get an advisory, never a silent pass.
-- This repository's own PR-creating flows comply: the `/release` skill, `/release hotfix` and `RELEASING.md`.
+- This repository's own PR-creating flow complies: `CLAUDE/development/RELEASING.md` Step 8a (its `gh pr create`;
+  the `/release` skill and `/release hotfix` carry no `gh pr` command of their own and delegate to that document).
 
 ## Non-Goals
 
@@ -67,8 +68,10 @@ standard: every deny says why and what to do next.
 
 - [ ] ⬜ **Task 2.1**: RED tests, then the handler: create, ready, edit, undo and REST routes, with the shared `gh`
   command parsing
-- [ ] ⬜ **Task 2.2**: Update the release skill, the hotfix path and `RELEASING.md` to create `[DRAFT]` drafts and to
-  mark ready with the prefix removed; a test pins the release flow's commands against the handler
+- [ ] ⬜ **Task 2.2**: Update `RELEASING.md` (Step 8a's `gh pr create`, and the recap of it further down) to create a
+  `[DRAFT]` draft and to mark it ready with the prefix removed; a test pins those commands against the handler. The
+  `gh` command parsing is per handler today (no shared parser module): reuse the nearest existing one rather than
+  adding another
 
 ### Phase 3: Delivery
 
