@@ -1,6 +1,6 @@
 # Plan 00581: provision repairs a stale venv
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-09
 **Owner**: dev
 **Priority**: Medium
@@ -37,22 +37,24 @@ at the wrong version, not this equal-version path.
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED test: equal version with a stale venv (foreground repairs; background names the repair) and
+- [x] ✅ **Task 1.1**: RED test: equal version with a stale venv (foreground repairs; background names the repair) and
   equal version with a matching venv (nothing to do)
-- [ ] ⬜ **Task 1.2**: GREEN in `provision.sh` and its deployed copy
-- [ ] ⬜ **Task 1.3**: release-notes callout
+- [x] ✅ **Task 1.2**: GREEN in `provision.sh` and its deployed copy
+- [x] ✅ **Task 1.3**: release-notes callout
 
 ### Phase 2: Delivery
 
-- [ ] ⬜ **Task 2.1**: targeted QA, merge, verify CI, close #168
+- [x] ✅ **Task 2.1**: targeted QA, merge, verify CI, close #168
 
 ## Success Criteria
 
-- [ ] The new tests failed before the fix and pass after it, in all three cases
-- [ ] `provision.sh` and `.claude/provision.sh` are identical
-- [ ] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
-- [ ] Merged to main with green CI; #168 closed
+- [x] The new tests pass after the fix in all three cases; the two stale-venv cases failed before it, and the
+  matching-venv case passed before it, as a regression guard on the unchanged path should
+- [x] `provision.sh` and `.claude/provision.sh` are identical (the deployed copy is a symlink to the root script)
+- [x] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+- [x] Merged to main with green CI; #168 closed
 
 ## Delivery & Milestones
 
-- (pending)
+- `cfa601263`: fix, tests and release note `017-provision-repairs-a-stale-venv.md`; targeted QA 42/42; CI QA run
+  42650039659 and CodeQL 42650039133 success; #168 closed
