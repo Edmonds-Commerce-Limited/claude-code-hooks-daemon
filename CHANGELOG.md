@@ -37,6 +37,7 @@ _A patch release. Branches now sit in three pools (open, parked, merged) with th
 - An upgrade to a commit whose short SHA is all digits is no longer stopped as a "MAJOR version change"; a release is recognised only when `v`-prefixed or dotted (Plan 00474 N598).
 - The transport probe checks the host's own musl relay target (`aarch64-unknown-linux-musl` on arm64) instead of always asking for the x86_64 one (Plan 00572 Task 3.3).
 - The remote-delete guard no longer falsely denies a compound cleanup command (Plan 00474 N591).
+- The branch creation guard trusts a SessionStart "merged" or "stale" label only while the branch is still at the tip the label recorded, so a merged branch that later gains commits no longer denies every branch creation with `R-BRANCH-MERGED-POOL` (a deny `branch-sweep --clean` and `branch-keep` both refuse to clear); it is judged by its live state instead (release review D1).
 - Test hardening: a pinned clock in the bundle-path collision test, a `Timeout` constant in the target-release test, and a black-formatted FIFO test.
 
 ## [3.73.0] - 2026-11-07

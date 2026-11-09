@@ -282,8 +282,15 @@ class TestPoolSplit:
 
     def test_a_patch_equivalent_label_leaves_the_wip_count(self, repo: Path) -> None:
         _unique(repo, "one")
-        _unique(repo, "cherry")
-        labels = {"cherry": {"group": "patch-equivalent", "action": None, "stage": None}}
+        tip = _unique(repo, "cherry")
+        labels = {
+            "cherry": {
+                "group": "patch-equivalent",
+                "action": None,
+                "stage": None,
+                "local_tip": tip,
+            }
+        }
         verdict = creation_verdict(repo, _config(cap=2), "fresh", labels=labels, now=NOW)
         assert verdict.decision == "allow"
 
@@ -516,12 +523,50 @@ class TestMergedPool:
         )
 
     def test_a_stale_label_denies_under_the_cap(self, repo: Path) -> None:
-        _merged_distinct(repo, "a")
-        labels = {"a": {"group": "merged", "stale": "true"}}
+        tip = _merged_distinct(repo, "a")
+        labels = {"a": {"group": "merged", "stale": "true", "local_tip": tip}}
         verdict = creation_verdict(repo, _config(), "fresh", labels=labels, now=NOW)
         assert verdict.rule_id == RuleID.BRANCH_MERGED_POOL
         text = "\n".join(verdict.lines)
         assert "stale" in text.lower() and "branches.merged.max_age_days" in text
+
+    def test_a_label_whose_branch_gained_commits_is_not_trusted(self, repo: Path) -> None:
+        """A merged+stale label recorded at an old tip must not outlive new commits."""
+        old_tip = _merged_distinct(repo, "a")
+        labels = {
+            "a": {"group": "merged", "stale": "true", "local_tip": old_tip, "remote_tip": None}
+        }
+        _git(repo, "checkout", "-q", "a")
+        (repo / "new.txt").write_text("live work")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", "new live work")
+        _git(repo, "checkout", "-q", "main")
+        verdict = creation_verdict(repo, _config(), "fresh", labels=labels, now=NOW)
+        assert verdict.decision == "allow"
+
+    def test_a_label_still_at_its_tip_is_trusted(self, repo: Path) -> None:
+        tip = _merged_distinct(repo, "a")
+        labels = {"a": {"group": "merged", "stale": "true", "local_tip": tip, "remote_tip": None}}
+        verdict = creation_verdict(repo, _config(), "fresh", labels=labels, now=NOW)
+        assert verdict.rule_id == RuleID.BRANCH_MERGED_POOL
+
+    def test_a_moved_branch_counts_as_open_work(self, repo: Path) -> None:
+        old_tip = _unique(repo, "one")
+        _unique(repo, "two")
+        labels = {
+            "one": {"group": "merged", "stale": None, "local_tip": old_tip, "remote_tip": None}
+        }
+        _git(repo, "checkout", "-q", "one")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "more")
+        _git(repo, "checkout", "-q", "main")
+        verdict = creation_verdict(repo, _config(cap=2), "fresh", labels=labels, now=NOW)
+        assert verdict.rule_id == RuleID.BRANCH_WIP_CAP
+
+    def test_labels_snapshot_records_both_tips(self, tmp_path: Path) -> None:
+        path = tmp_path / "labels.json"
+        write_labels(path, [{"name": "a", "local_tip": "abc", "remote_tip": None}])
+        assert read_labels(path)["a"]["local_tip"] == "abc"
+        assert read_labels(path)["a"]["remote_tip"] is None
 
     def test_warn_and_off_modes(self, repo: Path) -> None:
         _merged_distinct(repo, "a")
