@@ -190,6 +190,17 @@ class TestNoisyLine:
         decision = _decide(repo, untracked)
         assert any("old-idle" in line for line in decision.context)
 
+    def test_line_states_intent_and_the_action_for_each_branch(
+        self, repo: Path, untracked: Path, stale: None
+    ) -> None:
+        decision = _decide(repo, untracked)
+        text = "\n".join(decision.context)
+        assert BRANCH_LIMIT_PRINCIPLE in text
+        assert "branch-park old-idle --reason" in text
+        assert "delete-branch old-idle" in text
+        assert "merge" in text
+        assert "take this work on" in text
+
     def test_at_most_once_per_hour(self, repo: Path, untracked: Path, stale: None) -> None:
         _decide(repo, untracked, now=1_000_000.0)
         again = _decide(repo, untracked, now=1_000_000.0 + NOISY_INTERVAL_SECONDS - 1)

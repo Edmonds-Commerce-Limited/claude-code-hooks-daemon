@@ -100,6 +100,15 @@ class TestHandle:
         assert result.reason.startswith("BLOCKED [R-BRANCH-WIP-CAP]")
         assert "one" in result.reason and BRANCH_LIMIT_PRINCIPLE in result.reason
 
+    def test_wip_cap_deny_demands_finishing_not_continuing(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        result = handler.handle(_bash("git checkout -b fresh", repo))
+        assert result.reason is not None
+        assert "continue in one" not in result.reason
+        assert "Finish (merge)" in result.reason
+        assert "park" in result.reason and "proves nothing is lost" in result.reason
+
     def test_a_full_parked_pool_is_denied_under_its_own_rule(
         self, handler: BranchCreationGuardHandler, repo: Path
     ) -> None:
