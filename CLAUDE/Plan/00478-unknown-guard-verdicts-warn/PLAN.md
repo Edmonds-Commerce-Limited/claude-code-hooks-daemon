@@ -1,11 +1,12 @@
 # Plan 00478: unknown guard verdicts warn
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-01
 **Owner**: dev
 **Priority**: High
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Sub-Agent Orchestration
+**GitHub Issue**: #170 (Phase 0)
 
 ## Overview
 
@@ -48,7 +49,14 @@ plan states that cost; it does not re-decide the ruling.
 
 ## Tasks
 
-### Phase 1: Inventory
+### Phase 0: First slice, GitHub #170
+
+- [ ] 🔄 **Task 0.1**: `destructive_git`'s unreadable-removal route denies a command whose only git text is DATA:
+  `printf p | awk '{print "git worktree remove " $1}'` (reproduced on `main`; GitHub #170). The raw-text pattern
+  matches, the parser reads no removal, and the fail-closed branch denies. Fix the misreading, not the policy:
+  git text that provably stays data (a quoted argument of a program that does not execute it) is no removal, so
+  the route never fires. Text that may be executed (`| sh`, `| bash`, `| xargs`, `eval "$(…)"`, `source <(…)`)
+  keeps today's verdict until Phase 2 converts the route itself. RED tests in both directions, release note
 
 - [ ] ⬜ **Task 1.1**: List every route where a safety guard denies because it
   could not decide, as opposed to a positive match. Cover the evaluation-error
