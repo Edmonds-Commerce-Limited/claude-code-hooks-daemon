@@ -512,6 +512,8 @@ _REROUTING_MARKERS: tuple[str, ...] = ("$(", "<(", ">(", "`")
 
 #: Write targets that are no file an executor could read from.
 _INERT_DEVICES: frozenset[str] = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr"})
+#: A file written with this suffix is prose no command runs.
+_MARKDOWN_SUFFIX: Final[str] = ".md"
 _DEVICE_ROOTS: tuple[str, ...] = ("/dev/", "/proc/")
 #: fds a redirect may duplicate onto and stay inert: stdout, stderr, closed.
 _INERT_FD_TARGETS: frozenset[str] = frozenset({"1", "2", "-"})
@@ -1497,7 +1499,21 @@ def is_wholly_inert_command(command: str) -> bool:
     return not (head.group(1) == _PRINTF_HEAD and arguments[0].startswith(_OPTION_PREFIX))
 
 
-def strip_quoted_heredoc_bodies(command: str, *, text_readers_only: bool = False) -> str:
+def strip_unrun_heredoc_bodies(command: str) -> str:
+    """Blank every quoted-delimiter heredoc body nothing runs, now or later.
+
+    Narrower than :func:`strip_quoted_heredoc_bodies`, which blanks a body
+    ``cat > t.sh`` writes: that script may be run by the next statement. Here a
+    body is blanked only when every command it reaches reads it as text (the
+    ``text_readers_only`` contract), publishes it as a ``gh`` body, or writes
+    it only to ``.md`` files.
+    """
+    return strip_quoted_heredoc_bodies(command, text_readers_only=True, prose_sinks=True)
+
+
+def strip_quoted_heredoc_bodies(
+    command: str, *, text_readers_only: bool = False, prose_sinks: bool = False
+) -> str:
     """Blank the body of every quoted-delimiter heredoc fed to a DATA SINK.
 
     ``<<'EOF'`` and ``<<"EOF"`` disable every expansion, so bash hands the body
@@ -1538,6 +1554,9 @@ def strip_quoted_heredoc_bodies(command: str, *, text_readers_only: bool = False
             whose question is whether anything opens the body's words as
             paths rather than whether anything runs them. Narrower than the
             default: it blanks nothing the default keeps.
+        prose_sinks: With ``text_readers_only``, also blank a body a ``gh``
+            command publishes or that is written only to ``.md`` files: prose
+            no command runs (:func:`strip_unrun_heredoc_bodies`).
 
     Returns:
         ``command`` with each sink-fed quoted-delimiter heredoc body replaced by
@@ -1567,11 +1586,17 @@ def strip_quoted_heredoc_bodies(command: str, *, text_readers_only: bool = False
         # statement may have rebound (an alias, a function, PATH) is not asked:
         # a careless agent does not do that (Plan 00483 A2).
         if not _receiver_is_data_sink(
-            command, heredoc, depth_tracker, newline_tracker, fds_may_run, text_readers_only
+            command,
+            heredoc,
+            depth_tracker,
+            newline_tracker,
+            fds_may_run,
+            text_readers_only,
+            prose_sinks,
         ):
             continue
         if not _downstream_is_all_data_sinks(
-            _opener_tail(command, heredoc), fds_may_run, text_readers_only
+            _opener_tail(command, heredoc), fds_may_run, text_readers_only, prose_sinks
         ):
             continue
         # Only the body lines are replaced. Everything else on the opener
@@ -1608,6 +1633,7 @@ def _receiver_is_data_sink(
     newline_tracker: _LastNewlineTracker,
     fds_may_run: bool,
     text_readers_only: bool = False,
+    prose_sinks: bool = False,
 ) -> bool:
     """Does the command feeding ``heredoc`` only READ it?
 
@@ -1651,7 +1677,7 @@ def _receiver_is_data_sink(
     receiving_stage = segment + " " + split_unquoted(opener_tail, ("|", *_PIPELINE_TERMINATORS))[0]
     if not text_readers_only and _segment_command_word(receiving_stage) == _LOOP_END_WORD:
         return _loop_only_prints_its_input(command[:opener_start], receiving_stage, fds_may_run)
-    return _stage_is_inert_sink(receiving_stage, fds_may_run, text_readers_only)
+    return _stage_is_inert_sink(receiving_stage, fds_may_run, text_readers_only, prose_sinks)
 
 
 #: The word that closes a loop; a heredoc after it is the loop's standard input.
@@ -1742,7 +1768,9 @@ def _loop_only_prints_its_input(prefix: str, receiving_stage: str, fds_may_run: 
     return True
 
 
-def _stage_is_inert_sink(stage: str, fds_may_run: bool, text_readers_only: bool = False) -> bool:
+def _stage_is_inert_sink(
+    stage: str, fds_may_run: bool, text_readers_only: bool = False, prose_sinks: bool = False
+) -> bool:
     """Does ``stage`` run a :data:`DATA_SINKS` command whose every argument
     only reads the body (Plan 00466 N101 round 10, S1)?
 
@@ -1765,9 +1793,13 @@ def _stage_is_inert_sink(stage: str, fds_may_run: bool, text_readers_only: bool 
     that reads the body as TEXT: its word is in :data:`TEXT_READING_SINKS`,
     or it is a ``git commit``/``git tag`` taking its message from stdin and no
     pathspec; and the stage carries no substitution at all.
+
+    ``prose_sinks`` widens that narrowed answer by two receivers that run
+    nothing: a ``gh`` command group reading its stdin as a body, and a text
+    reader whose every written file is ``.md``.
     """
     word = _segment_command_word(stage)
-    if word == _GH_COMMAND and not text_readers_only:
+    if word == _GH_COMMAND and (prose_sinks or not text_readers_only):
         return _gh_reads_body_as_data(stage, fds_may_run)
     if word is None or word not in DATA_SINKS:
         return False
@@ -1787,7 +1819,7 @@ def _stage_is_inert_sink(stage: str, fds_may_run: bool, text_readers_only: bool 
     remaining = _inert_redirects(arguments, fds_may_run)
     if remaining is None:
         return False
-    if text_readers_only and _stage_writes_a_file(word, words, remaining):
+    if text_readers_only and _stage_writes_a_file(word, words, remaining, prose_sinks):
         return False
     if word == "git":
         if text_readers_only:
@@ -1828,15 +1860,24 @@ def _gh_reads_body_as_data(stage: str, fds_may_run: bool) -> bool:
     return remaining[0].value in _GH_DATA_SUBCOMMANDS
 
 
-def _stage_writes_a_file(command: str, words: list[_Word], remaining: list[_Word]) -> bool:
+def _stage_writes_a_file(
+    command: str, words: list[_Word], remaining: list[_Word], markdown_is_prose: bool = False
+) -> bool:
     """Does a text reader's stage write what it reads to a file?
 
     A body written to a file is not text that dies with the command: it is
     authored content (``cat > run.sh <<'EOF'``) that a later command runs
     or opens, so the body keeps being judged. ``/dev/null`` and a duplicated
-    fd write no file. ``words`` is the whole stage, so a redirect before the
+    fd write no file, and with ``markdown_is_prose`` neither does a ``.md``
+    file. ``words`` is the whole stage, so a redirect before the
     command word counts; ``remaining`` is the arguments without redirects,
     where ``tee`` names its files and ``sort`` its ``-o`` output."""
+
+    def _is_runnable_file(target: str | None) -> bool:
+        if target in _INERT_DEVICES:
+            return False
+        return not (markdown_is_prose and target is not None and target.endswith(_MARKDOWN_SUFFIX))
+
     index = 0
     while index < len(words):
         match = _REDIRECT_WORD_PATTERN.fullmatch(words[index].raw)
@@ -1855,12 +1896,15 @@ def _stage_writes_a_file(command: str, words: list[_Word], remaining: list[_Word
         if operator in _DUPLICATE_OPERATORS and target is not None:
             if target.isdigit() or target == "-":
                 continue
-        if target not in _INERT_DEVICES:
+        if _is_runnable_file(target):
             return True
     arguments = [word.value for word in remaining]
     if command == "tee":
         return any(
-            value is None or not value.startswith("-") or value == "-" for value in arguments
+            value is None
+            or value == "-"
+            or (not value.startswith("-") and _is_runnable_file(value))
+            for value in arguments
         )
     if command == "sort":
         return any(
@@ -2246,7 +2290,10 @@ class _LastNewlineTracker:
 
 
 def _downstream_is_all_data_sinks(
-    opener_tail: str, fds_may_run: bool, text_readers_only: bool = False
+    opener_tail: str,
+    fds_may_run: bool,
+    text_readers_only: bool = False,
+    prose_sinks: bool = False,
 ) -> bool:
     """Does every command the body is PIPED ON to also just read it?
 
@@ -2271,7 +2318,7 @@ def _downstream_is_all_data_sinks(
     """
     pipeline = split_unquoted(opener_tail, _PIPELINE_TERMINATORS)[0]
     return all(
-        _stage_is_inert_sink(stage, fds_may_run, text_readers_only)
+        _stage_is_inert_sink(stage, fds_may_run, text_readers_only, prose_sinks)
         for stage in split_unquoted(pipeline, ("|",))[1:]
     )
 

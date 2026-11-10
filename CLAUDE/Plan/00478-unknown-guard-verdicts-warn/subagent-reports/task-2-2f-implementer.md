@@ -22,4 +22,16 @@ Docs: release note 031 and HANDLER_REFERENCE name heredoc bodies and `py.test`.
 ## Open
 
 - The autofix script also reformatted one unrelated line in tests/unit/scripts/test_mkplan_journal.py; committed as formatter output.
-- Only the awk word after the truncation point is re-read; operands after a later non-`${` word within the same statement are covered, text after `; & |` is not.
+- Only the awk word after the truncation point is re-read; operands after a later non-`${` word within the same statement are covered, text after `; & |` is not. (Superseded by the review fixes below: the re-read is gone.)
+
+## Review fixes
+
+Review: `task-2-2f-review-code-reviewer.md` (REQUEST CHANGES, 1 Critical, 1 Important, 3 Minor).
+
+- **Main CI red**: `tests/integration/handlers/test_pre_tool_use_safety.py` pinned `docker logs container | tail -100` as a deny. It now asserts the unknown-verdict allow and advisory. npm-tail and pytest-head still deny. The tier-3 docstring in `tests/integration/test_pipe_blocker_integration.py` is corrected. No other integration test pinned an unknown-producer deny.
+- **Critical 1 and Important 2 (root cause)**: `_quoted_span_end` in `utils/shell_segmentation.py` reads a brace-balanced `${...}` (operator forms included) as part of the current word, both unquoted and inside double quotes. Quotes, escapes and nested braces inside it are skipped, and nesting is capped at 32. A command substitution or an unclosed brace still ends the stream. `_SIMPLE_BRACED_PARAMETER` is subsumed and removed.
+- `core/utils.py` `_PWD_EXPANSION_RE` reads `${PWD:-w}`, `${PWD-w}`, `${PWD:=w}`, `${PWD=w}`, `${PWD:?w}` and `${PWD?w}` as the cwd, like `$PWD`. PWD is set, so bash never evaluates the word. `rm`, `cp`, `mv`, `tee`, `>`, `truncate`, `sed -i` and `awk` now get the same verdict for each operator form as for the matching `$NAME` form (tested as a matrix).
+- `_operator_expansion_violation` and `_STATEMENT_END_RE` are deleted from write_protected_paths. With the scanner fixed, the normal path denies the three review shapes plus `./protected/x`. The `echo awk ...;` decoy is tested.
+- **Minor 3**: added `strip_unrun_heredoc_bodies`. It reuses the text-reader receiver logic of `strip_quoted_heredoc_bodies` with a `prose_sinks` mode, which also counts a `gh` body and a write only to `.md` files as prose. pipe_blocker's blacklist rescan uses it. `cat > notes.md` and `git commit -F -` / `gh ... --body-file -` bodies followed by `docker ps | tail -1` now get the unknown advisory. `t.sh`, a mixed `tee a.md b.sh`, unquoted `<<EOF`, `| bash` and `bash <<` still deny.
+- **Minor 4**: release note 031 and HANDLER_REFERENCE now state the heredoc rule and its prose exception, plus the `${...}` operand handling.
+- **Minor 5**: added tests for `<<-`, unquoted, two heredocs (separate lines and one line), and `py.test` via `env`, `env FOO=1`, `.venv/bin`, `/usr/bin` and `bash -c`.

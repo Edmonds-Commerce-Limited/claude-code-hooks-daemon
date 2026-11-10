@@ -58,6 +58,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted_spans,
     strip_inert_spans,
     strip_message_bodies,
+    strip_unrun_heredoc_bodies,
 )
 from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
@@ -1535,9 +1536,10 @@ class PipeBlockerHandler(
         # failed to place (Plan 00478 second review), and the pipe denies on it.
         # Heredoc bodies are scanned too: a script authored by `cat > t.sh
         # <<'EOF'` and run by the same command is blanked as data in
-        # `scan_target` but still executes (Plan 00478 Task 2.2f).
+        # `scan_target` but still executes (Plan 00478 Task 2.2f). A body only
+        # written to markdown or read as a git/gh message runs nowhere.
         unplaced = self._blacklisted_word_anywhere(scan_target) or self._blacklisted_word_anywhere(
-            strip_message_bodies(command)
+            strip_message_bodies(strip_unrun_heredoc_bodies(command))
         )
         if unplaced is not None:
             rule_id, source_segment = judged[0]
