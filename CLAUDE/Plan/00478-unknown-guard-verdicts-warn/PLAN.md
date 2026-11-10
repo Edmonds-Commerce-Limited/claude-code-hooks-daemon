@@ -87,14 +87,23 @@ plan states that cost; it does not re-decide the ruling.
 - [ ] ⬜ **Task 2.2b**: `destructive_git` substitution route (row 2). Held with Q1:
   the forced delete is positively recognised and only its target is hidden behind
   the substitution, the same "recognised action, unproven target" shape as rows 1/3.
-- [ ] 🔄 **Task 2.2c**: rows 14, 15, 19, 20, 22, 24 (flaggable channel, journal
+- [x] ✅ **Task 2.2c**: rows 14, 15, 19, 20, 22, 24 (flaggable channel, journal
   guard, release merge freeze, reference repo not verified, curl into a
   non-shell interpreter, root recursion on an unstattable path).
-- [ ] 🔄 **Task 2.2d**: ESLint timeout and run failure (rows 17, 18).
+  Delivered: an independent review found two critical regressions (a literal journal
+  path allowed; a curl option value swallowed) and one important one (`git -C`
+  treated as unplaceable), all fixed before merge (`0057dc4ad`, branch merged via
+  `39da746f2`, main `4e3f77db6` CI run 42758232505 green on rerun after an unrelated
+  Kotlin-linter timeout); release note 028.
+- [x] ✅ **Task 2.2d**: ESLint timeout and run failure (rows 17, 18).
+  Delivered: `validate_eslint_on_write` `_not_linted` allows with the shared advisory;
+  R-ESLINT-TIMEOUT and R-ESLINT-RUN-FAILURE are advisory-only (`a215b3ae6`, branch
+  merged via `2d9e6c762`, main `47dae7574` CI run 42756436040 green); release note 029.
 - [ ] ⬜ **Task 2.2e**: Contested rows, after the owner rules (see "Owner
   questions"): 1, 3, 5, 16, 23, and scope rows 21, 25, 26.
-- [ ] ⬜ **Task 2.3**: Update the rule explanations, the generated `CLAUDE.md`
-  guidance, and add a release note.
+- [ ] 🔄 **Task 2.3**: Update the rule explanations, the generated `CLAUDE.md`
+  guidance, and add a release note. Done for 2.2a, 2.2c and 2.2d (rule texts,
+  `get_claude_md`, release notes 027-029); the rest ships with 2.2b and 2.2e.
 
 ## Owner questions (block Task 2.2e only)
 
