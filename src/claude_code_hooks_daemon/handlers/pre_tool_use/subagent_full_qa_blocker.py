@@ -237,12 +237,13 @@ PYTEST_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
         "--timeout",
         "--timeout-method",
         "--timeout_method",
-        # pytest-randomly, pytest-rerunfailures, pytest-asyncio, pytest-html
+        # pytest-randomly, pytest-rerunfailures, pytest-asyncio, anyio, pytest-html
         "--randomly-seed",
         "--reruns",
         "--reruns-delay",
         "--only-rerun",
         "--asyncio-mode",
+        "--anyio-mode",
         "--html",
         "--css",
         # This daemon's own qa.first_error_lines plugin (the QA tests stage)
