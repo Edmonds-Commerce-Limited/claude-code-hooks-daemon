@@ -35,6 +35,7 @@ import shutil
 from pathlib import Path
 
 from claude_code_hooks_daemon.core.worktree_seed import SEED_MODE_SYMLINK, SeedEntry
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,78 @@ def _place(source: Path, dest: Path, mode: str) -> None:
         shutil.copytree(source, dest)
     else:
         shutil.copy2(source, dest)
+
+
+#: Bytes read per step when comparing two files, so a huge seed is never held whole.
+_COMPARE_CHUNK_BYTES = 1 << 16
+
+
+def _files_identical(source: Path, copy: Path) -> bool:
+    """Whether two regular files hold the same bytes (a size mismatch ends it at once)."""
+    try:
+        if source.stat().st_size != copy.stat().st_size:
+            return False
+        with source.open("rb") as left, copy.open("rb") as right:
+            while True:
+                chunk = left.read(_COMPARE_CHUNK_BYTES)
+                if chunk != right.read(_COMPARE_CHUNK_BYTES):
+                    return False
+                if not chunk:
+                    return True
+    except OSError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"worktree seed: {copy} or {source} is unreadable, so the copy is "
+            "reported as differing from its source; an unread file is never called identical",
+        )
+        return False
+
+
+def _tree_files(root: Path) -> set[Path] | None:
+    """Every non-directory path under ``root``, relative to it; ``None`` if unreadable."""
+    found: set[Path] = set()
+    errors: list[OSError] = []
+    for current, dirs, names in os.walk(root, onerror=errors.append):
+        # os.walk reports a symlink to a directory under ``dirs`` and never enters it.
+        linked_dirs = [name for name in dirs if Path(current, name).is_symlink()]
+        found.update(Path(current, name).relative_to(root) for name in (*names, *linked_dirs))
+    return None if errors else found
+
+
+def _entries_identical(source: Path, copy: Path) -> bool:
+    """Whether ``copy`` is a byte-identical copy of ``source`` (symlinks compare by target)."""
+    if copy.is_symlink() or source.is_symlink():
+        return (
+            copy.is_symlink()
+            and source.is_symlink()
+            and os.readlink(copy) == os.readlink(source)
+        )
+    return source.is_file() and copy.is_file() and _files_identical(source, copy)
+
+
+def seed_copy_is_identical(source: Path, copy: Path) -> bool:
+    """Whether a copy-mode seeded ``copy`` still equals its ``source`` in the main checkout.
+
+    A file is identical when both are regular files of the same bytes. A
+    directory is identical only when both hold exactly the same files, each
+    identical. A missing or unreadable source, a type mismatch and any
+    difference all answer ``False``, so the caller treats the copy as work that
+    could be lost.
+
+    Args:
+        source: The path in the main checkout the entry was seeded from.
+        copy: The same entry inside the worktree.
+
+    Returns:
+        True only when nothing in ``copy`` is absent from ``source``.
+    """
+    if not source.is_dir() or source.is_symlink() or copy.is_symlink() or not copy.is_dir():
+        return _entries_identical(source, copy)
+    source_files, copy_files = _tree_files(source), _tree_files(copy)
+    if source_files is None or copy_files is None or source_files != copy_files:
+        return False
+    return all(_entries_identical(source / rel, copy / rel) for rel in source_files)
 
 
 def seed_worktree(root: Path, worktree: Path, entries: list[SeedEntry]) -> list[Path]:

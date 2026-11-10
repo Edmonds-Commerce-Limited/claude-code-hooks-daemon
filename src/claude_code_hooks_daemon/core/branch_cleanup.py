@@ -303,7 +303,46 @@ def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]
         and not _holds_nothing(path, entry)
         and not _is_generated_daemon_env(path, entry)
     ]
-    return (*dirty, *kept)
+    return (*dirty, *_judge_seeded_copies(path, kept))
+
+
+def _main_checkout(path: Path) -> Path | None:
+    """The main checkout of the repository ``path`` belongs to, or None if not found."""
+    common = run_git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common.returncode != 0:
+        return None
+    git_dir = Path(common.stdout.strip())
+    return git_dir.parent if git_dir.name == ".git" else None
+
+
+def _judge_seeded_copies(path: Path, entries: Sequence[str]) -> list[str]:
+    """Drop the copy-mode seeded entries that still equal their source in the main checkout.
+
+    The seed list is the one ``worktree_create`` is configured with, read from
+    the main checkout. A copy cannot be lost while its source holds the same
+    bytes. One that differs, or whose source is gone, stays a blocker and is
+    named as differing from its source. Every other entry passes through.
+    """
+    # Imported here: the install package imports core, so a module-level import cycles.
+    from claude_code_hooks_daemon.core.worktree_seed import SEED_MODE_COPY
+    from claude_code_hooks_daemon.install.worktree_seed_report import configured_seed_entries
+    from claude_code_hooks_daemon.utils.worktree_seeding import seed_copy_is_identical
+
+    main = _main_checkout(path)
+    if main is None or not entries:
+        return list(entries)
+    seeds = [
+        seed.path.strip("/") for seed in configured_seed_entries(main) if seed.mode == SEED_MODE_COPY
+    ]
+    judged: list[str] = []
+    for entry in entries:
+        relative = entry.rstrip("/")
+        covered = any(relative == seed or relative.startswith(f"{seed}/") for seed in seeds)
+        if not covered:
+            judged.append(entry)
+        elif not seed_copy_is_identical(main / relative, path / relative):
+            judged.append(f"{entry} (differs from its source in the main checkout)")
+    return judged
 
 
 #: The daemon env file every worktree gets from `scripts/setup_worktree.sh`.

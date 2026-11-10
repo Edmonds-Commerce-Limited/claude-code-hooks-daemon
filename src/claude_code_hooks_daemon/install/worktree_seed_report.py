@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.core.worktree_seed import (
     build_seed_config,
     parse_seed_config,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.worktree_seed_suggestions import diff_seed_config
 
 logger = logging.getLogger(__name__)
@@ -164,6 +165,40 @@ def build_seed_report(root: Path, config: dict[str, Any]) -> WorktreeSeedReport:
         missing=drift.missing,
         seed_key_configured=raw_seed is not None,
     )
+
+
+def configured_seed_entries(root: Path) -> list[SeedEntry]:
+    """The seed entries configured in ``root``'s own ``hooks-daemon.yaml``.
+
+    Reads the file at ``<root>/.claude/``, never searching upward, so the main
+    checkout's list is what answers for the main checkout. A missing or
+    unparseable file yields no entries: the caller uses the list only to EXCUSE
+    a path, so an unreadable list errs toward keeping the path as a blocker.
+
+    Args:
+        root: The repository root whose config to read.
+
+    Returns:
+        The validated entries, empty when nothing is configured or readable.
+    """
+    from claude_code_hooks_daemon.config.loader import ConfigLoader
+
+    for filename in ("hooks-daemon.yaml", "hooks-daemon.yml"):
+        config_path = root / ".claude" / filename
+        if not config_path.is_file():
+            continue
+        try:
+            config = ConfigLoader.load(config_path)
+        except (OSError, ValueError) as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"{config_path} is unreadable, so no seeded copy is excused from "
+                "a worktree removal; every one stays a blocker",
+            )
+            return []
+        return parse_seed_config(_value_at_key(SEED_CONFIG_KEY, config))
+    return []
 
 
 def suggested_yaml_block(entries: Sequence[SeedEntry], *, seed_key_configured: bool) -> str:
