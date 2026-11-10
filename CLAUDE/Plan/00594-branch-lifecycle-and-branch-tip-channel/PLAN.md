@@ -190,8 +190,10 @@ names, people or hashes appear here.
 - [x] ✅ **Task 4.1**: (on main, release note 046, report `task-4-1-report.md`)
   A preflight command (`branch-preflight`)
   lists every blocker with its fix; the creation deny renders the same report.
-- [ ] ⬜ **Task 4.2**: Move pressure to stop, session start and merge per
-  `DESIGN.md`.
+- [x] ✅ **Task 4.2**: (on main, release note 049, report `task-4-2-report.md`)
+  Move pressure to stop, session start and merge per
+  `DESIGN.md`. Creation denies only at cap plus `branches.wip.creation_grace`
+  (default 2). Not done: the "ignored stop report" grace variant.
 - [ ] ⬜ **Task 4.3**: The park record survives a rejected push, and a merge
   clears it visibly. On main (release note 043, report `task-4-3-report.md`):
   the park writes a git-config record before the push; a refused push exits 3
