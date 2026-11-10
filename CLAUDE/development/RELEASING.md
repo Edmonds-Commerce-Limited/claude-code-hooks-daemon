@@ -308,6 +308,56 @@ as normal: a defect is fixed before the tag. Resuming: the state file's `mode`
 keeps a resumed session on this path, and `release_blocker`'s deny message
 names it.
 
+## Release candidate branches (beta testing)
+
+**Owner ruling (Plan 00594):** client projects may run a release candidate
+(RC) branch instead of waiting for a tagged release. An RC unblocks an urgent
+client problem the same day, and proves fixes against real projects before
+they are tagged. Stable tagged releases remain the norm. An RC is a bridge to
+the next tag, not a substitute for it.
+
+**What an RC is.** A branch named `rc/X.Y.Z`, where X.Y.Z is the release it is
+heading for. It is cut from the newest release head or `main`, and the fix
+branches are merged into it with `--no-ff`. It may carry plan work whose
+design is still under review, provided the announcement says so. That work
+goes into a tag only after the review.
+
+**Before every push to an RC** (no exceptions; CI is not the place a format
+slip is found):
+
+1. `./scripts/qa/run_autofix.sh`
+2. `./scripts/qa/llm_qa.py format lint type_check error_hiding magic_values semgrep`
+3. the unit tests of every area the merged branches touch
+
+**Every push is announced** to the client coordinator with the new full sha,
+what it adds, and anything the seat must configure. A seat does not detect a
+moved branch by itself, so an unannounced push is invisible to it.
+
+**Installing on a client seat** uses the guarded unreleased install in
+`scripts/upgrade.sh`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o untracked/scratch/upgrade.sh
+HOOKS_DAEMON_UNSAFE_TRACK_REF=rc/X.Y.Z \
+HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE="<why this seat needs the rc>" \
+  bash untracked/scratch/upgrade.sh --project-root "$PWD"
+```
+
+A full sha in `HOOKS_DAEMON_UNSAFE_TRACK_REF` pins an exact build. Session
+start flags the install as unreleased (`vA.B.C+rc-X.Y.Z.<sha>`). Only a seat
+that is actually blocked takes an RC.
+
+**Returning to stable:** run the same script with the tag and without the two
+variables: `bash untracked/scratch/upgrade.sh --project-root "$PWD" vX.Y.Z`.
+
+**Feedback.** A defect or usability note from an RC seat is recorded in the
+owning plan, or in the open niggles ledger, the same day. A fix lands on its
+own branch and is merged into the RC under the same push rules.
+
+**Ending an RC.** The next `/release` ships the RC's reviewed content. Once
+that tag is published, every RC seat is told to return to stable, and the RC
+branch is deleted (it is merged, so the remote delete is allowed).
+
 ## 🚨 Review Early, Never Drop Findings (Plan 00157)
 
 The Code Review Gate (Step 10) and CLAUDE.md Guidance Audit (Step 11) run
