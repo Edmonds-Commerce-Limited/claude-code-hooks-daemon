@@ -1737,6 +1737,99 @@ class TestAPathNobodyNamedWarnsInsteadOfDenying:
         hook_input = _bash(root, f'true\necho "never closed {root}/{PROTECTED}')
         assert guard.handle(hook_input).decision == Decision.DENY
 
+    @pytest.mark.parametrize(
+        "program",
+        [
+            """'{print > "/tmp/out"}'""",
+            """'{print | "sort"}'""",
+            """-F= '{print $1 > "other/keys"}'""",
+            """'{n++} END{print n > "/tmp/c"}'""",
+            """'{print >> "out.txt"; close("out.txt")}'""",
+        ],
+    )
+    def test_an_awk_program_writing_to_a_literal_destination_only_reads_its_operand(
+        self, root: Path, program: str
+    ) -> None:
+        """Second review I-3: the operand check is for a COMPUTED destination only.
+
+        A literal destination is judged by the program text, as at base, so a
+        program that reads the protected file and writes elsewhere matches nothing.
+        """
+        guard = _make(root, [PROTECTED])
+        assert guard.matches(_bash(root, f"awk {program} {PROTECTED}")) is False
+
+    @pytest.mark.parametrize(
+        ("program", "computed"),
+        [
+            ('{print > "/tmp/out"}', False),
+            ('{print >> "out"; close("out")}', False),
+            ('{print | "sort"}', False),
+            ('{print |& "sort"}', False),
+            ('BEGIN { "date" | getline d }', False),
+            ("{print > FILENAME}", True),
+            ("{print > $1}", True),
+            ('{print > "dir/" $1}', True),
+            ("{print | cmd}", True),
+            ("BEGIN { cmd | getline d }", True),
+            ('BEGIN{system("rm x")}', True),
+        ],
+    )
+    def test_which_awk_programs_compute_their_destination(
+        self, program: str, computed: bool
+    ) -> None:
+        from claude_code_hooks_daemon.handlers.pre_tool_use.write_protected_paths import (
+            _awk_destination_computed,
+        )
+
+        assert _awk_destination_computed(program) is computed
+
+    @pytest.mark.parametrize(
+        "operand",
+        [
+            "$PWD/protected/x",
+            '"$PWD"/protected/x',
+            "$HOME/../protected/x",
+            "~+/protected/x",
+        ],
+    )
+    def test_an_awk_operand_built_from_an_expansion_still_names_the_directory(
+        self, root: Path, operand: str
+    ) -> None:
+        """Second review I-4: the literal part after the expansion names the directory."""
+        (root / "protected").mkdir()
+        guard = _make(root, ["protected/**"])
+        hook_input = _bash(root, f"awk '{{print > FILENAME}}' {operand}")
+        assert guard.matches(hook_input) is True
+        assert guard.handle(hook_input).decision == Decision.DENY
+
+    @pytest.mark.parametrize("operand", ["$PWD/x", "$f", '"$PWD"/notes.txt'])
+    def test_an_unresolvable_awk_operand_under_a_glob_with_no_literal_part_is_denied(
+        self, root: Path, operand: str
+    ) -> None:
+        """Second review I-4: under `**` every project file is listed, as at base."""
+        guard = _make(root, ["**"])
+        hook_input = _bash(root, f"awk '{{print > FILENAME}}' {operand}")
+        assert guard.matches(hook_input) is True
+        assert guard.handle(hook_input).decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        ("cwd", "command"),
+        [
+            ("", "cd protected && awk '{print > $1}' ../other/list"),
+            ("protected", "awk '{print > $1}' list"),
+        ],
+    )
+    def test_a_computed_awk_destination_inside_a_listed_directory_is_denied(
+        self, root: Path, cwd: str, command: str
+    ) -> None:
+        """Second review M-1: every relative destination lands inside the listed directory."""
+        (root / "protected").mkdir()
+        (root / "other").mkdir()
+        guard = _make(root, ["protected/**"])
+        hook_input = {**_bash(root, command), "cwd": str(root / cwd)}
+        assert guard.matches(hook_input) is True
+        assert guard.handle(hook_input).decision == Decision.DENY
+
     def test_the_warning_is_not_kept_for_the_next_call(self, root: Path) -> None:
         guard = _make(root, ["**"])
         assert guard.matches(_bash(root, 'true\necho "never closed')) is True

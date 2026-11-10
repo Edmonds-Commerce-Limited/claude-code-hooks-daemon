@@ -165,6 +165,13 @@ _AWK_PIPE_RE: Final[re.Pattern[str]] = re.compile(r"(?<!\|)\|(?!\|)")
 _AWK_PRINT_RE: Final[re.Pattern[str]] = re.compile(r"\bprintf?\b")
 #: Characters after which a ``/`` opens a regex literal rather than dividing.
 _AWK_REGEX_OPENERS: Final[str] = "{(,;!~&|=<>?:\n"
+#: A string literal as :func:`_awk_without_literals` leaves it.
+_AWK_BLANKED_LITERAL: Final[str] = '""'
+#: What may follow a destination that is one whole string literal.
+_AWK_EXPRESSION_ENDS: Final[frozenset[str]] = frozenset({"", ";", "}", "\n", ")"})
+#: The ``&`` of gawk's two-way ``|&``.
+_AWK_PIPE_COPROCESS: Final[str] = "&"
+_AWK_GETLINE: Final[str] = "getline"
 
 
 def _awk_without_literals(program: str) -> str:
@@ -195,14 +202,9 @@ def _awk_without_literals(program: str) -> str:
     return "".join(out)
 
 
-def _awk_program_writes(program: str) -> bool:
-    """Whether an awk program can write: an output redirect or pipe in a ``print``,
-    a pipe to or from a command, or ``system()``. A comparison (``>=``, ``>`` in
-    a condition or in parentheses), a regex alternation, a ``||`` and a quoted bar
-    are reads."""
-    code = _awk_without_literals(program)
-    if _AWK_SYSTEM_RE.search(code) or _AWK_PIPE_RE.search(code):
-        return True
+def _awk_print_redirects(code: str) -> Iterator[int]:
+    """Offset just past each output redirect (``>``/``>>``) of a ``print`` in
+    literal-blanked awk ``code``; a ``>`` inside parentheses is a comparison."""
     for statement in _AWK_PRINT_RE.finditer(code):
         depth = 0
         position = statement.end()
@@ -215,9 +217,49 @@ def _awk_program_writes(program: str) -> bool:
             elif depth <= 0 and char in ";}\n":
                 break
             elif depth <= 0 and char == ">" and code[position + 1 : position + 2] != "=":
-                return True
+                yield position + (2 if code[position + 1 : position + 2] == ">" else 1)
+                break
             position += 1
-    return False
+
+
+def _awk_program_writes(program: str) -> bool:
+    """Whether an awk program can write: an output redirect or pipe in a ``print``,
+    a pipe to or from a command, or ``system()``. A comparison (``>=``, ``>`` in
+    a condition or in parentheses), a regex alternation, a ``||`` and a quoted bar
+    are reads."""
+    code = _awk_without_literals(program)
+    if _AWK_SYSTEM_RE.search(code) or _AWK_PIPE_RE.search(code):
+        return True
+    return next(_awk_print_redirects(code), None) is not None
+
+
+def _awk_literal_at(code: str, position: int) -> bool:
+    """Whether the expression at ``position`` of literal-blanked ``code`` is one
+    whole string literal (blanked to ``""``), not a concatenation or a variable."""
+    rest = code[position:].lstrip(_AWK_PIPE_COPROCESS).lstrip()
+    if not rest.startswith(_AWK_BLANKED_LITERAL):
+        return False
+    after = rest[len(_AWK_BLANKED_LITERAL) :].lstrip(" \t")
+    return after[:1] in _AWK_EXPRESSION_ENDS
+
+
+def _awk_destination_computed(program: str) -> bool:
+    """Whether a WRITING awk program computes where it writes (``print > FILENAME``,
+    ``> $1``, ``| cmd``, ``system(...)``), as opposed to writing only to string
+    literals (``print > "/tmp/out"``, ``print | "sort"``), which the program text
+    itself names. ``"cmd" | getline`` reads from a literal command."""
+    code = _awk_without_literals(program)
+    if _AWK_SYSTEM_RE.search(code):
+        return True
+    for pipe in _AWK_PIPE_RE.finditer(code):
+        before = code[: pipe.start()].rstrip()
+        after = code[pipe.end() :].lstrip(_AWK_PIPE_COPROCESS).lstrip()
+        if after.startswith(_AWK_GETLINE):
+            if not before.endswith(_AWK_BLANKED_LITERAL):
+                return True
+        elif not _awk_literal_at(code, pipe.end()):
+            return True
+    return any(not _awk_literal_at(code, at) for at in _awk_print_redirects(code))
 
 
 #: Options whose value is a file the command only READS, for any command.
@@ -359,6 +401,13 @@ _CD_ARGUMENT_RE: Final[re.Pattern[str]] = re.compile(
 )
 #: A `cd` argument the handler cannot follow to a directory.
 _UNFOLLOWABLE_CD: Final[re.Pattern[str]] = re.compile(r"[$`*?~]|^-$")
+#: An awk operand holding one of these is built by the shell (`$PWD/x`, `~+/x`),
+#: so it cannot be resolved as a path and is judged by its text.
+_UNRESOLVED_OPERAND_CHARS: Final[str] = "$`~"
+#: A file name standing for "any file written in this directory": a glob whose
+#: last component is wildcard-only matches it exactly when it matches every name.
+_DESTINATION_PROBE: Final[str] = "awk-computed-destination"
+
 #: Characters that make a name part of a longer one (`.env` inside `.envrc`).
 _NAME_CHARACTER: Final[str] = r"[\w.-]"
 
@@ -1261,19 +1310,61 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
                 # A program writing to a destination it computes (`print >
                 # FILENAME`, `> $1`) may write over any file it is given, so a
                 # listed path named among the operands denies (Plan 00478
-                # review C3). Only when neither the operands nor the program
-                # name one is the call left unjudged.
-                for operand in files:
-                    if operand in programs:
-                        continue
-                    glob = self._operand_naming(operand, roots, base, untrusted)
+                # review C3). A program writing only to string literals is
+                # judged by its text alone: its operands are only read (I-3).
+                if any(_awk_destination_computed(program) for program in programs):
+                    glob = self._awk_operands_naming(
+                        [operand for operand in files if operand not in programs],
+                        roots,
+                        base,
+                        untrusted,
+                    )
                     if glob is not None:
                         return glob
+                # A relative destination lands in the working directory, so one
+                # inside a listed directory is written over (second review M-1).
+                glob = self._listed_directory_holding(base, roots)
+                if glob is not None:
+                    return glob
                 for program in programs:
                     glob = self._text_naming(program, cause=_CAUSE_AWK, computed_destination=True)
                     if glob is not None:
                         return glob
         return None
+
+    def _awk_operands_naming(
+        self, operands: Sequence[str], roots: Sequence[str], base: str, untrusted: bool
+    ) -> str | None:
+        """The glob a file operand of an awk program with a computed destination names.
+
+        An operand resolved as a path is judged as one. An operand built from an
+        expansion (`$PWD/protected/x`, `~+/protected/x`) cannot be resolved, so
+        it is judged by its text, as the whole program was at base: the literal
+        part after the expansion naming a listed path or its directory counts
+        (second review I-4), and under a glob with no literal part (`**`) it
+        could be any file, so it counts too.
+        """
+        for operand in operands:
+            glob = self._operand_naming(operand, roots, base, untrusted)
+            if glob is None and any(char in operand for char in _UNRESOLVED_OPERAND_CHARS):
+                glob = self._unresolved_operand_naming(operand)
+            if glob is not None:
+                return glob
+        return None
+
+    def _unresolved_operand_naming(self, operand: str) -> str | None:
+        """The glob the text of an operand that cannot be resolved could name."""
+        for glob in self._globs():
+            pattern = _name_pattern(glob) or _directory_pattern(glob)
+            if pattern is None or pattern.search(operand):
+                return glob
+        return None
+
+    def _listed_directory_holding(self, base: str, roots: Sequence[str]) -> str | None:
+        """The wildcard-only glob (`protected/**`) that any file in ``base`` matches."""
+        probe = str(Path(base) / _DESTINATION_PROBE)
+        glob = self._protecting(probe, roots, directories=False)
+        return glob if glob is not None and _name_pattern(glob) is None else None
 
     def _rescanned(
         self, text: str, where: tuple[str, Sequence[str], bool, dict[str, Any]]
