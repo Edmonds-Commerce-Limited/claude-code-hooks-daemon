@@ -467,7 +467,14 @@ class ClaudeMdInjector:
         try:
             return inspect.getsourcefile(cls)
         except (TypeError, OSError) as exc:
-            logger.debug("ClaudeMdInjector: inspect found no source for %s: %s", cls, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    f"inspect found no source file for {cls!r}; falling back to the code "
+                    "objects of the methods it defines"
+                ),
+            )
         for member in vars(cls).values():
             code = getattr(member, "__code__", None)
             if code is not None:
