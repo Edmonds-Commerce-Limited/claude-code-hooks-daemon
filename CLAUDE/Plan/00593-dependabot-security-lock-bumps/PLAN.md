@@ -31,6 +31,25 @@ never dropped silently.
 
 Dependabot PR #193 (nltk only) is superseded by this plan and is closed once this lands.
 
+## Outcome
+
+| Package           | From    | To       | Alert cleared | Constraint holding it                                             |
+| ----------------- | ------- | -------- | ------------- | ----------------------------------------------------------------- |
+| nltk              | 3.9.4   | 3.10.4   | yes           |                                                                   |
+| anyio             | 4.13.0  | 4.16.0   | yes           |                                                                   |
+| virtualenv        | 21.7.1  | 21.15.6  | yes           |                                                                   |
+| urllib3           | 2.6.3   | 2.8.0    | yes           |                                                                   |
+| cryptography      | 46.0.7  | 50.0.2   | yes           |                                                                   |
+| idna              | 3.13    | 3.20     | yes           |                                                                   |
+| filelock          | 3.29.0  | 3.32.7   | no            | `safety` 3.8.1 (latest) requires `filelock<4.0`; patched is 4.2.1 |
+| mcp               | 1.29.0  | 1.29.0   | no            | `semgrep` 1.184.0 (latest) requires `mcp==1.29.0`                 |
+| opentelemetry-api | 1.37.0  | 1.37.0   | no            | `semgrep` 1.184.0 (latest) requires `opentelemetry-api~=1.37.0`   |
+
+Forcing the held packages makes the resolver downgrade `semgrep`/`safety` (and drop `mcp`, `nltk` and others), so none
+was forced and no dependency or pyproject floor was changed. Side effects of the update: `defusedxml` 0.7.1 added (new
+`nltk` dependency); `packaging` and `python-discovery` moved. No runtime `[project] dependencies` package changed, so
+no release note.
+
 ## Goals
 
 - Every alerted package at or above its first patched version, unless a named constraint holds it.
@@ -45,9 +64,9 @@ Dependabot PR #193 (nltk only) is superseded by this plan and is closed once thi
 
 ### Phase 1: Bump
 
-- [ ] ⬜ **Task 1.1**: `uv lock --upgrade-package` for each alerted package; record any package held by a constraint and
+- [x] ✅ **Task 1.1**: `uv lock --upgrade-package` for each alerted package; record any package held by a constraint and
   why
-- [ ] ⬜ **Task 1.2**: targeted QA plus the tests that exercise the bumped packages; fix forced breakage test-first
+- [x] ✅ **Task 1.2**: targeted QA plus the tests that exercise the bumped packages; fix forced breakage test-first
 
 ### Phase 2: Delivery
 
