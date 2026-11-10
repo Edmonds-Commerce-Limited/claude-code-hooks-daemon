@@ -1399,20 +1399,21 @@ class PipeBlockerHandler(
                 requires_main_thread=False,
             ),
             AcceptanceTest(
-                title="docker ps piped to tail (unknown command — extra_whitelist path)",
+                title="docker ps piped to tail (unknown producer — advisory)",
                 command='[[ "docker ps -a | tail -20" == 0 ]]',
                 dispatch_as_bash=True,
                 description=(
-                    "Blocks docker ps | tail via unknown-command path (extra_whitelist hint). "
-                    "docker ps is not in blacklist so handler suggests adding to extra_whitelist."
+                    "Allows docker ps | tail with an advisory. docker ps is on neither "
+                    "list, so the handler cannot tell whether it is expensive and names "
+                    "echd-capture and extra_whitelist."
                 ),
-                expected_decision=Decision.DENY,
+                expected_decision=Decision.ALLOW,
                 expected_message_patterns=[
-                    r"Pipe to tail/head",
+                    r"pipe_blocker",
                     r"extra_whitelist",
                 ],
                 safety_notes="No-op: [[ ... ]] evaluates to false (exit 1), no side effects",
-                test_type=TestType.BLOCKING,
+                test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

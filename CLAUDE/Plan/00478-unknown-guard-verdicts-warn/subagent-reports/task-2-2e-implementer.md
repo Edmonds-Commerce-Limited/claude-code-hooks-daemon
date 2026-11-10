@@ -23,7 +23,7 @@ Left as deny (a path or wildcard that can reach a listed path is positively pres
 
 - Targeted pytest on all 9 test files touched since 6bba54cc7: 951 passed.
 - `run_autofix.sh`: rc 0 (it reformatted test_pipe_blocker_unknown_verdict.py).
-- `llm_qa.py changed`: exceeded the 600 s foreground limit; see the final reply for its outcome.
+- `llm_qa.py changed` (ran past the 600 s foreground limit, finished in background): found 3 failures + lint F811 + pyright, all mine and now fixed: (1) `test_pipe_blocker_integration.py` duplicate method name (my rename collided with an existing test; renamed `test_cargo_deny_has_single_disable_footer`); (2) pipe_blocker's own acceptance test "docker ps piped to tail" pinned the unknown deny (`pipe_blocker.py` get_acceptance_tests, now ADVISORY/ALLOW with `pipe_blocker`/`extra_whitelist` patterns; `test_acceptance_contract.py` two tests pass again); (3) `tests/unit/handlers/test_registry_option_injection.py::test_unparseable_pattern_is_not_fatal` now expects allow + advisory. Re-ran those files: 605 passed. `llm_qa.py changed` not re-run in full after the fixes (10 min); the coordinator's gate covers it.
 
 ## Ambiguities
 

@@ -165,13 +165,14 @@ class TestPipeBlockerExtraWhitelistInjection:
         """A malformed client regex must not take the whole handler down.
 
         It cannot match anything, so the command falls through to the normal
-        unknown-command denial rather than raising out of `matches()`.
+        unknown-producer advisory rather than raising out of `matches()`.
         """
         router = _register_with_options("pipe_blocker", {"extra_whitelist": ["^my_report(["]})
 
         result = router.route(EventType.PRE_TOOL_USE, _bash_input("my_report | tail -5"))
 
-        assert result.result.decision == "deny"
+        assert result.result.decision == "allow"
+        assert "extra_whitelist" in "\n".join(result.result.context)
 
 
 def _handler_modules() -> list[Path]:
