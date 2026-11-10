@@ -33,8 +33,11 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     DormancyStage,
     Pool,
     is_work_branch,
+    merge_proof_key,
+    read_merge_proofs,
     worktrees_by_branch,
 )
+from claude_code_hooks_daemon.daemon.branch_safety import TIER_UNPROVEN
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -309,7 +312,29 @@ def _merged_refnames(
     if result.returncode != 0:
         logger.info("branch_creation: merged listing failed: %s", result.stderr.strip())
         return set()
-    return {line for line in result.stdout.splitlines() if line}
+    merged = {line for line in result.stdout.splitlines() if line}
+    return merged | _proven_refnames(repo, refs, targets, merged)
+
+
+def _proven_refnames(
+    repo: Path, refs: list[_Ref], targets: list[str], merged: set[str]
+) -> set[str]:
+    """Refs whose patch-id or tree-containment proof is cached for this tip and default.
+
+    Read-only and offline: the proof is computed on the explicit commands (the remote
+    delete proof, ``branch-sweep``) and cached by tip, so a squash-merged branch stops
+    counting as open without this hook walking any object.
+    """
+    default_shas = [ref.tip for ref in refs if ref.refname in targets]
+    proofs = read_merge_proofs(repo)
+    if not proofs:
+        return set()
+    return {
+        ref.refname
+        for ref in refs
+        if ref.refname not in merged
+        and proofs.get(merge_proof_key(ref.tip, default_shas), TIER_UNPROVEN) != TIER_UNPROVEN
+    }
 
 
 def _tip_label(ref: _Ref, labels: Labels) -> Mapping[str, str | None]:

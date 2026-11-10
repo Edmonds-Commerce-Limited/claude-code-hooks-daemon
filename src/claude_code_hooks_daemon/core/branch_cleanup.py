@@ -878,7 +878,8 @@ def _proven_remote(
     Candidates are the inventory's merged and patch-equivalent records with a remote
     copy, past the cleanup policy; each is then judged by the remote-delete guard's
     own proof (:func:`prove_remote_merged`), so this deletes nothing the guard would
-    refuse an agent. A patch-equivalent remote branch fails that proof and is kept.
+    refuse an agent. That proof accepts ancestry, patch-id and tree containment, so a
+    patch-equivalent remote branch is deleted too (behind the same bundle).
     """
     names: list[str] = []
     problems: dict[str, str] = {}
