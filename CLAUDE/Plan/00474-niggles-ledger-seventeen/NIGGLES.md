@@ -7261,3 +7261,27 @@ plan's lifetime total. The owner read that number as review churn and was alarme
 **Status**: ⬜ Open. Count only dispatches of reviewer agent types (or exclude the fact-checker
 and other daemon-requested agents), say in the advisory what is counted, and consider counting
 rounds per branch head or per day rather than per plan lifetime.
+
+### N603 — check that write_protected_paths cp/mv verb matching handles path-spelled `/bin/cp` and `/usr/bin/mv`
+
+**Source**: the Claude Code changelog review for v3.74.0 (2.1.319 to 2.1.322), row "adopt (verify)".
+Report: `subagent-reports/261110-claude-code-review-v3.74.0.md`.
+
+**Evidence**: Claude Code 2.1.321 now gives `cp` and `mv` spelled by a path, such as `/bin/cp`, the same
+path checks as the bare verbs. In `write_protected_paths.py` one place strips the path
+(`rsplit("/", 1)[-1]`) but the verb checks at `_TREE_COPY_VERBS` and the target-directory resolution
+match by name, so a path-spelled verb may slip past the daemon's own guard.
+
+**Status**: ⬜ Open. Write a test that `/bin/cp` and `/usr/bin/mv` into a protected path are denied
+exactly as the bare verbs are, and fix the match if it is not.
+
+### N604 — review whether the write_protected_paths cp/mv-into-directory guard overlaps Claude Code 2.1.321's deny-rule fix
+
+**Source**: the same review, row "redundant (partial)".
+
+**Evidence**: Claude Code 2.1.321 now applies deny rules and protected-file prompts to the file a `cp`
+or `mv` into a directory writes. The daemon's guard at `write_protected_paths.py:457` resolves that
+target directory itself.
+
+**Status**: ⬜ Open. Keep the guard unless the project's `permissions.deny` already covers the same
+paths; record the comparison before removing anything.

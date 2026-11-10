@@ -1,6 +1,6 @@
-# Drafted by Plan 00594. The VERSION in the filename is a target, not a decision.
+# Drafted by Plan 00594.
 version: "3.74.0"
-date: "UNRELEASED"
+date: "2026-11-10"
 
 breaking: false
 
