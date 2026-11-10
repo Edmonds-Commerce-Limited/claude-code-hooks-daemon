@@ -84,9 +84,10 @@ plan states that cost; it does not re-decide the ruling.
   log prefix `UNKNOWN-VERDICT`; an independent review caught a found marker lost on
   a later timeout, fixed before merge (`a2a7f5687`; branch merged to main via
   `6014e3814`, main CI run 42747571106 green); release note 027.
-- [ ] ⬜ **Task 2.2b**: `destructive_git` substitution route (row 2). Held with Q1:
-  the forced delete is positively recognised and only its target is hidden behind
-  the substitution, the same "recognised action, unproven target" shape as rows 1/3.
+- [ ] 🔄 **Task 2.2b**: `destructive_git` substitution route (row 2). The stand-in's
+  Q1 ruling keeps the deny (a recognised forced delete with an unproven target), so
+  this task only pins the local-delete substitution deny with a test (none found by
+  name in INVENTORY.md row 2).
 - [x] ✅ **Task 2.2c**: rows 14, 15, 19, 20, 22, 24 (flaggable channel, journal
   guard, release merge freeze, reference repo not verified, curl into a
   non-shell interpreter, root recursion on an unstattable path).
@@ -99,13 +100,23 @@ plan states that cost; it does not re-decide the ruling.
   Delivered: `validate_eslint_on_write` `_not_linted` allows with the shared advisory;
   R-ESLINT-TIMEOUT and R-ESLINT-RUN-FAILURE are advisory-only (`a215b3ae6`, branch
   merged via `2d9e6c762`, main `47dae7574` CI run 42756436040 green); release note 029.
-- [ ] ⬜ **Task 2.2e**: Contested rows, after the owner rules (see "Owner
-  questions"): 1, 3, 5, 16, 23, and scope rows 21, 25, 26.
+- [ ] 🔄 **Task 2.2e**: Contested rows 1, 3, 5, 16, 23 and scope rows 21, 25, 26,
+  under the stand-in's ruling (see "Owner questions"). Convert to warn: row 16's
+  sub-branches that deny with no literal mention of a listed path (the `**`-only
+  glob), and row 26 (an unknown producer piped to `tail`/`head`; blacklisted
+  producers still deny). Rows 1, 3, 5, 16-literal and 23 stay deny; rows 21 and 25
+  are out of scope.
 - [ ] 🔄 **Task 2.3**: Update the rule explanations, the generated `CLAUDE.md`
   guidance, and add a release note. Done for 2.2a, 2.2c and 2.2d (rule texts,
   `get_claude_md`, release notes 027-029); the rest ships with 2.2b and 2.2e.
 
 ## Owner questions (block Task 2.2e only)
+
+The owner did not answer by the stand-in deadline. The STAND-IN's ruling (not the
+owner's; the owner may overturn any line) is journalled in
+`JOURNAL/2026-11-10/100942Z-decision-97aacd.md`: Q1 deny, Q2 deny, Q3 deny where
+the path is literally named and warn where it is not, Q4 rows 21 and 25 out of
+scope and row 26 in scope (warn).
 
 - **Q1 (rows 1, 2, 3):** `destructive_git` denies a positively recognised
   `git branch -D` / `worktree remove` / `git push --delete` when it cannot PROVE
