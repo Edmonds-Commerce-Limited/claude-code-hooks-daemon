@@ -84,6 +84,8 @@ JSON_RECORD_KEYS: tuple[str, ...] = (
     "kept_reason",
     "kept_by",
     "kept_at",
+    "author",
+    "author_email",
     "action",
 )
 
@@ -111,6 +113,7 @@ class SweepGroups:
     unclassified: tuple[BranchRecord, ...]
     never_work: tuple[BranchRecord, ...]
     bot_owned: tuple[BranchRecord, ...] = ()
+    foreign: tuple[BranchRecord, ...] = ()
 
 
 def _group_name(record: BranchRecord) -> str:
@@ -118,6 +121,8 @@ def _group_name(record: BranchRecord) -> str:
     state = record.state
     if state == BranchState.BOT_OWNED:
         return "bot-owned"
+    if state == BranchState.FOREIGN:
+        return "foreign"
     if state in _NEVER_WORK:
         return "not-work"
     if state in _MERGED:
@@ -155,6 +160,7 @@ def group_records(inventory: BranchInventory) -> SweepGroups:
         unclassified=take("unclassified"),
         never_work=take("not-work"),
         bot_owned=take("bot-owned"),
+        foreign=take("foreign"),
     )
 
 
@@ -408,6 +414,14 @@ def _parked_line(record: BranchRecord, config: BranchesConfig) -> str:
 # --- the CLI report --------------------------------------------------------------------
 
 
+def _foreign_line(record: BranchRecord) -> str:
+    who = record.author or "unknown author"
+    if record.author_email:
+        who = f"{who} <{record.author_email}>"
+    proof = f"; proven {record.proof_state.value}" if record.proof_state is not None else ""
+    return f"  {record.name}: {_age(record)}, by {who}{proof}"
+
+
 def _section(title: str, lines: list[str]) -> list[str]:
     return [title, *lines, ""] if lines else []
 
@@ -481,6 +495,11 @@ def render_report(
     out += _section(
         "Bot-owned (branches.bot_owned: in no pool, never cleaned; the bot removes them):",
         [f"  {r.name}: {_age(r)}" for r in groups.bot_owned],
+    )
+    out += _section(
+        "Foreign (not this clone's branches: in no pool, never cleaned automatically; "
+        "listed so they are not invisible):",
+        [_foreign_line(r) for r in groups.foreign],
     )
     if show_all:
         out += _section(
@@ -563,6 +582,8 @@ def _record_json(
         "kept_reason": record.kept_reason,
         "kept_by": record.kept_by,
         "kept_at": record.kept_at,
+        "author": record.author,
+        "author_email": record.author_email,
         "action": action,
     }
     return {key: document[key] for key in JSON_RECORD_KEYS}

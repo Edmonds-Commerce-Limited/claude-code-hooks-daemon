@@ -3,7 +3,9 @@
 ``git commit-tree`` writes a commit with the tip's own tree plus the
 ``Parked-Reason``/``Parked-By`` trailers (``Unparked`` to clear), and
 ``git update-ref <ref> <new> <old>`` moves the branch only if its tip has not
-moved meanwhile. No checkout is needed. The branch is then pushed with a plain
+moved meanwhile. No checkout is needed. When ``commit.gpgsign`` is true the commit
+is signed (``commit-tree`` ignores that key itself); a failed signing aborts the
+park before any ref moves. The branch is then pushed with a plain
 fast-forward ``git push``; a failed push leaves the local park standing and
 is reported with the command to retry.
 """
@@ -25,6 +27,13 @@ EXIT_PARKED_NOT_PUSHED = 3
 
 #: ``git config`` exit status for "no such key".
 _CONFIG_KEY_ABSENT = 1
+
+_GPGSIGN_KEY = "commit.gpgsign"
+_SIGN_FLAG = "-S"
+_SIGNING_HINT = (
+    "commit.gpgsign is true here, so the park commit must be signed: check user.signingkey, "
+    "gpg.format and gpg.program, or unset commit.gpgsign for this repository"
+)
 
 _SHA_KEY = "hooksDaemonParked"
 _REASON_KEY = "hooksDaemonParkedReason"
@@ -100,6 +109,43 @@ def clear_park_record(repo: Path, name: str) -> ParkRecord | None:
     return record
 
 
+def _recorded_park_names(repo: Path) -> list[str]:
+    """Every branch that carries a park record (git lower-cases the key's last segment)."""
+    result = run_git(repo, "config", "--get-regexp", rf"^branch\..+\.{_SHA_KEY.lower()}$")
+    if result.returncode == _CONFIG_KEY_ABSENT:
+        return []
+    if result.returncode != 0:
+        raise BranchParkError(f"git config --get-regexp failed: {result.stderr.strip()}")
+    prefix, suffix = "branch.", f".{_SHA_KEY.lower()}"
+    names: list[str] = []
+    for line in result.stdout.splitlines():
+        key = line.split(" ", 1)[0]
+        names.append(key[len(prefix) : -len(suffix)])
+    return names
+
+
+def announce_ended_parks(repo: Path) -> list[str]:
+    """Report each park that has ended, then remove its record, so it is said once.
+
+    A park ends when the branch gained new work (its tip is no longer the park
+    commit) or is gone. A merge clears its record itself and says so
+    (``cleanup_after_merge``). The line is the one the merge path prints:
+    ``Park cleared: <name> (<reason>)``. Nothing is reported for a park that
+    still stands.
+    """
+    lines: list[str] = []
+    for name in _recorded_park_names(repo):
+        record = read_park_record(repo, name)
+        if record is None:
+            continue
+        tip = run_git(repo, "rev-parse", "--verify", "--quiet", f"{_HEADS}{name}^{{commit}}")
+        if tip.returncode == 0 and tip.stdout.strip() == record.sha:
+            continue
+        clear_park_record(repo, name)
+        lines.append(f"Park cleared: {name} ({record.reason})")
+    return lines
+
+
 def _git_out(repo: Path, *args: str) -> str:
     result = run_git(repo, *args)
     if result.returncode != 0:
@@ -137,9 +183,56 @@ def _write_park_commit(repo: Path, parent: str, reason: str, *, clear: bool) -> 
     """A trailer commit on ``parent``'s own tree; returns its sha."""
     tree = _git_out(repo, "rev-parse", f"{parent}^{{tree}}")
     user = run_git(repo, "config", "user.name").stdout.strip() or "unknown"
-    return _git_out(
-        repo, "commit-tree", tree, "-p", parent, "-m", _message(reason, user, clear=clear)
-    )
+    args = ["commit-tree", tree, "-p", parent, "-m", _message(reason, user, clear=clear)]
+    if not _signing_requested(repo):
+        return _git_out(repo, *args)
+    result = run_git(repo, *args, _SIGN_FLAG)
+    if result.returncode != 0:
+        raise BranchParkError(
+            f"signing the park commit failed, so nothing was changed: {result.stderr.strip()}. "
+            f"{_SIGNING_HINT}"
+        )
+    return result.stdout.strip()
+
+
+def _signing_requested(repo: Path) -> bool:
+    """True when the repository asks for signed commits (``commit.gpgsign``).
+
+    ``git commit-tree`` does not read that key itself, so the park asks for it.
+    """
+    result = run_git(repo, "config", "--type=bool", "--get", _GPGSIGN_KEY)
+    if result.returncode == _CONFIG_KEY_ABSENT:
+        return False
+    if result.returncode != 0:
+        raise BranchParkError(f"git config {_GPGSIGN_KEY} failed: {result.stderr.strip()}")
+    return result.stdout.strip() == "true"
+
+
+def _keep_refused_remote_park(
+    repo: Path, name: str, remote: str, new: str, reason: str, clear: bool, stderr: str
+) -> ParkResult:
+    """Keep a remote-only park whose push failed: a local branch at ``new`` plus the record.
+
+    The park then stands locally exactly as it does for a local branch, so the
+    pool counts, the retry command and the exit status all agree with that path.
+    """
+    created = run_git(repo, "update-ref", f"{_HEADS}{name}", new, "")
+    if created.returncode != 0:
+        raise BranchParkError(
+            f"push of {name} to {remote} failed and the park could not be kept locally: "
+            f"{created.stderr.strip()}"
+        )
+    _record_park(repo, name, new, reason, clear=clear)
+    return ParkResult(new, False, stderr.strip() or "git push failed", f"git push {remote} {name}")
+
+
+def _record_park(repo: Path, name: str, sha: str, reason: str, *, clear: bool) -> None:
+    """Write the park record of a fresh park, or remove it on an unpark."""
+    if clear:
+        clear_park_record(repo, name)
+        return
+    user = run_git(repo, "config", "user.name").stdout.strip() or "unknown"
+    write_park_record(repo, name, ParkRecord(sha, reason, int(time.time()), user))
 
 
 def _park_remote_only(
@@ -154,9 +247,10 @@ def _park_remote_only(
 ) -> ParkResult:
     """Park a branch only ``remote`` holds, with no local branch.
 
-    The park commit is pushed as a plain fast-forward; no local ref holds it, so
-    a failed push parks nothing. On success the remote-tracking ref follows the
-    push so the inventory sees the park without a fetch.
+    The park commit is pushed as a plain fast-forward. On success no local branch
+    exists and the remote-tracking ref follows the push so the inventory sees the
+    park without a fetch. A failed push keeps the park in a local branch with its
+    record (``_keep_refused_remote_park``).
     """
     if not clear:
         _refuse_same_reason(repo, old, name, reason)
@@ -169,10 +263,7 @@ def _park_remote_only(
         timeout=Timeout.GIT_FETCH_SESSION,
     )
     if pushed.returncode != 0:
-        raise BranchParkError(
-            f"push of {name} to {remote} failed, so nothing is parked: "
-            f"{pushed.stderr.strip() or 'git push failed'}"
-        )
+        return _keep_refused_remote_park(repo, name, remote, new, reason, clear, pushed.stderr)
     # ``git push`` already advances the tracking ref when the remote has the default
     # fetch refspec; setting it to ``new`` is idempotent and covers a remote without one.
     moved = run_git(repo, "update-ref", remote_ref, new)
@@ -198,9 +289,8 @@ def park_branch(
     the remote alone (no local branch is created).
 
     Raises:
-        BranchParkError: The reason is unusable, the branch is missing, the
-            tip moved while the park commit was written, or a remote-only
-            park could not be pushed.
+        BranchParkError: The reason is unusable, the branch is missing, or the
+            tip moved while the park commit was written.
     """
     stripped = reason.strip() if reason is not None else ""
     if not clear and (not stripped or "\n" in stripped):
@@ -224,11 +314,7 @@ def park_branch(
         raise BranchParkError(
             f"{name} moved while parking; nothing changed: {moved.stderr.strip()}"
         )
-    if clear:
-        clear_park_record(repo, name)
-    else:
-        user = run_git(repo, "config", "user.name").stdout.strip() or "unknown"
-        write_park_record(repo, name, ParkRecord(new, stripped, int(time.time()), user))
+    _record_park(repo, name, new, stripped, clear=clear)
     retry = f"git push {remote} {name}"
     pushed = run_git(repo, "push", remote, name, timeout=Timeout.GIT_FETCH_SESSION)
     if pushed.returncode != 0:

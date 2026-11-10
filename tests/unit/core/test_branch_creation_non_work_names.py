@@ -40,7 +40,9 @@ def _repo_at_cap(tmp_path: Path, cap: int) -> Path:
 
 
 def _config(cap: int) -> BranchesConfig:
-    return BranchesConfig.model_validate({"wip": {"cap": cap}, "default": "main"})
+    return BranchesConfig.model_validate(
+        {"wip": {"cap": cap, "creation_grace": 0}, "default": "main"}
+    )
 
 
 def test_creating_the_default_branch_at_the_cap_is_allowed(tmp_path: Path) -> None:

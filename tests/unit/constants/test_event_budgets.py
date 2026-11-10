@@ -89,13 +89,13 @@ class TestBudgetOrdering:
             if args[0] == "for-each-ref":
                 # The default's ref is listed, so the --merged call runs too.
                 rows = "".join(
-                    f"refs/heads/{name}\x00" + "1" * 40 + "\x000\x00\x00\n"
+                    f"refs/heads/{name}\x00" + "1" * 40 + "\x000\x00\x00\x00\n"
                     for name in ("a", "main")
                 )
                 return subprocess.CompletedProcess(["git", *args], 0, rows, "")
             return subprocess.CompletedProcess(["git", *args], 1, "", "boom")
 
-        config = BranchesConfig(default="main", wip=BranchWipConfig(cap=1))
+        config = BranchesConfig(default="main", wip=BranchWipConfig(cap=1, creation_grace=0))
         with (
             patch.object(branch_creation, "run_git", fake_run_git),
             patch.object(branch_inventory, "run_git", fake_run_git),

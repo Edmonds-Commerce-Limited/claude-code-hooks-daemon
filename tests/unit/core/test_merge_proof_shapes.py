@@ -296,7 +296,7 @@ class TestCreationReadsTheProof:
     def test_a_squash_merged_branch_stops_counting_as_open(self, repo: Path) -> None:
         config = BranchesConfig(
             default="main",
-            wip=BranchWipConfig(cap=1, count_remote=True),
+            wip=BranchWipConfig(cap=1, count_remote=True, creation_grace=0),
             merged=BranchMergedConfig(mode="off"),
         )
         _topic(repo, "feat", ["a.txt", "b.txt"])

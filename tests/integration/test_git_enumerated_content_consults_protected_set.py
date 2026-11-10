@@ -71,6 +71,8 @@ import ast
 from pathlib import Path
 from typing import Final, NamedTuple
 
+import pytest
+
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 
 #: The trees where a module may reach repository content through git.
@@ -93,6 +95,14 @@ _CONTENT_BEARING: Final[frozenset[str]] = frozenset({"diff", "grep"})
 _NAMES_ONLY_FLAGS: Final[frozenset[str]] = frozenset(
     {"--name-only", "--name-status", "--error-unmatch", "--shortstat"}
 )
+
+#: `--raw` prints only modes, blob ids and paths, so it reduces a diff to
+#: metadata -- unless one of these flags also asks for the body.
+_RAW_FLAG: Final[str] = "--raw"
+_BODY_FLAGS: Final[frozenset[str]] = frozenset(
+    {"-p", "-u", "--patch", "--patch-with-raw", "--cc", "-c", "--combined"}
+)
+_BODY_FLAG_PREFIXES: Final[tuple[str, ...]] = ("--unified",)
 
 #: Any reference to one of these means the module consults the protected set.
 _PROTECTED_HELPERS: Final[tuple[str, ...]] = (
@@ -176,6 +186,13 @@ def _reads_file_content(tree: ast.Module) -> bool:
     )
 
 
+def _is_raw_metadata_only(strings: list[str]) -> bool:
+    """A `--raw` diff that asks for no body."""
+    return _RAW_FLAG in strings and not any(
+        string in _BODY_FLAGS or string.startswith(_BODY_FLAG_PREFIXES) for string in strings
+    )
+
+
 def _content_enumerating_calls(tree: ast.Module) -> list[tuple[int, str]]:
     """Call sites that obtain CONTENT from a git-enumerated file set."""
     literals = _list_literals(tree)
@@ -188,6 +205,8 @@ def _content_enumerating_calls(tree: ast.Module) -> list[tuple[int, str]]:
         if not _is_git_call(node, strings):
             continue
         if any(flag in strings for flag in _NAMES_ONLY_FLAGS):
+            continue
+        if _is_raw_metadata_only(strings):
             continue
         for subcommand in sorted(set(strings) & _ENUMERATING):
             # `ls-files` yields names; it only reaches content when the module
@@ -269,6 +288,22 @@ class TestTheScannerIsNotVacuous:
         source = 'result = run_git(root, "diff", "--name-only", "ORIG_HEAD", "HEAD")\n'
 
         assert self._scan(tmp_path, source) == []
+
+    def test_raw_diff_metadata_is_not_flagged(self, tmp_path: Path) -> None:
+        """`--raw` prints modes, blob ids and paths; remote_branch_proof relies on it."""
+        source = 'result = run_git(root, "diff", "--raw", "-z", base, tip)\n'
+
+        assert self._scan(tmp_path, source) == []
+
+    @pytest.mark.parametrize("patch_flag", ["--patch", "-p", "--unified=0", "--stat"])
+    def test_raw_diff_that_also_asks_for_a_body_is_caught(
+        self, tmp_path: Path, patch_flag: str
+    ) -> None:
+        """`--raw --patch` prints the diff body after the raw lines."""
+        source = f'result = run_git(root, "diff", "--raw", "{patch_flag}", base, tip)\n'
+
+        expected = [] if patch_flag == "--stat" else ["1:diff"]
+        assert self._scan(tmp_path, source) == expected
 
     def test_error_unmatch_is_not_flagged(self, tmp_path: Path) -> None:
         """A membership test on a path the module already named."""

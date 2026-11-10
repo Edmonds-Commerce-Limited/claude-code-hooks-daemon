@@ -138,6 +138,7 @@ class TestBranchInstallRecordsTracking:
         assert meta is not None
         assert meta.tracked_ref == "rc/1.1.0"
         assert meta.tracked_sha == _head(daemon_dir)
+        assert meta.tracked_sha is not None
         assert len(meta.tracked_sha) == 40
         assert meta.last_release_tag == "v1.0.0"
 

@@ -24,8 +24,15 @@ from typing import Any
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
-from claude_code_hooks_daemon.core.branch_creation import LABELS_RELATIVE_PATH, write_labels
+from claude_code_hooks_daemon.core.branch_creation import (
+    LABELS_RELATIVE_PATH,
+    creation_report,
+    read_labels,
+    render_creation_report,
+    write_labels,
+)
 from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
+from claude_code_hooks_daemon.core.branch_park import BranchParkError, announce_ended_parks
 from claude_code_hooks_daemon.core.branch_sweep import (
     deprecation_line,
     effective_behind_threshold,
@@ -93,8 +100,26 @@ class BranchSweepHandler(SessionStartHandlerBase):
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Run the inventory within its budget and print the summary, or nothing."""
-        context = [*self._branch_lines(hook_input), *self._claude_md_notice_lines()]
+        context = [
+            *self._ended_park_lines(),
+            *self._branch_lines(hook_input),
+            *self._claude_md_notice_lines(),
+        ]
         return AdvisoryResult(decision=Decision.ALLOW, context=context)
+
+    def _ended_park_lines(self) -> list[str]:
+        """``Park cleared: ...`` for each park that ended since the last session; empty if none."""
+        try:
+            return announce_ended_parks(self._get_project_root())
+        except BranchParkError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="the park-cleared line is advisory (not a repository, or git failed); "
+                "the record stays and the next SessionStart says it",
+                level=logging.DEBUG,
+            )
+            return []
 
     def _claude_md_notice_lines(self) -> list[str]:
         """The CLAUDE.md block notices, fresh for this SessionStart; empty when none or unreadable."""
@@ -144,9 +169,21 @@ class BranchSweepHandler(SessionStartHandlerBase):
             deprecation=deprecation_line(self._branches, legacy),
             behind_threshold=effective_behind_threshold(self._branches, legacy),
         )
-        if not lines:
+        out = [f"{_ICON}  GIT BRANCHES:", *lines] if lines else []
+        return [*out, *self._pool_lines(root)]
+
+    def _pool_lines(self, root: Path) -> list[str]:
+        """Every full pool with its fix: the preflight report (``branch-preflight``)."""
+        report = creation_report(
+            root, self._branches, None, labels=read_labels(root / LABELS_RELATIVE_PATH)
+        )
+        if not report.blockers:
             return []
-        return [f"{_ICON}  GIT BRANCHES:", *lines]
+        preflight = daemon_cli_command_for_docs("branch-preflight")
+        return [
+            f"{_ICON}  BRANCH POOLS (same report as `{preflight}`):",
+            *render_creation_report(report),
+        ]
 
     def get_claude_md(self) -> str | None:
         """The branch summary and the cap are a standing policy."""

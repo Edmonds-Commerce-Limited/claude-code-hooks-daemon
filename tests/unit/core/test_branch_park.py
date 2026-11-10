@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.core.branch_park import (
     BranchParkSameReason,
     park_branch,
 )
+from tests.conftest import HERMETIC_GIT_EMAIL
 from tests.support.git_fixtures import git_setup_timeout
 
 
@@ -43,7 +44,7 @@ def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
     _git(root, "init", "-q", "-b", "main")
-    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.email", HERMETIC_GIT_EMAIL)
     _git(root, "config", "user.name", "Tess")
     _git(root, "remote", "add", "origin", str(bare))
     _git(root, "commit", "-q", "--allow-empty", "-m", "root")
@@ -126,13 +127,14 @@ class TestPark:
         assert record.state == BranchState.PARKED
         assert record.parked_reason == "remote only"
 
-    def test_remote_only_push_failure_parks_nothing(self, repo: Path) -> None:
+    def test_remote_only_push_failure_keeps_the_park_locally(self, repo: Path) -> None:
         old = _git(repo, "rev-parse", "origin/work")
         _git(repo, "branch", "-D", "work")
         _git(repo, "remote", "set-url", "origin", str(repo / "missing.git"))
-        with pytest.raises(BranchParkError, match="push"):
-            park_branch(repo, "work", reason="r", remote="origin")
+        result = park_branch(repo, "work", reason="r", remote="origin")
+        assert result.pushed is False and result.retry_command == "git push origin work"
         assert _git(repo, "rev-parse", "origin/work") == old
+        assert _git(repo, "rev-parse", "refs/heads/work") == result.sha
 
     def test_remote_only_clear_unparks(self, repo: Path) -> None:
         _git(repo, "branch", "-D", "work")

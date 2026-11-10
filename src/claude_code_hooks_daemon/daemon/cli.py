@@ -6560,12 +6560,18 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     """
     from claude_code_hooks_daemon.config.models import handler_options
     from claude_code_hooks_daemon.core import branch_cleanup, branch_inventory, branch_sweep
+    from claude_code_hooks_daemon.core.branch_park import announce_ended_parks
     from claude_code_hooks_daemon.utils.remote_refs import LazyRemoteRefs
 
     repo = get_project_path(getattr(args, "project_root", None))
     config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
     branches = config.branches
-    if args.clean or args.dry_run or getattr(args, "remote", False):
+    if (
+        args.clean
+        or args.dry_run
+        or getattr(args, "remote", False)
+        or getattr(args, "apply", False)
+    ):
         return _branch_sweep_clean(args, repo, branches)
     legacy = handler_options(config.handlers.session_start.get(HandlerID.BRANCH_SWEEP.config_key))
     try:
@@ -6579,6 +6585,10 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
         print(f"ERROR: no branch inventory for {repo}: {e}", file=sys.stderr)
         return 1
     cap = branch_sweep.effective_wip_cap(branches, legacy)
+    if not args.json:
+        # A park that ended (new work, a vanished branch) is said once, then its record goes.
+        for line in announce_ended_parks(repo):
+            print(line)
     # A runnable remote delete is printed only for what the remote-delete guard's proof accepts.
     proven = branch_cleanup.proven_remote_only(repo, branches, inventory)
     if args.json:
@@ -6595,6 +6605,47 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     if notice is not None:
         print(notice)
     return 0
+
+
+def cmd_branch_preflight(args: argparse.Namespace) -> int:
+    """``branch-preflight [name]``: every reason creating a branch is refused, with its fix.
+
+    Read-only. Builds the one creation report the creation guard's deny renders, so
+    the two cannot disagree (Plan 00594 Task 4.1).
+
+    Returns:
+        0 when a branch may be created, ``EXIT_CREATION_REFUSED`` when a pool refuses
+        it, 1 when the directory is not a git repository.
+    """
+    from claude_code_hooks_daemon.core.branch_creation import (
+        EXIT_CREATION_REFUSED,
+        LABELS_RELATIVE_PATH,
+        creation_report,
+        creation_report_json,
+        read_labels,
+        render_creation_report,
+    )
+    from claude_code_hooks_daemon.utils.git_repo import run_git
+
+    repo = get_project_path(getattr(args, "project_root", None))
+    if run_git(repo, "rev-parse", "--git-dir").returncode != 0:
+        print(f"ERROR: branch-preflight: {repo} is not a git repository", file=sys.stderr)
+        return 1
+    report = creation_report(
+        repo, _branches_config(repo), args.name, labels=read_labels(repo / LABELS_RELATIVE_PATH)
+    )
+    code = 0 if report.may_create else EXIT_CREATION_REFUSED
+    if args.json:
+        print(json.dumps(creation_report_json(report), indent=2))
+        return code
+    if report.may_create:
+        print("A branch may be created: no pool refuses it.")
+    else:
+        refusing = ", ".join(str(b.rule_id) for b in report.blockers if b.refuses)
+        print(f"A branch may NOT be created now. Blocked by: {refusing}")
+    for line in render_creation_report(report):
+        print(line)
+    return code
 
 
 def cmd_branch_park(args: argparse.Namespace) -> int:
@@ -6725,7 +6776,10 @@ _BRANCH_CLEANUP_BUNDLE_DIR = Path("untracked") / "branch-cleanup"
 
 
 def _branch_sweep_clean(args: argparse.Namespace, repo: Path, branches: BranchesConfig) -> int:
-    """``branch-sweep --clean [--remote] [--dry-run]``: delete merged branches.
+    """``branch-sweep --clean [--remote] [--apply]``: preview, or delete, merged branches.
+
+    ``--clean`` alone is the dry run: it prints the whole plan and deletes nothing.
+    ``--apply`` deletes, in batches, each behind its own recovery bundle.
 
     Returns:
         0 when the sweep ran, 1 when it could not, 2 on a usage error.
@@ -6733,17 +6787,21 @@ def _branch_sweep_clean(args: argparse.Namespace, repo: Path, branches: Branches
     from claude_code_hooks_daemon.core import branch_cleanup, branch_inventory
 
     remote = bool(getattr(args, "remote", False))
+    apply = bool(getattr(args, "apply", False))
     if not args.clean:
-        print("ERROR: --dry-run and --remote only apply to --clean", file=sys.stderr)
+        print("ERROR: --dry-run, --apply and --remote only apply to --clean", file=sys.stderr)
         return 2
     if args.json or args.all:
         print("ERROR: --clean does not take --json or --all", file=sys.stderr)
+        return 2
+    if apply and args.dry_run:
+        print("ERROR: --apply and --dry-run contradict each other", file=sys.stderr)
         return 2
     try:
         report = branch_cleanup.clean_sweep(
             repo,
             branches,
-            dry_run=args.dry_run,
+            dry_run=not apply,
             bundle_dir=repo / _BRANCH_CLEANUP_BUNDLE_DIR,
             remote=remote,
         )
@@ -13356,14 +13414,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser_branch_sweep.add_argument(
         "--clean",
         action="store_true",
-        help="Delete every merged and patch-equivalent local branch behind a recovery bundle "
-        "(untracked/branch-cleanup/), removing a linked worktree only when it holds nothing "
-        "outside branches.cleanup_after_merge.regenerable",
+        help="Plan the removal of every merged and patch-equivalent branch: prints each one "
+        "with its proof and deletes nothing. Add --apply to delete",
+    )
+    parser_branch_sweep.add_argument(
+        "--apply",
+        action="store_true",
+        help="With --clean: delete, in batches of 50, one recovery bundle per batch "
+        "(untracked/branch-cleanup/) and one remote push per batch, removing a linked worktree "
+        "only when it holds nothing outside branches.cleanup_after_merge.regenerable. An "
+        "interrupted run is resumed by running the same command again",
     )
     parser_branch_sweep.add_argument(
         "--dry-run",
         action="store_true",
-        help="With --clean: print what would be removed and deleted, change nothing",
+        help="With --clean: the default; accepted for clarity, cannot be combined with --apply",
     )
     parser_branch_sweep.add_argument(
         "--remote",
@@ -13374,6 +13439,28 @@ def build_parser() -> argparse.ArgumentParser:
         "first. Contacts the remote",
     )
     parser_branch_sweep.set_defaults(func=cmd_branch_sweep)
+
+    # branch-preflight command (Plan 00594 Task 4.1)
+    parser_branch_preflight = subparsers.add_parser(
+        "branch-preflight",
+        help="List every reason creating a branch is refused right now (open cap, parked, "
+        "merged, dormant), each with its fix command; read-only",
+        epilog="Exit 0 when a branch may be created, 4 when a pool refuses it, 1 when this "
+        "is not a git repository. The creation deny prints the same report.",
+    )
+    parser_branch_preflight.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help="The branch name you mean to create (also checks for a likely duplicate; "
+        "an existing name is a reset, not a creation)",
+    )
+    parser_branch_preflight.add_argument(
+        "--json",
+        action="store_true",
+        help="Print {may_create, blockers: [{rule_id, refuses, fixes, lines}], notices}",
+    )
+    parser_branch_preflight.set_defaults(func=cmd_branch_preflight)
 
     # branch-park command (Plan 00558 Task 4.3)
     parser_branch_park = subparsers.add_parser(

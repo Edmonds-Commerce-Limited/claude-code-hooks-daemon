@@ -69,6 +69,9 @@ _GIT_UNAVAILABLE: Final[int] = 127
 #: loaded" from "git is absent or said no" (ledger 00474 N346).
 GIT_TIMED_OUT: Final[int] = 124
 
+#: What running git can raise (non-zero exit, timeout, missing binary), so callers need not import subprocess.
+GIT_COMMAND_ERRORS: Final[tuple[type[BaseException], ...]] = (OSError, subprocess.SubprocessError)
+
 #: Local branches live under this. Ask git about a branch with the FULL ref and
 #: read listings back with ``%(refname)``, never ``%(refname:short)`` — see
 #: :func:`branch_ref` and :func:`strip_branch_ref` for why a bare name is unsafe.

@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.git_branch_creation import (
     ROUTE_WORKTREE,
     created_branches,
@@ -211,7 +212,15 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
         if worst == "deny":
             denying = next(verdict for verdict in verdicts if verdict.decision == "deny")
             rule = self._rules_by_id.get(denying.rule_id or "", self._rule)
-            reason = "\n".join([self._formatter.headline(rule), "", *lines])
+            preflight = daemon_cli_command_for_docs("branch-preflight")
+            reason = "\n".join(
+                [
+                    self._formatter.headline(rule),
+                    "",
+                    *lines,
+                    f"Re-check every blocker and its fix at any time: `{preflight}`",
+                ]
+            )
             return GatingResult(decision=Decision.DENY, reason=reason)
         return GatingResult(decision=Decision.ALLOW, context=list(dict.fromkeys([*lines, *advice])))
 
@@ -220,14 +229,18 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             "## branch_creation_guard — three branch pools, each capped\n\n"
             "Creating a branch (`git switch -c`, `checkout -b`, `branch <name>`, "
             '`worktree add`, or an Agent dispatch with `isolation: "worktree"`) is '
-            "denied while a pool is full: OPEN work at `branches.wip.cap`, PARKED "
+            "denied while a pool is full: OPEN work at `branches.wip.cap` plus "
+            "`branches.wip.creation_grace` (the cap itself only warns; the stop gate and "
+            "session start carry that pressure), PARKED "
             "branches at `branches.parked.cap` (or one parked past "
             "`branches.parked.max_age_days`), MERGED branches at `branches.merged.cap` "
             "(or one unkept or kept past `branches.merged.max_age_days`). Each pool "
             "has `mode: block|warn|off`. Merge, park or delete an open branch; clear "
             "a park with `branch-park <name> --clear` or re-park with a NEW reason; "
             "clear merged branches with `branch-sweep --clean` or keep one with "
-            "`branch-keep <name> --reason ...`. Bot-owned branches (`branches.bot_owned`) "
+            "`branch-keep <name> --reason ...`. `branch-preflight [name]` (read-only) lists "
+            "every pool that blocks a creation right now with its exact fix; the deny "
+            "prints the same report. Bot-owned branches (`branches.bot_owned`) "
             "are in no pool. A name already in `refs/heads` is a "
             "reset, never a creation. A name close to an existing branch's draws a "
             "duplicate warning naming it; that never blocks. Advisory only: a branch named "

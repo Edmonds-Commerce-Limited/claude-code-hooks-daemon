@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.core.branch_creation import (
     write_labels,
 )
 from claude_code_hooks_daemon.core.branch_sweep import effective_wip_cap
+from tests.conftest import HERMETIC_GIT_EMAIL
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -42,7 +43,7 @@ def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
     _git(root, "init", "-q", "-b", "main")
-    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.email", HERMETIC_GIT_EMAIL)
     _git(root, "config", "user.name", "t")
     _git(root, "commit", "-q", "--allow-empty", "-m", "root")
     return root
@@ -63,7 +64,7 @@ def _config(
 ) -> BranchesConfig:
     return BranchesConfig(
         default="main",
-        wip=BranchWipConfig(cap=cap, mode=mode, count_remote=True),
+        wip=BranchWipConfig(cap=cap, mode=mode, count_remote=True, creation_grace=0),
         duplicates=BranchDuplicatesConfig(mode=dup),
     )
 
@@ -144,7 +145,8 @@ class TestCap:
         _git(repo, "update-ref", "refs/remotes/origin/trunkish", sha)
         _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunkish")
         config = BranchesConfig(
-            default="auto", wip=BranchWipConfig(cap=2, mode="block", count_remote=False)
+            default="auto",
+            wip=BranchWipConfig(cap=2, mode="block", count_remote=False, creation_grace=0),
         )
         assert creation_verdict(repo, config, "fresh").decision == "allow"
 
@@ -188,7 +190,11 @@ class TestLegacyCap:
                         "branch_sweep": {"enabled": True, "options": {"max_open_branches": 2}}
                     }
                 },
-                "branches": {"default": "main", "duplicates": {"mode": "off"}},
+                "branches": {
+                    "default": "main",
+                    "duplicates": {"mode": "off"},
+                    "wip": {"creation_grace": 0},
+                },
             }
         )
 
