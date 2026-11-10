@@ -181,7 +181,9 @@ names, people or hashes appear here.
 
 ### Phase 6: Journal heading churn (class 9)
 
-- [ ] ⬜ **Task 6.1**: Write a failing test in which a `--title` journal entry
+- [x] ✅ **Task 6.1**: (done: single-spaced title separator in both
+  `mkplan.bash` copies and the journal template; test
+  `test_titled_heading_is_single_spaced`; release note 031) Write a failing test in which a `--title` journal entry
   is rewritten by the formatter, then make the scaffolder emit the
   formatter-stable heading.
 

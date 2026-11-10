@@ -81,7 +81,7 @@ The park commit stays the shared record, keeping the 00558 §5 mechanics and the
 
 ### 2.7 Journal heading (class 9)
 
-`CLAUDE/Plan/mkplan.bash:517` defaults the ref to `—`, and `:625-627` adds `   — title` (three spaces). The fix emits `## HH:MM · category — title` when there is no ref, with single spaces. That heading is formatter-stable. The `**/JOURNAL/**` formatter exclusion also goes into `CLAUDE/LLM-INSTALL.md`.
+`CLAUDE/Plan/mkplan.bash:517` defaults the ref to `—`, and `:625-627` adds `   — title` (three spaces). The fix keeps the `· REF` slot, because the entry grammar in `plan_qa/model.py:358` requires it, and makes the title separator a single space: `## HH:MM · category · — — title`. A heading with no run of spaces stays the same after formatting. This is done in Task 6.1. The `**/JOURNAL/**` formatter exclusion also goes into `CLAUDE/LLM-INSTALL.md`.
 
 ## 3. Branch-tip channel
 

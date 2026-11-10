@@ -15,7 +15,7 @@ _Scaffolded by `mkplan.bash`; timestamps in this file are UTC._
 > edit an existing journal file (corrections are new entries):
 >
 > ```
-> ## HH:MM · category · REF   — optional short title
+> ## HH:MM · category · REF — optional short title
 > ```
 >
 > - `HH:MM` UTC 24h (the date is the folder name, also UTC) and equal to the
