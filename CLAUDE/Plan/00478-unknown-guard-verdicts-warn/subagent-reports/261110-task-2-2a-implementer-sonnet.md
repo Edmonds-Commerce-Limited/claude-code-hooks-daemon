@@ -38,3 +38,13 @@
 - Out of scope and left alone: `sensitive_content.scan_text` (a CLI helper for `remote-docs`, not a hook) still reports an unreadable word list as a finding.
 - The brief's "TDD first for every route" was not fully met (see Tests).
 - I was warned that my context passed the soft budget; I continued because the remaining work was small.
+
+## Review fixes
+
+Commit a2a7f5687, from the review `261110-task-2-2a-review-code-reviewer.md`.
+
+1. **CRITICAL, a found marker lost to a later git failure.** RED first: the three new `TestAFoundMarkerSurvivesALaterUnreadablePart` shapes failed 4 of 7 (`assert ALLOW == DENY`, for the within-commit diff failure and the second-grep failure, each as a timeout and as a non-timeout failure); the cross-commit shape and the pure timeout already passed. Fix: `_grep` returns the output read so far with the failure, `_candidate_lines` and `_findings` return `(findings, problems)`, and a failing `_added_line_numbers` or `_whole_text` ends only its own path. `handle` denies on any finding and warns for the problems. A pure timeout with nothing found still allows with the advisory. The other converted handlers (sensitive_content, staged_lint, remote_docs, docs_qa, plan_qa) have no such shape: `simulated_staging` raises only before it yields, and sensitive_content returns every deny before it reaches the advisory (pinned by the existing message-term and public-pattern tests).
+2. **IMPORTANT, stale deny wording.** `docs/guides/HANDLER_REFERENCE.md` and the `rule_ids.py` comment now say allow with an advisory. No other deny wording for these routes was found in the reference. `CLAUDE.md`'s generated rule table regenerates on restart.
+3. **SUGGESTION, advisory wording.** `unknown_verdict_line` now reads "could not fully decide, so it allowed this call; not checked: <cause>". sensitive_content carries a rephrase per cause and joins only those present. Tests were written before the change; I did not run them red separately.
+
+QA: `42/42 PASSED` (`changed --range main..HEAD --allow-unmapped`), after one RUF012 lint finding in my new test was fixed. `tests/integration/test_pending_release_notes_holding_area.py` passes.
