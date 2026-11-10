@@ -711,3 +711,92 @@ class TestFailedAddLeavesNoOrphan:
                 WorktreeCreateHandler._git_worktree_add(str(tmp_path), tmp_path / "w", "b")
 
         assert "fatal: the add failed" in str(excinfo.value)
+
+
+class TestUndoOfALockedPartialAdd:
+    """Plan 00592 (GitHub #173): a killed add leaves the worktree locked ``initializing``."""
+
+    @staticmethod
+    def _git(repo: Path, *args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+        ).stdout
+
+    def _partial(self, repo: Path, reason: str | None, new_branch: bool = True) -> Path:
+        path = repo / ".claude" / "worktrees" / "w"
+        if new_branch:
+            self._git(repo, "worktree", "add", "-b", "wb", str(path))
+        else:
+            self._git(repo, "branch", "wb")
+            self._git(repo, "worktree", "add", str(path), "wb")
+        if reason is not None:
+            self._git(repo, "worktree", "lock", "--reason", reason, str(path))
+        return path
+
+    def _branches(self, repo: Path) -> list[str]:
+        return self._git(repo, "branch", "--format=%(refname:short)").split()
+
+    def test_initializing_lock_is_released_and_everything_removed(self, repo: Path) -> None:
+        path = self._partial(repo, "initializing")
+
+        WorktreeCreateHandler._undo_failed_add(str(repo), path, "wb", False)
+
+        assert not path.exists()
+        assert "wb" not in self._branches(repo)
+        assert str(path.resolve()) not in self._git(repo, "worktree", "list", "--porcelain")
+
+    def test_foreign_lock_is_never_overridden_and_leftovers_are_named(self, repo: Path) -> None:
+        path = self._partial(repo, "held by user")
+
+        left = WorktreeCreateHandler._undo_failed_add(str(repo), path, "wb", False)
+
+        assert path.exists()
+        assert "wb" in self._branches(repo)
+        assert "locked held by user" in self._git(repo, "worktree", "list", "--porcelain")
+        assert str(path) in left
+        assert "wb" in left
+
+    def test_foreign_lock_error_text_names_path_and_branch(self, repo: Path) -> None:
+        path = self._partial(repo, "held by user")
+        failed = subprocess.CompletedProcess(["git"], 128, "", "fatal: add failed")
+        seen_preexisting_probe: list[bool] = []
+
+        def fake_run_git(
+            cwd: Path, *args: str, timeout: float = 5.0
+        ) -> subprocess.CompletedProcess[str]:
+            from claude_code_hooks_daemon.utils.git_repo import run_git as real_run_git
+
+            if args[:2] == ("worktree", "add"):
+                return failed
+            if args[:2] == ("rev-parse", "--verify") and not seen_preexisting_probe:
+                seen_preexisting_probe.append(True)  # first probe: the branch is "ours"
+                return subprocess.CompletedProcess(["git"], 1, "", "")
+            return real_run_git(cwd, *args, timeout=Timeout.GIT_WORKTREE_CLEANUP)
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.worktree_create.worktree_create_handler.run_git",
+            side_effect=fake_run_git,
+        ):
+            with pytest.raises(subprocess.CalledProcessError) as excinfo:
+                WorktreeCreateHandler._git_worktree_add(str(repo), path, "wb")
+
+        assert "fatal: add failed" in str(excinfo.value)
+        assert str(path) in str(excinfo.value)
+        assert "wb" in str(excinfo.value)
+
+    def test_preexisting_branch_is_kept_when_lock_released(self, repo: Path) -> None:
+        path = self._partial(repo, "initializing", new_branch=False)
+
+        WorktreeCreateHandler._undo_failed_add(str(repo), path, "wb", True)
+
+        assert not path.exists()
+        assert "wb" in self._branches(repo)
+
+    def test_unlocked_partial_worktree_is_removed(self, repo: Path) -> None:
+        path = self._partial(repo, None)
+
+        left = WorktreeCreateHandler._undo_failed_add(str(repo), path, "wb", False)
+
+        assert not path.exists()
+        assert "wb" not in self._branches(repo)
+        assert left == ""

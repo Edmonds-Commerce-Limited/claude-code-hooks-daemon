@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.core.worktree_seed import (
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
+from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.worktree_seeding import seed_worktree, validate_seed_sources
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,9 @@ _KEY_PROMPT_ID = "prompt_id"
 #: ``run_git`` reports an unspawnable git as this status, and git itself exits
 #: with it when a hook it runs (e.g. ``post-checkout``) cannot find a command.
 _STATUS_COMMAND_NOT_FOUND = 127
+
+#: The lock reason git itself writes while ``worktree add`` is still running.
+_INITIALIZING_LOCK_REASON = "initializing"
 _NOT_FOUND_HINT = (
     " [status 127 has two origins: git could not be spawned (searched PATH={path}), "
     "or a git hook such as post-checkout ran a command that was not found - in that "
@@ -83,10 +87,15 @@ class _WorktreeAddError(subprocess.CalledProcessError):
     user as an unexplained number (00466 N53).
     """
 
+    #: What the undo could not remove (path / branch); empty when nothing is left.
+    left_behind: str = ""
+
     def __str__(self) -> str:
         stderr = (self.stderr or "").strip()
         base = super().__str__()
         message = f"{base}: {stderr}" if stderr else base
+        if self.left_behind:
+            message += f" [{self.left_behind}]"
         if self.returncode == _STATUS_COMMAND_NOT_FOUND:
             message += _NOT_FOUND_HINT.format(path=os.environ.get("PATH", "<unset>"))
         return message
@@ -241,22 +250,67 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             Path(cwd), "worktree", "add", "-b", branch, str(path), timeout=Timeout.GIT_WORKTREE
         )
         if result.returncode != 0:
-            WorktreeCreateHandler._undo_failed_add(cwd, path, branch, branch_preexisted)
-            raise _WorktreeAddError(result.returncode, result.args, result.stdout, result.stderr)
+            left = WorktreeCreateHandler._undo_failed_add(cwd, path, branch, branch_preexisted)
+            error = _WorktreeAddError(result.returncode, result.args, result.stdout, result.stderr)
+            error.left_behind = left
+            raise error
 
     @staticmethod
-    def _undo_failed_add(cwd: str, path: Path, branch: str, branch_preexisted: bool) -> None:
+    def _lock_reason(cwd: str, path: Path) -> str | None:
+        """Return the lock reason of the worktree registered at ``path``, else ``None``.
+
+        ``""`` means locked with no reason. Read from ``worktree list --porcelain``
+        (one blank-line separated record per worktree).
+        """
+        result = run_git(
+            Path(cwd), "worktree", "list", "--porcelain", timeout=Timeout.GIT_WORKTREE_CLEANUP
+        )
+        if result.returncode != 0:
+            return None
+        target = path.resolve()
+        for record in result.stdout.split("\n\n"):
+            lines = record.strip().splitlines()
+            if not lines or not lines[0].startswith("worktree "):
+                continue
+            if Path(lines[0].removeprefix("worktree ")).resolve() != target:
+                continue
+            for line in lines[1:]:
+                if line == "locked":
+                    return ""
+                if line.startswith("locked "):
+                    return line.removeprefix("locked ")
+        return None
+
+    @staticmethod
+    def _undo_failed_add(cwd: str, path: Path, branch: str, branch_preexisted: bool) -> str:
         """Remove what a failed ``git worktree add`` may have left behind.
 
         Only what this call created: the worktree at ``path`` (the caller proved
         it did not exist) and ``branch`` unless it already existed, in which case
         ``add -b`` refused it and it is not ours to delete. A cleanup failure is
         logged and never masks the add error the caller is about to raise.
+
+        A killed add leaves the worktree locked with the reason ``initializing``;
+        that lock is git's own and is released here (Plan 00592, GitHub #173).
+        A lock with any other reason belongs to someone else and is never
+        overridden.
+
+        Returns a description of what is still there (empty when nothing is), for
+        the caller to put in the error it raises.
         """
-        steps: list[tuple[str, ...]] = [
-            ("worktree", "remove", "--force", str(path)),
-            ("worktree", "prune"),
-        ]
+        reason = WorktreeCreateHandler._lock_reason(cwd, path)
+        if reason == _INITIALIZING_LOCK_REASON:
+            steps: list[tuple[str, ...]] = [("worktree", "unlock", str(path))]
+        elif reason is not None:
+            logger.warning(
+                "worktree_create: leaving %s in place: it is locked (%s)",
+                path,
+                reason or "no reason",
+            )
+            return WorktreeCreateHandler._left_behind(cwd, path, branch, branch_preexisted)
+        else:
+            steps = []
+        steps += [("worktree", "remove", "--force", str(path)), ("worktree", "prune")]
         if not branch_preexisted:
             steps.append(("branch", "-D", branch))
         for args in steps:
@@ -267,6 +321,29 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
                     " ".join(args),
                     result.stderr.strip(),
                 )
+        return WorktreeCreateHandler._left_behind(cwd, path, branch, branch_preexisted)
+
+    @staticmethod
+    def _left_behind(cwd: str, path: Path, branch: str, branch_preexisted: bool) -> str:
+        """Describe the worktree and branch of this call that still exist."""
+        left: list[str] = []
+        if (
+            path_exists(path, unreadable_means=True)
+            or WorktreeCreateHandler._lock_reason(cwd, path) is not None
+        ):
+            left.append(f"worktree left behind at {path}")
+        if not branch_preexisted:
+            exists = run_git(
+                Path(cwd),
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}",
+                timeout=Timeout.GIT_WORKTREE_CLEANUP,
+            )
+            if exists.returncode == 0:
+                left.append(f"branch left behind: {branch}")
+        return "; ".join(left)
 
     def get_claude_md(self) -> str | None:
         """Guidance injected into the project CLAUDE.md.
