@@ -45,7 +45,7 @@ IDs: R-LSP-SYMBOL-LOOKUP
 
 ### Pipe Blocker
 
-Commands piped to `tail` or `head` are **blocked** — piping truncates output and causes information loss.
+Known expensive commands (pytest, npm, cargo, ...) piped to `tail` or `head` are **blocked** — piping truncates output and causes information loss. That includes one run through a wrapper or runner (`VAR=x`, `env`, `timeout N`, `uv run`, `xargs`, `python3 -m`, a `bash -c` body, `.venv/bin/pytest`). A producer on neither the whitelist nor the blacklist is **allowed with an advisory** naming the capture helper and `extra_whitelist` — but ONLY when no blacklisted command is named anywhere in the command (any statement, substitution, `-c` body or here-string; as a word, a path's basename or `-mNAME`). If one is, the pipe is blocked on it whatever wrapper hides it (`unbuffer pytest | tail`); if it really feeds no pipe, run it as a separate command. Prose-shaped matches and pipes fed by a whole loop/`if`/`case`/group are still blocked, a single `&` ends a statement, and an unknown pipe never excuses a blocked one elsewhere in the same command.
 
 **Do NOT do the theatre** of capturing output to a file and then echoing the WHOLE file to stdout — that defeats the point and just bloats tokens.
 
@@ -72,7 +72,7 @@ pytest tests/ 2>&1 | bin/echd-capture 20
 
 **Only PIPES are restricted — reading a file directly is not.** `tail -n 40 <file>`, `head -n 40 <file>` and `grep pattern <file>` take the path as an ARGUMENT, so no pipe exists and this handler never sees them. That is the supported way to sample a large append-only file such as a plan's `JOURNAL/` entry files or legacy day-file — which you should tail or grep rather than read whole.
 
-**Add to whitelist** (if safe to pipe): set `extra_whitelist` in `.claude/hooks-daemon.yaml` under `pipe_blocker`.
+**Add to whitelist** (if safe to pipe, and to silence the unknown-producer advisory): set `extra_whitelist` in `.claude/hooks-daemon.yaml` under `pipe_blocker`.
 
 **A git message VALUE is exempt only while the shell cannot run it.** Prose in `git commit -m`/`git tag -m` is not scanned, so a literal `| tail` inside a message never counts as a pipe — but that exemption ends at a command substitution. Bash expands `$( )` and backticks inside DOUBLE quotes, so `git commit -m "$(pytest | tail -1)"` genuinely runs pytest and truncates it, and is blocked on the `pytest`. Single quotes substitute nothing and are exempt unconditionally, as is the `"$(cat <<'EOF' ... EOF)"` idiom, whose QUOTED delimiter makes the body literal. The exemption is also scoped to commands that actually take a message: `python -m pytest ... | tail` names `pytest` as its producer, because `-m` there means module.
 
