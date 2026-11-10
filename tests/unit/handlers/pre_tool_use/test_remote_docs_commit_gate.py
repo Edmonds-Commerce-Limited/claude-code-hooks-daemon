@@ -83,7 +83,9 @@ class TestAStagingThatCannotBeSimulatedIsAnAdvisory:
         tmp_path: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True, timeout=git_setup_timeout())
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "init", "-q"], check=True, timeout=git_setup_timeout()
+        )
         _write(tmp_path, "remote-docs/example.com/p.md", "# just prose\n")
         handler.staged_reader = handler._read_staged
         hook_input = {
