@@ -270,6 +270,17 @@ class TestWorktreeRemoveIgnoredContent:
         assert "chained delete is not counted" in reason
         assert "in a separate command first" in reason
 
+    def test_an_unresolvable_user_home_word_does_not_replace_the_guidance(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        (wt / "untracked" / "scratch").mkdir(parents=True)
+        (wt / "untracked" / "scratch" / "plan.md").write_text("notes")
+        command = f"rm -rf ~nosuchuserxyz/x && git worktree remove {wt}"
+        rule, reason = _deny(handler, command, repo)
+        assert rule == RuleID.GIT_WORKTREE_REMOVE_FORCE
+        assert "untracked/scratch/" in reason
+        assert "in a separate command first" in reason
+
     def test_dirty_files_get_no_delete_advice(
         self, handler: DestructiveGitHandler, repo: Path, wt: Path
     ) -> None:

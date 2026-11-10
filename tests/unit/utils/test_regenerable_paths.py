@@ -226,3 +226,16 @@ class TestUnderAny:
         assert under_any("a/vendor/", ["a/vendor/"])
         assert not under_any("a/vendors/", ["a/vendor/"])
         assert not under_any("b/vendor/", ["a/vendor/"])
+
+
+class TestCloneProbeGlobs:
+    def test_bundler_output_carries_its_deeper_clone_probe(self) -> None:
+        from claude_code_hooks_daemon.utils.regenerable_paths import clone_probe_globs
+
+        assert clone_probe_globs("svc/vendor/bundle/") == ("ruby/*/bundler/gems/*/.git",)
+
+    def test_other_managers_keep_only_the_generic_probe(self) -> None:
+        from claude_code_hooks_daemon.utils.regenerable_paths import clone_probe_globs
+
+        for directory in ("vendor/", "node_modules/", "target/", ".venv/"):
+            assert clone_probe_globs(directory) == ()

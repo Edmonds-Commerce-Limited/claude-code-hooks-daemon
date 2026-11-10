@@ -482,19 +482,21 @@ class ClaudeMdInjector:
         # The generated block for this handler set; the set is fixed for the
         # injector's life, so it is built once however often notices are asked.
         self._generated_block_cache: str | None = None
+        # The last (sha256 of the input, formatted output). The formatter is pure, so
+        # a repeated staleness check (every SessionStart under home_commit: false,
+        # where nothing is written to record a format) does not re-run it.
+        self._formatted_cache: tuple[str, str] | None = None
 
-    def inject(self) -> list[str]:
+    def inject(self) -> None:
         """Collect handler guidance and update CLAUDE.md.
 
         Silently no-ops if no handlers provide guidance.
-        Logs errors but never raises — daemon startup must not fail.
-
-        Returns:
-            Notices an agent should see (the block is stale and was deliberately
-            not written, or no home branch could be resolved); usually empty.
+        Logs errors but never raises — daemon startup must not fail. What an
+        agent should be told about the block is not returned here: it is
+        ``current_notices()``, computed fresh at each SessionStart.
         """
         try:
-            return self._run_inject()
+            self._run_inject()
         except OSError as exc:
             log_and_continue(
                 logger,
@@ -505,7 +507,6 @@ class ClaudeMdInjector:
                     "daemon continues without it"
                 ),
             )
-            return []
         except Exception as exc:
             log_and_continue(
                 logger,
@@ -516,15 +517,14 @@ class ClaudeMdInjector:
                     "feature that must never stop daemon startup"
                 ),
             )
-            return []
 
-    def _run_inject(self) -> list[str]:
+    def _run_inject(self) -> None:
         """Execute injection — raises on errors for caller to handle."""
         tiers = self._collect_tiers()
         generated = self._generated_block(tiers)
         if generated is None:
             logger.debug("ClaudeMdInjector: no handler guidance to inject — skipping")
-            return []
+            return
 
         claude_md_path = self._workspace_root / "CLAUDE.md"
 
@@ -532,7 +532,7 @@ class ClaudeMdInjector:
             logger.warning(
                 "ClaudeMdInjector: workspace_root does not exist: %s", self._workspace_root
             )
-            return []
+            return
 
         if not self._on_request and is_linked_worktree(self._workspace_root):
             logger.info(
@@ -543,13 +543,13 @@ class ClaudeMdInjector:
                 claude_md_path,
                 daemon_cli_command_for_docs("regenerate-docs"),
             )
-            return []
+            return
 
         if self._on_request:
             refusal = regenerate_refusal(self._workspace_root, self._branches)
             if refusal is not None:
                 logger.warning("ClaudeMdInjector: not writing %s: %s", claude_md_path, refusal)
-                return [refusal]
+                return
         else:
             off_home = _off_home_reason(self._workspace_root, self._branches)
             if off_home is not None:
@@ -560,13 +560,14 @@ class ClaudeMdInjector:
                     off_home,
                     daemon_cli_command_for_docs("regenerate-docs"),
                 )
-                return self._unresolved_home_notices()
+                return
             if self._branches is not None and not self._branches.home_commit:
-                return self._report_stale_block(claude_md_path, generated)
+                self._report_stale_block(claude_md_path, generated)
+                return
 
         if claude_md_path.exists():
             if not self._write_reconciling_concurrent_edits(claude_md_path, generated):
-                return []
+                return
         else:
             # No existing file — create from scratch (no backup needed)
             updated = generated + "\n"
@@ -585,7 +586,6 @@ class ClaudeMdInjector:
         ClaudeMdInjector._auto_commit_if_dirty(
             claude_md_path, self._external_handler_sources(self._handlers), self._branches
         )
-        return []
 
     def _generated_block(self, tiers: "_CollectedTiers | None" = None) -> str | None:
         """The block this handler set generates, or ``None`` when no handler has guidance."""
@@ -631,7 +631,7 @@ class ClaudeMdInjector:
         if current_branch(self._workspace_root) is None:
             return []
         if config is not None and config.home:
-            return []
+            return self._unmatched_home_notices(config)
         from claude_code_hooks_daemon.config.models import BranchesConfig
 
         resolved = config or BranchesConfig()
@@ -651,6 +651,26 @@ class ClaudeMdInjector:
             "lives on) in .claude/hooks-daemon.yaml, then restart the daemon."
         ]
 
+    def _unmatched_home_notices(self, config: "BranchesConfig") -> list[str]:
+        """A notice naming the ``branches.home`` entries that match no local or remote branch.
+
+        A typo there is otherwise silent: every branch reads as off home, so the
+        block is never written anywhere.
+        """
+        unmatched = [
+            name
+            for name in config.home
+            if not _is_local_or_unborn_branch(self._workspace_root, name)
+            and not _is_remote_branch(self._workspace_root, config.remote, name)
+        ]
+        if not unmatched:
+            return []
+        return [
+            f"CLAUDE.md hooks-daemon block not written: branches.home names {unmatched}, which "
+            "match no local or remote branch, so no branch counts as home. Correct "
+            "`branches.home` in .claude/hooks-daemon.yaml, then restart the daemon."
+        ]
+
     def _stale_message(self, claude_md_path: Path, generated: str) -> str | None:
         """The stale-block notice, or ``None`` when the file already carries ``generated``."""
         original = claude_md_path.read_text(encoding="utf-8") if claude_md_path.exists() else ""
@@ -665,7 +685,7 @@ class ClaudeMdInjector:
             "writes it on a home branch)"
         )
 
-    def _report_stale_block(self, claude_md_path: Path, generated: str) -> list[str]:
+    def _report_stale_block(self, claude_md_path: Path, generated: str) -> None:
         """``branches.home_commit: false``: never write on a home branch, report drift instead.
 
         A home branch that only takes pull requests cannot carry the block as a
@@ -675,10 +695,8 @@ class ClaudeMdInjector:
         ``current_notices`` tells the agent at each SessionStart.
         """
         message = self._stale_message(claude_md_path, generated)
-        if message is None:
-            return []
-        logger.warning("ClaudeMdInjector: %s", message)
-        return [message]
+        if message is not None:
+            logger.warning("ClaudeMdInjector: %s", message)
 
     @staticmethod
     def _external_handler_sources(handlers: list[Any]) -> list[Path]:
@@ -849,7 +867,12 @@ class ClaudeMdInjector:
         """
         if self._read_format_memory() == (_sha256(updated), _sha256(original)):
             return original
-        return self._format_fail_safe(updated)
+        key = _sha256(updated)
+        if self._formatted_cache is not None and self._formatted_cache[0] == key:
+            return self._formatted_cache[1]
+        formatted = self._format_fail_safe(updated)
+        self._formatted_cache = (key, formatted)
+        return formatted
 
     def _format_memory_path(self) -> Path | None:
         """Where the last format's fingerprint lives: inside the git dir, or None.
