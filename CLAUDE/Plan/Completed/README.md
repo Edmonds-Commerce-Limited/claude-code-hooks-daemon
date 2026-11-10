@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00552: conflict marker hook bricking](00552-conflict-marker-hook-bricking/PLAN.md) - Complete at merges `a5a2e6970`, `b5c7d834c`, `5612cce6d` + the archiving commit (owner field report: hook stubs fail open on a corrupt `init.sh`, a `.gitattributes` `-merge` block, and `repair-install`; release note 003)
+
 - [00551: supervisor own session ids from child tree](00551-supervisor-own-session-ids-from-child-tree/PLAN.md) - Complete at merges `e39f0ee88` + `77749bd36` (green CI run 39962905189) + the archiving commit (#138, closed: own session ids come only from the supervisor's own process tree, never a `/proc`-wide scan; the hot-reload fallback walks the host tree; release note 027 in UNRELEASED)
 
 - [00549: opencode support research](00549-opencode-support-research/PLAN.md) - Complete, research only (#136: opencode V2 has in-process TS plugins, not command hooks, with `tool.execute.before` the only blocking hook and no stop veto; Codex is the easier second host; Claude Code's `AGENTS.md` is a fallback, workable AGENTS-only under an opt-in multi-harness mode; `FINDINGS.md` holds the answers and the epic proposal; open owner question M5 on naming, non-blocking)

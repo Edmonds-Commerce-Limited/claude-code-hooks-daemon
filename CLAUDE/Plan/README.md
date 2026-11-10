@@ -10,8 +10,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00478: unknown guard verdicts warn](00478-unknown-guard-verdicts-warn/PLAN.md) - In Progress (owner ruling "warn dont block": a safety guard that cannot decide allows with an advisory; a positive match still denies; Phase 0 done, GitHub #170 closed; inventory done; Tasks 2.2a, 2.2c and 2.2d merged with green CI (release notes 027-029); 2.2b and 2.2e blocked on owner questions Q1-Q4 in PLAN.md)
 
-- [00593: dependabot security lock bumps](00593-dependabot-security-lock-bumps/PLAN.md) - In Progress (77 open Dependabot alerts, all pip packages in `uv.lock`, each with a patched release: bump them in one lock update, record any held by a constraint such as `safety` pinning `filelock<4.0`; supersedes PR #193)
-
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
 ### Next (ordered; work top to bottom)
@@ -186,6 +184,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00593: dependabot security lock bumps](Completed/00593-dependabot-security-lock-bumps/PLAN.md) - Complete at `d1d248e1d` + `cc6ace282` (main CI run 42769393325 green) + the archiving commit (open Dependabot alerts 77 to 18: nltk, anyio, virtualenv, urllib3, cryptography, idna bumped; filelock, mcp, opentelemetry-api held by the latest `safety`/`semgrep` pins; anyio's new `--anyio-mode` added to the full-QA blocker's option table; PR #193 closed)
+
 - [00592: worktree create undo releases initializing lock](Completed/00592-worktree-create-undo-releases-initializing-lock/PLAN.md) - Complete at `fd7e894fa` (merge `c5c9deb82`) + `37d8d31e0` (main CI run 42739985119 success) + the archiving commit (GitHub #173, closed: the failed-add undo releases git's own `initializing` lock and removes the worktree and new branch; another lock is never overridden; leftovers are named in the error; release note 026)
 
 - [00591: claude md auto commit waits for handler sources](Completed/00591-claude-md-auto-commit-waits-for-handler-sources/PLAN.md) - Complete at `7e9a03f28` (merge `a9e0dacdb`; main CI run 42732895459 success) + the archiving commit (GitHub #172, closed: the restart auto-commit of CLAUDE.md is held while a plugin/project handler source is untracked or modified, logging the file; library handlers never hold it; release note 025)
@@ -244,8 +244,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00553: supervisor indicator scoped to session](Completed/00553-supervisor-indicator-scoped-to-session/PLAN.md) - Complete at `2234dc879` (green CI run 40424574049) + the archiving commit (#140: the green top hat counts only a supervisor whose own process tree holds the session; release note 004)
 
-- [00552: conflict marker hook bricking](Completed/00552-conflict-marker-hook-bricking/PLAN.md) - Complete at merges `a5a2e6970`, `b5c7d834c`, `5612cce6d` + the archiving commit (owner field report: hook stubs fail open on a corrupt `init.sh`, a `.gitattributes` `-merge` block, and `repair-install`; release note 003)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -299,9 +297,9 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - **Total Plans Created**: 593 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 500 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 501 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 70 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 69 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
