@@ -189,7 +189,13 @@ names, people or hashes appear here.
 - [ ] ⬜ **Task 4.2**: Move pressure to stop, session start and merge per
   `DESIGN.md`.
 - [ ] ⬜ **Task 4.3**: The park record survives a rejected push, and a merge
-  clears it visibly.
+  clears it visibly. On main (release note 043, report `task-4-3-report.md`):
+  the park writes a git-config record before the push; a refused push exits 3
+  and says "parked locally, not pushed" with the command to push later; a
+  merge, `delete_if_merged`, the sweep and `branch-park --clear` remove the
+  record and print "Park cleared". Open: a branch only the remote holds still
+  parks nothing on a refused push, the group-pool PARKED resolution, and the
+  session-start "park cleared" print (DESIGN 2.4).
 - [ ] ⬜ **Task 4.4**: Pools are counted per owner.
 - [x] ✅ **Task 4.5**: (done: `clear_label_stale_at_tips`; release note 037)
   A keep covers every branch name at the kept tip, in the creation guard as
@@ -210,7 +216,11 @@ names, people or hashes appear here.
   the guard that judges it; the sweep now takes its remote-delete lines from
   the same proof as the guard, and a test feeds every printed line to the
   guard. (The test was written after the fix, so it was never seen failing.)
-- [ ] ⬜ **Task 4.8**: (second client seat) Write the branch practice down
+- [x] ✅ **Task 4.8**: (second client seat; on main, release note 044, report
+  `task-4-8-report.md`; the practice is the "Branch Practice" section of
+  `CLAUDE/core/Worktree.core.md`, and `branch_creation_guard` advises on a
+  recovery-shaped branch name and on a worktree created inside a worktree)
+  Write the branch practice down
   for clients: recovery copies go to a bundle or `refs/archive/<name>`
   (pools count only branches), never to a branch; worktrees are created
   from the main checkout, never nested; agents' worktrees are reaped after
