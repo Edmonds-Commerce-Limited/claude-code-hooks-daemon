@@ -17,6 +17,7 @@ fallback for one release (DESIGN.md section 1).
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,7 @@ from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 logger = logging.getLogger(__name__)
 
 _ICON = "🌿"
+_NOTICE_ICON = "⚠️"
 
 
 class BranchSweepHandler(SessionStartHandlerBase):
@@ -64,6 +66,11 @@ class BranchSweepHandler(SessionStartHandlerBase):
         # when the matching `branches.*` key is unset (DESIGN.md section 1).
         self._max_open_branches: int | None = None
         self._behind_main_threshold: int | None = None
+        # Asked at each SessionStart for what an agent should hear about the
+        # CLAUDE.md hooks-daemon block (stale on a home branch, no home branch
+        # resolved). The daemon controller sets it to the injector's
+        # `current_notices`, so the answer reflects the checkout as it is NOW.
+        self.claude_md_notices: Callable[[], list[str]] | None = None
 
     def _legacy_options(self) -> dict[str, Any]:
         options: dict[str, Any] = {}
@@ -86,6 +93,29 @@ class BranchSweepHandler(SessionStartHandlerBase):
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Run the inventory within its budget and print the summary, or nothing."""
+        context = [*self._branch_lines(hook_input), *self._claude_md_notice_lines()]
+        return AdvisoryResult(decision=Decision.ALLOW, context=context)
+
+    def _claude_md_notice_lines(self) -> list[str]:
+        """The CLAUDE.md block notices, fresh for this SessionStart; empty when none or unreadable."""
+        if self.claude_md_notices is None:
+            return []
+        try:
+            notices = self.claude_md_notices()
+        except Exception as exc:  # advisory must never break SessionStart
+            log_and_continue(
+                logger,
+                exc,
+                reason="the CLAUDE.md block notice is advisory; the branch summary still "
+                "runs and the next SessionStart asks again",
+            )
+            return []
+        if not notices:
+            return []
+        return [f"{_NOTICE_ICON}  CLAUDE.MD BLOCK:", *(f"  - {notice}" for notice in notices)]
+
+    def _branch_lines(self, hook_input: dict[str, Any]) -> list[str]:
+        """The branch summary lines, or none."""
         root = self._get_project_root()
         legacy = self._legacy_options()
         try:
@@ -98,7 +128,7 @@ class BranchSweepHandler(SessionStartHandlerBase):
                 "`hooks-daemon branch-sweep` reports the failure itself",
                 level=logging.DEBUG,
             )
-            return AdvisoryResult(decision=Decision.ALLOW, context=[])
+            return []
         cap = effective_wip_cap(self._branches, legacy)
         # The branch creation guard orders its deny list from this snapshot:
         # it cannot afford the inventory on the PreToolUse path.
@@ -115,8 +145,8 @@ class BranchSweepHandler(SessionStartHandlerBase):
             behind_threshold=effective_behind_threshold(self._branches, legacy),
         )
         if not lines:
-            return AdvisoryResult(decision=Decision.ALLOW, context=[])
-        return AdvisoryResult(decision=Decision.ALLOW, context=[f"{_ICON}  GIT BRANCHES:", *lines])
+            return []
+        return [f"{_ICON}  GIT BRANCHES:", *lines]
 
     def get_claude_md(self) -> str | None:
         """The branch summary and the cap are a standing policy."""
@@ -136,7 +166,10 @@ class BranchSweepHandler(SessionStartHandlerBase):
             "prints, never a raw force delete. Replaces `branch_count_advisor`: that key "
             "still disables this handler, and its `max_open_branches` / "
             "`behind_main_threshold` options are read for one release when "
-            "`branches.wip.cap` / `branches.sweep.behind_threshold` are unset. Advisory only."
+            "`branches.wip.cap` / `branches.sweep.behind_threshold` are unset. The same summary "
+            "carries a `CLAUDE.MD BLOCK` notice, recomputed at every SessionStart, when the "
+            "`<hooksdaemon>` block is stale on a home branch under `branches.home_commit: "
+            "false` or no home branch resolves to a local branch (set `branches.home`). Advisory only."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

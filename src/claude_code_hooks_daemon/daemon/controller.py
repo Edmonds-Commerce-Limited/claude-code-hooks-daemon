@@ -154,6 +154,7 @@ class DaemonController:
     __slots__ = (
         "_chain_config",
         "_chain_deadline_problems",
+        "_claude_md_injector",
         "_config",
         "_config_errors",
         "_config_fingerprint",
@@ -218,6 +219,7 @@ class DaemonController:
         # after that -- staying stale IS the point, so a caller can detect
         # when the on-disk source has moved on without a restart.
         self._source_fingerprint: str | None = None
+        self._claude_md_injector: ClaudeMdInjector | None = None
         # Fingerprint of the config bound at startup (Plan 00415), supplied by
         # the caller that loaded it; the same never-recomputed contract.
         self._config_fingerprint: str | None = None
@@ -436,15 +438,21 @@ class DaemonController:
             else None
         )
 
+        claude_md_injector = ClaudeMdInjector(
+            workspace_root=workspace_root,
+            handlers=all_handlers,
+            promoted_handlers=promoted_handlers,
+            on_request=claude_md_on_request,
+            branches=branches,
+        )
+        # Wired now, not after the injection: the SessionStart that started this
+        # daemon is answered before the deferred injection runs, and the notice
+        # is asked for afresh at each SessionStart rather than fixed here.
+        self._claude_md_injector = claude_md_injector
+        self._publish_claude_md_notices(all_handlers, claude_md_injector.current_notices)
+
         def inject_claude_md() -> None:
-            notices = ClaudeMdInjector(
-                workspace_root=workspace_root,
-                handlers=all_handlers,
-                promoted_handlers=promoted_handlers,
-                on_request=claude_md_on_request,
-                branches=branches,
-            ).inject()
-            self._publish_startup_notices(all_handlers, notices)
+            claude_md_injector.inject()
 
         # Sync daemon-shipped agent assets with the gating config (Plan 00279):
         # enabled + missing/outdated deploys, disabled + present logs a removal
@@ -479,18 +487,21 @@ class DaemonController:
             sync_directory_role_rules()
 
     @staticmethod
-    def _publish_startup_notices(handlers: list[Any], notices: list[str]) -> None:
-        """Hand start-up notices to each handler that shows them to agents at SessionStart.
+    def _publish_claude_md_notices(handlers: list[Any], provider: Callable[[], list[str]]) -> None:
+        """Give the branch sweep the provider it asks at each SessionStart."""
+        from claude_code_hooks_daemon.handlers.session_start.branch_sweep import (
+            BranchSweepHandler,
+        )
 
-        The injector runs after handlers are registered (and, in the serving
-        daemon, after the socket is bound), so what it found cannot travel with
-        the registry's ``config_problems``.
-        """
-        if not notices:
-            return
         for handler in handlers:
-            if hasattr(handler, "_startup_notices"):
-                handler._startup_notices = tuple(notices)
+            if isinstance(handler, BranchSweepHandler):
+                handler.claude_md_notices = provider
+
+    def claude_md_notices(self) -> list[str]:
+        """What the CLAUDE.md block currently needs an agent to know; empty before initialise."""
+        if self._claude_md_injector is None:
+            return []
+        return self._claude_md_injector.current_notices()
 
     def take_deferred_startup(self) -> list[tuple[str, Callable[[], object]]]:
         """Hand over, once, the start-up steps ``initialise`` held back.

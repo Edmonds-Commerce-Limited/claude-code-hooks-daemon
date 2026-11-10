@@ -16,9 +16,7 @@ import pytest
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.controller import DaemonController
-from claude_code_hooks_daemon.handlers.session_start.project_handler_load_checker import (
-    ProjectHandlerLoadCheckerHandler,
-)
+from claude_code_hooks_daemon.handlers.session_start.branch_sweep import BranchSweepHandler
 
 
 def _git(path: Path, *args: str) -> str:
@@ -74,13 +72,47 @@ def test_the_default_branches_config_still_writes_and_commits(repo: Path) -> Non
     assert _git(repo, "rev-parse", "HEAD") != head
 
 
-def test_a_stale_block_notice_reaches_the_session_start_handler(repo: Path) -> None:
-    controller = _initialise(repo, BranchesConfig(home_commit=False))
-    checkers = [
+def _sweep_handlers(controller: DaemonController) -> list[BranchSweepHandler]:
+    return [
         handler
         for handlers in controller._router.get_all_handlers().values()
         for handler in handlers
-        if isinstance(handler, ProjectHandlerLoadCheckerHandler)
+        if isinstance(handler, BranchSweepHandler)
     ]
-    assert checkers
-    assert any("stale on main" in notice for notice in checkers[0]._startup_notices)
+
+
+def test_a_stale_block_notice_reaches_the_session_start_handler(repo: Path) -> None:
+    controller = _initialise(repo, BranchesConfig(home_commit=False))
+    sweeps = _sweep_handlers(controller)
+    assert sweeps
+    provider = sweeps[0].claude_md_notices
+    assert provider is not None
+    assert any("stale on main" in notice for notice in provider())
+
+
+def test_the_notice_is_available_before_the_deferred_injection_has_run(repo: Path) -> None:
+    """The SessionStart that started the daemon is answered before the injection runs."""
+    controller = DaemonController()
+    controller.initialise(
+        workspace_root=repo,
+        branches=BranchesConfig(home_commit=False),
+        defer_nonessential_startup=True,
+    )
+    provider = _sweep_handlers(controller)[0].claude_md_notices
+    assert provider is not None
+    assert any("stale on main" in notice for notice in provider())
+
+
+def test_the_notice_clears_when_the_block_is_made_current(repo: Path) -> None:
+    controller = _initialise(repo, BranchesConfig(home_commit=False))
+    provider = _sweep_handlers(controller)[0].claude_md_notices
+    assert provider is not None
+    assert provider()
+    _initialise(repo, BranchesConfig())  # a default-config start-up writes and commits it
+    assert provider() == []
+
+
+def test_the_controller_answers_the_upgrade_script_with_the_current_notices(repo: Path) -> None:
+    assert DaemonController().claude_md_notices() == []
+    controller = _initialise(repo, BranchesConfig(home_commit=False))
+    assert any("stale on main" in notice for notice in controller.claude_md_notices())

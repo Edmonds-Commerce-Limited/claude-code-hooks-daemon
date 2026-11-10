@@ -174,23 +174,6 @@ class TestConfigProblems:
             assert ProjectHandlerLoadCheckerHandler().matches({}) is False
 
 
-class TestStartupNotices:
-    """Plan 00594: what the CLAUDE.md injection left undone is shown to agents."""
-
-    def test_matches_and_names_the_notice(self) -> None:
-        handler = ProjectHandlerLoadCheckerHandler()
-        handler._startup_notices = ("block is stale on main; run regenerate-docs",)
-        with patch(_READ, return_value=_healthy()):
-            assert handler.matches({}) is True
-            text = "\n".join(handler.handle({}).context)
-        assert "DAEMON START-UP NOTICE" in text
-        assert "block is stale on main" in text
-
-    def test_no_notices_by_default(self) -> None:
-        with patch(_READ, return_value=_healthy()):
-            assert ProjectHandlerLoadCheckerHandler().matches({}) is False
-
-
 class TestGetClaudeMd:
     def test_returns_guidance(self) -> None:
         handler = ProjectHandlerLoadCheckerHandler()
