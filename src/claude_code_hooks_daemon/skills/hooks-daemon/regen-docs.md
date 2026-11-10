@@ -43,10 +43,15 @@ edit will not produce churn diffs.
 | Action            | Refreshes generated docs | Restarts daemon | Use when                                      |
 | ----------------- | ------------------------ | --------------- | --------------------------------------------- |
 | `regenerate-docs` | Yes                      | No              | Fixing/refreshing docs only (e.g. merge fix)  |
-| `restart`         | `CLAUDE.md` block ONLY   | Yes             | Applying config/handler changes to the daemon |
+| `restart`         | `CLAUDE.md` block ONLY, on a home branch | Yes | Applying config/handler changes to the daemon |
 
-A `restart` regenerates **only** the `<hooksdaemon>` block in `CLAUDE.md`; it
-never rewrites `.claude/HOOKS-DAEMON.md`. That is deliberate: the file's
+A `restart` regenerates **only** the `<hooksdaemon>` block in `CLAUDE.md`, and
+only while the checkout is on a home branch (`branches.home`, default the
+default branch) and `branches.home_commit` is not `false`; elsewhere it leaves
+the block alone and reports a stale one at SessionStart. `regenerate-docs`
+writes the block from any branch, without committing it off a home branch, so
+run it on a pull-request branch and commit the result there. A restart never
+rewrites `.claude/HOOKS-DAEMON.md`. That is deliberate: the file's
 `> Generated on … (vX.Y.Z)` line records the version the project's tracked
 assets were deployed from, and the upgrade reads it, so a restart must not
 restamp it. The cost is that a handler added in-repo refreshes one artefact and

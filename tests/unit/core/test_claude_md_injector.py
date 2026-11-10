@@ -2385,3 +2385,42 @@ class TestClaudeMdInjectorHomeBranch:
         head = _git(tmp_path, "rev-parse", "HEAD")
         ClaudeMdInjector._auto_commit_if_dirty(claude_md)
         assert _git(tmp_path, "rev-parse", "HEAD") == head
+
+
+class TestBlockNotRefreshedReason:
+    """Plan 00594 I-4: the upgrade script names why a restart left the block alone."""
+
+    def test_none_on_a_home_branch(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import block_not_refreshed_reason
+
+        _init_repo_on_main(tmp_path)
+        assert block_not_refreshed_reason(tmp_path, None) is None
+
+    def test_names_the_branch_off_home(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import block_not_refreshed_reason
+
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
+        reason = block_not_refreshed_reason(tmp_path, None)
+        assert reason is not None
+        assert "feature/x" in reason
+
+    def test_home_commit_false_is_a_reason_even_on_home(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+        from claude_code_hooks_daemon.core.claude_md_injector import block_not_refreshed_reason
+
+        _init_repo_on_main(tmp_path)
+        reason = block_not_refreshed_reason(tmp_path, BranchesConfig(home_commit=False))
+        assert reason is not None
+        assert "home_commit" in reason
+
+    def test_a_linked_worktree_is_a_reason(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import block_not_refreshed_reason
+
+        main = tmp_path / "main"
+        main.mkdir()
+        _init_git_repo(main)
+        linked = _add_linked_worktree(main, "worktree-x")
+        reason = block_not_refreshed_reason(linked, None)
+        assert reason is not None
+        assert "worktree" in reason

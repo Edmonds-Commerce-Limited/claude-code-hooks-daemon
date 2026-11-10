@@ -87,7 +87,9 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-_No tasks are queued for the next release._
+| File                                            | Type             | Severity    | Applies to | One-line summary                                                                               |
+| ----------------------------------------------- | ---------------- | ----------- | ---------- | ---------------------------------------------------------------------------------------------- |
+| `01-set-home-branch-for-the-claude-md-block.md` | config-migration | recommended | all        | Set `branches.home` / `branches.home_commit` when the main checkout is off the default branch. |
 
 <!-- END TASK INDEX -->
 

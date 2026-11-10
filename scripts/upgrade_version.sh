@@ -139,6 +139,28 @@ INSTALL_STAMP="$TARGET_VERSION"
 # Called once the daemon dir sits on the target (the fast path finds it there
 # already; the slow path arrives after Step 6). A release install keeps the
 # tag as its stamp; a branch install computes and announces its own.
+# Plan 00594: a restart refreshes the CLAUDE.md <hooksdaemon> block only on a
+# home branch (and not under branches.home_commit: false). Off home it leaves
+# the block as it was, so say so instead of letting the upgrade look complete.
+warn_if_claude_md_block_not_refreshed() {
+    local python="$1" project_root="$2" reason
+    if ! reason="$("$python" -c '
+import sys
+from pathlib import Path
+from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.core.claude_md_injector import block_not_refreshed_reason
+root = Path(sys.argv[1])
+config = Config.load(root / ".claude" / "hooks-daemon.yaml")
+print(block_not_refreshed_reason(root, config.branches) or "")
+' "$project_root")"; then
+        print_warning "Could not tell whether the CLAUDE.md hooks-daemon block was refreshed; run 'hooks-daemon regenerate-docs' on a pull-request branch if it is stale"
+        return 0
+    fi
+    if [ -n "$reason" ]; then
+        print_warning "CLAUDE.md hooks-daemon block was NOT refreshed by the restart: $reason. Run 'hooks-daemon regenerate-docs' (it writes the block without committing it) and commit the result on a pull-request branch."
+    fi
+}
+
 _resolve_install_stamp() {
     if [ "$BRANCH_INSTALL_STATE" != "armed" ]; then
         INSTALL_STAMP="$TARGET_VERSION"
@@ -1070,8 +1092,9 @@ FASTPATH_CCY_PY
     eager_cleanup_stale_venvs "$DAEMON_DIR" "$VENV_PATH"
 
     # Plan 00336 Phase 3: regenerate .claude/HOOKS-DAEMON.md. The restart above
-    # already refreshed the CLAUDE.md <hooksdaemon> block (DaemonController
-    # .initialise runs the ClaudeMdInjector), but nothing regenerated this
+    # refreshed the CLAUDE.md <hooksdaemon> block only if the checkout is on a
+    # home branch (DaemonController.initialise runs the ClaudeMdInjector; the
+    # warning below says when it did not), but nothing regenerated this
     # document, so it kept describing the version the project was INSTALLED at.
     # Runs AFTER the restart so it reflects the handler set that actually
     # loaded, and only warns on failure — guidance is not worth aborting a
@@ -1081,6 +1104,7 @@ FASTPATH_CCY_PY
     else
         print_warning "Failed to regenerate handler docs (non-fatal; run 'hooks-daemon regenerate-docs')"
     fi
+    warn_if_claude_md_block_not_refreshed "$VENV_PYTHON" "$PROJECT_ROOT"
 
     # Plan 00477: the tracked config names the version a fresh clone provisions.
     if ! record_expected_version "$VENV_PYTHON" "$PROJECT_ROOT"; then
@@ -1641,7 +1665,8 @@ fi
 # Step 15 restart (DaemonController.initialise runs the ClaudeMdInjector);
 # .claude/HOOKS-DAEMON.md was written by install_version.sh and then never
 # again, so it described the INSTALLED version no matter how many upgrades
-# later it was read. An upgrade that enables a new deny handler by default then
+# later it was read. (The restart refreshes the CLAUDE.md block only on a home
+# branch; the warning after this step says when it did not.) An upgrade that enables a new deny handler by default then
 # denies an agent by a rule its own guidance does not document.
 #
 # Ordering: after the restart, so the document reflects the handler set that
@@ -1653,6 +1678,7 @@ if "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli generate-docs --project
 else
     print_warning "Failed to regenerate handler docs (non-fatal; run 'hooks-daemon regenerate-docs')"
 fi
+warn_if_claude_md_block_not_refreshed "$VENV_PYTHON" "$PROJECT_ROOT"
 
 # Plan 00477: the tracked config names the version a fresh clone provisions.
 if ! record_expected_version "$VENV_PYTHON" "$PROJECT_ROOT"; then

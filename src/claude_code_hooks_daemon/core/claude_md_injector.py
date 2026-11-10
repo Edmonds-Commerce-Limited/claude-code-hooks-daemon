@@ -195,6 +195,24 @@ def _off_home_reason(cwd: Path, branches: "BranchesConfig | None") -> str | None
     return None
 
 
+def block_not_refreshed_reason(cwd: Path, branches: "BranchesConfig | None") -> str | None:
+    """Why a daemon restart in ``cwd`` leaves the CLAUDE.md block alone, or ``None``.
+
+    The upgrade script asks this after its restart, so it can say so rather than
+    claim the block was refreshed.
+    """
+    if is_linked_worktree(cwd):
+        return "this checkout is a linked git worktree, which start-up leaves alone"
+    off_home = _off_home_reason(cwd, branches)
+    if off_home is not None:
+        return off_home
+    if branches is not None and not branches.home_commit:
+        return (
+            "branches.home_commit is false, so the daemon never writes CLAUDE.md on a home branch"
+        )
+    return None
+
+
 def _home_branches(cwd: Path, config: "BranchesConfig") -> list[str]:
     """The home branches: ``branches.home``, else the default branch, else a fallback.
 
@@ -215,8 +233,8 @@ def _fallback_default_branch(cwd: Path) -> str | None:
         return configured
     if run_git(cwd, "rev-parse", "--verify", "--quiet", _GIT_HEAD_REF).returncode != 0:
         return current_branch(cwd)
-    listing = run_git(cwd, "for-each-ref", "--format=%(refname:short)", "refs/heads")
-    local = [line for line in listing.stdout.splitlines() if line]
+    listing = run_git(cwd, "for-each-ref", "--format=%(refname)", "refs/heads")
+    local = [line.removeprefix("refs/heads/") for line in listing.stdout.splitlines() if line]
     return local[0] if len(local) == 1 else None
 
 

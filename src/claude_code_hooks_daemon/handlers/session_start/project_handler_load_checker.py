@@ -177,7 +177,10 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
         """Say what daemon start-up left undone that an agent can act on."""
         if not self._startup_notices:
             return []
-        return ["⚠️ DAEMON START-UP NOTICE:", *(f"  - {notice}" for notice in self._startup_notices)]
+        return [
+            "⚠️ DAEMON START-UP NOTICE:",
+            *(f"  - {notice}" for notice in self._startup_notices),
+        ]
 
     def _config_problem_lines(self) -> list[str]:
         """Name each config value the daemon runs with other than as written.

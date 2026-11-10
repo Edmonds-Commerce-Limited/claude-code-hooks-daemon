@@ -315,7 +315,10 @@ def _holds_git_clone(directory: Path) -> bool:
         current, depth = pending.pop()
         try:
             children = list(current.iterdir())
-        except OSError:
+        except OSError as exc:
+            log_and_continue(
+                logger, exc, reason="an unreadable directory is searched no further for a clone"
+            )
             continue
         for child in children:
             if child.name == ".git":
