@@ -64,7 +64,7 @@ class TestPipeBlockerIntegration:
         assert result.result.reason is not None
         assert result.result.reason.count("To disable:") == 1
 
-    def test_blacklisted_deny_has_single_disable_footer(self) -> None:
+    def test_cargo_deny_has_single_disable_footer(self) -> None:
         router = EventRouter()
         handler = PipeBlockerHandler()
         router.register(EventType.PRE_TOOL_USE, handler)
