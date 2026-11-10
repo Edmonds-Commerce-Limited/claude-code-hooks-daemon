@@ -36,4 +36,4 @@ run separately; the old behaviour is evidenced by the code paths above.
 
 ## Release note
 
-`CLAUDE/UPGRADES/UNRELEASED/release-notes/041-branch-sweep-prints-only-remote-deletes-the-guard-allows.md`
+`CLAUDE/UPGRADES/UNRELEASED/release-notes/042-branch-sweep-prints-only-remote-deletes-the-guard-allows.md`
