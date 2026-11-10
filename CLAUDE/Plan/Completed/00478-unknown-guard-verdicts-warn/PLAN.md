@@ -1,6 +1,6 @@
 # Plan 00478: unknown guard verdicts warn
 
-**Status**: In Progress
+**Status**: Complete (2026-11-10)
 **Created**: 2026-10-01
 **Owner**: dev
 **Priority**: High
@@ -84,10 +84,10 @@ plan states that cost; it does not re-decide the ruling.
   log prefix `UNKNOWN-VERDICT`; an independent review caught a found marker lost on
   a later timeout, fixed before merge (`a2a7f5687`; branch merged to main via
   `6014e3814`, main CI run 42747571106 green); release note 027.
-- [ ] 🔄 **Task 2.2b**: `destructive_git` substitution route (row 2). The stand-in's
+- [x] ✅ **Task 2.2b**: `destructive_git` substitution route (row 2). The stand-in's
   Q1 ruling keeps the deny (a recognised forced delete with an unproven target), so
   this task only pins the local-delete substitution deny with a test (none found by
-  name in INVENTORY.md row 2).
+  name in INVENTORY.md row 2). Delivered with 2.2e (`afcda1796`).
 - [x] ✅ **Task 2.2c**: rows 14, 15, 19, 20, 22, 24 (flaggable channel, journal
   guard, release merge freeze, reference repo not verified, curl into a
   non-shell interpreter, root recursion on an unstattable path).
@@ -100,22 +100,31 @@ plan states that cost; it does not re-decide the ruling.
   Delivered: `validate_eslint_on_write` `_not_linted` allows with the shared advisory;
   R-ESLINT-TIMEOUT and R-ESLINT-RUN-FAILURE are advisory-only (`a215b3ae6`, branch
   merged via `2d9e6c762`, main `47dae7574` CI run 42756436040 green); release note 029.
-- [ ] 🔄 **Task 2.2e**: Contested rows 1, 3, 5, 16, 23 and scope rows 21, 25, 26,
+- [x] ✅ **Task 2.2e**: Contested rows 1, 3, 5, 16, 23 and scope rows 21, 25, 26,
   under the stand-in's ruling (see "Owner questions"). Convert to warn: row 16's
   sub-branches that deny with no literal mention of a listed path (the `**`-only
   glob), and row 26 (an unknown producer piped to `tail`/`head`; blacklisted
   producers still deny). Rows 1, 3, 5, 16-literal and 23 stay deny; rows 21 and 25
-  are out of scope.
-- [ ] ⬜ **Task 2.2f**: The three minor findings from the third 2.2e review (report
+  are out of scope. Delivered: three review rounds. Round 1 found an unknown pipe
+  laundering a later blacklisted one, and wrapped blacklisted producers read as
+  unknown. Round 2 found the same for parser gaps, so an unknown pipe now allows only
+  when no blacklisted name appears anywhere in the command. Round 3 approved. Main
+  `7995c3330`; shipped in v3.73.2 (release note 031).
+- [x] ✅ **Task 2.2f**: The three minor findings from the third 2.2e review (report
   `untracked/agent-reports/auto/261110-114115-code-reviewer-ae1ac874080c044d0.md`,
   copied into `subagent-reports/` with 2.2e). First, `pipe_blocker` also scans heredoc
   bodies on the unknown-producer path (`cat > t.sh <<'EOF' … pytest … EOF; bash t.sh | tail`).
   Second, `py.test` is blacklisted. Third, an operator-form expansion operand
   (`${PWD:-.}/protected/x`) counts by its literal part in `write_protected_paths`, or
-  release note 031 is narrowed to the forms it covers.
-- [ ] 🔄 **Task 2.3**: Update the rule explanations, the generated `CLAUDE.md`
-  guidance, and add a release note. Done for 2.2a, 2.2c and 2.2d (rule texts,
-  `get_claude_md`, release notes 027-029); the rest ships with 2.2b and 2.2e.
+  release note 031 is narrowed to the forms it covers. Delivered: its review found a
+  2.2e regression already shipped in v3.73.2 (an awk `FILENAME` rewrite of a named
+  protected file allowed after an operator-form expansion operand). Fixed at the root:
+  the shared word scanner reads a brace-balanced `${...}` as part of its word, which
+  also closed an older gap for `rm`, `cp`, `tee` and other verbs. Main `99b1917c9`;
+  main CI green on `2ef61af10` (run 42897828693); release note 037.
+- [x] ✅ **Task 2.3**: Update the rule explanations, the generated `CLAUDE.md`
+  guidance, and add a release note: rule texts, `get_claude_md` and
+  `HANDLER_REFERENCE.md` per batch; release notes 027-029, 031 and 037.
 
 ## Owner questions (block Task 2.2e only)
 
@@ -141,9 +150,14 @@ scope and row 26 in scope (warn).
 
 ## Success Criteria
 
-- [ ] No safety guard denies solely because it could not decide.
-- [ ] Every positive-match deny in the existing suites is still a deny.
-- [ ] A converted route emits an advisory and a log line, and a test pins both.
+- [x] No safety guard denies solely because it could not decide. Rows 1-3, 5, 21, 23
+  and 25 stay deny as positively recognised actions, under the stand-in's ruling.
+- [x] Every positive-match deny in the existing suites is still a deny. Each batch's
+  adversarial review compared verdicts before and after the change.
+- [x] A converted route emits an advisory and a log line, and a test pins both: the
+  shared `unknown_verdict_allow` helper with an `UNKNOWN-VERDICT` log line.
+- [x] Release-bound consequences in the holding area: release notes 027-029, 031
+  (shipped in v3.73.2) and 037 in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ## Delivery & Milestones
 
