@@ -8,7 +8,9 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00478: unknown guard verdicts warn](00478-unknown-guard-verdicts-warn/PLAN.md) - In Progress (owner ruling "warn dont block": a safety guard that cannot decide allows with an advisory; a positive match still denies; Phase 0 done, GitHub #170 closed; inventory done; Tasks 2.2a, 2.2c and 2.2d merged with green CI (release notes 027-029); 2.2b and 2.2e blocked on owner questions Q1-Q4 in PLAN.md)
+- [00478: unknown guard verdicts warn](00478-unknown-guard-verdicts-warn/PLAN.md) - In Progress (owner ruling "warn dont block": a safety guard that cannot decide allows with an advisory; a positive match still denies; Phase 0 done, GitHub #170 closed; inventory done; Tasks 2.2a, 2.2c and 2.2d merged with green CI (release notes 027-029); Q1-Q4 decided by the STAND-IN (not the owner); 2.2b, 2.2e and 2.2f merged to main, 2.2f main CI pending)
+
+- [00595: secret guard search string option value bold colon](00595-secret-guard-search-string-option-value-bold-colon/PLAN.md) - In Progress (GitHub #200: secret_file_guard misreads a git search string, a grep --include value and a colon-split markdown bold as protected paths)
 
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
@@ -297,11 +299,11 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Plan Statistics
 
-- **Total Plans Created**: 593 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 595 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 501 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 70 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 71 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
