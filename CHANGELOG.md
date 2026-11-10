@@ -17,6 +17,7 @@ _A hotfix release. A plan journal entry could be stranded by a markdown formatte
 ### Changed
 
 - Eight commit-gate routes and six more guards (`flaggable_content_channel_guard`, `plan_journal_guard`, `release_merge_freeze`, `reference_repo_freshness`, `curl_pipe_shell`, `root_recursion_guard`) now allow with an advisory instead of denying when they cannot decide; `validate_eslint_on_write` does the same when ESLint times out or cannot run (Plan 00478, "warn dont block"). A positively recognised finding still denies. Each writes an `UNKNOWN-VERDICT` log line.
+- `pipe_blocker` allows with an advisory a tail/head pipe whose producer is on no list, unless a blacklisted command is named anywhere in the command; `write_protected_paths` allows with an advisory an unreadable command that names no listed path, and judges a writing awk program by where it writes (Plan 00478 Task 2.2e).
 - The `branch-sweep` "Dormant:" section, the idle-branch Stop line and the `R-BRANCH-WIP-CAP` deny state the branch-limit principle and give each branch its next step (Plan 00583; GitHub #192).
 - An advise-severity `plan_qa` or `docs_qa` finding is reported without failing the check (Plan 00576).
 - A worktree removal no longer treats a seeded copy identical to its source as unrecoverable work (Plan 00579; GitHub #164).
