@@ -15,19 +15,19 @@ Class numbers and names are those of the "Observed failure classes" list in PLAN
 
 ## Summary
 
-| Class | Name                                         | Closing task(s)          | Status on main today                                |
-| ----- | -------------------------------------------- | ------------------------ | --------------------------------------------------- |
-| 1     | The daemon makes dangling branches itself    | 2.1, 2.2                 | Closed (both done)                                  |
-| 2     | The cap bites at creation                    | 4.2 (and 4.8 advisories) | Open (4.2 not done)                                 |
-| 3     | Some resolutions are impossible for an agent | 3.1, 3.2, 4.7            | Closed (all done)                                   |
-| 4     | Blockers appear one at a time                | 4.1                      | Open (4.1 not done)                                 |
-| 5     | Parking is fragile                           | 4.3, 4.5                 | Partly closed (4.5 done, 4.3 partly done)           |
-| 6     | Regenerable directories block cleanup        | 3.3, 3.5                 | Closed (both done)                                  |
-| 7     | Pools are not counted per owner              | 4.4 (and 4.6 for stacks) | Open (4.4 and 4.6 not done)                         |
-| 8     | Scale                                        | 3.4 (with 3.1, 3.2)      | Open (3.4 not done; the proof it relies on is done) |
-| 9     | Journal heading churn (smaller, separate)    | 6.1, 6.2, 6.3            | Closed (all done)                                   |
+| Class | Name                                         | Closing task(s)          | Status on main today                             |
+| ----- | -------------------------------------------- | ------------------------ | ------------------------------------------------ |
+| 1     | The daemon makes dangling branches itself    | 2.1, 2.2                 | Closed (both done)                               |
+| 2     | The cap bites at creation                    | 4.2 (and 4.8 advisories) | Open (4.2 not done)                              |
+| 3     | Some resolutions are impossible for an agent | 3.1, 3.2, 4.7            | Closed (all done)                                |
+| 4     | Blockers appear one at a time                | 4.1                      | Closed (4.1 done)                                |
+| 5     | Parking is fragile                           | 4.3, 4.5                 | Partly closed (4.5 done, 4.3 partly done)        |
+| 6     | Regenerable directories block cleanup        | 3.3, 3.5                 | Closed (both done)                               |
+| 7     | Pools are not counted per owner              | 4.4 (and 4.6 for stacks) | Open (4.4 and 4.6 not done)                      |
+| 8     | Scale                                        | 3.4 (with 3.1, 3.2)      | Closed (3.4 done, on the proof from 3.1 and 3.2) |
+| 9     | Journal heading churn (smaller, separate)    | 6.1, 6.2, 6.3            | Closed (all done)                                |
 
-Phase 5 (branch-tip channel) is not a failure class and is covered in its own section at the end. Task statuses were checked against the PLAN.md checkboxes: done are 2.1, 2.2, 3.1, 3.2, 3.3, 3.5, 3.6, 4.5, 4.7, 4.8, 5.0, 5.2, 5.3, 6.1, 6.2, 6.3; partly done are 4.3 and 5.1; open are 3.4, 4.1, 4.2, 4.4, 4.6.
+Phase 5 (branch-tip channel) is not a failure class and is covered in its own section at the end. Task statuses were checked against the PLAN.md checkboxes: done are 1.1, 2.1, 2.2, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 4.1, 4.5, 4.7, 4.8, 5.0, 5.2, 5.3, 6.1, 6.2, 6.3; partly done are 4.3 and 5.1; open are 4.2, 4.4, 4.6, 4.9 (a client report, ledger N611: the park commit is unsigned).
 
 ## Class 1: The daemon makes dangling branches itself
 
@@ -91,7 +91,7 @@ Phase 5 (branch-tip channel) is not a failure class and is covered in its own se
 
 **Own-repo recurrence (repo source, JOURNAL)**: the release-branch block above needed several stale branches cleared before the creation succeeded.
 
-**Closed by**: Task 4.1 (`branch-preflight`, the creation deny renders the same report), not done. DESIGN.md section 2.3 specifies that it evaluates every pool rather than the first rule that trips. Status on main: open.
+**Closed by**: Task 4.1 (`branch-preflight`, the creation deny renders the same report), done (release note 046, `task-4-1-report.md`). DESIGN.md section 2.3 specifies that it evaluates every pool rather than the first rule that trips. Status on main: closed.
 
 ## Class 5: Parking is fragile
 
@@ -146,7 +146,7 @@ Status on main: partly closed.
 - Advice given to that seat (repo source, JOURNAL): archive recovery copies under `refs/archive` and leave the deletes to the owner until the proof shipped.
 - Second client seat, a nested agent worktree: one agent worktree was created inside another worktree.
 
-**Closed by**: Task 3.4 (batched, resumable bulk cleanup tested against a fixture with hundreds of branches), not done. The proof it depends on (3.1, 3.2) is done, and Task 4.8 (release note 044, "Branch Practice" in the core worktree doc) now says recovery copies go to a bundle or `refs/archive/<name>`, never to a branch, and worktrees are never nested. `branch_creation_guard` advises on a recovery-shaped branch name and on a nested worktree. Status on main: open for the bulk path; the recovery-copy and nested-worktree causes are closed.
+**Closed by**: Task 3.4 (batched, resumable bulk cleanup tested against a fixture with hundreds of branches), done (release note 047, `task-3-4-report.md`: `--clean` previews, `--apply` deletes in batches of 50 with a bundle each, and a run resumes by running the same command again). The proof it depends on (3.1, 3.2) is done, and Task 4.8 (release note 044, "Branch Practice" in the core worktree doc) now says recovery copies go to a bundle or `refs/archive/<name>`, never to a branch, and worktrees are never nested. `branch_creation_guard` advises on a recovery-shaped branch name and on a nested worktree. Status on main: closed (the bulk path, the recovery-copy cause and the nested-worktree cause).
 
 ## Class 9: Journal heading churn
 
