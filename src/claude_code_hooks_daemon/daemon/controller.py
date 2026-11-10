@@ -440,6 +440,7 @@ class DaemonController:
                 handlers=all_handlers,
                 promoted_handlers=promoted_handlers,
                 write_in_linked_worktree=write_claude_md_in_linked_worktree,
+                branches=branches,
             ).inject()
 
         # Sync daemon-shipped agent assets with the gating config (Plan 00279):

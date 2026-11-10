@@ -2440,11 +2440,17 @@ class BranchesConfig(BaseModel):
             pool, never cleaned, listed in their own sweep group. Separate from
             ``exempt`` so a project's own exempt list does not drop the default
         protected_names: Branch names no delete command will remove
+        home: The branches a main checkout lives on. The daemon writes and
+            commits the CLAUDE.md block only while HEAD is attached to one of
+            them. Empty means the default branch; a configured list REPLACES
+            that default (a checkout that sits on an environment or release
+            branch declares it here)
     """
 
     model_config = ConfigDict(extra="forbid")
 
     default: str = Field(default=BRANCH_DEFAULT_AUTO, min_length=1)
+    home: list[str] = Field(default_factory=list)
     remote: str = Field(default="origin", min_length=1)
     integration_lines: list[str] = Field(default_factory=list)
     exempt: list[str] = Field(default_factory=list)
