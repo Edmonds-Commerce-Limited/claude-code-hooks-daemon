@@ -165,15 +165,43 @@ def _executed_path(words: list[str | None], written: set[str]) -> str | None:
     return candidate if candidate in written else None
 
 
+def _stdin_paths(words: list[str | None]) -> set[str]:
+    """Paths one segment feeds on stdin: `< p`, `<p`, and the operands of `cat`."""
+    paths: set[str] = set()
+    for index, word in enumerate(words):
+        if word is None or not word.startswith("<") or word.startswith(("<<", "<(")):
+            continue
+        target = word[1:] or (words[index + 1] if index + 1 < len(words) else None)
+        if target:
+            paths.add(_normalise_path(target))
+    if words and words[0] is not None and words[0].rsplit("/", 1)[-1] == "cat":
+        paths.update(
+            _normalise_path(word) for word in words[1:] if word and not word.startswith("-")
+        )
+    return paths
+
+
+def _reads_shell_input(words: list[str | None]) -> bool:
+    """Whether one segment is a shell that reads its program from stdin."""
+    if not words or words[0] is None:
+        return False
+    head = words[0].rsplit("/", 1)[-1]
+    if head not in SHELL_NAMES:
+        return False
+    return not any(word == "-c" or (word or "").startswith("-c") for word in words[1:])
+
+
 def _runs_written_script(command: str) -> bool:
     """Whether a segment runs a path an EARLIER segment of ``command`` wrote.
 
     `echo 'git stash' > s.sh && bash s.sh` runs the text of the echo, so that
-    text is a command however a data head would otherwise be read. Paths are
+    text is a command however a data head would otherwise be read. So does a
+    shell fed the file on stdin: `sh < s.sh`, or `cat s.sh | sh`. Paths are
     compared textually, so a path the shell computes is not matched; the caller
     then judges the whole command exactly as written.
     """
     written: set[str] = set()
+    fed = False
     for start, end in _segment_spans(command):
         words = [
             resolve_shell_word(command[a + start : b + start])
@@ -181,6 +209,9 @@ def _runs_written_script(command: str) -> bool:
         ]
         if _executed_path(words, written) is not None:
             return True
+        if _reads_shell_input(words) and (fed or _stdin_paths(words) & written):
+            return True
+        fed = fed or bool(_stdin_paths(words) & written)
         written |= _written_paths(words)
     return False
 
@@ -511,6 +542,12 @@ def _outside_quotes(text: str) -> str:
     return "".join(kept)
 
 
+def _assigns_variable(words: list[str | None]) -> bool:
+    """Whether a `printf` stores its output in a variable (`printf -v name ...`)
+    instead of printing it, so the text can be run later through that variable."""
+    return any(word == "printf" for word in words[:1]) and "-v" in words[1:2]
+
+
 def _printing_body(body: str) -> bool:
     """Whether ``body`` is ONE `printf`/`echo` of literal words and nothing else."""
     if any(marker in body for marker in _BODY_ACTIVE_CHARS):
@@ -523,6 +560,8 @@ def _printing_body(body: str) -> bool:
         return False
     words = [resolve_shell_word(body[start:end]) for start, end in spans]
     if words[0] not in _PRINTING_HEADS or any(word is None for word in words):
+        return False
+    if _assigns_variable(words):
         return False
     return not any(char in _outside_quotes(body) for char in _BODY_OPERATORS)
 
@@ -584,8 +623,10 @@ def _prints_only(masked: str, spans: list[tuple[int, int]], index: int) -> bool:
     turn into a command: no other substitution and no pipe into a stage that may run it."""
     segments = [masked[start:end] for start, end in spans]
     segment = segments[index]
+    words = [resolve_shell_word(segment[a:b]) for a, b in shell_word_spans(segment)]
     return (
         _head(segment) in _PRINTING_HEADS
+        and not _assigns_variable(words)
         and not any(marker in segment for marker in ("$(", "`", "<(", ">("))
         and not _pipeline_may_run_output(masked, spans, segments, index)
     )
@@ -675,6 +716,9 @@ def _narrow(
             may_run_output
             or any(marker in segment for marker in _EXPANSION_MARKERS)
             or (head == "rg" and _has_rg_preprocessor(segment))
+            or _assigns_variable(
+                [resolve_shell_word(segment[a:b]) for a, b in shell_word_spans(segment)]
+            )
         ):
             return segment
         return f" {head} {_DATA_PLACEHOLDER} "

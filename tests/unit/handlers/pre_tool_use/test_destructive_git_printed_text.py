@@ -76,6 +76,37 @@ class TestAnythingThatMayRunTheCapturedTextStillDenies:
         assert not _allowed(command, tmp_path)
 
 
+class TestAWrittenScriptRunThroughStdinDenies:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"echo \"$(printf '{_RESET}')\" > s.sh; sh < s.sh",
+            f"echo \"$(printf '{_RESET}')\" > s.sh; bash -s < s.sh",
+            f"echo \"$(printf '{_RESET}')\" > s.sh; bash < s.sh",
+            f"echo \"$(printf '{_RESET}')\" > s.sh; cat s.sh | sh",
+            f"echo \"$(printf '{_RESET}')\" > s.sh; cat s.sh | bash",
+            f"m=$(printf '{_RESET}'); echo \"$m\" > s.sh; sh < s.sh",
+            f"echo '{_RESET}' > s.sh; sh < s.sh",
+            f"echo '{_RESET}' > s.sh; cat s.sh | sh",
+        ],
+    )
+    def test_it_is_denied(self, command: str, tmp_path: Path) -> None:
+        assert not _allowed(command, tmp_path)
+
+
+class TestPrintfDashVAssignsRatherThanPrints:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"m=$(printf '{_RESET}'); printf -v n \"$m\"; eval \"$n\"",
+            f"printf -v n '%s' '{_RESET}'; $n",
+            f"printf -v n '%s' '{_RESET}'; eval \"$n\"",
+        ],
+    )
+    def test_it_is_denied(self, command: str, tmp_path: Path) -> None:
+        assert not _allowed(command, tmp_path)
+
+
 class TestTextFormattersNeverRunTheirInput:
     @pytest.mark.parametrize(
         "formatter",
