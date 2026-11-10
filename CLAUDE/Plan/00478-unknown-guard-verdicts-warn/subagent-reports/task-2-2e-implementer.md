@@ -80,4 +80,7 @@ Review: `task-2-2e-rereview-code-reviewer.md` (committed af5607bad). Every fix w
   - Targeted pytest over all 19 files (every test file changed since 6bba54cc7, plus all `test_pipe_blocker*.py` and `test_write_protected_paths*.py`): 1652 passed.
   - `run_autofix.sh`: rc 0, with one black reformat.
   - mypy: clean on both handlers.
-- **Open.** `${PWD}/…` as an awk operand under a directory glob (see above).
+- **Closed on follow-up: the `${PWD}/…` case.** The shared word scanner now gives a simple braced parameter `${NAME}` the extent of `$NAME`, both unquoted and inside double quotes (`_SIMPLE_BRACED_PARAMETER` in `shell_segmentation._quoted_span_end`). Operator forms such as `${x:-a b}`, `${#x}` and `${x[@]}` still end the stream.
+  - Effect: `awk '{print > FILENAME}' ${PWD}/protected/x`, `"${PWD}"/protected/x` and `${HOME}/../protected/x` now deny under `protected/**`, as at base.
+  - RED tests: 3 wpp cases and 4 in `test_shell_segmentation_braced_parameter.py`.
+  - Targeted run: `test_write_protected_paths.py` plus the new file, 635 passed. Because the scanner is shared, I also ran `tests/unit/utils`, `tests/unit/core` and `tests/unit/handlers/pre_tool_use`: 24771 passed, 2 skipped.

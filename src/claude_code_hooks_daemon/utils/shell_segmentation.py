@@ -934,6 +934,11 @@ _EXPANDING_CHARS = "$`*?[{}"
 _WORD_BREAK_CHARS = " \t\n"
 
 
+#: A braced parameter with no operator (`${PWD}`): its extent is that of `$PWD`,
+#: so unlike `${x:-a b}` it cannot hide whitespace and the word stays exact.
+_SIMPLE_BRACED_PARAMETER = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
+
+
 def iter_shell_words(text: str) -> Iterator[str | None]:
     """Each whitespace-delimited shell word of ``text``, quotes kept.
 
@@ -991,6 +996,9 @@ def _quoted_span_end(text: str, index: int) -> int | None:
     char = text[index]
     if char == "\\":
         return min(index + 2, len(text))
+    simple = _SIMPLE_BRACED_PARAMETER.match(text, index)
+    if simple is not None:
+        return simple.end()
     if char == "`" or text.startswith(("$(", "${"), index):
         return None
     if char == "'":
@@ -1013,6 +1021,8 @@ def _quoted_span_end(text: str, index: int) -> int | None:
                 cursor += 2
             elif text[cursor] == '"':
                 return cursor + 1
+            elif (simple := _SIMPLE_BRACED_PARAMETER.match(text, cursor)) is not None:
+                cursor = simple.end()
             elif text[cursor] == "`" or text.startswith(("$(", "${"), cursor):
                 return None
             else:

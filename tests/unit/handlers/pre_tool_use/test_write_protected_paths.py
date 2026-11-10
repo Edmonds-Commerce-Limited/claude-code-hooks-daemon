@@ -1790,6 +1790,9 @@ class TestAPathNobodyNamedWarnsInsteadOfDenying:
             '"$PWD"/protected/x',
             "$HOME/../protected/x",
             "~+/protected/x",
+            "${PWD}/protected/x",
+            '"${PWD}"/protected/x',
+            "${HOME}/../protected/x",
         ],
     )
     def test_an_awk_operand_built_from_an_expansion_still_names_the_directory(
