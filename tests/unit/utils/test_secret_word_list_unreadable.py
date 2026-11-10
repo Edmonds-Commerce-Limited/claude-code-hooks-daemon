@@ -11,6 +11,7 @@ Root can read any chmod-000 file, so unreadability is simulated by patching
 
 import importlib.util
 import json
+import logging
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -27,6 +28,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
     SensitiveContentHandler,
 )
 from claude_code_hooks_daemon.utils import secret_redaction as sr
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TERM = "zzqx-nonsense-term"
@@ -158,22 +160,44 @@ class TestSinkHelper:
 
 
 class TestSensitiveContentHandler:
-    def test_unreadable_list_denies_with_a_purpose_built_reason(self, tmp_path: Path) -> None:
+    def test_unreadable_list_is_an_advisory_naming_the_path(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         handler = _handler_for(_unreadable_list(tmp_path))
         assert handler.matches(_WRITE_INPUT) is True
-        result = handler.handle(_WRITE_INPUT)
-        assert result.decision == Decision.DENY
-        assert "secret word list" in (result.reason or "")
-        assert "cannot be read" in (result.reason or "")
+        with caplog.at_level(logging.WARNING):
+            result = handler.handle(_WRITE_INPUT)
+        advisory = assert_unknown_verdict(
+            result, caplog, "sensitive_content", "secret word list", "cannot be read", _LIST_NAME
+        )
+        assert "NOT checked" in advisory
 
-    def test_reason_never_contains_a_term(self, tmp_path: Path) -> None:
+    def test_advisory_and_log_never_contain_a_term(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         path = tmp_path / _LIST_NAME
         path.write_text(f"{_TERM}\n")
         handler = _handler_for(path)
-        with patch.object(Path, "read_text", side_effect=PermissionError(f"leaks {_TERM}")):
-            result = handler.handle(_WRITE_INPUT)
+        with caplog.at_level(logging.DEBUG):
+            with patch.object(Path, "read_text", side_effect=PermissionError(f"leaks {_TERM}")):
+                result = handler.handle(_WRITE_INPUT)
+        assert_unknown_verdict(result, caplog, "sensitive_content")
+        assert _TERM not in "\n".join(result.context)
+        assert _TERM not in caplog.text
+
+    def test_a_public_pattern_match_still_denies_when_the_list_is_unreadable(
+        self, tmp_path: Path
+    ) -> None:
+        handler = _handler_for(_unreadable_list(tmp_path))
+        handler._public_patterns = [
+            {"name": "probe", "pattern": "PUBLIC-PROBE-[0-9]+", "description": "probe"}
+        ]
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/tmp/f.txt", "content": "PUBLIC-PROBE-42"},
+        }
+        result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
-        assert _TERM not in (result.reason or "")
 
     def test_absent_list_still_allows(self, tmp_path: Path) -> None:
         handler = _handler_for(tmp_path / "absent.lst")

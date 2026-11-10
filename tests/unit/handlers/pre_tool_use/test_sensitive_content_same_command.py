@@ -10,6 +10,7 @@ Every row runs real git in a temporary repository, so each verdict is checked
 against what the command would really record.
 """
 
+import logging
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -18,6 +19,7 @@ from unittest.mock import patch
 
 import pytest
 from tests.support.git_fixtures import git_setup_timeout
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
@@ -372,7 +374,7 @@ class TestACdThatMayLandInSeveralDirectories:
         assert _decision(handler, repo, "cd sub && git commit -q -m x f.txt") == Decision.ALLOW
 
 
-class TestAStagingThatCannotBeSimulatedIsDenied:
+class TestAStagingThatCannotBeSimulatedIsAnAdvisory:
     """A simulation that did not finish is not a clean index: the gate says so."""
 
     @staticmethod
@@ -386,8 +388,8 @@ class TestAStagingThatCannotBeSimulatedIsDenied:
 
         return run
 
-    def test_handle_denies_and_tells_the_user_to_stage_first(
-        self, repo: Path, handler: SensitiveContentHandler
+    def test_handle_allows_with_an_advisory_that_says_to_stage_first(
+        self, repo: Path, handler: SensitiveContentHandler, caplog: pytest.LogCaptureFixture
     ) -> None:
         (repo / "leak.txt").write_text(f"{_TERM}\n")
         hook_input: dict[str, Any] = {
@@ -396,11 +398,26 @@ class TestAStagingThatCannotBeSimulatedIsDenied:
             "cwd": str(repo),
         }
 
-        with patch(_STAGING_RUN_GIT, side_effect=self._fail_every_add()):
+        with caplog.at_level(logging.WARNING), patch(
+            _STAGING_RUN_GIT, side_effect=self._fail_every_add()
+        ):
             result = handler.handle(hook_input)
 
+        assert_unknown_verdict(result, caplog, "sensitive_content", "separate command")
+
+    def test_a_term_in_the_message_still_denies_when_the_staging_cannot_be_simulated(
+        self, repo: Path, handler: SensitiveContentHandler
+    ) -> None:
+        """A positive finding in the command text is not lost to the simulation gap."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": f"git add leak.txt && git commit -q -m '{_TERM}'"},
+            "cwd": str(repo),
+        }
+        with patch(_STAGING_RUN_GIT, side_effect=self._fail_every_add()):
+            assert handler.matches(hook_input) is True
+            result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
-        assert "separate command" in (result.reason or "")
 
     def test_matches_selects_the_command_so_the_chain_reaches_handle(
         self, repo: Path, handler: SensitiveContentHandler

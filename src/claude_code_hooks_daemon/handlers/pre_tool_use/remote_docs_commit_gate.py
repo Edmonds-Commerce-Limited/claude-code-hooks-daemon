@@ -46,10 +46,11 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import (
 )
 from claude_code_hooks_daemon.utils.git_facts import commit_facts
 from claude_code_hooks_daemon.utils.staging_simulation import (
-    INCOMPLETE_SIMULATION_BLOCKED,
+    INCOMPLETE_SIMULATION_REPHRASE,
     SimulationIncompleteError,
     simulated_staging,
 )
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 logger = logging.getLogger(__name__)
 
@@ -145,8 +146,10 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
                 return GatingResult(decision=Decision.ALLOW)
             staged = self.staged_reader(reading, cwd if isinstance(cwd, str) else None)
         except SimulationIncompleteError as incomplete:
-            return GatingResult(decision=Decision.DENY, reason=str(incomplete)).under_rule(
-                _rule_staged_provenance(), blocked=INCOMPLETE_SIMULATION_BLOCKED
+            return unknown_verdict_allow(
+                HandlerID.REMOTE_DOCS_COMMIT_GATE.config_key,
+                str(incomplete),
+                INCOMPLETE_SIMULATION_REPHRASE,
             )
         except OSError as exc:
             # A gate that cannot read the index must not block every commit.

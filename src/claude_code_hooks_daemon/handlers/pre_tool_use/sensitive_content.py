@@ -92,10 +92,10 @@ from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 from claude_code_hooks_daemon.utils.staging_simulation import (
-    INCOMPLETE_SIMULATION_BLOCKED,
     SimulationIncompleteError,
     simulated_staging,
 )
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -151,12 +151,15 @@ _GIT_FIELD_BY_SUBCOMMAND: Final[dict[str, str]] = {
 _LOCATION_WITHHELD: Final[str] = "a path whose own name also matches the pattern (not shown)"
 _OFFSET_KEY: Final[str] = "_offset"
 
-# Headline wording for the fail-closed denies, which cannot say "matched a
+# Headline wording for the NUL-byte deny, which cannot say "matched a
 # pattern" because nothing was matched: the write could not be checked.
 _NUL_BYTE_BLOCKED: Final[str] = "a write whose file_path embeds a NUL byte"
-_SECRET_LIST_UNREADABLE_BLOCKED: Final[str] = (
-    "a write that cannot be checked because the secret word list cannot be read"
+_UNCHECKED_REPHRASE: Final[str] = (
+    "To have it checked: stage with `git add` as its own call and commit as a "
+    "separate command, and restore read access to the secret word list (or remove "
+    "it to opt out)."
 )
+_STAGED_TREE_SUBJECT: Final[str] = "the staged tree"
 _FIELD_CONTENT: Final[str] = "content"
 _FIELD_NEW_STRING: Final[str] = "new_string"
 _FIELD_COMMAND: Final[str] = "command"
@@ -478,6 +481,10 @@ class _Haystack(NamedTuple):
     # Set when ``text`` is only a fragment of the file (an Edit's new_string):
     # its line numbers are not the file's, so the deny says what they count in.
     line_scope: str = ""
+    # A marker rather than text: why part of what this call introduces could not
+    # be read. It carries no text to scan, so the rest is still judged, and the
+    # unknown part is then reported as an advisory (Plan 00478).
+    unchecked: str = ""
 
 
 def _shell_tokens(command: str) -> list[str]:
@@ -948,13 +955,13 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if self._nul_byte_file_path_reason(hook_input) is not None:
             return True
 
-        try:
-            haystacks = self._compute_and_cache(hook_input)
-        except SimulationIncompleteError:
-            # Nothing can be judged, so nothing may be allowed: handle() denies.
-            return True
+        haystacks = self._compute_and_cache(hook_input)
         if not haystacks:
             return False
+
+        # A part that could not be read is reported by handle(), as an advisory.
+        if any(hay.unchecked for hay in haystacks):
+            return True
 
         if any(
             self._find_public_pattern_match(hay.text) is not None
@@ -966,7 +973,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         try:
             terms = self._secret_terms()
         except sr.SecretWordListUnreadableError:
-            # Nothing can be checked, so nothing may be allowed: handle() denies.
+            # Nothing can be checked: handle() allows it, with an advisory.
             return True
         return any(sr.find_first_match_index(hay.text, terms) is not None for hay in haystacks)
 
@@ -1082,11 +1089,23 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         is_commit, commits_all = _is_git_commit(command)
         if is_commit:
             reading = read_commit_form(command)
-            haystacks.extend(
-                self._staged_content_haystacks(
-                    hook_input, commits_all or reading.commits_all, reading
+            try:
+                haystacks.extend(
+                    self._staged_content_haystacks(
+                        hook_input, commits_all or reading.commits_all, reading
+                    )
                 )
-            )
+            except SimulationIncompleteError as incomplete:
+                # The staged tree is unknown, but the command text gathered above
+                # is not: it is still judged, so only the unknown part warns.
+                haystacks.append(
+                    _Haystack(
+                        subject=_STAGED_TREE_SUBJECT,
+                        text="",
+                        public_patterns_apply=False,
+                        unchecked=str(incomplete),
+                    )
+                )
         return haystacks
 
     def _message_file_haystacks(self, command: str, hook_input: dict[str, Any]) -> list[_Haystack]:
@@ -1676,12 +1695,10 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 _RULE_PUBLIC_PATTERN, blocked=_NUL_BYTE_BLOCKED
             )
 
-        try:
-            haystacks = self._take_cached_haystacks(hook_input)
-        except SimulationIncompleteError as incomplete:
-            return GatingResult(decision=Decision.DENY, reason=str(incomplete)).under_rule(
-                _RULE_PUBLIC_PATTERN, blocked=INCOMPLETE_SIMULATION_BLOCKED
-            )
+        haystacks = self._take_cached_haystacks(hook_input)
+        # What could not be read warns; what WAS read is still judged below, so a
+        # positive finding never hides behind a gap (Plan 00478).
+        unchecked = [hay.unchecked for hay in haystacks if hay.unchecked]
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
 
         for hay in haystacks:
@@ -1699,15 +1716,12 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         try:
             terms = self._secret_terms()
         except sr.SecretWordListUnreadableError as exc:
-            # The path is named; the message carries no content or term.
-            return GatingResult(
-                decision=Decision.DENY,
-                reason=(
-                    "The secret word list exists but cannot be read, so this "
-                    f"write cannot be checked against it. {exc}. Restore read access "
-                    "to the list (or remove it to opt out) and retry."
-                ),
-            ).under_rule(_RULE_SECRET_TERM, blocked=_SECRET_LIST_UNREADABLE_BLOCKED)
+            # The path is named; the message carries no content or term. With no
+            # terms to compare against, no positive finding is possible.
+            unchecked.append(
+                f"this call was NOT checked against the secret word list: {exc}"
+            )
+            terms = ()
         for hay in haystacks:
             index = sr.find_first_match_index(hay.text, terms)
             if index is not None:
@@ -1721,6 +1735,12 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                     transcript_path, sr.redact_text(hay.subject, terms), index, len(terms)
                 )
 
+        if unchecked:
+            return unknown_verdict_allow(
+                HandlerID.SENSITIVE_CONTENT.config_key,
+                "; ".join(unchecked),
+                _UNCHECKED_REPHRASE,
+            )
         return GatingResult(decision=Decision.ALLOW)
 
     def _safe_location(self, location: str) -> str:

@@ -24,6 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from tests.support.git_fixtures import git_setup_timeout
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -611,9 +612,13 @@ class TestACommandThatStagesOrCommitsMoreThanOnce:
 
         assert "later.py" in rendered
 
-    @pytest.mark.parametrize(("mode", "decision"), [("block", Decision.DENY), ("warn", None)])
-    def test_an_add_that_cannot_be_simulated_is_not_read_as_clean(
-        self, handler: StagedLintGateHandler, tracked: Path, mode: str, decision: Decision | None
+    @pytest.mark.parametrize("mode", ["block", "warn"])
+    def test_an_add_that_cannot_be_simulated_is_an_advisory_in_every_mode(
+        self,
+        handler: StagedLintGateHandler,
+        tracked: Path,
+        mode: str,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         handler._mode = mode
         (tracked / "broken.py").write_text("def broken(\n")
@@ -626,17 +631,13 @@ class TestACommandThatStagesOrCommitsMoreThanOnce:
             return real(directory, *args, **kwargs)
 
         with (
+            caplog.at_level(logging.WARNING),
             _patched_root(tracked),
             patch("claude_code_hooks_daemon.utils.staging_simulation.run_git", side_effect=run),
         ):
             result = handler.handle(_bash("git add broken.py && git commit -m x", str(tracked)))
 
-        if decision is Decision.DENY:
-            assert result.decision == Decision.DENY
-            assert "separate command" in (result.reason or "")
-        else:
-            assert result.decision == Decision.ALLOW
-            assert "separate command" in " ".join(result.context)
+        assert_unknown_verdict(result, caplog, "staged_lint_gate", "separate command")
 
     def test_the_real_index_is_untouched(
         self, handler: StagedLintGateHandler, tracked: Path

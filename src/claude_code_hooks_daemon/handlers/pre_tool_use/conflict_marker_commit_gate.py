@@ -68,6 +68,7 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
 from claude_code_hooks_daemon.utils.git_repo import GIT_TIMED_OUT, GitRepo, run_git
 from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 logger = logging.getLogger(__name__)
 
@@ -140,17 +141,21 @@ _RULE: Final[Rule] = Rule(
 
 _TIMED_OUT_RULE: Final[Rule] = Rule(
     rule_id=RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT,
-    blocked="a commit git could not finish reading for conflict markers within its time limit",
+    blocked=(
+        "ADVISORY ONLY, never a deny: a commit git could not finish reading for "
+        "conflict markers within its time limit"
+    ),
     why=(
-        "An unchecked commit is not a clean one, so it is denied; but no conflict "
+        "An unchecked commit is not a clean one, so it is flagged; but no conflict "
         "marker was found, and the content is not at fault"
     ),
     fix="Retry the same commit; the limit is hit when the host is loaded",
     verbose=(
         f"git did not answer within {Timeout.GIT_CONTEXT} s while this gate read what "
         "the commit records, so the commit was NOT checked, and no conflict marker was "
-        "found: this is not a finding and the staged content needs no edit. The gate "
-        "fails closed because it could not read the tree. Retry the same commit "
+        "found: this is not a finding and the staged content needs no edit. Under the "
+        "owner's 'warn dont block' ruling the commit is ALLOWED with this advisory, "
+        "because the gate could not read the tree. Retry the same commit "
         "unchanged; the limit is hit when the host is under load."
     ),
 )
@@ -494,26 +499,31 @@ _REPHRASE: Final[str] = (
     "`--git-dir`, `GIT_INDEX_FILE` or `--pathspec-from-file`. "
     'To reach the project root, `cd "$(git rev-parse --show-toplevel)" && git commit ...` '
     'is read and accepted; so are `cd "$PWD"` and `cd "$(pwd)"` (the current directory). '
-    "Any other variable (`cd $PROJ`) cannot be read and stays denied."
+    "Any other variable (`cd $PROJ`) cannot be read, so that commit is not checked."
 )
 
 
-def _unchecked(reason: str) -> GatingResult:
-    """Deny a commit this gate could not check: an unchecked commit is not a clean one."""
-    headline = _FORMATTER.headline(
-        _RULE, blocked=f"this commit was NOT checked for merge-conflict markers, because {reason}"
-    )
-    return GatingResult(
-        decision=Decision.DENY, reason=f"{headline}\n\n{_REPHRASE}", rule=_RULE.rule_id
+@dataclass(frozen=True)
+class _Unknown:
+    """Why one commit could not be checked, and how to get it checked."""
+
+    cause: str
+    rephrase: str
+
+
+def _unchecked(reason: str) -> _Unknown:
+    """A commit this gate could not check (warned about, never denied: Plan 00478)."""
+    return _Unknown(
+        cause=f"this commit was NOT checked for merge-conflict markers, because {reason}",
+        rephrase=_REPHRASE,
     )
 
 
-def _timed_out() -> GatingResult:
-    """Deny a commit git ran out of time reading, saying plainly that nothing was found."""
-    return GatingResult(
-        decision=Decision.DENY,
-        reason=_FORMATTER.verbose(_TIMED_OUT_RULE),
-        rule=_TIMED_OUT_RULE.rule_id,
+def _timed_out() -> _Unknown:
+    """A commit git ran out of time reading; nothing was found."""
+    return _Unknown(
+        cause=f"{_TIMED_OUT_RULE.rule_id}: {_TIMED_OUT_RULE.verbose}",
+        rephrase="Retry the same commit unchanged.",
     )
 
 
@@ -569,26 +579,41 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
         """Deny when an added line of the recorded tree carries a marker."""
         command = get_bash_command(hook_input) or ""
         findings: list[_Finding] = []
+        # A commit that cannot be checked warns; it never hides a marker found in
+        # another commit of the same command, so every commit is still scanned.
+        unknowns: list[_Unknown] = []
         for commit in _commits(command, self._cwd(hook_input)):
             if isinstance(commit, _Unplaceable):
-                return _unchecked(commit.reason)
+                unknowns.append(_unchecked(commit.reason))
+                continue
             # An unstattable directory is reported as unchecked below, not raised.
             is_dir = path_is_dir(commit.directory, unreadable_means=False)
             repo = GitRepo.resolve_for(commit.directory) if is_dir else None
             if repo is None:
-                return _unchecked(f"`{commit.directory}` is not a directory inside a repository")
+                unknowns.append(
+                    _unchecked(f"`{commit.directory}` is not a directory inside a repository")
+                )
+                continue
             try:
                 for source in commit.sources:
                     findings.extend(_findings(repo.root, commit.directory, source, self._excluded))
             except _GitTimedOut as exc:
                 logger.warning("conflict_marker_commit_gate: %s timed out in %s", exc, repo.root)
-                return _timed_out()
+                unknowns.append(_timed_out())
             except _UnreadableTree as exc:
                 logger.warning(
                     "conflict_marker_commit_gate: %s was NOT checked: %s", repo.root, exc
                 )
-                return _unchecked(f"git could not read what it records in {repo.root}: {exc}")
+                unknowns.append(
+                    _unchecked(f"git could not read what it records in {repo.root}: {exc}")
+                )
         if not findings:
+            if unknowns:
+                return unknown_verdict_allow(
+                    HandlerID.CONFLICT_MARKER_COMMIT_GATE.config_key,
+                    "; ".join(unknown.cause for unknown in unknowns),
+                    " ".join(dict.fromkeys(unknown.rephrase for unknown in unknowns)),
+                )
             return GatingResult(decision=Decision.ALLOW)
         return GatingResult(
             decision=Decision.DENY,
@@ -630,12 +655,14 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
             "earlier `cd` or `git -C` names. A marker already in history never blocks an unrelated "
             "edit, and deleting one is never blocked. **Fix:** resolve the conflict at "
             "each listed line and re-stage.\n\n"
-            "**A commit it cannot check is DENIED, not allowed** — a directory from "
-            "`$VAR`, `cd -` or `popd`; `--git-dir`, `--work-tree`, `GIT_DIR`, "
-            "`GIT_INDEX_FILE`; `--pathspec-from-file`; `git am <patch>`; a directory "
-            "outside any repository; or a git error. Rephrase as "
-            "`git -C /absolute/path/to/repo commit ...`.\n\n"
-            "**A git timeout is denied under its own rule, "
+            "**A commit it cannot check is ALLOWED with an advisory** (the owner's "
+            "'warn dont block' ruling; the log line starts `UNKNOWN-VERDICT`) — a "
+            "directory from `$VAR`, `cd -` or `popd`; `--git-dir`, `--work-tree`, "
+            "`GIT_DIR`, `GIT_INDEX_FILE`; `--pathspec-from-file`; `git am <patch>`; a "
+            "directory outside any repository; or a git error. A marker found in "
+            "another commit of the same command still denies. Rephrase as "
+            "`git -C /absolute/path/to/repo commit ...` to have it checked.\n\n"
+            "**A git timeout is an advisory under its own name, "
             "`R-CONFLICT-MARKER-SCAN-TIMED-OUT`** — git did not answer within its "
             f"{Timeout.GIT_CONTEXT} s limit, nothing was found, and the content is "
             "fine. Retry the same commit unchanged.\n\n"
@@ -695,24 +722,23 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
                 requires_main_thread=False,
             ),
             AcceptanceTest(
-                title="conflict-marker commit gate - a commit it cannot place is denied",
+                title="conflict-marker commit gate - a commit it cannot place is an advisory",
                 command="cd - && git commit -m acceptance -- no-such-acceptance-path",
                 dispatch_as_bash=True,
                 description=(
                     "`cd -` names no directory the daemon can state, so the commit is "
-                    "denied as NOT checked, with the `git -C` rephrase"
+                    "ALLOWED with an advisory saying it was NOT checked, with the "
+                    "`git -C` rephrase"
                 ),
-                expected_decision=Decision.DENY,
+                expected_decision=Decision.ALLOW,
                 expected_message_patterns=[
-                    r"R-CONFLICT-MARKER-COMMIT",
                     r"NOT checked",
                     r"git -C /absolute/path/to/repo commit",
                 ],
                 safety_notes=(
-                    "Denied before it runs. Were it to run, the pathspec matches no "
-                    "file, so git refuses and records nothing."
+                    "The pathspec matches no file, so git refuses and records nothing."
                 ),
-                test_type=TestType.BLOCKING,
+                test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

@@ -7,6 +7,7 @@ the diffable TODO list. Guard rails: no-op outside the project's own repo,
 graceful no-op without injected policy.
 """
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,11 @@ from unittest.mock import patch
 
 import pytest
 from tests.support.git_fixtures import git_setup_timeout
+from tests.support.unknown_verdict_asserts import (
+    STAGING_RUN_GIT,
+    assert_unknown_verdict,
+    failing_add_run_git,
+)
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
@@ -241,6 +247,31 @@ class TestHandle:
             result = _handler().handle(_bash_input("git commit -m 'x'", cwd=str(other_repo)))
         assert result.decision == Decision.ALLOW
         assert result.context == []
+
+
+class TestAStagingThatCannotBeSimulatedIsAnAdvisory:
+    """Plan 00478 row 12: an unknown tree warns in every mode, block included."""
+
+    @pytest.mark.parametrize("mode", ["warn", "block"])
+    def test_allows_with_an_advisory_and_a_log_line(
+        self, tmp_path: Path, mode: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE").mkdir()
+        (root / "CLAUDE" / "Foo.md").write_text("See [missing](Nope.md).\n")
+        policy = DocumentationPolicy(enabled=True, qa=DocumentationQaPolicy(commit_gate_mode=mode))
+
+        with (
+            caplog.at_level(logging.WARNING),
+            _patched_root(root),
+            patch(STAGING_RUN_GIT, side_effect=failing_add_run_git()),
+        ):
+            result = _handler(policy).handle(
+                _bash_input("git add -A && git commit -m 'x'", cwd=str(root))
+            )
+
+        assert_unknown_verdict(result, caplog, "docs_qa_commit_gate", "separate command")
 
 
 class TestAMoveIntoAnotherRepository:

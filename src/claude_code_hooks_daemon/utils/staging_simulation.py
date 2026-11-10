@@ -67,9 +67,12 @@ _NO_SPLIT_INDEX: Final[tuple[str, ...]] = ("-c", "core.splitIndex=false")
 #: it did not run to the end.
 _PARTIAL_ADD_EXIT: Final[int] = 1
 
-#: The headline wording for a deny filed under the gate's rule when the commit
-#: could not be read, so the rule's own text (about content) is not claimed.
-INCOMPLETE_SIMULATION_BLOCKED: Final[str] = "a commit whose staging this gate could not simulate"
+#: How to get a commit the simulation could not read checked after all: the
+#: gate's advisory carries it beside the cause (Plan 00478).
+INCOMPLETE_SIMULATION_REPHRASE: Final[str] = (
+    "Stage with `git add` as its own call, then commit as a separate command, "
+    "so the gate reads the real index."
+)
 
 INCOMPLETE_SIMULATION_REASON: Final[str] = (
     "The `git add` in this command could not be simulated completely ({why}), so "
@@ -170,7 +173,7 @@ _UPDATE_INDEX_NOTHING_STAGED_MESSAGES: Final[tuple[str, ...]] = (
 class SimulationIncompleteError(Exception):
     """The copy of the index is not what the command's staging run would leave.
 
-    The message is the reason to give the user; a gate denies with it.
+    The message is the reason to give the user; a gate warns with it.
     """
 
 

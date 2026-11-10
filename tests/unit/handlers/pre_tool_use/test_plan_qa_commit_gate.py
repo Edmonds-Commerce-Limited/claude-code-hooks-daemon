@@ -7,6 +7,7 @@ the diffable TODO list. Guard rails: no-op outside the project's own repo,
 graceful no-op without injected policy.
 """
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any, Literal
@@ -14,6 +15,11 @@ from unittest.mock import patch
 
 import pytest
 from tests.support.git_fixtures import git_setup_timeout
+from tests.support.unknown_verdict_asserts import (
+    STAGING_RUN_GIT,
+    assert_unknown_verdict,
+    failing_add_run_git,
+)
 
 from claude_code_hooks_daemon.config.models import PlanWorkflowQaConfig
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -232,6 +238,28 @@ class TestHandleWarnMode:
 
         assert result.decision == Decision.ALLOW
         assert "same-commit-plan-doc" in "\n".join(result.context)
+
+
+class TestAStagingThatCannotBeSimulatedIsAnAdvisory:
+    """Plan 00478 row 13: an unknown tree warns in every mode, block included."""
+
+    @pytest.mark.parametrize("mode", ["warn", "block"])
+    def test_allows_with_an_advisory_and_a_log_line(
+        self, repo: Path, mode: Literal["block", "warn"], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        plan_md = repo / _PLAN_DIR_REL / "00001-first/PLAN.md"
+        plan_md.write_text("# Plan 00001: first\n\n**Status**: Complete\n")
+
+        with (
+            caplog.at_level(logging.WARNING),
+            _patched_root(repo),
+            patch(STAGING_RUN_GIT, side_effect=failing_add_run_git()),
+        ):
+            result = _handler(mode).handle(
+                _bash_input('git add -A && git commit -m "Plan 00001: done"', cwd=str(repo))
+            )
+
+        assert_unknown_verdict(result, caplog, "plan_qa_commit_gate", "separate command")
 
 
 class TestHandleBlockMode:

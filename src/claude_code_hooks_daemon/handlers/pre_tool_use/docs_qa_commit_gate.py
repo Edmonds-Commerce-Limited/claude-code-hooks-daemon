@@ -44,9 +44,11 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import (
 )
 from claude_code_hooks_daemon.utils.git_facts import commit_scopes
 from claude_code_hooks_daemon.utils.staging_simulation import (
+    INCOMPLETE_SIMULATION_REPHRASE,
     SimulationIncompleteError,
     simulated_staging,
 )
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 _MODE_BLOCK: Final[str] = "block"
 
@@ -139,9 +141,12 @@ class DocsQaCommitGateHandler(PreToolUseHandlerBase):
                 )
                 findings = run_stage(CheckStage.STAGED, context)
         except SimulationIncompleteError as incomplete:
-            if policy.qa.commit_gate_mode == _MODE_BLOCK:
-                return GatingResult(decision=Decision.DENY, reason=str(incomplete))
-            return GatingResult(decision=Decision.ALLOW, context=[f"DOCS QA: {incomplete}"])
+            # Unknown, not a finding: warn in every mode (Plan 00478).
+            return unknown_verdict_allow(
+                HandlerID.DOCS_QA_COMMIT_GATE.config_key,
+                str(incomplete),
+                INCOMPLETE_SIMULATION_REPHRASE,
+            )
         if not findings:
             return GatingResult(decision=Decision.ALLOW, context=[])
 

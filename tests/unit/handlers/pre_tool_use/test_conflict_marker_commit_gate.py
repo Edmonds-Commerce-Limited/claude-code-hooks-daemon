@@ -12,6 +12,7 @@ this file carries no marker the gate would report against itself.
 
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 from pathlib import Path
@@ -31,7 +32,9 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.conflict_marker_commit_gate 
     _parse_grep_stream,
 )
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
+_GUARD = "conflict_marker_commit_gate"
 OPEN = "<" * 7
 SEP = "=" * 7
 CLOSE = ">" * 7
@@ -292,16 +295,18 @@ class TestAllowsWhatIsNotAnAddedMarker:
         result = _verdict(handler, "git commit -m x", repo)
         assert result.decision == Decision.ALLOW
 
-    def test_a_directory_outside_any_repository_is_denied_as_unchecked(
-        self, handler: ConflictMarkerCommitGateHandler, tmp_path: Path
+    def test_a_directory_outside_any_repository_is_an_advisory_not_a_silent_allow(
+        self,
+        handler: ConflictMarkerCommitGateHandler,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Review 1 M4: resolving no repository was a silent allow."""
+        """Review 1 M4: resolving no repository was a silent allow; it now says so."""
         outside = tmp_path / "plain"
         outside.mkdir()
-        result = _verdict(handler, "git commit -m x", outside)
-        assert result.decision == Decision.DENY
-        assert "NOT checked" in result.reason
-        assert result.rule == RuleID.CONFLICT_MARKER_COMMIT
+        with caplog.at_level(logging.WARNING):
+            result = _verdict(handler, "git commit -m x", outside)
+        assert_unknown_verdict(result, caplog, _GUARD, "NOT checked", "not a directory inside")
 
 
 class TestWhatTheCommitRecords:
@@ -387,13 +392,16 @@ class TestWhatTheCommitRecords:
         result = _verdict(handler, f"cd {repo.name}; git commit -m x", repo.parent)
         assert result.decision == Decision.DENY
 
-    def test_an_unresolvable_cd_is_denied_even_when_the_tree_is_clean(
-        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    def test_an_unresolvable_cd_is_an_advisory_even_when_the_tree_is_clean(
+        self,
+        handler: ConflictMarkerCommitGateHandler,
+        repo: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Review 1 M1: the old test passed only because the cwd was the repo."""
-        result = _verdict(handler, "cd - && git commit -m x", repo)
-        assert result.decision == Decision.DENY
-        assert "NOT checked" in result.reason
+        with caplog.at_level(logging.WARNING):
+            result = _verdict(handler, "cd - && git commit -m x", repo)
+        assert_unknown_verdict(result, caplog, _GUARD, "NOT checked")
 
     def test_merge_continue_checks_the_index(
         self, handler: ConflictMarkerCommitGateHandler, repo: Path
@@ -404,15 +412,16 @@ class TestWhatTheCommitRecords:
 
 
 class TestAGitFailureIsReportedNotSilent:
-    def test_an_unreadable_index_denies_naming_the_error(
-        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    def test_an_unreadable_index_is_an_advisory_naming_the_error(
+        self,
+        handler: ConflictMarkerCommitGateHandler,
+        repo: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         failed = subprocess.CompletedProcess(args=["git"], returncode=128, stdout="", stderr="boom")
-        with patch(f"{_MODULE}.run_git", return_value=failed):
+        with caplog.at_level(logging.WARNING), patch(f"{_MODULE}.run_git", return_value=failed):
             result = _verdict(handler, "git commit -m x", repo)
-        assert result.decision == Decision.DENY
-        assert "NOT checked" in result.reason
-        assert "boom" in result.reason
+        assert_unknown_verdict(result, caplog, _GUARD, "NOT checked", "boom")
 
 
 class TestATimedOutScanIsNotAFinding:
@@ -430,26 +439,34 @@ class TestATimedOutScanIsNotAFinding:
         return patch("claude_code_hooks_daemon.utils.git_repo.subprocess.run", side_effect=_run)
 
     @pytest.mark.parametrize("verb", ["grep", "diff", "check-attr"])
-    def test_a_git_timeout_denies_under_its_own_rule(
-        self, handler: ConflictMarkerCommitGateHandler, repo: Path, verb: str
+    def test_a_git_timeout_is_an_advisory_under_its_own_name(
+        self,
+        handler: ConflictMarkerCommitGateHandler,
+        repo: Path,
+        verb: str,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         _stage(repo, "doc.md", "# Doc\n\nfirst\nmore\n")
-        with self._git_times_out_on(verb):
+        with caplog.at_level(logging.WARNING), self._git_times_out_on(verb):
             result = _verdict(handler, "git commit -m x", repo)
-        assert result.decision == Decision.DENY
-        assert RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT in result.reason
-        assert f"{RuleID.CONFLICT_MARKER_COMMIT}:" not in result.reason
-        assert result.rule == RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT
+        advisory = assert_unknown_verdict(
+            result, caplog, _GUARD, RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT
+        )
+        assert f"{RuleID.CONFLICT_MARKER_COMMIT}:" not in advisory
 
-    def test_the_reason_says_what_ran_out_that_nothing_was_found_and_to_retry(
-        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    def test_the_advisory_says_what_ran_out_that_nothing_was_found_and_to_retry(
+        self,
+        handler: ConflictMarkerCommitGateHandler,
+        repo: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         _stage(repo, "doc.md", "# Doc\n\nfirst\nmore\n")
-        with self._git_times_out_on("grep"):
+        with caplog.at_level(logging.WARNING), self._git_times_out_on("grep"):
             result = _verdict(handler, "git commit -m x", repo)
-        assert f"{Timeout.GIT_CONTEXT} s" in result.reason
-        assert "no conflict marker was found" in result.reason
-        assert "retry" in result.reason.lower()
+        advisory = assert_unknown_verdict(result, caplog, _GUARD)
+        assert f"{Timeout.GIT_CONTEXT} s" in advisory
+        assert "no conflict marker was found" in advisory
+        assert "retry" in advisory.lower()
 
     def test_a_real_finding_keeps_its_own_rule(
         self, handler: ConflictMarkerCommitGateHandler, repo: Path
@@ -461,14 +478,26 @@ class TestATimedOutScanIsNotAFinding:
         assert RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT not in result.reason
         assert result.rule == RuleID.CONFLICT_MARKER_COMMIT
 
-    def test_a_non_timeout_git_failure_keeps_the_unchecked_rule(
-        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    def test_a_non_timeout_git_failure_is_the_unchecked_advisory(
+        self,
+        handler: ConflictMarkerCommitGateHandler,
+        repo: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         failed = subprocess.CompletedProcess(args=["git"], returncode=128, stdout="", stderr="boom")
-        with patch(f"{_MODULE}.run_git", return_value=failed):
+        with caplog.at_level(logging.WARNING), patch(f"{_MODULE}.run_git", return_value=failed):
             result = _verdict(handler, "git commit -m x", repo)
-        assert RuleID.CONFLICT_MARKER_COMMIT in result.reason
-        assert RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT not in result.reason
+        advisory = assert_unknown_verdict(result, caplog, _GUARD, "NOT checked")
+        assert RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT not in advisory
+
+    def test_an_unplaceable_later_commit_does_not_hide_a_marker_in_an_earlier_one(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        """Only the unknown part warns: a positively found marker still denies."""
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
+        result = _verdict(handler, "git commit -m x; cd - && git commit -m y", repo)
+        assert result.decision == Decision.DENY
+        assert result.rule == RuleID.CONFLICT_MARKER_COMMIT
 
 
 class TestCommandShapes:
@@ -523,7 +552,10 @@ class TestGrepStream:
 
 class TestAGrepFailureIsReported:
     def test_a_failing_grep_allows_with_a_visible_advisory(
-        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+        self,
+        handler: ConflictMarkerCommitGateHandler,
+        repo: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         _stage(repo, "doc.md", "# Doc\n\nfirst\nmore\n")
         real_run_git = run_git
@@ -533,10 +565,9 @@ class TestAGrepFailureIsReported:
                 return subprocess.CompletedProcess(args=["git"], returncode=2, stdout="", stderr="")
             return real_run_git(root, *args)
 
-        with patch(f"{_MODULE}.run_git", side_effect=_grep_fails):
+        with caplog.at_level(logging.WARNING), patch(f"{_MODULE}.run_git", side_effect=_grep_fails):
             result = _verdict(handler, "git commit -m x", repo)
-        assert result.decision == Decision.DENY
-        assert "git grep exited 2" in result.reason
+        assert_unknown_verdict(result, caplog, _GUARD, "git grep exited 2")
 
 
 class TestShellSyntaxNeverHidesTheIndex:
@@ -603,8 +634,8 @@ class TestEveryWrapperIsJudged:
         assert "doc.md:4" in result.reason
 
 
-class TestAnUncheckableCommitIsDenied:
-    """Review 1 M4: a commit the gate cannot place is denied, with a rephrase."""
+class TestAnUncheckableCommitIsAnAdvisory:
+    """Review 1 M4: a commit the gate cannot place is allowed with a rephrase (Plan 00478)."""
 
     @pytest.mark.parametrize(
         ("command", "named"),
@@ -622,22 +653,36 @@ class TestAnUncheckableCommitIsDenied:
         ],
     )
     def test_names_the_reason_and_the_rephrase(
-        self, handler: ConflictMarkerCommitGateHandler, repo: Path, command: str, named: str
+        self,
+        handler: ConflictMarkerCommitGateHandler,
+        repo: Path,
+        command: str,
+        named: str,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        result = _verdict(handler, command, repo)
-        assert result.decision == Decision.DENY
-        assert "NOT checked" in result.reason
-        assert named in result.reason
-        assert "git -C /absolute/path/to/repo commit" in result.reason
+        with caplog.at_level(logging.WARNING):
+            result = _verdict(handler, command, repo)
+        assert_unknown_verdict(
+            result,
+            caplog,
+            _GUARD,
+            "NOT checked",
+            named,
+            "git -C /absolute/path/to/repo commit",
+        )
 
-    def test_an_unstattable_directory_is_denied_not_raised(
-        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    def test_an_unstattable_directory_is_an_advisory_not_raised(
+        self,
+        handler: ConflictMarkerCommitGateHandler,
+        repo: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """EACCES on the commit's directory is an uncheckable commit, not a crash."""
-        with patch.object(Path, "is_dir", side_effect=PermissionError(13, "denied")):
+        with caplog.at_level(logging.WARNING), patch.object(
+            Path, "is_dir", side_effect=PermissionError(13, "denied")
+        ):
             result = _verdict(handler, f"git -C {repo} commit -m x", repo)
-        assert result.decision == Decision.DENY
-        assert "NOT checked" in result.reason
+        assert_unknown_verdict(result, caplog, _GUARD, "NOT checked")
 
     def test_am_continue_checks_the_index(
         self, handler: ConflictMarkerCommitGateHandler, repo: Path
@@ -687,22 +732,34 @@ class TestCwdExpansionsInTheCdAreChecked:
     @pytest.mark.parametrize(
         "command", ["cd $PROJ && git commit -m x", 'cd "$PWD/$SUB" && git commit -m x']
     )
-    def test_any_other_expansion_stays_denied_as_unchecked(
-        self, handler: ConflictMarkerCommitGateHandler, repo: Path, command: str
+    def test_any_other_expansion_is_an_unchecked_advisory(
+        self,
+        handler: ConflictMarkerCommitGateHandler,
+        repo: Path,
+        command: str,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        result = _verdict(handler, command, repo)
-        assert result.decision == Decision.DENY
-        assert "NOT checked" in result.reason
+        with caplog.at_level(logging.WARNING):
+            result = _verdict(handler, command, repo)
+        assert_unknown_verdict(result, caplog, _GUARD, "NOT checked")
 
-    def test_the_deny_names_the_forms_that_do_reach_the_project_root(
-        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    def test_the_advisory_names_the_forms_that_do_reach_the_project_root(
+        self,
+        handler: ConflictMarkerCommitGateHandler,
+        repo: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """N402 (b): fail-closed stays, and the reason names the readable spellings."""
-        result = _verdict(handler, "cd $PROJ && git commit -m x", repo)
-        assert result.decision == Decision.DENY
-        assert 'cd "$(git rev-parse --show-toplevel)"' in result.reason
-        assert 'cd "$PWD"' in result.reason
-        assert 'cd "$(pwd)"' in result.reason
+        """N402 (b): the advisory names the readable spellings."""
+        with caplog.at_level(logging.WARNING):
+            result = _verdict(handler, "cd $PROJ && git commit -m x", repo)
+        assert_unknown_verdict(
+            result,
+            caplog,
+            _GUARD,
+            'cd "$(git rev-parse --show-toplevel)"',
+            'cd "$PWD"',
+            'cd "$(pwd)"',
+        )
 
     @pytest.mark.parametrize(
         "template",
@@ -942,17 +999,19 @@ class TestTheAcceptanceTestsCanFail:
             result = handler.handle(hook_input)
             assert result.decision == test.expected_decision, test.title
             for pattern in test.expected_message_patterns:
-                assert re.search(pattern, result.reason or ""), (test.title, pattern)
+                text = "\n".join([result.reason or "", *result.context])
+                assert re.search(pattern, text), (test.title, pattern)
 
     def test_the_dry_run_command_would_deny_were_dry_run_misjudged(
         self, handler: ConflictMarkerCommitGateHandler, repo: Path
     ) -> None:
         """Strip `--dry-run` and the same command must deny: the ALLOW can fail."""
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
         (dry_run,) = [t for t in self._dispatched(handler) if "--dry-run" in t.command]
         judged = dry_run.command.replace(" --dry-run", "")
         result = _verdict(handler, judged, repo)
         assert result.decision == Decision.DENY
-        assert "NOT checked" in (result.reason or "")
+        assert result.rule == RuleID.CONFLICT_MARKER_COMMIT
 
 
 class TestTheGrepIsScopedToTheRecordedPaths:

@@ -79,10 +79,11 @@ from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 from claude_code_hooks_daemon.utils.staging_simulation import (
-    INCOMPLETE_SIMULATION_BLOCKED,
+    INCOMPLETE_SIMULATION_REPHRASE,
     SimulationIncompleteError,
     simulated_staging,
 )
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 logger = logging.getLogger(__name__)
 
@@ -226,12 +227,11 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
                     if change.status[:1] in _RECORDED_STATUSES
                 ]
         except SimulationIncompleteError as incomplete:
-            if self._mode == _MODE_BLOCK:
-                return GatingResult(decision=Decision.DENY, reason=str(incomplete)).under_rule(
-                    self._rule, blocked=INCOMPLETE_SIMULATION_BLOCKED
-                )
-            return GatingResult(
-                decision=Decision.ALLOW, context=[f"⚠️ staged-lint-gate: {incomplete}"]
+            # Unknown, not a finding: warn in every mode (Plan 00478).
+            return unknown_verdict_allow(
+                HandlerID.STAGED_LINT_GATE.config_key,
+                str(incomplete),
+                INCOMPLETE_SIMULATION_REPHRASE,
             )
 
         lintable = self._lintable_files(project_root, recorded)

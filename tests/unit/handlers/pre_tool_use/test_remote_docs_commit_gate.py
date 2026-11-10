@@ -11,6 +11,7 @@ This is stronger — it stops the unattributed document entering history at
 all, which matters because removing one afterwards needs a rewrite.
 """
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,11 @@ from unittest.mock import patch
 
 import pytest
 from tests.support.git_fixtures import git_setup_timeout
+from tests.support.unknown_verdict_asserts import (
+    STAGING_RUN_GIT,
+    assert_unknown_verdict,
+    failing_add_run_git,
+)
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.remote_docs_commit_gate import (
@@ -66,6 +72,33 @@ class TestScope:
 
     def test_it_ignores_other_tools(self, handler: RemoteDocsCommitGateHandler) -> None:
         assert handler.matches({"tool_name": "Write", "tool_input": {}}) is False
+
+
+class TestAStagingThatCannotBeSimulatedIsAnAdvisory:
+    """Plan 00478 row 11: an unknown staged tree warns."""
+
+    def test_allows_with_an_advisory_and_a_log_line(
+        self,
+        handler: RemoteDocsCommitGateHandler,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True, timeout=30)
+        _write(tmp_path, "remote-docs/example.com/p.md", "# just prose\n")
+        handler.staged_reader = handler._read_staged
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git add -A && git commit -m x"},
+            "cwd": str(tmp_path),
+        }
+
+        with (
+            caplog.at_level(logging.WARNING),
+            patch(STAGING_RUN_GIT, side_effect=failing_add_run_git()),
+        ):
+            result = handler.handle(hook_input)
+
+        assert_unknown_verdict(result, caplog, "remote_docs_commit_gate", "separate command")
 
 
 class TestGate:
