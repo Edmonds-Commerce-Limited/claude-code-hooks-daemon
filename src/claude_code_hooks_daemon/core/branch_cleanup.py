@@ -67,6 +67,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
 )
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.regenerable_paths import (
+    clone_probe_globs,
     is_regenerable,
     lock_regenerated_dirs,
     under_any,
@@ -299,21 +300,25 @@ def _lock_regenerated(path: Path) -> tuple[str, ...]:
         return shown.stdout if shown.returncode == 0 else None
 
     rebuilt = lock_regenerated_dirs([p for p in listing.stdout.split("\0") if p], read_committed)
-    return tuple(d for d in rebuilt if not _holds_git_clone(path / d))
+    return tuple(d for d in rebuilt if not _holds_git_clone(path / d, clone_probe_globs(d)))
 
 
-def _holds_git_clone(directory: Path) -> bool:
+def _holds_git_clone(directory: Path, extra_probes: Sequence[str] = ()) -> bool:
     """Whether ``<directory>/.git``, ``<dir>/*/.git`` or ``<dir>/*/*/.git`` exists.
 
     A package manager can install a dependency as a real clone (``--prefer-source``),
     and commits made inside it exist nowhere else, so such a directory is work.
     Only those paths are statted, never every file, because this runs on the
     destructive-git guard path over directories that can hold thousands of packages.
+    ``extra_probes`` are the package manager's own globs (relative to ``directory``)
+    for clones it leaves deeper than that, each a fixed-depth pattern.
     A directory that is not there (an uninstalled ``vendor/``) holds nothing.
     """
     if not directory.is_dir():
         return False
     if os.path.lexists(directory / ".git"):
+        return True
+    if any(next(directory.glob(probe), None) is not None for probe in extra_probes):
         return True
     return any(
         os.path.lexists(Path(grandchild) / ".git")

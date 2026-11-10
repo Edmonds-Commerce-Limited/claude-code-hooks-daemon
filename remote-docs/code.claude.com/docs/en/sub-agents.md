@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/sub-agents.md
-fetched_at: '2026-11-09T09:01:47.455955+00:00'
+fetched_at: '2026-11-10T16:35:20.096308+00:00'
 fidelity: converted
-source_sha256: db8a532d4c04d8cec27622b3afd68f86f8d96efa121f4b498dcb430e2bc543b8
+source_sha256: 47e8c8b6739a522497dd10349af0c8e9a9f56898049017aafa44f0bfeb1047b6
 licence: unreviewed
-stale_after: '2027-02-07'
+stale_after: '2027-02-08'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -602,6 +602,8 @@ Set `permissionMode` to choose the permission mode a subagent runs in. Use the m
 The main conversation's permission mode decides whether Claude Code uses the value you set:
 
 * When the main conversation is in `bypassPermissions`, `acceptEdits`, or [auto mode](https://code.claude.com/docs/en/permission-modes.md#eliminate-prompts-with-auto-mode), the subagent runs in that same mode and Claude Code ignores the `permissionMode` you set. Under auto mode, the classifier evaluates the subagent's tool calls with the main conversation's block and allow rules. When the subagent finishes, the classifier also reviews its work and its final report before the report is delivered, as [How auto mode handles subagents](https://code.claude.com/docs/en/permission-modes.md#eliminate-prompts-with-auto-mode) describes.
+
+  If a subagent asks for permission while the main conversation is in `bypassPermissions`, check whether its tool call is one of the [actions no mode auto-approves](https://code.claude.com/docs/en/permission-modes.md#actions-no-mode-auto-approves).
 * When the main conversation is in `plan` mode, the subagent stays in plan mode whichever `permissionMode` you set, unless it runs as an [agent team teammate](#subagent-names) under the [agent teams rules](https://code.claude.com/docs/en/agent-teams.md#have-teammates-plan-before-implementing). If you set `dontAsk`, the subagent also doesn't prompt you: an action that plan mode would ask you to approve is denied instead.
 * When the main conversation is in `default` or `dontAsk` mode, the subagent runs in the permission mode you set. It keeps the main conversation's permission mode instead in these cases:
   * You set `bypassPermissions`. The `bypassPermissions` exception requires Claude Code v2.1.267 or later.

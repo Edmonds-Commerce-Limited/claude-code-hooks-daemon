@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/events
-fetched_at: '2026-11-09T09:01:39.038328+00:00'
+fetched_at: '2026-11-10T16:35:09.982870+00:00'
 fidelity: converted
-source_sha256: 389cb2bae3d78cea39b4f2c5ee8f9d0596c0bc6b1f35622c4f27b875b2fd94bb
+source_sha256: 5913ffd8190f83b94bba5f8ae275d0dd9d03a916e7f9686fc9b81a750dfeb541
 licence: unreviewed
-stale_after: '2027-02-07'
+stale_after: '2027-02-08'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -289,7 +289,7 @@ To stop a prompt, return `{ drop: 'the reason' }` without calling `next`. The te
 * **Your hook returns a `drop` after its `next(e)` call let the prompt through**: the turn still runs, and the hook [fails](#handle-a-hook-that-fails) with a message that includes `a drop after its next() was answered`
 * **Your hook throws or times out**: Claude Code skips it and sends the prompt. [Add a `.catch` handler](#handle-a-hook-that-fails) so that a failure doesn't send a prompt the hook would have stopped.
 
-[Other events](https://code.claude.com/docs/en/plugins/mods/reference.md#prompts-and-what-claude-reads) cover the rest of what Claude reads: `prompt.section` for each section of the system prompt, `prompt.context` for the context sent with the first message, and `skill.prompt` for a skill's text. Text from these hooks that changes between requests [invalidates the prompt cache](https://code.claude.com/docs/en/prompt-caching.md). In a `skill.prompt` hook, you can also read [which plugin or file the skill came from](https://code.claude.com/docs/en/plugins/mods/reference.md#skill-prompt-fields).
+[Other events](https://code.claude.com/docs/en/plugins/mods/reference.md#prompts-and-what-claude-reads) cover the rest of what Claude reads: `prompt.section` for each section of the system prompt, `prompt.context` for the context sent with the first message, and `skill.prompt` for a skill's text. To change a section after a conversation has started, see [Send a changed system prompt section or tool description](https://code.claude.com/docs/en/plugins/mods/reference.md#break-prompt-cache). In a `skill.prompt` hook, you can also read [which plugin or file the skill came from](https://code.claude.com/docs/en/plugins/mods/reference.md#skill-prompt-fields).
 
 ### Follow a turn
 
@@ -338,7 +338,7 @@ Use a `settings.read` hook to change or refuse a settings read, either a mod's o
 
 Check which mods get this event and your Claude Code version:
 
-* **The built-in guard**: with managed settings, or with a Team or Enterprise [`/login`](https://code.claude.com/docs/en/authentication#authentication-precedence) as the session's credential, the [built-in guard](https://code.claude.com/docs/en/plugins/mods/admin.md#know-what-happens-by-default) can skip this hook in a mod you install or load with `--plugin-dir`. To check, search the [debug log](https://code.claude.com/docs/en/plugins/mods/troubleshoot.md#read-the-debug-log) for `settings.read bypassed by cc-plugin-sec-default`. If a line with that text names your mod, ask your organization's administrator to [install the mod as one of the organization's mods](https://code.claude.com/docs/en/plugins/mods/admin.md#install-your-organizations-mods).
+* **The built-in guard**: where the [built-in guard](https://code.claude.com/docs/en/plugins/mods/admin.md#know-what-happens-by-default) loads, it can skip this hook in a mod you install or load with `--plugin-dir`. To check, search the [debug log](https://code.claude.com/docs/en/plugins/mods/troubleshoot.md#read-the-debug-log) for `settings.read bypassed by cc-plugin-sec-default`. If a line with that text names your mod, ask your organization's administrator to [install the mod as one of the organization's mods](https://code.claude.com/docs/en/plugins/mods/admin.md#install-your-organizations-mods).
 * **The version**: the event firing on Claude Code's own read, and the `e.layers` field, require Claude Code v2.1.304 or later.
 
 #### What a `settings.read` hook receives

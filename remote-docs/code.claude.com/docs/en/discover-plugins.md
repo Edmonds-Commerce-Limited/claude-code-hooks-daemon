@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/discover-plugins.md
-fetched_at: '2026-11-09T09:01:30.454141+00:00'
+fetched_at: '2026-11-10T16:35:00.660601+00:00'
 fidelity: converted
-source_sha256: b4fadbd95f26877220b725b0a3f3f69025dd0f2f4abc60a20eeae03e1fd764b0
+source_sha256: 041d060043a23273eba6c4679dc3ac22d01afccb51db65f8d82d231a338e187e
 licence: unreviewed
-stale_after: '2027-02-07'
+stale_after: '2027-02-08'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -142,7 +142,7 @@ Pick the tab for where you run Claude Code.
 A plugin's install scope decides who gets the plugin and which settings file records it as enabled:
 
 * **User scope**: the plugin is enabled for you in every project on this machine. The entry goes in `enabledPlugins` in `~/.claude/settings.json`.
-* **Project scope**: the plugin is enabled for everyone who works in this repository. The entry goes in `.claude/settings.json`, which you commit. Committing that entry turns the plugin on for your collaborators but doesn't download it to their machines, so each collaborator also runs `claude plugin install <name>@<marketplace> --scope project` once; see [Enabled in project settings but not installed](https://code.claude.com/docs/en/plugins/loading.md#enabled-in-project-settings-but-not-installed).
+* **Project scope**: the plugin is enabled for everyone who works in this repository. The entry goes in `.claude/settings.json`, which you commit. Committing that entry turns the plugin on for your collaborators but doesn't download it to their machines. Each collaborator also runs `claude plugin install <name>@<marketplace> --scope project` once per clone; see [Enabled in project settings but not installed](https://code.claude.com/docs/en/plugins/loading.md#enabled-in-project-settings-but-not-installed).
 * **Local scope**: the plugin is enabled for you in this repository only. The entry goes in `.claude/settings.local.json`.
 
 Some plugins are set by their author to start turned off, through the [`defaultEnabled`](https://code.claude.com/docs/en/plugins/manifest-reference#defaultenabled) field. Such a plugin is installed but stays off until you turn it on with `claude plugin enable <name>` in your shell, or from the **Installed** tab of `/plugin` in a session.

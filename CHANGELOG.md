@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.74.0] - 2026-11-10
+
+_The CLAUDE.md block is written and committed only on a home branch, a run of fixes from release-candidate field use (Plan 00594), and refreshed vendored remote docs. Two new config keys, `branches.home` and `branches.home_commit`, both optional. One recommended post-upgrade task. No breaking change._
+
+### Added
+
+- `branches.home` config key: the branches a main checkout lives on (exact names, globs rejected at load). The daemon writes and commits the CLAUDE.md block only while HEAD is attached to one; empty means the repository's default branch (Plan 00594 Task 2.1).
+- `branches.home_commit` config key (default `true`): set `false` for a home branch that only accepts pull requests, so the daemon never writes CLAUDE.md there and a stale block is reported at every SessionStart (Plan 00594 Task 2.2).
+- Release candidate branches (`rc/X.Y.Z`) documented as the supported beta channel for client projects, with the push checklist, install and return-to-stable procedure (Plan 00594).
+- Post-upgrade task `01-set-home-branch-for-the-claude-md-block`, and config-changes manifest `v3.74.0.yaml`.
+
+### Changed
+
+- The CLAUDE.md block fallback when git cannot name a default branch: `init.defaultBranch` (only if that branch exists or HEAD is unborn on it), then the branch of an unborn HEAD, then a sole local branch. `regenerate-docs` writes from any branch but commits only on a home branch, and refuses on a home branch under `home_commit: false` (Plan 00594).
+- The upgrade script warns only on a stale CLAUDE.md block, and the `regen-docs` skill says what happens off a home branch (Plan 00594).
+- Ignored directories beside a committed manifest and lock file (`vendor/`, `node_modules/`, `target/`, `.venv/` and similar, at any depth) count as regenerable for worktree removal (Plan 00594 Task 3.3).
+- The worktree-removal deny says to look at ignored blockers first, keep what matters and delete the disposable in a separate command, and says when a chained delete is not counted (Plan 00594 Task 3.5).
+- The vendored remote docs were refreshed for the release.
+
+### Fixed
+
+- The daemon no longer writes and auto-commits the CLAUDE.md block onto a feature branch or a detached HEAD at start (Plan 00594 Task 2.1).
+- `branch-keep` clears the stale merged-pool mark for every branch name at the kept tip, so a same-tip sibling no longer keeps denying branch creation (Plan 00594).
+- A reused venv is re-stamped with the version being installed, so `hooks-daemon status` names the live commit after a guarded branch install moves; a stamp that cannot be written fails the install (Plan 00594 Task 5.3).
+- An installer or upgrader settings backup identical to the merged `settings.json` is removed instead of left as a stray untracked file (Plan 00594 Task 3.6).
+- `lsp_enforcement` no longer reads `semgrep <name>` (a tool name ending in `grep` or `rg`) as a grep for a symbol.
+- `destructive_git` chained-rm check uses linear shlex and path-containment helpers, clearing a semgrep finding in CI (Plan 00478).
+- `branches.home` rejects an empty or whitespace-padded name at load, and a name matching no local or remote branch is reported at SessionStart instead of leaving the block unwritten on every branch without a word. The notice says the block is not written only when no entry matches; with a partial match it is informational, and it suggests fetching the branch as well as correcting the config (Plan 00594).
+- A worktree removal no longer treats `vendor/bundle/` as rebuildable when Bundler left a `git:` gem there as a real clone, whose commits exist nowhere else (Plan 00594 Task 3.3).
+- A `~user` word in a chained `rm` no longer turns the worktree-removal deny into an "evaluation error"; the blocker list and delete-first advice are kept (Plan 00594 Task 3.5).
+- Plan 00474 ledger items N600 (a test or QA step writing change reports into the checkout `untracked/`), N601 (Go testdata under staged lint) and N602 (the review round counter counted non-reviews).
+
 ## [3.73.2] - 2026-11-10
 
 _A hotfix release. A plan journal entry could be stranded by a markdown formatter: a titled heading carried a run of spaces a formatter collapsed, the commit gate treats a journal entry as immutable, so the collapsed entry could be neither committed nor restored. Three fixes close the deadlock (Plan 00594). Also carries every other change merged since v3.73.1: guards that warn instead of deny when they cannot decide (Plan 00478), the `/release hotfix` fast path (Plan 00576) and a run of field-report fixes. No config key changes, no breaking change, no pre-upgrade or post-upgrade task._

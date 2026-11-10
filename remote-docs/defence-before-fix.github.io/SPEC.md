@@ -1,10 +1,10 @@
 ---
 source_url: https://defence-before-fix.github.io/SPEC.html
-fetched_at: '2026-11-09T09:01:49.796424+00:00'
+fetched_at: '2026-11-10T16:35:22.443632+00:00'
 fidelity: converted
 source_sha256: d4927deccbeecc92ab8be4cce8dbfa8f1e478cdeef625c87027b854325dba468
 licence: CC-BY-4.0
-stale_after: '2027-02-07'
+stale_after: '2027-02-08'
 fetch_method: agent-browser-lite-headless (llms-link)
 ---
 

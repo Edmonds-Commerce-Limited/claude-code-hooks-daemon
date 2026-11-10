@@ -617,7 +617,19 @@ def _rm_covers(command: str, cwd: Path, target: Path) -> bool:
         for word in words[1:]:
             if word.startswith("-"):
                 continue
-            named = Path(word).expanduser()
+            try:
+                named = Path(word).expanduser()
+            except RuntimeError as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=(
+                        f"`{word}` names a home directory that cannot be resolved, so it covers "
+                        "no path; this advice-building code must never fail the judgement"
+                    ),
+                    level=logging.DEBUG,
+                )
+                continue
             named = named if named.is_absolute() else cwd / named
             if path_is_relative_to(target, named):
                 return True

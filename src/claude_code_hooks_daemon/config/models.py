@@ -2493,7 +2493,13 @@ class BranchesConfig(BaseModel):
     @field_validator("home")
     @classmethod
     def reject_home_globs(cls, value: list[str]) -> list[str]:
-        """``home`` names branches exactly; a glob would silently match none of them."""
+        """``home`` names branches exactly; a glob or a blank/padded name matches none of them."""
+        blank = [name for name in value if not name or name != name.strip()]
+        if blank:
+            raise ValueError(
+                f"home: {blank} are empty or padded with whitespace, but branches.home takes "
+                "exact branch names"
+            )
         globbed = [name for name in value if any(char in name for char in "*?[")]
         if globbed:
             raise ValueError(
