@@ -7641,6 +7641,27 @@ def _format_single_markdown_file(path: Path, check: bool) -> tuple[bool, bool]:
     return True, False
 
 
+def _is_project_journal_file(path: Path, project_root: Path) -> bool:
+    """Whether ``path`` is a plan journal file, judged inside the project only.
+
+    A journal entry is append-only and immutable once committed, so a rewrite
+    would leave a file its own commit gate refuses (Plan 00594 class 9). When
+    ``project_root`` is a real project (it holds a daemon config), only the
+    part of the path below it is judged, so a project that itself lives under
+    a folder named like a journal directory is still formatted. Without one,
+    the whole path is judged.
+    """
+    from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
+
+    if not (project_root / ".claude" / "hooks-daemon.yaml").is_file():
+        return is_journal_file(path)
+    root_prefix = f"{project_root.resolve()}{os.sep}"
+    resolved = str(path.resolve())
+    if not resolved.startswith(root_prefix):
+        return is_journal_file(path)
+    return is_journal_file(Path(resolved[len(root_prefix) :]))
+
+
 def cmd_format_markdown(args: argparse.Namespace) -> int:
     """Format markdown files via mdformat + mdformat-gfm.
 
@@ -7678,16 +7699,11 @@ def cmd_format_markdown(args: argparse.Namespace) -> int:
         print(_gitignored_message(path), file=sys.stderr)
         return 1
 
-    # A plan journal entry is append-only and immutable once committed, so a
-    # rewrite here would leave a file its own commit gate refuses (Plan 00594
-    # class 9). The edit-time formatter handler skips the same predicate.
-    from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
-
     if path.is_file():
         if not path.name.lower().endswith(_MARKDOWN_EXTENSIONS):
             print(f"ERROR: {path} is not a markdown file", file=sys.stderr)
             return 1
-        if is_journal_file(path):
+        if _is_project_journal_file(path, project_root):
             print(f"Skipped (plan journal entry, never reformatted): {path}")
             return 0
         changed, errored = _format_single_markdown_file(path, check)
@@ -7713,7 +7729,7 @@ def cmd_format_markdown(args: argparse.Namespace) -> int:
     any_changed = False
     any_errored = False
     for candidate in _iter_markdown_candidates(path, exclude_paths, project_root):
-        if is_journal_file(candidate):
+        if _is_project_journal_file(candidate, project_root):
             continue
         changed, errored = _format_single_markdown_file(candidate, check)
         if errored:

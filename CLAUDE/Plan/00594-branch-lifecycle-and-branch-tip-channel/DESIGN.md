@@ -81,7 +81,7 @@ The park commit stays the shared record, keeping the 00558 §5 mechanics and the
 
 ### 2.7 Journal heading (class 9)
 
-`CLAUDE/Plan/mkplan.bash:517` defaults the ref to `—`, and `:625-627` adds `   — title` (three spaces). The fix keeps the `· REF` slot, because the entry grammar in `plan_qa/model.py:358` requires it, and makes the title separator a single space: `## HH:MM · category · — — title`. A heading with no run of spaces stays the same after formatting. This is done in Task 6.1. The `**/JOURNAL/**` formatter exclusion also goes into `CLAUDE/LLM-INSTALL.md`.
+`CLAUDE/Plan/mkplan.bash:517` defaults the ref to `—`, and `:625-627` used to add `   — title` (three spaces). The fix keeps the `· REF` slot, which every heading the tool writes carries (the grammar in `plan_qa/model.py:358` makes the slot optional, so it does not force this), and makes the title separator a single space: `## HH:MM · category · — — title`. A heading with no run of spaces stays the same after formatting. This is done in Task 6.1. The `**/JOURNAL/**` formatter exclusion also goes into `CLAUDE/LLM-INSTALL.md`.
 
 ## 3. Branch-tip channel
 
@@ -94,8 +94,8 @@ This builds on the guarded branch install from Plan 00291:
 What is new:
 
 - **Pin.** `upgrade --track <branch|sha> --because "<why>"` is a skill-level spelling of the two environment variables. The stamp loses the ref's `/` (it becomes `-`), so the exact ref, the full sha and the last release tag go into `.daemon-metadata.json` (`daemon/metadata.py:27`): `{tracked_ref, tracked_sha, last_release_tag}`. `last_release_tag` comes from `ROLLBACK_REF` (`scripts/upgrade_version.sh:898`) when the previous install was a release.
-- **Detect a move.** `version_check._branch_install_context` (`:447`) reuses the handler's existing TTL cache and network budget. It makes one `remote_refs.list_remote_refs(patterns=[refs/heads/<ref>])` call (`utils/remote_refs.py:48`). If the tip differs from `tracked_sha`, it reports "tracked ref moved <old>..<new> (N commits); re-run `upgrade --track <ref>`". A sha pin never moves. A failed listing says "not checked" and never "current".
-- **Rebuild.** Re-running the upgrade re-enters the existing path. `ensure_venv` (`scripts/upgrade_version.sh:936`) installs from the target's `uv.lock`, keyed by `INSTALL_STAMP`, so a new sha produces a new stamp and a rebuild. The order follows Plan 00535: stop the daemon, check out, build, then start. That part must land before the channel ships. Plan 00535 Task 2.1 stays the owner of the handover, and this plan depends on it.
+- **Detect a move.** `version_check._branch_install_context` (`:447`) is today a static method that returns fixed text and uses no cache and no network; the branch-install path returns before the TTL cache is consulted. This task adds that wiring: a cached, time-bounded single `remote_refs.list_remote_refs(patterns=("refs/heads/<ref>",))` call (`utils/remote_refs.py:48`). If the tip differs from `tracked_sha`, it reports "tracked ref moved <old>..<new> (N commits); re-run `upgrade --track <ref>`". A sha pin never moves. A failed listing says "not checked" and never "current".
+- **Rebuild.** Re-running the upgrade re-enters the existing path. `ensure_venv` (`scripts/upgrade_version.sh:936`) installs from the target's `uv.lock` and is keyed by the lock hash. A new sha with an unchanged lock reuses the venv and re-stamps it (Task 5.3); a changed lock rebuilds. The order follows Plan 00535: stop the daemon, check out, build, then start. That part must land before the channel ships. Plan 00535 Task 2.1 stays the owner of the handover, and this plan depends on it.
 - **Return.** `upgrade --release` checks out `last_release_tag`, or the latest tag if none was recorded, with no tracking environment variables. It also clears the tracking metadata. It is one command.
 
 ## 4. Open questions for the client test seat

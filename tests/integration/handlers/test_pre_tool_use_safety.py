@@ -197,8 +197,9 @@ class TestPipeBlockerHandler:
         [
             "npm test | tail -n 20",
             "pytest | head -5",
+            "timeout 60 pytest | tail -3",
         ],
-        ids=["npm-tail", "pytest-head"],
+        ids=["npm-tail", "pytest-head", "wrapped-pytest-tail"],
     )
     def test_blocks_expensive_pipes(self, handler: Any, command: str) -> None:
         hook_input = make_bash_hook_input(command)
@@ -206,10 +207,10 @@ class TestPipeBlockerHandler:
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
 
-    def test_unknown_producer_pipe_allows_with_the_unknown_advisory(
+    def test_unknown_producer_is_advisory_not_denied(
         self, handler: Any, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """docker is on no list: the pipe is allowed with the unknown-verdict advisory."""
+        """A producer on neither list is allowed with an advisory (Plan 00478 row 26)."""
         hook_input = make_bash_hook_input("docker logs container | tail -100")
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
