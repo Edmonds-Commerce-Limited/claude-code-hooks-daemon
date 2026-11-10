@@ -65,7 +65,11 @@ from claude_code_hooks_daemon.utils.git_repo import (
     run_git,
 )
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
-from claude_code_hooks_daemon.utils.regenerable_paths import is_regenerable
+from claude_code_hooks_daemon.utils.regenerable_paths import (
+    is_regenerable,
+    lock_regenerated_dirs,
+    under_any,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +283,23 @@ def _empty_tree(path: Path) -> bool:
     return all(_empty_tree(child) for child in children)
 
 
+def _lock_regenerated(path: Path) -> tuple[str, ...]:
+    """Directories the worktree's committed manifest + lock pairs let a manager rebuild.
+
+    Judged from the tree at HEAD, so only a pair that is actually committed counts.
+    A git failure yields none: nothing is then called regenerable.
+    """
+    listing = run_git(path, "ls-tree", "-r", "--name-only", "-z", "HEAD")
+    if listing.returncode != 0:
+        return ()
+
+    def read_committed(name: str) -> str | None:
+        shown = run_git(path, "show", f"HEAD:{name}")
+        return shown.stdout if shown.returncode == 0 else None
+
+    return lock_regenerated_dirs([p for p in listing.stdout.split("\0") if p], read_committed)
+
+
 def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]:
     """Paths a removal of the worktree at ``path`` would lose.
 
@@ -296,11 +317,13 @@ def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]
     if ignored.returncode != 0:
         return (*dirty, f"<git ls-files failed: {ignored.stderr.strip()}>")
     entries = [e for line in ignored.stdout.splitlines() if line for e in _expand(path, line)]
+    rebuilt = _lock_regenerated(path) if entries else ()
     kept = [
         entry
         for entry in entries
         if not _is_symlink(path, entry)
         and not is_regenerable(entry, regenerable)
+        and not under_any(entry, rebuilt)
         and not _holds_nothing(path, entry)
         and not _is_generated_daemon_env(path, entry)
     ]
