@@ -2,6 +2,7 @@
 
 import logging
 import re
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -12,7 +13,7 @@ from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIP
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
-from claude_code_hooks_daemon.core.branch_cleanup import preview_paths, worktree_blockers
+from claude_code_hooks_daemon.core.branch_cleanup import preview_paths, worktree_blocker_groups
 from claude_code_hooks_daemon.core.evacuation import (
     Evacuation,
     EvacuationMatch,
@@ -595,6 +596,33 @@ def _lost_phrase(count: int | None) -> str:
     return f"{count} commit" + ("" if count == 1 else "s")
 
 
+_STATEMENT_SPLIT: Final[re.Pattern[str]] = re.compile(r"&&|\|\||;|\n")
+
+
+def _words_of(statement: str) -> list[str]:
+    """The shell words of ``statement``, or none when its quoting cannot be read."""
+    try:
+        return shlex.split(statement)
+    except ValueError:
+        return []
+
+
+def _rm_covers(command: str, cwd: Path, target: Path) -> bool:
+    """Whether an ``rm`` statement in ``command`` names ``target`` or a directory holding it."""
+    for statement in _STATEMENT_SPLIT.split(command):
+        words = _words_of(statement)
+        if not words or words[0] != "rm":
+            continue
+        for word in words[1:]:
+            if word.startswith("-"):
+                continue
+            named = Path(word).expanduser()
+            named = named if named.is_absolute() else cwd / named
+            if target == named or named in target.parents:
+                return True
+    return False
+
+
 class _ForceRemovalJudge:
     """Judges every forced branch delete and worktree removal in one command as a whole."""
 
@@ -607,6 +635,25 @@ class _ForceRemovalJudge:
         self._excluded: dict[str, set[str]] = {}
         self._unheld: list[_HeldTip] = []
         self._worktree_losses: list[str] = []
+        self._command = ""
+        self._deletable: list[str] = []
+        self._chained_rm: list[str] = []
+
+    def _delete_first_advice(self) -> str:
+        """Tell the agent to delete ignored blockers on their own, since judging precedes running."""
+        if not self._deletable:
+            return ""
+        advice = (
+            f" Delete {preview_paths(self._deletable)} in a separate command first (this "
+            "command is judged before any of it runs, so a delete chained in front of the "
+            "removal does not count), then retry the removal."
+        )
+        if self._chained_rm:
+            advice = (
+                f" The chained delete is not counted: {preview_paths(self._chained_rm)} "
+                "still exists when this command is judged." + advice
+            )
+        return advice
 
     def _place(self, run: GitInvocation) -> Path:
         problem = placement_problem(run, self._cwd)
@@ -651,7 +698,14 @@ class _ForceRemovalJudge:
         path = self._place(removal.run) / Path(removal.path).expanduser()
         if not path_is_dir(path, unreadable_means=False):
             raise _Unverifiable(f"worktree `{path}` is not a directory")
-        blockers = worktree_blockers(path, self._branches.cleanup_after_merge.regenerable)
+        dirty, ignored = worktree_blocker_groups(
+            path, self._branches.cleanup_after_merge.regenerable
+        )
+        blockers = (*dirty, *ignored)
+        self._deletable.extend(ignored)
+        self._chained_rm.extend(
+            entry for entry in ignored if _rm_covers(self._command, self._cwd, path / entry)
+        )
         if blockers:
             self._worktree_losses.append(
                 f"worktree `{path}` holds {len(blockers)} path(s) the removal would lose: "
@@ -692,6 +746,7 @@ class _ForceRemovalJudge:
 
     def judge(self, command: str) -> tuple[str, str] | None:
         """None when nothing would be lost, else the rule that denies and why."""
+        self._command = command
         deletions = _deleted_branches(command)
         removals = _worktree_removals(command) if self._judge_worktrees else []
         if not deletions and not removals:
@@ -715,7 +770,7 @@ class _ForceRemovalJudge:
             "Not removed: nothing that survives this command (another branch, a tag, a "
             "remote-tracking ref) holds this work, or it could not be checked, so it would be "
             "lost: " + "; ".join(losses) + ". Push or merge each branch, commit or move each "
-            "path, then retry."
+            "path, then retry." + self._delete_first_advice()
         )
         return rule_id, _with_principle(note)
 
