@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command, sweep_clean_line
 from claude_code_hooks_daemon.core.branch_inventory import (
     DormancyStage,
+    OwnerRule,
     Pool,
     is_work_branch,
     merge_proof_key,
@@ -57,9 +58,9 @@ _REMOTES: Final[str] = "refs/remotes/"
 _FIELD_SEP: Final[str] = "\x00"
 _FORMAT: Final[str] = (
     "%(refname)%00%(objectname)%00%(committerdate:unix)%00%(symref)"
-    "%00%(trailers:key=Parked-Reason,valueonly,unfold,separator=%x1f)"
+    "%00%(trailers:key=Parked-Reason,valueonly,unfold,separator=%x1f)%00%(authoremail)"
 )
-_FIELD_COUNT: Final[int] = 5
+_FIELD_COUNT: Final[int] = 6
 _UNIT_SEP: Final[str] = "\x1f\n "
 _SECONDS_PER_DAY: Final[float] = 86400.0
 _STEM_PREFIXES: Final[tuple[str, ...]] = ("worktree-", "agent-")
@@ -173,6 +174,8 @@ class _Ref:
     refname: str = ""
     #: The tip carries a ``Parked-Reason`` trailer.
     parked: bool = False
+    #: The tip's author email (``<`` and ``>`` stripped).
+    author_email: str = ""
 
 
 @dataclass(frozen=True)
@@ -344,15 +347,41 @@ def _read_refs(repo: Path, config: BranchesConfig) -> tuple[list[_Ref], str | No
         fields = line.split(_FIELD_SEP)
         if len(fields) != _FIELD_COUNT:
             continue
-        refname, tip, committed, _symref, parked = fields
+        refname, tip, committed, _symref, parked, author = fields
         if refname == head_ref:
             continue
         local = refname.startswith(_HEADS)
         name = refname.removeprefix(_HEADS) if local else refname.removeprefix(remote_prefix)
         refs.append(
-            _Ref(name, tip, float(committed or 0), local, refname, bool(parked.strip(_UNIT_SEP)))
+            _Ref(
+                name,
+                tip,
+                float(committed or 0),
+                local,
+                refname,
+                bool(parked.strip(_UNIT_SEP)),
+                author.strip().removeprefix("<").removesuffix(">"),
+            )
         )
     return refs, default
+
+
+def _owned_refs(repo: Path, refs: list[_Ref]) -> list[_Ref]:
+    """``refs`` without the foreign branches, which no pool counts (DESIGN.md section 2.2).
+
+    The owner rule is the inventory's (:class:`OwnerRule`): a branch is mine with
+    a local ref, a creator record, or a remote tip authored by ``user.email``.
+    """
+    rule = OwnerRule(repo)
+    local_names = {ref.name for ref in refs if ref.local}
+    return [
+        ref
+        for ref in refs
+        if ref.local
+        or rule.is_mine(
+            ref.name, has_local=ref.name in local_names, author_email=ref.author_email or None
+        )
+    ]
 
 
 def _merged_refnames(
@@ -758,7 +787,9 @@ def creation_report(
         # cannot raise the count the cap and dormancy judge.
         if not is_work_branch(new_name, config, default):
             return CreationReport()
-    work_refs = [ref for ref in refs if is_work_branch(ref.name, config, default)]
+    work_refs = _owned_refs(
+        repo, [ref for ref in refs if is_work_branch(ref.name, config, default)]
+    )
     labels = labels or {}
     all_groups = _work_groups(work_refs, _merged_refnames(repo, config, refs, default), labels)
     groups = [work for work in all_groups if work.pool == Pool.OPEN]

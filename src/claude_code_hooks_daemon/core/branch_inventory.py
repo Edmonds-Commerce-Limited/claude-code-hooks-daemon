@@ -53,6 +53,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.branch_keep import read_keeps
+from claude_code_hooks_daemon.core.branch_records import CREATOR_KEY
 from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -82,7 +83,7 @@ _REMOTE_HEAD = "HEAD"
 _FIELD = "\x00"
 #: for-each-ref ends every record with a newline after the format's trailing NUL.
 _RECORD_END = "\n"
-_FIELD_COUNT = 7
+_FIELD_COUNT = 9
 _UNIT = "\x1f"
 _GIT_TIMEOUT = Timeout.GIT_CONTEXT
 _BOUNDARY_MARK = "-"
@@ -124,6 +125,9 @@ class BranchState(StrEnum):
     EXEMPT = "exempt"
     #: Matches ``branches.bot_owned`` (``dependabot/*``): in no pool, never cleaned.
     BOT_OWNED = "bot-owned"
+    #: Not this clone's branch (DESIGN.md section 2.2): in no pool, never cleaned
+    #: automatically; ``BranchRecord.proof_state`` keeps a merge proof if it has one.
+    FOREIGN = "foreign"
     DEFAULT = "default"
     INTEGRATION_LINE = "integration-line"
     PROTECTED = "protected"
@@ -236,6 +240,18 @@ class BranchRecord:
     kept_reason: str | None = None
     kept_by: str | None = None
     kept_at: int | None = None
+    #: Author of a FOREIGN branch's tip.
+    author: str | None = None
+    author_email: str | None = None
+    #: The done state a FOREIGN branch was proven in (merged, merged-into-line or
+    #: patch-equivalent), so ``--clean --remote`` can still delete it: proof
+    #: matters more than ownership.
+    proof_state: BranchState | None = None
+
+    @property
+    def cleanup_state(self) -> BranchState:
+        """The state ``--clean`` judges: a foreign branch's proof, else its own state."""
+        return self.proof_state or self.state
 
 
 @dataclass(frozen=True)
@@ -264,6 +280,8 @@ class _RefRow:
     behind: int | None
     parked_reason: str | None
     subject: str
+    author_name: str
+    author_email: str
 
 
 @dataclass(frozen=True)
@@ -330,12 +348,14 @@ def _ref_format(default_ref: str | None) -> str:
         ahead_behind,
         f"%(trailers:key={_PARK_REASON_KEY},valueonly,unfold,separator=%x1f)",
         "%(contents:subject)",
+        "%(authorname)",
+        "%(authoremail)",
     )
     return "".join(f"{atom}%00" for atom in fields)
 
 
 def _parse_row(refname: str, fields: list[str]) -> _Row:
-    sha, date, upstream, ahead_behind, parked, subject = fields
+    sha, date, upstream, ahead_behind, parked, subject, author_name, author_email = fields
     if not _OBJECT_NAME.fullmatch(sha):
         return _BadRow(refname, f"unparseable object name {sha!r} in the ref listing")
     if not date.isdigit():
@@ -352,6 +372,8 @@ def _parse_row(refname: str, fields: list[str]) -> _Row:
         behind=behind,
         parked_reason=parked.split(_UNIT)[0].strip() or None,
         subject=subject,
+        author_name=author_name,
+        author_email=author_email.strip().removeprefix("<").removesuffix(">"),
     )
 
 
@@ -886,6 +908,58 @@ class _Context:
     worktrees: dict[str, Path] | None
     refs_hash: str
     moment: float
+    owners: OwnerRule
+
+
+class OwnerRule:
+    """DESIGN.md section 2.2, read once per pass and only when a branch needs it.
+
+    A branch with a local ref is mine without a git call; only a remote-only
+    branch needs the creator records and ``user.email``.
+    """
+
+    def __init__(self, repo: Path) -> None:
+        self._repo = repo
+        self._creators: set[str] | None = None
+        self._email: str | None = None
+        self._email_read = False
+
+    def creators(self) -> set[str]:
+        """Names carrying a ``hooksDaemonCreator`` record in this clone."""
+        if self._creators is None:
+            result = run_git(
+                self._repo,
+                "config",
+                "--get-regexp",
+                rf"^branch\..+\.{CREATOR_KEY}$",
+                timeout=_GIT_TIMEOUT,
+            )
+            names: set[str] = set()
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    key = line.split(" ", 1)[0].removeprefix("branch.")
+                    names.add(key.rsplit(".", 1)[0])
+            self._creators = names
+        return self._creators
+
+    def email(self) -> str | None:
+        """This clone's ``user.email`` (lower case), or None when unset."""
+        if not self._email_read:
+            result = run_git(self._repo, "config", "user.email", timeout=_GIT_TIMEOUT)
+            value = result.stdout.strip().lower()
+            self._email = value if result.returncode == 0 and value else None
+            self._email_read = True
+        return self._email
+
+    def is_mine(self, name: str, *, has_local: bool, author_email: str | None) -> bool:
+        """The owner rule, in order: creator record, local ref, author email.
+
+        ``author_email`` is the remote tip's author, or None when unknown.
+        """
+        if has_local or name in self.creators():
+            return True
+        mine = self.email()
+        return mine is not None and author_email is not None and author_email.lower() == mine
 
 
 def _group_rows(rows: list[_Row], remote: str) -> dict[str, tuple[_Row | None, _Row | None]]:
@@ -952,6 +1026,7 @@ def build_inventory(
         worktrees=_worktrees(repo),
         refs_hash=refs_hash,
         moment=moment,
+        owners=OwnerRule(repo),
     )
     cache_path = repo / CACHE_RELATIVE_PATH
     run = _Pass(repo, config, _load_cache(cache_path), remote_refs)
@@ -981,6 +1056,32 @@ def _row_facts(row: _RefRow | None, moment: float) -> dict[str, Any]:
 
 
 def _record(
+    run: _Pass, context: _Context, name: str, local: _Row | None, remote_row: _Row | None
+) -> BranchRecord:
+    """Classify one name, then take it out of every pool when it is not mine (section 2.2)."""
+    record = _classify(run, context, name, local, remote_row)
+    if (
+        record.state in _UNGROUPED
+        or not isinstance(remote_row, _RefRow)
+        or context.owners.is_mine(
+            name, has_local=local is not None, author_email=remote_row.author_email
+        )
+    ):
+        return record
+    done = record.state if record.state in _DONE_RANK else None
+    return replace(
+        record,
+        state=BranchState.FOREIGN,
+        author=remote_row.author_name or None,
+        author_email=remote_row.author_email or None,
+        proof_state=done,
+        dormancy_stage=None,
+        containment=None,
+        contained_in=None,
+    )
+
+
+def _classify(
     run: _Pass, context: _Context, name: str, local: _Row | None, remote_row: _Row | None
 ) -> BranchRecord:
     """Classify one name over every copy it has (DESIGN.md section 2)."""
@@ -1115,6 +1216,7 @@ def _weakest(verdicts: list[_Verdict]) -> _Verdict:
 _UNGROUPED = {
     BranchState.EXEMPT,
     BranchState.BOT_OWNED,
+    BranchState.FOREIGN,
     BranchState.DEFAULT,
     BranchState.INTEGRATION_LINE,
     BranchState.PROTECTED,

@@ -1065,7 +1065,7 @@ def _proven_remote(
     for name in sorted(records):
         record = records[name]
         if (
-            record.state not in CLEAN_STATES
+            record.cleanup_state not in CLEAN_STATES
             or record.remote_tip is None
             or name in spared
             or policy_refusal(name, config, default) is not None
