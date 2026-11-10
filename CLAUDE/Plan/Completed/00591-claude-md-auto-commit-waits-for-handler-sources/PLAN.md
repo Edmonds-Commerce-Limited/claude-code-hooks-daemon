@@ -1,6 +1,6 @@
 # Plan 00591: claude md auto commit waits for handler sources
 
-**Status**: In Progress
+**Status**: Complete (2026-11-10)
 **Created**: 2026-11-09
 **Owner**: dev
 **Priority**: Medium
@@ -33,18 +33,20 @@ that commit puts a rule row on the branch that no committed code declares
 
 ### Phase 1: Hold the auto-commit
 
-- [ ] 🔄 **Task 1.1**: RED tests in a temporary git repo (an untracked plugin
+- [x] ✅ **Task 1.1**: RED tests in a temporary git repo (an untracked plugin
   handler holds the commit back; a modified project handler holds it back; all
   clean commits as today; no handlers configured commits as today). GREEN:
   gather the handler source paths the injector already knows of, or from the
   same loaders, and check them with the existing lock-free `run_git`. Release note.
+  Delivered from the loaded handler classes (outside the daemon package), one
+  `git status --porcelain -- <paths>`.
 
 ## Success Criteria
 
-- [ ] A restart with an uncommitted plugin handler leaves CLAUDE.md uncommitted, with a log line naming the file.
-- [ ] Release-bound consequence recorded as a release note in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] A restart with an uncommitted plugin handler leaves CLAUDE.md uncommitted, with a log line naming the file (pinned by `test_untracked_handler_source_holds_the_commit`).
+- [x] Release-bound consequence recorded as a release note in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (`025-claude-md-auto-commit-waits-for-handler-sources.md`).
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hash -->
+- `ff62dc932` + `ddf285d42`, review edits `7e9a03f28` (merge `a9e0dacdb`), main CI run 42732895459 green; GitHub #172 closed.
