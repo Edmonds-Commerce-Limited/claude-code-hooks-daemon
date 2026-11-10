@@ -741,6 +741,8 @@ handlers:
 - Direct file operations (`tail -n 20 file.txt`)
 - `tail -f` (follow mode) and `head -c` (byte count)
 
+**Cannot decide:** a producer on neither the whitelist nor the blacklist (for example `my_report --all | tail`) is allowed with an advisory that names `bin/echd-capture` (if it is expensive) and `extra_whitelist` (if it is cheap, to stop the advisory). Known expensive producers (`pytest`, `npm`, `cargo`, ...), prose-shaped matches and pipes fed by a whole loop, `if`, `case` or group are still blocked.
+
 **Example trigger:**
 
 ```bash

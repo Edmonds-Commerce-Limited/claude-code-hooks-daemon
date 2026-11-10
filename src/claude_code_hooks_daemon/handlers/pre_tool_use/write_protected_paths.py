@@ -578,7 +578,8 @@ def _directory_pattern(glob: str) -> re.Pattern[str] | None:
     """A pattern finding the longest run of literal directories above ``glob``'s
     wildcard-only last component in free text, as whole names (`protected/`,
     `./protected/x`, `"protected"/x`, `/root/protected/x`); ``None`` when no
-    directory above it is literal (`**`, `*/**`), which stays fail-closed."""
+    directory above it is literal (`**`, `*/**`): unreadable text is then warned
+    about rather than denied, since no listed path is named in it."""
     runs: list[list[str]] = [[]]
     for part in _segments(glob)[:-1]:
         if part == _RECURSIVE or _WILDCARDS.search(part):
@@ -1257,9 +1258,7 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
                 )
             for operand in files:
                 if _awk_program_writes(operand):
-                    glob = self._text_naming(
-                        operand, cause=_CAUSE_AWK, computed_destination=True
-                    )
+                    glob = self._text_naming(operand, cause=_CAUSE_AWK, computed_destination=True)
                     if glob is not None:
                         return glob
         return None

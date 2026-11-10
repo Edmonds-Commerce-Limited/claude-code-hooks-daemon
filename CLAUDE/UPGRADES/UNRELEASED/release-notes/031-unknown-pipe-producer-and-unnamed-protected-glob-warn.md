@@ -1,0 +1,6 @@
+# Callout: pipe_blocker and write_protected_paths warn instead of denying when they cannot decide
+
+**Plan**: 00478
+**Audience**: client projects
+
+Under the owner's "warn dont block" ruling, two more guards allow with an advisory (and one log line starting `UNKNOWN-VERDICT <handler>`) where they used to deny for lack of a verdict. `pipe_blocker`: a producer on neither the whitelist nor the blacklist (for example `my_report --all | tail`) is no longer blocked; the advisory names `bin/echd-capture` for an expensive command and `extra_whitelist` for a cheap one. Known expensive producers (`pytest`, `npm`, `cargo`, ...), prose-shaped matches and pipes fed by a whole loop, `if`, `case` or group still deny. `write_protected_paths`: when a command cannot be read (unclosed quote, brace group past the spelling cap, text too deep or large to scan, an awk-computed destination) and no listed path is literally named in it, the command is now allowed with an advisory; this is what a protected-path glob with no literal part (such as `**`) used to turn into a deny. Wherever a listed path IS named in the command, an unknown verb or unreadable text still denies. If you relied on either deny as a backstop, add the producer to `extra_blacklist` or list a literal path to keep the deny.

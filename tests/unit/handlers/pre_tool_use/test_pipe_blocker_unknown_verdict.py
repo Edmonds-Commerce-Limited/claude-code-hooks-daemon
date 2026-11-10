@@ -39,9 +39,12 @@ def test_an_unknown_producer_allows_with_an_advisory(
     assert handler.matches(_event(command)) is True
     result = handler.handle(_event(command))
     advisory = assert_unknown_verdict(
-        result, caplog, _GUARD, "echd-capture", "extra_whitelist", "my_report"
-        if command.startswith("my_report")
-        else "frobnicate",
+        result,
+        caplog,
+        _GUARD,
+        "echd-capture",
+        "extra_whitelist",
+        "my_report" if command.startswith("my_report") else "frobnicate",
     )
     assert "pipe_blocker" in advisory
 
