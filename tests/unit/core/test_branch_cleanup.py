@@ -173,6 +173,14 @@ class TestLockRegeneratedBlockers:
         (path / "a/b/c/node_modules/x/i.js").write_text("x\n", encoding="utf-8")
         assert worktree_blockers(path, []) == ()
 
+    def test_a_vendor_dir_holding_a_nested_git_clone_still_blocks(self, repo: Path) -> None:
+        path = _lock_pair_branch(repo, "f6", "svc", "composer.json", "composer.lock")
+        (path / "svc/vendor/pkg/.git").mkdir(parents=True)
+        (path / "svc/vendor/pkg/a.php").write_text("x\n", encoding="utf-8")
+        blockers = worktree_blockers(path, [])
+        assert blockers
+        assert all(b.startswith("svc/vendor/") for b in blockers)
+
     def test_scratch_is_never_accepted(self, repo: Path) -> None:
         path = _lock_pair_branch(repo, "f5", "svc", "composer.json", "composer.lock")
         (path / "untracked/scratch").mkdir(parents=True)

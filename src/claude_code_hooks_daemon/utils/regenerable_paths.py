@@ -157,6 +157,7 @@ def lock_regenerated_dirs(
     committed file's text, or None.
     """
     tree = set(committed)
+    occupied = _occupied_directories(tree)
     found: list[str] = []
     for path in sorted(tree):
         base, _, filename = path.rpartition("/")
@@ -174,10 +175,21 @@ def lock_regenerated_dirs(
                 if (
                     directory not in found
                     and not under_any(directory, [NEVER_REGENERABLE])
-                    and not any(under_any(other, [directory]) for other in tree)
+                    and not NEVER_REGENERABLE.startswith(directory)
+                    and directory not in occupied
                 ):
                     found.append(directory)
     return tuple(found)
+
+
+def _occupied_directories(tree: Collection[str]) -> frozenset[str]:
+    """Every directory (``a/``, ``a/b/``) that has a committed file somewhere inside it."""
+    occupied: set[str] = set()
+    for path in tree:
+        parts = path.split("/")[:-1]
+        for depth in range(1, len(parts) + 1):
+            occupied.add("/".join(parts[:depth]) + "/")
+    return frozenset(occupied)
 
 
 def under_any(entry: str, directories: Iterable[str]) -> bool:
@@ -202,7 +214,11 @@ def never_regenerable_violations(patterns: Sequence[str]) -> list[str]:
 
 __all__ = [
     "DEFAULT_REGENERABLE_STORES",
+    "LOCK_REGENERATED_RULES",
     "NEVER_REGENERABLE",
+    "LockRegeneratedRule",
     "is_regenerable",
+    "lock_regenerated_dirs",
     "never_regenerable_violations",
+    "under_any",
 ]

@@ -91,6 +91,9 @@ BLOCKER_PREVIEW = 10
 #: Width of the ``XY `` status prefix in ``git status --porcelain``.
 _STATUS_PREFIX = 3
 
+#: How far below a lock-regenerated directory to look for a nested ``.git`` clone.
+_CLONE_SEARCH_DEPTH = 3
+
 
 def sweep_clean_command(*, remote: bool = False) -> str:
     """The ``branch-sweep --clean`` invocation, spelled for this install's wrapper.
@@ -297,7 +300,29 @@ def _lock_regenerated(path: Path) -> tuple[str, ...]:
         shown = run_git(path, "show", f"HEAD:{name}")
         return shown.stdout if shown.returncode == 0 else None
 
-    return lock_regenerated_dirs([p for p in listing.stdout.split("\0") if p], read_committed)
+    rebuilt = lock_regenerated_dirs([p for p in listing.stdout.split("\0") if p], read_committed)
+    return tuple(d for d in rebuilt if not _holds_git_clone(path / d))
+
+
+def _holds_git_clone(directory: Path) -> bool:
+    """Whether a ``.git`` entry sits within ``_CLONE_SEARCH_DEPTH`` levels of ``directory``.
+
+    A package manager can install a dependency as a real clone (``--prefer-source``),
+    and commits made inside it exist nowhere else, so such a directory is work.
+    """
+    pending = [(directory, 0)]
+    while pending:
+        current, depth = pending.pop()
+        try:
+            children = list(current.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if child.name == ".git":
+                return True
+            if depth < _CLONE_SEARCH_DEPTH and child.is_dir() and not child.is_symlink():
+                pending.append((child, depth + 1))
+    return False
 
 
 def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]:
