@@ -2208,34 +2208,63 @@ _FILTER_SEPARATE_OPTIONS: Final = frozenset(
 )
 
 
-def _follows_separate_filter_option(before: str) -> bool:
-    """Whether the text ``before`` a value ends in a filter option and its opening quote.
+#: Characters a double-quoted word still expands or escapes, so it is no plain literal.
+_DOUBLE_QUOTE_ACTIVE_CHARS: Final = frozenset('"$`\\')
 
-    The quote is required: bash passes a quoted word literally, but expands an
-    unquoted glob (``--include *``) into the cwd's file names, so the protected
-    file would become a search operand.
+
+def _is_one_quoted_literal(word: str) -> bool:
+    """Whether the shell ``word`` is wholly one quoted literal (``'*'``, ``"*.txt"``).
+
+    Anything outside the quotes (``''*``, ``'*'*``) is unquoted text bash still
+    glob-expands, and a double-quoted ``$`` or backtick still expands.
     """
-    words = before.rstrip("'\"").split()
-    return bool(words) and words[-1] in _FILTER_SEPARATE_OPTIONS and before[-1:] in "'\""
+    if len(word) < 2 or word[0] not in "'\"" or word[-1] != word[0]:
+        return False
+    body = word[1:-1]
+    if word[0] == "'":
+        return "'" not in body
+    return not any(char in _DOUBLE_QUOTE_ACTIVE_CHARS for char in body)
+
+
+def _quoted_separate_filter_values(command: str) -> frozenset[tuple[int, str]]:
+    """``(offset, value)`` of every separate filter value that is one whole quoted word.
+
+    Decided from whole shell words: bash passes ``-g '*'`` on literally, but
+    expands ``-g *``, ``-g ''*`` or ``-g '*'*`` into the cwd's file names, so a
+    protected file would become a search operand. The offset is that of the
+    value's first character, just inside its opening quote.
+    """
+    spans = shell_word_spans(command)
+    return frozenset(
+        (start + 1, command[start + 1 : end - 1])
+        for (option_start, option_end), (start, end) in itertools.pairwise(spans)
+        if command[option_start:option_end] in _FILTER_SEPARATE_OPTIONS
+        and _is_one_quoted_literal(command[start:end])
+    )
 
 
 def _is_separate_filter_value(word: str, command: str) -> bool:
-    """Whether every occurrence of ``word`` is the separate value of a filter option."""
+    """Whether every occurrence of ``word`` is the whole quoted value of a filter option."""
+    quoted = _quoted_separate_filter_values(command)
     starts = [m.start() for m in re.finditer(re.escape(word), command)]
-    return bool(starts) and all(_follows_separate_filter_option(command[:s]) for s in starts)
+    return bool(starts) and all((start, word) in quoted for start in starts)
 
 
 def _is_wildcard_filter_over_foreign_cwd(
-    word: str, cwds: tuple[str, ...], index: "ProtectedFileIndex"
+    word: str, command: str, cwds: tuple[str, ...], index: "ProtectedFileIndex"
 ) -> bool:
-    """Whether ``word`` is an attached ``--include=*``-style filter and a cwd really lies outside.
+    """Whether ``word`` is a wildcard grep/rg filter and a cwd really lies outside the project.
 
-    A cwd that is a link leading out of the project holds files the index never
-    listed, so the wildcard filter over a relative root cannot be vouched for.
+    Covers the attached ``--include=*`` and the quoted separate ``-g '*'``
+    spellings. A cwd that is a link leading out of the project holds files the
+    index never listed, so the wildcard filter over a relative root cannot be
+    vouched for.
     """
     prefix = next((p for p in _FILTER_VALUE_PREFIXES if word.startswith(p)), "")
     value = word[len(prefix) :]
-    if not prefix or not value or value.strip("*") != "":
+    if not value or value.strip("*") != "":
+        return False
+    if not prefix and not _is_separate_filter_value(word, command):
         return False
     project = os.path.realpath(index.project_root)
     return any(not _is_inside(os.path.realpath(cwd), project) for cwd in cwds if cwd)
@@ -2259,9 +2288,10 @@ def _is_scoped_filter_value(
     starts = [m.start() for m in re.finditer(re.escape(value), command)]
     if not starts:
         return False
+    quoted = _quoted_separate_filter_values(command)
     for start in starts:
         before = command[:start]
-        if not (before.endswith(_FILTER_VALUE_PREFIXES) or _follows_separate_filter_option(before)):
+        if not (before.endswith(_FILTER_VALUE_PREFIXES) or (start, value) in quoted):
             return False
         segment_start = _scan_shell_prefix(command[:start])[0]
         segment = _COMMAND_SEGMENT_SEPARATORS.split(command[segment_start:])[0]
@@ -2585,7 +2615,7 @@ def iter_protected_mentions(
         if (
             found is None
             and index is not None
-            and _is_wildcard_filter_over_foreign_cwd(word, effective, index)
+            and _is_wildcard_filter_over_foreign_cwd(word, command, effective, index)
         ):
             # The index lists only the project, so it cannot say what a wildcard
             # filter reads when the real cwd lies outside it: not judged clean.

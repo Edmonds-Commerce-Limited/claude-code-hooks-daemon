@@ -29,4 +29,13 @@ Open follow-up (not fixed): `rg --follow x clean -g '*'` still ALLOWs. The separ
 1. Separate filter spelling (`--include *`, `-g *`, `--exclude-dir d*`, `-g [d]*`) now counts as a filter value only when the value word is quoted (`_follows_separate_filter_option` requires the opening quote); bash expands an unquoted glob into cwd file names. RED tests: all nine reviewed commands deny; quoted forms (`rg x sub -g '*'`) stay allowed. Attached forms (`--include=*`) unchanged: bash cannot expand them into a protected file name.
 2. Cwd symlink resolving outside the project: relative roots are anchored at `realpath(cwd)`, and an attached wildcard filter (`--include=*`) with any effective cwd really outside the project is not judged clean (`_is_wildcard_filter_over_foreign_cwd`). RED test `test_cwd_symlink_resolving_outside_project_denied`. Plain `grep -r x .` from such a cwd (no filter) is still not judged: the index lists only the project, pre-existing design.
 
-Results: option_values file 77 passed; test_secret_file_guard*.py + tests/unit/utils/test_secret_*.py 1939 passed; probe harness: the nine deny, no regressions (remaining ALLOWs are the pre-existing out-of-scope ones).
+Results: option_values file 77 passed; test_secret_file_guard\*.py + tests/unit/utils/test_secret\_\*.py 1939 passed; probe harness: the nine deny, no regressions (remaining ALLOWs are the pre-existing out-of-scope ones).
+
+### Round 4 review fixes
+
+Review: `task-1-review-round4-code-reviewer.md`.
+
+1. (Critical) A separate filter value is decided from the WHOLE shell word, not the character before it. `_quoted_separate_filter_values` walks `shell_word_spans` and keeps a value only when the word after a `_FILTER_SEPARATE_OPTIONS` word is exactly one quoted literal (`_is_one_quoted_literal`: matching opening and closing quote, nothing outside; a double-quoted body holds no `$`, backtick, backslash or `"`). Both `_is_separate_filter_value` and `_is_scoped_filter_value` use it, and `_follows_separate_filter_option` is gone. `''*`, `""*`, `''*.secret`, `''[d]*`, `'*'*`, `*'*'` and `"$X"*` now deny.
+2. (Suggestion) `_is_wildcard_filter_over_foreign_cwd` now also covers the quoted separate spelling (`-g '*'`, `--include '*'`, `--glob "*"`). With a cwd that is a link leading out of the project, `rg x -g '*' .`, `rg x -g '*'` and `grep -r x --include '*' .` deny.
+
+RED first: 10 failed. Now green: option_values file 107 passed; test_secret_file_guard\*.py + tests/unit/utils/test_secret\_\*.py 1954 passed. Probe harness over cmdsV, cmdsV2, cmdsR, cmdsR2 and cmdsR9: compared with the reviewer's HEAD results, the only changes are the nine reviewed commands going ALLOW -> DENY. Every remaining ALLOW also allowed in the reviewer's run.

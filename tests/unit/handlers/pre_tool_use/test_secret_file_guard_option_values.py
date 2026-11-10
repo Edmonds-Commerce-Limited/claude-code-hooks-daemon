@@ -206,7 +206,13 @@ class TestGrepFilterRelaxationNeedsRootsInsideProject:
 
     @pytest.mark.parametrize(
         "command",
-        ["rg x sub -g '*'", "rg x sub --glob '*'", "grep -rl zz sub --include '*'"],
+        [
+            "rg x sub -g '*'",
+            "rg x sub --glob '*'",
+            "grep -rl zz sub --include '*'",
+            'rg x sub -g "*"',
+            "grep -r x --include='*' sub",
+        ],
     )
     def test_separate_value_filter_over_clean_root_allowed(
         self, project: Path, command: str
@@ -232,14 +238,54 @@ class TestGrepFilterRelaxationNeedsRootsInsideProject:
     ) -> None:
         assert _verdict(project, command) is Decision.DENY
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rg x -g ''* sub",
+            'rg x -g ""* sub',
+            f"rg x -g ''*.{_SUFFIX} sub",
+            "grep -r x --include ''* sub",
+            'grep -r x --exclude-dir ""* sub',
+            "rg x --glob ''[d]* sub",
+            "rg x -g '*'* sub",
+            "rg x -g *'*' sub",
+            'rg x -g "$X"* sub',
+        ],
+    )
+    def test_quoted_part_beside_unquoted_glob_is_expanded_so_denied(
+        self, project: Path, command: str
+    ) -> None:
+        """Only a word that is wholly one quoted literal reaches the tool unexpanded."""
+        assert _verdict(project, command) is Decision.DENY
+
+    @pytest.mark.parametrize("word", ["'*'", '"*"', "'*.txt'", '"[d]*"', "''"])
+    def test_one_quoted_literal(self, word: str) -> None:
+        assert sfm._is_one_quoted_literal(word) is True
+
+    @pytest.mark.parametrize(
+        "word", ["*", "'", "''*", "'*'*", "*'*'", "'a''b'", '"$X"', '"`x`"', '"a\\b"', "'*\""]
+    )
+    def test_not_one_quoted_literal(self, word: str) -> None:
+        assert sfm._is_one_quoted_literal(word) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -r x --include=* .",
+            "rg x -g '*' .",
+            "rg x -g '*'",
+            "grep -r x --include '*' .",
+            'rg x --glob "*"',
+        ],
+    )
     def test_cwd_symlink_resolving_outside_project_denied(
-        self, project: Path, outside: Path
+        self, project: Path, outside: Path, command: str
     ) -> None:
         link = project / "sub" / "cwdlnk"
         link.symlink_to(outside)
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
-            "tool_input": {"command": "grep -r x --include=* ."},
+            "tool_input": {"command": command},
             "cwd": str(link),
         }
         handler = SecretFileGuardHandler()
