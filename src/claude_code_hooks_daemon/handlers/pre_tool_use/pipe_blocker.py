@@ -57,6 +57,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted,
     split_unquoted_spans,
     strip_inert_spans,
+    strip_message_bodies,
 )
 from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
@@ -1532,7 +1533,12 @@ class PipeBlockerHandler(
         # Every pipe left is unknown. It may only be allowed if no blacklisted
         # command is named anywhere in the text: one that is, the parser
         # failed to place (Plan 00478 second review), and the pipe denies on it.
-        unplaced = self._blacklisted_word_anywhere(scan_target)
+        # Heredoc bodies are scanned too: a script authored by `cat > t.sh
+        # <<'EOF'` and run by the same command is blanked as data in
+        # `scan_target` but still executes (Plan 00478 Task 2.2f).
+        unplaced = self._blacklisted_word_anywhere(scan_target) or self._blacklisted_word_anywhere(
+            strip_message_bodies(command)
+        )
         if unplaced is not None:
             rule_id, source_segment = judged[0]
             return self._unplaced_verdict(hook_input, rule_id, source_segment, command, unplaced)

@@ -1805,6 +1805,32 @@ class TestAPathNobodyNamedWarnsInsteadOfDenying:
         assert guard.matches(hook_input) is True
         assert guard.handle(hook_input).decision == Decision.DENY
 
+    @pytest.mark.parametrize(
+        "operand",
+        [
+            "${PWD:-.}/protected/x",
+            '"${PWD:-.}"/protected/x',
+            "${HOME%/}/../protected/x",
+        ],
+    )
+    def test_an_awk_operand_with_an_operator_expansion_still_names_the_directory(
+        self, root: Path, operand: str
+    ) -> None:
+        """Task 2.2f Minor-3: `${NAME:-x}` ends the word stream; the raw text still counts."""
+        (root / "protected").mkdir()
+        guard = _make(root, ["protected/**"])
+        hook_input = _bash(root, f"awk '{{print > FILENAME}}' {operand}")
+        assert guard.matches(hook_input) is True
+        assert guard.handle(hook_input).decision == Decision.DENY
+
+    def test_an_awk_operand_with_an_operator_expansion_elsewhere_stays_allowed(
+        self, root: Path
+    ) -> None:
+        (root / "protected").mkdir()
+        guard = _make(root, ["protected/**"])
+        hook_input = _bash(root, "awk '{print > FILENAME}' ${PWD:-.}/other/x")
+        assert guard.handle(hook_input).decision != Decision.DENY
+
     @pytest.mark.parametrize("operand", ["$PWD/x", "$f", '"$PWD"/notes.txt'])
     def test_an_unresolvable_awk_operand_under_a_glob_with_no_literal_part_is_denied(
         self, root: Path, operand: str

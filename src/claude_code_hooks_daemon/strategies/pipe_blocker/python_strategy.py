@@ -7,7 +7,9 @@ _LANGUAGE_NAME = "Python"
 # Python test runners, linters, and QA tools — all expensive to pipe
 _BLACKLIST_PATTERNS: tuple[str, ...] = (
     r"^pytest\b",
+    r"^py\.test\b",
     r"^python\s+-m\s+pytest\b",
+    r"^python\s+-m\s+py\.test\b",
     r"^mypy\b",
     r"^ruff\s+check\b",
     r"^black\b",
