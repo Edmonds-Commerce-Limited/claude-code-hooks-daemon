@@ -188,6 +188,15 @@ names, people or hashes appear here.
   `test_titled_heading_is_single_spaced`; release note 031) Write a failing test in which a `--title` journal entry
   is rewritten by the formatter, then make the scaffolder emit the
   formatter-stable heading.
+- [x] ✅ **Task 6.2**: (done: release note 033) `format-markdown` skips plan
+  journal files, both in a directory walk and when one is named (the
+  edit-time handler already did). Client report: a QA pipeline's call to the
+  verb rewrote entries.
+- [x] ✅ **Task 6.3**: (done: `only_whitespace_changed` in
+  `plan_qa/model.py`; release note 033) The journal immutability check
+  (`journal-dayfile-is-today`) accepts a whitespace-only change (same word
+  sequence) at both edit and commit time, at the owner's request relayed by
+  the client team. Any word change still blocks.
 
 ## Success Criteria
 
