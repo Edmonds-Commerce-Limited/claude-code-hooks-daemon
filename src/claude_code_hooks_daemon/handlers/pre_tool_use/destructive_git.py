@@ -2,7 +2,6 @@
 
 import logging
 import re
-import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -38,6 +37,7 @@ from claude_code_hooks_daemon.core.remote_branch_proof import (
 )
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
     SUBCOMMAND_SEPARATOR_CHARS,
@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
 )
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
 from claude_code_hooks_daemon.utils.git_sync import resolve_default_branch
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 
 logger = logging.getLogger(__name__)
@@ -602,7 +603,7 @@ _STATEMENT_SPLIT: Final[re.Pattern[str]] = re.compile(r"&&|\|\||;|\n")
 def _words_of(statement: str) -> list[str]:
     """The shell words of ``statement``, or none when its quoting cannot be read."""
     try:
-        return shlex.split(statement)
+        return linear_shlex.split(statement)
     except ValueError:
         return []
 
@@ -618,7 +619,7 @@ def _rm_covers(command: str, cwd: Path, target: Path) -> bool:
                 continue
             named = Path(word).expanduser()
             named = named if named.is_absolute() else cwd / named
-            if target == named or named in target.parents:
+            if path_is_relative_to(target, named):
                 return True
     return False
 
