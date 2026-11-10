@@ -3883,6 +3883,8 @@ handlers:
 
 **Checked extensions:** `.ts`, `.tsx`
 
+**Cannot-decide results warn, they do not block**: ESLint errors that were actually reported DENY (`R-ESLINT-ERRORS`). If ESLint does not finish within its timeout (`R-ESLINT-TIMEOUT`) or cannot be launched (`R-ESLINT-RUN-FAILURE`), the write is ALLOWED with an advisory saying the file was NOT linted, and one `UNKNOWN-VERDICT` log line is written. Both rule IDs are advisory-only. Silence is not a clean file.
+
 **Bash-authored files**: a `.ts`/`.tsx` file written by a Bash command is checked too, not only one written with `Write`/`Edit`. Only AUTHORING routes count — a `>`, `>>`, `>|` or `&>` redirect, `tee`, or a `cat <<EOF` heredoc. A file the command merely RELOCATES (`cp`, `mv`, `install`, `dd`) is never checked, because those bytes were already on disk and denying the copy would report a defect the command did not introduce. A predicted target that does not exist on disk is skipped.
 
 | Option              | Values         | Default | Effect                                                                                                     |

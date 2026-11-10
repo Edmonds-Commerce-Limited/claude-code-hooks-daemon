@@ -38,6 +38,7 @@ from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 # Where a Node workspace keeps its tool binaries. Used as a FALLBACK when the
 # resolver yields no bin dirs (no manifest found), so a pinned workspace_root
@@ -109,26 +110,29 @@ _ESLINT_ERRORS_RULE = Rule(
 )
 _ESLINT_TIMEOUT_RULE = Rule(
     rule_id=RuleID.ESLINT_TIMEOUT,
-    blocked="an ESLint run that did not finish within the configured timeout",
-    why="This handler DENIES on a timeout — unlike lint_on_edit, which allows",
-    fix="Investigate why ESLint is slow (config, project size); retry the edit",
+    blocked=(
+        "ADVISORY ONLY, never a deny: an ESLint run that did not finish within the "
+        "configured timeout"
+    ),
+    why="No ESLint error was found; the file was NOT linted, so it is flagged, not blocked",
+    fix="Investigate why ESLint is slow (config, project size); re-run it by hand",
     verbose=(
-        "This is STRICTER than `lint_on_edit`, which covers the other "
-        "languages: that handler ALLOWs when its linter is missing or when "
-        "the check times out. This one DENIES on an ESLint timeout — do not "
-        "carry 'a missing linter never blocks' across to TypeScript."
+        "ESLint did not finish in time, so the file was NOT linted and no ESLint "
+        "error was found: this is not a finding. Under the owner's 'warn dont "
+        "block' ruling the write is ALLOWED with this advisory. Do not read the "
+        "silence as a clean file; run ESLint by hand."
     ),
 )
 _ESLINT_RUN_FAILURE_RULE = Rule(
     rule_id=RuleID.ESLINT_RUN_FAILURE,
-    blocked="an ESLint invocation that failed to run at all",
-    why="ESLint could not be launched (exception raised invoking it)",
-    fix="Check the ESLint wrapper/tsx setup, then retry the edit",
+    blocked="ADVISORY ONLY, never a deny: an ESLint invocation that failed to run at all",
+    why="No ESLint error was found; the file was NOT linted, so it is flagged, not blocked",
+    fix="Check the ESLint wrapper/tsx setup, then re-run ESLint by hand",
     verbose=(
-        "This is STRICTER than `lint_on_edit`, which covers the other "
-        "languages: that handler ALLOWs when its linter is missing. This one "
-        "DENIES on any failure to run ESLint at all — do not carry 'a missing "
-        "linter never blocks' across to TypeScript."
+        "ESLint could not be launched, so the file was NOT linted and no ESLint "
+        "error was found: this is not a finding. Under the owner's 'warn dont "
+        "block' ruling the write is ALLOWED with this advisory. Do not read the "
+        "silence as a clean file; check the wrapper and tsx setup."
     ),
 )
 
@@ -403,23 +407,27 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
             return BlockingResult(decision=Decision.ALLOW)
 
         except subprocess.TimeoutExpired:
-            return BlockingResult(
-                decision=Decision.DENY,
-                reason=self._deny_reason(
-                    hook_input,
-                    _ESLINT_TIMEOUT_RULE,
-                    f"ESLint timed out after {Timeout.ESLINT_CHECK} seconds",
-                ),
-                rule=_ESLINT_TIMEOUT_RULE.rule_id,
+            return self._not_linted(
+                file_path_obj.name,
+                f"ESLint timed out after {Timeout.ESLINT_CHECK} seconds "
+                f"({_ESLINT_TIMEOUT_RULE.rule_id})",
             )
         except Exception as e:
-            return BlockingResult(
-                decision=Decision.DENY,
-                reason=self._deny_reason(
-                    hook_input, _ESLINT_RUN_FAILURE_RULE, f"Failed to run ESLint: {e!s}"
-                ),
-                rule=_ESLINT_RUN_FAILURE_RULE.rule_id,
+            return self._not_linted(
+                file_path_obj.name,
+                f"ESLint could not be launched ({_ESLINT_RUN_FAILURE_RULE.rule_id}): "
+                f"{type(e).__name__}",
             )
+
+    @staticmethod
+    def _not_linted(file_name: str, cause: str) -> BlockingResult:
+        """ALLOW with an advisory: ESLint gave no verdict, so the file was NOT linted."""
+        verdict = unknown_verdict_allow(
+            "validate_eslint_on_write",
+            f"{file_name} was NOT linted; {cause}",
+            "Run `npx eslint` on the file by hand; no ESLint error was found.",
+        )
+        return BlockingResult(decision=Decision.ALLOW, context=verdict.context)
 
     def get_enforcement_status(self, project_root: Path) -> list[str]:
         """Advisory when ``project_root`` has no ``llm:`` scripts (Plan 00296 T4.1).
@@ -456,10 +464,11 @@ with `Edit` (`npx eslint <file> --fix` clears most of them). Sibling tool
 calls batched with the denied one may already have run, so check their
 results before re-issuing them.
 
-**This is STRICTER than `lint_on_edit`, which covers the other languages.**
-That handler ALLOWs when its linter is missing or when the check times out;
-this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
-Do not carry "a missing linter never blocks" across to TypeScript.
+**A timeout, or a failure to launch ESLint, only WARNS.** Under the owner's
+"warn dont block" ruling the write is allowed with an advisory saying the file
+was NOT linted (`R-ESLINT-TIMEOUT` and `R-ESLINT-RUN-FAILURE` are advisory-only
+rules). Silence is not a clean file: run ESLint by hand. Errors ESLint actually
+reported still DENY.
 
 **Enforcement is gated on `llm:` scripts in `package.json`.** With none
 present this handler only advises — and suggests adding `llm:lint` — so silence

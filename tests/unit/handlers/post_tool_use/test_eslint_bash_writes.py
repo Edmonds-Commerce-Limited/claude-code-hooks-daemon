@@ -1,9 +1,8 @@
 """`validate_eslint_on_write` sees TypeScript a Bash command AUTHORED.
 
 Plan 00260 Task 3.5, the sibling of `test_lint_on_edit_bash_writes.py`. This
-handler is the stricter of the two — it DENIES on an ESLint timeout and on any
-failure to run ESLint at all — so the conservative boundaries matter more here,
-not less.
+handler DENIES on reported ESLint errors, so the conservative boundaries matter
+more here, not less.
 
 **Test function names avoid `node_modules`, `dist`, `coverage`, `.build` and
 `test-results` on purpose.** pytest builds `tmp_path` from the function name and

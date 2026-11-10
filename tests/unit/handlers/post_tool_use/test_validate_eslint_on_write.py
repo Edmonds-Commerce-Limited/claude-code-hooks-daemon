@@ -36,10 +36,15 @@ def mock_llm_commands_detection():
         yield mock
 
 
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
+
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
     _ESLINT_ERRORS_RULE,
+    _ESLINT_RUN_FAILURE_RULE,
+    _ESLINT_TIMEOUT_RULE,
     ValidateEslintOnWriteHandler,
 )
 
@@ -76,6 +81,18 @@ class TestResidentGuidance:
 
     def test_states_that_it_denies(self, tmp_path: Path) -> None:
         assert "DENIES" in self._guidance(tmp_path)
+
+    def test_states_that_timeout_and_run_failure_only_warn(self, tmp_path: Path) -> None:
+        guidance = self._guidance(tmp_path)
+
+        assert "NOT linted" in guidance
+        assert "warn dont block" in guidance
+
+    def test_timeout_and_run_failure_rules_are_advisory_only(self) -> None:
+        for rule in (_ESLINT_TIMEOUT_RULE, _ESLINT_RUN_FAILURE_RULE):
+            assert rule.blocked.startswith("ADVISORY ONLY")
+            assert "DENIES" not in rule.why
+            assert "DENIES" not in rule.verbose
 
     def test_states_that_the_write_already_landed(self, tmp_path: Path) -> None:
         guidance = self._guidance(tmp_path).lower()
@@ -445,9 +462,13 @@ class TestValidateEslintOnWriteHandler:
 
     @patch("subprocess.run")
     def test_handle_timeout(
-        self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+        self,
+        mock_run: MagicMock,
+        handler: ValidateEslintOnWriteHandler,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Should deny when ESLint times out."""
+        """Should allow with an unknown-verdict advisory when ESLint times out."""
         test_file = tmp_path / "test.ts"
         test_file.write_text("const x = 1;")
 
@@ -462,15 +483,20 @@ class TestValidateEslintOnWriteHandler:
 
         result = handler.handle(hook_input)
 
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "timed out" in result.reason
+        advisory = assert_unknown_verdict(
+            result, caplog, "validate_eslint_on_write", "NOT linted", "timed out"
+        )
+        assert "test.ts" in advisory
 
     @patch("subprocess.run")
     def test_handle_exception(
-        self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+        self,
+        mock_run: MagicMock,
+        handler: ValidateEslintOnWriteHandler,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Should deny when ESLint command fails with exception."""
+        """Should allow with an unknown-verdict advisory when ESLint cannot be launched."""
         test_file = tmp_path / "test.ts"
         test_file.write_text("const x = 1;")
 
@@ -483,9 +509,9 @@ class TestValidateEslintOnWriteHandler:
 
         result = handler.handle(hook_input)
 
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "Failed to run ESLint" in result.reason
+        assert_unknown_verdict(
+            result, caplog, "validate_eslint_on_write", "NOT linted", "could not be launched"
+        )
 
     def test_handle_missing_file_path(self, handler: ValidateEslintOnWriteHandler) -> None:
         """Should allow when file_path is missing."""
@@ -987,12 +1013,13 @@ class TestValidateEslintOnWriteDisclosureLadder:
         assert "ALREADY landed on disk" in first.reason
         assert "ALREADY landed on disk" in second.reason
 
-    def test_timeout_uses_the_timeout_rule(
-        self, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    def test_timeout_is_an_advisory_not_a_deny(
+        self,
+        handler: ValidateEslintOnWriteHandler,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         import subprocess as subprocess_module
-
-        from claude_code_hooks_daemon.constants.rule_ids import RuleID
 
         test_file = tmp_path / "test.ts"
         test_file.write_text("const x = 1;")
@@ -1001,22 +1028,29 @@ class TestValidateEslintOnWriteDisclosureLadder:
             side_effect=subprocess_module.TimeoutExpired(cmd="tsx", timeout=Timeout.ESLINT_CHECK),
         ):
             result = handler.handle(self._hook_input(test_file, None))
-        assert result.reason is not None
-        assert result.reason.startswith(f"BLOCKED [{RuleID.ESLINT_TIMEOUT}]")
-        assert result.rule == RuleID.ESLINT_TIMEOUT
+        assert_unknown_verdict(result, caplog, "validate_eslint_on_write", "NOT linted")
 
-    def test_run_failure_uses_the_run_failure_rule(
-        self, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    def test_run_failure_is_an_advisory_not_a_deny(
+        self,
+        handler: ValidateEslintOnWriteHandler,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        from claude_code_hooks_daemon.constants.rule_ids import RuleID
-
         test_file = tmp_path / "test.ts"
         test_file.write_text("const x = 1;")
         with patch("subprocess.run", side_effect=RuntimeError("boom")):
             result = handler.handle(self._hook_input(test_file, None))
-        assert result.reason is not None
-        assert result.reason.startswith(f"BLOCKED [{RuleID.ESLINT_RUN_FAILURE}]")
-        assert result.rule == RuleID.ESLINT_RUN_FAILURE
+        assert_unknown_verdict(result, caplog, "validate_eslint_on_write", "NOT linted")
+
+    def test_reported_errors_still_deny(
+        self, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+        with patch("subprocess.run", return_value=MagicMock(returncode=1, stdout="bad", stderr="")):
+            result = handler.handle(self._hook_input(test_file, None))
+        assert result.decision == Decision.DENY
+        assert result.rule == RuleID.ESLINT_ERRORS
 
 
 class TestPerFileWorkspace:
