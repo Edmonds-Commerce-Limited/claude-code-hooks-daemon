@@ -269,6 +269,28 @@ class TestGuardPathCost:
         assert warm <= one  # a warm cache: the listings only, whatever the count
         assert cold <= one + _CALLS_PER_BRANCH * (len(names) - 1)
 
+    def test_a_branch_over_the_path_ceiling_is_unproven_without_walking_main(
+        self, repo: Path
+    ) -> None:
+        # A branch touching very many paths costs git calls in proportion to them on
+        # the hook path; past the ceiling the proof stops and the delete is refused.
+        _topic(repo, "wide", ["w1.txt", "w2.txt", "w3.txt"])
+        _land_squash(repo, "wide")
+        with patch.object(remote_branch_proof, "MAX_PROOF_PATHS", 2):
+            calls = _git_subcommands_during(lambda: _prove(repo, ["wide"]))
+            tips, problems, _evidence = _prove(repo, ["wide"])
+        assert tips == {}
+        assert "wide" in problems
+        assert "log" not in calls and "ls-tree" not in calls
+
+    def test_a_branch_at_the_path_ceiling_is_still_proven(self, repo: Path) -> None:
+        _topic(repo, "narrow", ["n1.txt", "n2.txt"])
+        _land_squash(repo, "narrow")
+        with patch.object(remote_branch_proof, "MAX_PROOF_PATHS", 2):
+            tips, problems, _evidence = _prove(repo, ["narrow"])
+        assert list(tips) == ["narrow"]
+        assert problems == {}
+
 
 class TestCreationReadsTheProof:
     def test_a_squash_merged_branch_stops_counting_as_open(self, repo: Path) -> None:

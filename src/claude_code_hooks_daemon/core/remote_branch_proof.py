@@ -67,6 +67,11 @@ _REPLACEMENT_CHAR: Final[str] = "\ufffd"
 #: First-parent commits of the default one proof will inspect; more is unproven.
 MAX_PROOF_CANDIDATES: Final[int] = 50
 
+#: Paths a branch may change and still be proven on the hook path. Each candidate
+#: costs one ``ls-tree`` per ``_LS_TREE_CHUNK`` paths, so an unbounded branch could
+#: run past the hook timeout on its first, uncached judgement; past this it is unproven.
+MAX_PROOF_PATHS: Final[int] = 2000
+
 #: Paths per ``git ls-tree`` call, bounding the argv for a branch touching many files.
 _LS_TREE_CHUNK: Final[int] = 200
 
@@ -320,8 +325,11 @@ def _holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
     the first-parent commits after the merge base that touched those paths (a state
     that holds the change was reached by a commit that touched one of them). Once a
     commit held it the content is permanently in the default's history, even if the
-    default has changed it since. More candidates than ``MAX_PROOF_CANDIDATES`` is
-    unproven, as is an empty net change (empty commits, or changes that cancel out).
+    default has changed it since. More candidates than ``MAX_PROOF_CANDIDATES``, or
+    more changed paths than ``MAX_PROOF_PATHS``, is unproven, as is an empty net
+    change (empty commits, or changes that cancel out). The default's history is
+    read from the local refs: the live remote check covers the deleted branch's
+    tip, not the default's, so a squash only on an unpushed local default proves.
 
     Raises:
         ProofUnavailableError: git failed, so there is no answer to cache.
@@ -333,7 +341,7 @@ def _holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
         raise ProofUnavailableError(f"git merge-base failed for {tracking_ref}")
     merge_base = base.stdout.strip()
     changes = _net_change(directory, merge_base, tracking_ref)
-    if not changes:
+    if not changes or len(changes) > MAX_PROOF_PATHS:
         return False
     if _tree_holds(directory, target, changes):
         return True
@@ -549,7 +557,7 @@ def prove_remote_merged(
         return RemoteProof(
             tips={},
             problems={
-                name: f"the repository top level could not be resolved, so `{name}` is unchecked"
+                name: f"not inside a work tree (no top level to run the proof from), so `{name}` is unchecked"
                 for name in names
             },
             evidence={},
