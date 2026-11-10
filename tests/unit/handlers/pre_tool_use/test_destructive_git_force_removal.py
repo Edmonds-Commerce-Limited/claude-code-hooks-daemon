@@ -249,6 +249,34 @@ class TestWorktreeRemoveIgnoredContent:
         assert "untracked/scratch/" in reason
         assert BRANCH_LIMIT_PRINCIPLE in reason
 
+    def test_deny_says_to_delete_ignored_content_in_a_separate_command(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        (wt / "untracked" / "scratch").mkdir(parents=True)
+        (wt / "untracked" / "scratch" / "plan.md").write_text("notes")
+        _rule, reason = _deny(handler, f"git worktree remove {wt}", repo)
+        assert "in a separate command first" in reason
+        assert "judged before any of it runs" in reason
+        assert "untracked/scratch/" in reason
+
+    def test_chained_rm_of_the_blocking_path_is_still_denied_and_said_so(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        (wt / "untracked" / "scratch").mkdir(parents=True)
+        (wt / "untracked" / "scratch" / "plan.md").write_text("notes")
+        command = f"rm -rf {wt}/untracked/scratch && git worktree remove {wt}"
+        rule, reason = _deny(handler, command, repo)
+        assert rule == RuleID.GIT_WORKTREE_REMOVE_FORCE
+        assert "chained delete is not counted" in reason
+        assert "in a separate command first" in reason
+
+    def test_dirty_files_get_no_delete_advice(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path
+    ) -> None:
+        (wt / "notes.txt").write_text("work")
+        _rule, reason = _deny(handler, f"git worktree remove {wt}", repo)
+        assert "separate command" not in reason
+
     def test_regenerable_ignored_content_is_allowed(
         self, handler: DestructiveGitHandler, repo: Path, wt: Path
     ) -> None:

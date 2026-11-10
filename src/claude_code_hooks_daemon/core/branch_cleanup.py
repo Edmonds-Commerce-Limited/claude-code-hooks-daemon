@@ -286,15 +286,28 @@ def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]
     entry outside the ``regenerable`` globs. A git failure is itself a blocker:
     an unread tree is never called clean.
     """
+    dirty, ignored = worktree_blocker_groups(path, regenerable)
+    return (*dirty, *ignored)
+
+
+def worktree_blocker_groups(
+    path: Path, regenerable: Sequence[str]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The ``(dirty, ignored)`` split of :func:`worktree_blockers`.
+
+    ``ignored`` are the kept ignored entries (scratch and the like), which the
+    agent may delete itself; ``dirty`` also carries a git failure, which no
+    delete can clear.
+    """
     status = run_git(path, "status", "--porcelain")
     if status.returncode != 0:
-        return (f"<git status failed: {status.stderr.strip()}>",)
+        return ((f"<git status failed: {status.stderr.strip()}>",), ())
     dirty = [line[_STATUS_PREFIX:] for line in status.stdout.splitlines() if line]
     ignored = run_git(
         path, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"
     )
     if ignored.returncode != 0:
-        return (*dirty, f"<git ls-files failed: {ignored.stderr.strip()}>")
+        return ((*dirty, f"<git ls-files failed: {ignored.stderr.strip()}>"), ())
     entries = [e for line in ignored.stdout.splitlines() if line for e in _expand(path, line)]
     kept = [
         entry
@@ -304,7 +317,7 @@ def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]
         and not _holds_nothing(path, entry)
         and not _is_generated_daemon_env(path, entry)
     ]
-    return (*dirty, *_judge_seeded_copies(path, kept))
+    return tuple(dirty), tuple(_judge_seeded_copies(path, kept))
 
 
 def _main_checkout(path: Path) -> Path | None:
