@@ -18,7 +18,7 @@ import subprocess  # nosec B404 - imported for the CompletedProcess type; git sp
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -29,8 +29,12 @@ from claude_code_hooks_daemon.utils.conflict_markers import (
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree, run_git
+from claude_code_hooks_daemon.utils.git_sync import current_branch, resolve_default_branch
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_document
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.config.models import BranchesConfig
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +168,34 @@ _GIT_HEAD_REF = "HEAD"
 # Fingerprint of the last markdown format, kept inside the git dir.
 _FORMAT_MEMORY_FILENAME = "hooks-daemon-claude-md-format"
 _FORMAT_MEMORY_FIELDS = 2  # input sha, output sha
+
+
+def _off_home_reason(cwd: Path, branches: "BranchesConfig | None") -> str | None:
+    """Why ``cwd`` is not on a home branch, or ``None`` when it is.
+
+    Home branches are ``branches.home`` or, when that is empty, the default
+    branch. A HEAD or default branch that cannot be resolved counts as off home
+    (fail safe: nothing is written or committed on a guess). A directory that
+    is not a git repository has no branch to protect, so the rule does not
+    apply to it.
+    """
+    from claude_code_hooks_daemon.config.models import BranchesConfig
+
+    if run_git(cwd, "rev-parse", "--git-dir").returncode != 0:
+        return None
+    config = branches if branches is not None else BranchesConfig()
+    head = current_branch(cwd)
+    if head is None:
+        return "HEAD is detached or unreadable, so there is no home branch to be on"
+    home = list(config.home)
+    if not home:
+        default = resolve_default_branch(config, cwd)
+        if default is None:
+            return "the default branch could not be resolved and branches.home is not set"
+        home = [default]
+    if head not in home:
+        return f"HEAD is on {head!r}, not a home branch ({', '.join(home)})"
+    return None
 
 
 def _sha256(text: str) -> str:
@@ -328,6 +360,7 @@ class ClaudeMdInjector:
         handlers: list[Any],
         promoted_handlers: list[str] | None = None,
         write_in_linked_worktree: bool = False,
+        branches: "BranchesConfig | None" = None,
     ) -> None:
         """Initialise injector.
 
@@ -351,7 +384,11 @@ class ClaudeMdInjector:
                 ``regenerate-docs`` command passes True — it is the
                 documented way to recover a conflict-marked block, wherever
                 that block is.
+            branches: The ``branches:`` config; ``branches.home`` names the
+                branches the block may be written and committed on. ``None``
+                means the defaults (the repo's default branch).
         """
+        self._branches = branches
         self._workspace_root = workspace_root
         self._handlers = handlers
         self._promoted_handlers = frozenset(promoted_handlers or [])
@@ -417,6 +454,18 @@ class ClaudeMdInjector:
             )
             return
 
+        if not self._write_in_linked_worktree:
+            off_home = _off_home_reason(self._workspace_root, self._branches)
+            if off_home is not None:
+                logger.info(
+                    "ClaudeMdInjector: not writing %s: %s. The block is only written on a home "
+                    "branch; `%s` writes it on request.",
+                    claude_md_path,
+                    off_home,
+                    daemon_cli_command_for_docs("regenerate-docs"),
+                )
+                return
+
         if claude_md_path.exists():
             if not self._write_reconciling_concurrent_edits(claude_md_path, generated):
                 return
@@ -436,7 +485,7 @@ class ClaudeMdInjector:
         )
 
         ClaudeMdInjector._auto_commit_if_dirty(
-            claude_md_path, self._external_handler_sources(self._handlers)
+            claude_md_path, self._external_handler_sources(self._handlers), self._branches
         )
 
     @staticmethod
@@ -662,8 +711,16 @@ class ClaudeMdInjector:
             return content
 
     @staticmethod
-    def _auto_commit_if_dirty(claude_md_path: Path, handler_sources: Sequence[Path] = ()) -> None:
+    def _auto_commit_if_dirty(
+        claude_md_path: Path,
+        handler_sources: Sequence[Path] = (),
+        branches: "BranchesConfig | None" = None,
+    ) -> None:
         """Auto-commit CLAUDE.md if it has uncommitted changes.
+
+        Refused unless HEAD is attached to a home branch (``branches.home``):
+        a commit on a feature branch or a detached HEAD is how stray branches
+        and dangling commits get made.
 
         Held back while any of ``handler_sources`` (plugin/project handler
         files the block documents) is untracked or modified: the commit would
@@ -692,6 +749,11 @@ class ClaudeMdInjector:
         status_line = status.stdout.strip()
         if not status_line:
             return  # CLAUDE.md is clean — no commit needed
+
+        off_home = _off_home_reason(cwd, branches)
+        if off_home is not None:
+            logger.info("ClaudeMdInjector: not auto-committing %s: %s", filename, off_home)
+            return
 
         held_by = ClaudeMdInjector._uncommitted_handler_source(cwd, handler_sources)
         if held_by is not None:

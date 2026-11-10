@@ -361,6 +361,8 @@ In `block` mode, creating a branch is denied while a pool is at its cap or holds
 
 `branches.bot_owned` (default `["dependabot/*"]`) names branches a bot manages. They are in no pool: never counted, never judged by the creation guard and never deleted by `branch-sweep --clean`. `branch-sweep` lists them in their own `bot-owned` section.
 
+`branches.home` (default empty) names the branches a main checkout lives on. The daemon writes and auto-commits the CLAUDE.md block only while HEAD is attached to a home branch; empty means the repository's default branch, and a configured list replaces that default (set it when a checkout sits on an environment, release or production branch). On any other branch, or a detached HEAD, it writes nothing and logs why. `regenerate-docs` still writes the block on request but commits only on a home branch.
+
 ```yaml
 branches:
   parked:

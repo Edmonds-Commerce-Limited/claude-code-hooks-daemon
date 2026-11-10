@@ -2142,3 +2142,123 @@ class TestAutoCommitWaitsForHandlerSources:
         from claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker import SedBlockerHandler
 
         assert ClaudeMdInjector._external_handler_sources([SedBlockerHandler()]) == []
+
+
+def _git(path: Path, *args: str) -> str:
+    """Run git in ``path`` and return stdout."""
+    return subprocess.run(
+        ["git", *args], cwd=path, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _init_repo_on_main(path: Path) -> None:
+    """A committed repo whose only branch is ``main``."""
+    _init_git_repo(path)
+    _git(path, "branch", "-M", "main")
+
+
+def _claude_md_is_clean(path: Path) -> bool:
+    return _git(path, "status", "--porcelain", "CLAUDE.md") == ""
+
+
+def _has_block(path: Path) -> bool:
+    return _OPEN_TAG in (path / "CLAUDE.md").read_text()
+
+
+class TestClaudeMdInjectorHomeBranch:
+    """The block is written and committed only on the checkout's home branch."""
+
+    @staticmethod
+    def _inject(path: Path, home: list[str] | None = None, force: bool = False) -> None:
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        branches = BranchesConfig(home=home) if home is not None else BranchesConfig()
+        ClaudeMdInjector(
+            workspace_root=path,
+            handlers=[_StubHandler("h", "## H\n\nContent.")],
+            write_in_linked_worktree=force,
+            branches=branches,
+        ).inject()
+
+    def test_home_defaults_to_empty(self) -> None:
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+
+        assert BranchesConfig().home == []
+
+    def test_default_branch_writes_and_commits(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        before = _git(tmp_path, "rev-list", "--count", "HEAD")
+        self._inject(tmp_path)
+        assert _has_block(tmp_path)
+        assert _claude_md_is_clean(tmp_path)
+        assert int(_git(tmp_path, "rev-list", "--count", "HEAD")) == int(before) + 1
+
+    def test_feature_branch_neither_writes_nor_commits(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
+        head = _git(tmp_path, "rev-parse", "HEAD")
+        with caplog.at_level(logging.INFO):
+            self._inject(tmp_path)
+        assert not _has_block(tmp_path)
+        assert _git(tmp_path, "rev-parse", "HEAD") == head
+        assert "regenerate-docs" in caplog.text
+        assert "feature/x" in caplog.text
+
+    def test_detached_head_neither_writes_nor_commits(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "--detach")
+        head = _git(tmp_path, "rev-parse", "HEAD")
+        self._inject(tmp_path)
+        assert not _has_block(tmp_path)
+        assert _git(tmp_path, "rev-parse", "HEAD") == head
+
+    def test_configured_home_writes_and_commits_there(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "release-x")
+        before = _git(tmp_path, "rev-list", "--count", "HEAD")
+        self._inject(tmp_path, home=["release-x"])
+        assert _has_block(tmp_path)
+        assert _claude_md_is_clean(tmp_path)
+        assert int(_git(tmp_path, "rev-list", "--count", "HEAD")) == int(before) + 1
+
+    def test_configured_home_replaces_the_default_branch(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        head = _git(tmp_path, "rev-parse", "HEAD")
+        self._inject(tmp_path, home=["release-x"])
+        assert not _has_block(tmp_path)
+        assert _git(tmp_path, "rev-parse", "HEAD") == head
+
+    def test_forced_regenerate_off_home_writes_but_does_not_commit(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
+        head = _git(tmp_path, "rev-parse", "HEAD")
+        with caplog.at_level(logging.INFO):
+            self._inject(tmp_path, force=True)
+        assert _has_block(tmp_path)
+        assert not _claude_md_is_clean(tmp_path)
+        assert _git(tmp_path, "rev-parse", "HEAD") == head
+        assert "not auto-committing" in caplog.text
+
+    def test_unresolvable_default_branch_fails_safe(self, tmp_path: Path) -> None:
+        _init_git_repo(tmp_path)
+        _git(tmp_path, "branch", "-M", "trunk-like")
+        head = _git(tmp_path, "rev-parse", "HEAD")
+        self._inject(tmp_path)
+        assert not _has_block(tmp_path)
+        assert _git(tmp_path, "rev-parse", "HEAD") == head
+
+    def test_auto_commit_refuses_off_home_directly(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n\nedited\n")
+        head = _git(tmp_path, "rev-parse", "HEAD")
+        ClaudeMdInjector._auto_commit_if_dirty(claude_md)
+        assert _git(tmp_path, "rev-parse", "HEAD") == head
