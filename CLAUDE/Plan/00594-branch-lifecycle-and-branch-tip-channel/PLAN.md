@@ -164,6 +164,13 @@ names, people or hashes appear here.
   directories, and the list is configurable.
 - [ ] ⬜ **Task 3.4**: Bulk cleanup is batched, resumable and dry-run first,
   and is tested against a fixture with hundreds of branches.
+- [ ] ⬜ **Task 3.5**: (RC feedback) When the worktree-removal guard names a
+  blocking path, its deny says "delete it first, then retry the removal". A
+  single command that deletes the path and removes the worktree is judged
+  before it runs, so it is still denied.
+- [ ] ⬜ **Task 3.6**: (RC feedback) The installer cleans up, or ignores, the
+  settings backup file it leaves when that file is byte-identical to the
+  original.
 
 ### Phase 4: Pressure, preflight, park, owner (classes 2, 4, 5, 7)
 
@@ -177,6 +184,12 @@ names, people or hashes appear here.
 
 ### Phase 5: Branch tip channel
 
+- [x] ✅ **Task 5.0**: (done: RELEASING.md "Release candidate branches")
+  At the owner's ruling, `rc/X.Y.Z` release-candidate branches become the
+  supported beta channel. They are installed through the existing guarded
+  unreleased install. Every push gets autofix and targeted QA first and is
+  announced with its sha. Proven live: the first RC, `rc/3.73.3`, unblocked
+  a client seat and confirmed the class 6 fix the same day.
 - [ ] ⬜ **Task 5.1**: A client can follow a branch or commit, is told when it
   has moved, and can return to the last tag in one step. Proven on the client
   test seat.
