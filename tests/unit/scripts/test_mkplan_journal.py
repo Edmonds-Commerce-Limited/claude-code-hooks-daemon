@@ -378,6 +378,29 @@ class TestEntryShape:
         assert "· blocker · T2.1" in content
         assert "waiting on upstream" in content
 
+    @pytest.mark.parametrize("ref_args", [[], ["--ref", "T2.1"]])
+    def test_titled_heading_is_single_spaced(
+        self, plan_repo: Path, ref_args: list[str]
+    ) -> None:
+        """Plan 00594 class 9: a run of spaces in a heading is collapsed by
+        common markdown formatters, and an entry is immutable once committed,
+        so the scaffolder must emit the already-collapsed form."""
+        _make_plan(plan_repo, "00042", "sample-plan")
+        body = _write_body(plan_repo, "Titled entry body.\n")
+
+        result = _run(
+            plan_repo, "--journal", "42", "finding", str(body), *ref_args, "--title", "short title"
+        )
+        assert result.returncode == 0, result.stderr
+
+        content = _entry_files(plan_repo)[0].read_text()
+        heading_line = next(line for line in content.splitlines() if line.startswith("## "))
+        assert "  " not in heading_line
+        assert heading_line.endswith(" — short title")
+        new_heading = _last_heading(content)
+        assert new_heading.group(3) == "finding"
+        assert new_heading.group(5) == "short title"
+
     def test_accepts_a_zero_padded_plan_number(self, plan_repo: Path) -> None:
         _make_plan(plan_repo, "00042", "sample-plan")
         body = _write_body(plan_repo)

@@ -177,6 +177,8 @@ class TestRun:
 _ENTRY_FOLDER = "2026-08-06"
 _ENTRY_NAME = "093015Z-action-0a1b2c.md"
 _ENTRY_BODY = "## 09:30 · action · — — thing\n\nBody.\n"
+#: The same words as `_ENTRY_BODY`, with different whitespace between them.
+_WHITESPACE_VARIANT = "## 09:30 · action · —   — thing\n\n\nBody.  \n"
 
 
 def _existing_ctx(
@@ -251,6 +253,9 @@ class TestAnExistingJournalFileIsClosed:
 
     def test_a_no_op_write_is_clean(self) -> None:
         assert _edit_run(_existing_ctx(after=_ENTRY_BODY)) == []
+
+    def test_a_whitespace_only_edit_is_clean(self) -> None:
+        assert _edit_run(_existing_ctx(after=_WHITESPACE_VARIANT)) == []
 
     def test_removing_only_conflict_markers_is_clean(self) -> None:
         """Parity with plan_journal_guard: both sides' entries survive."""
@@ -359,6 +364,18 @@ class TestCommitHalf:
         assert [(finding.path, finding.level) for finding in findings] == [
             (_REPO_ENTRY, Level.BLOCK)
         ]
+
+    def test_a_whitespace_only_change_is_clean(self, repo: Path) -> None:
+        """Plan 00594 class 9: a formatter collapsing a run of spaces changes no
+        word of the record, so it must not strand an uncommittable file."""
+        (repo / _REPO_ENTRY).write_text(_WHITESPACE_VARIANT)
+        _git(repo, "add", "-A")
+        assert _commit_run(repo) == []
+
+    def test_whitespace_plus_a_word_change_is_blocked(self, repo: Path) -> None:
+        (repo / _REPO_ENTRY).write_text(_WHITESPACE_VARIANT.replace("Body.", "Rewritten."))
+        _git(repo, "add", "-A")
+        assert [finding.path for finding in _commit_run(repo)] == [_REPO_ENTRY]
 
     def test_a_deleted_entry_file_is_blocked(self, repo: Path) -> None:
         _git(repo, "rm", "-q", _REPO_ENTRY)

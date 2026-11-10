@@ -7678,10 +7678,18 @@ def cmd_format_markdown(args: argparse.Namespace) -> int:
         print(_gitignored_message(path), file=sys.stderr)
         return 1
 
+    # A plan journal entry is append-only and immutable once committed, so a
+    # rewrite here would leave a file its own commit gate refuses (Plan 00594
+    # class 9). The edit-time formatter handler skips the same predicate.
+    from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
+
     if path.is_file():
         if not path.name.lower().endswith(_MARKDOWN_EXTENSIONS):
             print(f"ERROR: {path} is not a markdown file", file=sys.stderr)
             return 1
+        if is_journal_file(path):
+            print(f"Skipped (plan journal entry, never reformatted): {path}")
+            return 0
         changed, errored = _format_single_markdown_file(path, check)
         if errored:
             return 1
@@ -7705,6 +7713,8 @@ def cmd_format_markdown(args: argparse.Namespace) -> int:
     any_changed = False
     any_errored = False
     for candidate in _iter_markdown_candidates(path, exclude_paths, project_root):
+        if is_journal_file(candidate):
+            continue
         changed, errored = _format_single_markdown_file(candidate, check)
         if errored:
             any_errored = True

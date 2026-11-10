@@ -508,6 +508,18 @@ def only_conflict_markers_removed(before: str, after: str) -> bool:
     return expected is None and removed_any
 
 
+def only_whitespace_changed(before: str, after: str) -> bool:
+    """Whether ``before`` and ``after`` hold the same words in the same order.
+
+    A markdown formatter collapsing a run of spaces or a blank line changes no
+    word of a journal record, and an entry it rewrote that way could otherwise
+    never be committed nor restored by an agent (Plan 00594 class 9). Any
+    added, removed or altered non-whitespace character still counts as a
+    rewrite. Read by both halves of ``journal-dayfile-is-today``.
+    """
+    return before.split() == after.split()
+
+
 def corrected_entry_labels(headings: list[JournalEntryHeading]) -> frozenset[str]:
     """The ``HH:MM`` labels that this day-file's own corrections declare wrong.
 

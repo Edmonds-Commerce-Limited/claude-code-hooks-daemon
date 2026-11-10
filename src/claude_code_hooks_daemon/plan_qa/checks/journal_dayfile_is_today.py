@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.plan_qa.model import (
     JOURNAL_BODY_FILE_HINT,
     journal_append_command,
     only_conflict_markers_removed,
+    only_whitespace_changed,
     parse_journal_dayfile_name,
 )
 from claude_code_hooks_daemon.plan_qa.paths import PlanFileKind, classify
@@ -112,7 +113,9 @@ def _existing_file_findings(
     before = context.file_content_before
     if after is None or after == before:
         return []
-    if before is not None and only_conflict_markers_removed(before, after):
+    if before is not None and (
+        only_conflict_markers_removed(before, after) or only_whitespace_changed(before, after)
+    ):
         return []
     if after == _head_text(context, target.rel_path):
         return []
@@ -188,7 +191,14 @@ _CHANGE_WORDS: Final[dict[str, str]] = {
 
 def _rewrite_kind(context: CheckContext, change: StagedChange) -> str | None:
     """The status key of a staged change that rewrites an entry file, else ``None``."""
-    if change.status in (_MODIFY_STATUS, _DELETE_STATUS):
+    if change.status == _DELETE_STATUS:
+        return change.status
+    if change.status == _MODIFY_STATUS:
+        if context.gitfacts is not None:
+            staged = context.gitfacts.staged_file_text(change.path)
+            head = context.gitfacts.head_file_text(change.path)
+            if staged is not None and head is not None and only_whitespace_changed(head, staged):
+                return None
         return change.status
     if change.status.startswith(_RENAME_PREFIX) and context.gitfacts is not None:
         staged = context.gitfacts.staged_file_text(change.path)
