@@ -26,6 +26,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.hook_result import Decision
@@ -34,7 +35,6 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.plan_journal_guard import (
     conflict_checkout_paths,
 )
 from claude_code_hooks_daemon.utils.path_predicates import TextOrReason
-from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 PLAN_DIR = "CLAUDE/Plan"
 LIVE_FOLDER = "00461-journal-entries-only"

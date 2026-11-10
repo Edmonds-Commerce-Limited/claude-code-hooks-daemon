@@ -56,13 +56,13 @@ from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
-from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     command_word,
     split_unquoted,
     strip_message_bodies,
     strip_quoted_heredoc_bodies,
 )
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 logger = logging.getLogger(__name__)
 

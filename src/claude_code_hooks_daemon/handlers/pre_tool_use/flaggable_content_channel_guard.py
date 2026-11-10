@@ -48,7 +48,6 @@ from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
-from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 from claude_code_hooks_daemon.utils.recursive_search import (
     TOOL_GIT,
     TOOL_GREP,
@@ -58,6 +57,7 @@ from claude_code_hooks_daemon.utils.recursive_search import (
     scan_options,
     search_command,
 )
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 _RULE = Rule(
     rule_id=RuleID.FLAGGABLE_CONTENT_CHANNEL,
@@ -435,9 +435,7 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
 # flagged directory it would reach, cannot read it.
 
 _RECURSIVE_SEARCH_LABEL: Final[str] = "recursive grep/rg search reaching a flaggable directory"
-_NO_REMEDY: Final[str] = (
-    "Name explicit narrower roots that do not contain the flagged directory."
-)
+_NO_REMEDY: Final[str] = "Name explicit narrower roots that do not contain the flagged directory."
 _UNPLACED_LABEL: Final[str] = "recursive search whose roots could not be placed"
 _GREP_SHAPE: Final[re.Pattern[str]] = re.compile(r"\b(?:grep|egrep|fgrep|zgrep|rg)\b")
 _NEGATION: Final[str] = "!"

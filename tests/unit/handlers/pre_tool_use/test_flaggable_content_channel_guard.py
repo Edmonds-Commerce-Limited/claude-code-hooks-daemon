@@ -15,13 +15,13 @@ import subprocess
 from typing import Any
 
 import pytest
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
-from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 from claude_code_hooks_daemon.handlers.pre_tool_use import (
     flaggable_content_channel_guard as guard_module,
 )

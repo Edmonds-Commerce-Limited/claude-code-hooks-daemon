@@ -23,6 +23,7 @@ from typing import Any, Literal
 
 import pytest
 from pydantic import ValidationError
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 from claude_code_hooks_daemon.config.models import ReferenceReposConfig
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -38,7 +39,6 @@ from claude_code_hooks_daemon.reference_repos.report import (
     UNCONFIRMED_HEADLINE,
     remediation_command,
 )
-from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 _SESSION = "session-alpha"
 _OTHER_SESSION = "session-beta"

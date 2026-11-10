@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 from release_merge_freeze import RULE_ID, ReleaseMergeFreezeHandler
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 from claude_code_hooks_daemon.core.hook_result import Decision
-from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 _SHA = "a" * 40
 _RELEASE_PR = 12
@@ -219,7 +219,11 @@ class TestUnreadableState:
         assert handler.matches(payload) is True
         result = handler.handle(payload)
         assert_unknown_verdict(
-            result, caplog, "release_merge_freeze", "release-state.json", "whether a release is open"
+            result,
+            caplog,
+            "release_merge_freeze",
+            "release-state.json",
+            "whether a release is open",
         )
 
     def test_unreadable_warns(

@@ -96,12 +96,12 @@ from claude_code_hooks_daemon.plan_qa.model import (
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME, JOURNAL_MODE_OFF
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.git_facts import GitFactsBase
-from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 from claude_code_hooks_daemon.utils.path_predicates import (
     TextOrReason,
     path_is_file,
     read_text_or_reason,
 )
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 logger = logging.getLogger(__name__)
 

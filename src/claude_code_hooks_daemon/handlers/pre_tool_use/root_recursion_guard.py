@@ -467,11 +467,11 @@ def _command_verdict(command: str, depth: int = 0) -> _Verdict:
     return max(
         (
             _segment_verdict(
-            command[start:end],
-            feeds_xargs=index + 1 < len(spans)
-            and command[end : spans[index + 1][0]] == _PIPE
-            and not _is_data_consumer(command[spans[index + 1][0] : spans[index + 1][1]]),
-            depth=depth,
+                command[start:end],
+                feeds_xargs=index + 1 < len(spans)
+                and command[end : spans[index + 1][0]] == _PIPE
+                and not _is_data_consumer(command[spans[index + 1][0] : spans[index + 1][1]]),
+                depth=depth,
             )
             for index, (start, end) in enumerate(spans)
         ),

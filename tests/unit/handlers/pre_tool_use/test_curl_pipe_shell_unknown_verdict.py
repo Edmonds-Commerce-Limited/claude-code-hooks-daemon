@@ -9,10 +9,10 @@ line. A finding that is positive wins over an unknown part of the same command.
 from typing import Any
 
 import pytest
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.curl_pipe_shell import CurlPipeShellHandler
-from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 _GUARD = "curl_pipe_shell"
 
