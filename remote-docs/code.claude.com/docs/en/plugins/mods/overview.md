@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/overview
-fetched_at: '2026-11-09T09:01:40.743419+00:00'
+fetched_at: '2026-11-10T16:35:12.474538+00:00'
 fidelity: converted
-source_sha256: 6bd81a0e8ffc9483565735845c440019cbdd30aa2479dd73c24b5d9c17d08173
+source_sha256: c7aa0160629c91c7c0e221f18acc729bdaa338e274888bcb68c24dbb2efab92a
 licence: unreviewed
-stale_after: '2027-02-07'
+stale_after: '2027-02-08'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -88,7 +88,7 @@ A mod runs with your permissions, so before you install one, know what it has ac
 
 Mods aren't sandboxed. If you turn on [sandboxing](https://code.claude.com/docs/en/sandboxing.md), the sandbox isolates the Bash commands Claude runs, and a process that a mod starts runs outside it.
 
-With [managed settings](https://code.claude.com/docs/en/settings.md#check-what-your-organization-enforces) or a Team or Enterprise [`/login`](https://code.claude.com/docs/en/authentication#authentication-precedence) as the session's credential, by default a mod's approval doesn't get a call past your `ask` rules or `PreToolUse` hooks. Without either, a mod can approve a call that an `ask` rule would prompt for, or that your `PreToolUse` hook blocked. To check when a mod can also approve a call that a `deny` rule refuses, see [Extend permissions with hooks](https://code.claude.com/docs/en/permissions.md#precedence-among-rules-hooks-and-mods).
+A mod can approve [many tool calls](https://code.claude.com/docs/en/permissions.md#precedence-among-rules-hooks-and-mods) that your `deny` or `ask` rules or your `PreToolUse` hooks would stop, unless the [built-in guard](https://code.claude.com/docs/en/plugins/mods/admin.md#know-what-happens-by-default) prevents it. With the guard loaded, by default a user's mod can't do this. In a local terminal session, `cc-plugin-sec-default` on the **Installed** tab of `/plugin` means the guard is loaded.
 
 A mod can restyle much of Claude Code's interface, but not the permission prompt. It can't change what a prompt shows you.
 

@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/llms.txt
-fetched_at: '2026-11-09T09:01:48.137935+00:00'
+fetched_at: '2026-11-10T16:35:20.840608+00:00'
 fidelity: converted
-source_sha256: b7e6c125bcbc45d24383d431589fca0532a1c361d717719a869402386bb1cde7
+source_sha256: fe04a609e137986ef60ff7fc649beebc563902b81150b81151f5b6092e6c4e54
 licence: unreviewed
-stale_after: '2027-02-07'
+stale_after: '2027-02-08'
 fetch_method: agent-browser-lite-headless (text)
 ---
 
@@ -395,7 +395,7 @@ fetch_method: agent-browser-lite-headless (text)
 #### Model and responses
 
 - [Model configuration](https://code.claude.com/docs/en/model-config.md): Configure which model Claude Code uses, effort levels, extended context, and the auto-compact window
-- [Speed up responses with fast mode](https://code.claude.com/docs/en/fast-mode.md): Get faster Opus responses in Claude Code by toggling fast mode.
+- [Speed up responses with fast mode](https://code.claude.com/docs/en/fast-mode.md): Get faster Opus and Fable responses in Claude Code by toggling fast mode with `/fast`.
 - [Escalate hard decisions with the advisor tool](https://code.claude.com/docs/en/advisor.md): Pair your main model with a stronger advisor model that Claude consults at key moments during a task.
 - [Output styles](https://code.claude.com/docs/en/output-styles.md): Change Claude Code's role, tone, and response format with a built-in output style such as Concise or Explanatory, or write a custom style.
 
