@@ -399,12 +399,17 @@ handlers:
       enabled: true
       priority: 17
       options:
-        # This project's full QA scripts are expensive. An unknown producer is
-        # only warned about (Plan 00478), so they are named here to keep their
-        # truncating pipes denied, at any path (`./scripts/qa/run_all.sh`).
+        # This project's QA scripts are expensive. An unknown producer is only
+        # warned about (Plan 00478), so they are named here to keep their
+        # truncating pipes denied. A pipe is denied when one of these names
+        # appears anywhere in the command as a word or a path's basename
+        # (`./scripts/qa/run_all.sh`, `bash scripts/qa/run_all.sh`,
+        # `python3 scripts/qa/llm_qa.py all`). `(\s|$)` rather than `\b`, so
+        # `run_all.sh.bak` is not matched.
         extra_blacklist:
-          - '^run_all\.sh\b'
-          - '^run_tests\.sh\b'
+          - '^run_all\.sh(\s|$)'
+          - '^run_tests\.sh(\s|$)'
+          - '^llm_qa\.py(\s|$)'
 
     dangerous_permissions: # Warns about dangerous file permission changes
       enabled: true

@@ -18,6 +18,7 @@ import os
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +55,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     resolve_shell_word,
     split_unquoted,
+    split_unquoted_spans,
     strip_inert_spans,
 )
 from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
@@ -375,6 +377,54 @@ _MAX_UNWRAP_DEPTH = 4
 # Shell options whose next word is a value (`bash -o pipefail -c '...'`).
 _SHELL_VALUE_FLAGS: frozenset[str] = frozenset({"-o", "+o", "-O", "+O"})
 _SHELL_OPTION_PREFIXES: tuple[str, ...] = ("-", "+")
+
+
+# A single `&` backgrounds the command before it and starts the next statement
+# (Plan 00478 second review C-1). It is NOT a separator when it is part of a
+# redirect or a pipe: `2>&1`, `>&2`, `<&3`, `&>f`, `&>>f`, `|&`.
+_BACKGROUND = "&"
+_REDIRECT_BEFORE_AMPERSAND = frozenset("<>|&")
+_REDIRECT_AFTER_AMPERSAND = frozenset(">&")
+
+# Whole-command blacklist scan (Plan 00478 second review). Characters that end a
+# word for the scan: whitespace, shell operators, quotes, braces, `=` (so
+# `--cmd=pytest` and `X=pytest` expose pytest) and backslash.
+_SCAN_WORD_BREAK = re.compile(r"[\s;&|()<>`'\"{}=\\]+")
+# Words after a candidate joined onto it, so a multi-word pattern
+# (`^npm\s+test\b`, `^python\s+-m\s+pytest\b`) can match where it appears.
+_SCAN_FOLLOWING_WORDS = 4
+# `python3 -mpytest`: the module is glued to the flag.
+_GLUED_MODULE_FLAG = "-m"
+_PATH_SEPARATOR = "/"
+
+
+def _last_background_statement(text: str) -> str:
+    """The statement after the last unquoted background ``&`` in ``text``.
+
+    ``sleep 1 & pytest`` runs pytest as its own statement, so the pipe after
+    it is fed by pytest alone. An ``&`` that belongs to a redirect or to ``|&``
+    is kept as part of the statement.
+    """
+    spans = split_unquoted_spans(text, (_BACKGROUND,))
+    start = spans[0][0]
+    for (_, separator_at), (next_start, _) in pairwise(spans):
+        before = text[separator_at - 1 : separator_at]
+        after = text[separator_at + 1 : separator_at + 2]
+        if before in _REDIRECT_BEFORE_AMPERSAND or after in _REDIRECT_AFTER_AMPERSAND:
+            continue
+        start = next_start
+    return text[start:]
+
+
+def _scan_candidates(word: str) -> list[str]:
+    """The names a raw word could run as: itself, its basename, a glued `-m` module."""
+    candidates = [word]
+    basename = word.rsplit(_PATH_SEPARATOR, 1)[-1]
+    if basename and basename != word:
+        candidates.append(basename)
+    if word.startswith(_GLUED_MODULE_FLAG) and len(word) > len(_GLUED_MODULE_FLAG):
+        candidates.append(word[len(_GLUED_MODULE_FLAG) :])
+    return candidates
 
 
 def _segment_words(segment: str) -> list[str]:
@@ -746,6 +796,7 @@ class PipeBlockerHandler(
             # Quote-aware so a separator inside a quoted argument (grep -E "a;b")
             # is not mistaken for a chain.
             before_pipe = split_unquoted(before_pipe, _CHAIN_SEPARATORS)[-1]
+            before_pipe = _last_background_statement(before_pipe)
 
             # Handle multiple actual pipes — take the last segment.
             # Quote-aware split prevents false splits on | inside grep patterns
@@ -934,6 +985,31 @@ class PipeBlockerHandler(
             if re.search(pattern_str, text, re.IGNORECASE):
                 return True
         return _matches_any_configured(self._extra_blacklist, text)
+
+    def _blacklisted_word_anywhere(self, command: str) -> str | None:
+        """The first blacklisted producer named ANYWHERE in ``command``, or None.
+
+        The safety net under the unknown tier (Plan 00478 second review). The
+        parser places a pipe's producer through wrappers, runners, `-c` bodies
+        and substitutions, but no list of such shapes is complete: `unbuffer
+        pytest`, `script -c pytest`, `bash <<< '...'`. While an unknown producer
+        denied, every shape it missed denied with it. Now that it warns, a
+        pipe may only be allowed when no blacklisted command is named
+        anywhere in the text at all: every segment, substitution, `-c` body
+        and here-string. Each word is tried as written, as its basename
+        (`scripts/qa/run_all.sh`, `.venv/bin/pytest`) and with a glued `-m`
+        removed (`-mpytest`), joined to the words after it so multi-word
+        patterns (`npm test`) match. Whole words only: `pytester` is not
+        pytest.
+        """
+        words = [word for word in _SCAN_WORD_BREAK.split(command) if word]
+        for index, word in enumerate(words):
+            following = words[index + 1 : index + 1 + _SCAN_FOLLOWING_WORDS]
+            for candidate in _scan_candidates(word):
+                text = " ".join([candidate, *following])
+                if self._matches_blacklist_text(text):
+                    return text
+        return None
 
     @classmethod
     def _run_targets(cls, segment: str, depth: int = 0) -> list[str]:
@@ -1322,6 +1398,41 @@ class PipeBlockerHandler(
             f"{_CONFIG_YAML_KEY} in .claude/hooks-daemon.yaml to stop this advisory",
         )
 
+    @staticmethod
+    def _first_fire(hook_input: dict[str, Any], rule_id: str) -> bool:
+        """Is this the first deny of ``rule_id`` for this agent? Records it if so.
+
+        Called only once a deny is certain: a warning must not use up the
+        verbose message of the first real deny for this rule.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        first_fire = not (transcript_path and tracker.was_disclosed(transcript_path, rule_id))
+        if transcript_path and first_fire:
+            tracker.mark_disclosed(transcript_path, rule_id)
+        return first_fire
+
+    def _unplaced_verdict(
+        self,
+        hook_input: dict[str, Any],
+        rule_id: str,
+        source_segment: str,
+        command: str,
+        unplaced: str,
+    ) -> GatingResult:
+        """DENY a pipe on a blacklisted command named in the text but not placed.
+
+        ``unplaced`` comes from :meth:`_blacklisted_word_anywhere`. The reason is
+        the blacklisted one, naming it, plus a note saying the guard could
+        not tell which pipe it feeds.
+        """
+        if self._first_fire(hook_input, rule_id):
+            reason = self._blacklisted_reason(rule_id, source_segment, command, unplaced)
+        else:
+            reason = self._blacklisted_terse_reason(rule_id, source_segment, command, unplaced)
+        note = self._unplaced_note(self._producer_label(unplaced))
+        return GatingResult(decision=Decision.DENY, reason=f"{reason}\n\n{note}", rule=rule_id)
+
     def _denying_verdict(
         self, hook_input: dict[str, Any], rule_id: str, source_segment: str, command: str
     ) -> GatingResult | None:
@@ -1338,11 +1449,7 @@ class PipeBlockerHandler(
         if not prose and closer is None and target is None:
             return None
 
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        tracker = get_data_layer().disclosure
-        first_fire = not (transcript_path and tracker.was_disclosed(transcript_path, rule_id))
-        if transcript_path and first_fire:
-            tracker.mark_disclosed(transcript_path, rule_id)
+        first_fire = self._first_fire(hook_input, rule_id)
 
         # Task 1.2: sanity-check BEFORE templating. Matched text that looks
         # like prose, not a shell command, gets a short accurate reason and
@@ -1369,6 +1476,16 @@ class PipeBlockerHandler(
         else:
             reason = self._blacklisted_terse_reason(rule_id, source_segment, command, target)
         return GatingResult(decision=Decision.DENY, reason=reason, rule=rule_id)
+
+    @staticmethod
+    def _unplaced_note(label: str) -> str:
+        """Why a pipe was judged on an expensive command it may not be fed by."""
+        return (
+            f"NOTE: `{label}` is a known expensive command, and it appears in this "
+            f"command where the pipe blocker could not tell which pipe it feeds, so "
+            f"the pipe is treated as feeding it. If it does not, run `{label}` as a "
+            f"separate command."
+        )
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block with a verbose-first/terse-after blacklisted/prose message; warn when unknown.
@@ -1411,6 +1528,14 @@ class PipeBlockerHandler(
             verdict = self._denying_verdict(hook_input, rule_id, source_segment, command)
             if verdict is not None:
                 return verdict
+
+        # Every pipe left is unknown. It may only be allowed if no blacklisted
+        # command is named anywhere in the text: one that is, the parser
+        # failed to place (Plan 00478 second review), and the pipe denies on it.
+        unplaced = self._blacklisted_word_anywhere(scan_target)
+        if unplaced is not None:
+            rule_id, source_segment = judged[0]
+            return self._unplaced_verdict(hook_input, rule_id, source_segment, command, unplaced)
 
         return self._unknown_producer_verdict([segment for _, segment in judged])
 

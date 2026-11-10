@@ -187,7 +187,7 @@ class TestAWrappedBlacklistedProducerStillDenies:
         "command",
         [
             "timeout 5 docker ps | tail -1",
-            "bash -c 'pytest | grep FAIL' | tail -5",
+            "bash -c 'docker ps | grep Up' | tail -5",
             "uv run my_report | tail -5",
         ],
     )
