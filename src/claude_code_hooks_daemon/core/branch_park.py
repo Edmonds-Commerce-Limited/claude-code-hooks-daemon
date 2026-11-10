@@ -3,7 +3,9 @@
 ``git commit-tree`` writes a commit with the tip's own tree plus the
 ``Parked-Reason``/``Parked-By`` trailers (``Unparked`` to clear), and
 ``git update-ref <ref> <new> <old>`` moves the branch only if its tip has not
-moved meanwhile. No checkout is needed. The branch is then pushed with a plain
+moved meanwhile. No checkout is needed. When ``commit.gpgsign`` is true the commit
+is signed (``commit-tree`` ignores that key itself); a failed signing aborts the
+park before any ref moves. The branch is then pushed with a plain
 fast-forward ``git push``; a failed push leaves the local park standing and
 is reported with the command to retry.
 """
@@ -25,6 +27,13 @@ EXIT_PARKED_NOT_PUSHED = 3
 
 #: ``git config`` exit status for "no such key".
 _CONFIG_KEY_ABSENT = 1
+
+_GPGSIGN_KEY = "commit.gpgsign"
+_SIGN_FLAG = "-S"
+_SIGNING_HINT = (
+    "commit.gpgsign is true here, so the park commit must be signed: check user.signingkey, "
+    "gpg.format and gpg.program, or unset commit.gpgsign for this repository"
+)
 
 _SHA_KEY = "hooksDaemonParked"
 _REASON_KEY = "hooksDaemonParkedReason"
@@ -137,9 +146,29 @@ def _write_park_commit(repo: Path, parent: str, reason: str, *, clear: bool) -> 
     """A trailer commit on ``parent``'s own tree; returns its sha."""
     tree = _git_out(repo, "rev-parse", f"{parent}^{{tree}}")
     user = run_git(repo, "config", "user.name").stdout.strip() or "unknown"
-    return _git_out(
-        repo, "commit-tree", tree, "-p", parent, "-m", _message(reason, user, clear=clear)
-    )
+    args = ["commit-tree", tree, "-p", parent, "-m", _message(reason, user, clear=clear)]
+    if not _signing_requested(repo):
+        return _git_out(repo, *args)
+    result = run_git(repo, *args, _SIGN_FLAG)
+    if result.returncode != 0:
+        raise BranchParkError(
+            f"signing the park commit failed, so nothing was changed: {result.stderr.strip()}. "
+            f"{_SIGNING_HINT}"
+        )
+    return result.stdout.strip()
+
+
+def _signing_requested(repo: Path) -> bool:
+    """True when the repository asks for signed commits (``commit.gpgsign``).
+
+    ``git commit-tree`` does not read that key itself, so the park asks for it.
+    """
+    result = run_git(repo, "config", "--type=bool", "--get", _GPGSIGN_KEY)
+    if result.returncode == _CONFIG_KEY_ABSENT:
+        return False
+    if result.returncode != 0:
+        raise BranchParkError(f"git config {_GPGSIGN_KEY} failed: {result.stderr.strip()}")
+    return result.stdout.strip() == "true"
 
 
 def _park_remote_only(
