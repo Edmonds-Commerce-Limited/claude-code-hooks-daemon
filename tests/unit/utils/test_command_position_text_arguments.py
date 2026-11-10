@@ -7,6 +7,7 @@ tests/unit/handlers/pre_tool_use/test_git_guards_command_shapes.py.
 import pytest
 
 from claude_code_hooks_daemon.utils.command_position import (
+    blank_printed_substitutions,
     blank_quoted_text_arguments,
     command_position_argument_segments,
 )
@@ -131,3 +132,28 @@ class TestHeredocReceivers:
     )
     def test_an_executing_or_unreadable_receiver_keeps_the_body(self, opener: str) -> None:
         assert "git reset" in strip_quoted_heredoc_bodies(opener + self.BODY)
+
+
+class TestBlankPrintedSubstitutions:
+    """A print-only substitution that stays data is replaced; anything else is kept."""
+
+    def test_an_assignment_printed_later_is_blanked(self) -> None:
+        assert (
+            blank_printed_substitutions("m=$(printf 'git reset --hard'); echo \"$m\"")
+            == 'm=_; echo "$m"'
+        )
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "m=$(printf 'x'); eval \"$m\"",
+            "$(printf 'x')",
+            "echo \"$(printf 'x' | sh)\"",
+            "echo \"$(printf 'x' $(id))\"",
+            'echo "$(printf \'a\\"b\')"',
+            "echo $(printf",
+            "echo '$(printf x)'",
+        ],
+    )
+    def test_it_is_kept(self, command: str) -> None:
+        assert blank_printed_substitutions(command) == command

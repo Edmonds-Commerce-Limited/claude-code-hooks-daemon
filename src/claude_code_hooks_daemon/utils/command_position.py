@@ -482,6 +482,161 @@ def command_position_argument_segments(command: str, awk_dollar_is_data: bool = 
     ]
 
 
+#: Heads whose substitution body, or whose argument, is only ever PRINTED.
+_PRINTING_HEADS: frozenset[str] = frozenset({"echo", "printf"})
+
+#: What a blanked print-only substitution is replaced with.
+_PRINTED_PLACEHOLDER = "_"
+
+#: Text that makes a substitution body more than a literal print, wherever it sits.
+_BODY_ACTIVE_CHARS: tuple[str, ...] = ("$", "`", "\n")
+
+#: Shell operators; in a substitution body they are tolerated only inside quotes.
+_BODY_OPERATORS: str = "(){};&|<>"
+
+_ASSIGNMENT_ONLY = re.compile(r"\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)=(?P<q>[\"']?)_+(?P=q)\s*")
+
+
+def _outside_quotes(text: str) -> str:
+    """``text`` without its single- and double-quoted spans."""
+    kept: list[str] = []
+    quote = ""
+    for char in text:
+        if quote:
+            quote = "" if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        else:
+            kept.append(char)
+    return "".join(kept)
+
+
+def _printing_body(body: str) -> bool:
+    """Whether ``body`` is ONE `printf`/`echo` of literal words and nothing else."""
+    if any(marker in body for marker in _BODY_ACTIVE_CHARS):
+        return False
+    # A backslash is literal inside single quotes; beside a double quote it may escape one.
+    if "\\" in body and ('"' in body or "\\" in _outside_quotes(body)):
+        return False
+    spans = shell_word_spans(body)
+    if not spans:
+        return False
+    words = [resolve_shell_word(body[start:end]) for start, end in spans]
+    if words[0] not in _PRINTING_HEADS or any(word is None for word in words):
+        return False
+    return not any(char in _outside_quotes(body) for char in _BODY_OPERATORS)
+
+
+def _printing_substitutions(command: str) -> list[tuple[int, int]]:
+    """Offsets of every `$( ... )` in ``command`` whose body only prints literal text.
+
+    A quote-aware scan: a `$(` inside single quotes is text; a body holding a
+    nested substitution, a group or an unterminated quote is not a candidate.
+    """
+    found: list[tuple[int, int]] = []
+    index = 0
+    quote = ""
+    while index < len(command):
+        char = command[index]
+        if char == "\\" and quote != "'":
+            index += 2
+            continue
+        if quote == "'":
+            quote = "" if char == "'" else quote
+        elif command.startswith("$(", index) and not command.startswith("$((", index):
+            end = _substitution_end(command, index + 2)
+            if end is not None and _printing_body(command[index + 2 : end - 1]):
+                found.append((index, end))
+                index = end
+                continue
+        elif quote:
+            quote = "" if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        index += 1
+    return found
+
+
+def _substitution_end(command: str, start: int) -> int | None:
+    """Offset just past the `)` closing a substitution whose body begins at ``start``."""
+    index = start
+    quote = ""
+    while index < len(command):
+        char = command[index]
+        if char == "\\" and quote != "'":
+            index += 2
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == ")":
+            return index + 1
+        elif char == "(" or command.startswith("$(", index):
+            return None
+        index += 1
+    return None
+
+
+def _prints_only(masked: str, spans: list[tuple[int, int]], index: int) -> bool:
+    """Whether segment ``index`` of ``masked`` is a `echo`/`printf` that nothing can
+    turn into a command: no other substitution and no pipe into a stage that may run it."""
+    segments = [masked[start:end] for start, end in spans]
+    segment = segments[index]
+    return (
+        _head(segment) in _PRINTING_HEADS
+        and not any(marker in segment for marker in ("$(", "`", "<(", ">("))
+        and not _pipeline_may_run_output(masked, spans, segments, index)
+    )
+
+
+def _variable_only_printed(masked: str, spans: list[tuple[int, int]], name: str) -> bool:
+    """Whether every reference to variable ``name`` sits in a printing-only segment."""
+    reference = re.compile(r"\$\{?[!#]?" + re.escape(name) + r"(?![A-Za-z0-9_])")
+    for match in reference.finditer(masked):
+        at = next((i for i, (a, b) in enumerate(spans) if a <= match.start() < b), None)
+        if at is None or not _prints_only(masked, spans, at):
+            return False
+    return True
+
+
+def blank_printed_substitutions(command: str) -> str:
+    """``command`` with each print-only substitution that stays data replaced by a placeholder.
+
+    `msg=$(printf '%s' 'git push origin --delete b'); echo "$msg"` and
+    `echo "$(printf ...)"` run no git: the substitution only prints, and its
+    output lands as a variable's value or a printing command's argument. A
+    substitution that is the command, is piped to an executor, is evaluated
+    through its variable, or sits in a command that runs a script it wrote
+    stays as written.
+    """
+    candidates = _printing_substitutions(command)
+    if not candidates:
+        return command
+    masked = command
+    for start, end in reversed(candidates):
+        masked = masked[:start] + "_" * (end - start) + masked[end:]
+    if _runs_written_script(masked):
+        return command
+    spans = _segment_spans(masked)
+    keep: list[tuple[int, int]] = []
+    for start, end in candidates:
+        at = next((i for i, (a, b) in enumerate(spans) if a <= start < b), None)
+        if at is None:
+            continue
+        segment = masked[spans[at][0] : spans[at][1]]
+        assignment = _ASSIGNMENT_ONLY.fullmatch(segment)
+        if assignment is not None:
+            if _variable_only_printed(masked, spans, assignment.group("name")):
+                keep.append((start, end))
+        elif _prints_only(masked, spans, at):
+            keep.append((start, end))
+    for start, end in reversed(keep):
+        command = command[:start] + _PRINTED_PLACEHOLDER + command[end:]
+    return command
+
+
 def _head(segment: str) -> str | None:
     chain = segment_command_chain(segment)
     return None if chain is None else chain[-1].rstrip(")").rsplit("/", 1)[-1]

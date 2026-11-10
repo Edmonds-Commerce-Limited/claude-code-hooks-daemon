@@ -43,7 +43,10 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     SUBCOMMAND_SEPARATOR_CHARS,
     remove_word_quoting,
 )
-from claude_code_hooks_daemon.utils.command_position import command_position_argument_segments
+from claude_code_hooks_daemon.utils.command_position import (
+    blank_printed_substitutions,
+    command_position_argument_segments,
+)
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_commit_parsing import GitInvocation, git_invocations
 from claude_code_hooks_daemon.utils.git_invocation_directory import (
@@ -1120,7 +1123,9 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         """
         return [
             remove_word_quoting(segment)
-            for segment in command_position_argument_segments(command, awk_dollar_is_data=True)
+            for segment in command_position_argument_segments(
+                blank_printed_substitutions(command), awk_dollar_is_data=True
+            )
         ]
 
     def _segment_matches(self, pattern: re.Pattern[str], command: str) -> bool:
@@ -1271,6 +1276,8 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
 
     def _judge(self, command: str, hook_input: dict[str, Any]) -> GatingResult:
         """The destructive-pattern verdict, with each rule's lossless allowance."""
+        # A print-only substitution that stays data is no substitution (GitHub #197).
+        command = blank_printed_substitutions(command)
         # Both matches() and handle() consume the same ordered mapping, so they
         # can never drift on which pattern matched first.
         rule_ids = self._match_rule_ids(command)
