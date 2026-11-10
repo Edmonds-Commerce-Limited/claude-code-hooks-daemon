@@ -148,7 +148,9 @@ names, people or hashes appear here.
 
 ### Phase 2: Stop the daemon making branches (class 1)
 
-- [ ] ⬜ **Task 2.1**: Write a failing test that reproduces a housekeeping
+- [ ] 🔄 **Task 2.1**: (implemented on the unmerged branch
+  `plan-00594-phase-2-home-branch`, adding config key `branches.home`; held
+  for client design review) Write a failing test that reproduces a housekeeping
   regeneration leaving a dirty tracked file and an auto-commit on a non-default
   or throwaway branch. Then fix it per `DESIGN.md`.
 
