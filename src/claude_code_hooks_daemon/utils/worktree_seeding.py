@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from collections.abc import Iterable
 from pathlib import Path
 
 from claude_code_hooks_daemon.core.worktree_seed import SEED_MODE_SYMLINK, SeedEntry
@@ -126,6 +127,11 @@ def _place(source: Path, dest: Path, mode: str) -> None:
 #: Bytes read per step when comparing two files, so a huge seed is never held whole.
 _COMPARE_CHUNK_BYTES = 1 << 16
 
+#: Budget for one seeded entry's comparison, which runs inside a hook. A larger
+#: entry counts as differing, so it blocks rather than stalling the hook.
+SEED_COMPARE_MAX_BYTES = 64 * 1024 * 1024
+SEED_COMPARE_MAX_FILES = 2000
+
 
 def _files_identical(source: Path, copy: Path) -> bool:
     """Whether two regular files hold the same bytes (a size mismatch ends it at once)."""
@@ -149,8 +155,12 @@ def _files_identical(source: Path, copy: Path) -> bool:
         return False
 
 
-def _tree_files(root: Path) -> set[Path] | None:
-    """Every non-directory path under ``root``, relative to it; ``None`` if unreadable."""
+def _tree_files(root: Path, max_files: int) -> set[Path] | None:
+    """Every non-directory path under ``root``, relative to it.
+
+    ``None`` when any part is unreadable or the tree holds more than ``max_files``
+    paths, in which case the walk stops early.
+    """
     found: set[Path] = set()
     errors: list[OSError] = []
     for current, dirs, names in os.walk(root, onerror=errors.append):
@@ -158,7 +168,22 @@ def _tree_files(root: Path) -> set[Path] | None:
         linked_dirs = [name for name in dirs if Path(current, name).is_symlink()]
         relative_dir = Path(os.path.relpath(current, root))
         found.update(relative_dir / name for name in (*names, *linked_dirs))
+        if len(found) > max_files:
+            return None
     return None if errors else found
+
+
+def _within_byte_budget(root: Path, relatives: Iterable[Path], max_bytes: int) -> bool:
+    """Whether the files at ``relatives`` under ``root`` total at most ``max_bytes``."""
+    total = 0
+    for relative in relatives:
+        try:
+            total += (root / relative).lstat().st_size
+        except OSError:
+            return False
+        if total > max_bytes:
+            return False
+    return True
 
 
 def _entries_identical(source: Path, copy: Path) -> bool:
@@ -168,28 +193,40 @@ def _entries_identical(source: Path, copy: Path) -> bool:
     return source.is_file() and copy.is_file() and _files_identical(source, copy)
 
 
-def seed_copy_is_identical(source: Path, copy: Path) -> bool:
+def seed_copy_is_identical(
+    source: Path,
+    copy: Path,
+    *,
+    max_bytes: int = SEED_COMPARE_MAX_BYTES,
+    max_files: int = SEED_COMPARE_MAX_FILES,
+) -> bool:
     """Whether a copy-mode seeded ``copy`` still equals its ``source`` in the main checkout.
 
     A file is identical when both are regular files of the same bytes. A
     directory is identical only when both hold exactly the same files, each
-    identical. A missing or unreadable source, a type mismatch and any
-    difference all answer ``False``, so the caller treats the copy as work that
-    could be lost.
+    identical. A missing or unreadable source, a type mismatch, any
+    difference and a comparison larger than the budget all answer ``False``,
+    so the caller treats the copy as work that could be lost.
 
     Args:
         source: The path in the main checkout the entry was seeded from.
         copy: The same entry inside the worktree.
+        max_bytes: Most source bytes the comparison may read in total.
+        max_files: Most files the comparison may cover.
 
     Returns:
         True only when nothing in ``copy`` is absent from ``source``.
     """
     if not source.is_dir() or source.is_symlink() or copy.is_symlink() or not copy.is_dir():
-        return _entries_identical(source, copy)
-    source_files, copy_files = _tree_files(source), _tree_files(copy)
+        return _within_byte_budget(source.parent, [Path(source.name)], max_bytes) and (
+            _entries_identical(source, copy)
+        )
+    source_files, copy_files = _tree_files(source, max_files), _tree_files(copy, max_files)
     if source_files is None or copy_files is None or source_files != copy_files:
         return False
-    return all(_entries_identical(source / rel, copy / rel) for rel in source_files)
+    return _within_byte_budget(source, source_files, max_bytes) and all(
+        _entries_identical(source / rel, copy / rel) for rel in source_files
+    )
 
 
 def seed_worktree(root: Path, worktree: Path, entries: list[SeedEntry]) -> list[Path]:

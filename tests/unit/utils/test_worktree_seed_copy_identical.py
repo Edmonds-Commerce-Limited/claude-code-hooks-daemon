@@ -84,3 +84,35 @@ class TestConfiguredSeedEntries:
         (tmp_path / ".claude").mkdir()
         (tmp_path / ".claude" / "hooks-daemon.yaml").write_text("- a\n- b\n", encoding="utf-8")
         assert configured_seed_entries(tmp_path) == []
+
+
+class TestComparisonBudget:
+    def test_a_file_over_the_byte_budget_counts_as_differing(self, tmp_path: Path) -> None:
+        (tmp_path / "a").write_bytes(b"x" * 100)
+        (tmp_path / "b").write_bytes(b"x" * 100)
+        assert seed_copy_is_identical(tmp_path / "a", tmp_path / "b", max_bytes=99) is False
+        assert seed_copy_is_identical(tmp_path / "a", tmp_path / "b", max_bytes=100) is True
+
+    def _tree(self, root: Path) -> None:
+        root.mkdir()
+        for name in ("one", "two", "three"):
+            (root / name).write_bytes(b"x" * 10)
+
+    def test_a_directory_over_the_file_budget_counts_as_differing(self, tmp_path: Path) -> None:
+        self._tree(tmp_path / "s")
+        self._tree(tmp_path / "c")
+        assert seed_copy_is_identical(tmp_path / "s", tmp_path / "c", max_files=2) is False
+        assert seed_copy_is_identical(tmp_path / "s", tmp_path / "c", max_files=3) is True
+
+    def test_a_directory_over_the_byte_budget_counts_as_differing(self, tmp_path: Path) -> None:
+        self._tree(tmp_path / "s")
+        self._tree(tmp_path / "c")
+        assert seed_copy_is_identical(tmp_path / "s", tmp_path / "c", max_bytes=29) is False
+        assert seed_copy_is_identical(tmp_path / "s", tmp_path / "c", max_bytes=30) is True
+
+    def test_a_self_referencing_symlink_compares_by_target(self, tmp_path: Path) -> None:
+        (tmp_path / "s").mkdir()
+        (tmp_path / "c").mkdir()
+        (tmp_path / "s" / "f").symlink_to(tmp_path / "s" / "f")
+        (tmp_path / "c" / "f").symlink_to(tmp_path / "s" / "f")
+        assert seed_copy_is_identical(tmp_path / "s", tmp_path / "c") is True

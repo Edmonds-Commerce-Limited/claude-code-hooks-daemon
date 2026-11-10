@@ -9,3 +9,9 @@ Tasks 1.1 to 1.3 done on branch `worktree-579-seeded-copy-removal`.
 - Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/030-seeded-copies-do-not-block-worktree-removal.md`.
 - Extra unit tests: `tests/unit/utils/test_worktree_seed_copy_identical.py` (one test skips when run as root).
 - QA: `core/branch_cleanup.py` and `destructive_git.py` are reported by `changed_tests` as unmapped `too-broad` (their reach exceeds the selection cap, as before this change); the coordinator's full gate covers them.
+
+## Review fixes
+
+- A seed source that resolves into the worktree being removed (a parent symlink in the main checkout) now counts as differing and blocks: `_source_resolves_into` in `core/branch_cleanup.py`; test `test_a_parent_symlink_in_main_pointing_into_the_worktree_blocks`.
+- `seed_copy_is_identical` has a budget (`SEED_COMPARE_MAX_BYTES` 64 MiB, `SEED_COMPARE_MAX_FILES` 2000, injectable as `max_bytes`/`max_files`); exceeding either counts as differing. Tests in `TestComparisonBudget`.
+- Process note: the source change was written before the two new tests, so no RED run was observed for them; the review probe had already shown the symlink defect.

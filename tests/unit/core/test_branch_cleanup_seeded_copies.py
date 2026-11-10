@@ -188,3 +188,21 @@ class TestSeededDirectoryCopy:
         path = self._seeded_directory(repo)
         (path / _SEED_DIR / "a.txt").unlink()
         assert "differs from its source" in worktree_blockers(path, _REGENERABLE)[0]
+
+
+class TestSourceReachedThroughASymlink:
+    def test_a_parent_symlink_in_main_pointing_into_the_worktree_blocks(self, repo: Path) -> None:
+        """The "source" would be the copy itself, which compares identical to itself."""
+        _write_config(repo, "            - path: cfg/local.json\n              mode: copy\n")
+        (repo / ".git" / "info" / "exclude").write_text("cfg/local.json\n.claude/\n")
+        path = _worktree(repo)
+        (path / "cfg").mkdir()
+        (path / "cfg" / "keep").write_text("k\n", encoding="utf-8")
+        _git(path, "add", "cfg/keep")
+        _git(path, "commit", "-m", "track cfg")
+        (path / "cfg" / "local.json").write_text("UNIQUE WORK\n", encoding="utf-8")
+        (repo / "cfg").symlink_to(path / "cfg")
+        blockers = worktree_blockers(path, _REGENERABLE)
+        assert len(blockers) == 1
+        assert "cfg/local.json" in blockers[0]
+        assert "differs from its source" in blockers[0]

@@ -64,6 +64,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
     parse_worktree_porcelain,
     run_git,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.regenerable_paths import is_regenerable
 
 logger = logging.getLogger(__name__)
@@ -315,6 +316,16 @@ def _main_checkout(path: Path) -> Path | None:
     return git_dir.parent if git_dir.name == ".git" else None
 
 
+def _source_resolves_into(source: Path, worktree: Path) -> bool:
+    """Whether ``source`` reaches the worktree being removed through a symlink.
+
+    A parent directory of the seed in the main checkout can be a link into the
+    worktree; the "source" is then the copy itself and would compare identical
+    to it while holding the only copy of the work.
+    """
+    return path_is_relative_to(source.resolve(), worktree.resolve())
+
+
 def _judge_seeded_copies(path: Path, entries: Sequence[str]) -> list[str]:
     """Drop the copy-mode seeded entries that still equal their source in the main checkout.
 
@@ -342,7 +353,9 @@ def _judge_seeded_copies(path: Path, entries: Sequence[str]) -> list[str]:
         covered = any(relative == seed or relative.startswith(f"{seed}/") for seed in seeds)
         if not covered:
             judged.append(entry)
-        elif not seed_copy_is_identical(main / relative, path / relative):
+        elif _source_resolves_into(main / relative, path) or not seed_copy_is_identical(
+            main / relative, path / relative
+        ):
             judged.append(f"{entry} (differs from its source in the main checkout)")
     return judged
 
