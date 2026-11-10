@@ -14,6 +14,8 @@ import argparse
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.daemon.cli import cmd_init_config, cmd_regenerate_docs
 
 
@@ -161,3 +163,45 @@ class TestRegenerateDocsInALinkedWorktree:
         assert cmd_regenerate_docs(_regen_args(linked)) == 0
 
         assert "<hooksdaemon>" in (linked / "CLAUDE.md").read_text()
+
+
+class TestRegenerateDocsRefusesOnAHomeBranchWithoutHomeCommit:
+    """Plan 00594 round 2: under ``home_commit: false`` nothing is written on a home branch."""
+
+    def _on_home(self, tmp_path: Path) -> Path:
+        project = _scaffold_project(tmp_path)
+        subprocess.run(
+            ["git", "symbolic-ref", "HEAD", "refs/heads/main"],
+            cwd=project,
+            capture_output=True,
+            check=True,
+        )
+        config = project / ".claude" / "hooks-daemon.yaml"
+        config.write_text(
+            config.read_text() + "\nbranches:\n  home_commit: false\n", encoding="utf-8"
+        )
+        return project
+
+    def test_refuses_with_a_non_zero_exit_and_writes_nothing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = self._on_home(tmp_path)
+        hooks_doc = project / ".claude" / "HOOKS-DAEMON.md"
+        hooks_doc.unlink(missing_ok=True)
+
+        assert cmd_regenerate_docs(_regen_args(project)) == 1
+
+        assert "pull-request" in capsys.readouterr().err
+        assert not (project / "CLAUDE.md").exists()
+        assert not hooks_doc.exists()
+
+    def test_off_a_home_branch_it_still_writes(self, tmp_path: Path) -> None:
+        project = self._on_home(tmp_path)
+        commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q"]
+        for args in (
+            [*commit, "--allow-empty", "-m", "seed"],
+            ["git", "checkout", "-q", "-b", "feature-x"],
+        ):
+            subprocess.run(args, cwd=project, capture_output=True, check=True)
+        assert cmd_regenerate_docs(_regen_args(project)) == 0
+        assert "<hooksdaemon>" in (project / "CLAUDE.md").read_text()

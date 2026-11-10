@@ -2298,14 +2298,31 @@ class TestClaudeMdInjectorHomeBranch:
         _git(local, "pull", "--ff-only", "-q")
         assert "changed upstream" in (local / "CLAUDE.md").read_text()
 
-    def test_on_request_on_a_home_branch_with_home_commit_false_writes_without_committing(
+    def test_on_request_on_a_home_branch_with_home_commit_false_refuses(
         self, tmp_path: Path
     ) -> None:
+        """Plan 00594 round 2: `regenerate-docs` never writes on a home branch either."""
         from claude_code_hooks_daemon.config.models import BranchesConfig
         from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 
         _init_repo_on_main(tmp_path)
         head = _git(tmp_path, "rev-parse", "HEAD")
+        notices = ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=[_StubHandler("h", "## H\n\nContent.")],
+            on_request=True,
+            branches=BranchesConfig(home_commit=False),
+        ).inject()
+        assert not _has_block(tmp_path)
+        assert _git(tmp_path, "rev-parse", "HEAD") == head
+        assert any("pull-request" in n for n in notices)
+
+    def test_on_request_off_home_with_home_commit_false_still_writes(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
         ClaudeMdInjector(
             workspace_root=tmp_path,
             handlers=[_StubHandler("h", "## H\n\nContent.")],
@@ -2313,7 +2330,6 @@ class TestClaudeMdInjectorHomeBranch:
             branches=BranchesConfig(home_commit=False),
         ).inject()
         assert _has_block(tmp_path)
-        assert _git(tmp_path, "rev-parse", "HEAD") == head
 
     def test_configured_home_replaces_the_default_branch(self, tmp_path: Path) -> None:
         _init_repo_on_main(tmp_path)
@@ -2364,6 +2380,39 @@ class TestClaudeMdInjectorHomeBranch:
         _git(tmp_path, "config", "--local", "init.defaultBranch", "develop")
         assert self._inject_notices(tmp_path) == []
         assert _has_block(tmp_path)
+
+    def test_init_default_branch_naming_a_missing_branch_is_not_the_home(
+        self, tmp_path: Path
+    ) -> None:
+        """Plan 00594 round 2: the configured name counts only if that branch exists.
+
+        The setting is made explicitly in the repository rather than relying on
+        the global git config the test suite blanks.
+        """
+        _init_git_repo(tmp_path)
+        _git(tmp_path, "branch", "-M", "trunk")
+        _git(tmp_path, "config", "--local", "init.defaultBranch", "main")
+        assert self._inject_notices(tmp_path) == []
+        assert _has_block(tmp_path)
+
+    def test_init_default_branch_naming_another_name_does_not_hide_an_unborn_head(
+        self, tmp_path: Path
+    ) -> None:
+        _git(tmp_path, "init", "-q", "-b", "trunk")
+        _git(tmp_path, "config", "--local", "init.defaultBranch", "main")
+        (tmp_path / "CLAUDE.md").write_text("# Project\n")
+        assert self._inject_notices(tmp_path) == []
+        assert _has_block(tmp_path)
+
+    def test_a_resolved_home_with_no_local_branch_raises_the_notice(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _git(tmp_path, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
+        _git(tmp_path, "branch", "-q", "-D", "main")
+        notices = self._inject_notices(tmp_path)
+        assert not _has_block(tmp_path)
+        assert any("branches.home" in n for n in notices)
 
     def test_unborn_head_writes_the_block_but_creates_no_root_commit(self, tmp_path: Path) -> None:
         _git(tmp_path, "init", "-q", "-b", "main")
@@ -2424,3 +2473,65 @@ class TestBlockNotRefreshedReason:
         reason = block_not_refreshed_reason(linked, None)
         assert reason is not None
         assert "worktree" in reason
+
+    def test_home_commit_false_with_a_current_block_is_no_reason(self, tmp_path: Path) -> None:
+        """Plan 00594 round 2: a current block is not worth a warning on every upgrade."""
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+        from claude_code_hooks_daemon.core.claude_md_injector import block_not_refreshed_reason
+
+        _init_repo_on_main(tmp_path)
+        config = BranchesConfig(home_commit=False)
+        assert block_not_refreshed_reason(tmp_path, config, lambda: False) is None
+        assert block_not_refreshed_reason(tmp_path, config, lambda: True) is not None
+
+
+class TestCurrentNotices:
+    """Plan 00594 round 2: notices are computed fresh from the checkout, not once at start-up."""
+
+    @staticmethod
+    def _injector(path: Path, home_commit: bool = False) -> Any:
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        return ClaudeMdInjector(
+            workspace_root=path,
+            handlers=[_StubHandler("h", "## H\n\nContent.")],
+            branches=BranchesConfig(home_commit=home_commit),
+        )
+
+    def test_stale_block_is_noticed_and_clears_once_the_file_is_current(
+        self, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_repo_on_main(tmp_path)
+        injector = self._injector(tmp_path)
+        assert any("stale on main" in n for n in injector.current_notices())
+        ClaudeMdInjector(
+            workspace_root=tmp_path, handlers=[_StubHandler("h", "## H\n\nContent.")]
+        ).inject()
+        assert injector.current_notices() == []
+
+    def test_notice_follows_the_branch(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        injector = self._injector(tmp_path)
+        assert injector.current_notices()
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
+        assert injector.current_notices() == []
+
+    def test_nothing_to_say_when_home_commit_is_true(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        assert self._injector(tmp_path, home_commit=True).current_notices() == []
+
+    def test_unresolved_home_is_noticed(self, tmp_path: Path) -> None:
+        _init_git_repo(tmp_path)
+        _git(tmp_path, "branch", "-M", "trunk-like")
+        _git(tmp_path, "branch", "other")
+        assert any("branches.home" in n for n in self._injector(tmp_path).current_notices())
+
+    def test_a_linked_worktree_has_no_notices(self, tmp_path: Path) -> None:
+        main = tmp_path / "main"
+        main.mkdir()
+        _init_git_repo(main)
+        linked = _add_linked_worktree(main, "worktree-x")
+        assert self._injector(linked).current_notices() == []

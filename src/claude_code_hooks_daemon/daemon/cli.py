@@ -4448,6 +4448,20 @@ def _build_initialised_controller(
     return controller
 
 
+def _regenerate_docs_refusal(project_path: Path) -> str | None:
+    """Why ``regenerate-docs`` must not write here (``home_commit: false`` on a home branch).
+
+    A project with no config yields ``None``: the generation steps report that
+    themselves, with their own message. An unreadable config raises.
+    """
+    from claude_code_hooks_daemon.core.claude_md_injector import regenerate_refusal
+
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    if not config_path.exists():
+        return None
+    return regenerate_refusal(project_path, Config.load(config_path).branches)
+
+
 def cmd_regenerate_docs(args: argparse.Namespace) -> int:
     """Force-regenerate both generated-doc artifacts in one shot.
 
@@ -4465,6 +4479,17 @@ def cmd_regenerate_docs(args: argparse.Namespace) -> int:
     Returns:
         0 if both artifacts regenerated successfully, 1 otherwise.
     """
+    try:
+        refusal = _regenerate_docs_refusal(get_project_path(getattr(args, "project_root", None)))
+    except SystemExit:
+        return 1
+    except (OSError, ValueError) as e:
+        print(f"ERROR: Failed to read the daemon config: {e}", file=sys.stderr)
+        return 1
+    if refusal is not None:
+        print(f"ERROR: Not regenerating: {refusal}", file=sys.stderr)
+        return 1
+
     # Step 1: HOOKS-DAEMON.md. cmd_generate_docs handles project/config resolution and
     # prints its own status; a missing config returns 1 here and aborts before step 2.
     docs_result = cmd_generate_docs(args)

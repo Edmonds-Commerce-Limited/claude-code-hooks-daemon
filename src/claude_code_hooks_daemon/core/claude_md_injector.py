@@ -15,7 +15,7 @@ import inspect
 import logging
 import re
 import subprocess  # nosec B404 - imported for the CompletedProcess type; git spawns live in utils.git_repo
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -195,11 +195,35 @@ def _off_home_reason(cwd: Path, branches: "BranchesConfig | None") -> str | None
     return None
 
 
-def block_not_refreshed_reason(cwd: Path, branches: "BranchesConfig | None") -> str | None:
-    """Why a daemon restart in ``cwd`` leaves the CLAUDE.md block alone, or ``None``.
+def regenerate_refusal(cwd: Path, branches: "BranchesConfig | None") -> str | None:
+    """Why an explicit ``regenerate-docs`` must not write in ``cwd``, or ``None``.
+
+    Under ``branches.home_commit: false`` nothing is ever written on a home
+    branch, not even on request: an uncommitted CLAUDE.md there is what makes
+    the next ``git pull`` fail.
+    """
+    if branches is None or branches.home_commit:
+        return None
+    if _off_home_reason(cwd, branches) is not None:
+        return None
+    return (
+        "branches.home_commit is false and this checkout is on a home branch, where the "
+        "CLAUDE.md block is never written. Run `regenerate-docs` in a pull-request worktree "
+        "or branch and commit the result there."
+    )
+
+
+def block_not_refreshed_reason(
+    cwd: Path,
+    branches: "BranchesConfig | None",
+    block_is_stale: Callable[[], bool] | None = None,
+) -> str | None:
+    """Why a daemon restart in ``cwd`` leaves a stale CLAUDE.md block alone, or ``None``.
 
     The upgrade script asks this after its restart, so it can say so rather than
-    claim the block was refreshed.
+    claim the block was refreshed. Under ``home_commit: false`` on a home branch
+    the restart never writes, which only matters when the block is stale:
+    ``block_is_stale`` answers that, and without it the reason is given anyway.
     """
     if is_linked_worktree(cwd):
         return "this checkout is a linked git worktree, which start-up leaves alone"
@@ -207,6 +231,8 @@ def block_not_refreshed_reason(cwd: Path, branches: "BranchesConfig | None") -> 
     if off_home is not None:
         return off_home
     if branches is not None and not branches.home_commit:
+        if block_is_stale is not None and not block_is_stale():
+            return None
         return (
             "branches.home_commit is false, so the daemon never writes CLAUDE.md on a home branch"
         )
@@ -217,7 +243,8 @@ def _home_branches(cwd: Path, config: "BranchesConfig") -> list[str]:
     """The home branches: ``branches.home``, else the default branch, else a fallback.
 
     Empty means nothing could be resolved. When ``resolve_default_branch`` finds
-    nothing, in order: git's ``init.defaultBranch``, the branch an unborn HEAD
+    nothing, in order: git's ``init.defaultBranch`` (only when that branch exists
+    or HEAD is unborn on it), the branch an unborn HEAD
     points at (a repository before its first commit), then a sole local branch.
     """
     if config.home:
@@ -226,12 +253,24 @@ def _home_branches(cwd: Path, config: "BranchesConfig") -> list[str]:
     return [default] if default else []
 
 
+def _head_is_unborn(cwd: Path) -> bool:
+    """True for a repository before its first commit."""
+    return run_git(cwd, "rev-parse", "--verify", "--quiet", _GIT_HEAD_REF).returncode != 0
+
+
+def _is_local_or_unborn_branch(cwd: Path, name: str) -> bool:
+    """``refs/heads/<name>`` exists, or HEAD is unborn on exactly that name."""
+    if run_git(cwd, "show-ref", "--verify", "--quiet", f"refs/heads/{name}").returncode == 0:
+        return True
+    return _head_is_unborn(cwd) and current_branch(cwd) == name
+
+
 def _fallback_default_branch(cwd: Path) -> str | None:
     """The default branch for a repository with no remote HEAD and no ``main``/``master``."""
     configured = run_git(cwd, "config", "init.defaultBranch").stdout.strip()
-    if configured:
+    if configured and _is_local_or_unborn_branch(cwd, configured):
         return configured
-    if run_git(cwd, "rev-parse", "--verify", "--quiet", _GIT_HEAD_REF).returncode != 0:
+    if _head_is_unborn(cwd):
         return current_branch(cwd)
     listing = run_git(cwd, "for-each-ref", "--format=%(refname)", "refs/heads")
     local = [line.removeprefix("refs/heads/") for line in listing.stdout.splitlines() if line]
@@ -434,6 +473,9 @@ class ClaudeMdInjector:
         # in the per-handler loop below and necessarily discards order.
         self._promoted_handlers_order: tuple[str, ...] = tuple(promoted_handlers or [])
         self._on_request = on_request
+        # The generated block for this handler set; the set is fixed for the
+        # injector's life, so it is built once however often notices are asked.
+        self._generated_block_cache: str | None = None
 
     def inject(self) -> list[str]:
         """Collect handler guidance and update CLAUDE.md.
@@ -473,11 +515,11 @@ class ClaudeMdInjector:
     def _run_inject(self) -> list[str]:
         """Execute injection — raises on errors for caller to handle."""
         tiers = self._collect_tiers()
-        if not (tiers.promoted or tiers.progressive or tiers.fallback):
+        generated = self._generated_block(tiers)
+        if generated is None:
             logger.debug("ClaudeMdInjector: no handler guidance to inject — skipping")
             return []
 
-        generated = self._build_section(tiers.promoted, tiers.progressive, tiers.fallback)
         claude_md_path = self._workspace_root / "CLAUDE.md"
 
         if not self._workspace_root.exists():
@@ -497,7 +539,12 @@ class ClaudeMdInjector:
             )
             return []
 
-        if not self._on_request:
+        if self._on_request:
+            refusal = regenerate_refusal(self._workspace_root, self._branches)
+            if refusal is not None:
+                logger.warning("ClaudeMdInjector: not writing %s: %s", claude_md_path, refusal)
+                return [refusal]
+        else:
             off_home = _off_home_reason(self._workspace_root, self._branches)
             if off_home is not None:
                 logger.info(
@@ -534,13 +581,45 @@ class ClaudeMdInjector:
         )
         return []
 
+    def _generated_block(self, tiers: "_CollectedTiers | None" = None) -> str | None:
+        """The block this handler set generates, or ``None`` when no handler has guidance."""
+        if self._generated_block_cache is None:
+            tiers = tiers or self._collect_tiers()
+            if not (tiers.promoted or tiers.progressive or tiers.fallback):
+                return None
+            self._generated_block_cache = self._build_section(
+                tiers.promoted, tiers.progressive, tiers.fallback
+            )
+        return self._generated_block_cache
+
+    def current_notices(self) -> list[str]:
+        """What an agent should be told about the CLAUDE.md block, from the checkout as it is now.
+
+        Computed on each call from the current branch, config and file, so a
+        notice disappears the moment its cause is fixed and one that arises
+        after start-up is still seen. Reads only: no write, no network, and a
+        bounded number of git calls.
+        """
+        if is_linked_worktree(self._workspace_root):
+            return []
+        if _off_home_reason(self._workspace_root, self._branches) is not None:
+            return self._unresolved_home_notices()
+        if self._branches is None or self._branches.home_commit:
+            return []
+        generated = self._generated_block()
+        if generated is None:
+            return []
+        message = self._stale_message(self._workspace_root / "CLAUDE.md", generated)
+        return [message] if message else []
+
     def _unresolved_home_notices(self) -> list[str]:
-        """An agent-visible notice when no home branch could be resolved at all.
+        """An agent-visible notice when no usable home branch could be resolved.
 
         A branch that is merely not home is the normal, quiet case. A checkout
         where NOTHING resolves (no ``branches.home``, no default branch, no
-        fallback) never gets the block on any branch, so it is said where agents
-        read it, naming the key that fixes it.
+        fallback), or where the resolved default names no local branch, never
+        gets the block on any branch, so it is said where agents read it,
+        naming the key that fixes it.
         """
         config = self._branches
         if current_branch(self._workspace_root) is None:
@@ -549,13 +628,28 @@ class ClaudeMdInjector:
             return []
         from claude_code_hooks_daemon.config.models import BranchesConfig
 
-        if _home_branches(self._workspace_root, config or BranchesConfig()):
+        home = _home_branches(self._workspace_root, config or BranchesConfig())
+        if any(_is_local_or_unborn_branch(self._workspace_root, name) for name in home):
             return []
         return [
             "CLAUDE.md hooks-daemon block not written: the default branch could not be "
-            "resolved. Set `branches.home` (exact branch names this checkout lives on) in "
-            ".claude/hooks-daemon.yaml, then restart the daemon."
+            "resolved to a local branch. Set `branches.home` (exact branch names this checkout "
+            "lives on) in .claude/hooks-daemon.yaml, then restart the daemon."
         ]
+
+    def _stale_message(self, claude_md_path: Path, generated: str) -> str | None:
+        """The stale-block notice, or ``None`` when the file already carries ``generated``."""
+        original = claude_md_path.read_text(encoding="utf-8") if claude_md_path.exists() else ""
+        updated = self._replace_or_append_section(original, generated)
+        if self._format_or_reuse(updated, original) == original:
+            return None
+        branch = current_branch(self._workspace_root) or _GIT_HEAD_REF
+        return (
+            f"CLAUDE.md hooks-daemon block is stale on {branch}; run "
+            f"`{daemon_cli_command_for_docs('regenerate-docs')}` in a pull-request worktree or "
+            "branch and commit it there (branches.home_commit is false, so the daemon never "
+            "writes it on a home branch)"
+        )
 
     def _report_stale_block(self, claude_md_path: Path, generated: str) -> list[str]:
         """``branches.home_commit: false``: never write on a home branch, report drift instead.
@@ -563,20 +657,12 @@ class ClaudeMdInjector:
         A home branch that only takes pull requests cannot carry the block as a
         local change: an uncommitted CLAUDE.md makes the next ``git pull`` of any
         upstream change to that file fail, and the daemon's own guards deny the
-        usual ways out. So the file is left alone and the drift is reported once
-        in the log and through the agent-visible start-up notice.
+        usual ways out. So the file is left alone and the drift is logged;
+        ``current_notices`` tells the agent at each SessionStart.
         """
-        original = claude_md_path.read_text(encoding="utf-8") if claude_md_path.exists() else ""
-        updated = self._replace_or_append_section(original, generated)
-        if self._format_or_reuse(updated, original) == original:
+        message = self._stale_message(claude_md_path, generated)
+        if message is None:
             return []
-        branch = current_branch(self._workspace_root) or _GIT_HEAD_REF
-        message = (
-            f"CLAUDE.md hooks-daemon block is stale on {branch}; run "
-            f"`{daemon_cli_command_for_docs('regenerate-docs')}` on a pull-request branch and "
-            "commit it there (branches.home_commit is false, so the daemon never writes it "
-            "on a home branch)"
-        )
         logger.warning("ClaudeMdInjector: %s", message)
         return [message]
 
