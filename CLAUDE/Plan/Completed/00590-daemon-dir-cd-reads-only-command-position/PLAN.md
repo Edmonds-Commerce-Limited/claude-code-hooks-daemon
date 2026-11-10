@@ -1,6 +1,6 @@
 # Plan 00590: daemon dir cd reads only command position
 
-**Status**: In Progress
+**Status**: Complete (2026-11-10)
 **Created**: 2026-11-09
 **Owner**: dev
 **Priority**: Medium
@@ -38,16 +38,18 @@ command.
 
 ### Phase 1: Command-position matching
 
-- [ ] 🔄 **Task 1.1**: RED tests in both directions (the issue's shapes allowed; every
+- [x] ✅ **Task 1.1**: RED tests in both directions (the issue's shapes allowed; every
   existing deny plus each executing twin still denied). GREEN: match `cd`/`pushd`
   in command position only, reusing `utils/command_position.py`. Release note.
+  Delivered as an opt-in `data_heads=SEARCH_HEADS` on `command_position_view`
+  (grep/egrep/fgrep/rg only; `echo`/`printf` stay judged, the shared default unchanged).
 
 ## Success Criteria
 
-- [ ] The issue's reproduction is allowed on `main`; `bash -c "cd .claude/hooks-daemon && ls"` still denies.
-- [ ] Release-bound consequence recorded as a release note in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] The issue's reproduction is allowed on `main`; `bash -c "cd .claude/hooks-daemon && ls"` still denies.
+- [x] Release-bound consequence recorded as a release note in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (`024-daemon-dir-cd-reads-only-command-position.md`).
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hash -->
+- `fee5dc457` (merge `46cf5c71a`), main CI run 42724555662 green; GitHub #194 closed.

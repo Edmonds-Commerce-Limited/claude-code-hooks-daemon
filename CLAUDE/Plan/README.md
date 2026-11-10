@@ -10,8 +10,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00478: unknown guard verdicts warn](00478-unknown-guard-verdicts-warn/PLAN.md) - In Progress (owner ruling "warn dont block": a safety guard that cannot decide allows with an advisory; a positive match still denies; Phase 0 done, GitHub #170 closed: awk program text that stays data is no removal; Task 1.1 inventory next)
 
-- [00590: daemon dir cd reads only command position](00590-daemon-dir-cd-reads-only-command-position/PLAN.md) - In Progress (GitHub #194: R-DAEMON-DIR-CD strips every quote, so a grep FOR `"cd "` over a daemon path is denied; judge `cd`/`pushd` only in command position, `bash -c "cd …"` keeps its deny)
-
 - [00591: claude md auto commit waits for handler sources](00591-claude-md-auto-commit-waits-for-handler-sources/PLAN.md) - In Progress (GitHub #172: the restart auto-commit of CLAUDE.md records a rule row while its project/plugin handler source is still uncommitted; hold the commit and log the file that held it)
 
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
@@ -190,6 +188,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00590: daemon dir cd reads only command position](Completed/00590-daemon-dir-cd-reads-only-command-position/PLAN.md) - Complete at `fee5dc457` (merge `46cf5c71a`; main CI run 42724555662 success) + the archiving commit (GitHub #194, closed: R-DAEMON-DIR-CD blanks only `grep`/`rg` search arguments nothing can run, so a search for `"cd "` over a daemon path is allowed; every executing twin still denies; release note 024)
+
 - [00589: explain rule covers plugin handlers](Completed/00589-explain-rule-covers-plugin-handlers/PLAN.md) - Complete at `bb6dbcb58` (merge `5ba1d98a2`; main CI run 42718913878 success) + the archiving commit (GitHub #171, closed: `explain-rule`/`explain-handler` also load the `plugins:` section through the daemon's own loader; a broken plugin is logged and contributes nothing; release note 023)
 
 - [00588: lsp_enforcement leaves stdin greps and git grep alone](Completed/00588-lsp-enforcement-stdin-and-git-grep/PLAN.md) - Complete at `a0ac71f37` (main CI run 42706023447 success) + the archiving commit (GitHub #169, closed: a grep fed by a pipe, `<` or `<<<` with no file target, and any `git grep`, are not judged as symbol lookups; real lookups stay enforced; release note 021)
@@ -248,8 +248,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00547: ansible lint runs under the governing config](Completed/00547-ansible-lint-runs-under-the-governing-config/PLAN.md) - Complete at merge `acf6bbcc3` (green CI run 39741211708) + the archiving commit (#128: `layout.ansible_configs` declares a play's governing `ansible.cfg`, applied in `module_context` for both lint gates with `ANSIBLE_CONFIG` set; both gates now share the no-root working directory; a failure with no config in effect still denies and names the option; release note 018)
 
-- [00546: upgrade steps use the resolved interpreter](Completed/00546-upgrade-steps-use-the-resolved-interpreter/PLAN.md) - Complete (#130: the stale-venv cleanup runs on the venv's own interpreter or `HOOKS_DAEMON_PYTHON`, never a bare `python3`, and warns loudly when neither is usable; entry points guard the minimum Python; a QA rule flags a bare `python3`/`python` in shipped scripts; release notes 014 and 017)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -303,9 +301,9 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - **Total Plans Created**: 591 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 496 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 497 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 72 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 71 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
