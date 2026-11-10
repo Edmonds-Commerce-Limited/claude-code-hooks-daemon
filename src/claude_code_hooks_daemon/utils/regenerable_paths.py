@@ -20,8 +20,13 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import logging
 from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass
+
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
+logger = logging.getLogger(__name__)
 
 #: The model default for ``branches.cleanup_after_merge.regenerable``.
 DEFAULT_REGENERABLE_STORES: tuple[str, ...] = (
@@ -89,7 +94,12 @@ def _composer_outputs(manifest_text: str | None) -> tuple[str, ...]:
     if manifest_text is not None:
         try:
             document = json.loads(manifest_text)
-        except ValueError:
+        except ValueError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a malformed composer.json uses the default vendor and bin directories",
+            )
             document = None
         if isinstance(document, dict):
             config = document.get("config", {})
