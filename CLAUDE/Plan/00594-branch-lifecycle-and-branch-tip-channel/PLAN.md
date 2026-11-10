@@ -148,20 +148,18 @@ names, people or hashes appear here.
 
 ### Phase 2: Stop the daemon making branches (class 1)
 
-- [ ] 🔄 **Task 2.1**: (implemented on the unmerged branch
-  `plan-00594-phase-2-home-branch`, adding config key `branches.home`; held
-  for client design review) Write a failing test that reproduces a housekeeping
-  regeneration leaving a dirty tracked file and an auto-commit on a non-default
-  or throwaway branch. Then fix it per `DESIGN.md`.
-- [ ] ⬜ **Task 2.2**: (RC feedback) A home branch that only accepts changes
-  by pull request gets no local auto-commit of the CLAUDE.md block. Observed:
-  a client named its PR-protected release line as a home branch, and
-  switching the main checkout to it committed five generated lines locally.
-  Landing those then needed a branch, a full gate and a bot review, and the
-  release tip moved each time. Design: a per-home-branch commit mode in
-  config. One mode commits (direct push allowed). Another writes the block,
-  leaves it uncommitted and says so, so it is batched into the next real PR.
-  Choose the default when the design is reviewed.
+- [x] ✅ **Task 2.1**: (on main, config key `branches.home`, release note
+  032; proven live on two client seats through the release candidate; three
+  review rounds) The daemon writes and commits the CLAUDE.md block only on a
+  home branch. The default branch is resolved without a remote when needed
+  (`init.defaultBranch` naming a real branch, an unborn HEAD, a sole local
+  branch). An unresolved home is reported at SessionStart by the branch sweep.
+- [x] ✅ **Task 2.2**: (on main, config key `branches.home_commit`) A home
+  branch that only accepts changes by pull request: under `home_commit: false`
+  the daemon never writes the block there, so a pull is never blocked by a
+  dirty CLAUDE.md. It reports the stale block at SessionStart, and
+  `regenerate-docs` writes it on a pull-request branch (it refuses on the home
+  branch). A post-upgrade task tells clients when to set both keys.
 
 ### Phase 3: Proof of merge and agent-performable deletion (classes 3, 6, 8)
 
@@ -169,8 +167,11 @@ names, people or hashes appear here.
   and patch-equivalent branches, with tests for each shape.
 - [ ] ⬜ **Task 3.2**: Remote delete of a proven-merged branch is allowed for
   an agent, behind the recovery bundle.
-- [ ] ⬜ **Task 3.3**: The default regenerable list covers common vendor
-  directories, and the list is configurable.
+- [x] ✅ **Task 3.3**: (on main, release note 034) An ignored directory that
+  a committed manifest and lock file let a package manager rebuild counts as
+  regenerable, unless it holds a nested git clone or contains the scratch
+  area. The scan is bounded and runs once per guard call. The list stays
+  configurable through `branches.cleanup_after_merge.regenerable`.
 - [ ] ⬜ **Task 3.4**: Bulk cleanup is batched, resumable and dry-run first,
   and is tested against a fixture with hundreds of branches.
 - [x] ✅ **Task 3.5**: (RC feedback; done, release note 038) When the
