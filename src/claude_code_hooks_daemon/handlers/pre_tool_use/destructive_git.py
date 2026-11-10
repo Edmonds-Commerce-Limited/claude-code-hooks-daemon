@@ -644,9 +644,10 @@ class _ForceRemovalJudge:
         if not self._deletable:
             return ""
         advice = (
-            f" Delete {preview_paths(self._deletable)} in a separate command first (this "
-            "command is judged before any of it runs, so a delete chained in front of the "
-            "removal does not count), then retry the removal."
+            f" Look at {preview_paths(self._deletable)} first: move anything worth keeping "
+            "to a tracked home; if it is disposable, delete it in a separate command first "
+            "(this command is judged before any of it runs, so a delete chained in front of "
+            "the removal does not count), then retry the removal."
         )
         if self._chained_rm:
             advice = (
