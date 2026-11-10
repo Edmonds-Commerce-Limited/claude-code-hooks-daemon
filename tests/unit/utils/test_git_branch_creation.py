@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from claude_code_hooks_daemon.utils.git_branch_creation import created_branches
+from claude_code_hooks_daemon.utils.git_branch_creation import (
+    created_branches,
+    worktree_add_path,
+)
 
 
 def _names(command: str) -> list[tuple[str, str, bool]]:
@@ -80,3 +83,24 @@ def test_creation_keeps_its_invocation() -> None:
     (creation,) = created_branches("git -C /repo switch -c feat")
     assert creation.invocation.subcommand == "switch"
     assert creation.invocation.global_options == ("-C", "/repo")
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        (("add", "../p"), "../p"),
+        (("add", "-b", "feat", "../p"), "../p"),
+        (("add", "-B", "feat", "../p", "main"), "../p"),
+        (("add", "--reason", "why", "../p"), "../p"),
+        (("add", "--detach", "../p"), "../p"),
+        (("add", "--", "../p"), "../p"),
+        (("add",), None),
+        (("add", "-b", "feat"), None),
+        (("list",), None),
+        ((), None),
+    ],
+)
+def test_worktree_add_path_reads_the_target_directory(
+    arguments: tuple[str, ...], expected: str | None
+) -> None:
+    assert worktree_add_path(arguments) == expected

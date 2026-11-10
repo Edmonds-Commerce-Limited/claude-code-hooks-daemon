@@ -87,7 +87,9 @@ answers one of those failures.
   was working, then remove its worktree and delete the branch, locally and on
   the remote. Keep no archive branches and no archive tags. Push the branch
   first if no remote holds its tip: `git branch -D` is allowed once one does,
-  and a tip no remote holds would lose its commits.
+  and a tip no remote holds would lose its commits. A recovery copy that must
+  outlive the branch is a bundle or `refs/archive/<name>`, never a branch; see
+  "Branch Practice" in [core/Worktree.core.md](core/Worktree.core.md).
 - **Ledger entries are recorded on `main`, never on a work branch.** A branch
   changes an existing entry's status only. Entries written only on a branch are
   lost when the branch is dropped, which is how ledger 00466's N53 and N253

@@ -14,3 +14,14 @@ BRANCH_LIMIT_PRINCIPLE: Final[str] = (
     "or untracked directory is lost work, not compliance. If the limit seems to "
     "force a choice between losing work and exceeding it, stop and ask a human."
 )
+
+#: Branch-name globs that read as a recovery copy. Pools count only branches, so a
+#: recovery copy kept as a branch is counted as open work; it belongs under
+#: ``refs/archive/<name>`` or in a bundle. Not configurable: a named constant.
+RECOVERY_COPY_PATTERNS: Final[tuple[str, ...]] = (
+    "rescue/*",
+    "recovery/*",
+    "backup/*",
+    "*-rescue",
+    "*-backup",
+)
