@@ -6539,7 +6539,7 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
         0 on a report, 1 when there is no inventory.
     """
     from claude_code_hooks_daemon.config.models import handler_options
-    from claude_code_hooks_daemon.core import branch_inventory, branch_sweep
+    from claude_code_hooks_daemon.core import branch_cleanup, branch_inventory, branch_sweep
     from claude_code_hooks_daemon.utils.remote_refs import LazyRemoteRefs
 
     repo = get_project_path(getattr(args, "project_root", None))
@@ -6559,10 +6559,17 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
         print(f"ERROR: no branch inventory for {repo}: {e}", file=sys.stderr)
         return 1
     cap = branch_sweep.effective_wip_cap(branches, legacy)
+    # A runnable remote delete is printed only for what the remote-delete guard's proof accepts.
+    proven = branch_cleanup.proven_remote_only(repo, branches, inventory)
     if args.json:
-        print(json.dumps(branch_sweep.report_json(inventory, cap=cap, config=branches), indent=2))
+        document = branch_sweep.report_json(
+            inventory, cap=cap, config=branches, remote_proven=proven
+        )
+        print(json.dumps(document, indent=2))
         return 0
-    for line in branch_sweep.render_report(inventory, branches, cap=cap, show_all=args.all):
+    for line in branch_sweep.render_report(
+        inventory, branches, cap=cap, show_all=args.all, remote_proven=proven
+    ):
         print(line)
     notice = branch_sweep.deprecation_line(branches, legacy)
     if notice is not None:

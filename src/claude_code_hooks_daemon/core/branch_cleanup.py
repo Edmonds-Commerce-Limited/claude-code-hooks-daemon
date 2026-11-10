@@ -474,11 +474,24 @@ def preview_paths(paths: Sequence[str]) -> str:
     return f"{shown} and {rest} more" if rest > 0 else shown
 
 
-def remote_delete_command(repo: Path, remote: str, name: str) -> str | None:
-    """The remote delete to run by hand, when the remote holds the branch."""
-    if _ref_exists(repo, f"refs/remotes/{remote}/{name}"):
-        return f"git push {remote} --delete {name}"
-    return None
+def remote_delete_advice(repo: Path, config: BranchesConfig, default: str, name: str) -> str | None:
+    """What to tell a person about the remote copy of ``name``, when the remote holds one.
+
+    The runnable delete line only when the remote-delete guard's own proof
+    (:func:`prove_remote_merged`) accepts the branch, so a printed command is one the
+    guard allows. Otherwise owner-only wording, which is advice and not a command.
+    """
+    remote = config.remote
+    if not _ref_exists(repo, f"refs/remotes/{remote}/{name}"):
+        return None
+    problem = named_ref_problem(remote, name, default, config)
+    if problem is None:
+        proof = prove_remote_merged(repo, remote, [name], default, config)
+        problem = proof.problems.get(name)
+        if problem is None and name in proof.tips:
+            return f"git push {remote} --delete {name}"
+        problem = problem or "the proof did not accept it"
+    return f"remote delete of {remote}/{name} is for the owner: {problem}"
 
 
 def _classify(
@@ -583,7 +596,7 @@ def cleanup_after_merge(
                 continue
             deleted.append(name)
             commands.append(f"git branch {name} {verdict.tip}")
-        remote = remote_delete_command(repo, config.remote, name)
+        remote = remote_delete_advice(repo, config, protected_default, name)
         if remote is not None:
             commands.append(remote)
     return CleanupReport(
@@ -653,7 +666,7 @@ def delete_if_merged(
     if name not in report.deleted:
         return CleanupReport(skipped=tuple(f"{name}: {b}" for b in report.blockers))
     commands = [f"git branch {name} {verdict.tip}"]
-    remote = remote_delete_command(repo, config.remote, name)
+    remote = remote_delete_advice(repo, config, default, name)
     if remote is not None:
         commands.append(remote)
     return CleanupReport(deleted=(name,), commands=tuple(commands))
@@ -794,7 +807,7 @@ def clean_sweep(
     if dry_run:
         commands += [f"would delete remote {config.remote}/{name}" for name in remote_tips]
         for name in proven:
-            advice = remote_delete_command(repo, config.remote, name)
+            advice = remote_delete_advice(repo, config, default, name)
             if advice is not None and name not in remote_tips:
                 commands.append(advice)
         return CleanupReport(
@@ -837,7 +850,7 @@ def clean_sweep(
             for name in gone
         ]
     for name in deleted:
-        advice = remote_delete_command(repo, config.remote, name)
+        advice = remote_delete_advice(repo, config, default, name)
         if advice is not None and name not in remote_tips:
             commands.append(advice)
     return CleanupReport(
@@ -901,6 +914,28 @@ def _proven_remote(
         return {}, problems
     proof = prove_remote_merged(repo, config.remote, names, default, config)
     return proof.tips, {**problems, **proof.problems}
+
+
+def proven_remote_only(
+    repo: Path, config: BranchesConfig, inventory: branch_inventory.BranchInventory
+) -> frozenset[str]:
+    """Remote-only done branches the remote-delete guard's proof accepts.
+
+    These are the only names the ``branch-sweep`` report may print a runnable remote
+    delete for. The remote is contacted only when such a branch exists.
+    """
+    default = inventory.default_branch
+    if default is None:
+        return frozenset()
+    remote_only = {
+        name: record
+        for name, record in inventory.records.items()
+        if record.local_tip is None and record.remote_tip is not None
+    }
+    if not remote_only:
+        return frozenset()
+    tips, _problems = _proven_remote(repo, config, default, remote_only)
+    return frozenset(tips)
 
 
 def _push_deletes(repo: Path, remote: str, tips: Mapping[str, str]) -> tuple[list[str], list[str]]:
@@ -970,7 +1005,8 @@ __all__ = [
     "merge_target_qualifies",
     "policy_refusal",
     "preview_paths",
-    "remote_delete_command",
+    "proven_remote_only",
+    "remote_delete_advice",
     "render",
     "sweep_clean_command",
     "sweep_clean_line",
