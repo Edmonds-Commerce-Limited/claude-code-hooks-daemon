@@ -127,6 +127,59 @@ class TestCleanupTargets:
         assert cleanup_targets(repo, _CONFIG, "main") == ["main", "refs/heads/release/1"]
 
 
+def _lock_pair_branch(repo: Path, name: str, where: str, manifest: str, lock: str | None) -> Path:
+    """A worktree whose branch commits ``manifest`` (and ``lock``) under ``where``."""
+    _git(repo, "checkout", "-b", name)
+    directory = repo / where
+    directory.mkdir(parents=True, exist_ok=True)
+    for filename in (manifest, lock):
+        if filename is not None:
+            (directory / filename).write_text("{}\n", encoding="utf-8")
+            _git(repo, "add", f"{where}/{filename}")
+    (repo / ".gitignore").write_text("untracked/\nvendor/\nnode_modules/\n", encoding="utf-8")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-m", f"Add {name}")
+    _git(repo, "checkout", "main")
+    return _worktree(repo, name)
+
+
+class TestLockRegeneratedBlockers:
+    def test_nested_composer_vendor_beside_manifest_and_lock_is_regenerable(
+        self, repo: Path
+    ) -> None:
+        path = _lock_pair_branch(repo, "f1", "svc/api", "composer.json", "composer.lock")
+        (path / "svc/api/vendor/pkg").mkdir(parents=True)
+        (path / "svc/api/vendor/pkg/a.php").write_text("x\n", encoding="utf-8")
+        assert worktree_blockers(path, []) == ()
+
+    def test_without_the_lock_it_still_blocks(self, repo: Path) -> None:
+        path = _lock_pair_branch(repo, "f2", "svc/api", "composer.json", None)
+        (path / "svc/api/vendor").mkdir(parents=True)
+        (path / "svc/api/vendor/a.php").write_text("x\n", encoding="utf-8")
+        assert worktree_blockers(path, []) == ("svc/api/vendor/",)
+
+    def test_a_vendor_dir_holding_a_tracked_file_still_blocks(self, repo: Path) -> None:
+        path = _lock_pair_branch(repo, "f3", "svc", "composer.json", "composer.lock")
+        (path / "svc/vendor").mkdir()
+        (path / "svc/vendor/mine.php").write_text("x\n", encoding="utf-8")
+        _git(path, "add", "-f", "svc/vendor/mine.php")
+        _git(path, "commit", "-m", "track a vendor file")
+        (path / "svc/vendor/extra.php").write_text("y\n", encoding="utf-8")
+        assert worktree_blockers(path, []) == ("svc/vendor/extra.php",)
+
+    def test_node_modules_at_depth_three_is_regenerable(self, repo: Path) -> None:
+        path = _lock_pair_branch(repo, "f4", "a/b/c", "package.json", "package-lock.json")
+        (path / "a/b/c/node_modules/x").mkdir(parents=True)
+        (path / "a/b/c/node_modules/x/i.js").write_text("x\n", encoding="utf-8")
+        assert worktree_blockers(path, []) == ()
+
+    def test_scratch_is_never_accepted(self, repo: Path) -> None:
+        path = _lock_pair_branch(repo, "f5", "svc", "composer.json", "composer.lock")
+        (path / "untracked/scratch").mkdir(parents=True)
+        (path / "untracked/scratch/n.md").write_text("x\n", encoding="utf-8")
+        assert worktree_blockers(path, []) == ("untracked/scratch/",)
+
+
 class TestWorktreeBlockers:
     def test_a_clean_worktree_with_only_regenerable_files_has_none(self, repo: Path) -> None:
         _git(repo, "branch", "feat")
