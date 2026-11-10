@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 
+from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
 
 # Assembled so the guarded pipes are not literal spans in this file.
@@ -25,6 +26,12 @@ def _matches(command: str) -> bool:
 
 def _producer(command: str) -> str | None:
     return PipeBlockerHandler()._find_offending_producer(command)
+
+
+def _denied(command: str) -> bool:
+    """handle()'s verdict: an unknown producer only warns, so matches() alone proves nothing."""
+    event = {"tool_name": "Bash", "tool_input": {"command": command}}
+    return PipeBlockerHandler().handle(event).decision == Decision.DENY
 
 
 class TestWhitelistedProducerInsideShellDashC:
@@ -65,9 +72,11 @@ class TestExpensiveProducerInsideShellDashC:
     def test_expensive_producer_is_blocked_and_named(self, command: str, producer: str) -> None:
         assert _matches(command) is True
         assert _producer(command) == producer
+        assert _denied(command) is True
 
     def test_pipe_after_the_quote_is_judged_on_the_wrapper(self) -> None:
         assert _matches(f"bash -c 'pytest tests' | {_TAIL} -3") is True
+        assert _denied(f"bash -c 'pytest tests' | {_TAIL} -3") is True
 
     def test_a_cheap_body_does_not_launder_a_pipe_after_the_quote(self) -> None:
         assert _matches(f"bash -c 'grep x f' | {_TAIL} -3") is True
@@ -99,6 +108,7 @@ class TestShellAtACommandPosition:
     def test_expensive_producer_blocked(self, command: str) -> None:
         assert _matches(command) is True
         assert _producer(command) == "pytest"
+        assert _denied(command) is True
 
     @pytest.mark.parametrize(
         "command",

@@ -78,6 +78,7 @@ class TestAnEscapedBarIsLiteral:
     def test_an_escaped_backslash_leaves_the_bar_real(self, handler: PipeBlockerHandler) -> None:
         # `\\|` is an escaped backslash followed by a real pipe.
         assert handler.matches(_bash("pytest \\\\| head")) is True
+        assert handler.handle(_bash("pytest \\\\| head")).decision == "deny"
 
 
 class TestRealPipesStayBlocked:
@@ -96,6 +97,7 @@ class TestRealPipesStayBlocked:
     )
     def test_is_blocked(self, handler: PipeBlockerHandler, command: str) -> None:
         assert handler.matches(_bash(command)) is True
+        assert handler.handle(_bash(command)).decision == "deny"
 
     def test_a_real_pipe_after_a_quoted_alternation_names_the_real_producer(
         self, handler: PipeBlockerHandler

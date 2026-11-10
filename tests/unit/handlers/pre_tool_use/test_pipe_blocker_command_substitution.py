@@ -225,9 +225,10 @@ class TestBlockMessageNamesTheInnerProducer:
         """
         handler = PipeBlockerHandler()
         result = handler.handle(_bash('FOO="$(some_unknown_tool --run | head -1)"'))
-        assert result.reason is not None
-        assert '"^some_unknown_tool\\\\b"' in result.reason
-        assert "^FOO=" not in result.reason
+        assert result.decision == Decision.ALLOW
+        advice = "\n".join(result.context)
+        assert "^some_unknown_tool\\b" in advice
+        assert "^FOO=" not in advice
 
 
 class TestQuotedArgumentPipeNamesTheInnerProducer:
