@@ -29,6 +29,12 @@ class TestUnknownVerdictAllow:
         assert "git timed out" in line
         assert "retry the commit" in line
 
+    def test_the_advisory_does_not_claim_nothing_was_checked(self) -> None:
+        """A guard may have judged part of the call; only the cause names what it could not."""
+        line = unknown_verdict_allow("g", "git timed out", "retry").context[0]
+        assert "without a check" not in line
+        assert "not checked: git timed out" in line
+
     def test_the_line_helper_is_the_advisory_text(self) -> None:
         result = unknown_verdict_allow("g", "c", "r")
         assert result.context == [unknown_verdict_line("g", "c", "r")]

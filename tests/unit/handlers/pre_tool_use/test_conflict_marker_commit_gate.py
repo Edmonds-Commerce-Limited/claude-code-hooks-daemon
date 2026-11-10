@@ -32,7 +32,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.conflict_marker_commit_gate 
     ConflictMarkerCommitGateHandler,
     _parse_grep_stream,
 )
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import GIT_TIMED_OUT, run_git
 
 _GUARD = "conflict_marker_commit_gate"
 OPEN = "<" * 7
@@ -498,6 +498,75 @@ class TestATimedOutScanIsNotAFinding:
         result = _verdict(handler, "git commit -m x; cd - && git commit -m y", repo)
         assert result.decision == Decision.DENY
         assert result.rule == RuleID.CONFLICT_MARKER_COMMIT
+
+
+class TestAFoundMarkerSurvivesALaterUnreadablePart:
+    """Plan 00478 review: a marker already found denies, whatever else could not be read."""
+
+    @staticmethod
+    def _two_markers(repo: Path) -> None:
+        _stage(repo, "a.md", f"# A\n\n{CLOSE} main\n")
+        _stage(repo, "b.md", f"# B\n\n{CLOSE} main\n")
+
+    def _failing(self, kind: str, fail: Any) -> Any:
+        def run(directory: Any, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if fail(directory, args):
+                if kind == "timeout":
+                    return subprocess.CompletedProcess(["git"], GIT_TIMED_OUT, "", "")
+                return subprocess.CompletedProcess(["git"], 128, "", "boom")
+            return run_git(directory, *args, **kwargs)
+
+        return patch(f"{_MODULE}.run_git", side_effect=run)
+
+    @pytest.mark.parametrize("kind", ["timeout", "failure"])
+    def test_the_diff_of_a_later_path_failing_still_denies_the_earlier_path(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, kind: str
+    ) -> None:
+        self._two_markers(repo)
+        with self._failing(kind, lambda _d, a: "--unified=0" in a and a[-1] == "b.md"):
+            result = _verdict(handler, "git commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert result.rule == RuleID.CONFLICT_MARKER_COMMIT
+        assert "a.md" in result.reason
+
+    @pytest.mark.parametrize("kind", ["timeout", "failure"])
+    def test_the_second_grep_failing_after_markers_were_found_still_denies(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, kind: str
+    ) -> None:
+        self._two_markers(repo)
+        with self._failing(kind, lambda _d, a: "grep" in a and "-l" in a):
+            result = _verdict(handler, "git commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert "a.md" in result.reason
+
+    @pytest.mark.parametrize("kind", ["timeout", "failure"])
+    def test_an_unreadable_earlier_commit_does_not_hide_a_marker_in_a_later_one(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, tmp_path: Path, kind: str
+    ) -> None:
+        other = _init(tmp_path / "other")
+        (other / "doc.md").write_text("# Doc\n")
+        _git(other, "add", "-A")
+        _git(other, "commit", "-q", "-m", "initial")
+        _stage(other, "doc.md", f"# Doc\n{CLOSE} main\n")
+        _stage(repo, "doc.md", "# Doc\n\nfirst\nmore\n")
+        with self._failing(kind, lambda d, _a: Path(d) == repo):
+            result = _verdict(
+                handler, f"git -C {repo} commit -m x && git -C {other} commit -m y", repo
+            )
+        assert result.decision == Decision.DENY
+        assert result.rule == RuleID.CONFLICT_MARKER_COMMIT
+
+    def test_a_pure_timeout_with_nothing_found_still_warns_and_allows(
+        self,
+        handler: ConflictMarkerCommitGateHandler,
+        repo: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        _stage(repo, "a.md", "# A\n\nclean\n")
+        _stage(repo, "b.md", "# B\n\nclean\n")
+        with caplog.at_level(logging.WARNING), self._failing("timeout", lambda _d, a: "grep" in a):
+            result = _verdict(handler, "git commit -m x", repo)
+        assert_unknown_verdict(result, caplog, _GUARD, RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT)
 
 
 class TestCommandShapes:

@@ -404,7 +404,11 @@ class TestAStagingThatCannotBeSimulatedIsAnAdvisory:
         ):
             result = handler.handle(hook_input)
 
-        assert_unknown_verdict(result, caplog, "sensitive_content", "separate command")
+        advisory = assert_unknown_verdict(result, caplog, "sensitive_content", "separate command")
+        # Only the remedy for THIS cause, and no claim that nothing was checked:
+        # the message and body files were read.
+        assert "word list" not in advisory
+        assert "without a check" not in advisory
 
     def test_a_term_in_the_message_still_denies_when_the_staging_cannot_be_simulated(
         self, repo: Path, handler: SensitiveContentHandler

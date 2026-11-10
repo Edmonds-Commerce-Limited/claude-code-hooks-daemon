@@ -171,6 +171,9 @@ class TestSensitiveContentHandler:
             result, caplog, "sensitive_content", "secret word list", "cannot be read", _LIST_NAME
         )
         assert "NOT checked" in advisory
+        # Only the remedy for THIS cause: staging advice is for a failed simulation.
+        assert "restore read access" in advisory
+        assert "separate command" not in advisory
 
     def test_advisory_and_log_never_contain_a_term(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture

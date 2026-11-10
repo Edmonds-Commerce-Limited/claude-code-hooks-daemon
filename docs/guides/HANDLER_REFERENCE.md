@@ -2933,11 +2933,14 @@ records: the index, the working tree for `commit -a`, the named paths for a
 pathspec commit (plus the index with `-i`), in the repository an earlier `cd`
 or `git -C` names.
 
-**Fails closed:** a commit it cannot check is DENIED, naming the reason and
-the `git -C /absolute/path/to/repo commit` rephrase. That covers a directory
+**A commit it cannot check is ALLOWED with an advisory** (log line
+`UNKNOWN-VERDICT`), naming the reason and the
+`git -C /absolute/path/to/repo commit` rephrase. That covers a directory
 built by an expansion, `cd -`, `popd`, `--git-dir`, `--work-tree`,
 `GIT_DIR`, `GIT_INDEX_FILE`, `--pathspec-from-file`, `git am <patch>`, a
-directory outside any repository, and any git error.
+directory outside any repository, a git timeout and any git error. A marker
+it did find still denies, whatever else in the same command or scan could
+not be read.
 
 **Options:**
 

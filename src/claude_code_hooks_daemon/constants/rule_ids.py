@@ -247,7 +247,7 @@ class RuleID:
     CONFLICT_MARKER_COMMIT: str = "R-CONFLICT-MARKER-COMMIT"
 
     #: git ran out of time reading what a commit records (ledger 00474 N346):
-    #: denied, because nothing was checked, but nothing was found either.
+    #: an advisory, never a deny: nothing was checked and nothing was found.
     CONFLICT_MARKER_SCAN_TIMED_OUT: str = "R-CONFLICT-MARKER-SCAN-TIMED-OUT"
 
     # ------------------------------------------------------------------

@@ -30,8 +30,8 @@ UNKNOWN_VERDICT_LOG_PREFIX: Final[str] = "UNKNOWN-VERDICT"
 def unknown_verdict_line(guard: str, cause: str, rephrase: str) -> str:
     """The advisory text: which guard, why it could not decide, what to do."""
     return (
-        f"⚠️ {guard} could not decide, so it ALLOWED this call without a check: "
-        f"{cause}. {rephrase}"
+        f"⚠️ {guard} could not fully decide, so it allowed this call; "
+        f"not checked: {cause}. {rephrase}"
     )
 
 

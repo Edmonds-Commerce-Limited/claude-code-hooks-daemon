@@ -316,8 +316,14 @@ def _marker_sizes(root: Path, source: _Source, paths: list[str]) -> dict[str, in
     return sizes
 
 
-def _grep(root: Path, source: _Source, paths: list[str], prefilter: str, *flags: str) -> str:
-    """``git grep`` over ``paths`` in the tree ``source`` records; empty when nothing matched.
+def _grep(
+    root: Path, source: _Source, paths: list[str], prefilter: str, *flags: str
+) -> tuple[str, _UnreadableTree | None]:
+    """``git grep`` over ``paths`` in the tree ``source`` records, and why it stopped early.
+
+    The output is what the chunks read before a failing one (empty when nothing
+    matched), so a match already read is never lost to a later chunk's failure;
+    the second item is that failure, None when every chunk ran.
 
     The paths are repository-relative and read literally, so a name holding
     ``*``, ``?``, ``[`` or a leading ``:`` is that file and nothing wider.
@@ -340,9 +346,12 @@ def _grep(root: Path, source: _Source, paths: list[str], prefilter: str, *flags:
         if result.returncode == _GREP_NO_MATCH:
             continue
         if result.returncode != 0:
-            _raise_unreadable(result.returncode, result.stderr, "git grep")
+            try:
+                _raise_unreadable(result.returncode, result.stderr, "git grep")
+            except _UnreadableTree as exc:
+                return "".join(output), exc
         output.append(result.stdout)
-    return "".join(output)
+    return "".join(output), None
 
 
 def _whole_text(root: Path, source: _Source, path: str) -> str:
@@ -357,8 +366,11 @@ def _whole_text(root: Path, source: _Source, path: str) -> str:
 
 def _candidate_lines(
     root: Path, source: _Source, paths: list[str], prefilter: str
-) -> dict[str, list[tuple[int, str]]]:
-    """Marker-shaped lines by path, from ``paths`` in the tree ``source`` records.
+) -> tuple[dict[str, list[tuple[int, str]]], list[_UnreadableTree]]:
+    """Marker-shaped lines by path, and what could not be read, from ``paths``.
+
+    A failing git call ends only its own part of the scan: the lines already
+    read are returned beside the failures, so a marker found is never lost.
 
     ``-I`` skips a file git calls binary, which covers a TEXT file whose
     attributes say ``-diff`` or ``binary``. A merge writes markers into such a
@@ -366,15 +378,25 @@ def _candidate_lines(
     file whose content really is binary (a NUL in git's first 8000 bytes) is
     skipped, because git never merges one line by line.
     """
-    found = _parse_grep_stream(_grep(root, source, paths, prefilter, "-I"))
-    matched = _nul_separated(_grep(root, source, paths, prefilter, "--text", "-l"))
-    for path in matched:
+    problems: list[_UnreadableTree] = []
+    stream, problem = _grep(root, source, paths, prefilter, "-I")
+    found = _parse_grep_stream(stream)
+    if problem is not None:
+        problems.append(problem)
+    listing, problem = _grep(root, source, paths, prefilter, "--text", "-l")
+    if problem is not None:
+        problems.append(problem)
+    for path in _nul_separated(listing):
         if path in found:
             continue
-        text = _whole_text(root, source, path)
+        try:
+            text = _whole_text(root, source, path)
+        except _UnreadableTree as exc:
+            problems.append(exc)
+            continue
         if _NUL not in text[:_BINARY_SNIFF_LENGTH]:
             found[path] = list(enumerate(text.splitlines(), start=1))
-    return found
+    return found, problems
 
 
 def _parse_grep_stream(stream: str) -> dict[str, list[tuple[int, str]]]:
@@ -433,11 +455,15 @@ def _added_line_numbers(root: Path, source: _Source, path: str, has_head: bool) 
 
 def _findings(
     root: Path, directory: Path, source: _Source, excluded: Callable[[Path, str], bool]
-) -> list[_Finding]:
-    """Markers on lines ``source`` adds, in path and line order.
+) -> tuple[list[_Finding], list[_UnreadableTree]]:
+    """Markers on lines ``source`` adds, in path and line order, and what was unreadable.
 
     Named pathspecs that match nothing are judged as the index instead: a word
     misread as a pathspec must never leave the commit unchecked.
+
+    The scan degrades per git call: a marker confirmed before a later call
+    fails is returned with that failure, never dropped for it. Only a failure
+    before any candidate is read (nothing found yet) is raised.
     """
     has_head = _has_head(root)
     recorded = _recorded_paths(directory, source, has_head)
@@ -445,13 +471,14 @@ def _findings(
         source = _Source(working_tree=False)
         recorded = _recorded_paths(directory, source, has_head)
     if not recorded:
-        return []
+        return [], []
     paths = sorted(recorded)
     sizes = _marker_sizes(root, source, paths)
     prefilter = git_grep_prefilter(min(sizes.values(), default=DEFAULT_MARKER_SIZE))
     protected_patterns = sfm.resolve_configured_patterns()
     findings: list[_Finding] = []
-    for path, lines in sorted(_candidate_lines(root, source, paths, prefilter).items()):
+    candidates, problems = _candidate_lines(root, source, paths, prefilter)
+    for path, lines in sorted(candidates.items()):
         if excluded(root, path):
             continue
         markers = find_conflict_markers(lines, sizes.get(path, DEFAULT_MARKER_SIZE))
@@ -460,13 +487,18 @@ def _findings(
         # A protected file is still checked -- skipping it would let a marker
         # through -- but its line text never reaches the deny (Plan 00272).
         withheld = sfm.path_is_protected(str(root / path), protected_patterns)
-        added = _added_line_numbers(root, source, path, has_head)
+        try:
+            added = _added_line_numbers(root, source, path, has_head)
+        except _UnreadableTree as exc:
+            # Whether this path's markers are on added lines is unknown.
+            problems.append(exc)
+            continue
         findings.extend(
             _Finding(path=path, marker=marker, withheld=withheld)
             for marker in markers
             if added is None or marker.line_number in added
         )
-    return findings
+    return findings, problems
 
 
 def _findings_block(findings: list[_Finding]) -> str:
@@ -594,19 +626,17 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
                     _unchecked(f"`{commit.directory}` is not a directory inside a repository")
                 )
                 continue
-            try:
-                for source in commit.sources:
-                    findings.extend(_findings(repo.root, commit.directory, source, self._excluded))
-            except _GitTimedOut as exc:
-                logger.warning("conflict_marker_commit_gate: %s timed out in %s", exc, repo.root)
-                unknowns.append(_timed_out())
-            except _UnreadableTree as exc:
-                logger.warning(
-                    "conflict_marker_commit_gate: %s was NOT checked: %s", repo.root, exc
-                )
-                unknowns.append(
-                    _unchecked(f"git could not read what it records in {repo.root}: {exc}")
-                )
+            problems: list[_UnreadableTree] = []
+            for source in commit.sources:
+                try:
+                    found, unread = _findings(repo.root, commit.directory, source, self._excluded)
+                except _UnreadableTree as exc:
+                    problems.append(exc)
+                    continue
+                findings.extend(found)
+                problems.extend(unread)
+            for problem in problems:
+                unknowns.append(self._unknown_of(problem, repo.root))
         if not findings:
             if unknowns:
                 return unknown_verdict_allow(
@@ -622,6 +652,15 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
             ),
             rule=_RULE.rule_id,
         )
+
+    @staticmethod
+    def _unknown_of(problem: _UnreadableTree, root: Path) -> _Unknown:
+        """The advisory cause for one unreadable part of the scan, logged as it is met."""
+        if isinstance(problem, _GitTimedOut):
+            logger.warning("conflict_marker_commit_gate: %s timed out in %s", problem, root)
+            return _timed_out()
+        logger.warning("conflict_marker_commit_gate: %s was NOT checked: %s", root, problem)
+        return _unchecked(f"git could not read what it records in {root}: {problem}")
 
     def _teaching(self, hook_input: dict[str, Any]) -> str:
         """Verbose the first time in a transcript, terse after (Plan 00116)."""

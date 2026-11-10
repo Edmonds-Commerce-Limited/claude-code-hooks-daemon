@@ -92,6 +92,7 @@ from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 from claude_code_hooks_daemon.utils.staging_simulation import (
+    INCOMPLETE_SIMULATION_REPHRASE,
     SimulationIncompleteError,
     simulated_staging,
 )
@@ -154,10 +155,8 @@ _OFFSET_KEY: Final[str] = "_offset"
 # Headline wording for the NUL-byte deny, which cannot say "matched a
 # pattern" because nothing was matched: the write could not be checked.
 _NUL_BYTE_BLOCKED: Final[str] = "a write whose file_path embeds a NUL byte"
-_UNCHECKED_REPHRASE: Final[str] = (
-    "To have it checked: stage with `git add` as its own call and commit as a "
-    "separate command, and restore read access to the secret word list (or remove "
-    "it to opt out)."
+_WORD_LIST_REPHRASE: Final[str] = (
+    "To have it checked, restore read access to the secret word list (or remove it to opt out)."
 )
 _STAGED_TREE_SUBJECT: Final[str] = "the staged tree"
 _FIELD_CONTENT: Final[str] = "content"
@@ -1698,7 +1697,10 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         haystacks = self._take_cached_haystacks(hook_input)
         # What could not be read warns; what WAS read is still judged below, so a
         # positive finding never hides behind a gap (Plan 00478).
-        unchecked = [hay.unchecked for hay in haystacks if hay.unchecked]
+        # (cause, rephrase) pairs: each advisory remedy matches its own cause.
+        unchecked = [
+            (hay.unchecked, INCOMPLETE_SIMULATION_REPHRASE) for hay in haystacks if hay.unchecked
+        ]
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
 
         for hay in haystacks:
@@ -1718,7 +1720,12 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         except sr.SecretWordListUnreadableError as exc:
             # The path is named; the message carries no content or term. With no
             # terms to compare against, no positive finding is possible.
-            unchecked.append(f"this call was NOT checked against the secret word list: {exc}")
+            unchecked.append(
+                (
+                    f"this call was NOT checked against the secret word list: {exc}",
+                    _WORD_LIST_REPHRASE,
+                )
+            )
             terms = ()
         for hay in haystacks:
             index = sr.find_first_match_index(hay.text, terms)
@@ -1736,8 +1743,8 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if unchecked:
             return unknown_verdict_allow(
                 HandlerID.SENSITIVE_CONTENT.config_key,
-                "; ".join(unchecked),
-                _UNCHECKED_REPHRASE,
+                "; ".join(cause for cause, _ in unchecked),
+                " ".join(dict.fromkeys(rephrase for _, rephrase in unchecked)),
             )
         return GatingResult(decision=Decision.ALLOW)
 
