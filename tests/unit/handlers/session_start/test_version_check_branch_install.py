@@ -154,7 +154,7 @@ def cache_file(handler: VersionCheckHandler, tmp_path: Path) -> Any:
 
 
 class TestMovedRefIsReported:
-    def test_a_moved_tip_names_both_shas_and_the_exact_command(
+    def test_a_moved_tip_names_both_shas_and_the_way_to_follow_it(
         self, handler: VersionCheckHandler, new_session_input: dict[str, Any], cache_file: Path
     ) -> None:
         with (
@@ -165,9 +165,20 @@ class TestMovedRefIsReported:
             text = _context_text(handler.handle(new_session_input))
 
         assert "tracked ref rc/1.2.3 moved 1111111..2222222" in text
-        assert "re-run the upgrade to follow it" in text
-        assert "HOOKS_DAEMON_UNSAFE_TRACK_REF=rc/1.2.3" in text
-        assert "HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE=" in text
+        assert "re-run the guarded install you used for rc/1.2.3 to follow it" in text
+
+    def test_a_moved_tip_never_prints_the_branch_install_gate(
+        self, handler: VersionCheckHandler, new_session_input: dict[str, Any], cache_file: Path
+    ) -> None:
+        """The gate stays non-obvious (Plan 00291): handler text reaches HOOKS-DAEMON.md."""
+        with (
+            patch(f"{_MODULE}.read_install_stamp", return_value=_BRANCH_STAMP),
+            patch(f"{_MODULE}.read_daemon_metadata", return_value=_tracking()),
+            patch(f"{_MODULE}.list_remote_refs", return_value=_listing("rc/1.2.3", _NEW_SHA)),
+        ):
+            text = _context_text(handler.handle(new_session_input))
+
+        assert "HOOKS_DAEMON_UNSAFE_TRACK_REF" not in text
 
     def test_one_listing_of_exactly_the_tracked_branch(
         self, handler: VersionCheckHandler, new_session_input: dict[str, Any], cache_file: Path

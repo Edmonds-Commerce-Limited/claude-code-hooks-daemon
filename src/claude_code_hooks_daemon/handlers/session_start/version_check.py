@@ -527,14 +527,9 @@ class VersionCheckHandler(SessionStartHandlerBase):
             elif tip == installed:
                 lines.append(f"Tracked ref {ref} has not moved since {short}.")
             else:
-                lines.extend(
-                    [
-                        f"tracked ref {ref} moved {short}..{tip[:_SHORT_SHA_LENGTH]}; "
-                        "re-run the upgrade to follow it:",
-                        f"  HOOKS_DAEMON_UNSAFE_TRACK_REF={ref} "
-                        'HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE="<why>" '
-                        'bash untracked/scratch/upgrade.sh --project-root "$PWD"',
-                    ]
+                lines.append(
+                    f"tracked ref {ref} moved {short}..{tip[:_SHORT_SHA_LENGTH]}; "
+                    f"re-run the guarded install you used for {ref} to follow it."
                 )
         back = meta.last_release_tag or "the latest release"
         lines.append(

@@ -19,6 +19,10 @@ _READER = "read_daemon_metadata"
 #: Modules allowed to use the metadata reader, with why.
 _ALLOWED = {
     "daemon/metadata.py": "defines the reader",
+    "handlers/session_start/version_check.py": (
+        "reads only the branch-tip tracking record (tracked_ref, tracked_sha, "
+        "last_release_tag), never daemon_version"
+    ),
 }
 
 
