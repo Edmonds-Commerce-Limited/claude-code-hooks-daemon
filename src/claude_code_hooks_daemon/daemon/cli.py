@@ -6597,6 +6597,47 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_branch_preflight(args: argparse.Namespace) -> int:
+    """``branch-preflight [name]``: every reason creating a branch is refused, with its fix.
+
+    Read-only. Builds the one creation report the creation guard's deny renders, so
+    the two cannot disagree (Plan 00594 Task 4.1).
+
+    Returns:
+        0 when a branch may be created, ``EXIT_CREATION_REFUSED`` when a pool refuses
+        it, 1 when the directory is not a git repository.
+    """
+    from claude_code_hooks_daemon.core.branch_creation import (
+        EXIT_CREATION_REFUSED,
+        LABELS_RELATIVE_PATH,
+        creation_report,
+        creation_report_json,
+        read_labels,
+        render_creation_report,
+    )
+    from claude_code_hooks_daemon.utils.git_repo import run_git
+
+    repo = get_project_path(getattr(args, "project_root", None))
+    if run_git(repo, "rev-parse", "--git-dir").returncode != 0:
+        print(f"ERROR: branch-preflight: {repo} is not a git repository", file=sys.stderr)
+        return 1
+    report = creation_report(
+        repo, _branches_config(repo), args.name, labels=read_labels(repo / LABELS_RELATIVE_PATH)
+    )
+    code = 0 if report.may_create else EXIT_CREATION_REFUSED
+    if args.json:
+        print(json.dumps(creation_report_json(report), indent=2))
+        return code
+    if report.may_create:
+        print("A branch may be created: no pool refuses it.")
+    else:
+        refusing = ", ".join(str(b.rule_id) for b in report.blockers if b.refuses)
+        print(f"A branch may NOT be created now. Blocked by: {refusing}")
+    for line in render_creation_report(report):
+        print(line)
+    return code
+
+
 def cmd_branch_park(args: argparse.Namespace) -> int:
     """``branch-park <name> --reason ...`` / ``--clear <name>`` (Plan 00558 Task 4.3).
 
@@ -13374,6 +13415,28 @@ def build_parser() -> argparse.ArgumentParser:
         "first. Contacts the remote",
     )
     parser_branch_sweep.set_defaults(func=cmd_branch_sweep)
+
+    # branch-preflight command (Plan 00594 Task 4.1)
+    parser_branch_preflight = subparsers.add_parser(
+        "branch-preflight",
+        help="List every reason creating a branch is refused right now (open cap, parked, "
+        "merged, dormant), each with its fix command; read-only",
+        epilog="Exit 0 when a branch may be created, 4 when a pool refuses it, 1 when this "
+        "is not a git repository. The creation deny prints the same report.",
+    )
+    parser_branch_preflight.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help="The branch name you mean to create (also checks for a likely duplicate; "
+        "an existing name is a reset, not a creation)",
+    )
+    parser_branch_preflight.add_argument(
+        "--json",
+        action="store_true",
+        help="Print {may_create, blockers: [{rule_id, refuses, fixes, lines}], notices}",
+    )
+    parser_branch_preflight.set_defaults(func=cmd_branch_preflight)
 
     # branch-park command (Plan 00558 Task 4.3)
     parser_branch_park = subparsers.add_parser(
