@@ -231,7 +231,12 @@ stamp_venv_version() {
         return 1
     fi
 
-    echo "$version" > "$venv_path/$VENV_VERSION_STAMP"
+    # Explicit check: callers run this inside `||` lists, where `set -e` does not
+    # stop on a failed redirect and the function would report success.
+    if ! echo "$version" > "$venv_path/$VENV_VERSION_STAMP"; then
+        print_error "stamp_venv_version: cannot write $venv_path/$VENV_VERSION_STAMP"
+        return 1
+    fi
     print_verbose "Stamped venv with version: $version"
     return 0
 }
@@ -1246,6 +1251,28 @@ _venv_is_fresh() {
     return 1
 }
 
+# _VENV_NOT_FRESH / _VENV_RESTAMP_FAILED: _reuse_venv_if_fresh's non-reuse statuses.
+_VENV_NOT_FRESH=1
+_VENV_RESTAMP_FAILED=2
+
+#
+# _reuse_venv_if_fresh() - Reuse a fresh venv AND record the version now live.
+#
+# A reused venv keeps the stamp of the commit it was built for, so after a
+# branch install moves to a newer commit with unchanged dependencies `status`
+# would name the old one. Every reuse therefore rewrites the stamp; it never
+# rebuilds. Args as _venv_is_fresh.
+#
+# Returns 0 reused and restamped, $_VENV_NOT_FRESH to build, and
+# $_VENV_RESTAMP_FAILED when the venv is fresh but the stamp cannot be written
+# (the caller fails, as it does when the build path's stamp fails).
+#
+_reuse_venv_if_fresh() {
+    local venv_path="$2" target_version="$3"
+    _venv_is_fresh "$@" || return "$_VENV_NOT_FRESH"
+    stamp_venv_version "$venv_path" "$target_version" || return "$_VENV_RESTAMP_FAILED"
+}
+
 # _require_venv_python_bin() - fail loudly when no interpreter was passed.
 #
 # Args: $1 - calling function name (for the message), $2 - python_bin value.
@@ -1305,9 +1332,14 @@ ensure_venv() {
     local venv_path="$daemon_dir/untracked/venv-$fingerprint"
 
     # Fast path, lock-free: a fresh venv is reused as-is.
-    if _venv_is_fresh "$daemon_dir" "$venv_path" "$target_version"; then
+    local reuse_rc=0
+    _reuse_venv_if_fresh "$daemon_dir" "$venv_path" "$target_version" || reuse_rc=$?
+    if [ "$reuse_rc" -eq 0 ]; then
         echo "$venv_path"
         return 0
+    fi
+    if [ "$reuse_rc" -eq "$_VENV_RESTAMP_FAILED" ]; then
+        return 1
     fi
 
     # Slow path: (re)create under the build lock.
@@ -1406,10 +1438,15 @@ _ensure_venv_build() {
 
     # Re-check under the lock: the process that held it may have built the
     # very venv this one queued up to build. Reuse it rather than rebuild.
-    if _venv_is_fresh "$daemon_dir" "$venv_path" "$target_version"; then
+    local reuse_rc=0
+    _reuse_venv_if_fresh "$daemon_dir" "$venv_path" "$target_version" || reuse_rc=$?
+    if [ "$reuse_rc" -eq 0 ]; then
         print_verbose "ensure_venv: venv built by another process while waiting — reusing $venv_path"
         echo "$venv_path"
         return 0
+    fi
+    if [ "$reuse_rc" -eq "$_VENV_RESTAMP_FAILED" ]; then
+        return 1
     fi
 
     if [ -d "$venv_path" ]; then
