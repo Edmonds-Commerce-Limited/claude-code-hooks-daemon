@@ -422,7 +422,7 @@ class TestCleanupAfterMerge:
         _patch_equivalent(repo, "picked")
         report = cleanup_after_merge(repo, ["picked"], config=_CONFIG, target="main", mode="act")
         assert report.deleted == ()
-        assert daemon_cli_command_for_docs("branch-sweep", "--clean") in report.commands
+        assert daemon_cli_command_for_docs("branch-sweep", "--clean", "--apply") in report.commands
 
     def test_an_exempt_branch_is_skipped(self, repo: Path) -> None:
         _merged(repo, "users/alice")
