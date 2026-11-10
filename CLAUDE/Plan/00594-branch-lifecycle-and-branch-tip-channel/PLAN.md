@@ -194,15 +194,17 @@ names, people or hashes appear here.
   Move pressure to stop, session start and merge per
   `DESIGN.md`. Creation denies only at cap plus `branches.wip.creation_grace`
   (default 2). Not done: the "ignored stop report" grace variant.
-- [ ] ⬜ **Task 4.3**: The park record survives a rejected push, and a merge
-  clears it visibly. On main (release note 043, report `task-4-3-report.md`):
+- [x] ✅ **Task 4.3**: The park record survives a rejected push, and a merge
+  clears it visibly. On main (release notes 043 and 051, reports
+  `task-4-3-report.md` and `task-4-3-gaps-report.md`):
   the park writes a git-config record before the push; a refused push exits 3
   and says "parked locally, not pushed" with the command to push later; a
   merge, `delete_if_merged` and the sweep remove the record and print "Park
   cleared"; `branch-park --clear` removes it and prints "Park record
-  cleared". Open: a branch only the remote holds still
-  parks nothing on a refused push, the group-pool PARKED resolution, and the
-  session-start "park cleared" print (DESIGN 2.4).
+  cleared". Also on main: a branch only the remote holds keeps a refused park
+  on a local branch, a same-tip group with a standing park resolves PARKED,
+  and an ended park prints "Park cleared" once at session start and in the
+  sweep (DESIGN 2.4).
 - [x] ✅ **Task 4.4**: (on main, release note 050, report `task-4-4-report.md`)
   Pools are counted per owner. A foreign branch is listed, in no pool, and
   cleaned only when its merge is proven. Not done: a configured owner for
