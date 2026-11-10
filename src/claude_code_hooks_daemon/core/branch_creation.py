@@ -795,7 +795,13 @@ def creation_report(
         lines, fixes = _cap_lines(groups, config, moment, worktrees)
         sections.append(
             ReportSection(
-                RuleID.BRANCH_WIP_CAP, config.wip.mode == "block", True, tuple(lines), tuple(fixes)
+                RuleID.BRANCH_WIP_CAP,
+                # Creation is a backstop: below cap + grace the cap only warns.
+                config.wip.mode == "block"
+                and len(groups) >= config.effective_wip_cap() + config.wip.creation_grace,
+                True,
+                tuple(lines),
+                tuple(fixes),
             )
         )
     if blocking:

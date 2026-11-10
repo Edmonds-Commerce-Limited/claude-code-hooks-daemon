@@ -2270,6 +2270,11 @@ class BranchWipConfig(BaseModel):
     count_remote: bool = Field(
         default=True, description="Remote-only branches count; identical tips count once"
     )
+    creation_grace: Annotated[int, Field(ge=0)] = Field(
+        default=2,
+        description="Creation is denied only at cap + this many; below that it warns "
+        "(pressure lands at stop and session start; 0 restores the deny at the cap)",
+    )
 
 
 class BranchPoolConfig(BaseModel):

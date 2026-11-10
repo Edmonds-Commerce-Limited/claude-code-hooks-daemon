@@ -95,7 +95,7 @@ class TestBudgetOrdering:
                 return subprocess.CompletedProcess(["git", *args], 0, rows, "")
             return subprocess.CompletedProcess(["git", *args], 1, "", "boom")
 
-        config = BranchesConfig(default="main", wip=BranchWipConfig(cap=1))
+        config = BranchesConfig(default="main", wip=BranchWipConfig(cap=1, creation_grace=0))
         with (
             patch.object(branch_creation, "run_git", fake_run_git),
             patch.object(branch_inventory, "run_git", fake_run_git),
