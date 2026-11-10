@@ -85,6 +85,7 @@ no release note.
 
 - Lock bump `d1d248e1d` (+ report `fe618f597`), fast-forwarded to main. Main CI run 42767350336 failed one test: anyio
   4.16 adds the pytest option `--anyio-mode`, which the option-table rot detector
-  (`test_every_option_of_the_running_pytest_is_in_a_table`) caught. The implementer's targeted QA had passed, so its
-  venv was most likely not synced to the new lock. Fixed forward in `cc6ace282`; main CI run 42769393325 green.
+  (`test_every_option_of_the_running_pytest_is_in_a_table`) caught. The implementer's targeted QA had passed because a
+  lock-only change maps to no test files (`--allow-unmapped`), so no tests ran; its venv was synced
+  (`uv sync --frozen --all-extras`). Fixed forward in `cc6ace282`; main CI run 42769393325 green.
 - PR #193 closed by Dependabot once nltk 3.10.4 was on main.
