@@ -1403,3 +1403,27 @@ class TestStdinGrepAndGitGrepAreNotLookups:
             "tool_input": {"pattern": "some_identifier", "path": "src"},
         }
         assert handler.matches(hook_input) is True
+
+
+class TestGrepWordInsideAnotherWord:
+    """`semgrep shell_check` is an argument list, not a `grep` invocation."""
+
+    @pytest.fixture()
+    def handler(self) -> Any:
+        return lsp_enforcement.LspEnforcementHandler()
+
+    def test_semgrep_argument_is_not_a_pattern(self, handler: Any) -> None:
+        command = (
+            "./scripts/qa/run_autofix.sh > untracked/scratch/rel-autofix.txt 2>&1 && "
+            "./scripts/qa/llm_qa.py format lint type_check error_hiding magic_values "
+            "semgrep shell_check > untracked/scratch/rel-qa.txt 2>&1 ; "
+            "grep -aE '❌|✅' untracked/scratch/rel-qa.txt ; git status --short"
+        )
+        assert handler.matches(_bash(command)) is False
+
+    def test_semgrep_alone_is_not_a_grep(self, handler: Any) -> None:
+        assert handler.matches(_bash("run_qa semgrep shell_check")) is False
+
+    def test_real_symbol_grep_in_compound_command_still_judged(self, handler: Any) -> None:
+        command = "cd x && grep -rn 'class FooHandler' src/"
+        assert handler.matches(_bash(command)) is True
