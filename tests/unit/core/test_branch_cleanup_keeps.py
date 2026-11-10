@@ -14,7 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.config.models import BranchesConfig, BranchMergedConfig
+from claude_code_hooks_daemon.config.models import (
+    BranchesConfig,
+    BranchMergedConfig,
+    BranchSweepConfig,
+)
 from claude_code_hooks_daemon.core.branch_cleanup import CleanupReport, clean_sweep
 from claude_code_hooks_daemon.core.branch_keep import keep_branch
 from tests.support.git_fixtures import git_setup_timeout
@@ -100,6 +104,17 @@ class TestLocalKeeps:
         report = _sweep(repo, tmp_path, remote=False)
         assert report.deleted == ()
         assert "kept: kept: needed for the audit" in report.skipped
+        assert _git(repo, "branch", "--list", "kept")
+
+    def test_a_spent_hook_budget_never_hides_a_keep_from_the_sweep(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        # The inventory skips reading keep notes once sweep.budget_ms is spent; a bulk
+        # clean is not a hook, so it must not run on that budget and delete a kept branch.
+        _keep(repo, _merged(repo, "kept"))
+        starved = _CONFIG.model_copy(update={"sweep": BranchSweepConfig(budget_ms=0)})
+        report = clean_sweep(repo, starved, dry_run=False, bundle_dir=tmp_path / "b", remote=False)
+        assert report.deleted == ()
         assert _git(repo, "branch", "--list", "kept")
 
     def test_a_lapsed_keep_is_cleaned(self, repo: Path, tmp_path: Path) -> None:

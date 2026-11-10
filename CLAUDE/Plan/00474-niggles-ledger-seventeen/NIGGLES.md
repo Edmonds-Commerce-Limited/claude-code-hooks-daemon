@@ -7341,6 +7341,21 @@ body that is only written to a file should be judged for the paths it names. Not
 `R-SECRET-BASH-MENTION` is deny-by-design for a command that names a protected path, so the fix has to
 distinguish a mention in written prose from a path the command acts on.
 
+### N611 — the park commit is never signed, so a repository that requires verified signatures refuses a pushed park
+
+**Source**: a client seat (10 November 2026), after daemon v3.73.1.
+
+**Evidence**: `branch_park._write_park_commit` writes the park with `git commit-tree` and passes no
+signing option (`core/branch_park.py:141`), and `commit-tree` does not read `commit.gpgsign` on its own.
+The subagent stop guard makes a sub-agent park before it stops, so every sub-agent branch ends in an
+unsigned commit. In a repository that requires verified signatures the host refused a push of three
+merged park commits, and the work had to be cherry-picked onto a clean line.
+
+**Status**: ⬜ Open, filed as Plan 00594 Task 4.9. Sign the park commit when `commit.gpgsign` is true
+(and honour `user.signingkey`/`gpg.format`), failing the park clearly rather than writing an unsigned
+commit the repository will reject. The wider design question of whether a park needs a commit at all is
+DESIGN.md's open "park record" question.
+
 ### N609 — a dangling legacy `untracked/venv` symlink survives install and upgrade
 
 **Source**: Plan 00594 release housekeeping (10 November 2026).

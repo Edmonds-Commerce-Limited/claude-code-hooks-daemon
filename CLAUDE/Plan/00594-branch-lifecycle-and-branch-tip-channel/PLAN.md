@@ -136,7 +136,8 @@ names, people or hashes appear here.
 
 ### Phase 1: Design
 
-- [ ] ⬜ **Task 1.1**: Collect the counts and sequences behind each class from
+- [x] ✅ **Task 1.1**: (on main: `EVIDENCE.md`, each figure tagged repo source
+  or second-hand) Collect the counts and sequences behind each class from
   the client test seat (generic: counts, orderings, git shapes; no names).
   Store them in `EVIDENCE.md` in generic form.
 - [x] ✅ **Task 1.2**: (draft written in [DESIGN.md](DESIGN.md); open
@@ -172,8 +173,10 @@ names, people or hashes appear here.
   regenerable, unless it holds a nested git clone or contains the scratch
   area. The scan is bounded and runs once per guard call. The list stays
   configurable through `branches.cleanup_after_merge.regenerable`.
-- [ ] ⬜ **Task 3.4**: Bulk cleanup is batched, resumable and dry-run first,
-  and is tested against a fixture with hundreds of branches.
+- [x] ✅ **Task 3.4**: (on main, release note 047, report `task-3-4-report.md`)
+  Bulk cleanup is batched, resumable and dry-run first,
+  and is tested against a fixture with hundreds of branches. `branch-sweep --clean` previews; `--apply` deletes in batches of 50 with a bundle per
+  batch; an interrupted run resumes by running the same command again.
 - [x] ✅ **Task 3.5**: (RC feedback; done, release note 038) When the
   worktree-removal guard names ignored blocking paths, its deny says to keep
   what matters and delete what is disposable in a separate command first. A
@@ -184,7 +187,8 @@ names, people or hashes appear here.
 
 ### Phase 4: Pressure, preflight, park, owner (classes 2, 4, 5, 7)
 
-- [ ] ⬜ **Task 4.1**: A preflight command (`branch-preflight` or similar)
+- [x] ✅ **Task 4.1**: (on main, release note 046, report `task-4-1-report.md`)
+  A preflight command (`branch-preflight`)
   lists every blocker with its fix; the creation deny renders the same report.
 - [ ] ⬜ **Task 4.2**: Move pressure to stop, session start and merge per
   `DESIGN.md`.
@@ -216,6 +220,11 @@ names, people or hashes appear here.
   the guard that judges it; the sweep now takes its remote-delete lines from
   the same proof as the guard, and a test feeds every printed line to the
   guard. (The test was written after the fix, so it was never seen failing.)
+- [ ] ⬜ **Task 4.9**: (client report, ledger N611) The park commit is written
+  with `git commit-tree`, which ignores `commit.gpgsign`, so a repository that
+  requires verified signatures refuses a pushed park. Sign the park commit when
+  the repository's configuration asks for signing, and fail the park clearly
+  rather than write a commit the repository will reject.
 - [x] ✅ **Task 4.8**: (second client seat; on main, release note 044, report
   `task-4-8-report.md`; the practice is the "Branch Practice" section of
   `CLAUDE/core/Worktree.core.md`, and `branch_creation_guard` advises on a

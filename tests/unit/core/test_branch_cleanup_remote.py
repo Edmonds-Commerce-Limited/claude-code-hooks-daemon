@@ -170,7 +170,8 @@ class TestRemoteClean:
     ) -> None:
         _pushed(repo, "feat", merge=True, keep_local=False)
         report = _sweep(repo, tmp_path, dry_run=True)
-        assert "would delete remote origin/feat" in report.commands
+        (line,) = [c for c in report.commands if c.startswith("would delete remote origin/feat")]
+        assert "proven merged into main" in line
         assert "feat" in _remote_branches(bare)
         assert report.bundle is None
 
