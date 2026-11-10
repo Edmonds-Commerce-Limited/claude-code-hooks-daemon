@@ -1,4 +1,4 @@
-# Fix: a failed worktree creation no longer leaves a locked worktree and branch behind
+# Callout: a failed worktree creation no longer leaves a locked worktree and branch behind
 
 **Plan**: 00592
 **Audience**: client projects
