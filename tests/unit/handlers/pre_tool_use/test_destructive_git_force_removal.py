@@ -267,6 +267,41 @@ class TestWorktreeRemoveIgnoredContent:
         assert "13 path" in reason
 
 
+class TestSubstitutionIsNotTrusted:
+    """A substitution can run a delete the reading misses, so the deny stays (Plan 00478 row 2).
+
+    The deny names a positively recognised danger (a forced delete or worktree removal
+    that may hide another), not a guard that failed to decide, so it is not warn-only.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git branch -D inner $(echo x)",
+            "git branch -D inner `echo x`",
+            "git branch -D inner <(echo x)",
+            "git update-ref -d refs/heads/inner $(echo x)",
+        ],
+    )
+    def test_a_forced_branch_delete_with_a_substitution_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, command: str
+    ) -> None:
+        rule, reason = _deny(handler, command, repo)
+        assert rule == RuleID.GIT_BRANCH_FORCE_DELETE
+        assert "substitution" in reason
+
+    @pytest.mark.parametrize(
+        "command",
+        ["git worktree remove --force {wt} $(echo x)", "git worktree remove {wt} `echo x`"],
+    )
+    def test_a_worktree_removal_with_a_substitution_is_denied(
+        self, handler: DestructiveGitHandler, repo: Path, wt: Path, command: str
+    ) -> None:
+        rule, reason = _deny(handler, command.format(wt=wt), repo)
+        assert rule == RuleID.GIT_WORKTREE_REMOVE_FORCE
+        assert "substitution" in reason
+
+
 class TestRuleRegistration:
     def test_rule_is_listed_with_guidance(self, handler: DestructiveGitHandler) -> None:
         rule = next(r for r in handler.get_rules() if r.rule_id == RuleID.GIT_WORKTREE_REMOVE_FORCE)
