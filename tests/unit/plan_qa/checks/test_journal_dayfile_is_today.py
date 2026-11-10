@@ -372,6 +372,12 @@ class TestCommitHalf:
         _git(repo, "add", "-A")
         assert _commit_run(repo) == []
 
+    def test_joining_a_heading_into_the_line_above_is_blocked(self, repo: Path) -> None:
+        """Same words, but an entry heading is no longer a heading: not whitespace-only."""
+        (repo / _REPO_ENTRY).write_text(_ENTRY_BODY.replace("thing\n\nBody.", "thing Body."))
+        _git(repo, "add", "-A")
+        assert [finding.path for finding in _commit_run(repo)] == [_REPO_ENTRY]
+
     def test_whitespace_plus_a_word_change_is_blocked(self, repo: Path) -> None:
         (repo / _REPO_ENTRY).write_text(_WHITESPACE_VARIANT.replace("Body.", "Rewritten."))
         _git(repo, "add", "-A")

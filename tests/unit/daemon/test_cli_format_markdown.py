@@ -663,6 +663,20 @@ class TestCmdFormatMarkdownLeavesJournalEntriesAlone:
         assert entry.read_text() == _UNSTABLE_JOURNAL_ENTRY
         assert result == (1 if check else 0)  # doc.md still counts
 
+    def test_a_project_under_a_journal_named_folder_is_still_formatted(
+        self, tmp_path: Path
+    ) -> None:
+        """Only a JOURNAL folder INSIDE the project marks journal territory."""
+        project = tmp_path / "JOURNAL" / "project"
+        (project / ".claude").mkdir(parents=True)
+        (project / ".claude" / "hooks-daemon.yaml").write_text("version: '2.0'\n")
+        (project / "doc.md").write_text(_UNALIGNED_TABLE)
+
+        result = cmd_format_markdown(argparse.Namespace(path=project, check=False))
+
+        assert result == 0
+        assert _ALIGNED_MARKER in (project / "doc.md").read_text()
+
     @pytest.mark.parametrize("check", [False, True])
     def test_named_journal_entry_is_skipped_not_rewritten(
         self, tmp_path: Path, check: bool, capsys: pytest.CaptureFixture[str]

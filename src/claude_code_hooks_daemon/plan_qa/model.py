@@ -508,16 +508,22 @@ def only_conflict_markers_removed(before: str, after: str) -> bool:
     return expected is None and removed_any
 
 
+def _non_blank_line_words(text: str) -> list[list[str]]:
+    return [line.split() for line in text.splitlines() if line.strip()]
+
+
 def only_whitespace_changed(before: str, after: str) -> bool:
-    """Whether ``before`` and ``after`` hold the same words in the same order.
+    """Whether ``before`` and ``after`` hold the same words on the same lines.
 
     A markdown formatter collapsing a run of spaces or a blank line changes no
     word of a journal record, and an entry it rewrote that way could otherwise
-    never be committed nor restored by an agent (Plan 00594 class 9). Any
-    added, removed or altered non-whitespace character still counts as a
-    rewrite. Read by both halves of ``journal-dayfile-is-today``.
+    never be committed nor restored by an agent (Plan 00594 class 9). Line
+    boundaries of non-blank lines are kept, so joining a heading into the line
+    above (same words, different structure) is still a rewrite, as is any
+    added, removed or altered non-whitespace character. Read by both halves
+    of ``journal-dayfile-is-today``.
     """
-    return before.split() == after.split()
+    return _non_blank_line_words(before) == _non_blank_line_words(after)
 
 
 def corrected_entry_labels(headings: list[JournalEntryHeading]) -> frozenset[str]:

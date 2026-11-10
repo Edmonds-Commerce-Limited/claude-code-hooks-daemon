@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.73.2] - 2026-11-10
+
+_A hotfix release. A plan journal entry could be stranded by a markdown formatter: a titled heading carried a run of spaces a formatter collapsed, the commit gate treats a journal entry as immutable, so the collapsed entry could be neither committed nor restored. Three fixes close the deadlock (Plan 00594). Also carries every other change merged since v3.73.1: guards that warn instead of deny when they cannot decide (Plan 00478), the `/release hotfix` fast path (Plan 00576) and a run of field-report fixes. No config key changes, no breaking change, no pre-upgrade or post-upgrade task._
+
+### Added
+
+- `/release hotfix` (or `/release X.Y.Z hotfix`): a shorter release path for an emergency patch. The release pull request, full CI gate, merge freeze, tagging and publishing are unchanged (Plan 00576).
+- `hooks-daemon explain-rule` and `explain-handler` resolve handlers loaded through the `plugins:` config section (Plan 00589; GitHub #171).
+
+### Changed
+
+- Eight commit-gate routes and six more guards (`flaggable_content_channel_guard`, `plan_journal_guard`, `release_merge_freeze`, `reference_repo_freshness`, `curl_pipe_shell`, `root_recursion_guard`) now allow with an advisory instead of denying when they cannot decide; `validate_eslint_on_write` does the same when ESLint times out or cannot run (Plan 00478, "warn dont block"). A positively recognised finding still denies. Each writes an `UNKNOWN-VERDICT` log line.
+- `pipe_blocker` allows with an advisory a tail/head pipe whose producer is on no list, unless a blacklisted command is named anywhere in the command; `write_protected_paths` allows with an advisory an unreadable command that names no listed path, and judges a writing awk program by where it writes (Plan 00478 Task 2.2e).
+- The `branch-sweep` "Dormant:" section, the idle-branch Stop line and the `R-BRANCH-WIP-CAP` deny state the branch-limit principle and give each branch its next step (Plan 00583; GitHub #192).
+- An advise-severity `plan_qa` or `docs_qa` finding is reported without failing the check (Plan 00576).
+- A worktree removal no longer treats a seeded copy identical to its source as unrecoverable work (Plan 00579; GitHub #164).
+- Dependency updates: the Python group, the GitHub Actions group and six alerted packages in `uv.lock` (Routine 00003, Plan 00593).
+
+### Fixed
+
+- A guarded unreleased-ref install (`HOOKS_DAEMON_UNSAFE_TRACK_REF`) no longer exits 141 when the ref's `pyproject.toml` is larger than one pipe write (Plan 00594).
+- The journal title heading written by `mkplan.bash --journal ... --title` is single-spaced (`## HH:MM · category · REF — T`), so a markdown formatter leaves it alone (Plan 00594 Task 6.1).
+- `hooks-daemon format-markdown` skips plan journal files; an explicitly named entry is reported as skipped (Plan 00594).
+- The journal immutability check, at edit and commit time, accepts a whitespace-only change (same words, same order); any added, removed or changed word is still blocked (Plan 00594).
+- A merged branch's remote delete chained after its worktree removal is judged on its own proof (Plan 00474 N578).
+- `project_containment` follows a `cd` into loop, if, group and subshell bodies (Plan 00587; GitHub #195).
+- `lsp_enforcement` leaves a grep that filters stdin, and `git grep`, alone (Plan 00588; GitHub #169).
+- `destructive_git` reads git text printed by a single-quoted awk program as data (Plan 00478; GitHub #170).
+- `R-DAEMON-DIR-CD` no longer denies a quoted search pattern that names `cd` (Plan 00590; GitHub #194).
+- The CLAUDE.md auto-commit waits for uncommitted plugin and project handler files (Plan 00591; GitHub #172).
+- A failed worktree creation releases an `initializing` lock and removes its worktree and branch (Plan 00592; GitHub #173).
+- `subagent_full_qa_blocker` no longer reads a shell file test (`[ -r FILE ]`, `test -e FILE`) as an interpreter running inline code (Plan 00576).
+- Generated forwarder stubs pass `shellcheck` (SC2034) (Plan 00577; GitHub #163).
+- `check-worktree-seed` does not report an absent optional seed entry as MISSING (Plan 00580; GitHub #167).
+- `provision.sh` rebuilds a venv whose lock hash is stale (Plan 00581; GitHub #168).
+
 ## [3.73.1] - 2026-11-09
 
 _A patch release. Branches now sit in three pools (open, parked, merged) with their own caps and ages (Plan 00571 Phase 3); a repository admin seat is no longer locked out by a non-admin's issue assignment (Plan 00573); releases ship attested arm64 relay and hooks-screen binaries (Plan 00572); and a run of fedora-desktop field reports is fixed (Plan 00474). Adds config keys only (`branches.parked.*`, `branches.merged.*`, `branches.bot_owned`). No breaking change, no pre-upgrade or post-upgrade task._
