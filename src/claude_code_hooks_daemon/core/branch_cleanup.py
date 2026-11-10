@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
+import subprocess  # nosec B404 - imported for the error types only; git spawns live in utils.git_repo
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
