@@ -9,6 +9,7 @@ import logging
 import re
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
@@ -72,6 +73,28 @@ _DEFAULT_CACHE_TTL_HOURS: Final[int] = 24
 #: "up to date" whenever it holds no ``is_outdated``, which a tip entry never has.
 _CACHE_FILENAME: Final[str] = "version_check_cache.json"
 _TIP_CACHE_FILENAME: Final[str] = "version_check_tip_cache.json"
+
+#: A failed or empty listing is cached too, but briefly: long enough that an
+#: offline machine does not wait at every session start, short enough that the
+#: network coming back is noticed within the hour.
+_NEGATIVE_TTL_SECONDS: Final[int] = 3600
+
+_TIP_KIND_TIP: Final[str] = "tip"
+_TIP_KIND_TAG: Final[str] = "tag"
+_TIP_KIND_ABSENT: Final[str] = "absent"
+_TIP_KIND_UNREAD: Final[str] = "unread"
+_TIP_KINDS: Final[frozenset[str]] = frozenset(
+    {_TIP_KIND_TIP, _TIP_KIND_TAG, _TIP_KIND_ABSENT, _TIP_KIND_UNREAD}
+)
+
+
+@dataclass(frozen=True)
+class _TipLookup:
+    """What the remote said about the tracked ref (``sha`` is set only for a branch tip)."""
+
+    kind: str
+    sha: str | None
+
 
 _FULL_SHA_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{40}$")
 _SHORT_SHA_LENGTH: Final[int] = 7
@@ -488,8 +511,18 @@ class VersionCheckHandler(SessionStartHandlerBase):
         if _FULL_SHA_RE.fullmatch(ref):
             lines.append(f"Pinned to commit {ref[:_SHORT_SHA_LENGTH]}; a pin never moves.")
         else:
-            tip = self._remote_tip(ref)
-            if tip is None:
+            lookup = self._remote_tip(ref, installed)
+            tip = lookup.sha
+            if lookup.kind == _TIP_KIND_TAG:
+                lines.append(
+                    f"Tracked ref {ref} is a tag, not a branch: it does not move, "
+                    "so there is nothing to follow."
+                )
+            elif lookup.kind == _TIP_KIND_ABSENT:
+                lines.append(
+                    f"Tracked ref {ref}: not checked (the remote has no branch or tag by that name)."
+                )
+            elif tip is None:
                 lines.append(f"Tracked ref {ref}: not checked (the remote could not be read).")
             elif tip == installed:
                 lines.append(f"Tracked ref {ref} has not moved since {short}.")
@@ -511,34 +544,76 @@ class VersionCheckHandler(SessionStartHandlerBase):
         )
         return lines
 
-    def _remote_tip(self, ref: str) -> str | None:
-        """The sha ``refs/heads/<ref>`` points at on the remote, or None when unread.
+    def _cached_tip(self, cache_file: Path, ref: str, installed: str) -> _TipLookup | None:
+        """The cached answer for ``ref`` as seen from ``installed``, or None when stale.
 
-        Cached for the TTL like the release check, per ref. Only a successful
-        answer is cached, so a failed listing is retried at the next session.
+        An entry applies only to the install it was made for: after the install
+        follows a move, the tip cached against the old commit would read as a
+        move back. A good answer lives for the configured TTL, a failed or empty
+        one for the shorter ``_NEGATIVE_TTL_SECONDS``.
+        """
+        cached = self._get_cached_result(cache_file)
+        if (
+            not cached
+            or cached.get("tracked_ref") != ref
+            or cached.get("installed_sha") != installed
+        ):
+            return None
+        kind = cached.get("kind")
+        sha = cached.get("remote_tip")
+        if kind not in _TIP_KINDS or (kind == _TIP_KIND_TIP and not sha):
+            return None
+        ttl_hours = self._cache_ttl_hours
+        if not isinstance(ttl_hours, int | float | str):
+            ttl_hours = _DEFAULT_CACHE_TTL_HOURS
+        ttl = int(ttl_hours) * _SECONDS_PER_HOUR if kind == _TIP_KIND_TIP else _NEGATIVE_TTL_SECONDS
+        cached_at = cached.get("cached_at")
+        if not isinstance(cached_at, int | float):
+            return None
+        if time.time() - cached_at >= ttl:
+            return None
+        return _TipLookup(str(kind), str(sha) if sha else None)
+
+    def _remote_tip(self, ref: str, installed: str) -> _TipLookup:
+        """What the remote holds under ``ref``: a branch tip, a tag, nothing, or unread.
+
+        One bounded listing of the branch and of a tag of that name (a tag is
+        accepted by the install's fetch but never moves). Every outcome is
+        cached, so an offline machine does not wait at each session start.
         """
         cache_file = self._get_cache_file(tip=True)
-        if self._is_cache_valid(cache_file):
-            cached = self._get_cached_result(cache_file)
-            if cached and cached.get("tracked_ref") == ref and cached.get("remote_tip"):
-                return str(cached["remote_tip"])
-        wanted = f"refs/heads/{ref}"
+        cached_lookup = self._cached_tip(cache_file, ref, installed)
+        if cached_lookup is not None:
+            return cached_lookup
+        head, tag = f"refs/heads/{ref}", f"refs/tags/{ref}"
         listing = list_remote_refs(
             _REMOTE_ONLY_CWD,
             _GITHUB_REPO_URL,
-            patterns=(wanted,),
+            patterns=(head, tag),
             timeout=Timeout.VERSION_CHECK,
         )
         if listing.failure is not None:
             logger.debug("tracked ref listing failed: %s", listing.failure)
-            return None
-        tip = next((sha for name, sha in listing.refs if name == wanted), None)
-        if tip is None:
-            return None
+            lookup = _TipLookup(_TIP_KIND_UNREAD, None)
+        else:
+            by_name = dict(listing.refs)
+            if head in by_name:
+                lookup = _TipLookup(_TIP_KIND_TIP, by_name[head])
+            elif tag in by_name:
+                lookup = _TipLookup(_TIP_KIND_TAG, None)
+            else:
+                lookup = _TipLookup(_TIP_KIND_ABSENT, None)
         self._write_cache(
-            cache_file, {"cached_at": time.time(), "tracked_ref": ref, "remote_tip": tip}
+            cache_file,
+            {
+                "cached_at": time.time(),
+                "tracked_ref": ref,
+                "installed_sha": installed,
+                "kind": lookup.kind,
+                "remote_tip": lookup.sha,
+            },
         )
-        return tip
+        return lookup
 
     def _compare_versions(self, current: str, latest: str) -> bool:
         """Compare semantic versions.

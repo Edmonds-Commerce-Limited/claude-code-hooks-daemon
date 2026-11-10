@@ -93,9 +93,7 @@ def daemon_remote(tmp_path: Path) -> dict[str, object]:
     shutil.copy(REPO_ROOT / "scripts" / "install" / "venv_resolver.sh", scripts / "install")
     paths_dir = work / "src" / "claude_code_hooks_daemon" / "daemon"
     paths_dir.mkdir(parents=True)
-    shutil.copy(
-        REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py", paths_dir
-    )
+    shutil.copy(REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py", paths_dir)
     stub = scripts / "upgrade_version.sh"
     stub.write_text(_STUB_LAYER2)
     stub.chmod(0o755)

@@ -8,6 +8,7 @@ an install, because any of those could answer "up to date".
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -181,7 +182,10 @@ class TestMovedRefIsReported:
             handler.handle(new_session_input)
 
         listing.assert_called_once()
-        assert listing.call_args.kwargs["patterns"] == ("refs/heads/rc/1.2.3",)
+        assert listing.call_args.kwargs["patterns"] == (
+            "refs/heads/rc/1.2.3",
+            "refs/tags/rc/1.2.3",
+        )
         assert listing.call_args.kwargs["timeout"] == Timeout.VERSION_CHECK
 
     def test_a_tip_that_has_not_moved_says_so_but_never_up_to_date(
@@ -224,7 +228,21 @@ class TestMoveCheckNeverClaimsCurrent:
 
         assert "not checked" in text.lower()
         assert "has not moved" not in text
-        assert not cache_file.exists()
+
+    def test_a_tag_ref_is_named_as_a_tag_not_as_an_unreadable_remote(
+        self, handler: VersionCheckHandler, new_session_input: dict[str, Any], cache_file: Path
+    ) -> None:
+        tag_listing = RemoteRefs("origin", refs=(("refs/tags/rc/1.2.3", _NEW_SHA),))
+        with (
+            patch(f"{_MODULE}.read_install_stamp", return_value=_BRANCH_STAMP),
+            patch(f"{_MODULE}.read_daemon_metadata", return_value=_tracking()),
+            patch(f"{_MODULE}.list_remote_refs", return_value=tag_listing),
+        ):
+            text = _context_text(handler.handle(new_session_input))
+
+        assert "is a tag" in text
+        assert "could not be read" not in text
+        assert "moved" not in text.lower().replace("not moved", "")
 
     def test_no_tracking_record_says_not_checked_without_the_network(
         self, handler: VersionCheckHandler, new_session_input: dict[str, Any], cache_file: Path
@@ -288,6 +306,70 @@ class TestTipLookupIsCached:
         assert listing.call_count == 1
         assert "moved 1111111..2222222" in second
         assert first == second
+
+    def test_following_a_move_does_not_report_the_old_cached_tip_as_a_move(
+        self, handler: VersionCheckHandler, new_session_input: dict[str, Any], cache_file: Path
+    ) -> None:
+        """A tip cached against one installed commit is not reused for another."""
+        with (
+            patch(f"{_MODULE}.read_install_stamp", return_value=_BRANCH_STAMP),
+            patch(f"{_MODULE}.read_daemon_metadata", return_value=_tracking(sha=_OLD_SHA)),
+            patch(f"{_MODULE}.list_remote_refs", return_value=_listing("rc/1.2.3", _OLD_SHA)),
+        ):
+            handler.handle(new_session_input)
+        with (
+            patch(f"{_MODULE}.read_install_stamp", return_value=_BRANCH_STAMP),
+            patch(f"{_MODULE}.read_daemon_metadata", return_value=_tracking(sha=_NEW_SHA)),
+            patch(
+                f"{_MODULE}.list_remote_refs", return_value=_listing("rc/1.2.3", _NEW_SHA)
+            ) as listing,
+        ):
+            text = _context_text(handler.handle(new_session_input))
+
+        listing.assert_called_once()
+        assert "has not moved" in text
+        assert "..1111111" not in text
+
+    def test_a_failed_listing_is_cached_so_an_offline_start_does_not_wait_again(
+        self, handler: VersionCheckHandler, new_session_input: dict[str, Any], cache_file: Path
+    ) -> None:
+        failed = _listing("rc/1.2.3", None, failure="timed out")
+        with (
+            patch(f"{_MODULE}.read_install_stamp", return_value=_BRANCH_STAMP),
+            patch(f"{_MODULE}.read_daemon_metadata", return_value=_tracking()),
+            patch(f"{_MODULE}.list_remote_refs", return_value=failed) as listing,
+        ):
+            first = _context_text(handler.handle(new_session_input))
+            second = _context_text(handler.handle(new_session_input))
+
+        assert listing.call_count == 1
+        assert "not checked" in first.lower()
+        assert "not checked" in second.lower()
+
+    def test_a_failed_listing_expires_sooner_than_a_good_one(
+        self, handler: VersionCheckHandler, new_session_input: dict[str, Any], cache_file: Path
+    ) -> None:
+        def _run(listing_result: RemoteRefs) -> Any:
+            with (
+                patch(f"{_MODULE}.read_install_stamp", return_value=_BRANCH_STAMP),
+                patch(f"{_MODULE}.read_daemon_metadata", return_value=_tracking()),
+                patch(f"{_MODULE}.list_remote_refs", return_value=listing_result) as listing,
+            ):
+                handler.handle(new_session_input)
+            return listing
+
+        def _age_cache(seconds: float) -> None:
+            entry = json.loads(cache_file.read_text())
+            entry["cached_at"] -= seconds
+            cache_file.write_text(json.dumps(entry))
+
+        two_hours = 2 * 3600
+        _run(_listing("rc/1.2.3", None, failure="timed out"))
+        _age_cache(two_hours)
+        assert _run(_listing("rc/1.2.3", _NEW_SHA)).call_count == 1  # failure retried
+
+        _age_cache(two_hours)
+        assert _run(_listing("rc/1.2.3", _NEW_SHA)).call_count == 0  # good entry still fresh
 
     def test_a_cache_for_another_ref_is_not_used(
         self, handler: VersionCheckHandler, new_session_input: dict[str, Any], cache_file: Path
