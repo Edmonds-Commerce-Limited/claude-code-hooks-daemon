@@ -14,6 +14,7 @@ import pytest
 
 from claude_code_hooks_daemon.core import Decision
 from tests.integration.handlers.conftest import make_bash_hook_input
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 
 # ---------------------------------------------------------------------------
@@ -196,15 +197,23 @@ class TestPipeBlockerHandler:
         [
             "npm test | tail -n 20",
             "pytest | head -5",
-            "docker logs container | tail -100",
         ],
-        ids=["npm-tail", "pytest-head", "docker-tail"],
+        ids=["npm-tail", "pytest-head"],
     )
     def test_blocks_expensive_pipes(self, handler: Any, command: str) -> None:
         hook_input = make_bash_hook_input(command)
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+
+    def test_unknown_producer_pipe_allows_with_the_unknown_advisory(
+        self, handler: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """docker is on no list: the pipe is allowed with the unknown-verdict advisory."""
+        hook_input = make_bash_hook_input("docker logs container | tail -100")
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert_unknown_verdict(result, caplog, "pipe_blocker", "docker")
 
     @pytest.mark.parametrize(
         "command",

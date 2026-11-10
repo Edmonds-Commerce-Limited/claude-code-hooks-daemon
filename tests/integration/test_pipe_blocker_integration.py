@@ -3,7 +3,7 @@
 Tests the three-tier decision system end-to-end through EventRouter:
 - Tier 1 (whitelist):  grep, ls, cat → ALLOW
 - Tier 2 (blacklist):  pytest, npm test, cargo test → DENY "expensive"
-- Tier 3 (unknown):    find, docker ps → DENY "unrecognized, add to extra_whitelist"
+- Tier 3 (unknown):    find, docker ps → ALLOW with the unknown-verdict advisory
 """
 
 from claude_code_hooks_daemon.constants import HandlerID
