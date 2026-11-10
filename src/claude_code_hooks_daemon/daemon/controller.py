@@ -242,7 +242,7 @@ class DaemonController:
         claude_md: "ClaudeMdConfig | None" = None,
         chain: "ChainConfig | None" = None,
         strict_mode: bool | None = None,
-        write_claude_md_in_linked_worktree: bool = False,
+        claude_md_on_request: bool = False,
         worktree: "WorktreeConfig | None" = None,
         reference_repos: "ReferenceReposConfig | None" = None,
         branches: "BranchesConfig | None" = None,
@@ -285,11 +285,13 @@ class DaemonController:
                 None (every existing caller that does not pass it, e.g. most
                 unit tests) keeps the pre-existing default: fail-open for a
                 non-SAFETY+BLOCKING handler that raises.
-            write_claude_md_in_linked_worktree: Regenerate the CLAUDE.md
-                block even when ``workspace_root`` is a linked git worktree.
+            claude_md_on_request: The CLAUDE.md block was explicitly asked for:
+                write it even in a linked git worktree or off a home branch.
                 Daemon startup leaves it False, so a worktree's branch never
                 carries an auto-committed regeneration that conflicts with
-                main's on merge; ``regenerate-docs`` passes True.
+                main's on merge and a non-home checkout is left alone;
+                ``regenerate-docs`` passes True. Nothing is committed off a
+                home branch either way.
             chain_deadline_problems: ``DaemonConfig.chain_deadline_problems``
                 (Plan 00466 N40 review 2 mA4). Each is logged and reported in
                 ``get_health()`` as the ``chain_deadline`` degraded reason.
@@ -435,13 +437,14 @@ class DaemonController:
         )
 
         def inject_claude_md() -> None:
-            ClaudeMdInjector(
+            notices = ClaudeMdInjector(
                 workspace_root=workspace_root,
                 handlers=all_handlers,
                 promoted_handlers=promoted_handlers,
-                write_in_linked_worktree=write_claude_md_in_linked_worktree,
+                on_request=claude_md_on_request,
                 branches=branches,
             ).inject()
+            self._publish_startup_notices(all_handlers, notices)
 
         # Sync daemon-shipped agent assets with the gating config (Plan 00279):
         # enabled + missing/outdated deploys, disabled + present logs a removal
@@ -474,6 +477,20 @@ class DaemonController:
             self._validate_config(config_path, reusable_config)
             sync_agent_assets()
             sync_directory_role_rules()
+
+    @staticmethod
+    def _publish_startup_notices(handlers: list[Any], notices: list[str]) -> None:
+        """Hand start-up notices to each handler that shows them to agents at SessionStart.
+
+        The injector runs after handlers are registered (and, in the serving
+        daemon, after the socket is bound), so what it found cannot travel with
+        the registry's ``config_problems``.
+        """
+        if not notices:
+            return
+        for handler in handlers:
+            if hasattr(handler, "_startup_notices"):
+                handler._startup_notices = tuple(notices)
 
     def take_deferred_startup(self) -> list[tuple[str, Callable[[], object]]]:
         """Hand over, once, the start-up steps ``initialise`` held back.

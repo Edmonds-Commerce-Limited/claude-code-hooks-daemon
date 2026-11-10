@@ -187,15 +187,37 @@ def _off_home_reason(cwd: Path, branches: "BranchesConfig | None") -> str | None
     head = current_branch(cwd)
     if head is None:
         return "HEAD is detached or unreadable, so there is no home branch to be on"
-    home = list(config.home)
+    home = _home_branches(cwd, config)
     if not home:
-        default = resolve_default_branch(config, cwd)
-        if default is None:
-            return "the default branch could not be resolved and branches.home is not set"
-        home = [default]
+        return "the default branch could not be resolved and branches.home is not set"
     if head not in home:
         return f"HEAD is on {head!r}, not a home branch ({', '.join(home)})"
     return None
+
+
+def _home_branches(cwd: Path, config: "BranchesConfig") -> list[str]:
+    """The home branches: ``branches.home``, else the default branch, else a fallback.
+
+    Empty means nothing could be resolved. When ``resolve_default_branch`` finds
+    nothing, in order: git's ``init.defaultBranch``, the branch an unborn HEAD
+    points at (a repository before its first commit), then a sole local branch.
+    """
+    if config.home:
+        return list(config.home)
+    default = resolve_default_branch(config, cwd) or _fallback_default_branch(cwd)
+    return [default] if default else []
+
+
+def _fallback_default_branch(cwd: Path) -> str | None:
+    """The default branch for a repository with no remote HEAD and no ``main``/``master``."""
+    configured = run_git(cwd, "config", "init.defaultBranch").stdout.strip()
+    if configured:
+        return configured
+    if run_git(cwd, "rev-parse", "--verify", "--quiet", _GIT_HEAD_REF).returncode != 0:
+        return current_branch(cwd)
+    listing = run_git(cwd, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+    local = [line for line in listing.stdout.splitlines() if line]
+    return local[0] if len(local) == 1 else None
 
 
 def _sha256(text: str) -> str:
@@ -359,7 +381,7 @@ class ClaudeMdInjector:
         workspace_root: Path,
         handlers: list[Any],
         promoted_handlers: list[str] | None = None,
-        write_in_linked_worktree: bool = False,
+        on_request: bool = False,
         branches: "BranchesConfig | None" = None,
     ) -> None:
         """Initialise injector.
@@ -373,17 +395,14 @@ class ClaudeMdInjector:
                 block. ``None``/empty means pure progressive disclosure —
                 every handler with declared ``get_rules()`` is reduced to
                 rule-table rows.
-            write_in_linked_worktree: Regenerate even when ``workspace_root``
-                is a ``git worktree add`` checkout. Off (the daemon startup
-                path) the injector leaves a linked worktree alone: the
-                regeneration is auto-committed, so in a worktree it lands on
-                the worktree's branch while the main checkout's restarts
-                land theirs on main, and the two generated blocks conflict
-                on every merge back. The block is regenerated on main after
-                the merge, for the merged code. The explicit
-                ``regenerate-docs`` command passes True — it is the
-                documented way to recover a conflict-marked block, wherever
-                that block is.
+            on_request: The write was explicitly asked for (the ``regenerate-docs``
+                command). It bypasses the two start-up gates: a linked worktree is
+                left alone at start-up (the regeneration is auto-committed, so it
+                would land on the worktree's branch and conflict with the main
+                checkout's on every merge back), and a checkout that is not on a
+                home branch (``branches.home``) is not written at all. It is the
+                documented way to recover a conflict-marked block wherever that
+                block is. It still never commits off a home branch.
             branches: The ``branches:`` config; ``branches.home`` names the
                 branches the block may be written and committed on. ``None``
                 means the defaults (the repo's default branch).
@@ -396,16 +415,20 @@ class ClaudeMdInjector:
         # frozenset above, which exists purely for the O(1) membership check
         # in the per-handler loop below and necessarily discards order.
         self._promoted_handlers_order: tuple[str, ...] = tuple(promoted_handlers or [])
-        self._write_in_linked_worktree = write_in_linked_worktree
+        self._on_request = on_request
 
-    def inject(self) -> None:
+    def inject(self) -> list[str]:
         """Collect handler guidance and update CLAUDE.md.
 
         Silently no-ops if no handlers provide guidance.
         Logs errors but never raises — daemon startup must not fail.
+
+        Returns:
+            Notices an agent should see (the block is stale and was deliberately
+            not written, or no home branch could be resolved); usually empty.
         """
         try:
-            self._run_inject()
+            return self._run_inject()
         except OSError as exc:
             log_and_continue(
                 logger,
@@ -416,6 +439,7 @@ class ClaudeMdInjector:
                     "daemon continues without it"
                 ),
             )
+            return []
         except Exception as exc:
             log_and_continue(
                 logger,
@@ -426,13 +450,14 @@ class ClaudeMdInjector:
                     "feature that must never stop daemon startup"
                 ),
             )
+            return []
 
-    def _run_inject(self) -> None:
+    def _run_inject(self) -> list[str]:
         """Execute injection — raises on errors for caller to handle."""
         tiers = self._collect_tiers()
         if not (tiers.promoted or tiers.progressive or tiers.fallback):
             logger.debug("ClaudeMdInjector: no handler guidance to inject — skipping")
-            return
+            return []
 
         generated = self._build_section(tiers.promoted, tiers.progressive, tiers.fallback)
         claude_md_path = self._workspace_root / "CLAUDE.md"
@@ -441,9 +466,9 @@ class ClaudeMdInjector:
             logger.warning(
                 "ClaudeMdInjector: workspace_root does not exist: %s", self._workspace_root
             )
-            return
+            return []
 
-        if not self._write_in_linked_worktree and is_linked_worktree(self._workspace_root):
+        if not self._on_request and is_linked_worktree(self._workspace_root):
             logger.info(
                 "ClaudeMdInjector: %s is a linked git worktree — leaving %s as its branch has "
                 "it, so the auto-committed regeneration cannot conflict with the main "
@@ -452,9 +477,9 @@ class ClaudeMdInjector:
                 claude_md_path,
                 daemon_cli_command_for_docs("regenerate-docs"),
             )
-            return
+            return []
 
-        if not self._write_in_linked_worktree:
+        if not self._on_request:
             off_home = _off_home_reason(self._workspace_root, self._branches)
             if off_home is not None:
                 logger.info(
@@ -464,11 +489,13 @@ class ClaudeMdInjector:
                     off_home,
                     daemon_cli_command_for_docs("regenerate-docs"),
                 )
-                return
+                return self._unresolved_home_notices()
+            if self._branches is not None and not self._branches.home_commit:
+                return self._report_stale_block(claude_md_path, generated)
 
         if claude_md_path.exists():
             if not self._write_reconciling_concurrent_edits(claude_md_path, generated):
-                return
+                return []
         else:
             # No existing file — create from scratch (no backup needed)
             updated = generated + "\n"
@@ -487,6 +514,53 @@ class ClaudeMdInjector:
         ClaudeMdInjector._auto_commit_if_dirty(
             claude_md_path, self._external_handler_sources(self._handlers), self._branches
         )
+        return []
+
+    def _unresolved_home_notices(self) -> list[str]:
+        """An agent-visible notice when no home branch could be resolved at all.
+
+        A branch that is merely not home is the normal, quiet case. A checkout
+        where NOTHING resolves (no ``branches.home``, no default branch, no
+        fallback) never gets the block on any branch, so it is said where agents
+        read it, naming the key that fixes it.
+        """
+        config = self._branches
+        if current_branch(self._workspace_root) is None:
+            return []
+        if config is not None and config.home:
+            return []
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+
+        if _home_branches(self._workspace_root, config or BranchesConfig()):
+            return []
+        return [
+            "CLAUDE.md hooks-daemon block not written: the default branch could not be "
+            "resolved. Set `branches.home` (exact branch names this checkout lives on) in "
+            ".claude/hooks-daemon.yaml, then restart the daemon."
+        ]
+
+    def _report_stale_block(self, claude_md_path: Path, generated: str) -> list[str]:
+        """``branches.home_commit: false``: never write on a home branch, report drift instead.
+
+        A home branch that only takes pull requests cannot carry the block as a
+        local change: an uncommitted CLAUDE.md makes the next ``git pull`` of any
+        upstream change to that file fail, and the daemon's own guards deny the
+        usual ways out. So the file is left alone and the drift is reported once
+        in the log and through the agent-visible start-up notice.
+        """
+        original = claude_md_path.read_text(encoding="utf-8") if claude_md_path.exists() else ""
+        updated = self._replace_or_append_section(original, generated)
+        if self._format_or_reuse(updated, original) == original:
+            return []
+        branch = current_branch(self._workspace_root) or _GIT_HEAD_REF
+        message = (
+            f"CLAUDE.md hooks-daemon block is stale on {branch}; run "
+            f"`{daemon_cli_command_for_docs('regenerate-docs')}` on a pull-request branch and "
+            "commit it there (branches.home_commit is false, so the daemon never writes it "
+            "on a home branch)"
+        )
+        logger.warning("ClaudeMdInjector: %s", message)
+        return [message]
 
     @staticmethod
     def _external_handler_sources(handlers: list[Any]) -> list[Path]:
@@ -758,6 +832,13 @@ class ClaudeMdInjector:
             logger.info(
                 "ClaudeMdInjector: wrote %s but not committing it (branches.home_commit: "
                 "false); include it in your next pull request",
+                filename,
+            )
+            return
+        if run_git(cwd, "rev-parse", "--verify", "--quiet", _GIT_HEAD_REF).returncode != 0:
+            logger.info(
+                "ClaudeMdInjector: not auto-committing %s: the repository has no commit yet, and "
+                "the daemon never creates the root commit",
                 filename,
             )
             return

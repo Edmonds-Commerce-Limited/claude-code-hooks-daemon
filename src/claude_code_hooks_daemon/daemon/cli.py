@@ -4383,7 +4383,7 @@ def _build_initialised_controller(
     config: Config,
     project_path: Path,
     *,
-    write_claude_md_in_linked_worktree: bool = False,
+    claude_md_on_request: bool = False,
     defer_nonessential_startup: bool = False,
 ) -> "DaemonController":
     """Build and fully initialise a DaemonController from a loaded config.
@@ -4397,10 +4397,11 @@ def _build_initialised_controller(
     Args:
         config: Loaded daemon configuration.
         project_path: Project root (workspace) the controller serves.
-        write_claude_md_in_linked_worktree: Regenerate the block even in a
-            linked git worktree. Startup leaves it False so the worktree's
-            branch never carries an auto-committed block that conflicts with
-            main's on merge; the explicit ``regenerate-docs`` passes True.
+        claude_md_on_request: Write the block even in a linked git worktree or off
+            a home branch. Startup leaves it False so a worktree's branch never
+            carries an auto-committed block that conflicts with main's on merge,
+            and a non-home checkout is left alone; the explicit
+            ``regenerate-docs`` passes True. It never commits off a home branch.
         defer_nonessential_startup: Leave the CLAUDE.md regeneration, the asset
             syncs and the index pre-warm for ``controller.take_deferred_startup``.
             Only the serving daemon passes True, so it can bind its socket first.
@@ -4436,7 +4437,7 @@ def _build_initialised_controller(
         chain_deadline_problems=config.daemon.chain_deadline_problems,
         config_problems=config.config_problems,
         strict_mode=config.daemon.strict_mode,
-        write_claude_md_in_linked_worktree=write_claude_md_in_linked_worktree,
+        claude_md_on_request=claude_md_on_request,
         worktree=config.worktree,
         reference_repos=config.reference_repos,
         branches=config.branches,
@@ -4480,9 +4481,9 @@ def cmd_regenerate_docs(args: argparse.Namespace) -> int:
     config_path = project_path / ".claude" / "hooks-daemon.yaml"
     try:
         config = Config.load(config_path)
-        # Explicit request: write even in a linked worktree, which daemon
-        # startup deliberately leaves alone (see ClaudeMdInjector).
-        _build_initialised_controller(config, project_path, write_claude_md_in_linked_worktree=True)
+        # Explicit request: write even in a linked worktree or off a home branch,
+        # which daemon startup deliberately leaves alone (see ClaudeMdInjector).
+        _build_initialised_controller(config, project_path, claude_md_on_request=True)
         print(f"Regenerated <hooksdaemon> block in: {project_path / 'CLAUDE.md'}")
         return 0
     except Exception as e:

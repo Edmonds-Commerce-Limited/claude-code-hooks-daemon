@@ -92,6 +92,11 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
         # Config values the daemon runs with other than as written, each with
         # its fix. Injected by `register_all` (Plan 00466 round 3) the same way.
         self._config_problems: Sequence[str] = ()
+        # Things the start-up work found that an agent should act on (a CLAUDE.md
+        # block left stale on a home branch, no resolvable home branch). Set by
+        # the controller after the CLAUDE.md injection, which runs after
+        # `register_all`.
+        self._startup_notices: Sequence[str] = ()
 
     @staticmethod
     def _read_state() -> Any:
@@ -148,7 +153,7 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
             running without its configured options, or a config value is not
             in force as written.
         """
-        return self._is_degraded() or bool(self._config_problems)
+        return self._is_degraded() or bool(self._config_problems) or bool(self._startup_notices)
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Inject the loud degraded-protection alert.
@@ -164,8 +169,15 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
             self._project_handler_lines()
             + self._option_failure_lines()
             + self._config_problem_lines()
+            + self._startup_notice_lines()
         )
         return AdvisoryResult(decision=Decision.ALLOW, context=lines)
+
+    def _startup_notice_lines(self) -> list[str]:
+        """Say what daemon start-up left undone that an agent can act on."""
+        if not self._startup_notices:
+            return []
+        return ["⚠️ DAEMON START-UP NOTICE:", *(f"  - {notice}" for notice in self._startup_notices)]
 
     def _config_problem_lines(self) -> list[str]:
         """Name each config value the daemon runs with other than as written.

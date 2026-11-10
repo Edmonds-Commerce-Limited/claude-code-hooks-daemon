@@ -1771,7 +1771,7 @@ class TestALinkedWorktreeIsNotRegeneratedAtStartup:
         ClaudeMdInjector(
             workspace_root=linked,
             handlers=[_StubHandler("h", "## H\n\nX.")],
-            write_in_linked_worktree=True,
+            on_request=True,
         ).inject()
 
         assert "<hooksdaemon>" in (linked / "CLAUDE.md").read_text(encoding="utf-8")
@@ -2177,8 +2177,19 @@ class TestClaudeMdInjectorHomeBranch:
         ClaudeMdInjector(
             workspace_root=path,
             handlers=[_StubHandler("h", "## H\n\nContent.")],
-            write_in_linked_worktree=force,
+            on_request=force,
             branches=branches,
+        ).inject()
+
+    @staticmethod
+    def _inject_notices(path: Path) -> list[str]:
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        return ClaudeMdInjector(
+            workspace_root=path,
+            handlers=[_StubHandler("h", "## H\n\nContent.")],
+            branches=BranchesConfig(),
         ).inject()
 
     def test_home_defaults_to_empty(self) -> None:
@@ -2229,25 +2240,80 @@ class TestClaudeMdInjectorHomeBranch:
 
         assert BranchesConfig().home_commit is True
 
-    def test_home_commit_false_writes_on_home_but_never_commits(
+    def test_home_commit_false_never_writes_on_a_home_branch(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Plan 00594 Task 2.2: a home branch that only takes pull requests."""
+        """Plan 00594 I-3: no dirty CLAUDE.md on a home branch, so a pull cannot deadlock."""
         from claude_code_hooks_daemon.config.models import BranchesConfig
         from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 
         _init_repo_on_main(tmp_path)
         head = _git(tmp_path, "rev-parse", "HEAD")
         with caplog.at_level(logging.INFO):
-            ClaudeMdInjector(
+            notices = ClaudeMdInjector(
                 workspace_root=tmp_path,
                 handlers=[_StubHandler("h", "## H\n\nContent.")],
                 branches=BranchesConfig(home_commit=False),
             ).inject()
-        assert _has_block(tmp_path)
-        assert not _claude_md_is_clean(tmp_path)
+        assert not _has_block(tmp_path)
+        assert _claude_md_is_clean(tmp_path)
         assert _git(tmp_path, "rev-parse", "HEAD") == head
-        assert "home_commit" in caplog.text
+        assert any("stale on main" in n and "regenerate-docs" in n for n in notices)
+        assert "stale on main" in caplog.text
+
+    def test_home_commit_false_with_a_current_block_reports_nothing(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_repo_on_main(tmp_path)
+        handlers = [_StubHandler("h", "## H\n\nContent.")]
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=handlers).inject()
+        assert _claude_md_is_clean(tmp_path)
+        notices = ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=handlers,
+            branches=BranchesConfig(home_commit=False),
+        ).inject()
+        assert notices == []
+
+    def test_home_commit_false_leaves_a_pull_from_upstream_able_to_fast_forward(
+        self, tmp_path: Path
+    ) -> None:
+        """The upstream touches CLAUDE.md; the home checkout has no local change to clash."""
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        upstream = tmp_path / "upstream"
+        upstream.mkdir()
+        _init_repo_on_main(upstream)
+        local = tmp_path / "local"
+        _git(tmp_path, "clone", "-q", str(upstream), str(local))
+        ClaudeMdInjector(
+            workspace_root=local,
+            handlers=[_StubHandler("h", "## H\n\nContent.")],
+            branches=BranchesConfig(home_commit=False),
+        ).inject()
+        (upstream / "CLAUDE.md").write_text("# Project\n\nchanged upstream\n")
+        _git(upstream, "commit", "-qam", "upstream edit")
+        _git(local, "pull", "--ff-only", "-q")
+        assert "changed upstream" in (local / "CLAUDE.md").read_text()
+
+    def test_on_request_on_a_home_branch_with_home_commit_false_writes_without_committing(
+        self, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_repo_on_main(tmp_path)
+        head = _git(tmp_path, "rev-parse", "HEAD")
+        ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=[_StubHandler("h", "## H\n\nContent.")],
+            on_request=True,
+            branches=BranchesConfig(home_commit=False),
+        ).inject()
+        assert _has_block(tmp_path)
+        assert _git(tmp_path, "rev-parse", "HEAD") == head
 
     def test_configured_home_replaces_the_default_branch(self, tmp_path: Path) -> None:
         _init_repo_on_main(tmp_path)
@@ -2269,13 +2335,45 @@ class TestClaudeMdInjectorHomeBranch:
         assert _git(tmp_path, "rev-parse", "HEAD") == head
         assert "not auto-committing" in caplog.text
 
-    def test_unresolvable_default_branch_fails_safe(self, tmp_path: Path) -> None:
+    def test_unresolvable_default_branch_writes_nothing_and_says_where_to_look(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         _init_git_repo(tmp_path)
         _git(tmp_path, "branch", "-M", "trunk-like")
+        _git(tmp_path, "branch", "other")
         head = _git(tmp_path, "rev-parse", "HEAD")
-        self._inject(tmp_path)
+        notices = self._inject_notices(tmp_path)
         assert not _has_block(tmp_path)
         assert _git(tmp_path, "rev-parse", "HEAD") == head
+        assert any("branches.home" in n for n in notices)
+
+    def test_a_local_only_trunk_branch_is_the_home_branch(self, tmp_path: Path) -> None:
+        _init_git_repo(tmp_path)
+        _git(tmp_path, "branch", "-M", "trunk")
+        before = int(_git(tmp_path, "rev-list", "--count", "HEAD"))
+        assert self._inject_notices(tmp_path) == []
+        assert _has_block(tmp_path)
+        assert int(_git(tmp_path, "rev-list", "--count", "HEAD")) == before + 1
+
+    def test_init_default_branch_names_the_home_when_nothing_else_resolves(
+        self, tmp_path: Path
+    ) -> None:
+        _init_git_repo(tmp_path)
+        _git(tmp_path, "branch", "-M", "develop")
+        _git(tmp_path, "branch", "other")
+        _git(tmp_path, "config", "--local", "init.defaultBranch", "develop")
+        assert self._inject_notices(tmp_path) == []
+        assert _has_block(tmp_path)
+
+    def test_unborn_head_writes_the_block_but_creates_no_root_commit(self, tmp_path: Path) -> None:
+        _git(tmp_path, "init", "-q", "-b", "main")
+        (tmp_path / "CLAUDE.md").write_text("# Project\n")
+        assert self._inject_notices(tmp_path) == []
+        assert _has_block(tmp_path)
+        unborn = subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", "HEAD"], cwd=tmp_path, capture_output=True
+        )
+        assert unborn.returncode != 0
 
     def test_auto_commit_refuses_off_home_directly(self, tmp_path: Path) -> None:
         from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
