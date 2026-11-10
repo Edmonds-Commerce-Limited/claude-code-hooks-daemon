@@ -186,6 +186,33 @@ class TestGrepFilterRelaxationNeedsRootsInsideProject:
     ) -> None:
         assert _verdict(project, command) is Decision.DENY
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rg --follow x clean -g '*'",
+            "rg -L x clean -g '*'",
+            "rg --follow x clean --glob '*'",
+            "rg --follow x clean --iglob '*'",
+            'rg -L x clean -g "*"',
+            "grep -R x clean --include '*'",
+            "rg x outlnk -g '*'",
+            "rg x /etc -g '*'",
+        ],
+    )
+    def test_separate_value_filter_judged_like_attached(
+        self, project: Path, outside: Path, command: str
+    ) -> None:
+        assert _verdict(project, command) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        ["rg x sub -g '*'", "rg x sub --glob '*'", "grep -rl zz sub --include '*'"],
+    )
+    def test_separate_value_filter_over_clean_root_allowed(
+        self, project: Path, command: str
+    ) -> None:
+        assert _verdict(project, command) is Decision.ALLOW
+
     def test_clean_root_inside_project_still_allowed(self, project: Path) -> None:
         (project / "untracked" / "scratch" / "sub").mkdir(parents=True)
         command = "grep -rl zz untracked/scratch/sub --include=*"

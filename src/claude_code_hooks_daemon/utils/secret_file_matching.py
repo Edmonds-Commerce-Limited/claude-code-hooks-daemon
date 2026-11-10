@@ -2160,7 +2160,10 @@ def _searched_paths_hold_no_protected_file(
         return False
     if any(_follows_links(word, names[command]) for word in rest):
         return False
-    operands = [word for word in rest if not word.startswith("-")]
+    filter_values = {i + 1 for i, word in enumerate(rest) if word in _FILTER_SEPARATE_OPTIONS}
+    operands = [
+        word for i, word in enumerate(rest) if not word.startswith("-") and i not in filter_values
+    ]
     paths = operands[1:]
     if not paths or any(char in _WORD_EXPANDING_CHARACTERS for p in paths for char in p):
         return False
@@ -2193,6 +2196,24 @@ def _is_inside(path: str, root: str) -> bool:
     return path == root or path.startswith(root.rstrip("/") + "/")
 
 
+#: The same filters spelled with the value as the next word (``-g '*'``).
+_FILTER_SEPARATE_OPTIONS: Final = frozenset(
+    {"-g", "--glob", "--iglob", "--include", "--exclude", "--exclude-dir"}
+)
+
+
+def _follows_separate_filter_option(before: str) -> bool:
+    """Whether the text ``before`` a value ends in a filter option and its opening quote."""
+    words = before.rstrip("'\"").split()
+    return bool(words) and words[-1] in _FILTER_SEPARATE_OPTIONS and before[-1:] in " '\"\t"
+
+
+def _is_separate_filter_value(word: str, command: str) -> bool:
+    """Whether every occurrence of ``word`` is the separate value of a filter option."""
+    starts = [m.start() for m in re.finditer(re.escape(word), command)]
+    return bool(starts) and all(_follows_separate_filter_option(command[:s]) for s in starts)
+
+
 def _is_scoped_filter_value(
     word: str, command: str, index: "ProtectedFileIndex | None", cwds: tuple[str, ...]
 ) -> bool:
@@ -2212,8 +2233,8 @@ def _is_scoped_filter_value(
     if not starts:
         return False
     for start in starts:
-        attached = next((p for p in _FILTER_VALUE_PREFIXES if command[:start].endswith(p)), None)
-        if attached is None:
+        before = command[:start]
+        if not (before.endswith(_FILTER_VALUE_PREFIXES) or _follows_separate_filter_option(before)):
             return False
         segment_start = _scan_shell_prefix(command[:start])[0]
         segment = _COMMAND_SEGMENT_SEPARATORS.split(command[segment_start:])[0]
@@ -2534,6 +2555,27 @@ def iter_protected_mentions(
             default_globs=default_globs,
         )
         core = word.strip(_TOKEN_PUNCTUATION)
+        if (
+            found is None
+            and index is not None
+            and glob_gate.is_quoted_literal(word)
+            and _is_separate_filter_value(word, command)
+        ):
+            # A quoted filter value is no path for bash, but rg/grep still apply it to
+            # what they find under the searched roots: judge it as the attached form.
+            found = _token_mention(
+                word,
+                patterns,
+                stem_pairs,
+                project_root,
+                context=context,
+                effective_cwds=effective,
+                index=index,
+                default_globs=default_globs,
+            )
+            if found is not None and _is_scoped_filter_value(word, command, index, effective):
+                return None
+            return found
         if found is not None and (
             _is_git_search_word(word, command)
             or _is_scoped_filter_value(word, command, index, effective)
