@@ -12,6 +12,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
+- [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - Not Started (owner request via a client team: redesign the whole branch lifecycle (birth, finish, proof of merge, delete, park, owner) from nine failure classes seen in multi-agent client use, plus letting a client follow a daemon branch tip with a one-step return to the last tag; design first, no guard change ships before review)
+
 ### Next (ordered; work top to bottom)
 
 Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in this order:
@@ -299,7 +301,7 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - **Completed**: 501 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 69 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 70 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
