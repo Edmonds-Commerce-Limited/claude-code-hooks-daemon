@@ -74,17 +74,22 @@ plan states that cost; it does not re-decide the ruling.
   converted (INVENTORY.md "Already converted": every cap, deadline and parse
   failure routes to `_literal_finding_or_advisory`, pinned by
   `test_secret_file_guard_advisory.py`); no work left.
-- [ ] 🔄 **Task 2.2a**: Commit gates (rows 6-13): conflict-marker timeout and
+- [x] ✅ **Task 2.2a**: Commit gates (rows 6-13): conflict-marker timeout and
   unchecked commit, unreadable secret word list, failed staging simulation in
   `sensitive_content`, `staged_lint_gate`, `remote_docs_commit_gate`, and the
   block-mode `docs_qa`/`plan_qa` gates. Introduce ONE shared "unknown verdict"
   helper (advisory naming guard, cause and how to rephrase, plus a log line)
   that the later batches reuse (TDD; handler tests for rows 11-13, which have none).
-- [ ] ⬜ **Task 2.2b**: `destructive_git` substitution route (row 2).
-- [ ] ⬜ **Task 2.2c**: rows 14, 15, 19, 20, 22, 24 (flaggable channel, journal
+  Delivered: `utils/unknown_verdict.py` `unknown_verdict_allow(guard, cause, rephrase)`,
+  log prefix `UNKNOWN-VERDICT`; an independent review caught a found marker lost on
+  a later timeout, fixed before merge (`6014e3814`); release note 027.
+- [ ] ⬜ **Task 2.2b**: `destructive_git` substitution route (row 2). Held with Q1:
+  the forced delete is positively recognised and only its target is hidden behind
+  the substitution, the same "recognised action, unproven target" shape as rows 1/3.
+- [ ] 🔄 **Task 2.2c**: rows 14, 15, 19, 20, 22, 24 (flaggable channel, journal
   guard, release merge freeze, reference repo not verified, curl into a
   non-shell interpreter, root recursion on an unstattable path).
-- [ ] ⬜ **Task 2.2d**: ESLint timeout and run failure (rows 17, 18).
+- [ ] 🔄 **Task 2.2d**: ESLint timeout and run failure (rows 17, 18).
 - [ ] ⬜ **Task 2.2e**: Contested rows, after the owner rules (see "Owner
   questions"): 1, 3, 5, 16, 23, and scope rows 21, 25, 26.
 - [ ] ⬜ **Task 2.3**: Update the rule explanations, the generated `CLAUDE.md`
@@ -92,7 +97,7 @@ plan states that cost; it does not re-decide the ruling.
 
 ## Owner questions (block Task 2.2e only)
 
-- **Q1 (rows 1, 3):** `destructive_git` denies a positively recognised
+- **Q1 (rows 1, 2, 3):** `destructive_git` denies a positively recognised
   `git branch -D` / `worktree remove` / `git push --delete` when it cannot PROVE
   nothing is lost (unknown flag, variable `cd`, failed containment or
   `ls-remote` proof). Is "cannot prove it is safe" an UNKNOWN (warn) or part of
