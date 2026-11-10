@@ -64,7 +64,7 @@ class TestPipeBlockerIntegration:
         assert result.result.reason is not None
         assert result.result.reason.count("To disable:") == 1
 
-    def test_unknown_deny_has_single_disable_footer(self) -> None:
+    def test_blacklisted_deny_has_single_disable_footer(self) -> None:
         router = EventRouter()
         handler = PipeBlockerHandler()
         router.register(EventType.PRE_TOOL_USE, handler)
@@ -72,7 +72,7 @@ class TestPipeBlockerIntegration:
         hook_input = {
             "hook_event_name": "PreToolUse",
             "tool_name": "Bash",
-            "tool_input": {"command": "docker ps -a | tail -10"},
+            "tool_input": {"command": "cargo build 2>&1 | tail -10"},
             "session_id": "test-session",
         }
 
@@ -82,8 +82,8 @@ class TestPipeBlockerIntegration:
         assert result.result.reason is not None
         assert result.result.reason.count("To disable:") == 1
 
-    def test_docker_ps_pipe_tail_blocks_as_unknown_through_router(self) -> None:
-        """Test docker ps | tail is blocked as unknown command through full pipeline."""
+    def test_docker_ps_pipe_tail_warns_as_unknown_through_router(self) -> None:
+        """docker ps | tail is allowed with the unknown-producer advisory through the router."""
         router = EventRouter()
         handler = PipeBlockerHandler()
         router.register(EventType.PRE_TOOL_USE, handler)
@@ -99,15 +99,8 @@ class TestPipeBlockerIntegration:
 
         result = router.route(EventType.PRE_TOOL_USE, hook_input)
 
-        # Should be denied with "unknown" message mentioning extra_whitelist
-        assert result.result.decision == "deny"
-        assert result.result.reason is not None
-        assert (
-            "extra_whitelist" in result.result.reason
-        ), "Unknown reason should mention extra_whitelist"
-        assert (
-            result.terminated_by == HandlerID.PIPE_BLOCKER.display_name
-        ), "Terminal handler should terminate chain"
+        assert result.result.decision == "allow"
+        assert "extra_whitelist" in "\n".join(result.result.context)
 
     def test_grep_pipe_tail_allowed_through_router(self) -> None:
         """Test whitelisted grep | tail is allowed."""

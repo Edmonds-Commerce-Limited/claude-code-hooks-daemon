@@ -214,10 +214,9 @@ class TestLongRealCommandsAreNotProse:
             "tool_input": {"command": f"{self.FIELD_CASE} | head -20"},
         }
         result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "extra_whitelist" in result.reason
-        assert "does not look like a real shell command" not in result.reason
+        assert result.decision == Decision.ALLOW
+        assert "extra_whitelist" in "\n".join(result.context)
+        assert "does not look like a real shell command" not in "\n".join(result.context)
 
     def test_long_real_commands_are_never_classified_as_prose(self) -> None:
         """A corpus of long commands drawn from this repo's actual workflow.
@@ -241,11 +240,8 @@ class TestLongRealCommandsAreNotProse:
             result = handler.handle(
                 {"tool_name": "Bash", "tool_input": {"command": f"{command} | head -20"}}
             )
-            assert result.decision == Decision.DENY
-            assert result.reason is not None
-            assert (
-                "does not look like a real shell command" not in result.reason
-            ), f"real command misclassified as prose: {command}"
+            assert result.decision == Decision.ALLOW, f"real command misclassified: {command}"
+            assert "extra_whitelist" in "\n".join(result.context)
 
     def test_commands_carrying_quoted_english_are_not_prose(self) -> None:
         """Shell quoting is where English legitimately lives inside a command.
@@ -261,21 +257,25 @@ class TestLongRealCommandsAreNotProse:
         probing the fix rather than by assuming it worked.
         """
         handler = PipeBlockerHandler()
+        # ``docker`` is on neither list (allowed with the unknown advisory);
+        # ``kubectl`` is blacklisted (denied with the expensive-command reason).
         quoted_english_commands = (
-            'docker run --name "the box that is in the room" ubuntu',
-            'kubectl annotate pod x note="this is the thing that was broken"',
+            ('docker run --name "the box that is in the room" ubuntu', Decision.ALLOW),
+            ('kubectl annotate pod x note="this is the thing that was broken"', Decision.DENY),
         )
-        for command in quoted_english_commands:
+        for command, decision in quoted_english_commands:
             hook_input = {
                 "tool_name": "Bash",
                 "tool_input": {"command": f"{command} | head -5"},
             }
             assert handler.matches(hook_input), f"fixture is whitelisted, proves nothing: {command}"
             result = handler.handle(hook_input)
-            assert result.reason is not None
-            assert (
-                "does not look like a real shell command" not in result.reason
-            ), f"quoted English misread as prose: {command}"
+            assert result.decision == decision, f"quoted English misread as prose: {command}"
+            if decision == Decision.ALLOW:
+                assert "extra_whitelist" in "\n".join(result.context)
+            else:
+                assert result.reason is not None
+                assert "does not look like a real shell command" not in result.reason
 
     def test_prose_is_still_detected(self) -> None:
         """Negative control: fixing the false positive must not blind the
@@ -312,16 +312,15 @@ class TestRealPipeBlocksAreUnaffected:
         assert result.reason is not None
         assert "expensive" in result.reason
 
-    def test_docker_ps_pipe_tail_still_gets_unknown_template(self) -> None:
+    def test_docker_ps_pipe_tail_gets_the_unknown_advisory(self) -> None:
         handler = PipeBlockerHandler()
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "docker ps -a | tail -20"},
         }
         result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "extra_whitelist" in result.reason
+        assert result.decision == Decision.ALLOW
+        assert "extra_whitelist" in "\n".join(result.context)
 
 
 class TestQuotedDelimiterBodiesAreInert:

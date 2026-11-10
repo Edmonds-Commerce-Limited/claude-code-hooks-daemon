@@ -60,6 +60,13 @@ class TestTheFieldReport:
         assert handler.matches(_bash(command)) is False
 
 
+def _advice(handler: PipeBlockerHandler, command: str) -> str:
+    """The advisory an unknown producer is allowed with (Plan 00478 row 26)."""
+    result = handler.handle(_bash(command))
+    assert result.decision == "allow"
+    return "\n".join(result.context)
+
+
 class TestEveryReservedWordIsSkipped:
     @pytest.mark.parametrize("prefix", _PREFIXES)
     def test_a_whitelisted_producer_stays_allowed(
@@ -129,11 +136,11 @@ class TestASubshellIsJudgedOnItsLastCommand:
     def test_an_unknown_producer_is_suggested_without_its_parentheses(
         self, handler: PipeBlockerHandler
     ) -> None:
-        """The capture snippet splices the producer, so it must be runnable text."""
-        reason = _reason(handler, "( (mytool --report) ) | head")
-        assert '"^mytool\\\\b"' in reason
-        assert "\n  mytool --report " in reason
-        assert "\n  mytool --report)" not in reason
+        """The advisory names the producer, so it must be runnable text."""
+        advice = _advice(handler, "( (mytool --report) ) | head")
+        assert "^mytool\\b" in advice
+        assert "`mytool` piped to tail/head" in advice
+        assert "(mytool" not in advice
 
 
 class TestTheWhitelistSuggestionNeverNamesAReservedWord:
@@ -141,9 +148,9 @@ class TestTheWhitelistSuggestionNeverNamesAReservedWord:
     def test_an_unknown_producer_is_suggested_by_its_own_name(
         self, handler: PipeBlockerHandler, prefix: str
     ) -> None:
-        reason = _reason(handler, f"{prefix}mytool --report | head")
-        assert '"^mytool\\\\b"' in reason
-        assert f'"^{prefix.strip()}' not in reason
+        advice = _advice(handler, f"{prefix}mytool --report | head")
+        assert "^mytool\\b" in advice
+        assert f"^{prefix.strip()}" not in advice
 
     @pytest.mark.parametrize(
         "command",

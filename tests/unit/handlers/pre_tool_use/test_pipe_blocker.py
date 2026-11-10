@@ -145,24 +145,25 @@ class TestEchdCaptureRecommendation:
         reason = self._handle(handler, blacklisted_input, transcript_path, daemon_dir=tmp_path)
         assert "echd-capture" in reason
 
-    def test_verbose_unknown_recommends_echd_capture(
+    def test_unknown_advisory_recommends_the_deployed_echd_capture(
         self, handler: PipeBlockerHandler, unknown_input: dict, tmp_path: Path
     ) -> None:
+        """An unknown producer is allowed; the advisory names the deployed helper."""
         _deploy_fake_helper(tmp_path)
-        reason = self._handle(
-            handler, unknown_input, "/tmp/agent-a/transcript.jsonl", daemon_dir=tmp_path
-        )
-        assert "echd-capture" in reason
-        assert "pipefail" in reason
+        with _pinned_to(tmp_path):
+            result = handler.handle(unknown_input)
+        assert result.decision == "allow"
+        advisory = "\n".join(result.context)
+        assert str(tmp_path / "bin" / "echd-capture") in advisory
+        assert "pipefail" in advisory
 
-    def test_terse_unknown_recommends_echd_capture(
-        self, handler: PipeBlockerHandler, unknown_input: dict, tmp_path: Path
+    def test_unknown_advisory_still_names_the_helper_when_unresolvable(
+        self, handler: PipeBlockerHandler, unknown_input: dict
     ) -> None:
-        _deploy_fake_helper(tmp_path)
-        transcript_path = "/tmp/agent-a/transcript.jsonl"
-        self._handle(handler, unknown_input, transcript_path, daemon_dir=tmp_path)
-        reason = self._handle(handler, unknown_input, transcript_path, daemon_dir=tmp_path)
-        assert "echd-capture" in reason
+        with _uninitialised():
+            result = handler.handle(unknown_input)
+        assert result.decision == "allow"
+        assert "echd-capture" in "\n".join(result.context)
 
 
 class TestClaudeMdNamesTheHelperOnlyWhenDeployed:
@@ -453,120 +454,6 @@ class TestBlacklistedTerseMessage:
         )
 
 
-# ── Unknown path: verbose (first fire) ────────────────────────────────────────
-
-
-class TestUnknownVerboseMessage:
-    """First fire for a given agent produces a verbose message for unknown commands."""
-
-    def test_first_fire_unknown_contains_pipe_blocked(
-        self, handler: PipeBlockerHandler, unknown_input: dict
-    ) -> None:
-        """Verbose unknown message contains 'Pipe to tail/head detected'."""
-        result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
-        assert result.reason is not None
-        assert "Pipe to tail/head detected" in result.reason
-
-    def test_first_fire_unknown_contains_extra_whitelist(
-        self, handler: PipeBlockerHandler, unknown_input: dict
-    ) -> None:
-        """Verbose unknown message mentions extra_whitelist."""
-        result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
-        assert result.reason is not None
-        assert "extra_whitelist" in result.reason
-
-    def test_first_fire_unknown_contains_why_blocked(
-        self, handler: PipeBlockerHandler, unknown_input: dict
-    ) -> None:
-        """Verbose unknown message contains 'WHY BLOCKED' section."""
-        result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
-        assert result.reason is not None
-        assert "WHY BLOCKED" in result.reason
-
-    def test_first_fire_unknown_contains_whitelisted_info(
-        self, handler: PipeBlockerHandler, unknown_input: dict
-    ) -> None:
-        """Verbose unknown message contains WHITELISTED COMMANDS section."""
-        result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
-        assert result.reason is not None
-        assert "WHITELISTED" in result.reason
-
-    def test_first_fire_unknown_leads_with_rule_id(
-        self, handler: PipeBlockerHandler, unknown_input: dict
-    ) -> None:
-        """The deny reason leads with a rule_id (Plan 00116 parity contract)."""
-        result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
-        assert result.reason is not None
-        assert result.reason.startswith(f"BLOCKED [{RuleID.PIPE_TO_TAIL}]")
-
-
-# ── Unknown path: terse (repeat fires) ─────────────────────────────────────────
-
-
-class TestUnknownTerseMessage:
-    """A repeat fire of the SAME rule for the SAME agent is terse."""
-
-    def _second_fire(self, handler: PipeBlockerHandler, unknown_input: dict) -> str:
-        transcript_path = "/tmp/agent-a/transcript.jsonl"
-        handler.handle(_with_transcript(unknown_input, transcript_path))
-        result = handler.handle(_with_transcript(unknown_input, transcript_path))
-        assert result.reason is not None
-        return result.reason
-
-    def test_second_fire_unknown_terse(
-        self, handler: PipeBlockerHandler, unknown_input: dict
-    ) -> None:
-        """A repeat fire produces a terse message for an unknown command."""
-        reason = self._second_fire(handler, unknown_input)
-        assert "BLOCKED" in reason
-        assert "unrecognized" in reason
-        assert "extra_whitelist" in reason
-
-    def test_second_fire_unknown_no_why_blocked_section(
-        self, handler: PipeBlockerHandler, unknown_input: dict
-    ) -> None:
-        """Terse unknown message omits 'WHY BLOCKED' section."""
-        assert "WHY BLOCKED" not in self._second_fire(handler, unknown_input)
-
-    def test_second_fire_unknown_no_whitelisted_section(
-        self, handler: PipeBlockerHandler, unknown_input: dict
-    ) -> None:
-        """Terse unknown message omits WHITELISTED COMMANDS section."""
-        assert "WHITELISTED COMMANDS" not in self._second_fire(handler, unknown_input)
-
-    def test_many_fires_unknown_still_terse(
-        self, handler: PipeBlockerHandler, unknown_input: dict
-    ) -> None:
-        """A long run of repeat fires for the same agent stays terse."""
-        transcript_path = "/tmp/agent-a/transcript.jsonl"
-        result: GatingResult | None = None
-        for _ in range(10):
-            result = handler.handle(_with_transcript(unknown_input, transcript_path))
-        assert result is not None
-        assert result.reason is not None
-        assert "BLOCKED" in result.reason
-        assert "unrecognized" in result.reason
-        assert "WHY BLOCKED" not in result.reason
-
-    def test_terse_unknown_contains_command(
-        self, handler: PipeBlockerHandler, unknown_input: dict
-    ) -> None:
-        """Terse unknown message includes the blocked command."""
-        assert "COMMAND:" in self._second_fire(handler, unknown_input)
-
-    def test_terse_unknown_contains_temp_file_alternative(
-        self, handler: PipeBlockerHandler, unknown_input: dict
-    ) -> None:
-        """Terse unknown message includes temp file alternative."""
-        assert "TEMP_FILE" in self._second_fire(handler, unknown_input)
-
-    def test_terse_unknown_contains_disable_hint(
-        self, handler: PipeBlockerHandler, unknown_input: dict
-    ) -> None:
-        """Terse unknown message includes disable hint."""
-        assert "pipe_blocker" in self._second_fire(handler, unknown_input)
-
-
 # ── Disclosure ladder isolation ────────────────────────────────────────────────
 
 
@@ -716,7 +603,6 @@ class TestEveryDenyCarriesItsRuleId:
         [
             ("pytest tests/ | tail -20", RuleID.PIPE_TO_TAIL),
             ("pytest tests/ | head -20", RuleID.PIPE_TO_HEAD),
-            ("docker ps -a | tail -20", RuleID.PIPE_TO_TAIL),
             ("for f in a b; do mytool $f; done | head -5", RuleID.PIPE_TO_HEAD),
         ],
     )
