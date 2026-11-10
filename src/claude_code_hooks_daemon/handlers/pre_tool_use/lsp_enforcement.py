@@ -349,8 +349,12 @@ _FLAG_SKIP = (
 
 # Extract the search pattern from a bash grep/rg command. Group 1 captures a
 # quoted pattern, group 2 captures an unquoted token.
+#
+# The command word must start a word: ``(?<![\w-])`` stops ``semgrep shell_check``
+# (an argument list) from reading as ``grep shell_check``.
 _BASH_GREP_EXTRACT = re.compile(
-    rf"(?:grep|rg)\s+{_FLAG_SKIP}[\"']([^\"']+)[\"']" rf"|(?:grep|rg)\s+{_FLAG_SKIP}(\S+)"
+    rf"(?<![\w-])(?:grep|rg)\s+{_FLAG_SKIP}[\"']([^\"']+)[\"']"
+    rf"|(?<![\w-])(?:grep|rg)\s+{_FLAG_SKIP}(\S+)"
 )
 
 # Recursive-scan indicators for a Bash grep/rg command. Only the SHORT-flag

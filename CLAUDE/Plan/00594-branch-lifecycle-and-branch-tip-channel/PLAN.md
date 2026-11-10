@@ -153,6 +153,15 @@ names, people or hashes appear here.
   for client design review) Write a failing test that reproduces a housekeeping
   regeneration leaving a dirty tracked file and an auto-commit on a non-default
   or throwaway branch. Then fix it per `DESIGN.md`.
+- [ ] ⬜ **Task 2.2**: (RC feedback) A home branch that only accepts changes
+  by pull request gets no local auto-commit of the CLAUDE.md block. Observed:
+  a client named its PR-protected release line as a home branch, and
+  switching the main checkout to it committed five generated lines locally.
+  Landing those then needed a branch, a full gate and a bot review, and the
+  release tip moved each time. Design: a per-home-branch commit mode in
+  config. One mode commits (direct push allowed). Another writes the block,
+  leaves it uncommitted and says so, so it is batched into the next real PR.
+  Choose the default when the design is reviewed.
 
 ### Phase 3: Proof of merge and agent-performable deletion (classes 3, 6, 8)
 
@@ -164,6 +173,13 @@ names, people or hashes appear here.
   directories, and the list is configurable.
 - [ ] ⬜ **Task 3.4**: Bulk cleanup is batched, resumable and dry-run first,
   and is tested against a fixture with hundreds of branches.
+- [ ] ⬜ **Task 3.5**: (RC feedback) When the worktree-removal guard names a
+  blocking path, its deny says "delete it first, then retry the removal". A
+  single command that deletes the path and removes the worktree is judged
+  before it runs, so it is still denied.
+- [ ] ⬜ **Task 3.6**: (RC feedback) The installer cleans up, or ignores, the
+  settings backup file it leaves when that file is byte-identical to the
+  original.
 
 ### Phase 4: Pressure, preflight, park, owner (classes 2, 4, 5, 7)
 
@@ -184,9 +200,23 @@ names, people or hashes appear here.
 
 ### Phase 5: Branch tip channel
 
+- [x] ✅ **Task 5.0**: (done: RELEASING.md "Release candidate branches")
+  At the owner's ruling, `rc/X.Y.Z` release-candidate branches become the
+  supported beta channel. They are installed through the existing guarded
+  unreleased install. Every push gets autofix and targeted QA first and is
+  announced with its sha. Proven live: the first RC, `rc/3.73.3`, unblocked
+  a client seat and confirmed the class 6 fix the same day.
 - [ ] ⬜ **Task 5.1**: A client can follow a branch or commit, is told when it
   has moved, and can return to the last tag in one step. Proven on the client
   test seat.
+- [x] ✅ **Task 5.2**: (RC feedback; done on the release branch, release note
+  034\) A guarded unreleased install no longer exits 141 when the ref's
+  `pyproject.toml` is larger than one pipe write. Layer 1 reads the blob
+  whole before parsing it.
+- [ ] ⬜ **Task 5.3**: (RC feedback) `hooks-daemon status` on a branch-tip
+  install shows the stamp of the clone HEAD. Today it can show an earlier
+  rc's `+sha`, because the venv is not rebuilt when the lock is unchanged.
+  Cosmetic, but it misleads anyone confirming which tip is live.
 
 ### Phase 6: Journal heading churn (class 9)
 
