@@ -739,6 +739,7 @@ fi
 # the resolver's own cache rule (Plan 00466 N37). Resolved with GATE_SAFE_PATH,
 # like everything else that feeds the gate.
 INSTALLED_VERSION=""
+PREVIOUS_VENV_DIR=""
 
 # _read_installed_version() - Set INSTALLED_VERSION.
 _read_installed_version() {
@@ -759,6 +760,19 @@ _read_installed_version() {
             ;;
     esac
     INSTALLED_VERSION="$(get_venv_version "$venv_dir")"
+    PREVIOUS_VENV_DIR="$venv_dir"
+}
+
+# _record_tracking() - Record (branch install) or clear (release install) the
+# tracking metadata of the venv just built (Plan 00594 Task 5.1). The release
+# installed before is the previous venv's stamp when that was a release; a
+# branch stamp carries none, so the previous venv's own record supplies it.
+_record_tracking() {
+    local previous_release=""
+    if [ -n "$INSTALLED_VERSION" ] && [[ "$INSTALLED_VERSION" != *+* ]]; then
+        previous_release="v${INSTALLED_VERSION#v}"
+    fi
+    record_install_tracking "$VENV_PYTHON" "$VENV_PATH" "$DAEMON_DIR" "$PREVIOUS_VENV_DIR" "$previous_release"
 }
 _read_installed_version
 
@@ -970,6 +984,7 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ] || { [ -n "$TARGET_COMMIT" ] && [ "$T
     if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
         fail_fast "Virtual environment verification failed"
     fi
+    _record_tracking
 
     # The target's own compatibility check needs its venv, and runs before the
     # first deploy.
@@ -1342,6 +1357,7 @@ VENV_PYTHON="$VENV_PATH/bin/python"
 if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
     fail_fast "Virtual environment verification failed"
 fi
+_record_tracking
 
 # The target's venv is verified and nothing has been deployed into the project
 # yet.

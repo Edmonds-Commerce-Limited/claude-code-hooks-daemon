@@ -98,3 +98,38 @@ print_branch_install_banner() {
     echo "==========================================================================" >&2
     echo "" >&2
 }
+
+#
+# record_install_tracking() - Record what this install tracks (Plan 00594 Task 5.1)
+#
+# The stamp turns the ref's "/" into "-", so the exact ref, the full sha and the
+# release installed before go into the venv's .daemon-metadata.json through the
+# record-venv-tracking command. A release install (gate off) clears them.
+# Non-fatal like write-venv-metadata: the venv works without the record, only
+# the session-start check for a moved ref is lost, so it warns.
+#
+# Args:
+#   $1 - venv_python, $2 - venv_path, $3 - daemon_dir (HEAD is the installed commit)
+#   $4 - previous_venv_dir (may be empty), $5 - previous_release_tag (may be empty)
+#
+record_install_tracking() {
+    local venv_python="$1" venv_path="$2" daemon_dir="$3"
+    local previous_venv="${4:-}" previous_release="${5:-}"
+    local -a args=(--venv-path "$venv_path")
+
+    if [ "$(branch_install_gate_state)" = "armed" ]; then
+        local sha
+        sha="$(git -C "$daemon_dir" rev-parse HEAD)" || return 0
+        args+=(--tracked-ref "$HOOKS_DAEMON_UNSAFE_TRACK_REF" --tracked-sha "$sha")
+        if [ -n "$previous_release" ]; then
+            args+=(--last-release-tag "$previous_release")
+        fi
+        if [ -n "$previous_venv" ]; then
+            args+=(--previous-venv-path "$previous_venv")
+        fi
+    fi
+    if ! "$venv_python" -m claude_code_hooks_daemon.daemon.cli record-venv-tracking "${args[@]}"; then
+        print_warning "Could not record the tracking metadata in $venv_path; session start will not notice when the tracked ref moves"
+    fi
+    return 0
+}

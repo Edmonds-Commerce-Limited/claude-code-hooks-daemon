@@ -272,6 +272,117 @@ class TestGateIsNotAdvertisedByTheScript:
 
 
 # ---------------------------------------------------------------------------
+# Layer 1: --release, the one-step return from a branch install (Plan 00594 Task 5.1)
+# ---------------------------------------------------------------------------
+
+
+def _record_tracking_metadata(project: Path, last_release_tag: str | None) -> None:
+    """Leave the venv metadata a branch install of ``main`` would have written."""
+    venv = project / ".claude" / "hooks-daemon" / "untracked" / "venv-fixture"
+    venv.mkdir(parents=True)
+    tag = "null" if last_release_tag is None else f'"{last_release_tag}"'
+    (venv / ".daemon-metadata.json").write_text(
+        '{"python_path":"/usr/bin/python3","fingerprint":"fixture","lock_hash":"sha256:'
+        + "a" * 64
+        + '","daemon_version":"v1.1.0+main.abcdef0","written_at":"2026-01-01T00:00:00Z",'
+        + '"tracked_ref":"main","tracked_sha":"'
+        + "a" * 40
+        + f'","last_release_tag":{tag}}}'
+    )
+
+
+@pytest.fixture
+def newer_tag(tmp_path: Path, daemon_remote: dict[str, object]) -> str:
+    """A release newer than the one the seat last ran, on the branch tip."""
+    work = tmp_path / "daemon-work"
+    # The latest tag is the one on the newest commit by date, and the fixture
+    # commits land in the same second, so date this one explicitly.
+    later = {**os.environ, "GIT_COMMITTER_DATE": "2099-01-01T00:00:00Z"}
+    commit = subprocess.run(
+        [
+            GIT,
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "release v1.0.1",
+            "--date",
+            "2099-01-01T00:00:00Z",
+        ],
+        cwd=work,
+        env=later,
+        capture_output=True,
+        text=True,
+        timeout=_TIMEOUT_SECONDS,
+        check=False,
+    )
+    _require_ok(commit, "commit newer")
+    _require_ok(_git("tag", "v1.0.1", cwd=work), "tag newer")
+    _require_ok(_git("push", "-q", "origin", "main", "v1.0.1", cwd=work), "push newer tag")
+    return "v1.0.1"
+
+
+class TestReleaseRouteReturnsFromABranchInstall:
+    def test_lands_on_the_recorded_last_release_without_the_unsafe_variables(
+        self, client_project: Path, daemon_remote: dict[str, object], newer_tag: str
+    ) -> None:
+        _record_tracking_metadata(client_project, "v1.0.0")
+        result = _run_layer1(client_project, "--release")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _daemon_head(client_project) == daemon_remote["tag_commit"]
+        assert "STUB_LAYER2_REF_VAR: <unset>" in result.stdout
+        assert "STUB_LAYER2_REASON_VAR: <unset>" in result.stdout
+        args_line = next(line for line in result.stdout.splitlines() if "STUB_LAYER2_ARGS" in line)
+        assert args_line.split()[-1] == "v1.0.0"
+        assert "NON-RELEASE" not in result.stdout
+
+    def test_without_a_recorded_release_it_takes_the_latest_tag(
+        self, client_project: Path, daemon_remote: dict[str, object], newer_tag: str
+    ) -> None:
+        _record_tracking_metadata(client_project, None)
+        result = _run_layer1(client_project, "--release")
+        assert result.returncode == 0, result.stdout + result.stderr
+        args_line = next(line for line in result.stdout.splitlines() if "STUB_LAYER2_ARGS" in line)
+        assert args_line.split()[-1] == newer_tag
+
+    def test_without_any_metadata_it_takes_the_latest_tag(
+        self, client_project: Path, newer_tag: str
+    ) -> None:
+        result = _run_layer1(client_project, "--release")
+        assert result.returncode == 0, result.stdout + result.stderr
+        args_line = next(line for line in result.stdout.splitlines() if "STUB_LAYER2_ARGS" in line)
+        assert args_line.split()[-1] == newer_tag
+
+    def test_refuses_alongside_the_unsafe_variables(
+        self, client_project: Path, daemon_remote: dict[str, object]
+    ) -> None:
+        result = _run_layer1(client_project, "--release", gate={REF_VAR: "main", REASON_VAR: "x"})
+        assert result.returncode != 0
+        assert "--release" in result.stderr
+        assert "STUB_LAYER2_ARGS" not in result.stdout
+        assert _daemon_head(client_project) == daemon_remote["tag_commit"]
+
+    def test_refuses_alongside_a_version_argument(
+        self, client_project: Path, daemon_remote: dict[str, object]
+    ) -> None:
+        result = _run_layer1(client_project, "--release", "v1.0.0")
+        assert result.returncode != 0
+        assert "--release" in result.stderr
+        assert "STUB_LAYER2_ARGS" not in result.stdout
+
+    def test_help_documents_the_route(self) -> None:
+        result = subprocess.run(
+            [BASH, str(LAYER1_UPGRADE_SH), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=_TIMEOUT_SECONDS,
+            check=False,
+        )
+        assert "--release" in result.stdout
+        assert "UNSAFE_TRACK_REF" not in result.stdout + result.stderr
+
+
+# ---------------------------------------------------------------------------
 # Layer 1: the fresh-clone client state (Task 1.2 / 1.3)
 # ---------------------------------------------------------------------------
 

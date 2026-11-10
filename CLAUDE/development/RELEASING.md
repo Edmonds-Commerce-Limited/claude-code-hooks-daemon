@@ -347,8 +347,18 @@ A full sha in `HOOKS_DAEMON_UNSAFE_TRACK_REF` pins an exact build. Session
 start flags the install as unreleased (`vA.B.C+rc-X.Y.Z.<sha>`). Only a seat
 that is actually blocked takes an RC.
 
-**Returning to stable:** run the same script with the tag and without the two
-variables: `bash untracked/scratch/upgrade.sh --project-root "$PWD" vX.Y.Z`.
+**Following a moved RC.** The install records its exact ref, full sha and the
+release installed before it in the venv's `.daemon-metadata.json`. Session
+start makes one cached, time-bounded listing of the branch and reports
+`tracked ref <ref> moved <old7>..<new7>` with the command to re-run; a failed
+listing says "not checked", and a full-sha pin never moves. The push
+announcement above stays the primary signal.
+
+**Returning to stable:** run the script with `--release` and without the two
+variables: `bash untracked/scratch/upgrade.sh --project-root "$PWD" --release`.
+It targets the release recorded before the RC (the latest tag when none was
+recorded) and clears the tracking record. A named tag still works:
+`... vX.Y.Z`.
 
 **Feedback.** A defect or usability note from an RC seat is recorded in the
 owning plan, or in the open niggles ledger, the same day. A fix lands on its
