@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00546: upgrade steps use the resolved interpreter](00546-upgrade-steps-use-the-resolved-interpreter/PLAN.md) - Complete (#130: the stale-venv cleanup runs on the venv's own interpreter or `HOOKS_DAEMON_PYTHON`, never a bare `python3`, and warns loudly when neither is usable; entry points guard the minimum Python; a QA rule flags a bare `python3`/`python` in shipped scripts; release notes 014 and 017)
+
 - [00545: spend meter agents only segment](00545-spend-meter-agents-only-segment/PLAN.md) - Complete at merge `3503b65ad` (green CI on `9f7ad510e`) + the archiving commit (#133, a coordinator ruling the owner delegated: the spend segment shows only while sub-agents run, as count, families and largest context; the cumulative total leaves the bar; start-up transcripts are no longer unmeasured and real failures show red only when non-zero; release note 012)
 
 - [00544: issue validity claim without author list](00544-issue-validity-claim-without-author-list/PLAN.md) - Complete at merge `15127181d` (green CI) + the archiving commit (#129: `issue-validity N --claim` and a plain judge run with no author list, printing the author check as not applicable; only `--list-eligible` still refuses)
