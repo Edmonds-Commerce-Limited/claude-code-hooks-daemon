@@ -457,25 +457,28 @@ class ClaudeMdInjector:
         return sorted(sources)
 
     @staticmethod
-    def _class_source_file(cls: type) -> str | None:
-        """File defining ``cls``, or ``None`` when it has none (dynamic class).
+    def _class_source_file(handler_class: type) -> str | None:
+        """File defining ``handler_class``, or ``None`` when it has none (dynamic class).
 
         ``inspect`` resolves a class through ``sys.modules``, which a plugin
         loaded straight from a file path may not be in; the code object of any
         method the class itself defines names its file regardless.
         """
         try:
-            return inspect.getsourcefile(cls)
+            return inspect.getsourcefile(handler_class)
         except (TypeError, OSError) as exc:
             log_and_continue(
                 logger,
                 exc,
                 reason=(
-                    f"inspect found no source file for {cls!r}; falling back to the code "
+                    f"inspect found no source file for {handler_class!r}; falling back to the code "
                     "objects of the methods it defines"
                 ),
+                # Expected for every plugin loaded from a file path, on every
+                # restart: a WARNING with a traceback here would be noise.
+                level=logging.DEBUG,
             )
-        for member in vars(cls).values():
+        for member in vars(handler_class).values():
             code = getattr(member, "__code__", None)
             if code is not None:
                 return str(code.co_filename)
