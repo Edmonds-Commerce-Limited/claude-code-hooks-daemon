@@ -112,6 +112,12 @@ class TestReadPreviousReleaseTag:
         assert _previous_release(tmp_path, "1.0.0") == "v1.0.0"
         assert _previous_release(tmp_path, "v1.0.0") == "v1.0.0"
 
+    @pytest.mark.parametrize("stamp", ["1.1.0rc1", "1.1.0-rc.1", "1.1", "main", "1.1.0.dev3"])
+    def test_a_stamp_that_is_not_a_release_shape_gives_nothing(
+        self, tmp_path: Path, stamp: str
+    ) -> None:
+        assert _previous_release(tmp_path, stamp) == ""
+
     def test_a_branch_stamp_without_a_record_gives_nothing(self, tmp_path: Path) -> None:
         assert _previous_release(tmp_path, "1.1.0+rc-1.1.0.abcdef0") == ""
         assert _previous_release(tmp_path, "") == ""
@@ -221,3 +227,124 @@ class TestReleaseInstallClearsTracking:
 
         assert result.returncode == 0
         assert "tracking" in (result.stdout + result.stderr).lower()
+
+
+def _bash(script: str) -> subprocess.CompletedProcess[str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HOOKS_DAEMON_UNSAFE")}
+    env["PYTHONPATH"] = str(REPO_ROOT / "src")
+    env["NO_COLOR"] = "1"
+    return subprocess.run(
+        [BASH, "-c", f'source "{OUTPUT_LIB}"; source "{BRANCH_INSTALL_LIB}"; {script}'],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=_TIMEOUT_SECONDS,
+        check=False,
+    )
+
+
+class TestRestoreTrackingAfterRolledBackRebuild:
+    """A rebuild blanks the record; a rollback puts the previous one back."""
+
+    def test_reads_the_recorded_fields(self, tmp_path: Path) -> None:
+        venv = tmp_path / "venv-a"
+        venv.mkdir()
+        write_daemon_metadata(
+            venv,
+            _metadata("v1.1.0+x.abcdef0").model_copy(
+                update={
+                    "tracked_ref": "rc/1.1.0",
+                    "tracked_sha": "c" * 40,
+                    "last_release_tag": "v1.0.0",
+                }
+            ),
+        )
+        for field, expected in (
+            ("tracked_ref", "rc/1.1.0"),
+            ("tracked_sha", "c" * 40),
+            ("last_release_tag", "v1.0.0"),
+        ):
+            result = _bash(f'read_recorded_tracking_field "{venv}" {field}')
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert result.stdout.strip() == expected
+
+    def test_restore_writes_the_previous_fields_back_onto_a_blank_record(
+        self, tmp_path: Path
+    ) -> None:
+        venv = tmp_path / "venv-a"
+        venv.mkdir()
+        write_daemon_metadata(venv, _metadata("v1.1.0+rc-1.1.0.abcdef1"))  # rebuilt: blank
+
+        result = _bash(
+            f'restore_install_tracking "{sys.executable}" "{venv}" rc/1.1.0 {"c" * 40} v1.0.0'
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        meta = read_daemon_metadata(venv)
+        assert meta is not None
+        assert (meta.tracked_ref, meta.tracked_sha, meta.last_release_tag) == (
+            "rc/1.1.0",
+            "c" * 40,
+            "v1.0.0",
+        )
+
+    def test_restore_with_no_previous_ref_leaves_the_record_alone(self, tmp_path: Path) -> None:
+        venv = tmp_path / "venv-a"
+        venv.mkdir()
+        write_daemon_metadata(venv, _metadata())
+
+        result = _bash(f'restore_install_tracking "{sys.executable}" "{venv}" "" "" ""')
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        meta = read_daemon_metadata(venv)
+        assert meta is not None
+        assert meta.tracked_ref is None
+
+
+UPGRADE_SCRIPT = REPO_ROOT / "scripts" / "upgrade_version.sh"
+
+
+def _code_lines() -> list[tuple[int, str]]:
+    """Non-comment lines of the Layer 2 script with their 1-based line numbers."""
+    return [
+        (number, line.strip())
+        for number, line in enumerate(UPGRADE_SCRIPT.read_text().splitlines(), start=1)
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+
+def _numbers(predicate: str) -> list[int]:
+    return [number for number, line in _code_lines() if predicate in line]
+
+
+class TestUpgradeScriptCallOrder:
+    """Structural: the order the behavioural fixtures cannot run (Layer 2 is stubbed)."""
+
+    def test_previous_release_is_read_before_every_ensure_venv(self) -> None:
+        reads = [number for number, line in _code_lines() if line == "_read_installed_version"]
+        builds = _numbers("=$(ensure_venv ")
+        assert len(reads) == 1
+        assert len(builds) == 2
+        assert all(reads[0] < build for build in builds)
+
+    def test_each_tracking_record_follows_the_restart_of_its_own_path(self) -> None:
+        builds = _numbers("=$(ensure_venv ")
+        restarts = _numbers("if ! restart_daemon_verified")
+        records = [number for number, line in _code_lines() if line == "_record_tracking"]
+        assert len(records) == 3
+        for record in records:
+            restart = max(r for r in restarts if r < record)
+            assert any(build < restart for build in builds)
+
+    def test_a_failed_step_15_restart_still_records_the_code_that_stays_installed(self) -> None:
+        lines = [line for _, line in _code_lines()]
+        start = next(
+            i for i, line in enumerate(lines) if "Daemon failed to start after upgrade" in line
+        )
+        end = lines.index("exit 1", start)
+        assert "_record_tracking" in lines[start:end]
+
+    def test_the_rollback_restores_the_previous_tracking(self) -> None:
+        text = UPGRADE_SCRIPT.read_text()
+        start = text.index("cleanup_on_failure() {")
+        assert "restore_install_tracking" in text[start : text.index("trap cleanup_on_failure")]

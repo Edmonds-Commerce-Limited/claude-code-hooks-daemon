@@ -740,6 +740,9 @@ fi
 # like everything else that feeds the gate.
 INSTALLED_VERSION=""
 PREVIOUS_RELEASE_TAG=""
+PREVIOUS_TRACKED_REF=""
+PREVIOUS_TRACKED_SHA=""
+PREVIOUS_RECORDED_RELEASE=""
 
 # _read_installed_version() - Set INSTALLED_VERSION.
 _read_installed_version() {
@@ -763,6 +766,9 @@ _read_installed_version() {
     # Read now, before ensure_venv: the venv folder name does not change with
     # the version, so a rebuild wipes the record this comes from.
     PREVIOUS_RELEASE_TAG="$(read_previous_release_tag "$venv_dir" "$INSTALLED_VERSION")"
+    PREVIOUS_TRACKED_REF="$(read_recorded_tracking_field "$venv_dir" tracked_ref)"
+    PREVIOUS_TRACKED_SHA="$(read_recorded_tracking_field "$venv_dir" tracked_sha)"
+    PREVIOUS_RECORDED_RELEASE="$(read_recorded_tracking_field "$venv_dir" last_release_tag)"
 }
 
 # _record_tracking() - Record (branch install) or clear (release install) the
@@ -838,6 +844,13 @@ cleanup_on_failure() {
             else
                 print_error "Git rollback failed. Previous ref: $ROLLBACK_REF"
             fi
+        fi
+
+        # A venv rebuild blanked the tracking record before any restart; the
+        # code is back on the previous install, so its record goes back too.
+        if venv_python_usable "$VENV_PYTHON"; then
+            restore_install_tracking "$VENV_PYTHON" "$VENV_PATH" \
+                "$PREVIOUS_TRACKED_REF" "$PREVIOUS_TRACKED_SHA" "$PREVIOUS_RECORDED_RELEASE"
         fi
 
         # Try to restart daemon with old code
@@ -1616,6 +1629,8 @@ if ! restart_daemon_verified "$VENV_PYTHON"; then
     # Don't trigger rollback for daemon start failure - code is updated
     # User can fix config manually
     UPGRADE_STARTED=false
+    # The new code stays installed, so the record must describe it.
+    _record_tracking
     exit 1
 fi
 

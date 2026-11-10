@@ -147,13 +147,57 @@ read_previous_release_tag() {
     if [ -z "$installed" ]; then
         return 0
     fi
-    if [[ "$installed" != *+* ]]; then
+    if [[ "$installed" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         echo "v${installed#v}"
         return 0
     fi
+    if [[ "$installed" != *+* ]]; then
+        return 0
+    fi
+    recorded="$(read_recorded_tracking_field "$venv_dir" last_release_tag)"
+    if [[ "$recorded" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$recorded"
+    fi
+    return 0
+}
+
+#
+# read_recorded_tracking_field() - One tracking field of a venv's record
+#
+# Prints the value, or nothing when the record or the field is absent.
+#
+# Args: $1 - venv_dir, $2 - field (tracked_ref, tracked_sha, last_release_tag)
+#
+read_recorded_tracking_field() {
+    local venv_dir="$1" field="$2" recorded=""
     if [ -f "$venv_dir/.daemon-metadata.json" ] \
-        && recorded="$(grep -o '"last_release_tag": *"v[0-9.]*"' "$venv_dir/.daemon-metadata.json")"; then
+        && recorded="$(grep -o "\"$field\": *\"[^\"]*\"" "$venv_dir/.daemon-metadata.json")"; then
         cut -d'"' -f4 <<<"$recorded"
+    fi
+    return 0
+}
+
+#
+# restore_install_tracking() - Put a previous tracking record back after a rollback
+#
+# A venv rebuild blanks the record before any restart, so a rolled-back upgrade
+# writes back what read_recorded_tracking_field captured beforehand. Nothing is
+# written when there was no tracked ref (a release install's record is clear).
+#
+# Args: $1 - venv_python, $2 - venv_path, $3 - tracked_ref, $4 - tracked_sha,
+#       $5 - last_release_tag (any may be empty)
+#
+restore_install_tracking() {
+    local venv_python="$1" venv_path="$2" ref="${3:-}" sha="${4:-}" release="${5:-}"
+    local -a args=(--venv-path "$venv_path" --tracked-ref "$ref" --tracked-sha "$sha")
+    if [ -z "$ref" ] || [ -z "$sha" ]; then
+        return 0
+    fi
+    if [ -n "$release" ]; then
+        args+=(--last-release-tag "$release")
+    fi
+    if ! "$venv_python" -m claude_code_hooks_daemon.daemon.cli record-venv-tracking "${args[@]}"; then
+        print_warning "Could not restore the tracking metadata in $venv_path"
     fi
     return 0
 }
