@@ -177,9 +177,9 @@ names, people or hashes appear here.
   blocking path, its deny says "delete it first, then retry the removal". A
   single command that deletes the path and removes the worktree is judged
   before it runs, so it is still denied.
-- [ ] ⬜ **Task 3.6**: (RC feedback) The installer cleans up, or ignores, the
-  settings backup file it leaves when that file is byte-identical to the
-  original.
+- [x] ✅ **Task 3.6**: (RC feedback; done, release note 039) The installer
+  removes the settings backup it took when the merge left the file
+  byte-identical to it.
 
 ### Phase 4: Pressure, preflight, park, owner (classes 2, 4, 5, 7)
 
