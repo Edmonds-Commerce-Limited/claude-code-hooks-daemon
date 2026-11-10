@@ -196,8 +196,9 @@ names, people or hashes appear here.
   clears it visibly. On main (release note 043, report `task-4-3-report.md`):
   the park writes a git-config record before the push; a refused push exits 3
   and says "parked locally, not pushed" with the command to push later; a
-  merge, `delete_if_merged`, the sweep and `branch-park --clear` remove the
-  record and print "Park cleared". Open: a branch only the remote holds still
+  merge, `delete_if_merged` and the sweep remove the record and print "Park
+  cleared"; `branch-park --clear` removes it and prints "Park record
+  cleared". Open: a branch only the remote holds still
   parks nothing on a refused push, the group-pool PARKED resolution, and the
   session-start "park cleared" print (DESIGN 2.4).
 - [ ] ⬜ **Task 4.4**: Pools are counted per owner.
@@ -220,7 +221,8 @@ names, people or hashes appear here.
   the guard that judges it; the sweep now takes its remote-delete lines from
   the same proof as the guard, and a test feeds every printed line to the
   guard. (The test was written after the fix, so it was never seen failing.)
-- [ ] ⬜ **Task 4.9**: (client report, ledger N611) The park commit is written
+- [x] ✅ **Task 4.9**: (on main, release note 048, report `task-4-9-report.md`;
+  client report, ledger N611) The park commit is written
   with `git commit-tree`, which ignores `commit.gpgsign`, so a repository that
   requires verified signatures refuses a pushed park. Sign the park commit when
   the repository's configuration asks for signing, and fail the park clearly
