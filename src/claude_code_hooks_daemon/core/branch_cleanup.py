@@ -21,6 +21,7 @@ only a merged or patch-equivalent branch can ever be deleted here.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -90,9 +91,6 @@ BLOCKER_PREVIEW = 10
 
 #: Width of the ``XY `` status prefix in ``git status --porcelain``.
 _STATUS_PREFIX = 3
-
-#: How far below a lock-regenerated directory to look for a nested ``.git`` clone.
-_CLONE_SEARCH_DEPTH = 3
 
 
 def sweep_clean_command(*, remote: bool = False) -> str:
@@ -305,27 +303,35 @@ def _lock_regenerated(path: Path) -> tuple[str, ...]:
 
 
 def _holds_git_clone(directory: Path) -> bool:
-    """Whether a ``.git`` entry sits within ``_CLONE_SEARCH_DEPTH`` levels of ``directory``.
+    """Whether ``<directory>/.git``, ``<dir>/*/.git`` or ``<dir>/*/*/.git`` exists.
 
     A package manager can install a dependency as a real clone (``--prefer-source``),
     and commits made inside it exist nowhere else, so such a directory is work.
+    Only those paths are statted, never every file, because this runs on the
+    destructive-git guard path over directories that can hold thousands of packages.
+    A directory that is not there (an uninstalled ``vendor/``) holds nothing.
     """
-    pending = [(directory, 0)]
-    while pending:
-        current, depth = pending.pop()
-        try:
-            children = list(current.iterdir())
-        except OSError as exc:
-            log_and_continue(
-                logger, exc, reason="an unreadable directory is searched no further for a clone"
-            )
-            continue
-        for child in children:
-            if child.name == ".git":
-                return True
-            if depth < _CLONE_SEARCH_DEPTH and child.is_dir() and not child.is_symlink():
-                pending.append((child, depth + 1))
-    return False
+    if not directory.is_dir():
+        return False
+    if os.path.lexists(directory / ".git"):
+        return True
+    return any(
+        os.path.lexists(Path(grandchild) / ".git")
+        for child in _subdirectories(directory)
+        for grandchild in (child, *_subdirectories(Path(child)))
+    )
+
+
+def _subdirectories(directory: Path) -> list[str]:
+    """Paths of the real (non-symlink) subdirectories of ``directory``; none when unreadable."""
+    try:
+        with os.scandir(directory) as entries:
+            return [e.path for e in entries if e.is_dir(follow_symlinks=False)]
+    except OSError as exc:
+        log_and_continue(
+            logger, exc, reason="an unreadable directory is searched no further for a clone"
+        )
+        return []
 
 
 def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]:
@@ -345,16 +351,18 @@ def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]
     if ignored.returncode != 0:
         return (*dirty, f"<git ls-files failed: {ignored.stderr.strip()}>")
     entries = [e for line in ignored.stdout.splitlines() if line for e in _expand(path, line)]
-    rebuilt = _lock_regenerated(path) if entries else ()
-    kept = [
+    undecided = [
         entry
         for entry in entries
         if not _is_symlink(path, entry)
         and not is_regenerable(entry, regenerable)
-        and not under_any(entry, rebuilt)
         and not _holds_nothing(path, entry)
         and not _is_generated_daemon_env(path, entry)
     ]
+    # Only a directory can be a package manager's output, so the committed tree
+    # is read for the lock pairs only when one is still undecided.
+    rebuilt = _lock_regenerated(path) if any(e.endswith("/") for e in undecided) else ()
+    kept = [entry for entry in undecided if not under_any(entry, rebuilt)]
     return (*dirty, *_judge_seeded_copies(path, kept))
 
 

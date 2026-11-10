@@ -6,9 +6,11 @@ and ignore semantics, which a mock would only restate.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -180,6 +182,41 @@ class TestLockRegeneratedBlockers:
         blockers = worktree_blockers(path, [])
         assert blockers
         assert all(b.startswith("svc/vendor/") for b in blockers)
+
+    def test_a_clone_at_depth_one_and_two_is_found(self, tmp_path: Path) -> None:
+        shallow = tmp_path / "shallow"
+        (shallow / "pkg" / ".git").mkdir(parents=True)
+        deep = tmp_path / "deep"
+        (deep / "scope" / "pkg" / ".git").mkdir(parents=True)
+        assert branch_cleanup._holds_git_clone(shallow) is True
+        assert branch_cleanup._holds_git_clone(deep) is True
+
+    def test_a_clone_below_depth_two_is_not_searched_for(self, tmp_path: Path) -> None:
+        """Only `<dir>/*/.git` and `<dir>/*/*/.git` are statted, which bounds the walk."""
+        too_deep = tmp_path / "vendor"
+        (too_deep / "a" / "b" / "c" / ".git").mkdir(parents=True)
+        assert branch_cleanup._holds_git_clone(too_deep) is False
+
+    def test_a_missing_directory_holds_nothing_and_logs_nothing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.DEBUG):
+            assert branch_cleanup._holds_git_clone(tmp_path / "vendor") is False
+        assert caplog.records == []
+
+    def test_the_committed_tree_is_not_read_when_no_ignored_directory_could_be_rebuilt(
+        self, repo: Path
+    ) -> None:
+        _git(repo, "branch", "plain")
+        path = _worktree(repo, "plain")
+        (path / ".gitignore").write_text("*.log\n", encoding="utf-8")
+        _git(path, "add", ".gitignore")
+        _git(path, "commit", "-m", "ignore logs")
+        (path / "notes.log").write_text("x\n", encoding="utf-8")
+        with patch.object(branch_cleanup, "_lock_regenerated") as lock_regenerated:
+            blockers = worktree_blockers(path, [])
+        lock_regenerated.assert_not_called()
+        assert blockers == ("notes.log",)
 
     def test_scratch_is_never_accepted(self, repo: Path) -> None:
         path = _lock_pair_branch(repo, "f5", "svc", "composer.json", "composer.lock")
