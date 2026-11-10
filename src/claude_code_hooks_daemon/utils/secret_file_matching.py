@@ -684,7 +684,10 @@ def _colon_path_parts(token: str) -> list[str]:
     positions = [i for i, char in enumerate(token) if char == ":"]
     if len(positions) > _MAX_COLON_SPLITS + 1:
         positions = [*positions[:_MAX_COLON_SPLITS], positions[-1]]
-    return [token[i + 1 :] for i in positions if token[i + 1 :]]
+    parts = [token[i + 1 :] for i in positions]
+    # A wildcard-only part (``**`` of ``2:**``) names no path: it is the tail of
+    # prose such as bold markdown, and judged alone it would match any glob.
+    return [part for part in parts if part.strip("*?")]
 
 
 def _home_and_dot_forms(token: str) -> list[str]:
@@ -2078,6 +2081,124 @@ def _scan_shell_prefix(prefix: str) -> tuple[int, int | None]:
     return segment_start, quote_index
 
 
+#: git options whose value is a search string (a commit-message regex, a pickaxe
+#: string, an identity), never a path. Attached spellings: ``-Sx``, ``--grep=x``.
+_GIT_SEARCH_VALUE_OPTIONS: Final = frozenset(
+    {"-S", "-G", "--grep", "--author", "--committer", "--grep-reflog"}
+)
+_GIT_SEARCH_ATTACHED_PREFIXES: Final = frozenset(
+    {"-S", "-G", *(f"{option}=" for option in _GIT_SEARCH_VALUE_OPTIONS if option[1] == "-")}
+)
+
+
+def _ends_in_git_search_option(words: list[str]) -> bool:
+    """Whether the words end in a git search option awaiting its value (``-S``)."""
+    return bool(words) and words[-1] in _GIT_SEARCH_VALUE_OPTIONS
+
+
+def _git_search_value_prefix_before(command: str, word_start: int, segment_start: int) -> bool:
+    """Whether the text attached just before ``word_start`` is ``-S``/``--grep=``... on git."""
+    start = word_start
+    while start > segment_start and not command[start - 1].isspace():
+        start -= 1
+    if command[start:word_start] not in _GIT_SEARCH_ATTACHED_PREFIXES:
+        return False
+    try:
+        words = linear_shlex.split(command[segment_start:start])
+    except ValueError:
+        return False
+    return "git" in (word.rsplit("/", 1)[-1] for word in words)
+
+
+def _is_git_search_word(word: str, command: str) -> bool:
+    """Whether every occurrence of ``word`` is an attached git search option (``-Sx``)."""
+    prefix = next(
+        (p for p in sorted(_GIT_SEARCH_ATTACHED_PREFIXES) if word.startswith(p) and word != p),
+        None,
+    )
+    if prefix is None:
+        return False
+    occurrences = [m.start() for m in re.finditer(re.escape(word), command)]
+    return bool(occurrences) and all(
+        _git_search_value_prefix_before(
+            command, start + len(prefix), _scan_shell_prefix(command[:start])[0]
+        )
+        for start in occurrences
+    )
+
+
+#: grep/rg options whose attached value is a file NAME filter, applied to the
+#: files found under the searched paths, never a path read from the cwd.
+_FILTER_VALUE_PREFIXES: Final = (
+    "--include=",
+    "--exclude=",
+    "--exclude-dir=",
+    "--glob=",
+    "--iglob=",
+)
+_SEARCH_PATH_COMMANDS: Final = frozenset({"grep", "egrep", "fgrep", "rg"})
+
+
+def _searched_paths_hold_no_protected_file(
+    segment_words: list[str], index: "ProtectedFileIndex", cwds: tuple[str, ...]
+) -> bool:
+    """Whether a grep/rg segment names searched paths and none holds a protected file.
+
+    Fails closed: no path operand (the cwd or stdin is searched), a pattern read
+    from a file, or an operand that is a glob, variable or ``~`` is not judged clean.
+    """
+    names = [word.rsplit("/", 1)[-1] for word in segment_words]
+    command = next((i for i, name in enumerate(names) if name in _SEARCH_PATH_COMMANDS), None)
+    if command is None:
+        return False
+    rest = segment_words[command + 1 :]
+    if any(word in _PATTERN_FILE_OPTIONS for word in rest):
+        return False
+    operands = [word for word in rest if not word.startswith("-")]
+    paths = operands[1:]
+    if not paths or any(char in _WORD_EXPANDING_CHARACTERS for p in paths for char in p):
+        return False
+    bases = [cwd for cwd in cwds if cwd]
+    for path in paths:
+        roots = [path] if path.startswith("/") else [str(Path(base) / path) for base in bases]
+        if not roots or any(index.find_under(root) is not None for root in roots):
+            return False
+    return True
+
+
+def _is_scoped_filter_value(
+    word: str, command: str, index: "ProtectedFileIndex | None", cwds: tuple[str, ...]
+) -> bool:
+    """Whether every occurrence of ``word`` is an attached grep/rg filter over clean paths.
+
+    ``--include=*`` filters the file names found under the searched paths; it
+    reads nothing from the cwd. It is judged by those paths: a filter over a
+    directory holding a protected file is still a mention.
+    """
+    if index is None:
+        return False
+    prefix = next((p for p in _FILTER_VALUE_PREFIXES if word.startswith(p)), "")
+    value = word[len(prefix) :]
+    if not value:
+        return False
+    starts = [m.start() for m in re.finditer(re.escape(value), command)]
+    if not starts:
+        return False
+    for start in starts:
+        attached = next((p for p in _FILTER_VALUE_PREFIXES if command[:start].endswith(p)), None)
+        if attached is None:
+            return False
+        segment_start = _scan_shell_prefix(command[:start])[0]
+        segment = _COMMAND_SEGMENT_SEPARATORS.split(command[segment_start:])[0]
+        try:
+            words = linear_shlex.split(segment)
+        except ValueError:
+            return False
+        if not _searched_paths_hold_no_protected_file(words, index, cwds):
+            return False
+    return True
+
+
 def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
     """Whether the command in ``segment`` may open an operand placed after it.
 
@@ -2096,8 +2217,9 @@ def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
         if name == "git":
             rest = names[names.index("git") + 1 :] if "git" in names else []
             first = next((word for word in rest if not word.startswith("-")), "")
-            if first != "config":
-                return True
+            if first == "config" or _ends_in_git_search_option(words):
+                continue
+            return True
         elif name in _PATTERN_FIRST_COMMANDS:
             rest = names[names.index(name) + 1 :] if name in names else []
             if _grep_pattern_word_is_token(rest) and token_is_first_pattern_word:
@@ -2152,7 +2274,7 @@ def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
     before = command[word_start - 1] if word_start > 0 else ""
     after_char = command[word_end] if word_end < len(command) else ""
     if before and not before.isspace() and before not in _COMMAND_SEPARATOR_CHARS:
-        return True
+        return not _git_search_value_prefix_before(command, word_start, segment_start)
     if after_char and after_char not in _AFTER_WORD_CHARS:
         return True
     segment = command[segment_start:word_start]
@@ -2385,6 +2507,11 @@ def iter_protected_mentions(
             default_globs=default_globs,
         )
         core = word.strip(_TOKEN_PUNCTUATION)
+        if found is not None and (
+            _is_git_search_word(word, command)
+            or _is_scoped_filter_value(word, command, index, effective)
+        ):
+            return None
         if (
             found is not None
             and _is_bare_dotted(core)
