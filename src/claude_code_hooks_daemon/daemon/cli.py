@@ -4036,7 +4036,6 @@ def cmd_record_venv_tracking(args: argparse.Namespace) -> int:
             tracked_ref=args.tracked_ref,
             tracked_sha=args.tracked_sha,
             last_release_tag=args.last_release_tag,
-            previous_venv_dir=args.previous_venv_path,
         )
     except (FileNotFoundError, ValueError, OSError) as exc:
         print(f"ERROR: cannot record tracking metadata: {exc}", file=sys.stderr)
@@ -11836,11 +11835,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_record_tracking.add_argument(
         "--last-release-tag", default=None, help="Release installed before the branch install"
-    )
-    parser_record_tracking.add_argument(
-        "--previous-venv-path",
-        default=None,
-        help="Venv the install came from; supplies last-release-tag when it is not given",
     )
     parser_record_tracking.set_defaults(func=cmd_record_venv_tracking)
 

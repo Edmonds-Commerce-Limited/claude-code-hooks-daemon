@@ -752,13 +752,23 @@ if [ "$_RELEASE_ROUTE" = "true" ]; then
     if [ -n "$TARGET_VERSION" ]; then
         _fail "--release and a version argument ($TARGET_VERSION) cannot both be given: --release chooses the release itself, refusing."
     fi
-    for _recorded_metadata in "$DAEMON_DIR"/untracked/venv-*/.daemon-metadata.json; do
-        [ -f "$_recorded_metadata" ] || continue
-        if _recorded_tag="$(grep -o '"last_release_tag":"v[0-9.]*"' "$_recorded_metadata")"; then
-            TARGET_VERSION="$(cut -d'"' -f4 <<<"$_recorded_tag")"
-            break
-        fi
-    done
+    # Only the ACTIVE venv's record counts: other venvs (another Python, a
+    # host or container view) stay on disk with records of older cycles. The
+    # venv is named by the resolver the rest of the install uses.
+    _RELEASE_RESOLVER="$DAEMON_DIR/scripts/install/venv_resolver.sh"
+    _ACTIVE_VENV=""
+    if [ -f "$_RELEASE_RESOLVER" ]; then
+        # shellcheck source=install/venv_resolver.sh
+        _ACTIVE_VENV="$(
+            unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH
+            source "$_RELEASE_RESOLVER"
+            resolve_existing_venv_dir "$DAEMON_DIR" 2>/dev/null
+        )" || _ACTIVE_VENV=""
+    fi
+    if [ -n "$_ACTIVE_VENV" ] && [ -f "$_ACTIVE_VENV/.daemon-metadata.json" ] \
+        && _recorded_tag="$(grep -o '"last_release_tag": *"v[0-9.]*"' "$_ACTIVE_VENV/.daemon-metadata.json")"; then
+        TARGET_VERSION="$(cut -d'"' -f4 <<<"$_recorded_tag")"
+    fi
     if [ -n "$TARGET_VERSION" ]; then
         _info "Returning to the release recorded before the branch install: $TARGET_VERSION"
     else
@@ -797,8 +807,10 @@ if [ "$_BRANCH_INSTALL" = "true" ]; then
     TARGET_DISPLAY="${TARGET_SEMVER}+${_TRACK_REF//\//-}.${_TARGET_SHORT}"
 else
     if [ -z "$TARGET_VERSION" ]; then
-        TARGET_VERSION=$(git -C "$DAEMON_DIR" describe --tags \
-            "$(git -C "$DAEMON_DIR" rev-list --tags --max-count=1)" 2>/dev/null || echo "")
+        # Highest VERSION, as version_check orders it: the newest commit's tag
+        # is a patch release on an older line as often as it is the latest.
+        _ALL_RELEASE_TAGS="$(git -C "$DAEMON_DIR" tag --list 'v[0-9]*' --sort=-v:refname)" || _ALL_RELEASE_TAGS=""
+        TARGET_VERSION="${_ALL_RELEASE_TAGS%%$'\n'*}"
         if [ -z "$TARGET_VERSION" ]; then
             _fail "No tags found. Specify a version explicitly."
         fi

@@ -87,50 +87,6 @@ class TestRecordTracking:
         assert meta is not None
         assert (meta.tracked_ref, meta.tracked_sha, meta.last_release_tag) == (None, None, None)
 
-    def test_missing_last_release_tag_is_inherited_from_the_previous_venv(
-        self, tmp_path: Path
-    ) -> None:
-        """Re-tracking from a branch install must not forget the release before it."""
-        previous = _venv(
-            tmp_path,
-            "venv-old",
-            tracked_ref="rc/1.2.3",
-            tracked_sha=_SHA,
-            last_release_tag="v3.8.0",
-        )
-        venv = _venv(tmp_path, "venv-new")
-        record_tracking(
-            venv,
-            tracked_ref="rc/1.2.3",
-            tracked_sha=_OTHER_SHA,
-            last_release_tag=None,
-            previous_venv_dir=previous,
-        )
-        meta = read_daemon_metadata(venv)
-        assert meta is not None
-        assert meta.last_release_tag == "v3.8.0"
-        assert meta.tracked_sha == _OTHER_SHA
-
-    def test_explicit_last_release_tag_beats_the_previous_venv(self, tmp_path: Path) -> None:
-        previous = _venv(
-            tmp_path,
-            "venv-old",
-            tracked_ref="rc/1.2.3",
-            tracked_sha=_SHA,
-            last_release_tag="v3.7.0",
-        )
-        venv = _venv(tmp_path, "venv-new")
-        record_tracking(
-            venv,
-            tracked_ref="rc/1.2.3",
-            tracked_sha=_SHA,
-            last_release_tag="v3.8.0",
-            previous_venv_dir=previous,
-        )
-        meta = read_daemon_metadata(venv)
-        assert meta is not None
-        assert meta.last_release_tag == "v3.8.0"
-
     def test_missing_metadata_raises(self, tmp_path: Path) -> None:
         venv = tmp_path / "venv-bare"
         venv.mkdir()
@@ -145,7 +101,6 @@ class TestRecordTrackingCommand:
             "tracked_ref": None,
             "tracked_sha": None,
             "last_release_tag": None,
-            "previous_venv_path": None,
         }
         values.update(kw)
         return argparse.Namespace(venv_path=str(venv), **values)

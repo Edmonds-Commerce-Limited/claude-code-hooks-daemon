@@ -69,7 +69,6 @@ def _record(
     daemon_dir: Path,
     *,
     ref: str | None,
-    previous_venv: Path | None = None,
     previous_release: str = "",
 ) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith("HOOKS_DAEMON_UNSAFE")}
@@ -80,8 +79,7 @@ def _record(
         env[REASON_VAR] = "test"
     script = (
         f'source "{OUTPUT_LIB}"; source "{BRANCH_INSTALL_LIB}"; '
-        f'record_install_tracking "{sys.executable}" "{venv}" "{daemon_dir}" '
-        f'"{previous_venv or ""}" "{previous_release}"'
+        f'record_install_tracking "{sys.executable}" "{venv}" "{daemon_dir}" "{previous_release}"'
     )
     return subprocess.run(
         [BASH, "-c", script],
@@ -91,6 +89,32 @@ def _record(
         timeout=_TIMEOUT_SECONDS,
         check=False,
     )
+
+
+def _previous_release(venv: Path, installed_version: str) -> str:
+    script = (
+        f'source "{OUTPUT_LIB}"; source "{BRANCH_INSTALL_LIB}"; '
+        f'read_previous_release_tag "{venv}" "{installed_version}"'
+    )
+    result = subprocess.run(
+        [BASH, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=_TIMEOUT_SECONDS,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result.stdout.strip()
+
+
+class TestReadPreviousReleaseTag:
+    def test_a_release_stamp_is_the_previous_release(self, tmp_path: Path) -> None:
+        assert _previous_release(tmp_path, "1.0.0") == "v1.0.0"
+        assert _previous_release(tmp_path, "v1.0.0") == "v1.0.0"
+
+    def test_a_branch_stamp_without_a_record_gives_nothing(self, tmp_path: Path) -> None:
+        assert _previous_release(tmp_path, "1.1.0+rc-1.1.0.abcdef0") == ""
+        assert _previous_release(tmp_path, "") == ""
 
 
 class TestBranchInstallRecordsTracking:
@@ -111,13 +135,15 @@ class TestBranchInstallRecordsTracking:
         assert len(meta.tracked_sha) == 40
         assert meta.last_release_tag == "v1.0.0"
 
-    def test_retracking_keeps_the_release_recorded_by_the_previous_venv(
-        self, tmp_path: Path, daemon_dir: Path
+    @pytest.mark.parametrize("lock_changes", [False, True], ids=["same-lock", "lock-changed"])
+    def test_rc_to_rc_keeps_the_release_when_the_same_venv_folder_is_rebuilt(
+        self, tmp_path: Path, daemon_dir: Path, lock_changes: bool
     ) -> None:
-        previous = tmp_path / "venv-old"
-        previous.mkdir()
+        """The venv folder name does not change with the version, so a rebuild wipes it."""
+        venv = tmp_path / "venv-py313-project"
+        venv.mkdir()
         write_daemon_metadata(
-            previous,
+            venv,
             _metadata("v1.1.0+rc-1.1.0.abcdef0").model_copy(
                 update={
                     "tracked_ref": "rc/1.1.0",
@@ -126,11 +152,17 @@ class TestBranchInstallRecordsTracking:
                 }
             ),
         )
-        venv = tmp_path / "venv-new"
-        venv.mkdir()
-        write_daemon_metadata(venv, _metadata("v1.1.0+rc-1.1.0.abcdef1"))
+        # What the install reads BEFORE ensure_venv touches the folder.
+        previous = _previous_release(venv, "1.1.0+rc-1.1.0.abcdef0")
 
-        result = _record(venv, daemon_dir, ref="rc/1.1.0", previous_venv=previous)
+        shutil.rmtree(venv)  # ensure_venv rebuilds the folder and its record
+        venv.mkdir()
+        rebuilt = _metadata("v1.1.0+rc-1.1.0.abcdef1")
+        if lock_changes:
+            rebuilt = rebuilt.model_copy(update={"lock_hash": "sha256:" + "b" * 64})
+        write_daemon_metadata(venv, rebuilt)
+
+        result = _record(venv, daemon_dir, ref="rc/1.1.0", previous_release=previous)
 
         assert result.returncode == 0, result.stdout + result.stderr
         meta = read_daemon_metadata(venv)

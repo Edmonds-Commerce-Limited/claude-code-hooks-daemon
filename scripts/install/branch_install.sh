@@ -110,11 +110,13 @@ print_branch_install_banner() {
 #
 # Args:
 #   $1 - venv_python, $2 - venv_path, $3 - daemon_dir (HEAD is the installed commit)
-#   $4 - previous_venv_dir (may be empty), $5 - previous_release_tag (may be empty)
+#   $4 - previous_release_tag (may be empty), read by read_previous_release_tag
+#        BEFORE ensure_venv: the venv folder name does not change with the
+#        version, so a rebuild wipes the record this would otherwise read.
 #
 record_install_tracking() {
     local venv_python="$1" venv_path="$2" daemon_dir="$3"
-    local previous_venv="${4:-}" previous_release="${5:-}"
+    local previous_release="${4:-}"
     local -a args=(--venv-path "$venv_path")
 
     if [ "$(branch_install_gate_state)" = "armed" ]; then
@@ -124,12 +126,34 @@ record_install_tracking() {
         if [ -n "$previous_release" ]; then
             args+=(--last-release-tag "$previous_release")
         fi
-        if [ -n "$previous_venv" ]; then
-            args+=(--previous-venv-path "$previous_venv")
-        fi
     fi
     if ! "$venv_python" -m claude_code_hooks_daemon.daemon.cli record-venv-tracking "${args[@]}"; then
         print_warning "Could not record the tracking metadata in $venv_path; session start will not notice when the tracked ref moves"
+    fi
+    return 0
+}
+
+#
+# read_previous_release_tag() - The release installed before the one being built
+#
+# Prints "vX.Y.Z" or nothing. A release stamp is its own answer; a branch stamp
+# carries none, so the venv's own record supplies it. Call it before ensure_venv
+# (see record_install_tracking).
+#
+# Args: $1 - venv_dir (may not exist), $2 - installed version stamp (may be empty)
+#
+read_previous_release_tag() {
+    local venv_dir="$1" installed="${2:-}" recorded=""
+    if [ -z "$installed" ]; then
+        return 0
+    fi
+    if [[ "$installed" != *+* ]]; then
+        echo "v${installed#v}"
+        return 0
+    fi
+    if [ -f "$venv_dir/.daemon-metadata.json" ] \
+        && recorded="$(grep -o '"last_release_tag": *"v[0-9.]*"' "$venv_dir/.daemon-metadata.json")"; then
+        cut -d'"' -f4 <<<"$recorded"
     fi
     return 0
 }

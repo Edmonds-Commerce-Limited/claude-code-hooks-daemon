@@ -180,14 +180,11 @@ def record_tracking(
     tracked_ref: str | None,
     tracked_sha: str | None,
     last_release_tag: str | None,
-    previous_venv_dir: Path | str | None = None,
 ) -> None:
     """Record (or, with no ref, clear) what ``venv_dir``'s install tracks.
 
-    A branch install passes its ref and full sha; a release install passes
-    neither, which clears all three fields. When a branch install gives no
-    ``last_release_tag`` it inherits the one ``previous_venv_dir`` recorded, so
-    re-tracking from a branch install does not forget the release before it.
+    A branch install passes its ref, full sha and the release installed before
+    it; a release install passes neither, which clears all three fields.
 
     Raises:
         FileNotFoundError: if ``venv_dir`` has no readable metadata to update.
@@ -203,9 +200,6 @@ def record_tracking(
             "last_release_tag": None,
         }
     else:
-        if last_release_tag is None and previous_venv_dir is not None:
-            previous = read_daemon_metadata(previous_venv_dir)
-            last_release_tag = previous.last_release_tag if previous is not None else None
         update = {
             "tracked_ref": tracked_ref,
             "tracked_sha": tracked_sha,

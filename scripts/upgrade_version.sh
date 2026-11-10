@@ -739,7 +739,7 @@ fi
 # the resolver's own cache rule (Plan 00466 N37). Resolved with GATE_SAFE_PATH,
 # like everything else that feeds the gate.
 INSTALLED_VERSION=""
-PREVIOUS_VENV_DIR=""
+PREVIOUS_RELEASE_TAG=""
 
 # _read_installed_version() - Set INSTALLED_VERSION.
 _read_installed_version() {
@@ -760,19 +760,16 @@ _read_installed_version() {
             ;;
     esac
     INSTALLED_VERSION="$(get_venv_version "$venv_dir")"
-    PREVIOUS_VENV_DIR="$venv_dir"
+    # Read now, before ensure_venv: the venv folder name does not change with
+    # the version, so a rebuild wipes the record this comes from.
+    PREVIOUS_RELEASE_TAG="$(read_previous_release_tag "$venv_dir" "$INSTALLED_VERSION")"
 }
 
 # _record_tracking() - Record (branch install) or clear (release install) the
-# tracking metadata of the venv just built (Plan 00594 Task 5.1). The release
-# installed before is the previous venv's stamp when that was a release; a
-# branch stamp carries none, so the previous venv's own record supplies it.
+# tracking metadata of the venv just built (Plan 00594 Task 5.1). Called only
+# once the install has succeeded, so a rollback leaves the record untouched.
 _record_tracking() {
-    local previous_release=""
-    if [ -n "$INSTALLED_VERSION" ] && [[ "$INSTALLED_VERSION" != *+* ]]; then
-        previous_release="v${INSTALLED_VERSION#v}"
-    fi
-    record_install_tracking "$VENV_PYTHON" "$VENV_PATH" "$DAEMON_DIR" "$PREVIOUS_VENV_DIR" "$previous_release"
+    record_install_tracking "$VENV_PYTHON" "$VENV_PATH" "$DAEMON_DIR" "$PREVIOUS_RELEASE_TAG"
 }
 _read_installed_version
 
@@ -984,7 +981,6 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ] || { [ -n "$TARGET_COMMIT" ] && [ "$T
     if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
         fail_fast "Virtual environment verification failed"
     fi
-    _record_tracking
 
     # The target's own compatibility check needs its venv, and runs before the
     # first deploy.
@@ -1104,6 +1100,9 @@ FASTPATH_CCY_PY
     if ! restart_daemon_verified "$VENV_PYTHON"; then
         fail_fast "Daemon failed to start after idempotent upgrade"
     fi
+
+    # The install has succeeded; only now does the tracking record change.
+    _record_tracking
 
     if ! run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false"; then
         fail_fast "Post-install verification failed after idempotent upgrade"
@@ -1357,7 +1356,6 @@ VENV_PYTHON="$VENV_PATH/bin/python"
 if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
     fail_fast "Virtual environment verification failed"
 fi
-_record_tracking
 
 # The target's venv is verified and nothing has been deployed into the project
 # yet.
@@ -1620,6 +1618,9 @@ if ! restart_daemon_verified "$VENV_PYTHON"; then
     UPGRADE_STARTED=false
     exit 1
 fi
+
+# The install has succeeded; only now does the tracking record change.
+_record_tracking
 
 # Clear version check cache to prevent stale upgrade indicators
 rm -f "$DAEMON_DIR/untracked/version_check_cache.json"

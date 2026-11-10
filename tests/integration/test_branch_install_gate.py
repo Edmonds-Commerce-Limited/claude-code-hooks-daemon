@@ -16,9 +16,11 @@ acceptance test in ``tests/acceptance/test_guarded_branch_install.py``.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -85,6 +87,15 @@ def daemon_remote(tmp_path: Path) -> dict[str, object]:
     scripts = work / "scripts"
     (scripts / "lib").mkdir(parents=True)
     shutil.copy(REPO_ROOT / "scripts" / "lib" / "python_discovery.sh", scripts / "lib")
+    # The venv resolver the install itself uses to name the ACTIVE venv.
+    shutil.copy(REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh", scripts / "lib")
+    (scripts / "install").mkdir()
+    shutil.copy(REPO_ROOT / "scripts" / "install" / "venv_resolver.sh", scripts / "install")
+    paths_dir = work / "src" / "claude_code_hooks_daemon" / "daemon"
+    paths_dir.mkdir(parents=True)
+    shutil.copy(
+        REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py", paths_dir
+    )
     stub = scripts / "upgrade_version.sh"
     stub.write_text(_STUB_LAYER2)
     stub.chmod(0o755)
@@ -276,14 +287,32 @@ class TestGateIsNotAdvertisedByTheScript:
 # ---------------------------------------------------------------------------
 
 
-def _record_tracking_metadata(project: Path, last_release_tag: str | None) -> None:
-    """Leave the venv metadata a branch install of ``main`` would have written."""
-    venv = project / ".claude" / "hooks-daemon" / "untracked" / "venv-fixture"
-    venv.mkdir(parents=True)
+def _record_tracking_metadata(
+    project: Path,
+    last_release_tag: str | None,
+    *,
+    name: str = "venv-fixture",
+    active: bool = True,
+) -> None:
+    """Leave the venv metadata a branch install of ``main`` would have written.
+
+    The venv is runnable (its ``bin/python`` is a real interpreter) so the
+    resolver can pick it; ``active`` gives it the lock hash of the checkout, which
+    the resolver ranks first, and any other venv a different one.
+    """
+    daemon_dir = project / ".claude" / "hooks-daemon"
+    venv = daemon_dir / "untracked" / name
+    (venv / "bin").mkdir(parents=True)
+    interpreter = venv / "bin" / "python"
+    interpreter.symlink_to(sys.executable)
+    lock_digest = hashlib.sha256(
+        (daemon_dir / "pyproject.toml").read_bytes() + b"\x00no-uv-lock\x00"
+    ).hexdigest()
+    lock_hash = lock_digest if active else "a" * 64
     tag = "null" if last_release_tag is None else f'"{last_release_tag}"'
     (venv / ".daemon-metadata.json").write_text(
-        '{"python_path":"/usr/bin/python3","fingerprint":"fixture","lock_hash":"sha256:'
-        + "a" * 64
+        f'{{"python_path":"{interpreter}","fingerprint":"fixture","lock_hash":"sha256:'
+        + lock_hash
         + '","daemon_version":"v1.1.0+main.abcdef0","written_at":"2026-01-01T00:00:00Z",'
         + '"tracked_ref":"main","tracked_sha":"'
         + "a" * 40
@@ -291,34 +320,28 @@ def _record_tracking_metadata(project: Path, last_release_tag: str | None) -> No
     )
 
 
-@pytest.fixture
-def newer_tag(tmp_path: Path, daemon_remote: dict[str, object]) -> str:
-    """A release newer than the one the seat last ran, on the branch tip."""
-    work = tmp_path / "daemon-work"
-    # The latest tag is the one on the newest commit by date, and the fixture
-    # commits land in the same second, so date this one explicitly.
-    later = {**os.environ, "GIT_COMMITTER_DATE": "2099-01-01T00:00:00Z"}
+def _tag_new_commit(work: Path, tag: str, date: str) -> None:
+    """Commit on ``main`` at an explicit date, tag it and push both."""
+    dated = {**os.environ, "GIT_COMMITTER_DATE": date}
     commit = subprocess.run(
-        [
-            GIT,
-            "commit",
-            "-q",
-            "--allow-empty",
-            "-m",
-            "release v1.0.1",
-            "--date",
-            "2099-01-01T00:00:00Z",
-        ],
+        [GIT, "commit", "-q", "--allow-empty", "-m", f"release {tag}", "--date", date],
         cwd=work,
-        env=later,
+        env=dated,
         capture_output=True,
         text=True,
         timeout=_TIMEOUT_SECONDS,
         check=False,
     )
-    _require_ok(commit, "commit newer")
-    _require_ok(_git("tag", "v1.0.1", cwd=work), "tag newer")
-    _require_ok(_git("push", "-q", "origin", "main", "v1.0.1", cwd=work), "push newer tag")
+    _require_ok(commit, f"commit {tag}")
+    _require_ok(_git("tag", tag, cwd=work), f"tag {tag}")
+    _require_ok(_git("push", "-q", "origin", "main", tag, cwd=work), f"push {tag}")
+
+
+@pytest.fixture
+def newer_tag(tmp_path: Path, daemon_remote: dict[str, object]) -> str:
+    """A release newer than the one the seat last ran, on the branch tip."""
+    # The fixture commits land in the same second, so date this one explicitly.
+    _tag_new_commit(tmp_path / "daemon-work", "v1.0.1", "2099-01-01T00:00:00Z")
     return "v1.0.1"
 
 
@@ -344,6 +367,28 @@ class TestReleaseRouteReturnsFromABranchInstall:
         assert result.returncode == 0, result.stdout + result.stderr
         args_line = next(line for line in result.stdout.splitlines() if "STUB_LAYER2_ARGS" in line)
         assert args_line.split()[-1] == newer_tag
+
+    def test_reads_only_the_active_venv_not_whichever_sorts_first(
+        self, client_project: Path, daemon_remote: dict[str, object], newer_tag: str
+    ) -> None:
+        _record_tracking_metadata(client_project, "v0.9.0", name="venv-a-old", active=False)
+        _record_tracking_metadata(client_project, "v1.0.0", name="venv-z-active", active=True)
+        result = _run_layer1(client_project, "--release")
+        assert result.returncode == 0, result.stdout + result.stderr
+        args_line = next(line for line in result.stdout.splitlines() if "STUB_LAYER2_ARGS" in line)
+        assert args_line.split()[-1] == "v1.0.0"
+
+    def test_latest_tag_is_the_highest_version_not_the_newest_commit(
+        self, tmp_path: Path, client_project: Path, daemon_remote: dict[str, object]
+    ) -> None:
+        work = tmp_path / "daemon-work"
+        same_date = "2099-01-01T00:00:00Z"
+        _tag_new_commit(work, "v1.1.0", same_date)
+        _tag_new_commit(work, "v1.0.5", same_date)  # a patch release on the older line
+        result = _run_layer1(client_project, "--release")
+        assert result.returncode == 0, result.stdout + result.stderr
+        args_line = next(line for line in result.stdout.splitlines() if "STUB_LAYER2_ARGS" in line)
+        assert args_line.split()[-1] == "v1.1.0"
 
     def test_without_any_metadata_it_takes_the_latest_tag(
         self, client_project: Path, newer_tag: str
