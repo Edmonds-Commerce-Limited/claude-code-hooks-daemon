@@ -30,6 +30,7 @@ Escape hatch (mirrors git_stash's ``MUST_STASH_BECAUSE=``):
 import os
 import re
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -55,6 +56,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     split_unquoted_spans,
 )
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 # Full first-fire teaching content (Plan 00116), preserving the pre-migration
 # handler's rich prose verbatim.
@@ -145,26 +147,37 @@ def _spelled_out_home() -> str | None:
     return home
 
 
-def _is_dangerous_root(token: str) -> bool:
-    """Return True if ``token`` is a scan root that walks a whole catastrophic tree.
+class _Verdict(IntEnum):
+    """What the guard concluded about a command; a larger value outranks a smaller one."""
+
+    SAFE = 0
+    UNKNOWN = 1  # a root under /proc or /sys could not be stat'ed: file or tree?
+    DANGEROUS = 2
+
+
+def _root_verdict(token: str) -> _Verdict:
+    """Judge whether ``token`` is a scan root that walks a whole catastrophic tree.
 
     ``/``, ``/home``, ``/root``, ``/proc``, ``/sys``, ``~`` and ``$HOME`` are
     the trees themselves (a trailing slash is the same root). A subdirectory of
     the home tree (``~/projects``) is a project root, and an existing FILE under
-    ``/proc`` or ``/sys`` is a single read: neither walks the tree.
+    ``/proc`` or ``/sys`` is a single read: neither walks the tree. A path under
+    ``/proc`` or ``/sys`` that cannot be stat'ed is UNKNOWN, not a tree.
     """
     root = token.rstrip("/") or token
     if root.endswith(_CHILDREN_GLOB):
         # `/*` is every child of the root: a walk of the same tree.
         root = root[: -len(_CHILDREN_GLOB)].rstrip("/") or "/"
     if root in _HOME_EXACT or root in _DEFAULT_EXACT_ROOTS:
-        return True
+        return _Verdict.DANGEROUS
     if root == _spelled_out_home():
-        return True
+        return _Verdict.DANGEROUS
     if any(root.startswith(prefix + "/") for prefix in _DEFAULT_PREFIX_ROOTS):
-        # An unreadable path counts as not-a-file, so it is judged as a tree.
-        return not path_is_file(root, unreadable_means=False)
-    return root in _DEFAULT_PREFIX_ROOTS
+        is_file = path_is_file(root, unreadable_means=None)
+        if is_file is None:
+            return _Verdict.UNKNOWN
+        return _Verdict.SAFE if is_file else _Verdict.DANGEROUS
+    return _Verdict.DANGEROUS if root in _DEFAULT_PREFIX_ROOTS else _Verdict.SAFE
 
 
 @dataclass(frozen=True)
@@ -400,20 +413,20 @@ def _command_start(tokens: list[str]) -> int:
     return index
 
 
-def _shell_body_is_dangerous(args: list[str], depth: int) -> bool:
-    """Whether the ``-c`` string of a shell invocation holds a root-rooted scan."""
+def _shell_body_verdict(args: list[str], depth: int) -> _Verdict:
+    """The verdict on the ``-c`` string of a shell invocation."""
     for position, arg in enumerate(args):
         if not arg.startswith("-"):
-            return False
+            return _Verdict.SAFE
         if is_shell_command_option(arg):
             # The string is the first operand: options (and `--`) may still precede it.
             operands = [word for word in args[position + 1 :] if not word.startswith("-")]
-            return bool(operands) and _command_is_dangerous(operands[0], depth + 1)
-    return False
+            return _command_verdict(operands[0], depth + 1) if operands else _Verdict.SAFE
+    return _Verdict.SAFE
 
 
-def _segment_is_dangerous(segment: str, feeds_xargs: bool = False, depth: int = 0) -> bool:
-    """Return True if a single command segment is a root-rooted recursive scan.
+def _segment_verdict(segment: str, feeds_xargs: bool = False, depth: int = 0) -> _Verdict:
+    """Judge a single command segment: a root-rooted recursive scan, or not.
 
     ``feeds_xargs``: its output is piped to ``xargs``, which runs a command on
     every entry, so a depth bound no longer limits the work.
@@ -421,26 +434,29 @@ def _segment_is_dangerous(segment: str, feeds_xargs: bool = False, depth: int = 
     tokens = _tokenize(strip_reserved_word_prefix(segment))
     index = _command_start(tokens)
     if index >= len(tokens):
-        return False
+        return _Verdict.SAFE
 
     command = _command_token_basename(tokens[index])
     args = tokens[index + 1 :]
 
     if command in SHELL_NAMES:
-        return depth < _MAX_SHELL_NESTING and _shell_body_is_dangerous(args, depth)
+        return _shell_body_verdict(args, depth) if depth < _MAX_SHELL_NESTING else _Verdict.SAFE
 
     if not _recurses(command, args):
-        return False
+        return _Verdict.SAFE
 
     if command == "find":
         roots, bounded = _find_roots(args)
     else:
         roots, bounded = _search_roots(_SYNTAX_BY_COMMAND[command], args)
-    return not (bounded and not feeds_xargs) and any(_is_dangerous_root(root) for root in roots)
+    if bounded and not feeds_xargs:
+        return _Verdict.SAFE
+    # The worst root decides: a catastrophic root still denies beside an unstat-able one.
+    return max((_root_verdict(root) for root in roots), default=_Verdict.SAFE)
 
 
-def _command_is_dangerous(command: str, depth: int = 0) -> bool:
-    """Return True if any segment of ``command`` is a root-rooted recursive scan.
+def _command_verdict(command: str, depth: int = 0) -> _Verdict:
+    """The worst verdict over the segments of ``command``.
 
     Segments are split quote-aware, so a ``;`` inside ``bash -c '...'`` stays in
     the body; ``depth`` counts the ``-c`` bodies already entered.
@@ -448,15 +464,18 @@ def _command_is_dangerous(command: str, depth: int = 0) -> bool:
     # A pipe that ends a line continues the pipeline onto the next one.
     command = PIPE_AT_LINE_END.sub("| ", command)
     spans = split_unquoted_spans(command, _SEGMENT_SEPARATORS)
-    return any(
-        _segment_is_dangerous(
+    return max(
+        (
+            _segment_verdict(
             command[start:end],
             feeds_xargs=index + 1 < len(spans)
             and command[end : spans[index + 1][0]] == _PIPE
             and not _is_data_consumer(command[spans[index + 1][0] : spans[index + 1][1]]),
             depth=depth,
-        )
-        for index, (start, end) in enumerate(spans)
+            )
+            for index, (start, end) in enumerate(spans)
+        ),
+        default=_Verdict.SAFE,
     )
 
 
@@ -485,14 +504,20 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
         # Escape hatch: explicit justification bypasses the block.
         if command_declares_hatch(command, _ESCAPE_HATCH):
             return False
-        return _command_is_dangerous(command)
+        return _command_verdict(command) is not _Verdict.SAFE
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""
         return [self._rule]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block with a verbose-first/terse-after explanation.
+        """Block a catastrophic root; allow with an advisory a root that cannot be stat'ed.
+
+        Plan 00478: a path under ``/proc``/``/sys`` that cannot be stat'ed is
+        neither a file nor a tree as far as the guard knows, so it warns.
+        A command that ALSO holds a catastrophic root is still blocked.
+
+        Block with a verbose-first/terse-after explanation.
 
         Verbosity is decided per (transcript_path, rule_id) via the shared
         DisclosureTracker (Plan 00116, Decision G): the first fire for a
@@ -501,6 +526,13 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
         toward verbose every time (unknown disclosure state -> more info)
         since there is no key to track against.
         """
+        if _command_verdict(get_bash_command(hook_input) or "") is _Verdict.UNKNOWN:
+            return unknown_verdict_allow(
+                "root_recursion_guard",
+                "a recursive scan of a path under /proc or /sys that could not be stat'ed, "
+                "so it is not known whether it is a single file or a whole tree",
+                "Name a single file, or a narrower directory, so the guard can tell",
+            )
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
 
@@ -535,7 +567,10 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
             "a subdirectory of home (`~/projects`, `$HOME/proj`) and a scan bounded to "
             "one level (`find / -maxdepth 1`, `rg --max-depth 1 x /`) are allowed. "
             "`grep -r x /`, `find / -name x`, `du -sh /` and `rg x ~` stay blocked; "
-            "`ls /`, `ls -la /` and `du -sh .` are allowed.\n\n"
+            "`ls /`, `ls -la /` and `du -sh .` are allowed. A scan of a path under "
+            "`/proc` or `/sys` that cannot be stat'ed is ALLOWED with an advisory "
+            "(it is not known to be a tree); a catastrophic root in the same command "
+            "still blocks.\n\n"
             "**Note**: `... | head` does NOT bound a `-l`/`-rl` scan — a producer that "
             "matches nothing never writes, so it never receives SIGPIPE and runs to "
             "completion across the whole disk.\n\n"
@@ -600,8 +635,8 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
                 expected_message_patterns=[],
                 safety_notes=(
                     "The root is a literal project-relative path, not a shell expansion: "
-                    "flaggable_content_channel_guard fails closed on an expanded root such "
-                    "as the project-dir variable, so that shape would be denied by it in a "
+                    "flaggable_content_channel_guard cannot place an expanded root such "
+                    "as the project-dir variable, so that shape would draw its advisory in a "
                     "full-daemon run. The variable root stays covered by this handler's "
                     "unit tests. "
                     "'false &&' short-circuits so grep never executes even though this "

@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 from claude_code_hooks_daemon.handlers.pre_tool_use import (
     flaggable_content_channel_guard as guard_module,
 )
@@ -447,7 +448,7 @@ class TestRecursiveSearchesThatCanReachTheFlaggedDirectory:
     ) -> None:
         assert flagged_handler.matches(_bash_in("grep -rn foo /var/log")) is False
 
-    def test_relative_root_without_a_cwd_fails_closed(
+    def test_relative_root_without_a_cwd_is_matched_as_unplaced(
         self, flagged_handler: FlaggableContentChannelGuardHandler
     ) -> None:
         assert flagged_handler.matches(_bash("grep -rn foo src")) is True
@@ -612,10 +613,64 @@ class TestRecursiveSearchDenyMessage:
         assert "inside the flagged directory" in reason
 
     def test_unplaceable_search_explains_why(
-        self, flagged_handler: FlaggableContentChannelGuardHandler
+        self, flagged_handler: FlaggableContentChannelGuardHandler, caplog: pytest.LogCaptureFixture
     ) -> None:
-        reason = flagged_handler.handle(_bash_in("grep -rn foo $SOME_DIR")).reason or ""
-        assert "could not be placed" in reason
+        result = flagged_handler.handle(_bash_in("grep -rn foo $SOME_DIR"))
+        assert_unknown_verdict(
+            result, caplog, "flaggable_content_channel_guard", "could not be placed"
+        )
+
+
+class TestUnplaceableRootsWarnInsteadOfBlocking:
+    """Plan 00478: roots the guard cannot place are UNKNOWN; a placed reach still denies."""
+
+    _GUARD = "flaggable_content_channel_guard"
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -rn foo $SOME_DIR",
+            'rg foo "$S"',
+            "git -C elsewhere grep foo",
+            "git grep foo -- ':(top)x'",
+            "grep -rn 'unterminated",
+        ],
+    )
+    def test_unplaceable_search_allows_with_an_advisory(
+        self,
+        flagged_handler: FlaggableContentChannelGuardHandler,
+        caplog: pytest.LogCaptureFixture,
+        command: str,
+    ) -> None:
+        assert flagged_handler.matches(_bash_in(command)) is True
+        result = flagged_handler.handle(_bash_in(command))
+        assert_unknown_verdict(result, caplog, self._GUARD, "could not be placed")
+
+    def test_relative_root_without_a_cwd_allows_with_an_advisory(
+        self,
+        flagged_handler: FlaggableContentChannelGuardHandler,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        result = flagged_handler.handle(_bash("grep -rn foo src"))
+        assert_unknown_verdict(result, caplog, self._GUARD)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # One root cannot be placed, another positively contains the flagged dir.
+            "grep -rn foo $SOME_DIR tests",
+            "grep -rn foo tests $SOME_DIR",
+            # Separate segments: the unknown one comes first.
+            "grep -rn foo $SOME_DIR; grep -rn foo tests",
+            "grep -rn foo $SOME_DIR && git diff tests/fixtures/cyber-flag/a.txt",
+            "git grep foo -- ':(top)x' tests",
+        ],
+    )
+    def test_a_root_that_reaches_the_flagged_directory_still_denies(
+        self, flagged_handler: FlaggableContentChannelGuardHandler, command: str
+    ) -> None:
+        result = flagged_handler.handle(_bash_in(command))
+        assert result.decision == Decision.DENY
 
     def test_unanchored_glob_says_it_cannot_be_excluded(self, project_root: str) -> None:
         handler = FlaggableContentChannelGuardHandler()

@@ -6,6 +6,7 @@ a common vector for malware and system compromise.
 """
 
 import re
+from enum import IntEnum
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
@@ -37,6 +38,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     strip_quoted_heredoc_bodies,
     substitution_inner_spans,
 )
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 # Full first-fire teaching content (Plan 00116): reuses the pre-migration
 # handler's rich prose verbatim, minus the invocation-specific `COMMAND:`
@@ -141,33 +143,45 @@ def _interpreter_family(word: str) -> str:
     return word.rsplit("/", 1)[-1].lower().rstrip("0123456789.")
 
 
-def _stage_reads_stdin_as_code(words: list[str | None]) -> bool:
-    """Whether a pipe stage running ``words`` executes the bytes piped into it.
+class _Verdict(IntEnum):
+    """Whether piped bytes run as code; a larger value outranks a smaller one."""
+
+    DATA = 0
+    UNKNOWN = 1  # a non-shell interpreter with an argument that cannot be resolved
+    CODE = 2
+
+
+def _stage_verdict(words: list[str | None]) -> _Verdict:
+    """Judge whether a pipe stage running ``words`` executes the bytes piped into it.
 
     A shell always does. python, perl and ruby do when no program is named: no
     `-c`/`-m`/`-e`, no script file, or an explicit `-` (stdin). A word the
-    reader cannot resolve is treated as the worst case.
+    reader cannot resolve might be the program or might be an option, so a
+    non-shell interpreter with one is UNKNOWN (Plan 00478) unless a later word
+    settles it as stdin.
     """
     family = _interpreter_family(words[0] or "")
     if family in _SHELL_NAMES or family not in _PROGRAM_OPTION:
-        return True
+        return _Verdict.CODE
+    unresolved = False
     skip_next = False
     for word in words[1:]:
         if word is None:
-            return True
+            unresolved = True
+            continue
         if skip_next:
             skip_next = False
         elif word in STDIN_OPERANDS:
-            return True
+            return _Verdict.CODE
         elif _PROGRAM_OPTION[family].match(word) or word in _NO_PROGRAM_OPTIONS[family]:
-            return False
+            return _Verdict.UNKNOWN if unresolved else _Verdict.DATA
         elif word in _VALUE_OPTIONS[family]:
             skip_next = True
         elif _REDIRECT_WORD.match(word):
             skip_next = _REDIRECT_WORD.fullmatch(word) is not None
         elif not word.startswith("-"):
-            return False
-    return True
+            return _Verdict.UNKNOWN if unresolved else _Verdict.DATA
+    return _Verdict.UNKNOWN if unresolved else _Verdict.CODE
 
 
 def _resolved_words(text: str) -> list[str | None]:
@@ -249,17 +263,19 @@ def _piped_interpreter_stages(view: str) -> list[tuple[int, list[str | None]]]:
     return stages
 
 
-def _some_download_becomes_code(view: str) -> bool:
-    """Whether any `curl|wget ... | <interpreter>` pipe in ``view`` runs the download.
+def _download_pipe_verdict(view: str) -> _Verdict:
+    """The worst verdict over the downloader pipes into an interpreter in ``view``.
 
     Each pipe into an interpreter that follows a downloader on the same line
-    is judged by the stage's own words.
+    is judged by the stage's own words; one that runs the download outranks one
+    that cannot be judged.
     """
+    worst = _Verdict.DATA
     for pipe_at, words in _piped_interpreter_stages(view):
         line_start = view.rfind("\n", 0, pipe_at) + 1
-        if _DOWNLOADER.search(view, line_start, pipe_at) and _stage_reads_stdin_as_code(words):
-            return True
-    return False
+        if _DOWNLOADER.search(view, line_start, pipe_at):
+            worst = max(worst, _stage_verdict(words))
+    return worst
 
 
 def _downloads(inner: str) -> bool:
@@ -451,10 +467,16 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
             return False
 
         # A pipe that ends a line continues the pipeline onto the next one.
+        return self._verdict(command) is not _Verdict.DATA
+
+    def _verdict(self, command: str) -> _Verdict:
+        """CODE for a download that runs, UNKNOWN for one the guard cannot judge."""
         view = PIPE_AT_LINE_END.sub("| ", self._scannable(command))
         if not _DOWNLOADER.search(view):
-            return False
-        return _some_download_becomes_code(view) or _substitution_runs_download(view)
+            return _Verdict.DATA
+        if _substitution_runs_download(view):
+            return _Verdict.CODE
+        return _download_pipe_verdict(view)
 
     @staticmethod
     def _scannable(command: str) -> str:
@@ -540,6 +562,17 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
         if not self.matches(hook_input):
             return GatingResult(decision=Decision.ALLOW)
 
+        # Plan 00478: a pipe into a non-shell interpreter whose arguments cannot
+        # be resolved is warned about; a pipe into a shell, or into an
+        # interpreter reading stdin, still blocks (CODE outranks UNKNOWN).
+        if self._verdict(get_bash_command(hook_input) or "") is _Verdict.UNKNOWN:
+            return unknown_verdict_allow(
+                "curl_pipe_shell",
+                "a download piped into an interpreter with an argument the guard could "
+                "not resolve, so it is not known whether the piped bytes run as code",
+                "Write the interpreter's arguments out literally (a script path, or -c/-m)",
+            )
+
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
 
@@ -573,6 +606,10 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
             "downloaded bytes are the program. A wrapper in front of the "
             "interpreter does not hide it (`| env python3`, `| sudo -u bob python3`), "
             "and `node` counts as an interpreter.\n\n"
+            "A pipe into python, perl, ruby or node whose arguments cannot be "
+            "resolved (a variable where the script or option would be) is ALLOWED "
+            "with an advisory: it may or may not run the download. A pipe into a "
+            "shell is never allowed.\n\n"
             "**Also blocked**: a download run as the program through a "
             'substitution: `sh -c "$(curl URL)"` (Homebrew\'s install form), '
             '`bash <(curl URL)`, `source <(curl URL)`, `eval "$(curl URL)"`. '

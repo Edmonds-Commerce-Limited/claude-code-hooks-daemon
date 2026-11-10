@@ -275,3 +275,50 @@ class TestRootRecursionGuardMetadata:
                     f"{test.expected_decision} but command {test.command!r} "
                     "DOES match() this handler"
                 )
+
+
+class TestUnstatablePathWarnsInsteadOfBlocking:
+    """Plan 00478: a /proc or /sys path that cannot be stat'ed is UNKNOWN, so it warns."""
+
+    @pytest.fixture
+    def handler(self):
+        return RootRecursionGuardHandler()
+
+    @pytest.fixture
+    def unstatable(self, monkeypatch):
+        from pathlib import Path
+
+        def refuse(self: Path) -> bool:
+            raise PermissionError(13, "Permission denied", str(self))
+
+        monkeypatch.setattr(Path, "is_file", refuse)
+
+    def test_unstatable_root_is_allowed_with_an_advisory(self, handler, unstatable, caplog):
+        from tests.support.unknown_verdict_asserts import assert_unknown_verdict
+
+        hook_input = _bash("grep -r foo /proc/1/environ")
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert_unknown_verdict(result, caplog, "root_recursion_guard", "/proc", "stat")
+
+    def test_unstatable_root_inside_bash_c_is_allowed(self, handler, unstatable, caplog):
+        from tests.support.unknown_verdict_asserts import assert_unknown_verdict
+
+        hook_input = _bash("bash -c 'find /sys/kernel/x -name y'")
+        assert handler.matches(hook_input) is True
+        assert_unknown_verdict(handler.handle(hook_input), caplog, "root_recursion_guard")
+
+    def test_mixed_catastrophic_root_still_denies(self, handler, unstatable):
+        hook_input = _bash("grep -r foo /proc/1/environ /")
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    def test_mixed_across_segments_still_denies(self, handler, unstatable):
+        hook_input = _bash("grep -r foo /proc/1/environ; find / -name x")
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    def test_statable_tree_under_proc_still_denies(self, handler):
+        hook_input = _bash("grep -r foo /proc/sys/kernel/nonexistent-dir-xyz")
+        assert handler.matches(hook_input) is True
+        assert handler.handle(hook_input).decision == Decision.DENY

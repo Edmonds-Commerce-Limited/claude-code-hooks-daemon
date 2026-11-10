@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 from claude_code_hooks_daemon.utils.recursive_search import (
     TOOL_GIT,
     TOOL_GREP,
@@ -226,6 +227,9 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
 
         ``remedy`` is set only for a recursive search, where the usual advice to
         delegate to the quarantine agent is wrong: it names the exclusion to add.
+        A search whose roots cannot be placed is reported with ``_UNPLACED_LABEL``
+        only when NO segment is positively revealing: a found finding outranks
+        an unknown one, wherever in the command each sits.
         """
         if not isinstance(hook_input, dict):
             return None
@@ -246,6 +250,7 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
 
         raw_cwd = hook_input.get(HookInputField.CWD)
         cwd = raw_cwd if isinstance(raw_cwd, str) else None
+        unplaced: tuple[str, str, str | None] | None = None
         for segment, piped_in in command_segments(command):
             for label, pattern in shapes:
                 if pattern.search(segment):
@@ -253,9 +258,11 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
                     if mention is not None:
                         return (label, mention, None)
             reached = _recursive_search_reaches(segment, globs, cwd=cwd, piped_in=piped_in)
-            if reached is not None:
+            if reached is not None and reached.unplaced:
+                unplaced = unplaced or (_UNPLACED_LABEL, reached.glob, None)
+            elif reached is not None:
                 return (_RECURSIVE_SEARCH_LABEL, reached.glob, reached.remedy)
-        return None
+        return unplaced
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""
@@ -276,6 +283,18 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
             return GatingResult(decision=Decision.ALLOW)
 
         shape_label, glob, remedy = matched
+
+        if shape_label == _UNPLACED_LABEL:
+            return unknown_verdict_allow(
+                "flaggable_content_channel_guard",
+                "a recursive search whose roots or exclusions could not be placed (a shell "
+                "expansion, unparseable quoting, a `git -C`, unknown pathspec magic, or a "
+                "relative root with no working directory), so it is not known whether it "
+                "reaches the flaggable directory",
+                "Name explicit roots that do not contain the flagged directory, or add the "
+                "exclusion as a literal flag; delegate any review of flagged content to the "
+                "quarantine subagent",
+            )
 
         if shape_label == _RECURSIVE_SEARCH_LABEL:
             return GatingResult(
@@ -325,7 +344,12 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
             "`grep -r --exclude-dir=<name>`, `rg -g '!<path>/**'`, or "
             "`git grep PATTERN -- ':!<path>'` (path relative to the working "
             "directory). The deny message prints the exact flag. Searches "
-            "whose roots lie off the flagged directory are allowed.\n\n"
+            "whose roots lie off the flagged directory are allowed. A recursive "
+            "search whose roots or exclusions CANNOT be placed (a shell expansion "
+            "such as `$DIR`, unparseable quoting, `git -C`, unknown pathspec magic, "
+            "a relative root with no working directory) is ALLOWED with an advisory, "
+            "because the guard has no verdict; one root that positively reaches the "
+            "flagged directory still denies the whole command.\n\n"
             "**Why**: those shapes pull a flaggable file's content into "
             "context inside a routine command's output, with no deliberate "
             "Read at all — the one leak an agent-side convention cannot "
@@ -412,10 +436,9 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
 
 _RECURSIVE_SEARCH_LABEL: Final[str] = "recursive grep/rg search reaching a flaggable directory"
 _NO_REMEDY: Final[str] = (
-    "The search roots could not be placed with certainty (a shell expansion, unparseable "
-    "quoting, a `git -C`, or unknown pathspec magic). Name explicit narrower roots that do "
-    "not contain it."
+    "Name explicit narrower roots that do not contain the flagged directory."
 )
+_UNPLACED_LABEL: Final[str] = "recursive search whose roots could not be placed"
 _GREP_SHAPE: Final[re.Pattern[str]] = re.compile(r"\b(?:grep|egrep|fgrep|zgrep|rg)\b")
 _NEGATION: Final[str] = "!"
 _GIT_EXCLUDE_MAGIC: Final[tuple[str, ...]] = (":(exclude)", ":!", ":^")
@@ -429,6 +452,7 @@ class _Reach:
 
     glob: str
     remedy: str | None
+    unplaced: bool = False  # the roots could not be placed: no verdict, not a finding
 
 
 def _has_wildcard(component: str) -> bool:
@@ -482,14 +506,16 @@ def _recursive_search_reaches(
 ) -> _Reach | None:
     """The flaggable glob a recursive search in ``segment`` can read, else None.
 
-    Fails closed: a search whose roots or exclusions cannot be placed
-    (unparseable quoting, a shell expansion, a relative path with no working
-    directory, a relocated ``git -C``, unknown pathspec magic) is treated as
-    reaching the first glob, with no remedy beyond narrower roots.
+    A search whose roots or exclusions cannot be placed (unparseable quoting, a
+    shell expansion, a relative path with no working directory, a relocated
+    ``git -C``, unknown pathspec magic) is reported as ``unplaced`` (Plan 00478):
+    no verdict, so the caller warns. A root that DOES reach a flagged directory
+    is returned as a finding even when another root of the same search cannot
+    be placed.
     """
     if not _GREP_SHAPE.search(segment):
         return None
-    unplaceable = _Reach(globs[0], None)
+    unplaceable = _Reach(globs[0], None, unplaced=True)
     try:
         words = linear_shlex.split(segment)
     except ValueError:
@@ -504,6 +530,7 @@ def _recursive_search_reaches(
     if relocated:
         return unplaceable
     pathspec_excludes: list[str] = []
+    unplaced = False
     roots = scan.operands
     if tool == TOOL_GIT:
         roots = []
@@ -512,10 +539,10 @@ def _recursive_search_reaches(
             if magic is not None:
                 pathspec_excludes.append(operand.removeprefix(magic))
             elif operand.startswith(":"):
-                return unplaceable
+                unplaced = True
             else:
                 roots.append(operand)
-    if not roots:
+    if not roots and not unplaced:
         # rg reads a piped stdin instead; grep -r and git grep search the cwd.
         if tool == TOOL_RG and piped_in:
             return None
@@ -525,7 +552,8 @@ def _recursive_search_reaches(
     for search_root in roots:
         searched = _root_relative_components(search_root, cwd=cwd, root=project_root)
         if searched is None:
-            return unplaceable
+            unplaced = True
+            continue
         if searched[:1] == [".."]:
             continue
         for glob in globs:
@@ -537,7 +565,7 @@ def _recursive_search_reaches(
             ):
                 continue
             return _Reach(glob, _remedy(glob, flagged, searched, cwd_components, tool))
-    return None
+    return unplaceable if unplaced else None
 
 
 def _cwd_components(cwd: str | None, root: str | None) -> list[str] | None:

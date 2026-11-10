@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.plan_journal_guard import (
     conflict_checkout_paths,
 )
 from claude_code_hooks_daemon.utils.path_predicates import TextOrReason
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 PLAN_DIR = "CLAUDE/Plan"
 LIVE_FOLDER = "00461-journal-entries-only"
@@ -559,8 +560,8 @@ class TestBashSurfaceIsDenied:
         assert handler.matches(_bash(command, project)) is True
 
 
-class TestUnplaceableDestinationsFailClosed:
-    """M2: a destination the resolver cannot place is denied if it names a journal."""
+class TestUnplaceableDestinationsWarn:
+    """Plan 00478: a destination the resolver cannot place warns, and does not deny."""
 
     @pytest.mark.parametrize(
         "command",
@@ -576,40 +577,33 @@ class TestUnplaceableDestinationsFailClosed:
             f'cd {_live_journal_dir()} && echo x >> "$F"',
         ],
     )
-    def test_is_denied(self, handler: PlanJournalGuardHandler, project: Path, command: str) -> None:
-        assert handler.matches(_bash(command, project)) is True, command
-
-    def test_the_deny_still_names_the_plan(
-        self, handler: PlanJournalGuardHandler, project: Path
+    def test_is_allowed_with_an_advisory(
+        self,
+        handler: PlanJournalGuardHandler,
+        project: Path,
+        command: str,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        command = (
-            f"cat >> {_live_journal_dir()}/00461-Journal-$(date -u +%y-%m-%d).md <<'EOF'\nx\nEOF"
-        )
-        reason = handler.handle(_bash(command, project)).reason or ""
-        assert f"{project}/{PLAN_DIR}/mkplan.bash --journal 461 " in reason
+        hook_input = _bash(command, project)
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+        assert_unknown_verdict(result, caplog, "plan_journal_guard", "run time", "mkplan.bash")
 
-    def test_an_absolute_cd_names_that_checkouts_script(
-        self, handler: PlanJournalGuardHandler, project: Path
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # An unplaced destination first, then a literal day-file: the literal one denies.
+            f'cd {_live_journal_dir()} && echo x >> "$F"; echo y >> {{abs}}/{LIVE_DAYFILE}',
+            f"echo x >> {_live_journal_dir()}/*.md; echo y >> {_live_journal_dir()}/{LIVE_DAYFILE}",
+            f"echo y >> {_live_journal_dir()}/{LIVE_DAYFILE}; echo x >> {_live_journal_dir()}/*.md",
+        ],
+    )
+    def test_a_literal_day_file_beside_an_unplaced_one_still_denies(
+        self, handler: PlanJournalGuardHandler, project: Path, command: str
     ) -> None:
-        worktree_journal = _worktree_path(project).parent
-        command = f'cd {worktree_journal} && echo x >> "$F"'
-        reason = handler.handle(_bash(command, project)).reason or ""
-        assert f"{project / WORKTREE}/{PLAN_DIR}/mkplan.bash --journal 500 " in reason
-
-    def test_without_a_cwd_the_main_checkout_is_named(
-        self, handler: PlanJournalGuardHandler, project: Path
-    ) -> None:
-        command = f"echo x >> {_live_journal_dir()}/00461-Journal-$(date -u +%y-%m-%d).md"
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
-        reason = handler.handle(hook_input).reason or ""
-        assert f"{project}/{PLAN_DIR}/mkplan.bash --journal 461 " in reason
-
-    def test_an_unnamed_plan_is_a_placeholder(
-        self, handler: PlanJournalGuardHandler, project: Path
-    ) -> None:
-        command = f'cd {PLAN_DIR}/JOURNAL && echo x >> "$F"'
-        reason = handler.handle(_bash(command, project)).reason or ""
-        assert "--journal <plan-number> <category> " in reason
+        command = command.replace("{abs}", f"{project}/{_live_journal_dir()}")
+        result = handler.handle(_bash(command, project))
+        assert result.decision == Decision.DENY
 
     @pytest.mark.parametrize(
         "command",
@@ -644,6 +638,27 @@ class TestUnplaceableDestinationsFailClosed:
         with everything after it. Unreadable text may write anywhere, so it
         denies when it names a day-file or a ``JOURNAL/`` directory."""
         assert handler.matches(_bash(command, project)) is True, command
+
+    def test_unreadable_text_naming_a_journal_warns(
+        self,
+        handler: PlanJournalGuardHandler,
+        project: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Plan 00478: text the analysis could not read is an unknown, not a deny."""
+        command = f"echo $'it && echo x >> {_relative_live()}"
+        result = handler.handle(_bash(command, project))
+        assert_unknown_verdict(result, caplog, "plan_journal_guard", "could not read")
+
+    def test_unreadable_text_beside_a_literal_day_file_still_denies(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        command = (
+            f"echo $'it\\'s' && echo '## 14:05' >> {_relative_live()}\n"
+            f"echo y >> {project}/{_live_journal_dir()}/{LIVE_DAYFILE}"
+        )
+        result = handler.handle(_bash(command, project))
+        assert result.decision == Decision.DENY
 
     def test_unreadable_text_that_names_no_journal_is_allowed(
         self, handler: PlanJournalGuardHandler, project: Path

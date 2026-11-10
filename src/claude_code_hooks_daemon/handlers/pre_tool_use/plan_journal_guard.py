@@ -41,11 +41,14 @@ day-file directly in ``JOURNAL/``, or an entry file one folder down
   judged (``git mv`` of a plan folder into ``Completed/``), and the one write
   allowed is the exact restore ``git show HEAD:<p> > <p>``.
 
-Fails CLOSED on a destination it cannot place: one built at run time
-(``$(date …)``, a variable, a glob), or a relative one after a ``cd``. Such a
-destination is denied when it visibly names a day-file (``NNNNN-Journal-``), or
-when any part after a ``JOURNAL/`` directory is built at run time (the entry
-folder included: ``JOURNAL/$(date -u +%F)/x.md``).
+A destination it cannot place (Plan 00478) is ALLOWED with an advisory: one
+built at run time (``$(date …)``, a variable, a glob), or a relative one after a
+``cd``, when it visibly names a day-file (``NNNNN-Journal-``) or any part after
+a ``JOURNAL/`` directory is built at run time (``JOURNAL/$(date -u +%F)/x.md``),
+and text the write analysis could not read. The guard cannot tell whether such
+a write lands in a journal, so it warns. A command that ALSO writes a literal
+day-file or ``JOURNAL/`` target is still denied, wherever the unplaced
+destination sits in it.
 
 Gated as ``plan_number_helper`` is: the plan workflow is on and the checkout's
 scaffolder is deployed. That scaffolder must also offer ``--journal``, and the
@@ -93,6 +96,7 @@ from claude_code_hooks_daemon.plan_qa.model import (
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME, JOURNAL_MODE_OFF
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.git_facts import GitFactsBase
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 from claude_code_hooks_daemon.utils.path_predicates import (
     TextOrReason,
     path_is_file,
@@ -440,20 +444,22 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         cwd = raw_cwd if isinstance(raw_cwd, str) and raw_cwd else None
 
         writes = bash_file_writes(command, cwd, self._read_text)
+        unplaced: _JournalTarget | None = None
         for raw in writes.destinations:
             if _needs_expansion(raw) or (writes.directories and not _is_anchored(raw)):
-                if _could_name_dayfile(raw, writes.directories):
-                    return self._unplaced_target(raw, writes.directories, cwd, plan_dir)
+                if unplaced is None and _could_name_dayfile(raw, writes.directories):
+                    unplaced = self._unplaced_target(raw, writes.directories, cwd, plan_dir)
                 continue
             target = self._dayfile_target(raw, cwd, plan_dir)
             if target is not None:
+                # A placed day-file is a finding; an unplaced one seen earlier is not.
                 return target
-        # Text the analysis could not read may write anywhere: fail closed
-        # when it names a day-file or a `JOURNAL/` directory (Plan 00466 N120).
+        # Text the analysis could not read may write anywhere: an unknown when it
+        # names a day-file or a `JOURNAL/` directory (Plan 00466 N120, Plan 00478).
         for text in writes.unreadable:
-            if _could_mention_dayfile(text):
-                return self._unplaced_target(text.strip(), writes.directories, cwd, plan_dir)
-        return None
+            if unplaced is None and _could_mention_dayfile(text):
+                unplaced = self._unplaced_target(text.strip(), writes.directories, cwd, plan_dir)
+        return unplaced
 
     def _conflict_checkout_target(
         self, hook_input: dict[str, Any], plan_dir: str
@@ -561,18 +567,22 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
                 ]
             )
 
+        if not target.placed:
+            return unknown_verdict_allow(
+                "plan_journal_guard",
+                "a Bash write whose destination is built at run time, or text the write "
+                "analysis could not read, and which could name a plan journal day-file or "
+                "`JOURNAL/` directory",
+                "Spell the destination out literally, or append journal entries through "
+                "`mkplan.bash --journal`, which stamps the real UTC time",
+            )
+
         number = _PLAN_NUMBER_PLACEHOLDER if target.plan_number is None else str(target.plan_number)
         script = target.checkout / plan_dir / MKPLAN_SCRIPT_NAME
         stamp = datetime.now(UTC).strftime(_BODY_FILE_STAMP)
         suffix = secrets.token_hex(_BODY_FILE_SUFFIX_BYTES)
         body_file = (
             target.checkout / ProjectPath.SCRATCH_DIR / f"journal-{number}-{stamp}-{suffix}.md"
-        )
-        unplaced_note = (
-            ""
-            if target.placed
-            else "  (built by the shell at run time; it names a journal day-file, "
-            "so it is treated as one)"
         )
         message = self._render(hook_input)
         if target.destructive:
@@ -582,7 +592,7 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         # The target and the command are invocation-specific, so they are shown
         # on every fire, terse or verbose.
         message += (
-            f"\n\nTarget: `{target.display}`{unplaced_note}\n\n"
+            f"\n\nTarget: `{target.display}`\n\n"
             "Append the entry through the stamping tool, in two steps:\n\n"
             f"  1. Write the entry BODY with the Write tool to {body_file}\n"
             "     (body only: the tool writes the `## HH:MM · category · REF` heading;\n"
@@ -653,10 +663,13 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             "and a Bash command that writes into one by any route — `>`, "
             "`>>`, `tee`, a heredoc, `cp`/`mv`/`dd`/`ln`/`rsync`, an in-place editor, "
             "a patch, an interpreter program (inline, on a heredoc, or behind "
-            "`timeout`/`uv run`/…). A destination the shell builds at run time "
-            "(`$(date …)`, a variable, a glob, a relative name after `cd`) is denied "
-            "when it names a day-file or builds any part after `JOURNAL/`. Every "
-            "worktree and archived plan included. A wrong entry is fixed by a new "
+            "`timeout`/`uv run`/…). Every "
+            "worktree and archived plan included. A destination the shell builds at "
+            "run time (`$(date …)`, a variable, a glob, a relative name after `cd`) "
+            "that could name a day-file or builds any part after `JOURNAL/`, and text "
+            "the write analysis could not read, is ALLOWED with an advisory: the guard "
+            "cannot tell where it lands. A command that also writes a literal day-file "
+            "is still denied. A wrong entry is fixed by a new "
             "`correction` entry (`--ref HH:MM`), never by editing it.\n\n"
             "**Allowed**: the tool itself, `git` (moving a plan folder into "
             "`Completed/`), reading a journal, an Edit that removes ONLY conflict-marker "

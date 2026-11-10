@@ -16,8 +16,9 @@ the commands that move `main` other than the release itself:
 The state file is the trigger, exactly as for `release_blocker`: no file means
 no release, and that path costs one stat and no JSON parse. A state file that
 cannot be read, is not a JSON object, or carries a malformed `ci` record
-FAILS CLOSED for those same commands, with a reason naming the file: a guard
-that cannot read its evidence must not look like a guard with nothing to say.
+leaves the guard unable to tell whether a release is open (Plan 00478): those
+same commands are ALLOWED with an advisory naming the file, and the log line
+`UNKNOWN-VERDICT` records it. A release that IS positively open still denies.
 A state file with no `ci` record means the pull request is not open yet, so
 nothing is frozen.
 """
@@ -41,6 +42,7 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
 )
 from claude_code_hooks_daemon.utils.git_sync import current_branch
 from claude_code_hooks_daemon.utils.shell_segmentation import peel_command_wrappers
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 RULE_ID: Final[str] = "R-RELEASE-MERGE-FREEZE"
 
@@ -52,7 +54,8 @@ _RULE: Final[Rule] = Rule(
     verbose=(
         "The release state file records the release pull request's CI run. Merges to main\n"
         "are frozen until the release is finished or aborted (RELEASING.md). An unreadable\n"
-        "or malformed state file also denies these commands, naming the file."
+        "or malformed state file is only an advisory, naming the file: the guard cannot tell\n"
+        "whether a release is open, so it warns instead of blocking."
     ),
 )
 
@@ -206,41 +209,40 @@ class ReleaseMergeFreezeHandler(Handler):
             return None, f"{state_path} has a `{_CI_KEY}` record without a positive `{_PR_KEY}`"
         return number, None
 
-    def _verdict(self, hook_input: dict[str, Any]) -> str | None:
-        """The deny reason for this event, or None to allow it."""
+    def _verdict(self, hook_input: dict[str, Any]) -> tuple[str | None, str | None]:
+        """``(deny_reason, unknown_cause)`` for this event; ``(None, None)`` allows it.
+
+        Only one is ever set. ``unknown_cause`` is why the state file cannot say
+        whether a release is open, for a command that moves `main`.
+        """
         if hook_input.get("tool_name") != "Bash":
-            return None
+            return None, None
         tool_input = hook_input.get("tool_input", {})
         command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
         if not isinstance(command, str):
-            return None
+            return None, None
         if "gh" not in command and not any(word in command for word in _MOVING_WORDS):
-            return None
+            return None, None
 
         root = self._project_root(hook_input)
         state_path = root.joinpath(*_STATE_PARTS)
         if not state_path.exists():
-            return None
+            return None, None
         release_pr, problem = self._release_pr(state_path)
         if problem is None and release_pr is None:
-            return None
+            return None, None
 
         cwd_value = hook_input.get("cwd")
         cwd = Path(cwd_value) if isinstance(cwd_value, str) and cwd_value else root
         if not any(_moves_main(step, cwd, release_pr) for step in simple_commands(command)):
-            return None
-        return self._reason(release_pr, problem)
+            return None, None
+        if problem is not None:
+            return None, problem
+        return self._reason(release_pr), None
 
     @staticmethod
-    def _reason(release_pr: int | None, problem: str | None) -> str:
+    def _reason(release_pr: int | None) -> str:
         head = RuleFormatter().headline(_RULE)
-        if problem is not None:
-            return (
-                f"{head}\n\nRELEASE MERGE FREEZE - {_STATE_FILE_NAME} is unusable\n\n"
-                f"{problem}.\n\nWithout it the open release pull request is unknown, so this "
-                "command, which moves main, is denied (fail closed). Repair the file "
-                "(RELEASING.md, release state file), or abort the release by deleting it."
-            )
         return (
             f"{head}\n\nRELEASE MERGE FREEZE - release pull request #{release_pr} is open\n\n"
             f"`untracked/{_STATE_FILE_NAME}` records pull request #{release_pr} as the open "
@@ -253,11 +255,19 @@ class ReleaseMergeFreezeHandler(Handler):
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match a Bash command that moves `main` during an open release."""
-        return self._verdict(hook_input) is not None
+        return self._verdict(hook_input) != (None, None)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Deny, naming the open release pull request and the way out."""
-        return HookResult(decision=Decision.DENY, reason=self._verdict(hook_input))
+        """Deny while a release is positively open; warn when the guard cannot tell."""
+        reason, cause = self._verdict(hook_input)
+        if cause is not None:
+            return unknown_verdict_allow(
+                "release_merge_freeze",
+                f"whether a release is open, because {cause}; this command moves main",
+                f"Repair `untracked/{_STATE_FILE_NAME}` (RELEASING.md, release state file), "
+                "or delete it if no release is open",
+            )
+        return HookResult(decision=Decision.DENY, reason=reason)
 
     def get_rules(self) -> list[Rule]:
         """The rule behind this handler's deny."""

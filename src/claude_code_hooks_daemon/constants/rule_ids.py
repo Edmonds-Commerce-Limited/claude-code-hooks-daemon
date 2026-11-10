@@ -452,6 +452,7 @@ class RuleID:
     #: A read of a governed reference clone with no in-date freshness reading.
     #: Deliberately its own rule: "nobody checked" and "this is out of date"
     #: call for different responses, so they must not share an explanation.
+    #: An advisory only: nobody checked, and nothing was found.
     REFERENCE_REPO_NOT_VERIFIED: str = "R-REFERENCE-REPO-NOT-VERIFIED"
 
     # ------------------------------------------------------------------

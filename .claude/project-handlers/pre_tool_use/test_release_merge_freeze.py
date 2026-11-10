@@ -14,6 +14,7 @@ import pytest
 from release_merge_freeze import RULE_ID, ReleaseMergeFreezeHandler
 
 from claude_code_hooks_daemon.core.hook_result import Decision
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 _SHA = "a" * 40
 _RELEASE_PR = 12
@@ -205,25 +206,45 @@ class TestUnreadableState:
             json.dumps(_state(True)),
         ],
     )
-    def test_malformed_denies_loudly_naming_the_file(
-        self, handler: ReleaseMergeFreezeHandler, root: Path, content: str, command: str
+    def test_malformed_warns_naming_the_file(
+        self,
+        handler: ReleaseMergeFreezeHandler,
+        root: Path,
+        content: str,
+        command: str,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         (root / "untracked" / "release-state.json").write_text(content, encoding="utf-8")
         payload = _input(command, root)
         assert handler.matches(payload) is True
         result = handler.handle(payload)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "release-state.json" in result.reason
-        assert RULE_ID in result.reason
+        assert_unknown_verdict(
+            result, caplog, "release_merge_freeze", "release-state.json", "whether a release is open"
+        )
 
-    def test_unreadable_denies(self, handler: ReleaseMergeFreezeHandler, root: Path) -> None:
+    def test_unreadable_warns(
+        self,
+        handler: ReleaseMergeFreezeHandler,
+        root: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
         (root / "untracked" / "release-state.json").mkdir()
         payload = _input("git push origin main", root)
         assert handler.matches(payload) is True
-        reason = handler.handle(payload).reason
-        assert reason is not None
-        assert "release-state.json" in reason
+        result = handler.handle(payload)
+        assert_unknown_verdict(result, caplog, "release_merge_freeze", "release-state.json")
+
+    def test_a_positively_open_release_still_denies(
+        self, handler: ReleaseMergeFreezeHandler, root: Path
+    ) -> None:
+        (root / "untracked" / "release-state.json").write_text(
+            json.dumps(_state()), encoding="utf-8"
+        )
+        payload = _input("git push origin main", root)
+        result = handler.handle(payload)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert RULE_ID in result.reason
 
     def test_malformed_state_still_allows_unrelated_commands(
         self, handler: ReleaseMergeFreezeHandler, root: Path

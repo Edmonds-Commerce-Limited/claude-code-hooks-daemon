@@ -46,7 +46,6 @@ from claude_code_hooks_daemon.reference_repos.cache import cached_states
 from claude_code_hooks_daemon.reference_repos.discovery import GIT_ENTRY as _GIT_ENTRY
 from claude_code_hooks_daemon.reference_repos.model import RepoState
 from claude_code_hooks_daemon.reference_repos.report import (
-    NOT_VERIFIED_HEADLINE,
     display_path,
     remediation_command,
     repo_line,
@@ -57,6 +56,7 @@ from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     command_word,
     split_unquoted,
@@ -191,7 +191,7 @@ _STALE_RULE = Rule(
 
 _NOT_VERIFIED_RULE = Rule(
     rule_id=RuleID.REFERENCE_REPO_NOT_VERIFIED,
-    blocked="a read of a governed reference clone with no in-date freshness reading",
+    blocked="(advisory only) a read of a governed reference clone with no in-date freshness reading",
     why=(
         "nobody has checked this clone, which is a different fact from it being "
         "stale -- and treating the two the same either cries wolf or gives false comfort"
@@ -475,11 +475,13 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         """Judge every governed checkout this call reaches into.
 
         Three answers, in descending order of what a reader must act on:
-        nothing has checked this repo, this repo is out of date, or this repo's
-        reading was never confirmed against an upstream. The first two are
-        findings and obey the configured mode; the third is a NOTE that never
-        blocks — see :func:`unconfirmed_note` for why blocking on it would make
-        an unreachable clone permanently unreadable.
+        this repo is out of date, nothing has checked this repo, or this repo's
+        reading was never confirmed against an upstream. Only the first is a
+        finding and obeys the configured mode. The other two never block:
+        "nobody checked" is an unknown verdict (Plan 00478), allowed with an
+        advisory, and a stale repo in the same call still blocks; see
+        :func:`unconfirmed_note` for why blocking on the third would make an
+        unreachable clone permanently unreadable.
         """
         config = self._reference_repos
         project_root = self.project_root_reader()
@@ -488,6 +490,7 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         known = cached_states(project_root, ttl_seconds=config.cache_ttl_minutes * 60)
 
         notes: list[str] = []
+        unverified: list[str] = []
         for path in self._touched_paths(hook_input, project_root):
             subject = self._subject(path, project_root, known)
             if subject is None:
@@ -496,20 +499,33 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
                 continue
 
             if known is None or subject not in known:
-                blocking = self._is_blocking(session_id, subject, config.mode)
-                message = self._not_verified(subject, project_root, blocking=blocking)
-                return self._verdict(message, session_id, subject, config.mode, _NOT_VERIFIED_RULE)
+                # Nobody has checked it: no verdict (Plan 00478), reported below. The
+                # walk goes on, because a LATER path may be positively stale.
+                unverified.append(display_path(subject, project_root))
+                continue
 
             state = known[subject]
             if state.needs_attention:
                 blocking = self._is_blocking(session_id, subject, config.mode)
                 message = self._stale(state, project_root, blocking=blocking)
-                return self._verdict(message, session_id, subject, config.mode, _STALE_RULE)
+                result = self._verdict(message, session_id, subject, config.mode, _STALE_RULE)
+                if result.decision != Decision.ALLOW:
+                    return result
+                notes.extend(result.context)
+                continue
 
             note = self._unconfirmed(state, subject, session_id, project_root)
             if note is not None:
                 notes.append(note)
 
+        if unverified:
+            allowed = unknown_verdict_allow(
+                "reference_repo_freshness",
+                "no in-date freshness reading exists for " + ", ".join(unverified),
+                "Run `hooks-daemon reference-repos` to fetch every governed repo and "
+                "refresh the reading",
+            )
+            return GatingResult(decision=Decision.ALLOW, context=[*allowed.context, *notes])
         return GatingResult(decision=Decision.ALLOW, context=notes)
 
     def _unconfirmed(
@@ -531,36 +547,14 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         self._record(session_id, key)
         return note
 
-    def _not_verified(self, subject: Path, project_root: Path, *, blocking: bool) -> str:
-        """Nobody has checked this repo.
-
-        A DIFFERENT sentence and a different rule ID from :meth:`_stale`, on
-        purpose: "nobody checked" and "this is out of date" call for different
-        responses, and collapsing them would either cry wolf or give false
-        comfort. Two rules means `explain-rule` can answer each on its own terms.
+    def _stale(self, state: RepoState, project_root: Path, *, blocking: bool) -> str:
+        """This repo was checked, and it is not what the reader thinks it is.
 
         ``blocking`` selects the headline: the deny rendering when this call
         will actually be denied, the ALLOW-path advisory rendering (Plan
         00466 N8) when it will not -- an `advise`-mode result or a
         `block_once` repeat must never open with "BLOCKED", because the
         call already ran.
-        """
-        headline = (
-            self._formatter.verbose(_NOT_VERIFIED_RULE)
-            if blocking
-            else self._formatter.advisory(_NOT_VERIFIED_RULE)
-        )
-        detail = (
-            f"{NOT_VERIFIED_HEADLINE}: no in-date reading exists for "
-            f"{display_path(subject, project_root)}, so what it contains may not be "
-            "what you think it is."
-        )
-        return f"{headline}\n\n{detail}"
-
-    def _stale(self, state: RepoState, project_root: Path, *, blocking: bool) -> str:
-        """This repo was checked, and it is not what the reader thinks it is.
-
-        See :meth:`_not_verified` for what ``blocking`` selects and why.
         """
         headline = (
             self._formatter.verbose(_STALE_RULE)
@@ -654,7 +648,9 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
             "inspecting a governed repo is always allowed. A repo that cannot be checked at "
             "all — no remote, no upstream, detached HEAD — never blocks anything.\n\n"
             "`NOT VERIFIED` means something different from stale: nobody has checked, usually "
-            "because no sweep has run this session. Run `hooks-daemon reference-repos` to "
+            "because no sweep has run this session. It is ALLOWED with an advisory, never a "
+            "block, because the guard has no verdict; a stale repo in the same call still "
+            "blocks. Run `hooks-daemon reference-repos` to "
             "fetch every governed repo and refresh the reading.\n\n"
             "**`COULD NOT BE CONFIRMED` is a third answer, and it never blocks.** A sweep ran "
             "and could not compare this clone against an upstream — the remote was unreachable, "

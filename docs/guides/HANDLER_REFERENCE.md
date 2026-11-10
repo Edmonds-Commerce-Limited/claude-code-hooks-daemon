@@ -615,6 +615,8 @@ handlers:
 
 **Description:** Blocks piping curl or wget output directly to bash/sh. This pattern executes untrusted remote code without inspection and is a common vector for malware. The safe alternative is to download first, inspect, then execute.
 
+**Cannot decide:** a pipe into python, perl, ruby or node whose arguments cannot be resolved (a variable where the script or option would be) is allowed with an advisory, because the guard cannot tell whether the interpreter runs the download as code. A pipe into a shell always executes stdin and still blocks, even beside an unresolved word.
+
 **Example trigger:**
 
 ```bash
@@ -650,6 +652,8 @@ handlers:
 - Roots: `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`
 
 **Allowed:** the same scanners scoped to the project — `rg -l "x" /path/to/project`, `grep -rl "x" "$CLAUDE_PROJECT_DIR"`, `grep -rl x src/`, `find . -name y`. A non-recursive `grep x /etc/hosts` is never affected.
+
+**Cannot decide:** a recursive scan of a path under `/proc` or `/sys` that cannot be stat'ed (file or tree?) is allowed with an advisory. A catastrophic root in the same command still blocks.
 
 **Note:** piping to `head` does NOT bound a `-l`/`-rl` scan. A producer that matches nothing never writes, so it never receives `SIGPIPE` and runs to completion across the whole disk.
 
@@ -2140,6 +2144,8 @@ can only advise about: content-revealing git commands (`git diff`,
 `grep`/`rg`/`egrep`/`fgrep` family pull a flaggable file's content into
 context inside a routine command's output, with no deliberate `Read` at all.
 
+A recursive search whose roots or exclusions cannot be placed (a shell expansion, unparseable quoting, `git -C`, unknown pathspec magic, a relative root with no working directory) is allowed with an advisory; a root that positively reaches the flagged directory still denies the whole command.
+
 Denies a Bash command segment (statements and pipe/`&&`/`||` spans, quote-
 and heredoc-aware) whose SHAPE is content-revealing AND that references a
 path matching `flaggable_path_globs`. A plain `git status`, `git log` (no
@@ -2392,7 +2398,7 @@ handlers:
 | **Type**       | Blocking             |
 | **Event**      | PreToolUse           |
 
-**Description:** Denies a plan journal entry written by hand, in any checkout including git worktrees: an `Edit`/`Write` that creates a `JOURNAL/` entry file or changes any existing journal file (entry file or legacy day-file), or a Bash command that does so by any route. Only removing conflict markers, or restoring the committed bytes, is allowed. The deny prints the exact `mkplan.bash --journal <plan> <category> <body-file>` command for that plan, with absolute paths, because the tool stamps the real UTC time and a hand-typed one can be wrong. `mkplan.bash`, `git`, reads and edits that add no line are allowed. Active only when the plan workflow and journalling are on, the journal directory keeps its default `JOURNAL` name, and the checkout's plan directory holds `_JOURNAL_TEMPLATE_.md` and a `mkplan.bash` that offers `--journal`; otherwise it is inert and logs why once. Full rule: [CLAUDE/PlanJournalling.md](../../CLAUDE/PlanJournalling.md#appending-an-entry).
+**Description:** Denies a plan journal entry written by hand, in any checkout including git worktrees: an `Edit`/`Write` that creates a `JOURNAL/` entry file or changes any existing journal file (entry file or legacy day-file), or a Bash command that does so by any route. Only removing conflict markers, or restoring the committed bytes, is allowed. The deny prints the exact `mkplan.bash --journal <plan> <category> <body-file>` command for that plan, with absolute paths, because the tool stamps the real UTC time and a hand-typed one can be wrong. `mkplan.bash`, `git`, reads and edits that add no line are allowed. Active only when the plan workflow and journalling are on, the journal directory keeps its default `JOURNAL` name, and the checkout's plan directory holds `_JOURNAL_TEMPLATE_.md` and a `mkplan.bash` that offers `--journal`; otherwise it is inert and logs why once. A Bash write whose destination is built at run time, or text the write analysis could not read, is allowed with an advisory because the guard cannot tell where it lands; a literal day-file or `JOURNAL/` target in the same command still denies. Full rule: [CLAUDE/PlanJournalling.md](../../CLAUDE/PlanJournalling.md#appending-an-entry).
 
 **Config example:**
 
@@ -2501,7 +2507,7 @@ handlers:
 | Answer                   | Means                                                         | Blocks?              |
 | ------------------------ | ------------------------------------------------------------- | -------------------- |
 | stale                    | checked, and behind or off its default branch                 | yes, per `mode`      |
-| `NOT VERIFIED`           | no in-date reading exists — nobody has checked                | yes, per `mode`      |
+| `NOT VERIFIED`           | no in-date reading exists — nobody has checked                | no, advisory only    |
 | `COULD NOT BE CONFIRMED` | a sweep ran and could not reach the remote (or there is none) | never — context only |
 
 "Nobody has checked" and "this is out of date" call for different responses; collapsing them would either cry wolf about repos that are fine or give false comfort about repos nobody looked at. Run `hooks-daemon reference-repos` to refresh and clear the first two.

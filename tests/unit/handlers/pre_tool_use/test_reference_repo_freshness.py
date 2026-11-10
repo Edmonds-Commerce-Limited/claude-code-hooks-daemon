@@ -35,10 +35,10 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.reference_repo_freshness imp
 from claude_code_hooks_daemon.reference_repos.cache import write_cache
 from claude_code_hooks_daemon.reference_repos.model import Checkability, RepoState
 from claude_code_hooks_daemon.reference_repos.report import (
-    NOT_VERIFIED_HEADLINE,
     UNCONFIRMED_HEADLINE,
     remediation_command,
 )
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 _SESSION = "session-alpha"
 _OTHER_SESSION = "session-beta"
@@ -579,17 +579,42 @@ class TestIsBlockingMatchesVerdict:
 
 
 class TestNotVerified:
-    def test_a_missing_cache_reads_as_not_verified(
-        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    """Plan 00478: "nobody has checked" is an unknown verdict, so it warns in every mode."""
+
+    _GUARD = "reference_repo_freshness"
+
+    def test_a_missing_cache_allows_with_an_advisory(
+        self,
+        tmp_path: Path,
+        handler: ReferenceRepoFreshnessHandler,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """No reading is NOT the same as a clean reading."""
+        """No reading is NOT the same as a clean reading, and not a deny either."""
         repo = _repo(tmp_path)
 
         result = handler.handle(_read(repo / "x.py"))
 
-        assert NOT_VERIFIED_HEADLINE in _reason(result)
+        advisory = assert_unknown_verdict(
+            result, caplog, self._GUARD, "no in-date freshness reading", "reference-repos"
+        )
+        assert "BLOCKED [" not in advisory
 
-    def test_not_verified_also_honours_block_once(
+    @pytest.mark.parametrize("mode", ["block", "block_once", "advise"])
+    def test_not_verified_never_denies_in_any_mode(
+        self,
+        tmp_path: Path,
+        handler: ReferenceRepoFreshnessHandler,
+        caplog: pytest.LogCaptureFixture,
+        mode: Any,
+    ) -> None:
+        repo = _repo(tmp_path)
+        handler._reference_repos = ReferenceReposConfig(mode=mode)
+
+        result = handler.handle(_read(repo / "x.py"))
+
+        assert_unknown_verdict(result, caplog, self._GUARD, "untracked/repos/alpha")
+
+    def test_every_repeat_is_still_allowed_with_the_advisory(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
     ) -> None:
         repo = _repo(tmp_path)
@@ -597,50 +622,30 @@ class TestNotVerified:
         first = handler.handle(_read(repo / "x.py"))
         second = handler.handle(_read(repo / "y.py"))
 
-        assert first.decision == Decision.DENY
+        assert first.decision == Decision.ALLOW
         assert second.decision == Decision.ALLOW
+        assert "NOT checked" in "\n".join(second.context) or "not checked" in "\n".join(
+            second.context
+        )
 
-    def test_not_verified_allowed_retry_never_carries_the_deny_headline(
-        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
-    ) -> None:
-        """Plan 00466 N8, the NOT VERIFIED half: `_not_verified` builds its
-        own message via the same verbose-formatter call `_stale` does."""
-        repo = _repo(tmp_path)
-
-        handler.handle(_read(repo / "x.py"))
-        second = handler.handle(_read(repo / "y.py"))
-
-        assert second.decision == Decision.ALLOW
-        joined = "\n".join(second.context or [])
-        assert "BLOCKED [" not in joined
-        assert NOT_VERIFIED_HEADLINE in joined
-
-    def test_not_verified_advise_mode_never_carries_the_deny_headline(
-        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
-    ) -> None:
-        repo = _repo(tmp_path)
-        handler._reference_repos = ReferenceReposConfig(mode="advise")
-
-        result = handler.handle(_read(repo / "x.py"))
-
-        assert result.decision == Decision.ALLOW
-        joined = "\n".join(result.context or [])
-        assert "BLOCKED [" not in joined
-        assert NOT_VERIFIED_HEADLINE in joined
-
-    def test_an_expired_cache_reads_as_not_verified(
-        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    def test_an_expired_cache_allows_with_an_advisory(
+        self,
+        tmp_path: Path,
+        handler: ReferenceRepoFreshnessHandler,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         repo = _repo(tmp_path)
         write_cache(tmp_path, [_state(repo)], now=0.0)
 
         result = handler.handle(_read(repo / "x.py"))
 
-        assert result.decision == Decision.DENY
-        assert NOT_VERIFIED_HEADLINE in _reason(result)
+        assert_unknown_verdict(result, caplog, self._GUARD)
 
-    def test_a_repo_absent_from_a_valid_cache_reads_as_not_verified(
-        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    def test_a_repo_absent_from_a_valid_cache_allows_with_an_advisory(
+        self,
+        tmp_path: Path,
+        handler: ReferenceRepoFreshnessHandler,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """A repo cloned mid-session was never swept, so nothing is known of it."""
         known = _repo(tmp_path, "alpha")
@@ -649,7 +654,22 @@ class TestNotVerified:
 
         result = handler.handle(_read(unknown / "x.py"))
 
+        assert_unknown_verdict(result, caplog, self._GUARD, "untracked/repos/beta")
+
+    @pytest.mark.parametrize("stale_first", [True, False])
+    def test_a_stale_repo_in_the_same_call_still_denies(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler, stale_first: bool
+    ) -> None:
+        """Mixed: one path nobody checked and one positively stale. The stale one wins."""
+        stale = _repo(tmp_path, "alpha")
+        unknown = _repo(tmp_path, "beta")
+        write_cache(tmp_path, [_state(stale, behind=4)])
+        paths = [stale, unknown] if stale_first else [unknown, stale]
+
+        result = handler.handle(_bash("cat " + " ".join(f"{path}/x.py" for path in paths)))
+
         assert result.decision == Decision.DENY
+        assert result.rule == RuleID.REFERENCE_REPO_STALE
 
 
 class TestAnUnreadableAncestor:
@@ -1063,8 +1083,8 @@ class TestOnlyRealCheckoutsAreGoverned:
 
         result = handler.handle(_read(fresh / "x.py"))
 
-        assert result.decision == Decision.DENY
-        assert NOT_VERIFIED_HEADLINE in _reason(result)
+        assert result.decision == Decision.ALLOW
+        assert "cloned-midsession" in "\n".join(result.context)
 
 
 class TestCommandsThatCannotRead:
@@ -1256,8 +1276,9 @@ class TestPathDisplay:
 
         result = handler.handle(_read(repo / "x.py"))
 
-        assert "untracked/repos/alpha" in _reason(result)
-        assert str(tmp_path) not in _reason(result)
+        advisory = "\n".join(result.context)
+        assert "untracked/repos/alpha" in advisory
+        assert str(tmp_path) not in advisory
 
     def test_a_root_outside_the_repository_cannot_be_configured(self) -> None:
         """Why the handler never has to render an absolute path.
@@ -1305,8 +1326,8 @@ class TestHandlerContract:
         not_verified = handler.handle(_read(unknown / "x.py"))
         behind = handler.handle(_read(stale / "x.py"))
 
-        assert not_verified.decision == Decision.DENY
-        assert not_verified.rule == RuleID.REFERENCE_REPO_NOT_VERIFIED
+        assert not_verified.decision == Decision.ALLOW
+        assert not_verified.rule is None
         assert behind.decision == Decision.DENY
         assert behind.rule == RuleID.REFERENCE_REPO_STALE
 
