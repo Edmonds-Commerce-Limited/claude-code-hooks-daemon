@@ -1466,7 +1466,9 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             "code nested too deep, an awk program writing to a computed destination) and the "
             "listed glob has no literal name to look for in it (`**`, `*`), the call is "
             "allowed with an advisory and one `UNKNOWN-VERDICT` log line. Text that "
-            "literally names a listed path is still denied.\n\n"
+            "literally names a listed path is still denied, and so is such an awk program "
+            "when one of its file operands names a listed path "
+            "(`awk '{print > FILENAME}' protected/x`).\n\n"
             "**When it is denied, do not look for another route to the same file.** Ask the "
             "human for the change you need; the file is theirs (or the IaC's) to place."
         )
