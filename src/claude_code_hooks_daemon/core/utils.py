@@ -461,8 +461,11 @@ def scan_bash_write_targets(
 #: holds no brace. PWD is set and non-empty, so those expand to ``$PWD`` and
 #: bash never evaluates the word.
 _PWD_EXPANSION_RE: Final[re.Pattern[str]] = re.compile(
-    r"\$\{PWD(?::?[-=?][^{}]*)?\}|\$PWD(?![A-Za-z0-9_])|\$\(\s*pwd\s*\)"
+    r"""\$\{PWD(?::?[-=?][^{}'"\\]*)?\}|\$PWD(?![A-Za-z0-9_])|\$\(\s*pwd\s*\)"""
 )
+
+#: Where a ``${PWD`` expansion with a default operator opens.
+_PWD_OPERATOR_OPENER_RE: Final[re.Pattern[str]] = re.compile(r"\$\{PWD:?[-=?]")
 
 #: The repository root, spelled exactly as ``git rev-parse --show-toplevel``.
 _TOPLEVEL_EXPANSION_RE: Final[re.Pattern[str]] = re.compile(
@@ -499,7 +502,23 @@ def substitute_cwd_expansions(token: str, command: str, cwd: Any) -> str:
         return token
     if _CHANGES_DIRECTORY_RE.search(command):
         return token
+    if _has_unreadable_pwd_operator(command):
+        return token
     return expand_cwd_references(token, cwd)
+
+
+def _has_unreadable_pwd_operator(command: str) -> bool:
+    """Does ``command`` open a ``${PWD<op>`` whose word the strict pattern rejects?
+
+    The write-target scanner hands over tokens with quotes and backslashes
+    already stripped, so ``${PWD:-\\}/a}`` reaches the substitution as
+    ``${PWD:-}/a}`` and would close early. The raw command still shows the
+    quote, backslash or inner brace, so the token is left unresolved.
+    """
+    return any(
+        _PWD_EXPANSION_RE.match(command, opener.start()) is None
+        for opener in _PWD_OPERATOR_OPENER_RE.finditer(command)
+    )
 
 
 def expand_cwd_references(token: str, cwd: str) -> str:

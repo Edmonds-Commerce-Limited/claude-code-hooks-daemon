@@ -594,6 +594,8 @@ class TestTheWorkingDirectoryExpansionsAreResolved:
             'pushd /tmp; echo x > "$(pwd)/x"',
             'PWD=/tmp; echo x > "$PWD/x"',
             'echo x > "$PWDX/x"',
+            r"echo hi > ${PWD:-\}/a/b/c}/../../../zz",
+            "echo hi > ${PWD:-'}'/a/b/c}/../../../zz",
             'echo x > "$TMPDIR/x"',
             'echo x > "$(git rev-parse --git-dir)/x"',
         ],

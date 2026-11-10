@@ -69,11 +69,33 @@ class TestSubstituteCwdExpansions:
 
     @pytest.mark.parametrize(
         "token",
-        ["${PWD:+.}/x", "${PWD#/a}/x", "${PWD%/b}/x", "${PWD:-${x}}/x", "${PWDX:-.}/x"],
+        [
+            "${PWD:+.}/x",
+            "${PWD#/a}/x",
+            "${PWD%/b}/x",
+            "${PWD:-${x}}/x",
+            "${PWDX:-.}/x",
+            r"${PWD:-\}/a/b/c}/x",
+            "${PWD:-'}'/a/b/c}/x",
+            '${PWD:-"}"/a}/x',
+        ],
     )
     def test_any_other_operator_on_pwd_stays_unresolved(self, token: str) -> None:
         """An alternative, a pattern trim or a nested brace is not `$PWD`."""
         assert substitute_cwd_expansions(token, "echo", "/a/b") == token
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            r"echo hi > ${PWD:-\}/a/b/c}/../../../zz",
+            "echo hi > ${PWD:-'}'/a/b/c}/../../../zz",
+        ],
+    )
+    def test_a_token_stripped_of_its_quotes_stays_unresolved(self, command: str) -> None:
+        """The scanner strips the escape, so only the raw command shows the word
+        holds a brace."""
+        token = "${PWD:-}/a/b/c}/../../../zz"
+        assert substitute_cwd_expansions(token, command, "/a/b") == token
 
     def test_a_longer_variable_name_is_left_alone(self) -> None:
         assert substitute_cwd_expansions("$PWDX/x", "echo", "/a/b") == "$PWDX/x"
