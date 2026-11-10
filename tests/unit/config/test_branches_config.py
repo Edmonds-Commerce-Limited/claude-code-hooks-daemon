@@ -216,3 +216,15 @@ class TestRootConfig:
         path.write_text('version: "2.0"\nbranches:\n  dormancy: {advisory_days: 40}\n')
         with pytest.raises((ValidationError, ValueError)):
             Config.load(path)
+
+
+class TestHome:
+    """Plan 00594 M-2: ``home`` takes exact branch names, unlike the glob lists."""
+
+    @pytest.mark.parametrize("value", ["release/*", "feat?", "env/[ab]"])
+    def test_a_glob_character_is_rejected_with_the_reason(self, value: str) -> None:
+        with pytest.raises(ValidationError, match="exact branch names"):
+            BranchesConfig(home=[value])
+
+    def test_exact_names_are_accepted(self) -> None:
+        assert BranchesConfig(home=["main", "release/2.0"]).home == ["main", "release/2.0"]

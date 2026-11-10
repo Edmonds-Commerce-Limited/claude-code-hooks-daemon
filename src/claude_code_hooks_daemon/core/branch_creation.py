@@ -161,18 +161,26 @@ def write_labels(path: Path, branches: list[dict[str, object]]) -> None:
         }
         for record in branches
     }
+    _write_labels(
+        path,
+        labels,
+        "the labels snapshot only orders the creation guard's deny list; "
+        "without it the list falls back to names and ages",
+    )
+
+
+_REWRITE_REASON = "the next SessionStart rewrites the snapshot from the inventory"
+
+
+def _write_labels(path: Path, labels: Mapping[str, object], reason: str) -> None:
+    """Write the labels snapshot through a temporary file; a failure is logged, never raised."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(labels, sort_keys=True), encoding="utf-8")
         temporary.replace(path)
     except OSError as exc:
-        log_and_continue(
-            logger,
-            exc,
-            reason="the labels snapshot only orders the creation guard's deny list; "
-            "without it the list falls back to names and ages",
-        )
+        log_and_continue(logger, exc, reason=reason)
 
 
 def clear_label_stage(path: Path, name: str) -> None:
@@ -181,14 +189,7 @@ def clear_label_stage(path: Path, name: str) -> None:
     if name not in labels:
         return
     labels[name] = {**labels[name], "group": "parked", "stage": None, "stale": None}
-    try:
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(labels, sort_keys=True), encoding="utf-8")
-        temporary.replace(path)
-    except OSError as exc:
-        log_and_continue(
-            logger, exc, reason="the next SessionStart rewrites the snapshot from the inventory"
-        )
+    _write_labels(path, labels, _REWRITE_REASON)
 
 
 def clear_label_stale(path: Path, name: str) -> None:
@@ -197,14 +198,7 @@ def clear_label_stale(path: Path, name: str) -> None:
     if name not in labels:
         return
     labels[name] = {**labels[name], "stale": None}
-    try:
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(labels, sort_keys=True), encoding="utf-8")
-        temporary.replace(path)
-    except OSError as exc:
-        log_and_continue(
-            logger, exc, reason="the next SessionStart rewrites the snapshot from the inventory"
-        )
+    _write_labels(path, labels, _REWRITE_REASON)
 
 
 def clear_label_stale_at_tips(path: Path, tips: Iterable[str]) -> None:
@@ -225,14 +219,7 @@ def clear_label_stale_at_tips(path: Path, tips: Iterable[str]) -> None:
         return
     for name in names:
         labels[name] = {**labels[name], "stale": None}
-    try:
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(labels, sort_keys=True), encoding="utf-8")
-        temporary.replace(path)
-    except OSError as exc:
-        log_and_continue(
-            logger, exc, reason="the next SessionStart rewrites the snapshot from the inventory"
-        )
+    _write_labels(path, labels, _REWRITE_REASON)
 
 
 def read_labels(path: Path) -> dict[str, dict[str, str | None]]:
