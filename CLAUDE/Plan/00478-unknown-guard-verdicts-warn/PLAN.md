@@ -82,7 +82,8 @@ plan states that cost; it does not re-decide the ruling.
   that the later batches reuse (TDD; handler tests for rows 11-13, which have none).
   Delivered: `utils/unknown_verdict.py` `unknown_verdict_allow(guard, cause, rephrase)`,
   log prefix `UNKNOWN-VERDICT`; an independent review caught a found marker lost on
-  a later timeout, fixed before merge (`6014e3814`); release note 027.
+  a later timeout, fixed before merge (`a2a7f5687`; branch merged to main via
+  `6014e3814`, main CI run 42747571106 green); release note 027.
 - [ ] ⬜ **Task 2.2b**: `destructive_git` substitution route (row 2). Held with Q1:
   the forced delete is positively recognised and only its target is hidden behind
   the substitution, the same "recognised action, unproven target" shape as rows 1/3.
