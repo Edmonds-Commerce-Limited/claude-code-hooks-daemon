@@ -695,8 +695,9 @@ def _save_cache(path: Path, cache: _Cache, live_tips: set[str]) -> None:
 
 
 #: Bump when the rule that decides a cached proof changes, so entries the old rule
-#: wrote are never read. v2: the default tip must hold the branch's net change.
-PROOF_ALGORITHM_VERSION: Final[str] = "v2"
+#: wrote are never read. v3: some first-parent commit of the default, after the merge
+#: base and up to its tip, holds the branch's net change.
+PROOF_ALGORITHM_VERSION: Final[str] = "v3"
 
 
 def merge_proof_key(tip: str, target_shas: Iterable[str]) -> str:
@@ -725,7 +726,9 @@ def write_merge_proofs(repo: Path, proofs: Mapping[str, str]) -> None:
     cache = _load_cache(path)
     cache.proofs.update(proofs)
     keys = [*cache.pairs, *cache.containment, *cache.park_counts]
-    live = {key.split(":", 1)[0] for key in keys} | {_proof_tip(key) for key in cache.proofs}
+    current = {key: tier for key, tier in cache.proofs.items() if _proof_tip(key)}
+    cache.proofs = current
+    live = {key.split(":", 1)[0] for key in keys} | {_proof_tip(key) for key in current}
     _save_cache(path, cache, live)
 
 

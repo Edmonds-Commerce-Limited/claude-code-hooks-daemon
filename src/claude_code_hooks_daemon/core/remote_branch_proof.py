@@ -9,12 +9,14 @@ The proof, for each named branch: a literal name that is not the default, exempt
 protected; no tag of the same name; a remote-tracking ref that is merged by the
 cheapest offline evidence that holds (Plan 00594 DESIGN.md 2.1): ancestry of the
 default branch (tracking or local) or, for an ordinary branch, of an integration
-line's tracking ref; else the default branch's TIP holding the branch's NET change: its diff against
-merge-base(default, tip), renames off, where every added or modified path has the
-same blob and mode at the default's tip and every deleted path is gone from it.
+line's tracking ref; else SOME commit on the default's first-parent line (after
+merge-base(default, tip), up to the default's tip) holding the branch's NET change:
+its diff against that merge base, renames off, where every added or modified path
+has the same blob and mode in the commit's tree and every deleted path is absent.
 That is what a squash merge, a renamed pull request or a cherry-pick leaves
-behind, and it is checked first, so patch-id evidence never proves a branch the
-default has since reverted, and an empty change (a park branch) proves nothing.
+behind; the content is then permanently in the default's history, so patch-id
+evidence never proves a branch alone, and an empty change (a park branch) proves
+nothing. Every git call runs from the repository top level.
 Results are cached by algorithm version, tip and default sha in the inventory
 cache, so the next call is offline and cheap. Then the remote's LIVE tip, read with one batched
 ``git ls-remote`` per chunk, equal to that tracking tip. Every failure, timeout and
@@ -58,6 +60,12 @@ _NO_MERGE_BASE: Final[int] = 1
 #: status) and of one ``git ls-tree`` record (mode, type, blob).
 _RAW_META_FIELDS: Final[int] = 5
 _LS_TREE_META_FIELDS: Final[int] = 3
+
+#: ``run_git`` decodes with ``errors="replace"``; this marks a path it could not decode.
+_REPLACEMENT_CHAR: Final[str] = "\ufffd"
+
+#: First-parent commits of the default one proof will inspect; more is unproven.
+MAX_PROOF_CANDIDATES: Final[int] = 50
 
 #: Paths per ``git ls-tree`` call, bounding the argv for a branch touching many files.
 _LS_TREE_CHUNK: Final[int] = 200
@@ -204,7 +212,8 @@ def _net_change(directory: Path, base: str, tracking_ref: str) -> list[_PathChan
     """The branch's net change: ``git diff --raw -z --no-renames`` of base to tip.
 
     Raises:
-        ProofUnavailableError: git failed, so there is no answer to cache.
+        ProofUnavailableError: git failed, or a path is not valid UTF-8 (``run_git``
+            decodes with replacement, so such a path could not be looked up again).
     """
     raw = run_git(
         directory,
@@ -226,13 +235,18 @@ def _net_change(directory: Path, base: str, tracking_ref: str) -> list[_PathChan
         meta = fields[index].lstrip(":").split(" ")
         if len(meta) != _RAW_META_FIELDS:
             raise ProofUnavailableError(f"unreadable git diff --raw output for {tracking_ref}")
+        if _REPLACEMENT_CHAR in fields[index + 1]:
+            raise ProofUnavailableError(f"{tracking_ref} changes a path that is not valid UTF-8")
         _old_mode, new_mode, _old_blob, new_blob, status = meta
         changes.append(_PathChange(fields[index + 1], status.startswith("D"), new_mode, new_blob))
     return changes
 
 
-def _tip_entries(directory: Path, target: str, paths: list[str]) -> dict[str, tuple[str, str]]:
-    """Map path to ``(mode, blob)`` as ``target``'s tip tree holds it, for the paths it has.
+def _tree_entries(directory: Path, commit: str, paths: list[str]) -> dict[str, tuple[str, str]]:
+    """Map path to ``(mode, blob)`` as ``commit``'s tree holds it, for the paths it has.
+
+    ``directory`` is the repository top level, so the root-relative paths of
+    ``git diff --raw`` mean the same thing here.
 
     Raises:
         ProofUnavailableError: git failed, so there is no answer to cache.
@@ -244,13 +258,13 @@ def _tip_entries(directory: Path, target: str, paths: list[str]) -> dict[str, tu
             "--literal-pathspecs",
             "ls-tree",
             "-z",
-            target,
+            commit,
             "--",
             *paths[start : start + _LS_TREE_CHUNK],
             timeout=Timeout.GIT_CONTEXT,
         )
         if listing.returncode != 0:
-            raise ProofUnavailableError(f"git ls-tree failed for {target}")
+            raise ProofUnavailableError(f"git ls-tree failed for {commit}")
         for entry in listing.stdout.split("\0"):
             meta, _, path = entry.partition("\t")
             parts = meta.split(" ")
@@ -259,26 +273,9 @@ def _tip_entries(directory: Path, target: str, paths: list[str]) -> dict[str, tu
     return held
 
 
-def _holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
-    """Whether ``target``'s tip holds the whole net change of ``tracking_ref``.
-
-    The net change is the branch's diff against ``merge-base(target, tip)``. Every
-    path it adds or modifies must be in the target's tip with the same blob and
-    mode; every path it deletes must be absent. An empty net change (empty commits,
-    or changes that cancel out) holds nothing, so it proves nothing.
-
-    Raises:
-        ProofUnavailableError: git failed, so there is no answer to cache.
-    """
-    base = run_git(directory, "merge-base", target, tracking_ref, timeout=Timeout.GIT_CONTEXT)
-    if base.returncode == _NO_MERGE_BASE:
-        return False
-    if base.returncode != 0:
-        raise ProofUnavailableError(f"git merge-base failed for {tracking_ref}")
-    changes = _net_change(directory, base.stdout.strip(), tracking_ref)
-    if not changes:
-        return False
-    held = _tip_entries(directory, target, [change.path for change in changes])
+def _tree_holds(directory: Path, commit: str, changes: list[_PathChange]) -> bool:
+    """Whether ``commit``'s tree holds every change: same blob and mode, deletions absent."""
+    held = _tree_entries(directory, commit, [change.path for change in changes])
     return all(
         (
             change.path not in held
@@ -289,12 +286,69 @@ def _holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
     )
 
 
+def _touching_commits(directory: Path, base: str, target: str, paths: list[str]) -> list[str]:
+    """The first-parent commits in ``base..target`` that touched any of ``paths``.
+
+    Raises:
+        ProofUnavailableError: git failed, so there is no answer to cache.
+    """
+    commits: dict[str, None] = {}
+    for start in range(0, len(paths), _LS_TREE_CHUNK):
+        listing = run_git(
+            directory,
+            "--literal-pathspecs",
+            "log",
+            "--first-parent",
+            "--format=%H",
+            f"{base}..{target}",
+            "--",
+            *paths[start : start + _LS_TREE_CHUNK],
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        if listing.returncode != 0:
+            raise ProofUnavailableError(f"git log failed for {target}")
+        commits.update(dict.fromkeys(listing.stdout.split()))
+    return list(commits)
+
+
+def _holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
+    """Whether the default's first-parent history holds the whole net change of the branch.
+
+    The net change is the branch's diff against ``merge-base(target, tip)``. It is
+    held by a commit whose tree has every added or modified path at the same blob
+    and mode and every deleted path absent. The target's tip is tried first, then
+    the first-parent commits after the merge base that touched those paths (a state
+    that holds the change was reached by a commit that touched one of them). Once a
+    commit held it the content is permanently in the default's history, even if the
+    default has changed it since. More candidates than ``MAX_PROOF_CANDIDATES`` is
+    unproven, as is an empty net change (empty commits, or changes that cancel out).
+
+    Raises:
+        ProofUnavailableError: git failed, so there is no answer to cache.
+    """
+    base = run_git(directory, "merge-base", target, tracking_ref, timeout=Timeout.GIT_CONTEXT)
+    if base.returncode == _NO_MERGE_BASE:
+        return False
+    if base.returncode != 0:
+        raise ProofUnavailableError(f"git merge-base failed for {tracking_ref}")
+    merge_base = base.stdout.strip()
+    changes = _net_change(directory, merge_base, tracking_ref)
+    if not changes:
+        return False
+    if _tree_holds(directory, target, changes):
+        return True
+    candidates = _touching_commits(directory, merge_base, target, [c.path for c in changes])
+    if len(candidates) > MAX_PROOF_CANDIDATES:
+        return False
+    return any(_tree_holds(directory, commit, changes) for commit in candidates)
+
+
 def _judge_offline(directory: Path, tracking_ref: str, targets: list[str]) -> str:
     """The tier that proves one tracking ref merged into a default ref, or ``unproven``.
 
-    The default tip must hold the branch's net change (:func:`_holds_net_change`):
-    that check comes FIRST and alone decides, so neither patch-id evidence (main may
-    have reverted the patch since) nor an empty commit on main can prove a branch.
+    The default's history must hold the branch's net change (:func:`_holds_net_change`):
+    that check comes FIRST and alone decides, so neither patch-id evidence nor an
+    empty commit on main can prove a branch.
     The tier only names how the change got there: ``patch-equivalent`` when every
     commit has its patch in the default, else ``content-preserved`` (a squash). It is
     not ``branch_safety``'s local-delete tier, which proves only recoverability.
@@ -487,7 +541,20 @@ def prove_remote_merged(
     """Prove each of ``names`` (bare branch names, already past :func:`named_ref_problem`).
 
     Contacts the remote (``ls-remote``) only for the names the local proof accepted.
+    Every git call of the proof runs from the repository top level, resolved once, so
+    a command typed in a subdirectory reads root-relative paths the way git printed them.
     """
+    top = run_git(directory, "rev-parse", "--show-toplevel", timeout=Timeout.GIT_CONTEXT)
+    if top.returncode != 0 or not top.stdout.strip():
+        return RemoteProof(
+            tips={},
+            problems={
+                name: f"the repository top level could not be resolved, so `{name}` is unchecked"
+                for name in names
+            },
+            evidence={},
+        )
+    directory = Path(top.stdout.strip())
     tips, problems, evidence = _merged_tracking_tips(directory, remote, names, default, branches)
     stale = _live_tip_problems(directory, remote, tips)
     return RemoteProof(

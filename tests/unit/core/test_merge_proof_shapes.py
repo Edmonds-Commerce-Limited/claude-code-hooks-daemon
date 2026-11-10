@@ -10,6 +10,7 @@ all offline; the remote's live tip is the only network read.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -23,6 +24,7 @@ from claude_code_hooks_daemon.config.models import (
     BranchMergedConfig,
     BranchWipConfig,
 )
+from claude_code_hooks_daemon.core import remote_branch_proof
 from claude_code_hooks_daemon.core.branch_creation import (
     _proven_refnames,
     _Ref,
@@ -32,6 +34,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     CACHE_RELATIVE_PATH,
     PROOF_ALGORITHM_VERSION,
     merge_proof_key,
+    write_merge_proofs,
 )
 from claude_code_hooks_daemon.core.remote_branch_proof import prove_remote_merged
 from claude_code_hooks_daemon.daemon.branch_safety import (
@@ -373,15 +376,35 @@ class TestNetChangeMustBeHeldByTheDefaultTip:
         _publish_main(repo)
         _assert_unproven(repo, "parked")
 
-    def test_branch_work_that_main_later_reverted_is_unproven(self, repo: Path) -> None:
+    def test_branch_work_that_main_later_reverted_is_proven(self, repo: Path) -> None:
+        """Round 1 called this a false positive; under the first-parent rule it is intended.
+
+        The cherry-pick commit on main's first-parent line held the branch's exact net
+        change, so the content is permanently in main's history. Deleting the remote
+        branch loses nothing, even though main's tip has since dropped the file.
+        """
         _topic(repo, "feat", ["a.txt"])
         _land_cherry_picks(repo, "feat")
         _git(repo, "rm", "-q", "a.txt")
         _git(repo, "commit", "-q", "-m", "Revert a")
         _publish_main(repo)
-        _assert_unproven(repo, "feat")
+        tips, _problems, _evidence = _prove(repo, ["feat"])
+        assert list(tips) == ["feat"]
 
-    def test_an_old_base_branch_whose_change_main_later_overwrote_is_unproven(
+    def test_an_old_base_branch_whose_change_main_overwrote_with_other_content_is_unproven(
+        self, repo: Path
+    ) -> None:
+        _commit(repo, "keep.txt")
+        _publish_main(repo)
+        _on_branch(repo, "old")
+        _overwrite(repo, "v2\n", "v2")
+        _push_back_to_main(repo, "old")
+        _overwrite(repo, "v2-different\n", "other v2 on main")
+        _overwrite(repo, "v3\n", "v3")
+        _publish_main(repo)
+        _assert_unproven(repo, "old")
+
+    def test_an_old_base_branch_whose_exact_change_a_main_commit_held_is_proven(
         self, repo: Path
     ) -> None:
         _commit(repo, "keep.txt")
@@ -392,7 +415,104 @@ class TestNetChangeMustBeHeldByTheDefaultTip:
         _overwrite(repo, "v2\n", "v2 on main")
         _overwrite(repo, "v3\n", "v3")
         _publish_main(repo)
-        _assert_unproven(repo, "old")
+        tips, _problems, _evidence = _prove(repo, ["old"])
+        assert list(tips) == ["old"]
+
+    def test_a_squash_several_main_commits_ago_stays_proven(self, repo: Path) -> None:
+        _topic(repo, "feat", ["a.txt", "b.txt"])
+        _land_squash(repo, "feat")
+        for index in range(4):
+            _commit(repo, f"later{index}.txt")
+        _publish_main(repo)
+        tips, _problems, evidence = _prove(repo, ["feat"])
+        assert list(tips) == ["feat"]
+        assert evidence == {"feat": TIER_CONTENT_PRESERVED}
+
+    def test_a_squashed_file_main_changed_again_stays_proven(self, repo: Path) -> None:
+        _topic(repo, "feat", ["a.txt", "b.txt"])
+        _land_squash(repo, "feat")
+        (repo / "a.txt").write_text("changed later\n", encoding="utf-8")
+        _git(repo, "commit", "-q", "-am", "Edit a")
+        _publish_main(repo)
+        tips, _problems, _evidence = _prove(repo, ["feat"])
+        assert list(tips) == ["feat"]
+
+    def test_more_candidates_than_the_cap_is_unproven_not_proven(self, repo: Path) -> None:
+        _topic(repo, "feat", ["a.txt"])
+        _land_squash(repo, "feat")
+        for index in range(3):
+            (repo / "a.txt").write_text(f"edit {index}\n", encoding="utf-8")
+            _git(repo, "commit", "-q", "-am", f"Edit {index}")
+        _publish_main(repo)
+        with patch.object(remote_branch_proof, "MAX_PROOF_CANDIDATES", 2):
+            _assert_unproven(repo, "feat")
+
+    def test_a_delete_only_branch_run_from_a_subdirectory_is_unproven(self, repo: Path) -> None:
+        _commit(repo, "keep.txt")
+        (repo / "sub").mkdir()
+        _commit(repo, "sub/inner.txt")
+        _publish_main(repo)
+        _on_branch(repo, "rm")
+        _git(repo, "rm", "-q", "keep.txt")
+        _git(repo, "commit", "-q", "-m", "Remove keep")
+        _push_back_to_main(repo, "rm")
+        proof = prove_remote_merged(repo / "sub", "origin", ["rm"], "main", _CONFIG)
+        assert proof.tips == {}
+        assert "not merged" in proof.problems["rm"]
+
+    def test_the_guard_denies_a_delete_only_branch_typed_from_a_subdirectory(
+        self, repo: Path
+    ) -> None:
+        from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import (
+            DestructiveGitHandler,
+        )
+
+        _commit(repo, "keep.txt")
+        (repo / "sub").mkdir()
+        _commit(repo, "sub/inner.txt")
+        _publish_main(repo)
+        _on_branch(repo, "rm")
+        _git(repo, "rm", "-q", "keep.txt")
+        _git(repo, "commit", "-q", "-m", "Remove keep")
+        _push_back_to_main(repo, "rm")
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push origin --delete rm"},
+            "cwd": str(repo / "sub"),
+        }
+        result = DestructiveGitHandler().handle(hook_input)
+        assert result.decision == "deny"
+
+    def test_a_squash_is_proven_from_a_subdirectory(self, repo: Path) -> None:
+        (repo / "sub").mkdir()
+        _commit(repo, "sub/inner.txt")
+        _publish_main(repo)
+        _topic(repo, "feat", ["a.txt", "sub/b.txt"])
+        _land_squash(repo, "feat")
+        proof = prove_remote_merged(repo / "sub", "origin", ["feat"], "main", _CONFIG)
+        assert list(proof.tips) == ["feat"]
+
+    def test_deleting_a_non_utf8_file_name_is_unproven(self, repo: Path) -> None:
+        name = os.fsdecode(b"caf\xe9.txt")
+        (repo / name).write_text("x\n", encoding="utf-8")
+        _git(repo, "add", name)
+        _git(repo, "commit", "-q", "-m", "Latin-1 name")
+        _publish_main(repo)
+        _on_branch(repo, "rm")
+        _git(repo, "rm", "-q", name)
+        _git(repo, "commit", "-q", "-m", "Remove it")
+        _push_back_to_main(repo, "rm")
+        _assert_unproven(repo, "rm")
+
+    def test_old_version_proof_entries_are_dropped_on_save(self, repo: Path) -> None:
+        cache = repo / CACHE_RELATIVE_PATH
+        write_merge_proofs(repo, {merge_proof_key("tip0", ["m"]): TIER_MERGED})
+        document = json.loads(cache.read_text(encoding="utf-8"))
+        document["proofs"] = {"v1:abc:def": TIER_CONTENT_PRESERVED}
+        cache.write_text(json.dumps(document), encoding="utf-8")
+        write_merge_proofs(repo, {merge_proof_key("tip1", ["m"]): TIER_MERGED})
+        proofs = json.loads(cache.read_text(encoding="utf-8"))["proofs"]
+        assert list(proofs) == [merge_proof_key("tip1", ["m"])]
 
     def test_a_branch_whose_deletion_main_also_made_is_proven(self, repo: Path) -> None:
         _commit(repo, "keep.txt")
