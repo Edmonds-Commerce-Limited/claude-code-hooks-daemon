@@ -28,7 +28,7 @@ from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_line
+from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command, sweep_clean_line
 from claude_code_hooks_daemon.core.branch_inventory import (
     DormancyStage,
     Pool,
@@ -48,6 +48,9 @@ logger = logging.getLogger(__name__)
 LABELS_RELATIVE_PATH: Final[Path] = Path("untracked/branch-inventory/labels.json")
 DENY_LIST_LIMIT: Final[int] = 20
 DUPLICATE_LIST_LIMIT: Final[int] = 5
+#: ``branch-preflight`` exit status when creating a branch would be refused (1 is an
+#: error, 2 a usage error, 3 is ``branch-park``'s "parked but not pushed").
+EXIT_CREATION_REFUSED: Final[int] = 4
 
 _HEADS: Final[str] = "refs/heads/"
 _REMOTES: Final[str] = "refs/remotes/"
@@ -88,6 +91,77 @@ class CreationVerdict:
     decision: Decision
     lines: tuple[str, ...]
     rule_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ReportSection:
+    """One block of the creation report: a pool that is full, or a notice.
+
+    ``rule_id`` is None for a notice (a likely duplicate, a noisy-stage dormancy
+    line, "could not judge"). ``refuses`` is True when the pool's mode is
+    ``block``; a pool in ``warn`` mode is listed but only warns.
+    """
+
+    rule_id: str | None
+    refuses: bool
+    warns: bool
+    lines: tuple[str, ...]
+    #: The exact commands that clear this blocker, as they appear in ``lines``.
+    fixes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CreationReport:
+    """Everything that stands between the caller and one more branch.
+
+    The single source for the creation deny and for ``branch-preflight``: both
+    render :func:`render_creation_report` over the one report, so they cannot
+    disagree about what blocks creation.
+    """
+
+    sections: tuple[ReportSection, ...] = ()
+
+    @property
+    def blockers(self) -> tuple[ReportSection, ...]:
+        """The full pools, in the order the guard denies them (cap, dormancy, parked, merged)."""
+        return tuple(section for section in self.sections if section.rule_id is not None)
+
+    @property
+    def may_create(self) -> bool:
+        """True when no blocker refuses (a warn-mode pool does not refuse)."""
+        return not any(section.refuses for section in self.sections)
+
+    def verdict(self) -> CreationVerdict:
+        """The decision the guard takes on this report."""
+        lines = tuple(render_creation_report(self))
+        for section in self.sections:
+            if section.refuses:
+                return CreationVerdict("deny", lines, section.rule_id)
+        if any(section.warns for section in self.sections):
+            return CreationVerdict("warn", lines)
+        return CreationVerdict("allow", lines)
+
+
+def render_creation_report(report: CreationReport) -> list[str]:
+    """The lines of every section, in order: what the deny and the preflight both print."""
+    return [line for section in report.sections for line in section.lines]
+
+
+def creation_report_json(report: CreationReport) -> dict[str, object]:
+    """The report as a JSON document: ``may_create``, the blockers, then the notices."""
+    return {
+        "may_create": report.may_create,
+        "blockers": [
+            {
+                "rule_id": section.rule_id,
+                "refuses": section.refuses,
+                "fixes": list(section.fixes),
+                "lines": list(section.lines),
+            }
+            for section in report.blockers
+        ],
+        "notices": [list(section.lines) for section in report.sections if section.rule_id is None],
+    }
 
 
 @dataclass(frozen=True)
@@ -444,23 +518,28 @@ def _cap_lines(
     config: BranchesConfig,
     now: float,
     worktrees: Mapping[str, Path] | None,
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
+    """``(lines, fixes)`` for the open-work cap."""
     ordered = sorted(groups, key=lambda work: (_rank(work), work.committed, work.name))
     lines = [
         f"Open work branches: {len(groups)} (cap {config.effective_wip_cap()}). "
         "Finish (merge) one, park it with a reason, or delete it once the guard proves "
         "nothing is lost, before starting another:"
     ]
+    park = daemon_cli_command_for_docs("branch-park")
+    fixes: list[str] = []
     for work in ordered[:DENY_LIST_LIMIT]:
-        group, action = work.label.get("group"), work.label.get("action")
+        group = work.label.get("group")
+        # Merging is the better outcome, so a snapshot action wins; without one the
+        # always-valid way out is a park, which keeps the work and frees the slot.
+        action = work.label.get("action") or f"{park} {work.name} --reason ..."
+        fixes.append(action)
         suffix = f"  [{group}]" if group else ""
-        if action:
-            suffix += f"  -> {action}"
-        lines.append(f"  - {_detail(work, now, worktrees)}{suffix}")
+        lines.append(f"  - {_detail(work, now, worktrees)}{suffix}  -> {action}")
     if len(ordered) > DENY_LIST_LIMIT:
         lines.append(f"  ... and {len(ordered) - DENY_LIST_LIMIT} more")
     lines.append(BRANCH_LIMIT_PRINCIPLE)
-    return lines
+    return lines, fixes
 
 
 def _dormant_work(
@@ -495,17 +574,26 @@ def _dormant_work(
 
 def _dormancy_deny_lines(
     blocking: list[_Work], now: float, worktrees: Mapping[str, Path] | None
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
+    """``(lines, fixes)`` for the dormant branches at the block stage."""
     lines = [
         "Dormant branches are blocking new work. Finish and merge each one, park it "
         "(`hooks-daemon branch-park <name> --reason ...`), or delete it (`delete-branch`):"
     ]
+    park = daemon_cli_command_for_docs("branch-park")
+    delete = daemon_cli_command_for_docs("delete-branch")
+    fixes: list[str] = []
     ordered = sorted(blocking, key=lambda work: (work.committed, work.name))
-    lines.extend(f"  - {_detail(work, now, worktrees)}" for work in ordered[:DENY_LIST_LIMIT])
+    for work in ordered[:DENY_LIST_LIMIT]:
+        park_fix = f"{park} {work.name} --reason ..."
+        delete_fix = f"{delete} {work.name}"
+        fixes.extend((park_fix, delete_fix))
+        lines.append(f"  - {_detail(work, now, worktrees)}")
+        lines.append(f"      -> {park_fix}; or {delete_fix}")
     if len(ordered) > DENY_LIST_LIMIT:
         lines.append(f"  ... and {len(ordered) - DENY_LIST_LIMIT} more")
     lines.append(BRANCH_LIMIT_PRINCIPLE)
-    return lines
+    return lines, fixes
 
 
 def _dormancy_context_lines(
@@ -531,7 +619,8 @@ def _parked_pool_lines(
     config: BranchesConfig,
     now: float,
     worktrees: Mapping[str, Path] | None,
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
+    """``(lines, fixes)`` for the parked pool."""
     cap = config.effective_pool_cap(Pool.PARKED)
     stale_names = {work.name for work in stale}
     head = f"Parked branches: {len(parked)} (cap {cap}, branches.parked.cap)"
@@ -548,17 +637,23 @@ def _parked_pool_lines(
     ordered = sorted(
         parked, key=lambda work: (work.name not in stale_names, work.committed, work.name)
     )
+    fixes: list[str] = []
     for work in ordered[:DENY_LIST_LIMIT]:
         flag = "  [STALE]" if work.name in stale_names else ""
-        action = f"{park} {work.name} --clear, then merge it; or {delete} {work.name}"
+        clear = f"{park} {work.name} --clear"
+        remove = f"{delete} {work.name}"
+        action = f"{clear}, then merge it; or {remove}"
+        fixes.extend((clear, remove))
         if work.name in stale_names:
-            action += f"; or re-park it with a new reason: {park} {work.name} --reason ..."
+            repark = f"{park} {work.name} --reason ..."
+            action += f"; or re-park it with a new reason: {repark}"
+            fixes.append(repark)
         lines.append(f"  - {_detail(work, now, worktrees)}{flag}")
         lines.append(f"      -> {action}")
     if len(ordered) > DENY_LIST_LIMIT:
         lines.append(f"  ... and {len(ordered) - DENY_LIST_LIMIT} more")
     lines.append(BRANCH_LIMIT_PRINCIPLE)
-    return lines
+    return lines, fixes
 
 
 def _stale_merged(merged: list[_Work]) -> list[_Work]:
@@ -572,7 +667,8 @@ def _merged_pool_lines(
     config: BranchesConfig,
     now: float,
     worktrees: Mapping[str, Path] | None,
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
+    """``(lines, fixes)`` for the merged pool."""
     cap = config.effective_pool_cap(Pool.MERGED)
     stale_names = {work.name for work in stale}
     head = f"Merged branches: {len(merged)} (cap {cap}, branches.merged.cap)"
@@ -584,21 +680,25 @@ def _merged_pool_lines(
             f"branches.merged.max_age_days {config.effective_pool_max_age(Pool.MERGED)})"
         )
     keep = daemon_cli_command_for_docs("branch-keep")
+    remote = any(work.on_remote for work in merged)
     lines = [
         f"{head}. Delete the merged branches, or keep one with a reason:",
-        sweep_clean_line(remote=any(work.on_remote for work in merged)),
+        sweep_clean_line(remote=remote),
     ]
+    fixes = [sweep_clean_command(remote=remote)]
     ordered = sorted(
         merged, key=lambda work: (work.name not in stale_names, work.committed, work.name)
     )
     for work in ordered[:DENY_LIST_LIMIT]:
         flag = "  [STALE]" if work.name in stale_names else ""
+        keep_fix = f"{keep} {work.name} --reason ..."
+        fixes.append(keep_fix)
         lines.append(f"  - {_detail(work, now, worktrees)}{flag}")
-        lines.append(f"      -> keep it: {keep} {work.name} --reason ...")
+        lines.append(f"      -> keep it: {keep_fix}")
     if len(ordered) > DENY_LIST_LIMIT:
         lines.append(f"  ... and {len(ordered) - DENY_LIST_LIMIT} more")
     lines.append(BRANCH_LIMIT_PRINCIPLE)
-    return lines
+    return lines, fixes
 
 
 def _duplicates(new_name: str, groups: list[_Work], remote: str) -> list[_Work]:
@@ -617,7 +717,7 @@ def _duplicates(new_name: str, groups: list[_Work], remote: str) -> list[_Work]:
 # --- the verdict ----------------------------------------------------------------------
 
 
-def creation_verdict(
+def creation_report(
     repo: Path,
     config: BranchesConfig,
     new_name: str | None,
@@ -625,8 +725,12 @@ def creation_verdict(
     labels: Labels | None = None,
     now: float | None = None,
     name_is_branch: bool = True,
-) -> CreationVerdict:
-    """Judge creating one more branch in ``repo``.
+) -> CreationReport:
+    """Every reason creating one more branch in ``repo`` would be refused or warned about.
+
+    The one builder behind the creation deny and ``branch-preflight``. Every pool
+    is judged, not only the first rule that trips, so one report lists the whole
+    way out.
 
     Args:
         repo: Any directory inside the repository.
@@ -636,25 +740,24 @@ def creation_verdict(
         labels: The SessionStart labels snapshot, ``{name: {group, action}}``.
         now: The clock, for ages; defaults to the current time.
         name_is_branch: When True a ``new_name`` already in ``refs/heads`` is a
-            reset or a checkout, not a creation, and is allowed silently.
+            reset or a checkout, not a creation, and has nothing to report.
 
     Returns:
-        The decision and its explanation lines.
+        The report; empty when creation is unremarkable.
     """
     read = _read_refs(repo, config)
     if isinstance(read, str):
-        return CreationVerdict(
-            "allow", (f"Branch limit: could not judge this creation (git: {read}).",)
-        )
+        line = f"Branch limit: could not judge this creation (git: {read})."
+        return CreationReport((ReportSection(None, False, False, (line,)),))
     refs, default = read
     if name_is_branch and new_name is not None:
         if any(ref.local and ref.name == new_name for ref in refs):
-            return CreationVerdict("allow", ())
+            return CreationReport()
         # The default branch and exempt/protected names are never counted as
         # open work, so creating one (a local `main` in a detached CI checkout)
         # cannot raise the count the cap and dormancy judge.
         if not is_work_branch(new_name, config, default):
-            return CreationVerdict("allow", ())
+            return CreationReport()
     work_refs = [ref for ref in refs if is_work_branch(ref.name, config, default)]
     labels = labels or {}
     all_groups = _work_groups(work_refs, _merged_refnames(repo, config, refs, default), labels)
@@ -666,7 +769,7 @@ def creation_verdict(
         if new_name and config.duplicates.mode == "warn"
         else []
     )
-    blocking, noisy = _dormant_work(groups, config, labels or {})
+    blocking, noisy = _dormant_work(groups, config, labels)
     parked = [work for work in all_groups if work.pool == Pool.PARKED]
     stale_parked = _stale_parked(parked, config, moment)
     over_parked = config.parked.mode != "off" and (
@@ -678,34 +781,78 @@ def creation_verdict(
         len(merged) >= config.effective_pool_cap(Pool.MERGED) or bool(stale_merged)
     )
     if not (over_cap or duplicates or blocking or noisy or over_parked or over_merged):
-        return CreationVerdict("allow", ())
+        return CreationReport()
     worktrees = worktrees_by_branch(repo)
-    lines: list[str] = []
+    sections: list[ReportSection] = []
     if duplicates:
-        for work in duplicates[:DUPLICATE_LIST_LIMIT]:
-            lines.append(
-                f"A branch for this work may already exist: {_detail(work, moment, worktrees)}"
-                " -- continue there instead of opening another."
-            )
+        duplicate_lines = tuple(
+            f"A branch for this work may already exist: {_detail(work, moment, worktrees)}"
+            " -- continue there instead of opening another."
+            for work in duplicates[:DUPLICATE_LIST_LIMIT]
+        )
+        sections.append(ReportSection(None, False, True, duplicate_lines))
     if over_cap:
-        lines.extend(_cap_lines(groups, config, moment, worktrees))
+        lines, fixes = _cap_lines(groups, config, moment, worktrees)
+        sections.append(
+            ReportSection(
+                RuleID.BRANCH_WIP_CAP, config.wip.mode == "block", True, tuple(lines), tuple(fixes)
+            )
+        )
     if blocking:
-        lines.extend(_dormancy_deny_lines(blocking, moment, worktrees))
+        lines, fixes = _dormancy_deny_lines(blocking, moment, worktrees)
+        sections.append(
+            ReportSection(RuleID.BRANCH_DORMANT, True, True, tuple(lines), tuple(fixes))
+        )
     elif noisy:
-        lines.extend(_dormancy_context_lines(noisy, moment, worktrees))
+        context = tuple(_dormancy_context_lines(noisy, moment, worktrees))
+        sections.append(ReportSection(None, False, False, context))
     if over_parked:
-        lines.extend(_parked_pool_lines(parked, stale_parked, config, moment, worktrees))
+        lines, fixes = _parked_pool_lines(parked, stale_parked, config, moment, worktrees)
+        sections.append(
+            ReportSection(
+                RuleID.BRANCH_PARKED_POOL,
+                config.parked.mode == "block",
+                True,
+                tuple(lines),
+                tuple(fixes),
+            )
+        )
     if over_merged:
-        lines.extend(_merged_pool_lines(merged, stale_merged, config, moment, worktrees))
-    cap_deny = over_cap and config.wip.mode == "block"
-    if cap_deny:
-        return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_WIP_CAP)
-    if blocking:
-        return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_DORMANT)
-    if over_parked and config.parked.mode == "block":
-        return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_PARKED_POOL)
-    if over_merged and config.merged.mode == "block":
-        return CreationVerdict("deny", tuple(lines), RuleID.BRANCH_MERGED_POOL)
-    if over_cap or duplicates or over_parked or over_merged:
-        return CreationVerdict("warn", tuple(lines))
-    return CreationVerdict("allow", tuple(lines))
+        lines, fixes = _merged_pool_lines(merged, stale_merged, config, moment, worktrees)
+        sections.append(
+            ReportSection(
+                RuleID.BRANCH_MERGED_POOL,
+                config.merged.mode == "block",
+                True,
+                tuple(lines),
+                tuple(fixes),
+            )
+        )
+    return CreationReport(tuple(sections))
+
+
+def creation_verdict(
+    repo: Path,
+    config: BranchesConfig,
+    new_name: str | None,
+    *,
+    labels: Labels | None = None,
+    now: float | None = None,
+    name_is_branch: bool = True,
+) -> CreationVerdict:
+    """Judge creating one more branch in ``repo``: the decision on :func:`creation_report`.
+
+    Args:
+        repo: Any directory inside the repository.
+        config: The ``branches:`` configuration.
+        new_name: The name being created; None when unknown.
+        labels: The SessionStart labels snapshot.
+        now: The clock, for ages; defaults to the current time.
+        name_is_branch: See :func:`creation_report`.
+
+    Returns:
+        The decision and its explanation lines.
+    """
+    return creation_report(
+        repo, config, new_name, labels=labels, now=now, name_is_branch=name_is_branch
+    ).verdict()
