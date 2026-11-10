@@ -206,10 +206,8 @@ names, people or hashes appear here.
   034\) A guarded unreleased install no longer exits 141 when the ref's
   `pyproject.toml` is larger than one pipe write. Layer 1 reads the blob
   whole before parsing it.
-- [ ] ⬜ **Task 5.3**: (RC feedback) `hooks-daemon status` on a branch-tip
-  install shows the stamp of the clone HEAD. Today it can show an earlier
-  rc's `+sha`, because the venv is not rebuilt when the lock is unchanged.
-  Cosmetic, but it misleads anyone confirming which tip is live.
+- [x] ✅ **Task 5.3**: (RC feedback; done, release note 036) `hooks-daemon status` on a branch-tip install shows the stamp of the clone HEAD. A venv
+  reused because its lock is unchanged is now re-stamped, never rebuilt.
 
 ### Phase 6: Journal heading churn (class 9)
 
