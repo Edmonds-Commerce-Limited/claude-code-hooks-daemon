@@ -20,7 +20,7 @@ import logging
 import re
 import time
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final, Literal
 
@@ -38,6 +38,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     read_merge_proofs,
     worktrees_by_branch,
 )
+from claude_code_hooks_daemon.core.branch_park import read_park_record
 from claude_code_hooks_daemon.daemon.branch_safety import TIER_UNPROVEN, matches_any_glob
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
@@ -364,6 +365,40 @@ def _read_refs(repo: Path, config: BranchesConfig) -> tuple[list[_Ref], str | No
             )
         )
     return refs, default
+
+
+def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    result = run_git(
+        repo, "merge-base", "--is-ancestor", ancestor, descendant, timeout=Timeout.GIT_CONTEXT
+    )
+    return result.returncode == 0
+
+
+def _with_standing_parks(repo: Path, refs: list[_Ref]) -> list[_Ref]:
+    """``refs`` with each remote copy that sits behind a standing local park marked parked.
+
+    A park whose push was rejected leaves the park commit only in the local
+    branch; the remote still holds the older tip, so the same-tip group would
+    otherwise read OPEN (DESIGN.md section 2.4). The park stands when the local
+    tip is the recorded park commit; the remote copy is then the park's own
+    past, because its tip is an ancestor of the park commit.
+    """
+    standing = {
+        ref.name: record.sha
+        for ref in refs
+        if ref.local and (record := read_park_record(repo, ref.name)) and record.sha == ref.tip
+    }
+    return [
+        (
+            replace(ref, parked=True)
+            if not ref.local
+            and ref.name in standing
+            and not ref.parked
+            and _is_ancestor(repo, ref.tip, standing[ref.name])
+            else ref
+        )
+        for ref in refs
+    ]
 
 
 def _owned_refs(repo: Path, refs: list[_Ref]) -> list[_Ref]:
@@ -787,8 +822,9 @@ def creation_report(
         # cannot raise the count the cap and dormancy judge.
         if not is_work_branch(new_name, config, default):
             return CreationReport()
-    work_refs = _owned_refs(
-        repo, [ref for ref in refs if is_work_branch(ref.name, config, default)]
+    work_refs = _with_standing_parks(
+        repo,
+        _owned_refs(repo, [ref for ref in refs if is_work_branch(ref.name, config, default)]),
     )
     labels = labels or {}
     all_groups = _work_groups(work_refs, _merged_refnames(repo, config, refs, default), labels)

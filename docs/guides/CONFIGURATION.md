@@ -343,7 +343,7 @@ branches:
 
 ### Parking a branch
 
-`bin/hooks-daemon branch-park <name> --reason "<text>"` writes an empty commit with `Parked-Reason` and `Parked-By` trailers at the branch tip (no checkout), then pushes the branch with a plain fast-forward `git push`. A parked branch is exempt from the dormancy stages and moves from the open-work count to the parked pool (below). A failed push is reported with the command to retry; the local park stands. A later commit on the branch ends the park, and `bin/hooks-daemon branch-park --clear <name>` writes an `Unparked` commit to restart the clock without a code change. Re-parking an already-parked branch needs a new reason: the same reason exits 2.
+`bin/hooks-daemon branch-park <name> --reason "<text>"` writes an empty commit with `Parked-Reason` and `Parked-By` trailers at the branch tip (no checkout), then pushes the branch with a plain fast-forward `git push`. A parked branch is exempt from the dormancy stages and moves from the open-work count to the parked pool (below). A failed push is reported with the command to retry and exits 3; the local park stands, and a branch only the remote holds is kept in a local branch the same way. Until the push lands the branch counts as parked, not open, though the remote copy is behind it. A later commit on the branch ends the park; the next session start and `branch-sweep` print `Park cleared: <name> (<reason>)` once. And `bin/hooks-daemon branch-park --clear <name>` writes an `Unparked` commit to restart the clock without a code change. Re-parking an already-parked branch needs a new reason: the same reason exits 2.
 
 ### Branch pools: open, parked, merged
 

@@ -6560,6 +6560,7 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     """
     from claude_code_hooks_daemon.config.models import handler_options
     from claude_code_hooks_daemon.core import branch_cleanup, branch_inventory, branch_sweep
+    from claude_code_hooks_daemon.core.branch_park import announce_ended_parks
     from claude_code_hooks_daemon.utils.remote_refs import LazyRemoteRefs
 
     repo = get_project_path(getattr(args, "project_root", None))
@@ -6584,6 +6585,10 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
         print(f"ERROR: no branch inventory for {repo}: {e}", file=sys.stderr)
         return 1
     cap = branch_sweep.effective_wip_cap(branches, legacy)
+    if not args.json:
+        # A park that ended (new work, a vanished branch) is said once, then its record goes.
+        for line in announce_ended_parks(repo):
+            print(line)
     # A runnable remote delete is printed only for what the remote-delete guard's proof accepts.
     proven = branch_cleanup.proven_remote_only(repo, branches, inventory)
     if args.json:
