@@ -261,6 +261,59 @@ class TestEnsureVenvDowngradeSafety:
         )
 
 
+class TestEnsureVenvRestampsReusedVenv:
+    """Task 5.3: a venv reused on a lock-hash match carries the NEW install stamp.
+
+    A branch install that moves to a newer commit with unchanged dependencies
+    reuses the venv; `status` reads `.daemon-version`, so it must name the
+    commit that is live, not the one the venv was built for.
+    """
+
+    OLD = "v1.0.0+main.aaaaaaa"
+    NEW = "v1.0.0+main.bbbbbbb"
+
+    def _reusable_venv(self, tmp_path: Path) -> tuple[Path, Path]:
+        daemon_dir = tmp_path / "project"
+        daemon_dir.mkdir()
+        _minimal_daemon_dir(daemon_dir)
+        from claude_code_hooks_daemon.daemon.metadata import compute_project_lock_hash
+
+        venv_dir = _stamped_venv(daemon_dir, compute_project_lock_hash(daemon_dir))
+        (venv_dir / ".daemon-version").write_text(f"{self.OLD}\n")
+        (venv_dir / "SENTINEL").write_text("must-survive")
+        return daemon_dir, venv_dir
+
+    def test_fast_path_rewrites_the_stamp_without_rebuilding(self, tmp_path: Path) -> None:
+        daemon_dir, venv_dir = self._reusable_venv(tmp_path)
+
+        result = _run_bash(f'ensure_venv "{daemon_dir}" "{self.NEW}" "{sys.executable}"')
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(venv_dir)
+        assert (venv_dir / ".daemon-version").read_text().strip() == self.NEW
+        assert (venv_dir / "SENTINEL").exists(), "restamp must not rebuild"
+
+    def test_recheck_under_the_lock_rewrites_the_stamp(self, tmp_path: Path) -> None:
+        daemon_dir, venv_dir = self._reusable_venv(tmp_path)
+
+        result = _run_bash(f'ensure_venv_locked "{daemon_dir}" "{self.NEW}" "{sys.executable}"')
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(venv_dir)
+        assert (venv_dir / ".daemon-version").read_text().strip() == self.NEW
+        assert (venv_dir / "SENTINEL").exists(), "restamp must not rebuild"
+
+    def test_unwritable_stamp_fails_ensure_venv(self, tmp_path: Path) -> None:
+        daemon_dir, venv_dir = self._reusable_venv(tmp_path)
+        (venv_dir / ".daemon-version").unlink()
+        (venv_dir / ".daemon-version").mkdir()  # a directory: the stamp cannot be written
+
+        result = _run_bash(f'ensure_venv "{daemon_dir}" "{self.NEW}" "{sys.executable}"')
+
+        assert result.returncode != 0
+        assert (venv_dir / "SENTINEL").exists()
+
+
 class TestEnsureVenvLockChangeBeatsTheStamp:
     """Plan 00474 N469: a venv proven built for another lock is never reused.
 
