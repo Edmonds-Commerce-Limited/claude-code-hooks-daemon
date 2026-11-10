@@ -25,6 +25,7 @@ _A hotfix release. A plan journal entry could be stranded by a markdown formatte
 
 ### Fixed
 
+- A guarded unreleased-ref install (`HOOKS_DAEMON_UNSAFE_TRACK_REF`) no longer exits 141 when the ref's `pyproject.toml` is larger than one pipe write (Plan 00594).
 - The journal title heading written by `mkplan.bash --journal ... --title` is single-spaced (`## HH:MM · category · REF — T`), so a markdown formatter leaves it alone (Plan 00594 Task 6.1).
 - `hooks-daemon format-markdown` skips plan journal files; an explicitly named entry is reported as skipped (Plan 00594).
 - The journal immutability check, at edit and commit time, accepts a whitespace-only change (same words, same order); any added, removed or changed word is still blocked (Plan 00594).

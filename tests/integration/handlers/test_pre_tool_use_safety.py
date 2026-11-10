@@ -196,15 +196,23 @@ class TestPipeBlockerHandler:
         [
             "npm test | tail -n 20",
             "pytest | head -5",
-            "docker logs container | tail -100",
+            "timeout 60 pytest | tail -3",
         ],
-        ids=["npm-tail", "pytest-head", "docker-tail"],
+        ids=["npm-tail", "pytest-head", "wrapped-pytest-tail"],
     )
     def test_blocks_expensive_pipes(self, handler: Any, command: str) -> None:
         hook_input = make_bash_hook_input(command)
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+
+    def test_unknown_producer_is_advisory_not_denied(self, handler: Any) -> None:
+        """A producer on neither list is allowed with an advisory (Plan 00478 row 26)."""
+        hook_input = make_bash_hook_input("docker logs container | tail -100")
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert result.context
 
     @pytest.mark.parametrize(
         "command",
