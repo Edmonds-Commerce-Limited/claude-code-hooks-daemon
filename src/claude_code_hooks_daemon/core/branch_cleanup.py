@@ -332,7 +332,9 @@ def _judge_seeded_copies(path: Path, entries: Sequence[str]) -> list[str]:
     if main is None or not entries:
         return list(entries)
     seeds = [
-        seed.path.strip("/") for seed in configured_seed_entries(main) if seed.mode == SEED_MODE_COPY
+        seed.path.strip("/")
+        for seed in configured_seed_entries(main)
+        if seed.mode == SEED_MODE_COPY
     ]
     judged: list[str] = []
     for entry in entries:

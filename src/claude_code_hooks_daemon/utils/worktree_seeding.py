@@ -156,7 +156,8 @@ def _tree_files(root: Path) -> set[Path] | None:
     for current, dirs, names in os.walk(root, onerror=errors.append):
         # os.walk reports a symlink to a directory under ``dirs`` and never enters it.
         linked_dirs = [name for name in dirs if Path(current, name).is_symlink()]
-        found.update(Path(current, name).relative_to(root) for name in (*names, *linked_dirs))
+        relative_dir = Path(os.path.relpath(current, root))
+        found.update(relative_dir / name for name in (*names, *linked_dirs))
     return None if errors else found
 
 
@@ -164,9 +165,7 @@ def _entries_identical(source: Path, copy: Path) -> bool:
     """Whether ``copy`` is a byte-identical copy of ``source`` (symlinks compare by target)."""
     if copy.is_symlink() or source.is_symlink():
         return (
-            copy.is_symlink()
-            and source.is_symlink()
-            and os.readlink(copy) == os.readlink(source)
+            copy.is_symlink() and source.is_symlink() and copy.readlink() == source.readlink()
         )
     return source.is_file() and copy.is_file() and _files_identical(source, copy)
 
