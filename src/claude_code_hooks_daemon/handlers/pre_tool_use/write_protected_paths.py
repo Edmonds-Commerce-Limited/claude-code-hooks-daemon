@@ -1557,7 +1557,7 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             "code nested too deep) and the listed glob has no literal name to look for in "
             "it (`**`, `*`), the call is allowed with an advisory and one `UNKNOWN-VERDICT` "
             "log line. Text that literally names a listed path is still denied. An awk "
-            "program writing only to string literals (`print > \"/tmp/out\"`) is judged by "
+            'program writing only to string literals (`print > "/tmp/out"`) is judged by '
             "its program text and only reads its operands; one writing to a computed "
             "destination (`print > FILENAME`, `> $1`) is denied when a file operand names a "
             "listed path (`awk '{print > FILENAME}' protected/x`, also `$PWD/protected/x`), "

@@ -42,4 +42,42 @@ Review: `task-2-2e-review-code-reviewer.md` (committed d90c8e96c). Each fix is t
 - **I1 (matches()-only pins).** C1/C2 tests above are handle()-level. Fix 21ddeec3b adds handle() DENY twins in the shell -c, reserved-word, literal-pipe and message-substitution suites.
 - **I2 (overstated docs).** Fix 73d561a77: release note 031, `docs/guides/HANDLER_REFERENCE.md` (pipe_blocker and write_protected_paths) and both handlers' `get_claude_md` guidance now state the wrapper/runner coverage, every-pipe judging, the `extra_blacklist` route for an expensive command on no list, and the awk operand deny.
 - **Minor.** The `_find_offending_producer` docstring now describes the empty producer as unknown-tier. The comprehensive `TestPipeBlockerHandleUnknown`/message-differentiation fixtures use `mytool` (not the whitelisted `find`) and assert `matches()` first (45b7825a4). The prose corpus now expects the venv `python3 -m pytest` command to deny as expensive; the branch had pinned it as allow, an instance of C2.
-- Results: targeted pytest on all 14 test files touched since 6bba54cc7: 1514 passed. `run_autofix.sh` rc 0; mypy clean on both handlers; `config-validate` valid. `llm_qa.py changed` timed out waiting on the host-wide QA lock (held by pid 58368 in this worktree, likely the earlier background run), so it was not run.
+- Results (round 1): targeted pytest on all 14 test files touched since 6bba54cc7: 1514 passed. `run_autofix.sh` rc 0; mypy clean on both handlers; `config-validate` valid. `llm_qa.py changed` timed out waiting on the host-wide QA lock (held by pid 58368 in this worktree, likely the earlier background run), so it was not run.
+
+## Review round 2 fixes
+
+Review: `task-2-2e-rereview-code-reviewer.md` (committed af5607bad). Every fix was written test-first and its tests were run RED before the source change.
+
+- **Structural rule (C-1, I-1, I-2).** At base, the unknown tier denied. That made it the net for every pipe whose blacklisted producer the parser could not place, and adding wrappers to a list will never cover them all.
+  - The rule now: before an unknown-tier pipe may allow, `_blacklisted_word_anywhere` scans the whole inert-stripped command for a blacklisted producer, including `extra_blacklist`. That covers every segment, substitution, `-c` body and here-string.
+  - Each word is checked three ways: as written, as its path basename, and with a glued `-m` removed. It is joined to the next 4 words, so multi-word patterns (`npm test`) still match. Matching is by whole word only, so `pytester` does not count.
+  - A hit denies with the blacklisted reason. The reason names the command and adds a note that the guard could not tell which pipe it feeds (`_unplaced_verdict`).
+  - A single `&` now separates statements in `_extract_producer` (`_last_background_statement`). Redirect forms are not split: `2>&1`, `>&2`, `&>`, `|&`.
+  - The wrapper unwrapping stays in place for better reasons, but safety no longer depends on it.
+  - Tests: `test_pipe_blocker_unplaced_producer.py`, 38 RED at first. It covers:
+    - the 4 `&` cases, pinned as placed directly (no unplaced note);
+    - the 20 I-1 shapes, plus `bash <<<` and `timeout 5s --`;
+    - the 8 QA-script spellings, using the repo yaml;
+    - `.bak`/`.orig` non-matches;
+    - negative allows: `docker ps`, `mytool`, `systemctl`, `uv run my_report`, `timeout 5 docker ps`.
+  - Commit: aa0631d4a.
+- **Config.** `extra_blacklist` gains `'^llm_qa\.py(\s|$)'`. Base treated `python3 scripts/qa/llm_qa.py ... | tail` as unknown, so it denied there. All three entries now end in `(\s|$)` instead of `\b`, so `run_all.sh.bak` no longer matches.
+- **Two pins changed to the base verdict.**
+  - `docker run ... --entrypoint /bin/bash ... -lc make | head` now denies, because it runs `make`.
+  - The `bash -c 'pytest | grep FAIL'` warn pin became `bash -c 'docker ps | grep Up'`. The pytest form now denies.
+- **I-3.** The awk operand check now runs only when `_awk_destination_computed` is true: FILENAME, `$N`, a variable, `| cmd`, `system()`, or a non-literal `cmd | getline`. A program that writes only to string literals is judged by its text, as at base. Commit: 250a03cea.
+- **I-4.** An operand containing `$`, a backtick or `~` that `_operand_naming` cannot resolve is judged by its text (`_unresolved_operand_naming`). A name or directory pattern match counts. A glob with no literal part (`**`) always counts, as at base.
+- **M-1.** A writing awk program whose working directory is inside a listed wildcard-only directory glob denies (`_listed_directory_holding`). This covers `cd protected && ...` and a cwd inside `protected/`.
+- **Classifier pins.** `test_which_awk_programs_compute_their_destination` has 11 cases.
+- **M-2.** Release note 031, `HANDLER_REFERENCE.md` (both handlers), both `get_claude_md` texts and the yaml comment now state the whole-command scan rule and the awk split. Commit: 7ec427352.
+- **Harness.** `untracked/scratch/rr2e/r2run.py` and `r2cmp.py` ran on a fresh detached checkout of 6bba54cc7 and on HEAD. That is 147 pipe cases (`cases.txt`, `cases-round3.txt`, the `base2.out` commands, `hd*.txt`) and 212 wpp case×glob rows. Output: `r3-cmp.txt`.
+  - **Base deny, HEAD allow, pipe, with the repo config: 19.** All are unknown producers with no blacklisted word: `docker ps`, `mytool`, wrapped whitelisted readers such as `env grep`/`sudo cat`, `python -m http.server`, `python3 script.py`, `run_all.sh.bak`, and a trailing `&`. Without config the count is 29; the extra 10 are the QA-script spellings that the config covers.
+  - **Base deny, HEAD allow, wpp: 59.**
+    - 58 name no protected path under the glob in force. These are a `.claude/ccy/*` glob with `protected/x` operands, literal-destination awk reading a file, `other/` operands, and unreadable or brace-overflow text under `**`.
+    - 1 is open: `${PWD}/protected/x` under `protected/**`. The shared word scanner stops at a `${...}` extent, so the operand never reaches the awk check.
+  - **Base no-deny, HEAD deny: 10.** One is `echo hi & pytest | tail`, which pipes pytest. Eight are awk programs rewriting the named literal-glob file through FILENAME; that change was made in round 1 by C3.
+- **Results.**
+  - Targeted pytest over all 19 files (every test file changed since 6bba54cc7, plus all `test_pipe_blocker*.py` and `test_write_protected_paths*.py`): 1652 passed.
+  - `run_autofix.sh`: rc 0, with one black reformat.
+  - mypy: clean on both handlers.
+- **Open.** `${PWD}/…` as an awk operand under a directory glob (see above).
