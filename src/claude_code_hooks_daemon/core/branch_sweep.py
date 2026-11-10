@@ -259,19 +259,35 @@ def push_command(record: BranchRecord, config: BranchesConfig) -> str:
     return f"git push -u {config.remote} {record.name}"
 
 
-def delete_action(record: BranchRecord, inventory: BranchInventory, config: BranchesConfig) -> str:
+def delete_action(
+    record: BranchRecord,
+    inventory: BranchInventory,
+    config: BranchesConfig,
+    remote_proven: frozenset[str] = frozenset(),
+) -> str:
     """How to delete a done branch, never a raw force delete.
 
     A local copy is deleted through ``delete-branch``, which proves the claim
     again before it deletes; a target other than the default is passed as
     ``--protected-ref``. A remote-only branch proven only by an unpushed local
     ref gets no command: the push of that ref comes first.
+
+    A remote delete is printed as a runnable line only for a name in
+    ``remote_proven``, the names the remote-delete guard's own proof
+    (``remote_branch_proof.prove_remote_merged``) accepted; any other remote-only
+    branch gets owner-only wording, because the guard would refuse the line. The
+    default is no proof, so no runnable line.
     """
     remote_prefix = f"{config.remote}/"
     proven = record.proven_by
     if record.local_tip is None:
         if proven is not None and proven.startswith(remote_prefix):
-            return f"remote only: git push {config.remote} --delete {record.name}"
+            if record.name in remote_proven:
+                return f"remote only: git push {config.remote} --delete {record.name}"
+            return (
+                f"remote only: deleting {config.remote}/{record.name} is for the owner "
+                "(the remote-delete guard cannot prove it merged)"
+            )
         return f"remote only, proven by the unpushed {proven}: push {proven} first"
     command = f"{delete_command()} {record.name}"
     if record.merged_into is not None and record.merged_into != inventory.default_branch:
@@ -279,13 +295,18 @@ def delete_action(record: BranchRecord, inventory: BranchInventory, config: Bran
     return command
 
 
-def _done_line(record: BranchRecord, inventory: BranchInventory, config: BranchesConfig) -> str:
+def _done_line(
+    record: BranchRecord,
+    inventory: BranchInventory,
+    config: BranchesConfig,
+    remote_proven: frozenset[str],
+) -> str:
     verb = "patch-equivalent to" if record.state == BranchState.PATCH_EQUIVALENT else "merged into"
     proof = f" (proven by {record.proven_by})" if record.proven_by else ""
     return (
         f"  {record.name}: {verb} {record.merged_into}{proof}, {_age(record)}{_where(record)}"
         f"{_keep_text(record, config)}"
-        f"\n      {delete_action(record, inventory, config)}"
+        f"\n      {delete_action(record, inventory, config, remote_proven)}"
         f"\n      keep it instead: {daemon_cli_command_for_docs('branch-keep')} "
         f"{record.name} --reason ..."
     )
@@ -397,9 +418,18 @@ def _with_clean_line(lines: list[str], *, remote: bool) -> list[str]:
 
 
 def render_report(
-    inventory: BranchInventory, config: BranchesConfig, *, cap: int, show_all: bool = False
+    inventory: BranchInventory,
+    config: BranchesConfig,
+    *,
+    cap: int,
+    show_all: bool = False,
+    remote_proven: frozenset[str] = frozenset(),
 ) -> list[str]:
-    """The ``branch-sweep`` text: actionable groups first, then the count against the cap."""
+    """The ``branch-sweep`` text: actionable groups first, then the count against the cap.
+
+    ``remote_proven`` names the remote-only branches the remote-delete guard's proof
+    accepted (see :func:`delete_action`).
+    """
     groups = group_records(inventory)
     out: list[str] = []
     if inventory.default_ref is None:
@@ -425,7 +455,7 @@ def render_report(
     out += _section(
         "Merged, not deleted:",
         _with_clean_line(
-            [_done_line(r, inventory, config) for r in groups.merged],
+            [_done_line(r, inventory, config, remote_proven) for r in groups.merged],
             remote=any(r.remote_tip is not None for r in groups.merged),
         ),
     )
@@ -434,7 +464,8 @@ def render_report(
     out += _section(
         "Patch-equivalent (every change already in the target):",
         _with_clean_line(
-            [_done_line(r, inventory, config) for r in groups.patch_equivalent], remote=False
+            [_done_line(r, inventory, config, remote_proven) for r in groups.patch_equivalent],
+            remote=False,
         ),
     )
     out += _section("Dormant:", _dormant_section(groups.dormant))
@@ -491,12 +522,15 @@ def pool_count_lines(inventory: BranchInventory, config: BranchesConfig, *, cap:
 
 
 def _record_json(
-    record: BranchRecord, inventory: BranchInventory, config: BranchesConfig
+    record: BranchRecord,
+    inventory: BranchInventory,
+    config: BranchesConfig,
+    remote_proven: frozenset[str],
 ) -> dict[str, Any]:
     group = _group_name(record)
     action: str | None = None
     if group in {"merged", "patch-equivalent"}:
-        action = delete_action(record, inventory, config)
+        action = delete_action(record, inventory, config, remote_proven)
     elif group == "contained-nowhere":
         action = push_command(record, config)
     document: dict[str, Any] = {
@@ -535,7 +569,11 @@ def _record_json(
 
 
 def report_json(
-    inventory: BranchInventory, *, cap: int, config: BranchesConfig | None = None
+    inventory: BranchInventory,
+    *,
+    cap: int,
+    config: BranchesConfig | None = None,
+    remote_proven: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """The ``--json`` document: every record, never-work ones included."""
     branches = config or BranchesConfig()
@@ -550,7 +588,7 @@ def report_json(
             for pool, pool_cap in pool_caps(branches, cap=cap).items()
         },
         "branches": [
-            _record_json(inventory.records[name], inventory, branches)
+            _record_json(inventory.records[name], inventory, branches, remote_proven)
             for name in sorted(inventory.records)
         ],
     }

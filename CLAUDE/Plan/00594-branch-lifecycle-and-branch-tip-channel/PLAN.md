@@ -163,10 +163,10 @@ names, people or hashes appear here.
 
 ### Phase 3: Proof of merge and agent-performable deletion (classes 3, 6, 8)
 
-- [ ] ⬜ **Task 3.1**: Proof of merge covers squash merges, renamed-PR merges
+- [x] ✅ **Task 3.1**: (release note 040) Proof of merge covers squash merges, renamed-PR merges
   and patch-equivalent branches, with tests for each shape.
-- [ ] ⬜ **Task 3.2**: Remote delete of a proven-merged branch is allowed for
-  an agent, behind the recovery bundle.
+- [x] ✅ **Task 3.2**: (release note 040) Remote delete of a proven-merged branch is allowed for
+  an agent; `branch-sweep --clean --remote` keeps its recovery bundle.
 - [x] ✅ **Task 3.3**: (on main, release note 034) An ignored directory that
   a committed manifest and lock file let a package manager rebuild counts as
   regenerable, unless it holds a nested git clone or contains the scratch

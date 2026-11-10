@@ -44,10 +44,11 @@ import json
 import logging
 import re
 import time
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -292,6 +293,8 @@ class _Cache:
     containment: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: Consecutive park commits by tip sha: a count depends only on the tip.
     park_counts: dict[str, int] = field(default_factory=dict)
+    #: Offline proof-of-merge evidence by ``tip:target shas`` (Plan 00594 DESIGN.md 2.1).
+    proofs: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -649,7 +652,13 @@ def _load_cache(path: Path) -> _Cache:
     pairs = data.get("pairs")
     containment = data.get("containment")
     park_counts = data.get("park_counts")
+    proofs = data.get("proofs")
     return _Cache(
+        proofs={
+            key: tier
+            for key, tier in (proofs if isinstance(proofs, dict) else {}).items()
+            if isinstance(key, str) and isinstance(tier, str)
+        },
         pairs=pairs if isinstance(pairs, dict) else {},
         containment=containment if isinstance(containment, dict) else {},
         park_counts={
@@ -669,6 +678,7 @@ def _save_cache(path: Path, cache: _Cache, live_tips: set[str]) -> None:
             k: v for k, v in cache.containment.items() if k.split(":", 1)[0] in live_tips
         },
         "park_counts": {k: v for k, v in cache.park_counts.items() if k in live_tips},
+        "proofs": {k: v for k, v in cache.proofs.items() if _proof_tip(k) in live_tips},
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -682,6 +692,44 @@ def _save_cache(path: Path, cache: _Cache, live_tips: set[str]) -> None:
             reason="an unwritable inventory cache costs the next pass time, not correctness",
             level=logging.WARNING,
         )
+
+
+#: Bump when the rule that decides a cached proof changes, so entries the old rule
+#: wrote are never read. v3: some first-parent commit of the default, after the merge
+#: base and up to its tip, holds the branch's net change.
+PROOF_ALGORITHM_VERSION: Final[str] = "v3"
+
+
+def merge_proof_key(tip: str, target_shas: Iterable[str]) -> str:
+    """The cache key of a tip's merge evidence against the default refs at these shas.
+
+    Keyed by algorithm version, tip AND target, so a changed rule or a moved default
+    invalidates it and a moved branch never reads another tip's answer.
+    """
+    return f"{PROOF_ALGORITHM_VERSION}:{tip}:{','.join(sorted(set(target_shas)))}"
+
+
+def _proof_tip(key: str) -> str:
+    """The tip a proof key names; "" for a key an older algorithm wrote (so it is pruned)."""
+    version, _, rest = key.partition(":")
+    return rest.split(":", 1)[0] if version == PROOF_ALGORITHM_VERSION else ""
+
+
+def read_merge_proofs(repo: Path) -> dict[str, str]:
+    """The cached merge evidence (``merge_proof_key`` to tier or ``unproven``); offline."""
+    return dict(_load_cache(repo / CACHE_RELATIVE_PATH).proofs)
+
+
+def write_merge_proofs(repo: Path, proofs: Mapping[str, str]) -> None:
+    """Add ``proofs`` to the inventory cache, keeping every other entry it holds."""
+    path = repo / CACHE_RELATIVE_PATH
+    cache = _load_cache(path)
+    cache.proofs.update(proofs)
+    keys = [*cache.pairs, *cache.containment, *cache.park_counts]
+    current = {key: tier for key, tier in cache.proofs.items() if _proof_tip(key)}
+    cache.proofs = current
+    live = {key.split(":", 1)[0] for key in keys} | {_proof_tip(key) for key in current}
+    _save_cache(path, cache, live)
 
 
 def _facts_from_cache(entry: dict[str, Any] | None) -> _PairFacts | None:
