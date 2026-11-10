@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.core.branch_creation import (
     write_labels,
 )
 from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
+from claude_code_hooks_daemon.core.branch_park import BranchParkError, announce_ended_parks
 from claude_code_hooks_daemon.core.branch_sweep import (
     deprecation_line,
     effective_behind_threshold,
@@ -99,8 +100,26 @@ class BranchSweepHandler(SessionStartHandlerBase):
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Run the inventory within its budget and print the summary, or nothing."""
-        context = [*self._branch_lines(hook_input), *self._claude_md_notice_lines()]
+        context = [
+            *self._ended_park_lines(),
+            *self._branch_lines(hook_input),
+            *self._claude_md_notice_lines(),
+        ]
         return AdvisoryResult(decision=Decision.ALLOW, context=context)
+
+    def _ended_park_lines(self) -> list[str]:
+        """``Park cleared: ...`` for each park that ended since the last session; empty if none."""
+        try:
+            return announce_ended_parks(self._get_project_root())
+        except BranchParkError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="the park-cleared line is advisory (not a repository, or git failed); "
+                "the record stays and the next SessionStart says it",
+                level=logging.DEBUG,
+            )
+            return []
 
     def _claude_md_notice_lines(self) -> list[str]:
         """The CLAUDE.md block notices, fresh for this SessionStart; empty when none or unreadable."""

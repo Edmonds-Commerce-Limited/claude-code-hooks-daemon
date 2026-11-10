@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.branch_creation import LABELS_RELATIVE_PATH, read_labels
 from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
+from claude_code_hooks_daemon.core.branch_park import park_branch, read_park_record
 from claude_code_hooks_daemon.handlers.session_start.branch_sweep import BranchSweepHandler
 
 _ROOT = "claude_code_hooks_daemon.handlers.session_start.branch_sweep.ProjectContext.project_root"
@@ -125,6 +126,19 @@ class TestSummary:
         for hook_input in (_new(), _resume(repo)):
             text = "\n".join(_run(handler, repo, hook_input))
             assert "CONTAINED NOWHERE: lost" in text
+
+    def test_an_ended_park_is_announced_once_at_session_start(self, repo: Path) -> None:
+        _git(repo, "checkout", "-q", "-b", "waits")
+        _commit(repo, "waits")
+        _git(repo, "checkout", "-q", "main")
+        park_branch(repo, "waits", reason="blocked on review", remote="origin")
+        _git(repo, "checkout", "-q", "waits")
+        _commit(repo, "more")
+        _git(repo, "checkout", "-q", "main")
+        handler = BranchSweepHandler()
+        assert "Park cleared: waits (blocked on review)" in _run(handler, repo, _new())
+        assert "Park cleared: waits (blocked on review)" not in _run(handler, repo, _new())
+        assert read_park_record(repo, "waits") is None
 
     def test_cap_falls_back_to_the_legacy_option(self, repo: Path) -> None:
         for name in ("a", "b"):
