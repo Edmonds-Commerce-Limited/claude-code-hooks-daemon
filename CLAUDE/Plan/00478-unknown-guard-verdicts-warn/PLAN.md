@@ -90,7 +90,10 @@ plan states that cost; it does not re-decide the ruling.
 - [ ] 🔄 **Task 2.2c**: rows 14, 15, 19, 20, 22, 24 (flaggable channel, journal
   guard, release merge freeze, reference repo not verified, curl into a
   non-shell interpreter, root recursion on an unstattable path).
-- [ ] 🔄 **Task 2.2d**: ESLint timeout and run failure (rows 17, 18).
+- [x] ✅ **Task 2.2d**: ESLint timeout and run failure (rows 17, 18).
+  Delivered: `validate_eslint_on_write` `_not_linted` allows with the shared advisory;
+  R-ESLINT-TIMEOUT and R-ESLINT-RUN-FAILURE are advisory-only (`a215b3ae6`, branch
+  merged via `2d9e6c762`, main `47dae7574` CI run 42756436040 green); release note 029.
 - [ ] ⬜ **Task 2.2e**: Contested rows, after the owner rules (see "Owner
   questions"): 1, 3, 5, 16, 23, and scope rows 21, 25, 26.
 - [ ] ⬜ **Task 2.3**: Update the rule explanations, the generated `CLAUDE.md`
