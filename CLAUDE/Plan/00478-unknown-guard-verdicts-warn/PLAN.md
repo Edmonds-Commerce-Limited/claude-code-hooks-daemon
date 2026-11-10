@@ -106,6 +106,13 @@ plan states that cost; it does not re-decide the ruling.
   glob), and row 26 (an unknown producer piped to `tail`/`head`; blacklisted
   producers still deny). Rows 1, 3, 5, 16-literal and 23 stay deny; rows 21 and 25
   are out of scope.
+- [ ] ⬜ **Task 2.2f**: The three minor findings from the third 2.2e review (report
+  `untracked/agent-reports/auto/261110-114115-code-reviewer-ae1ac874080c044d0.md`,
+  copied into `subagent-reports/` with 2.2e). First, `pipe_blocker` also scans heredoc
+  bodies on the unknown-producer path (`cat > t.sh <<'EOF' … pytest … EOF; bash t.sh | tail`).
+  Second, `py.test` is blacklisted. Third, an operator-form expansion operand
+  (`${PWD:-.}/protected/x`) counts by its literal part in `write_protected_paths`, or
+  release note 031 is narrowed to the forms it covers.
 - [ ] 🔄 **Task 2.3**: Update the rule explanations, the generated `CLAUDE.md`
   guidance, and add a release note. Done for 2.2a, 2.2c and 2.2d (rule texts,
   `get_claude_md`, release notes 027-029); the rest ships with 2.2b and 2.2e.
