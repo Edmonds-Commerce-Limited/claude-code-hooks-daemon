@@ -2224,6 +2224,31 @@ class TestClaudeMdInjectorHomeBranch:
         assert _claude_md_is_clean(tmp_path)
         assert int(_git(tmp_path, "rev-list", "--count", "HEAD")) == int(before) + 1
 
+    def test_home_commit_defaults_to_true(self) -> None:
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+
+        assert BranchesConfig().home_commit is True
+
+    def test_home_commit_false_writes_on_home_but_never_commits(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Plan 00594 Task 2.2: a home branch that only takes pull requests."""
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_repo_on_main(tmp_path)
+        head = _git(tmp_path, "rev-parse", "HEAD")
+        with caplog.at_level(logging.INFO):
+            ClaudeMdInjector(
+                workspace_root=tmp_path,
+                handlers=[_StubHandler("h", "## H\n\nContent.")],
+                branches=BranchesConfig(home_commit=False),
+            ).inject()
+        assert _has_block(tmp_path)
+        assert not _claude_md_is_clean(tmp_path)
+        assert _git(tmp_path, "rev-parse", "HEAD") == head
+        assert "home_commit" in caplog.text
+
     def test_configured_home_replaces_the_default_branch(self, tmp_path: Path) -> None:
         _init_repo_on_main(tmp_path)
         head = _git(tmp_path, "rev-parse", "HEAD")

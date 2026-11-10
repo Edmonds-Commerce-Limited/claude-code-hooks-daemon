@@ -13,3 +13,9 @@ config_changes:
         them. Empty (the default) means the repository's default branch; a
         configured list replaces that default. Set it when a checkout sits on
         an environment, release or production branch.
+    - key: branches.home_commit
+      description: >-
+        Whether the daemon commits the CLAUDE.md block it wrote on a home
+        branch (default true). Set false when the home branch only accepts
+        changes by pull request: the block is written and left uncommitted
+        so it rides the next real pull request.

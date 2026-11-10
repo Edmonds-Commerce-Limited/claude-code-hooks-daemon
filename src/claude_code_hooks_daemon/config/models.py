@@ -2445,12 +2445,17 @@ class BranchesConfig(BaseModel):
             them. Empty means the default branch; a configured list REPLACES
             that default (a checkout that sits on an environment or release
             branch declares it here)
+        home_commit: Whether the daemon commits the CLAUDE.md block it wrote
+            on a home branch. ``false`` for a home branch that only accepts
+            changes by pull request: the block is written and left
+            uncommitted, to ride the next real pull request
     """
 
     model_config = ConfigDict(extra="forbid")
 
     default: str = Field(default=BRANCH_DEFAULT_AUTO, min_length=1)
     home: list[str] = Field(default_factory=list)
+    home_commit: bool = True
     remote: str = Field(default="origin", min_length=1)
     integration_lines: list[str] = Field(default_factory=list)
     exempt: list[str] = Field(default_factory=list)
