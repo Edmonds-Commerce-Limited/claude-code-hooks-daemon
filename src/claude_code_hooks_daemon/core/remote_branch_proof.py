@@ -9,11 +9,14 @@ The proof, for each named branch: a literal name that is not the default, exempt
 protected; no tag of the same name; a remote-tracking ref that is merged by the
 cheapest offline evidence that holds (Plan 00594 DESIGN.md 2.1): ancestry of the
 default branch (tracking or local) or, for an ordinary branch, of an integration
-line's tracking ref; else patch-id equivalence (``git cherry``) with the default;
-else tree containment, every file version on the branch being byte-identical to
-one reachable from the default, which is what a squash merge or a renamed pull
-request leaves behind. The patch-id and containment results are cached by tip in
-the inventory cache, so the next call is offline and cheap. Then the remote's LIVE tip, read with one batched
+line's tracking ref; else the default branch's TIP holding the branch's NET change: its diff against
+merge-base(default, tip), renames off, where every added or modified path has the
+same blob and mode at the default's tip and every deleted path is gone from it.
+That is what a squash merge, a renamed pull request or a cherry-pick leaves
+behind, and it is checked first, so patch-id evidence never proves a branch the
+default has since reverted, and an empty change (a park branch) proves nothing.
+Results are cached by algorithm version, tip and default sha in the inventory
+cache, so the next call is offline and cheap. Then the remote's LIVE tip, read with one batched
 ``git ls-remote`` per chunk, equal to that tracking tip. Every failure, timeout and
 mismatch is a reason, never a pass. The listing is ``utils/remote_refs.py``'s, the
 same one ``branch-sweep`` and ``delete-branch`` use, bounded to the named branches.
@@ -23,7 +26,6 @@ from __future__ import annotations
 
 import logging
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -40,10 +42,8 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_MERGED,
     TIER_PATCH_EQUIVALENT,
     TIER_UNPROVEN,
-    content_unique_paths_of,
     matches_any_glob,
     patch_equivalent,
-    reachable_object_shas,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
@@ -51,8 +51,16 @@ from claude_code_hooks_daemon.utils.remote_refs import list_remote_refs
 
 logger = logging.getLogger(__name__)
 
-#: ``git diff --quiet`` exits 1 when the two sides differ (0 when identical).
-_DIFF_HAS_CHANGES: Final[int] = 1
+#: ``git merge-base`` exits 1 when the two commits share no ancestor.
+_NO_MERGE_BASE: Final[int] = 1
+
+#: Fields of one ``git diff --raw`` record (old mode, new mode, old blob, new blob,
+#: status) and of one ``git ls-tree`` record (mode, type, blob).
+_RAW_META_FIELDS: Final[int] = 5
+_LS_TREE_META_FIELDS: Final[int] = 3
+
+#: Paths per ``git ls-tree`` call, bounding the argv for a branch touching many files.
+_LS_TREE_CHUNK: Final[int] = 200
 
 #: A name that is safe to hand to git as one argument: no expansion, quoting or
 #: option-looking characters survive it.
@@ -182,61 +190,140 @@ class ProofUnavailableError(RuntimeError):
     """Git failed while judging a branch, so its answer is unknown and must not be cached."""
 
 
-def _judge_offline(
-    directory: Path, tracking_ref: str, targets: list[str], reachable: list[set[str]]
-) -> str:
-    """Patch-id, then tree containment, of one tracking ref against ``targets``.
+@dataclass(frozen=True)
+class _PathChange:
+    """One path the branch changed against the merge base (renames and copies off)."""
 
-    Returns the tier that holds, or ``unproven`` when neither does.
-    ``reachable`` is a
-    one-slot memo of the objects reachable from the targets, walked at most once
-    per call however many branches are judged.
+    path: str
+    deleted: bool
+    mode: str
+    blob: str
+
+
+def _net_change(directory: Path, base: str, tracking_ref: str) -> list[_PathChange]:
+    """The branch's net change: ``git diff --raw -z --no-renames`` of base to tip.
+
+    Raises:
+        ProofUnavailableError: git failed, so there is no answer to cache.
+    """
+    raw = run_git(
+        directory,
+        "diff",
+        "--raw",
+        "-z",
+        "--no-renames",
+        "--no-abbrev",
+        "--no-ext-diff",
+        base,
+        tracking_ref,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if raw.returncode != 0:
+        raise ProofUnavailableError(f"git diff failed for {tracking_ref}")
+    fields = raw.stdout.split("\0")
+    changes: list[_PathChange] = []
+    for index in range(0, len(fields) - 1, 2):
+        meta = fields[index].lstrip(":").split(" ")
+        if len(meta) != _RAW_META_FIELDS:
+            raise ProofUnavailableError(f"unreadable git diff --raw output for {tracking_ref}")
+        _old_mode, new_mode, _old_blob, new_blob, status = meta
+        changes.append(_PathChange(fields[index + 1], status.startswith("D"), new_mode, new_blob))
+    return changes
+
+
+def _tip_entries(directory: Path, target: str, paths: list[str]) -> dict[str, tuple[str, str]]:
+    """Map path to ``(mode, blob)`` as ``target``'s tip tree holds it, for the paths it has.
+
+    Raises:
+        ProofUnavailableError: git failed, so there is no answer to cache.
+    """
+    held: dict[str, tuple[str, str]] = {}
+    for start in range(0, len(paths), _LS_TREE_CHUNK):
+        listing = run_git(
+            directory,
+            "--literal-pathspecs",
+            "ls-tree",
+            "-z",
+            target,
+            "--",
+            *paths[start : start + _LS_TREE_CHUNK],
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        if listing.returncode != 0:
+            raise ProofUnavailableError(f"git ls-tree failed for {target}")
+        for entry in listing.stdout.split("\0"):
+            meta, _, path = entry.partition("\t")
+            parts = meta.split(" ")
+            if path and len(parts) == _LS_TREE_META_FIELDS:
+                held[path] = (parts[0], parts[2])
+    return held
+
+
+def _holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
+    """Whether ``target``'s tip holds the whole net change of ``tracking_ref``.
+
+    The net change is the branch's diff against ``merge-base(target, tip)``. Every
+    path it adds or modifies must be in the target's tip with the same blob and
+    mode; every path it deletes must be absent. An empty net change (empty commits,
+    or changes that cancel out) holds nothing, so it proves nothing.
+
+    Raises:
+        ProofUnavailableError: git failed, so there is no answer to cache.
+    """
+    base = run_git(directory, "merge-base", target, tracking_ref, timeout=Timeout.GIT_CONTEXT)
+    if base.returncode == _NO_MERGE_BASE:
+        return False
+    if base.returncode != 0:
+        raise ProofUnavailableError(f"git merge-base failed for {tracking_ref}")
+    changes = _net_change(directory, base.stdout.strip(), tracking_ref)
+    if not changes:
+        return False
+    held = _tip_entries(directory, target, [change.path for change in changes])
+    return all(
+        (
+            change.path not in held
+            if change.deleted
+            else held.get(change.path) == (change.mode, change.blob)
+        )
+        for change in changes
+    )
+
+
+def _judge_offline(directory: Path, tracking_ref: str, targets: list[str]) -> str:
+    """The tier that proves one tracking ref merged into a default ref, or ``unproven``.
+
+    The default tip must hold the branch's net change (:func:`_holds_net_change`):
+    that check comes FIRST and alone decides, so neither patch-id evidence (main may
+    have reverted the patch since) nor an empty commit on main can prove a branch.
+    The tier only names how the change got there: ``patch-equivalent`` when every
+    commit has its patch in the default, else ``content-preserved`` (a squash). It is
+    not ``branch_safety``'s local-delete tier, which proves only recoverability.
 
     Raises:
         ProofUnavailableError: git failed, so there is no answer to cache.
     """
     for target in targets:
+        if not _holds_net_change(directory, target, tracking_ref):
+            continue
         equivalent, count = patch_equivalent(directory, target, tracking_ref)
-        if equivalent:
-            return TIER_PATCH_EQUIVALENT
         if count is None:
             raise ProofUnavailableError(f"git cherry failed for {tracking_ref}")
-    # A branch that changes nothing (a park branch holds only empty commits) is
-    # contained in everything, yet it is paused work, not finished work.
-    changes = run_git(
-        directory, "diff", "--quiet", f"{targets[0]}...{tracking_ref}", timeout=Timeout.GIT_CONTEXT
-    )
-    if changes.returncode == 0:
-        return TIER_UNPROVEN
-    if changes.returncode != _DIFF_HAS_CHANGES:
-        raise ProofUnavailableError(f"git diff failed for {tracking_ref}")
-    if not reachable:
-        walked: set[str] = set()
-        for target in targets:
-            walked |= reachable_object_shas(directory, target)
-        reachable.append(walked)
-    if not reachable[0]:
-        raise ProofUnavailableError("git could not list the objects reachable from the default")
-    try:
-        unique = content_unique_paths_of(directory, tracking_ref, reachable[0])
-    except subprocess.CalledProcessError as exc:
-        raise ProofUnavailableError(f"git ls-tree failed for {tracking_ref}") from exc
-    return TIER_UNPROVEN if unique else TIER_CONTENT_PRESERVED
+        return TIER_PATCH_EQUIVALENT if equivalent else TIER_CONTENT_PRESERVED
+    return TIER_UNPROVEN
 
 
 def _offline_evidence(
     directory: Path, pending: dict[str, str], targets: list[str], refs: dict[str, tuple[str, str]]
 ) -> dict[str, str]:
-    """``name -> tier`` for each pending tracking ref the default holds by patch-id or tree.
+    """``name -> tier`` for each pending tracking ref whose net change the default holds.
 
     ``pending`` maps the tracking refname to its tip. Answers are read from, and
-    written to, the inventory cache keyed by tip and default sha, so a repeat call
-    spawns no walk. Targets at the same sha are judged once.
+    written to, the inventory cache keyed by algorithm version, tip and default sha,
+    so a repeat call spawns no git. Targets at the same sha are judged once.
     """
     by_sha = {refs[target][0]: target for target in targets}
     judged_targets = list(by_sha.values())
     cached = read_merge_proofs(directory)
-    reachable: list[set[str]] = []
     fresh: dict[str, str] = {}
     found: dict[str, str] = {}
     for tracking_ref, tip in pending.items():
@@ -244,7 +331,7 @@ def _offline_evidence(
         tier = cached.get(key)
         if tier is None:
             try:
-                tier = _judge_offline(directory, tracking_ref, judged_targets, reachable)
+                tier = _judge_offline(directory, tracking_ref, judged_targets)
             except ProofUnavailableError as exc:
                 log_and_continue(
                     logger,

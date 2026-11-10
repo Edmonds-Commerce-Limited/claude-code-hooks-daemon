@@ -48,7 +48,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -678,7 +678,7 @@ def _save_cache(path: Path, cache: _Cache, live_tips: set[str]) -> None:
             k: v for k, v in cache.containment.items() if k.split(":", 1)[0] in live_tips
         },
         "park_counts": {k: v for k, v in cache.park_counts.items() if k in live_tips},
-        "proofs": {k: v for k, v in cache.proofs.items() if k.split(":", 1)[0] in live_tips},
+        "proofs": {k: v for k, v in cache.proofs.items() if _proof_tip(k) in live_tips},
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -694,13 +694,24 @@ def _save_cache(path: Path, cache: _Cache, live_tips: set[str]) -> None:
         )
 
 
+#: Bump when the rule that decides a cached proof changes, so entries the old rule
+#: wrote are never read. v2: the default tip must hold the branch's net change.
+PROOF_ALGORITHM_VERSION: Final[str] = "v2"
+
+
 def merge_proof_key(tip: str, target_shas: Iterable[str]) -> str:
     """The cache key of a tip's merge evidence against the default refs at these shas.
 
-    Keyed by tip AND target, so a moved default invalidates it and a moved branch
-    never reads another tip's answer.
+    Keyed by algorithm version, tip AND target, so a changed rule or a moved default
+    invalidates it and a moved branch never reads another tip's answer.
     """
-    return f"{tip}:{','.join(sorted(set(target_shas)))}"
+    return f"{PROOF_ALGORITHM_VERSION}:{tip}:{','.join(sorted(set(target_shas)))}"
+
+
+def _proof_tip(key: str) -> str:
+    """The tip a proof key names; "" for a key an older algorithm wrote (so it is pruned)."""
+    version, _, rest = key.partition(":")
+    return rest.split(":", 1)[0] if version == PROOF_ALGORITHM_VERSION else ""
 
 
 def read_merge_proofs(repo: Path) -> dict[str, str]:
@@ -713,8 +724,9 @@ def write_merge_proofs(repo: Path, proofs: Mapping[str, str]) -> None:
     path = repo / CACHE_RELATIVE_PATH
     cache = _load_cache(path)
     cache.proofs.update(proofs)
-    keys = [*cache.pairs, *cache.containment, *cache.park_counts, *cache.proofs]
-    _save_cache(path, cache, {key.split(":", 1)[0] for key in keys})
+    keys = [*cache.pairs, *cache.containment, *cache.park_counts]
+    live = {key.split(":", 1)[0] for key in keys} | {_proof_tip(key) for key in cache.proofs}
+    _save_cache(path, cache, live)
 
 
 def _facts_from_cache(entry: dict[str, Any] | None) -> _PairFacts | None:

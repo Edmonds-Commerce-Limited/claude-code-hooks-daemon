@@ -23,8 +23,16 @@ from claude_code_hooks_daemon.config.models import (
     BranchMergedConfig,
     BranchWipConfig,
 )
-from claude_code_hooks_daemon.core.branch_creation import creation_verdict
-from claude_code_hooks_daemon.core.branch_inventory import CACHE_RELATIVE_PATH
+from claude_code_hooks_daemon.core.branch_creation import (
+    _proven_refnames,
+    _Ref,
+    creation_verdict,
+)
+from claude_code_hooks_daemon.core.branch_inventory import (
+    CACHE_RELATIVE_PATH,
+    PROOF_ALGORITHM_VERSION,
+    merge_proof_key,
+)
 from claude_code_hooks_daemon.core.remote_branch_proof import prove_remote_merged
 from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_CONTENT_PRESERVED,
@@ -42,7 +50,7 @@ _ENV = {
 _CONFIG = BranchesConfig(default="main")
 
 #: Git calls one branch may cost the proof beyond the fixed per-call listings.
-_CALLS_PER_BRANCH = 4
+_CALLS_PER_BRANCH = 5
 
 #: Index of the subcommand in ``git -C <dir> <subcommand> ...``.
 _SUBCOMMAND_AT = 3
@@ -208,7 +216,7 @@ class TestCaching:
         _prove(repo, ["feat"])
         document = json.loads((repo / CACHE_RELATIVE_PATH).read_text(encoding="utf-8"))
         assert any(
-            key.startswith(f"{tip}:") and value == TIER_CONTENT_PRESERVED
+            key.startswith(f"{PROOF_ALGORITHM_VERSION}:{tip}:") and value == TIER_CONTENT_PRESERVED
             for key, value in document["proofs"].items()
         )
 
@@ -272,3 +280,149 @@ class TestCreationReadsTheProof:
         # The proof is computed on an explicit command and read, offline, by the guard.
         prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
         assert creation_verdict(repo, config, "fresh").decision == "allow"
+
+    def test_a_line_sharing_a_proven_feature_tip_is_never_read_as_merged(self, repo: Path) -> None:
+        config = BranchesConfig(default="main", integration_lines=["release/*"])
+        _topic(repo, "feat", ["a.txt", "b.txt"])
+        _git(repo, "branch", "release/1", "feat")
+        _git(repo, "push", "--quiet", "origin", "release/1")
+        _land_squash(repo, "feat")
+        prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
+        tip = _git(repo, "rev-parse", "refs/heads/feat").strip()
+        main = _git(repo, "rev-parse", "refs/heads/main").strip()
+        refs = [
+            _Ref("main", main, 0.0, True, "refs/heads/main"),
+            _Ref("feat", tip, 0.0, True, "refs/heads/feat"),
+            _Ref("release/1", tip, 0.0, True, "refs/heads/release/1"),
+        ]
+        proven = _proven_refnames(repo, config, refs, ["refs/heads/main"], set())
+        assert proven == {"refs/heads/feat"}
+
+
+def _on_branch(repo: Path, name: str) -> None:
+    _git(repo, "checkout", "-q", "-b", name, "main")
+
+
+def _push_back_to_main(repo: Path, name: str) -> None:
+    _git(repo, "push", "--quiet", "origin", name)
+    _git(repo, "checkout", "-q", "main")
+
+
+def _assert_unproven(repo: Path, name: str) -> None:
+    tips, problems, evidence = _prove(repo, [name])
+    assert tips == {}
+    assert "not merged" in problems[name]
+    assert evidence == {}
+
+
+def _overwrite(repo: Path, content: str, message: str) -> None:
+    (repo / "keep.txt").write_text(content, encoding="utf-8")
+    _git(repo, "commit", "-q", "-am", message)
+
+
+class TestNetChangeMustBeHeldByTheDefaultTip:
+    """A false "merged" lets an agent delete a remote branch with no bundle."""
+
+    def test_a_branch_that_only_deletes_a_file_main_still_has_is_unproven(self, repo: Path) -> None:
+        _commit(repo, "keep.txt")
+        _publish_main(repo)
+        _on_branch(repo, "rm")
+        _git(repo, "rm", "-q", "keep.txt")
+        _git(repo, "commit", "-q", "-m", "Remove keep")
+        _push_back_to_main(repo, "rm")
+        _assert_unproven(repo, "rm")
+
+    def test_a_branch_that_reverts_mains_change_to_an_older_version_is_unproven(
+        self, repo: Path
+    ) -> None:
+        _commit(repo, "keep.txt")
+        _overwrite(repo, "v2\n", "v2")
+        _publish_main(repo)
+        _on_branch(repo, "fix")
+        _git(repo, "revert", "--no-edit", "HEAD")
+        _push_back_to_main(repo, "fix")
+        _assert_unproven(repo, "fix")
+
+    def test_a_rename_only_branch_is_unproven(self, repo: Path) -> None:
+        _on_branch(repo, "mv")
+        _git(repo, "mv", "base.txt", "moved.txt")
+        _git(repo, "commit", "-q", "-m", "Rename")
+        _push_back_to_main(repo, "mv")
+        _assert_unproven(repo, "mv")
+
+    def test_a_copy_only_branch_is_unproven(self, repo: Path) -> None:
+        _on_branch(repo, "cp")
+        (repo / "copy.txt").write_text("base.txt\n", encoding="utf-8")
+        _git(repo, "add", "copy.txt")
+        _git(repo, "commit", "-q", "-m", "Copy")
+        _push_back_to_main(repo, "cp")
+        _assert_unproven(repo, "cp")
+
+    def test_a_chmod_only_branch_is_unproven(self, repo: Path) -> None:
+        _on_branch(repo, "chmod")
+        (repo / "base.txt").chmod(0o755)
+        _git(repo, "commit", "-q", "-a", "-m", "Make executable")
+        _push_back_to_main(repo, "chmod")
+        _assert_unproven(repo, "chmod")
+
+    def test_a_park_branch_is_unproven_while_main_has_an_empty_commit(self, repo: Path) -> None:
+        _on_branch(repo, "parked")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "Park it")
+        _push_back_to_main(repo, "parked")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "An empty commit on main")
+        _publish_main(repo)
+        _assert_unproven(repo, "parked")
+
+    def test_branch_work_that_main_later_reverted_is_unproven(self, repo: Path) -> None:
+        _topic(repo, "feat", ["a.txt"])
+        _land_cherry_picks(repo, "feat")
+        _git(repo, "rm", "-q", "a.txt")
+        _git(repo, "commit", "-q", "-m", "Revert a")
+        _publish_main(repo)
+        _assert_unproven(repo, "feat")
+
+    def test_an_old_base_branch_whose_change_main_later_overwrote_is_unproven(
+        self, repo: Path
+    ) -> None:
+        _commit(repo, "keep.txt")
+        _publish_main(repo)
+        _on_branch(repo, "old")
+        _overwrite(repo, "v2\n", "v2")
+        _push_back_to_main(repo, "old")
+        _overwrite(repo, "v2\n", "v2 on main")
+        _overwrite(repo, "v3\n", "v3")
+        _publish_main(repo)
+        _assert_unproven(repo, "old")
+
+    def test_a_branch_whose_deletion_main_also_made_is_proven(self, repo: Path) -> None:
+        _commit(repo, "keep.txt")
+        _publish_main(repo)
+        _on_branch(repo, "rm")
+        _git(repo, "rm", "-q", "keep.txt")
+        _git(repo, "commit", "-q", "-m", "Remove keep")
+        _push_back_to_main(repo, "rm")
+        _git(repo, "rm", "-q", "keep.txt")
+        _git(repo, "commit", "-q", "-m", "Remove keep on main")
+        _publish_main(repo)
+        tips, _problems, evidence = _prove(repo, ["rm"])
+        assert list(tips) == ["rm"]
+        assert evidence == {"rm": TIER_PATCH_EQUIVALENT}
+
+
+class TestProofKeyVersion:
+    def test_the_key_carries_an_algorithm_version_prefix(self) -> None:
+        assert merge_proof_key("abc", ["def"]).startswith(f"{PROOF_ALGORITHM_VERSION}:")
+
+    def test_a_proof_cached_by_the_old_algorithm_is_ignored(self, repo: Path) -> None:
+        _on_branch(repo, "rm")
+        _git(repo, "mv", "base.txt", "moved.txt")
+        _git(repo, "commit", "-q", "-m", "Rename")
+        _push_back_to_main(repo, "rm")
+        tip = _git(repo, "rev-parse", "refs/heads/rm").strip()
+        main = _git(repo, "rev-parse", "refs/heads/main").strip()
+        cache = repo / CACHE_RELATIVE_PATH
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(
+            json.dumps({"proofs": {f"{tip}:{main}": TIER_CONTENT_PRESERVED}}), encoding="utf-8"
+        )
+        _assert_unproven(repo, "rm")
