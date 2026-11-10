@@ -2440,11 +2440,25 @@ class BranchesConfig(BaseModel):
             pool, never cleaned, listed in their own sweep group. Separate from
             ``exempt`` so a project's own exempt list does not drop the default
         protected_names: Branch names no delete command will remove
+        home: Exact names (not globs) of the branches a main checkout lives on.
+            The daemon writes and commits the CLAUDE.md block only while HEAD
+            is attached to one of them. Empty means the default branch; a
+            configured list REPLACES that default (a checkout that sits on an
+            environment or release branch declares it here)
+        home_commit: Whether the daemon writes and commits the CLAUDE.md block
+            on a home branch. ``false`` for a home branch that only accepts
+            changes by pull request: the daemon never writes the block there
+            (an uncommitted CLAUDE.md would make the next ``git pull`` that
+            touches the file fail). It reports a stale block once, in the log
+            and at SessionStart; ``regenerate-docs`` on a pull-request branch
+            writes it, and it is committed there
     """
 
     model_config = ConfigDict(extra="forbid")
 
     default: str = Field(default=BRANCH_DEFAULT_AUTO, min_length=1)
+    home: list[str] = Field(default_factory=list)
+    home_commit: bool = True
     remote: str = Field(default="origin", min_length=1)
     integration_lines: list[str] = Field(default_factory=list)
     exempt: list[str] = Field(default_factory=list)
@@ -2474,6 +2488,18 @@ class BranchesConfig(BaseModel):
         """A blank name is no branch and no remote."""
         if not value.strip():
             raise ValueError("must name a branch or remote, not whitespace")
+        return value
+
+    @field_validator("home")
+    @classmethod
+    def reject_home_globs(cls, value: list[str]) -> list[str]:
+        """``home`` names branches exactly; a glob would silently match none of them."""
+        globbed = [name for name in value if any(char in name for char in "*?[")]
+        if globbed:
+            raise ValueError(
+                f"home: {globbed} contain glob characters, but branches.home takes exact "
+                "branch names (unlike integration_lines, exempt and bot_owned, which take globs)"
+            )
         return value
 
     def explicit_wip_cap(self) -> int | None:

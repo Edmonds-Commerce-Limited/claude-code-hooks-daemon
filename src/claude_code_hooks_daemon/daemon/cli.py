@@ -4383,7 +4383,7 @@ def _build_initialised_controller(
     config: Config,
     project_path: Path,
     *,
-    write_claude_md_in_linked_worktree: bool = False,
+    claude_md_on_request: bool = False,
     defer_nonessential_startup: bool = False,
 ) -> "DaemonController":
     """Build and fully initialise a DaemonController from a loaded config.
@@ -4397,10 +4397,11 @@ def _build_initialised_controller(
     Args:
         config: Loaded daemon configuration.
         project_path: Project root (workspace) the controller serves.
-        write_claude_md_in_linked_worktree: Regenerate the block even in a
-            linked git worktree. Startup leaves it False so the worktree's
-            branch never carries an auto-committed block that conflicts with
-            main's on merge; the explicit ``regenerate-docs`` passes True.
+        claude_md_on_request: Write the block even in a linked git worktree or off
+            a home branch. Startup leaves it False so a worktree's branch never
+            carries an auto-committed block that conflicts with main's on merge,
+            and a non-home checkout is left alone; the explicit
+            ``regenerate-docs`` passes True. It never commits off a home branch.
         defer_nonessential_startup: Leave the CLAUDE.md regeneration, the asset
             syncs and the index pre-warm for ``controller.take_deferred_startup``.
             Only the serving daemon passes True, so it can bind its socket first.
@@ -4436,7 +4437,7 @@ def _build_initialised_controller(
         chain_deadline_problems=config.daemon.chain_deadline_problems,
         config_problems=config.config_problems,
         strict_mode=config.daemon.strict_mode,
-        write_claude_md_in_linked_worktree=write_claude_md_in_linked_worktree,
+        claude_md_on_request=claude_md_on_request,
         worktree=config.worktree,
         reference_repos=config.reference_repos,
         branches=config.branches,
@@ -4445,6 +4446,35 @@ def _build_initialised_controller(
         defer_nonessential_startup=defer_nonessential_startup,
     )
     return controller
+
+
+def claude_md_block_is_stale(config: Config, project_path: Path) -> bool:
+    """Whether the CLAUDE.md block needs an agent's attention, with no write side effect.
+
+    The upgrade script asks this after a restart. The controller is built with
+    the deferred start-up and the deferred steps (CLAUDE.md injection, asset and
+    rules syncs) are dropped, so the answer comes from the registered handlers
+    alone.
+    """
+    controller = _build_initialised_controller(
+        config, project_path, defer_nonessential_startup=True
+    )
+    controller.take_deferred_startup()
+    return bool(controller.claude_md_notices())
+
+
+def _regenerate_docs_refusal(project_path: Path) -> str | None:
+    """Why ``regenerate-docs`` must not write here (``home_commit: false`` on a home branch).
+
+    A project with no config yields ``None``: the generation steps report that
+    themselves, with their own message. An unreadable config raises.
+    """
+    from claude_code_hooks_daemon.core.claude_md_injector import regenerate_refusal
+
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    if not config_path.exists():
+        return None
+    return regenerate_refusal(project_path, Config.load(config_path).branches)
 
 
 def cmd_regenerate_docs(args: argparse.Namespace) -> int:
@@ -4464,6 +4494,17 @@ def cmd_regenerate_docs(args: argparse.Namespace) -> int:
     Returns:
         0 if both artifacts regenerated successfully, 1 otherwise.
     """
+    try:
+        refusal = _regenerate_docs_refusal(get_project_path(getattr(args, "project_root", None)))
+    except SystemExit:
+        return 1
+    except (OSError, ValueError) as e:
+        print(f"ERROR: Failed to read the daemon config: {e}", file=sys.stderr)
+        return 1
+    if refusal is not None:
+        print(f"ERROR: Not regenerating: {refusal}", file=sys.stderr)
+        return 1
+
     # Step 1: HOOKS-DAEMON.md. cmd_generate_docs handles project/config resolution and
     # prints its own status; a missing config returns 1 here and aborts before step 2.
     docs_result = cmd_generate_docs(args)
@@ -4480,9 +4521,9 @@ def cmd_regenerate_docs(args: argparse.Namespace) -> int:
     config_path = project_path / ".claude" / "hooks-daemon.yaml"
     try:
         config = Config.load(config_path)
-        # Explicit request: write even in a linked worktree, which daemon
-        # startup deliberately leaves alone (see ClaudeMdInjector).
-        _build_initialised_controller(config, project_path, write_claude_md_in_linked_worktree=True)
+        # Explicit request: write even in a linked worktree or off a home branch,
+        # which daemon startup deliberately leaves alone (see ClaudeMdInjector).
+        _build_initialised_controller(config, project_path, claude_md_on_request=True)
         print(f"Regenerated <hooksdaemon> block in: {project_path / 'CLAUDE.md'}")
         return 0
     except Exception as e:
@@ -6586,6 +6627,7 @@ def cmd_branch_keep(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.core.branch_creation import (
         LABELS_RELATIVE_PATH,
         clear_label_stale,
+        clear_label_stale_at_tips,
     )
     from claude_code_hooks_daemon.core.branch_keep import (
         BranchKeepError,
@@ -6624,6 +6666,9 @@ def cmd_branch_keep(args: argparse.Namespace) -> int:
             now=time.time(),
         )
     except BranchKeepSameReason as e:
+        # Already kept at this tip: the guard's snapshot must agree all the same.
+        clear_label_stale(repo / LABELS_RELATIVE_PATH, args.name)
+        clear_label_stale_at_tips(repo / LABELS_RELATIVE_PATH, tips)
         print(f"ERROR: branch-keep: {e}", file=sys.stderr)
         return 2
     except BranchKeepError as e:
@@ -6631,6 +6676,7 @@ def cmd_branch_keep(args: argparse.Namespace) -> int:
         return 1
     print(f"Kept {args.name}: {args.reason}")
     clear_label_stale(repo / LABELS_RELATIVE_PATH, args.name)
+    clear_label_stale_at_tips(repo / LABELS_RELATIVE_PATH, tips)
     if not result.pushed:
         print(f"WARNING: the push failed ({result.push_error}); the local keep stands.")
         print(f"Retry: {result.retry_command}")

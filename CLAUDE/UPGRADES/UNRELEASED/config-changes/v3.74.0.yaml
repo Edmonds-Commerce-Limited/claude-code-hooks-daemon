@@ -1,0 +1,24 @@
+# Drafted by Plan 00594. The VERSION in the filename is a target, not a decision.
+version: "3.74.0"
+date: "UNRELEASED"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: branches.home
+      description: >-
+        Branches a main checkout lives on (list of exact names, not globs). The daemon writes
+        and commits the CLAUDE.md block only while HEAD is attached to one of
+        them. Empty (the default) means the repository's default branch; a
+        configured list replaces that default. Set it when a checkout sits on
+        an environment, release or production branch.
+    - key: branches.home_commit
+      description: >-
+        Whether the daemon writes and commits the CLAUDE.md block on a home
+        branch (default true). Set false when the home branch only accepts
+        changes by pull request: the daemon then never writes CLAUDE.md on a
+        home branch (a modified file there would make the next git pull that
+        touches it fail). It reports a stale block once, in the log and at
+        SessionStart; run regenerate-docs on a pull-request branch and commit
+        the result there.

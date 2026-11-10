@@ -6,9 +6,11 @@ and ignore semantics, which a mock would only restate.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -125,6 +127,102 @@ class TestCleanupTargets:
     def test_only_existing_refs_are_targets(self, repo: Path) -> None:
         _git(repo, "branch", "release/1")
         assert cleanup_targets(repo, _CONFIG, "main") == ["main", "refs/heads/release/1"]
+
+
+def _lock_pair_branch(repo: Path, name: str, where: str, manifest: str, lock: str | None) -> Path:
+    """A worktree whose branch commits ``manifest`` (and ``lock``) under ``where``."""
+    _git(repo, "checkout", "-b", name)
+    directory = repo / where
+    directory.mkdir(parents=True, exist_ok=True)
+    for filename in (manifest, lock):
+        if filename is not None:
+            (directory / filename).write_text("{}\n", encoding="utf-8")
+            _git(repo, "add", f"{where}/{filename}")
+    (repo / ".gitignore").write_text("untracked/\nvendor/\nnode_modules/\n", encoding="utf-8")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-m", f"Add {name}")
+    _git(repo, "checkout", "main")
+    return _worktree(repo, name)
+
+
+class TestLockRegeneratedBlockers:
+    def test_nested_composer_vendor_beside_manifest_and_lock_is_regenerable(
+        self, repo: Path
+    ) -> None:
+        path = _lock_pair_branch(repo, "f1", "svc/api", "composer.json", "composer.lock")
+        (path / "svc/api/vendor/pkg").mkdir(parents=True)
+        (path / "svc/api/vendor/pkg/a.php").write_text("x\n", encoding="utf-8")
+        assert worktree_blockers(path, []) == ()
+
+    def test_without_the_lock_it_still_blocks(self, repo: Path) -> None:
+        path = _lock_pair_branch(repo, "f2", "svc/api", "composer.json", None)
+        (path / "svc/api/vendor").mkdir(parents=True)
+        (path / "svc/api/vendor/a.php").write_text("x\n", encoding="utf-8")
+        assert worktree_blockers(path, []) == ("svc/api/vendor/",)
+
+    def test_a_vendor_dir_holding_a_tracked_file_still_blocks(self, repo: Path) -> None:
+        path = _lock_pair_branch(repo, "f3", "svc", "composer.json", "composer.lock")
+        (path / "svc/vendor").mkdir()
+        (path / "svc/vendor/mine.php").write_text("x\n", encoding="utf-8")
+        _git(path, "add", "-f", "svc/vendor/mine.php")
+        _git(path, "commit", "-m", "track a vendor file")
+        (path / "svc/vendor/extra.php").write_text("y\n", encoding="utf-8")
+        assert worktree_blockers(path, []) == ("svc/vendor/extra.php",)
+
+    def test_node_modules_at_depth_three_is_regenerable(self, repo: Path) -> None:
+        path = _lock_pair_branch(repo, "f4", "a/b/c", "package.json", "package-lock.json")
+        (path / "a/b/c/node_modules/x").mkdir(parents=True)
+        (path / "a/b/c/node_modules/x/i.js").write_text("x\n", encoding="utf-8")
+        assert worktree_blockers(path, []) == ()
+
+    def test_a_vendor_dir_holding_a_nested_git_clone_still_blocks(self, repo: Path) -> None:
+        path = _lock_pair_branch(repo, "f6", "svc", "composer.json", "composer.lock")
+        (path / "svc/vendor/pkg/.git").mkdir(parents=True)
+        (path / "svc/vendor/pkg/a.php").write_text("x\n", encoding="utf-8")
+        blockers = worktree_blockers(path, [])
+        assert blockers
+        assert all(b.startswith("svc/vendor/") for b in blockers)
+
+    def test_a_clone_at_depth_one_and_two_is_found(self, tmp_path: Path) -> None:
+        shallow = tmp_path / "shallow"
+        (shallow / "pkg" / ".git").mkdir(parents=True)
+        deep = tmp_path / "deep"
+        (deep / "scope" / "pkg" / ".git").mkdir(parents=True)
+        assert branch_cleanup._holds_git_clone(shallow) is True
+        assert branch_cleanup._holds_git_clone(deep) is True
+
+    def test_a_clone_below_depth_two_is_not_searched_for(self, tmp_path: Path) -> None:
+        """Only `<dir>/*/.git` and `<dir>/*/*/.git` are statted, which bounds the walk."""
+        too_deep = tmp_path / "vendor"
+        (too_deep / "a" / "b" / "c" / ".git").mkdir(parents=True)
+        assert branch_cleanup._holds_git_clone(too_deep) is False
+
+    def test_a_missing_directory_holds_nothing_and_logs_nothing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.DEBUG):
+            assert branch_cleanup._holds_git_clone(tmp_path / "vendor") is False
+        assert caplog.records == []
+
+    def test_the_committed_tree_is_not_read_when_no_ignored_directory_could_be_rebuilt(
+        self, repo: Path
+    ) -> None:
+        _git(repo, "branch", "plain")
+        path = _worktree(repo, "plain")
+        (path / ".gitignore").write_text("*.log\n", encoding="utf-8")
+        _git(path, "add", ".gitignore")
+        _git(path, "commit", "-m", "ignore logs")
+        (path / "notes.log").write_text("x\n", encoding="utf-8")
+        with patch.object(branch_cleanup, "_lock_regenerated") as lock_regenerated:
+            blockers = worktree_blockers(path, [])
+        lock_regenerated.assert_not_called()
+        assert blockers == ("notes.log",)
+
+    def test_scratch_is_never_accepted(self, repo: Path) -> None:
+        path = _lock_pair_branch(repo, "f5", "svc", "composer.json", "composer.lock")
+        (path / "untracked/scratch").mkdir(parents=True)
+        (path / "untracked/scratch/n.md").write_text("x\n", encoding="utf-8")
+        assert worktree_blockers(path, []) == ("untracked/scratch/",)
 
 
 class TestWorktreeBlockers:

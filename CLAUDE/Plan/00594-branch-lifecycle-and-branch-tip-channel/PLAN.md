@@ -148,20 +148,18 @@ names, people or hashes appear here.
 
 ### Phase 2: Stop the daemon making branches (class 1)
 
-- [ ] 🔄 **Task 2.1**: (implemented on the unmerged branch
-  `plan-00594-phase-2-home-branch`, adding config key `branches.home`; held
-  for client design review) Write a failing test that reproduces a housekeeping
-  regeneration leaving a dirty tracked file and an auto-commit on a non-default
-  or throwaway branch. Then fix it per `DESIGN.md`.
-- [ ] ⬜ **Task 2.2**: (RC feedback) A home branch that only accepts changes
-  by pull request gets no local auto-commit of the CLAUDE.md block. Observed:
-  a client named its PR-protected release line as a home branch, and
-  switching the main checkout to it committed five generated lines locally.
-  Landing those then needed a branch, a full gate and a bot review, and the
-  release tip moved each time. Design: a per-home-branch commit mode in
-  config. One mode commits (direct push allowed). Another writes the block,
-  leaves it uncommitted and says so, so it is batched into the next real PR.
-  Choose the default when the design is reviewed.
+- [x] ✅ **Task 2.1**: (on main, config key `branches.home`, release note
+  032; proven live on two client seats through the release candidate; three
+  review rounds) The daemon writes and commits the CLAUDE.md block only on a
+  home branch. The default branch is resolved without a remote when needed
+  (`init.defaultBranch` naming a real branch, an unborn HEAD, a sole local
+  branch). An unresolved home is reported at SessionStart by the branch sweep.
+- [x] ✅ **Task 2.2**: (on main, config key `branches.home_commit`) A home
+  branch that only accepts changes by pull request: under `home_commit: false`
+  the daemon never writes the block there, so a pull is never blocked by a
+  dirty CLAUDE.md. It reports the stale block at SessionStart, and
+  `regenerate-docs` writes it on a pull-request branch (it refuses on the home
+  branch). A post-upgrade task tells clients when to set both keys.
 
 ### Phase 3: Proof of merge and agent-performable deletion (classes 3, 6, 8)
 
@@ -169,17 +167,20 @@ names, people or hashes appear here.
   and patch-equivalent branches, with tests for each shape.
 - [ ] ⬜ **Task 3.2**: Remote delete of a proven-merged branch is allowed for
   an agent, behind the recovery bundle.
-- [ ] ⬜ **Task 3.3**: The default regenerable list covers common vendor
-  directories, and the list is configurable.
+- [x] ✅ **Task 3.3**: (on main, release note 034) An ignored directory that
+  a committed manifest and lock file let a package manager rebuild counts as
+  regenerable, unless it holds a nested git clone or contains the scratch
+  area. The scan is bounded and runs once per guard call. The list stays
+  configurable through `branches.cleanup_after_merge.regenerable`.
 - [ ] ⬜ **Task 3.4**: Bulk cleanup is batched, resumable and dry-run first,
   and is tested against a fixture with hundreds of branches.
-- [ ] ⬜ **Task 3.5**: (RC feedback) When the worktree-removal guard names a
-  blocking path, its deny says "delete it first, then retry the removal". A
-  single command that deletes the path and removes the worktree is judged
-  before it runs, so it is still denied.
-- [ ] ⬜ **Task 3.6**: (RC feedback) The installer cleans up, or ignores, the
-  settings backup file it leaves when that file is byte-identical to the
-  original.
+- [x] ✅ **Task 3.5**: (RC feedback; done, release note 038) When the
+  worktree-removal guard names ignored blocking paths, its deny says to keep
+  what matters and delete what is disposable in a separate command first. A
+  chained delete is still denied, and the deny says it was not counted.
+- [x] ✅ **Task 3.6**: (RC feedback; done, release note 039) The installer
+  removes the settings backup it took when the merge left the file
+  byte-identical to it.
 
 ### Phase 4: Pressure, preflight, park, owner (classes 2, 4, 5, 7)
 
@@ -190,6 +191,13 @@ names, people or hashes appear here.
 - [ ] ⬜ **Task 4.3**: The park record survives a rejected push, and a merge
   clears it visibly.
 - [ ] ⬜ **Task 4.4**: Pools are counted per owner.
+- [x] ✅ **Task 4.5**: (done: `clear_label_stale_at_tips`; release note 037)
+  A keep covers every branch name at the kept tip, in the creation guard as
+  in the sweep. Client report: a same-tip `-parked` twin stayed stale to the
+  guard after its sibling was kept, and a same-reason re-keep was refused
+  before the stale mark was cleared. In the lifecycle model, a keep, a park
+  and a proof are all facts about a COMMIT. Every per-name cache of them
+  must be keyed or invalidated by tip, never by the name typed.
 
 ### Phase 5: Branch tip channel
 
