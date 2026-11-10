@@ -53,9 +53,11 @@ names, people or hashes appear here.
 6. **Regenerable directories block cleanup.** A merged branch's worktree held
    dependency-manager vendor directories. These can be regenerated but are
    not on the default regenerable list, so cleanup was refused.
-7. **Branches have no owner.** Remote-only branches created by other actors
-   count against every checkout, so one seat is blocked by another's
-   leftovers.
+7. **Pools are not counted per owner.** Remote-only branches created by
+   other actors count against every checkout, so one seat is blocked by
+   another's leftovers. A creator record already exists
+   (`hooksDaemonCreator` in `core/branch_records.py`), but only for branches
+   the daemon saw being created, and pool counting does not consult it.
 8. **Scale.** One client repository has 275 remote branches, 135 of them zero
    commits ahead of the default branch. A first cleanup at that size needs a
    safe bulk path.
