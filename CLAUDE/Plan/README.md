@@ -10,8 +10,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00478: unknown guard verdicts warn](00478-unknown-guard-verdicts-warn/PLAN.md) - In Progress (owner ruling "warn dont block": a safety guard that cannot decide allows with an advisory; a positive match still denies; Phase 0 done, GitHub #170 closed: awk program text that stays data is no removal; Task 1.1 inventory next)
 
-- [00592: worktree create undo releases initializing lock](00592-worktree-create-undo-releases-initializing-lock/PLAN.md) - In Progress (GitHub #173: a killed `git worktree add` leaves the worktree locked `initializing`, so the undo's single-force remove, prune and `branch -D` all fail; release only that lock, then undo; other locks are never overridden)
-
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
 ### Next (ordered; work top to bottom)
@@ -188,6 +186,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00592: worktree create undo releases initializing lock](Completed/00592-worktree-create-undo-releases-initializing-lock/PLAN.md) - Complete at `fd7e894fa` (merge `c5c9deb82`) + `37d8d31e0` (main CI run 42739985119 success) + the archiving commit (GitHub #173, closed: the failed-add undo releases git's own `initializing` lock and removes the worktree and new branch; another lock is never overridden; leftovers are named in the error; release note 026)
+
 - [00591: claude md auto commit waits for handler sources](Completed/00591-claude-md-auto-commit-waits-for-handler-sources/PLAN.md) - Complete at `7e9a03f28` (merge `a9e0dacdb`; main CI run 42732895459 success) + the archiving commit (GitHub #172, closed: the restart auto-commit of CLAUDE.md is held while a plugin/project handler source is untracked or modified, logging the file; library handlers never hold it; release note 025)
 
 - [00590: daemon dir cd reads only command position](Completed/00590-daemon-dir-cd-reads-only-command-position/PLAN.md) - Complete at `fee5dc457` (merge `46cf5c71a`; main CI run 42724555662 success) + the archiving commit (GitHub #194, closed: R-DAEMON-DIR-CD blanks only `grep`/`rg` search arguments nothing can run, so a search for `"cd "` over a daemon path is allowed; every executing twin still denies; release note 024)
@@ -246,8 +246,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00551: supervisor own session ids from child tree](Completed/00551-supervisor-own-session-ids-from-child-tree/PLAN.md) - Complete at merges `e39f0ee88` + `77749bd36` (green CI run 39962905189) + the archiving commit (#138, closed: own session ids come only from the supervisor's own process tree, never a `/proc`-wide scan; the hot-reload fallback walks the host tree; release note 027 in UNRELEASED)
 
-- [00549: opencode support research](Completed/00549-opencode-support-research/PLAN.md) - Complete, research only (#136: opencode V2 has in-process TS plugins, not command hooks, with `tool.execute.before` the only blocking hook and no stop veto; Codex is the easier second host; Claude Code's `AGENTS.md` is a fallback, workable AGENTS-only under an opt-in multi-harness mode; `FINDINGS.md` holds the answers and the epic proposal; open owner question M5 on naming, non-blocking)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -301,9 +299,9 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - **Total Plans Created**: 592 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 498 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 499 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 71 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 70 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

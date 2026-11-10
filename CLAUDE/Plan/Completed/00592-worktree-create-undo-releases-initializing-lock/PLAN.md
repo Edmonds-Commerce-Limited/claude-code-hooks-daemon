@@ -1,6 +1,6 @@
 # Plan 00592: worktree create undo releases initializing lock
 
-**Status**: In Progress
+**Status**: Complete (2026-11-10)
 **Created**: 2026-11-10
 **Owner**: dev
 **Priority**: Medium
@@ -38,7 +38,7 @@ the undo exists for.
 
 ### Phase 1: Undo the locked add
 
-- [ ] 🔄 **Task 1.1**: RED tests with a real temporary repo (a worktree locked
+- [x] ✅ **Task 1.1**: RED tests with a real temporary repo (a worktree locked
   `initializing` is removed and its branch deleted; a worktree locked with another
   reason is left alone and reported; a pre-existing branch is never deleted).
   GREEN: read the lock reason from `worktree list --porcelain`, `worktree unlock`
@@ -46,10 +46,10 @@ the undo exists for.
 
 ## Success Criteria
 
-- [ ] A killed or timed-out add leaves no worktree and no new branch behind.
-- [ ] Release-bound consequence recorded as a release note in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] A killed or timed-out add leaves no worktree and no new branch behind (pinned by `test_initializing_lock_is_released_and_everything_removed`; live on the triage reproduction).
+- [x] Release-bound consequence recorded as a release note in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (`026-worktree-create-undo-releases-initializing-lock.md`).
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hash -->
+- `fd7e894fa` (merge `c5c9deb82`) + release-note title fix `37d8d31e0`; main CI run 42739985119 green (run 42737010199 on the merge failed on the note's title only); GitHub #173 closed.
