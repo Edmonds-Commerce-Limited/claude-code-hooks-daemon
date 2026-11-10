@@ -116,5 +116,65 @@ What is new:
 - `scripts/upgrade.sh`, with `scripts/upgrade_version.sh` and
   `handlers/session_start/version_check.py`
 
-Status: a draft for review with the client test seat (Task 1.3). It has not
-been checked against client evidence yet.
+## 6. Review round 1 (client test seat, from the summary)
+
+The client seat's answers and cautions. Each one overrides the section it
+names, and the next revision folds them in.
+
+- **§2.2 owner: the email is weak evidence.** Most seats commit under one
+  shared identity, so the email rule cannot tell seats apart. Rule 2
+  (author email) becomes advisory only.
+
+- **§2.2 no blind spot for foreign branches.** "Foreign, not counted" would
+  hide most of the largest pile, because a branch from an earlier container
+  or a re-cloned checkout is foreign to every clone. Replace "foreign" with
+  an explicit **unowned** pool. It has its own report and its own cap
+  (`branches.unowned.cap`), and its pressure goes to a configured owner,
+  `branches.unowned.owner` (a seat or role). A checkout that matches that
+  owner is pressed for the unowned pool at session start and at stop. Every
+  other checkout only sees it reported.
+
+- **§2.5 home branch, not the default branch.** Main checkouts sit on an
+  environment, release or prod branch for weeks, by policy. The rule
+  becomes: write and commit the block only when HEAD is attached to the
+  checkout's **home branch**. That is `branches.home` (default: the default
+  branch), plus any configured integration lines. Never on a feature
+  branch, a detached HEAD or a throwaway branch.
+
+- **§2.3 grace.** Creation stays at the cap when this checkout's last stop
+  report was ignored, meaning the same blockers are still present at the
+  next session start. Otherwise it is cap + 2.
+
+- **§2.6 vendor dirs are nested.** The blocking directories were vendor and
+  bin directories several levels down, next to their manifest and lock
+  file. So match a **directory beside a manifest + lock pair** whose package
+  manager can regenerate it. A root-level name list would miss them.
+
+- **§2.1 the forge CLI is usable** in every seat, so proof 4 is
+  available on explicit commands.
+
+- **§2.6 / T7 the recovery bundle needs a durable copy.** A bundle in a
+  throwaway container is lost along with it. Before any remote delete, push
+  each deleted tip to an archive ref namespace on the same remote
+  (`refs/hooks-daemon/archive/<name>/<sha>`). The local bundle stays as a
+  second copy. The archive refs age out under their own retention key.
+
+- **§2.1 what tree containment proves.** The `content-preserved` tier
+  (`daemon/branch_safety.py:274`) proves only that every file version on
+  the branch is byte-identical to one *still reachable* from the protected
+  ref, which includes versions that were later reverted. So it proves **no
+  loss** (deleting is safe because everything is recoverable from history).
+  It does **not** prove the work is **finished**, i.e. live in the target
+  tree. The design therefore keeps two separate predicates:
+
+  - `deletable` = any `is_safe` tier, which is today's behaviour.
+  - `finished` = ancestry, patch-id, a forge merged-PR record, or
+    containment in the target's *current* tree.
+
+  Only `finished` moves a branch out of the open pool. A branch that is
+  `deletable` but not `finished` is reported as "superseded or reverted:
+  safe to delete, confirm intent".
+
+Status: a draft for review with the client test seat (Task 1.3). The seat
+will review the document itself after its production cut-over. Client
+counts and command sequences are still to come.
