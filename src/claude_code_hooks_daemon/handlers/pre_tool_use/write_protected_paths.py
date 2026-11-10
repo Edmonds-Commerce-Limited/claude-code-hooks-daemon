@@ -1256,9 +1256,21 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
                     ),
                     None,
                 )
-            for operand in files:
-                if _awk_program_writes(operand):
-                    glob = self._text_naming(operand, cause=_CAUSE_AWK, computed_destination=True)
+            programs = [operand for operand in files if _awk_program_writes(operand)]
+            if programs:
+                # A program writing to a destination it computes (`print >
+                # FILENAME`, `> $1`) may write over any file it is given, so a
+                # listed path named among the operands denies (Plan 00478
+                # review C3). Only when neither the operands nor the program
+                # name one is the call left unjudged.
+                for operand in files:
+                    if operand in programs:
+                        continue
+                    glob = self._operand_naming(operand, roots, base, untrusted)
+                    if glob is not None:
+                        return glob
+                for program in programs:
+                    glob = self._text_naming(program, cause=_CAUSE_AWK, computed_destination=True)
                     if glob is not None:
                         return glob
         return None

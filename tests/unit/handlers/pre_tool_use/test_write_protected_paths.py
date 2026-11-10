@@ -1704,6 +1704,34 @@ class TestAPathNobodyNamedWarnsInsteadOfDenying:
         hook_input = _bash(root, "awk '{print > \"protected/\" $1}' notes.txt")
         assert guard.handle(hook_input).decision == Decision.DENY
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "awk '{print > FILENAME}' protected/x",
+            "awk '{print > FILENAME}' ./protected/x",
+            "cd protected && awk '{print > FILENAME}' x",
+            "awk '{print > $1}' protected/list",
+        ],
+    )
+    def test_an_awk_program_whose_file_operand_names_the_directory_is_denied(
+        self, root: Path, command: str
+    ) -> None:
+        """Review C3: the operands are where the protected path is named, so the deny stays."""
+        (root / "protected").mkdir()
+        guard = _make(root, ["protected/**"])
+        hook_input = _bash(root, command)
+        assert guard.matches(hook_input) is True
+        assert guard.handle(hook_input).decision == Decision.DENY
+
+    @pytest.mark.parametrize("globs", [["**", PROTECTED], [PROTECTED]])
+    def test_an_awk_program_rewriting_a_named_protected_file_is_denied(
+        self, root: Path, globs: list[str]
+    ) -> None:
+        guard = _make(root, globs)
+        hook_input = _bash(root, f"awk '{{print > FILENAME}}' {PROTECTED}")
+        assert guard.matches(hook_input) is True
+        assert guard.handle(hook_input).decision == Decision.DENY
+
     def test_a_named_path_beside_an_unnamed_glob_is_denied(self, root: Path) -> None:
         guard = _make(root, ["**", PROTECTED])
         hook_input = _bash(root, f'true\necho "never closed {root}/{PROTECTED}')
