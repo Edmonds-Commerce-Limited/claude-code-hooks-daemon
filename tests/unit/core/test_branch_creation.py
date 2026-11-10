@@ -373,3 +373,38 @@ class TestWipCapLeavesMergedToItsOwnPool:
         _branch(repo, "zulu")
         verdict = creation_verdict(repo, _config(cap=2), "fresh")
         assert "--clean" not in "\n".join(verdict.lines)
+
+
+class TestWriteLabelsHelper:
+    """Plan 00594 M-5: every label mutation goes through one write path."""
+
+    def test_every_mutation_writes_through_the_one_helper(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from collections.abc import Mapping
+
+        from claude_code_hooks_daemon.core import branch_creation
+
+        path = tmp_path / "labels.json"
+        record: dict[str, object] = {"name": "a", "group": "merged", "stale": True}
+        write_labels(path, [{**record, "local_tip": "t1", "remote_tip": None}])
+        calls: list[str] = []
+        real = branch_creation._write_labels
+
+        def spy(target: Path, labels: Mapping[str, object], reason: str) -> None:
+            calls.append(reason)
+            real(target, labels, reason)
+
+        monkeypatch.setattr(branch_creation, "_write_labels", spy)
+        branch_creation.clear_label_stage(path, "a")
+        branch_creation.clear_label_stale(path, "a")
+        write_labels(path, [{**record, "local_tip": "t1"}])
+        branch_creation.clear_label_stale_at_tips(path, ["t1"])
+        assert len(calls) == 4
+
+    def test_an_unwritable_snapshot_is_logged_not_raised(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core import branch_creation
+
+        blocker = tmp_path / "file"
+        blocker.write_text("x", encoding="utf-8")
+        branch_creation._write_labels(blocker / "labels.json", {}, "test reason")

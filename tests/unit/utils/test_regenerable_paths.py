@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
+
 import pytest
 
 from claude_code_hooks_daemon.utils.regenerable_paths import (
     DEFAULT_REGENERABLE_STORES,
     NEVER_REGENERABLE,
     is_regenerable,
+    lock_regenerated_dirs,
     never_regenerable_violations,
+    under_any,
 )
 
 
@@ -107,3 +111,118 @@ class TestNeverRegenerable:
 
     def test_the_protected_path_is_scratch(self) -> None:
         assert NEVER_REGENERABLE == "untracked/scratch/"
+
+
+def _no_read(_path: str) -> str | None:
+    return None
+
+
+class TestLockRegeneratedDirs:
+    def test_nested_composer_pair_yields_vendor_dir(self) -> None:
+        committed = ["app/api/composer.json", "app/api/composer.lock", "app/api/src/a.php"]
+        assert "app/api/vendor/" in lock_regenerated_dirs(committed, _no_read)
+
+    def test_manifest_without_lock_yields_nothing(self) -> None:
+        assert lock_regenerated_dirs(["app/composer.json"], _no_read) == ()
+
+    def test_lock_without_manifest_yields_nothing(self) -> None:
+        assert lock_regenerated_dirs(["app/composer.lock"], _no_read) == ()
+
+    @pytest.mark.parametrize("lock", ["package-lock.json", "yarn.lock", "pnpm-lock.yaml"])
+    def test_node_modules_at_depth_three_with_any_lock(self, lock: str) -> None:
+        committed = ["a/b/c/package.json", f"a/b/c/{lock}"]
+        assert lock_regenerated_dirs(committed, _no_read) == ("a/b/c/node_modules/",)
+
+    @pytest.mark.parametrize(
+        ("files", "expected"),
+        [
+            (["Gemfile", "Gemfile.lock"], "vendor/bundle/"),
+            (["Cargo.toml", "Cargo.lock"], "target/"),
+            (["pyproject.toml", "uv.lock"], ".venv/"),
+            (["pyproject.toml", "poetry.lock"], ".venv/"),
+        ],
+    )
+    def test_other_managers(self, files: list[str], expected: str) -> None:
+        assert expected in lock_regenerated_dirs(files, _no_read)
+
+    def test_composer_dirs_are_read_from_the_committed_manifest(self) -> None:
+        def read(path: str) -> str | None:
+            assert path == "web/composer.json"
+            return '{"config": {"bin-dir": "bin", "vendor-dir": "libs"}}'
+
+        dirs = lock_regenerated_dirs(["web/composer.json", "web/composer.lock"], read)
+        assert "web/bin/" in dirs
+        assert "web/libs/" in dirs
+
+    @pytest.mark.parametrize(
+        "text", ["not json", "[]", '{"config": {"bin-dir": "../x", "vendor-dir": 3}}']
+    )
+    def test_odd_composer_config_falls_back_to_defaults(self, text: str) -> None:
+        committed = ["composer.json", "composer.lock"]
+        assert lock_regenerated_dirs(committed, lambda _p: text) == ("vendor/", "vendor/bin/")
+
+    def test_a_dir_under_the_never_regenerable_path_is_dropped(self) -> None:
+        committed = [f"{NEVER_REGENERABLE}composer.json", f"{NEVER_REGENERABLE}composer.lock"]
+        assert lock_regenerated_dirs(committed, _no_read) == ()
+
+    def test_a_dir_with_a_committed_file_inside_is_dropped(self) -> None:
+        committed = ["composer.json", "composer.lock", "vendor/keep.txt"]
+        assert lock_regenerated_dirs(committed, _no_read) == ("vendor/bin/",)
+
+
+class _CountingTree(list[str]):
+    """A committed-path listing that counts how often it is walked or probed."""
+
+    def __init__(self, paths: list[str]) -> None:
+        super().__init__(paths)
+        self.walks = 0
+
+    def __iter__(self) -> Iterator[str]:
+        self.walks += 1
+        return super().__iter__()
+
+
+class TestLockRegeneratedDirsComplexity:
+    @pytest.mark.parametrize("pairs", [1, 5, 40])
+    def test_work_is_one_lookup_per_candidate_not_a_scan_of_the_tree(
+        self, pairs: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.utils import regenerable_paths
+
+        files = [
+            f"svc{n}/{name}" for n in range(pairs) for name in ("composer.json", "composer.lock")
+        ]
+        files += [f"svc{n}/src/f{i}.php" for n in range(pairs) for i in range(3)]
+        tree = _CountingTree(files)
+        original = regenerable_paths.under_any
+        calls: list[str] = []
+
+        def spy(entry: str, directories: Iterable[str]) -> bool:
+            calls.append(entry)
+            return original(entry, directories)
+
+        monkeypatch.setattr(regenerable_paths, "under_any", spy)
+        dirs = lock_regenerated_dirs(tree, _no_read)
+        assert f"svc{pairs - 1}/vendor/" in dirs
+        assert len(calls) <= 2 * pairs  # at most one check per candidate directory
+        assert tree.walks <= 2
+
+    def test_a_dir_that_contains_the_never_regenerable_path_is_dropped(self) -> None:
+        text = '{"config": {"vendor-dir": "untracked", "bin-dir": "untracked/bin"}}'
+        committed = ["composer.json", "composer.lock"]
+        assert lock_regenerated_dirs(committed, lambda _p: text) == ("untracked/bin/",)
+
+    def test_all_public_names_are_exported(self) -> None:
+        from claude_code_hooks_daemon.utils import regenerable_paths
+
+        for name in ("lock_regenerated_dirs", "under_any", "LOCK_REGENERATED_RULES"):
+            assert name in regenerable_paths.__all__
+        assert "LockRegeneratedRule" in regenerable_paths.__all__
+
+
+class TestUnderAny:
+    def test_prefix_match_on_directory_boundary(self) -> None:
+        assert under_any("a/vendor/x/y.php", ["a/vendor/"])
+        assert under_any("a/vendor/", ["a/vendor/"])
+        assert not under_any("a/vendors/", ["a/vendor/"])
+        assert not under_any("b/vendor/", ["a/vendor/"])

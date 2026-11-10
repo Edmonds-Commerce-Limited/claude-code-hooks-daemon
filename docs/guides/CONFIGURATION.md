@@ -361,6 +361,8 @@ In `block` mode, creating a branch is denied while a pool is at its cap or holds
 
 `branches.bot_owned` (default `["dependabot/*"]`) names branches a bot manages. They are in no pool: never counted, never judged by the creation guard and never deleted by `branch-sweep --clean`. `branch-sweep` lists them in their own `bot-owned` section.
 
+`branches.home` (default empty) names, as exact branch names (not globs), the branches a main checkout lives on. The daemon writes and auto-commits the CLAUDE.md block only while HEAD is attached to a home branch; empty means the repository's default branch, and a configured list replaces that default (set it when a checkout sits on an environment, release or production branch). When git cannot name a default branch it falls back to `init.defaultBranch` (only when that branch exists or HEAD is unborn on it), then the branch of an unborn HEAD (the block is written, but no root commit is made), then a sole local branch; if none resolves to a local branch it writes nothing and says at SessionStart to set `branches.home`. On any other branch, or a detached HEAD, it writes nothing and logs why. `regenerate-docs` writes the block on request from any branch but commits only on a home branch. `branches.home_commit` (default `true`) set to `false` is for a home branch that only accepts changes by pull request: the daemon then never writes CLAUDE.md on a home branch. A modified CLAUDE.md there would make the next `git pull` fail whenever an upstream change touches the file, and the daemon's own guards deny the usual ways to discard it. A stale block is reported at every SessionStart, recomputed each time; run `regenerate-docs` in a pull-request worktree or branch and commit it there (on a home branch it refuses and exits non-zero).
+
 ```yaml
 branches:
   parked:
@@ -383,6 +385,8 @@ branches:
 | `evacuation.mode`              | `block`, `warn`, `off`        | Copying work to an untracked file and destroying its worktree or branch is denied, in one command or one turn                                              |
 | `cleanup_after_merge.mode`     | `advise`, `act`, `off`        | After a merge lands: advise the delete command, or delete the branch when it is proven merged; `regenerable` lists the ignored globs that may be discarded |
 | `sweep.budget_ms`              | `3000` / integer milliseconds | Wall-clock budget for the per-branch inventory steps; `behind_threshold` (default 50) is the commits-behind-default count that earns a warning             |
+
+**Regenerable stores.** Besides the `regenerable` globs, an ignored directory is discarded without blocking when it sits beside a manifest and lock file that are both committed at that location (`composer.json` + `composer.lock` for `vendor/` and its bin dir, `package.json` + a lock for `node_modules/`, `Gemfile`, `Cargo.toml` and `pyproject.toml` pairs likewise), at any depth. A directory holding a committed file, or lacking a committed lock, still blocks; `untracked/scratch/` never qualifies. The pairs are the `LOCK_REGENERATED_RULES` table in `utils/regenerable_paths.py`.
 
 Every deny from these guards ends with the same principle text: the limit exists so work finishes, never so it disappears. `bin/hooks-daemon branch-sweep` reports every branch by state; `branch-sweep --clean` deletes the provably merged ones and writes a recovery bundle first. The same two commands are the `branch-sweep` (report) and `branch-sweep-clean` (held) steps of `/hooks-daemon housekeeping`.
 

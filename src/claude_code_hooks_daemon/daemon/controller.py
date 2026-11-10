@@ -154,6 +154,7 @@ class DaemonController:
     __slots__ = (
         "_chain_config",
         "_chain_deadline_problems",
+        "_claude_md_injector",
         "_config",
         "_config_errors",
         "_config_fingerprint",
@@ -218,6 +219,7 @@ class DaemonController:
         # after that -- staying stale IS the point, so a caller can detect
         # when the on-disk source has moved on without a restart.
         self._source_fingerprint: str | None = None
+        self._claude_md_injector: ClaudeMdInjector | None = None
         # Fingerprint of the config bound at startup (Plan 00415), supplied by
         # the caller that loaded it; the same never-recomputed contract.
         self._config_fingerprint: str | None = None
@@ -242,7 +244,7 @@ class DaemonController:
         claude_md: "ClaudeMdConfig | None" = None,
         chain: "ChainConfig | None" = None,
         strict_mode: bool | None = None,
-        write_claude_md_in_linked_worktree: bool = False,
+        claude_md_on_request: bool = False,
         worktree: "WorktreeConfig | None" = None,
         reference_repos: "ReferenceReposConfig | None" = None,
         branches: "BranchesConfig | None" = None,
@@ -285,11 +287,13 @@ class DaemonController:
                 None (every existing caller that does not pass it, e.g. most
                 unit tests) keeps the pre-existing default: fail-open for a
                 non-SAFETY+BLOCKING handler that raises.
-            write_claude_md_in_linked_worktree: Regenerate the CLAUDE.md
-                block even when ``workspace_root`` is a linked git worktree.
+            claude_md_on_request: The CLAUDE.md block was explicitly asked for:
+                write it even in a linked git worktree or off a home branch.
                 Daemon startup leaves it False, so a worktree's branch never
                 carries an auto-committed regeneration that conflicts with
-                main's on merge; ``regenerate-docs`` passes True.
+                main's on merge and a non-home checkout is left alone;
+                ``regenerate-docs`` passes True. Nothing is committed off a
+                home branch either way.
             chain_deadline_problems: ``DaemonConfig.chain_deadline_problems``
                 (Plan 00466 N40 review 2 mA4). Each is logged and reported in
                 ``get_health()`` as the ``chain_deadline`` degraded reason.
@@ -434,13 +438,21 @@ class DaemonController:
             else None
         )
 
+        claude_md_injector = ClaudeMdInjector(
+            workspace_root=workspace_root,
+            handlers=all_handlers,
+            promoted_handlers=promoted_handlers,
+            on_request=claude_md_on_request,
+            branches=branches,
+        )
+        # Wired now, not after the injection: the SessionStart that started this
+        # daemon is answered before the deferred injection runs, and the notice
+        # is asked for afresh at each SessionStart rather than fixed here.
+        self._claude_md_injector = claude_md_injector
+        self._publish_claude_md_notices(all_handlers, claude_md_injector.current_notices)
+
         def inject_claude_md() -> None:
-            ClaudeMdInjector(
-                workspace_root=workspace_root,
-                handlers=all_handlers,
-                promoted_handlers=promoted_handlers,
-                write_in_linked_worktree=write_claude_md_in_linked_worktree,
-            ).inject()
+            claude_md_injector.inject()
 
         # Sync daemon-shipped agent assets with the gating config (Plan 00279):
         # enabled + missing/outdated deploys, disabled + present logs a removal
@@ -473,6 +485,30 @@ class DaemonController:
             self._validate_config(config_path, reusable_config)
             sync_agent_assets()
             sync_directory_role_rules()
+
+    @staticmethod
+    def _publish_claude_md_notices(handlers: list[Any], provider: Callable[[], list[str]]) -> None:
+        """Give the branch sweep the provider it asks at each SessionStart."""
+        from claude_code_hooks_daemon.handlers.session_start.branch_sweep import (
+            BranchSweepHandler,
+        )
+
+        recipients = [h for h in handlers if isinstance(h, BranchSweepHandler)]
+        for handler in recipients:
+            handler.claude_md_notices = provider
+        if not recipients:
+            logger.warning(
+                "CLAUDE.md block notices have no recipient: the branch_sweep session_start "
+                "handler is not registered (disabled, or switched off through its legacy "
+                "branch_count_advisor key). Enable handlers.session_start.branch_sweep for "
+                "an agent to be told when the block is stale or unwritten."
+            )
+
+    def claude_md_notices(self) -> list[str]:
+        """What the CLAUDE.md block currently needs an agent to know; empty before initialise."""
+        if self._claude_md_injector is None:
+            return []
+        return self._claude_md_injector.current_notices()
 
     def take_deferred_startup(self) -> list[tuple[str, Callable[[], object]]]:
         """Hand over, once, the start-up steps ``initialise`` held back.

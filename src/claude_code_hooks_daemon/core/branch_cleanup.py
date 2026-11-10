@@ -21,6 +21,7 @@ only a merged or patch-equivalent branch can ever be deleted here.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,7 +66,11 @@ from claude_code_hooks_daemon.utils.git_repo import (
     run_git,
 )
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
-from claude_code_hooks_daemon.utils.regenerable_paths import is_regenerable
+from claude_code_hooks_daemon.utils.regenerable_paths import (
+    is_regenerable,
+    lock_regenerated_dirs,
+    under_any,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +284,56 @@ def _empty_tree(path: Path) -> bool:
     return all(_empty_tree(child) for child in children)
 
 
+def _lock_regenerated(path: Path) -> tuple[str, ...]:
+    """Directories the worktree's committed manifest + lock pairs let a manager rebuild.
+
+    Judged from the tree at HEAD, so only a pair that is actually committed counts.
+    A git failure yields none: nothing is then called regenerable.
+    """
+    listing = run_git(path, "ls-tree", "-r", "--name-only", "-z", "HEAD")
+    if listing.returncode != 0:
+        return ()
+
+    def read_committed(name: str) -> str | None:
+        shown = run_git(path, "show", f"HEAD:{name}")
+        return shown.stdout if shown.returncode == 0 else None
+
+    rebuilt = lock_regenerated_dirs([p for p in listing.stdout.split("\0") if p], read_committed)
+    return tuple(d for d in rebuilt if not _holds_git_clone(path / d))
+
+
+def _holds_git_clone(directory: Path) -> bool:
+    """Whether ``<directory>/.git``, ``<dir>/*/.git`` or ``<dir>/*/*/.git`` exists.
+
+    A package manager can install a dependency as a real clone (``--prefer-source``),
+    and commits made inside it exist nowhere else, so such a directory is work.
+    Only those paths are statted, never every file, because this runs on the
+    destructive-git guard path over directories that can hold thousands of packages.
+    A directory that is not there (an uninstalled ``vendor/``) holds nothing.
+    """
+    if not directory.is_dir():
+        return False
+    if os.path.lexists(directory / ".git"):
+        return True
+    return any(
+        os.path.lexists(Path(grandchild) / ".git")
+        for child in _subdirectories(directory)
+        for grandchild in (child, *_subdirectories(Path(child)))
+    )
+
+
+def _subdirectories(directory: Path) -> list[str]:
+    """Paths of the real (non-symlink) subdirectories of ``directory``; none when unreadable."""
+    try:
+        with os.scandir(directory) as entries:
+            return [e.path for e in entries if e.is_dir(follow_symlinks=False)]
+    except OSError as exc:
+        log_and_continue(
+            logger, exc, reason="an unreadable directory is searched no further for a clone"
+        )
+        return []
+
+
 def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]:
     """Paths a removal of the worktree at ``path`` would lose.
 
@@ -309,7 +364,7 @@ def worktree_blocker_groups(
     if ignored.returncode != 0:
         return ((*dirty, f"<git ls-files failed: {ignored.stderr.strip()}>"), ())
     entries = [e for line in ignored.stdout.splitlines() if line for e in _expand(path, line)]
-    kept = [
+    undecided = [
         entry
         for entry in entries
         if not _is_symlink(path, entry)
@@ -317,6 +372,10 @@ def worktree_blocker_groups(
         and not _holds_nothing(path, entry)
         and not _is_generated_daemon_env(path, entry)
     ]
+    # Only a directory can be a package manager's output, so the committed tree
+    # is read for the lock pairs only when one is still undecided.
+    rebuilt = _lock_regenerated(path) if any(e.endswith("/") for e in undecided) else ()
+    kept = [entry for entry in undecided if not under_any(entry, rebuilt)]
     return tuple(dirty), tuple(_judge_seeded_copies(path, kept))
 
 

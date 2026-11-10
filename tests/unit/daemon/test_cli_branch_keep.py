@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -82,6 +83,49 @@ def test_unmerged_branch_exits_one_and_points_at_park(
 ) -> None:
     assert _run(project, "open", "--reason", "x") == 1
     assert "branch-park" in capsys.readouterr().err
+
+
+_LABELS = Path("untracked/branch-inventory/labels.json")
+
+
+def _stale_labels(project: Path, names: list[str]) -> None:
+    tip = _git(project, "rev-parse", "done")
+    labels = {
+        name: {"group": "merged", "stale": "true", "local_tip": tip, "remote_tip": None}
+        for name in names
+    }
+    (project / _LABELS).parent.mkdir(parents=True, exist_ok=True)
+    (project / _LABELS).write_text(json.dumps(labels), encoding="utf-8")
+
+
+def _stale_names(project: Path) -> set[str]:
+    labels = json.loads((project / _LABELS).read_text(encoding="utf-8"))
+    return {name for name, label in labels.items() if label.get("stale")}
+
+
+def test_keep_clears_the_stale_label_of_every_name_at_the_kept_tip(project: Path) -> None:
+    """Plan 00594: a keep is a note on the tip, so it keeps a same-tip sibling too;
+    the creation guard must stop calling that sibling stale."""
+    _git(project, "branch", "done-twin", "done")
+    _stale_labels(project, ["done", "done-twin"])
+
+    assert _run(project, "done", "--reason", "audit") == 0
+
+    assert _stale_names(project) == set()
+
+
+def test_a_same_reason_rekeep_still_clears_the_named_label(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The tip is kept, so the guard must agree even when the re-keep is refused."""
+    _git(project, "branch", "done-twin", "done")
+    assert _run(project, "done", "--reason", "w") == 0
+    _stale_labels(project, ["done-twin"])
+    capsys.readouterr()
+
+    assert _run(project, "done-twin", "--reason", "w") == 2
+
+    assert _stale_names(project) == set()
 
 
 def test_same_reason_exits_two(project: Path, capsys: pytest.CaptureFixture[str]) -> None:

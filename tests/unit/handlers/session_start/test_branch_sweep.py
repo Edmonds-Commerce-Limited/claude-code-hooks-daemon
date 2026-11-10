@@ -229,3 +229,38 @@ class TestDocs:
         tests = BranchSweepHandler().get_acceptance_tests()
         assert tests
         assert all(t.expected_decision == Decision.ALLOW for t in tests)
+
+
+class TestClaudeMdNotices:
+    """Plan 00594 round 2: the CLAUDE.md block notice is asked for at each SessionStart."""
+
+    def test_shown_on_the_very_first_session_start(self, repo: Path) -> None:
+        handler = BranchSweepHandler()
+        handler.claude_md_notices = lambda: ["CLAUDE.md hooks-daemon block is stale on main"]
+        text = "\n".join(_run(handler, repo, _new()))
+        assert "CLAUDE.md hooks-daemon block is stale on main" in text
+
+    def test_disappears_once_the_condition_is_fixed(self, repo: Path) -> None:
+        notices = ["block is stale"]
+        handler = BranchSweepHandler()
+        handler.claude_md_notices = lambda: list(notices)
+        assert "block is stale" in "\n".join(_run(handler, repo, _new()))
+        notices.clear()
+        assert "block is stale" not in "\n".join(_run(handler, repo, _new()))
+
+    def test_shown_even_when_the_branch_inventory_cannot_run(self, repo: Path) -> None:
+        handler = BranchSweepHandler()
+        handler.claude_md_notices = lambda: ["block is stale"]
+        with patch(_BUILD, side_effect=BranchInventoryError("no repository")):
+            assert "block is stale" in "\n".join(_run(handler, repo, _new()))
+
+    def test_a_failing_provider_does_not_break_the_summary(self, repo: Path) -> None:
+        def broken() -> list[str]:
+            raise OSError("unreadable")
+
+        handler = BranchSweepHandler()
+        handler.claude_md_notices = broken
+        assert _run(handler, repo, _new()) == []
+
+    def test_silent_without_a_provider(self, repo: Path) -> None:
+        assert _run(BranchSweepHandler(), repo, _new()) == []
