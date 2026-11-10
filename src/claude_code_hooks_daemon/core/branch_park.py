@@ -10,6 +10,7 @@ is reported with the command to retry.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,18 @@ from claude_code_hooks_daemon.utils.git_repo import run_git
 
 _HEADS = "refs/heads/"
 _REMOTES = "refs/remotes/"
+
+#: ``branch-park`` exit status for a park that stands locally but was not pushed.
+EXIT_PARKED_NOT_PUSHED = 3
+
+#: ``git config`` exit status for "no such key".
+_CONFIG_KEY_ABSENT = 1
+
+_SHA_KEY = "hooksDaemonParked"
+_REASON_KEY = "hooksDaemonParkedReason"
+_AT_KEY = "hooksDaemonParkedAt"
+_BY_KEY = "hooksDaemonParkedBy"
+_RECORD_KEYS = (_SHA_KEY, _REASON_KEY, _AT_KEY, _BY_KEY)
 
 
 class BranchParkError(Exception):
@@ -36,6 +49,55 @@ class ParkResult:
     pushed: bool
     push_error: str | None
     retry_command: str | None
+
+
+@dataclass(frozen=True)
+class ParkRecord:
+    """The local park record of a branch: the park commit, why, when and by whom."""
+
+    sha: str
+    reason: str
+    parked_at: int
+    parked_by: str
+
+
+def _record_key(name: str, key: str) -> str:
+    return f"branch.{name}.{key}"
+
+
+def write_park_record(repo: Path, name: str, record: ParkRecord) -> None:
+    """Write the park record into git config, before any push is attempted."""
+    values = {
+        _SHA_KEY: record.sha,
+        _REASON_KEY: record.reason,
+        _AT_KEY: str(record.parked_at),
+        _BY_KEY: record.parked_by,
+    }
+    for key, value in values.items():
+        _git_out(repo, "config", _record_key(name, key), value)
+
+
+def read_park_record(repo: Path, name: str) -> ParkRecord | None:
+    """The park record of ``name``; None when it has none (or an incomplete one)."""
+    values: dict[str, str] = {}
+    for key in _RECORD_KEYS:
+        result = run_git(repo, "config", "--get", _record_key(name, key))
+        if result.returncode == _CONFIG_KEY_ABSENT:
+            return None
+        if result.returncode != 0:
+            raise BranchParkError(f"git config {_record_key(name, key)} failed: {result.stderr}")
+        values[key] = result.stdout.strip()
+    return ParkRecord(values[_SHA_KEY], values[_REASON_KEY], int(values[_AT_KEY]), values[_BY_KEY])
+
+
+def clear_park_record(repo: Path, name: str) -> ParkRecord | None:
+    """Remove the park record of ``name`` and return it, or None when it had none."""
+    record = read_park_record(repo, name)
+    if record is None:
+        return None
+    for key in _RECORD_KEYS:
+        run_git(repo, "config", "--unset-all", _record_key(name, key))
+    return record
 
 
 def _git_out(repo: Path, *args: str) -> str:
@@ -162,6 +224,11 @@ def park_branch(
         raise BranchParkError(
             f"{name} moved while parking; nothing changed: {moved.stderr.strip()}"
         )
+    if clear:
+        clear_park_record(repo, name)
+    else:
+        user = run_git(repo, "config", "user.name").stdout.strip() or "unknown"
+        write_park_record(repo, name, ParkRecord(new, stripped, int(time.time()), user))
     retry = f"git push {remote} {name}"
     pushed = run_git(repo, "push", remote, name, timeout=Timeout.GIT_FETCH_SESSION)
     if pushed.returncode != 0:

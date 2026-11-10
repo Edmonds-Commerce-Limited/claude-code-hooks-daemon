@@ -6,7 +6,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from tests.support.git_fixtures import git_setup_timeout
 
+from claude_code_hooks_daemon.core.branch_park import EXIT_PARKED_NOT_PUSHED
 from claude_code_hooks_daemon.daemon.cli import build_parser, cmd_branch_park
 
 
@@ -36,7 +38,11 @@ def project(tmp_path: Path) -> Path:
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.name", "t")
     _git(tmp_path, "config", "user.email", "t@example.com")
-    _git(tmp_path, "remote", "add", "origin", str(tmp_path / "none.git"))
+    bare = tmp_path / "none.git"
+    subprocess.run(
+        ["git", "init", "-q", "--bare", str(bare)], check=True, timeout=git_setup_timeout()
+    )
+    _git(tmp_path, "remote", "add", "origin", str(bare))
     (tmp_path / "f").write_text("f")
     _git(tmp_path, "add", "f")
     _git(tmp_path, "commit", "-q", "-m", "base")
@@ -53,7 +59,8 @@ def _run(project: Path, *argv: str) -> int:
 def test_park_reports_a_failed_push_with_retry(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert _run(project, "work", "--reason", "waiting") == 0
+    _git(project, "remote", "set-url", "origin", str(project / "missing.git"))
+    assert _run(project, "work", "--reason", "waiting") == EXIT_PARKED_NOT_PUSHED
     out = capsys.readouterr().out
     assert "Parked work" in out and "Retry: git push origin work" in out
     assert "Parked-Reason: waiting" in _git(project, "log", "-1", "--format=%B", "work")
@@ -83,3 +90,26 @@ def test_clear_unparks(project: Path, capsys: pytest.CaptureFixture[str]) -> Non
     assert _run(project, "work", "--clear") == 0
     assert "Unparked:" in _git(project, "log", "-1", "--format=%B", "work")
     assert "Unparked work" in capsys.readouterr().out
+
+
+def test_a_refused_push_exits_distinctly_and_names_git_reason_and_retry(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    hook = project / ".git" / "hooks" / "pre-push"
+    hook.write_text("#!/bin/sh\necho 'gate: full-QA verdict required' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    assert _run(project, "work", "--reason", "waiting") == EXIT_PARKED_NOT_PUSHED
+    out = capsys.readouterr().out
+    assert "parked locally, not pushed" in out
+    assert "gate: full-QA verdict required" in out
+    assert "git push origin work" in out
+    assert _git(project, "config", "branch.work.hooksDaemonParkedReason") == "waiting"
+
+
+def test_clear_says_the_park_record_is_cleared(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _run(project, "work", "--reason", "waiting")
+    capsys.readouterr()
+    assert _run(project, "work", "--clear") == 0
+    assert "Park record cleared: work (waiting)" in capsys.readouterr().out
