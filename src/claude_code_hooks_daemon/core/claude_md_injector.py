@@ -11,9 +11,11 @@ Usage:
 """
 
 import hashlib
+import inspect
 import logging
 import re
 import subprocess  # nosec B404 - imported for the CompletedProcess type; git spawns live in utils.git_repo
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -28,8 +30,14 @@ from claude_code_hooks_daemon.utils.conflict_markers import (
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree, run_git
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_document
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 logger = logging.getLogger(__name__)
+
+# Library handlers ship inside this package, so their sources are never the
+# project's to commit; only handlers defined elsewhere (plugins, project
+# handlers) can be documented ahead of the code that declares them.
+_DAEMON_PACKAGE_DIR = Path(__file__).resolve().parent.parent
 
 # Section delimiters — must match exactly when reading/replacing
 _OPEN_TAG = "<hooksdaemon>"
@@ -427,7 +435,72 @@ class ClaudeMdInjector:
             len(tiers.fallback),
         )
 
-        ClaudeMdInjector._auto_commit_if_dirty(claude_md_path)
+        ClaudeMdInjector._auto_commit_if_dirty(
+            claude_md_path, self._external_handler_sources(self._handlers)
+        )
+
+    @staticmethod
+    def _external_handler_sources(handlers: list[Any]) -> list[Path]:
+        """Source files of plugin/project handlers (those defined outside the daemon package).
+
+        Derived from the loaded handler classes, so nothing is loaded twice.
+        A class with no discoverable source file (built dynamically) is skipped.
+        """
+        sources: set[Path] = set()
+        for handler in handlers:
+            source = ClaudeMdInjector._class_source_file(type(handler))
+            if source is None:
+                continue
+            path = Path(source).resolve()
+            if not path_is_relative_to(path, _DAEMON_PACKAGE_DIR):
+                sources.add(path)
+        return sorted(sources)
+
+    @staticmethod
+    def _class_source_file(cls: type) -> str | None:
+        """File defining ``cls``, or ``None`` when it has none (dynamic class).
+
+        ``inspect`` resolves a class through ``sys.modules``, which a plugin
+        loaded straight from a file path may not be in; the code object of any
+        method the class itself defines names its file regardless.
+        """
+        try:
+            return inspect.getsourcefile(cls)
+        except (TypeError, OSError) as exc:
+            logger.debug("ClaudeMdInjector: inspect found no source for %s: %s", cls, exc)
+        for member in vars(cls).values():
+            code = getattr(member, "__code__", None)
+            if code is not None:
+                return str(code.co_filename)
+        return None
+
+    @staticmethod
+    def _uncommitted_handler_source(cwd: Path, sources: Sequence[Path]) -> str | None:
+        """Describe the first handler source git reports as untracked/modified, else ``None``.
+
+        Sources outside the repository are skipped (git cannot judge them).
+        A git failure returns a reason string, so the caller holds the commit:
+        an uncommitted CLAUDE.md is visible, a wrong commit is history.
+        """
+        if not sources:
+            return None
+        top = run_git(cwd, "rev-parse", "--show-toplevel")
+        if top.returncode != 0:
+            return "git could not locate the repository root"
+        root = Path(top.stdout.strip()).resolve()
+        inside: list[str] = []
+        for source in sources:
+            if path_is_relative_to(source, root):
+                inside.append(str(source))
+            else:
+                logger.debug("ClaudeMdInjector: handler source %s is outside the repo", source)
+        if not inside:
+            return None
+        status = run_git(cwd, "status", "--porcelain", "--", *inside)
+        if status.returncode != 0:
+            return "git status of the handler sources failed"
+        lines = [line for line in status.stdout.splitlines() if line.strip()]
+        return lines[0][3:] if lines else None
 
     def _write_reconciling_concurrent_edits(self, claude_md_path: Path, generated: str) -> bool:
         """Replace the generated block without discarding anything else.
@@ -579,8 +652,12 @@ class ClaudeMdInjector:
             return content
 
     @staticmethod
-    def _auto_commit_if_dirty(claude_md_path: Path) -> None:
+    def _auto_commit_if_dirty(claude_md_path: Path, handler_sources: Sequence[Path] = ()) -> None:
         """Auto-commit CLAUDE.md if it has uncommitted changes.
+
+        Held back while any of ``handler_sources`` (plugin/project handler
+        files the block documents) is untracked or modified: the commit would
+        record a rule no committed code declares (GitHub #172).
 
         Prevents LLMs from seeing a dirty CLAUDE.md after daemon restart
         and attempting to revert or stash it. Only commits CLAUDE.md —
@@ -605,6 +682,16 @@ class ClaudeMdInjector:
         status_line = status.stdout.strip()
         if not status_line:
             return  # CLAUDE.md is clean — no commit needed
+
+        held_by = ClaudeMdInjector._uncommitted_handler_source(cwd, handler_sources)
+        if held_by is not None:
+            logger.info(
+                "ClaudeMdInjector: not auto-committing %s: handler source %s is not committed "
+                "yet; commit it and the next restart will commit the CLAUDE.md block",
+                claude_md_path,
+                held_by,
+            )
+            return
 
         # Read once: the marker check and the commit message both judge it.
         # Plan 00466 N211: this commit never passes the PreToolUse

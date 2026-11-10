@@ -2034,3 +2034,111 @@ class TestGuidanceOrderIsIndependentOfDiscoveryOrder:
         )
 
         assert forward == reverse
+
+
+_HANDLER_MODULE_SOURCE = """
+class SourceBackedHandler:
+    name = "source-backed"
+
+    def get_claude_md(self):
+        return "## Source backed\\n\\nContent."
+
+    def get_rules(self):
+        return []
+"""
+
+
+def _source_backed_handler(source_path: Path) -> Any:
+    """A handler whose class is defined in a real file at ``source_path``."""
+    import importlib.util
+
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_text(_HANDLER_MODULE_SOURCE)
+    spec = importlib.util.spec_from_file_location(f"src_backed_{source_path.stem}", source_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.SourceBackedHandler()
+
+
+def _claude_md_status(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "status", "--porcelain", "CLAUDE.md"], cwd=repo, capture_output=True, text=True
+    ).stdout.strip()
+
+
+class TestAutoCommitWaitsForHandlerSources:
+    """GitHub #172: a CLAUDE.md block must not be committed ahead of the handler it documents."""
+
+    def _inject(self, repo: Path, handler: Any) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        ClaudeMdInjector(workspace_root=repo, handlers=[handler]).inject()
+
+    def test_untracked_handler_source_holds_the_commit(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _init_git_repo(tmp_path)
+        source = tmp_path / ".claude" / "plugins" / "my_plugin.py"
+        handler = _source_backed_handler(source)
+
+        with caplog.at_level(logging.INFO):
+            self._inject(tmp_path, handler)
+
+        assert _claude_md_status(tmp_path) != "", "CLAUDE.md must stay dirty"
+        held = [r.getMessage() for r in caplog.records if "my_plugin.py" in r.getMessage()]
+        assert len(held) == 1
+
+    def test_modified_tracked_handler_source_holds_the_commit(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _init_git_repo(tmp_path)
+        source = tmp_path / ".claude" / "project-handlers" / "my_proj.py"
+        handler = _source_backed_handler(source)
+        subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "handler"], cwd=tmp_path, capture_output=True, check=True
+        )
+        source.write_text(source.read_text() + "# edited\n")
+
+        with caplog.at_level(logging.INFO):
+            self._inject(tmp_path, handler)
+
+        assert _claude_md_status(tmp_path) != ""
+        assert any("my_proj.py" in r.getMessage() for r in caplog.records)
+
+    def test_clean_handler_source_commits_as_before(self, tmp_path: Path) -> None:
+        _init_git_repo(tmp_path)
+        source = tmp_path / ".claude" / "project-handlers" / "my_clean.py"
+        handler = _source_backed_handler(source)
+        subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "handler"], cwd=tmp_path, capture_output=True, check=True
+        )
+
+        self._inject(tmp_path, handler)
+
+        assert _claude_md_status(tmp_path) == ""
+
+    def test_handler_source_outside_the_repo_does_not_block(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        handler = _source_backed_handler(tmp_path / "elsewhere" / "outside.py")
+
+        with caplog.at_level(logging.DEBUG):
+            self._inject(repo, handler)
+
+        assert _claude_md_status(repo) == ""
+        assert any(
+            r.levelno == logging.DEBUG and "outside.py" in r.getMessage() for r in caplog.records
+        )
+
+    def test_library_handlers_never_hold_the_commit(self, tmp_path: Path) -> None:
+        """A handler shipped in the daemon package is not a project source."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+        from claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker import SedBlockerHandler
+
+        assert ClaudeMdInjector._external_handler_sources([SedBlockerHandler()]) == []
