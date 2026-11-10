@@ -106,7 +106,10 @@ def _blocked_repo(
     if state == RuleID.BRANCH_WIP_CAP:
         _open(repo, "one")
         _open(repo, "two")
-        return _config(wip={"cap": 2, "mode": "block", "count_remote": True}), labels
+        return (
+            _config(wip={"cap": 2, "mode": "block", "count_remote": True, "creation_grace": 0}),
+            labels,
+        )
     if state == RuleID.BRANCH_DORMANT:
         _open(repo, "stale")
         labels["stale"] = {"group": "dormant", "action": None, "stage": "block"}

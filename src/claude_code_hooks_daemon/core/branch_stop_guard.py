@@ -29,8 +29,12 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     BranchInventory,
     BranchRecord,
     BranchState,
+    DormancyStage,
+    Pool,
+    pool_of,
 )
 from claude_code_hooks_daemon.core.branch_records import touched_by_session
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
@@ -51,6 +55,8 @@ class StopCheck(StrEnum):
     DIRTY = "dirty worktree"
     UNPUSHED = "commits no remote holds"
     MERGED = "merged but not deleted"
+    DORMANT = "dormant past the block stage"
+    OVER_CAP = "open pool over cap"
 
 
 @dataclass(frozen=True)
@@ -168,6 +174,33 @@ def _unpushed(
     return None if handed is None else not handed
 
 
+def _park_commands(record: BranchRecord) -> tuple[str, ...]:
+    """Finish it, or park it with a reason; never a rename or someone else's branch."""
+    return (
+        f"merge {record.name} when its work is done",
+        f"{daemon_cli_command_for_docs('branch-park')} {record.name} --reason ...",
+    )
+
+
+def _pressure_findings(
+    record: BranchRecord, inventory: BranchInventory, config: BranchesConfig
+) -> list[StopFinding]:
+    """Findings on an OWN open branch: dormant past the block stage, or in an over-cap pool."""
+    if pool_of(record.state) != Pool.OPEN:
+        return []
+    tip = record.local_tip or ""
+    findings: list[StopFinding] = []
+    if config.dormancy.mode != "off" and record.dormancy_stage == DormancyStage.BLOCK:
+        findings.append(StopFinding(record.name, StopCheck.DORMANT, tip, _park_commands(record)))
+    if config.wip.mode != "off":
+        open_count = sum(1 for r in inventory.records.values() if pool_of(r.state) == Pool.OPEN)
+        if open_count > config.effective_wip_cap():
+            findings.append(
+                StopFinding(record.name, StopCheck.OVER_CAP, tip, _park_commands(record))
+            )
+    return findings
+
+
 def judge_stop(
     repo: Path,
     inventory: BranchInventory,
@@ -261,6 +294,8 @@ def _judge_branch(
     findings: list[StopFinding] = []
     finished = True
     merged = record.state in _DONE_STATES
+    if full and not subagent and not handoff:
+        findings.extend(_pressure_findings(record, inventory, config))
     if full:
         dirty = _is_dirty(record, budget)
         finished = finished and dirty is not None

@@ -24,7 +24,13 @@ from typing import Any
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
-from claude_code_hooks_daemon.core.branch_creation import LABELS_RELATIVE_PATH, write_labels
+from claude_code_hooks_daemon.core.branch_creation import (
+    LABELS_RELATIVE_PATH,
+    creation_report,
+    read_labels,
+    render_creation_report,
+    write_labels,
+)
 from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
 from claude_code_hooks_daemon.core.branch_sweep import (
     deprecation_line,
@@ -144,9 +150,21 @@ class BranchSweepHandler(SessionStartHandlerBase):
             deprecation=deprecation_line(self._branches, legacy),
             behind_threshold=effective_behind_threshold(self._branches, legacy),
         )
-        if not lines:
+        out = [f"{_ICON}  GIT BRANCHES:", *lines] if lines else []
+        return [*out, *self._pool_lines(root)]
+
+    def _pool_lines(self, root: Path) -> list[str]:
+        """Every full pool with its fix: the preflight report (``branch-preflight``)."""
+        report = creation_report(
+            root, self._branches, None, labels=read_labels(root / LABELS_RELATIVE_PATH)
+        )
+        if not report.blockers:
             return []
-        return [f"{_ICON}  GIT BRANCHES:", *lines]
+        preflight = daemon_cli_command_for_docs("branch-preflight")
+        return [
+            f"{_ICON}  BRANCH POOLS (same report as `{preflight}`):",
+            *render_creation_report(report),
+        ]
 
     def get_claude_md(self) -> str | None:
         """The branch summary and the cap are a standing policy."""
