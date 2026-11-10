@@ -404,8 +404,6 @@ _UNFOLLOWABLE_CD: Final[re.Pattern[str]] = re.compile(r"[$`*?~]|^-$")
 #: An awk operand holding one of these is built by the shell (`$PWD/x`, `~+/x`),
 #: so it cannot be resolved as a path and is judged by its text.
 _UNRESOLVED_OPERAND_CHARS: Final[str] = "$`~"
-# Where the raw words after a truncated awk command stop belonging to it.
-_STATEMENT_END_RE: Final[re.Pattern[str]] = re.compile(r"[;&|\n]")
 #: A file name standing for "any file written in this directory": a glob whose
 #: last component is wildcard-only matches it exactly when it matches every name.
 _DESTINATION_PROBE: Final[str] = "awk-computed-destination"
@@ -1048,39 +1046,9 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         commands = simple_commands(text, known_verbs=_KNOWN_VERBS)
         for command in commands:
             glob = self._command_verdict(command, commands, where, depth, judged)
-            if glob is None:
-                glob = self._operator_expansion_violation(command, text)
             if glob is not None:
                 return glob
         return self._read_loop_violation(commands, where)
-
-    def _operator_expansion_violation(self, command: SimpleCommand, text: str) -> str | None:
-        """The glob an operand the shared scanner could not read names (Task 2.2f).
-
-        The scanner ends the word stream at an operator expansion
-        (`${PWD:-.}/protected/x`), so the command stops before that operand and
-        its text never reaches the awk check. For an awk program that writes to
-        a destination it computes, the raw words of the same statement after
-        the command's own text are judged as an unresolved operand: the
-        literal part naming a listed path counts.
-        """
-        if command.verb not in _AWK_VERBS:
-            return None
-        if not any(
-            _awk_program_writes(operand) and _awk_destination_computed(operand)
-            for operand in command.file_operands
-        ):
-            return None
-        start = text.find(command.text)
-        if start < 0:
-            return None
-        rest = _STATEMENT_END_RE.split(text[start + len(command.text) :], maxsplit=1)[0]
-        for word in rest.split():
-            if "${" in word:
-                glob = self._unresolved_operand_naming(word)
-                if glob is not None:
-                    return glob
-        return None
 
     def _command_verdict(
         self,

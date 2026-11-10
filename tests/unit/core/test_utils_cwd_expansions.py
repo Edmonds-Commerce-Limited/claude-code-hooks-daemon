@@ -59,6 +59,22 @@ class TestSubstituteCwdExpansions:
         for token in ("$PWD/x", "${PWD}/x", "$(pwd)/x", "$( pwd )/x"):
             assert substitute_cwd_expansions(token, "echo", "/a/b") == "/a/b/x"
 
+    @pytest.mark.parametrize(
+        "token",
+        ["${PWD:-.}/x", "${PWD-.}/x", "${PWD:=.}/x", "${PWD=.}/x", "${PWD:?no}/x", "${PWD?no}/x"],
+    )
+    def test_a_default_operator_on_pwd_reads_as_the_cwd(self, token: str) -> None:
+        """PWD is set, so each of these expands to `$PWD` and never to its word."""
+        assert substitute_cwd_expansions(token, "echo", "/a/b") == "/a/b/x"
+
+    @pytest.mark.parametrize(
+        "token",
+        ["${PWD:+.}/x", "${PWD#/a}/x", "${PWD%/b}/x", "${PWD:-${x}}/x", "${PWDX:-.}/x"],
+    )
+    def test_any_other_operator_on_pwd_stays_unresolved(self, token: str) -> None:
+        """An alternative, a pattern trim or a nested brace is not `$PWD`."""
+        assert substitute_cwd_expansions(token, "echo", "/a/b") == token
+
     def test_a_longer_variable_name_is_left_alone(self) -> None:
         assert substitute_cwd_expansions("$PWDX/x", "echo", "/a/b") == "$PWDX/x"
 

@@ -934,20 +934,23 @@ _EXPANDING_CHARS = "$`*?[{}"
 _WORD_BREAK_CHARS = " \t\n"
 
 
-#: A braced parameter with no operator (`${PWD}`): its extent is that of `$PWD`,
-#: so unlike `${x:-a b}` it cannot hide whitespace and the word stays exact.
-_SIMPLE_BRACED_PARAMETER = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
+#: How deep `${...}` may nest inside another before the scanner stops guessing.
+#: Real commands nest one or two levels; the cap bounds the recursion.
+_MAX_BRACED_EXPANSION_DEPTH: Final[int] = 32
 
 
 def iter_shell_words(text: str) -> Iterator[str | None]:
     """Each whitespace-delimited shell word of ``text``, quotes kept.
 
     Quote-aware, so ``sudo -p 'x cat' bash`` is four words, not five
-    (Plan 00466 N101 round 3, D-SEC minor 3). A word's extent is certain
-    only while no substitution can hide whitespace inside it, so an
-    unterminated quote, ``$(``, ``${`` or a backtick yields ``None`` and
-    ends the stream: every word before it is exact, and nothing after it is
-    guessed at.
+    (Plan 00466 N101 round 3, D-SEC minor 3). A ``${...}`` parameter
+    expansion, operator forms included (``${x:-a b}``, ``${HOME#x}``), is
+    read brace-balanced as part of the current word: an unresolved expansion
+    exactly like ``$NAME`` (Plan 00478 Task 2.2f). A word's extent is
+    otherwise certain only while no command substitution can hide
+    whitespace inside it, so an unterminated quote or brace, ``$(`` or a
+    backtick yields ``None`` and ends the stream: every word before it is
+    exact, and nothing after it is guessed at.
     """
     index = 0
     length = len(text)
@@ -990,16 +993,16 @@ def shell_word_spans(text: str) -> list[tuple[int, int]]:
         spans.append((start, index))
 
 
-def _quoted_span_end(text: str, index: int) -> int | None:
-    """Index past the escape, quoted span or plain character at ``index``;
-    ``None`` when its extent cannot be known without running the shell."""
+def _quoted_span_end(text: str, index: int, depth: int = 0) -> int | None:
+    """Index past the escape, quoted span, ``${...}`` or plain character at
+    ``index``; ``None`` when its extent cannot be known without running the
+    shell. ``depth`` counts the ``${`` this span sits inside."""
     char = text[index]
     if char == "\\":
         return min(index + 2, len(text))
-    simple = _SIMPLE_BRACED_PARAMETER.match(text, index)
-    if simple is not None:
-        return simple.end()
-    if char == "`" or text.startswith(("$(", "${"), index):
+    if text.startswith("${", index):
+        return _braced_expansion_end(text, index, depth, in_double=False)
+    if char == "`" or text.startswith("$(", index):
         return None
     if char == "'":
         end = text.find("'", index + 1)
@@ -1021,14 +1024,42 @@ def _quoted_span_end(text: str, index: int) -> int | None:
                 cursor += 2
             elif text[cursor] == '"':
                 return cursor + 1
-            elif (simple := _SIMPLE_BRACED_PARAMETER.match(text, cursor)) is not None:
-                cursor = simple.end()
-            elif text[cursor] == "`" or text.startswith(("$(", "${"), cursor):
+            elif text.startswith("${", cursor):
+                braced_end = _braced_expansion_end(text, cursor, depth, in_double=True)
+                if braced_end is None:
+                    return None
+                cursor = braced_end
+            elif text[cursor] == "`" or text.startswith("$(", cursor):
                 return None
             else:
                 cursor += 1
         return None
     return index + 1
+
+
+def _braced_expansion_end(text: str, index: int, depth: int, *, in_double: bool) -> int | None:
+    """Index past the ``}`` closing the ``${`` at ``index``; ``None`` when it
+    never closes, nests past the cap, or holds a command substitution.
+
+    Quotes, escapes and nested ``${...}`` inside the braces are skipped as
+    spans, so a ``}`` they hold does not close it. Inside double quotes a
+    single quote is a literal character, as bash reads it there.
+    """
+    if depth >= _MAX_BRACED_EXPANSION_DEPTH:
+        return None
+    cursor = index + 2
+    while cursor < len(text):
+        char = text[cursor]
+        if char == "}":
+            return cursor + 1
+        if in_double and char == "'":
+            cursor += 1
+            continue
+        end = _quoted_span_end(text, cursor, depth + 1)
+        if end is None:
+            return None
+        cursor = end
+    return None
 
 
 def resolve_shell_word(word: str) -> str | None:

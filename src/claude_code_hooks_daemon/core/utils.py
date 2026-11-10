@@ -456,9 +456,12 @@ def scan_bash_write_targets(
 
 
 #: The working-directory expansions read as the hook cwd, spelled exactly:
-#: ``$PWD`` and ``${PWD}`` (not ``$PWDX``) and ``$(pwd)``.
+#: ``$PWD`` and ``${PWD}`` (not ``$PWDX``), ``$(pwd)``, and ``${PWD}`` with a
+#: default operator (``:-``, ``-``, ``:=``, ``=``, ``:?``, ``?``) whose word
+#: holds no brace. PWD is set and non-empty, so those expand to ``$PWD`` and
+#: bash never evaluates the word.
 _PWD_EXPANSION_RE: Final[re.Pattern[str]] = re.compile(
-    r"\$\{PWD\}|\$PWD(?![A-Za-z0-9_])|\$\(\s*pwd\s*\)"
+    r"\$\{PWD(?::?[-=?][^{}]*)?\}|\$PWD(?![A-Za-z0-9_])|\$\(\s*pwd\s*\)"
 )
 
 #: The repository root, spelled exactly as ``git rev-parse --show-toplevel``.
