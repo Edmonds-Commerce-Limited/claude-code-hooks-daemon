@@ -198,6 +198,22 @@ names, people or hashes appear here.
   before the stale mark was cleared. In the lifecycle model, a keep, a park
   and a proof are all facts about a COMMIT. Every per-name cache of them
   must be keyed or invalidated by tip, never by the name typed.
+- [ ] ⬜ **Task 4.6**: (second client seat) A stack of dependent pull-request
+  branches counts once per link against the open cap, so a five-deep stack
+  alone uses half of a cap of 10. Decide (design review): count a stack as
+  one stream, cap stack depth, or keep counting each link and document the
+  practice of landing the bottom first.
+- [ ] ⬜ **Task 4.7**: (second client seat) `branch-sweep` prints a
+  `git push --delete` for a patch-equivalent remote branch that the
+  remote-delete guard then refuses. Every command the sweep prints must pass
+  the guard that judges it; Task 3.2's shared proof closes most of this, and
+  a test pins that the two agree.
+- [ ] ⬜ **Task 4.8**: (second client seat) Write the branch practice down
+  for clients: recovery copies go to a bundle or `refs/archive/<name>`
+  (pools count only branches), never to a branch; worktrees are created
+  from the main checkout, never nested; agents' worktrees are reaped after
+  each agent. Prefer a daemon advisory where the practice can be detected
+  (a new `rescue/*`-shaped branch, a nested worktree).
 
 ### Phase 5: Branch tip channel
 
