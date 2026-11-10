@@ -24,12 +24,14 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.branch_cleanup import (
     cleanup_after_merge,
     merge_target_qualifies,
     render,
 )
+from claude_code_hooks_daemon.core.branch_creation import creation_report
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
@@ -169,10 +171,20 @@ class CleanupAfterMergeHandler(PostToolUseHandlerBase):
             return BlockingResult(
                 decision=Decision.ALLOW, context=[_HEADER, f"Nothing deleted: {exc}"]
             )
-        lines = render(report)
+        lines = [*render(report), *self._pool_clear_lines(repo.root)]
         if not lines:
             return allow
         return BlockingResult(decision=Decision.ALLOW, context=[_HEADER, *lines])
+
+    def _pool_clear_lines(self, root: Path) -> list[str]:
+        """The exact command that clears the merged pool, when the merge left it full."""
+        for section in creation_report(root, self._branches, None).blockers:
+            if section.rule_id == RuleID.BRANCH_MERGED_POOL and section.fixes:
+                return [
+                    "The merged-branch pool is full; clear it with one command "
+                    f"(behind a recovery bundle): `{section.fixes[0]}`"
+                ]
+        return []
 
     def get_claude_md(self) -> str | None:
         """The post-merge cleanup is a standing behaviour worth knowing before a merge."""

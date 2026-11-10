@@ -70,7 +70,9 @@ class TestBranchCap:
         from claude_code_hooks_daemon.config.models import BranchesConfig, BranchWipConfig
 
         handler = WorktreeCreateHandler()
-        handler._branches = BranchesConfig(wip=BranchWipConfig(cap=cap, mode="block"))
+        handler._branches = BranchesConfig(
+            wip=BranchWipConfig(cap=cap, mode="block", creation_grace=0)
+        )
         return handler
 
     def _open(self, repo: Path, *names: str) -> None:

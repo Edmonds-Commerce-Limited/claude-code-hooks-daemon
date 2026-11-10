@@ -66,7 +66,7 @@ def test_a_clear_repository_exits_zero(tmp_path: Path, capsys: pytest.CaptureFix
 def test_a_full_pool_exits_with_the_named_constant_and_prints_the_fix(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    project = _project(tmp_path, "  wip:\n    cap: 1\n    mode: block\n")
+    project = _project(tmp_path, "  wip:\n    cap: 1\n    mode: block\n    creation_grace: 0\n")
     assert _run(project, "fresh") == EXIT_CREATION_REFUSED
     out = capsys.readouterr().out
     assert RuleID.BRANCH_WIP_CAP in out
@@ -76,7 +76,7 @@ def test_a_full_pool_exits_with_the_named_constant_and_prints_the_fix(
 def test_json_lists_each_blocker_with_its_fixes(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    project = _project(tmp_path, "  wip:\n    cap: 1\n    mode: block\n")
+    project = _project(tmp_path, "  wip:\n    cap: 1\n    mode: block\n    creation_grace: 0\n")
     assert _run(project, "--json") == EXIT_CREATION_REFUSED
     document = json.loads(capsys.readouterr().out)
     assert document["may_create"] is False

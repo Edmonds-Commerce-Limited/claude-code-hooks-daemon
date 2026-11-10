@@ -264,3 +264,44 @@ class TestClaudeMdNotices:
 
     def test_silent_without_a_provider(self, repo: Path) -> None:
         assert _run(BranchSweepHandler(), repo, _new()) == []
+
+
+class TestPoolPressureReport:
+    """Plan 00594 Task 4.2: session start lists every blocker plus the preflight report."""
+
+    def _two_open(self, repo: Path) -> None:
+        for name in ("a", "b"):
+            _git(repo, "checkout", "-q", "-b", name)
+            _commit(repo, name)
+            _git(repo, "checkout", "-q", "main")
+
+    def _handler(self, **pools: Any) -> BranchSweepHandler:
+        handler = BranchSweepHandler()
+        handler._branches = BranchesConfig.model_validate({"default": "main", **pools})
+        return handler
+
+    def test_lists_the_pool_blocker_with_its_fix(self, repo: Path) -> None:
+        self._two_open(repo)
+        text = "\n".join(_run(self._handler(wip={"cap": 1}), repo, _new()))
+        assert "BRANCH POOLS" in text
+        assert "Open work branches: 2 (cap 1)" in text
+        assert "branch-park" in text
+
+    def test_lists_every_blocker_not_only_the_first(self, repo: Path) -> None:
+        self._two_open(repo)
+        _git(repo, "branch", "done", "main")
+        handler = self._handler(wip={"cap": 1}, merged={"cap": 1})
+        text = "\n".join(_run(handler, repo, _new()))
+        assert "Open work branches" in text
+        assert "Merged branches" in text
+
+    def test_silent_when_no_pool_is_full(self, repo: Path) -> None:
+        self._two_open(repo)
+        text = "\n".join(_run(BranchSweepHandler(), repo, _new()))
+        assert "BRANCH POOLS" not in text
+
+    def test_names_no_rename_or_foreign_delete(self, repo: Path) -> None:
+        self._two_open(repo)
+        text = "\n".join(_run(self._handler(wip={"cap": 1}), repo, _new())).lower()
+        assert "rename" not in text
+        assert "branch -m" not in text

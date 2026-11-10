@@ -130,7 +130,7 @@ def _config(cap: int = 10, **extra: object) -> BranchesConfig:
     return BranchesConfig.model_validate(
         {
             "default": "main",
-            "wip": {"cap": cap, "mode": "block", "count_remote": True},
+            "wip": {"cap": cap, "mode": "block", "count_remote": True, "creation_grace": 0},
             "duplicates": {"mode": "off"},
             **extra,
         }

@@ -375,16 +375,17 @@ branches:
 
 ### Other branch settings
 
-| Key                            | Values (default first)        | Effect                                                                                                                                                     |
-| ------------------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `wip.cap` / `wip.mode`         | `10` / `block`, `warn`, `off` | Open work branches allowed before a creation is denied (`R-BRANCH-WIP-CAP`); `count_remote` also counts remote ones                                        |
-| `duplicates.mode`              | `warn`, `off`                 | Warn when a new branch name is close to an existing one; never denies                                                                                      |
-| `stop_guard.mode`              | `block`, `warn`, `off`        | Stop and SubagentStop refuse while a touched branch is dirty, holds commits no remote has, or is merged but undeleted                                      |
-| `stop_guard.unpushed_subagent` | `block`, `advise`, `off`      | How the unpushed-commits finding is treated at a SubagentStop (this repository sets `advise`)                                                              |
-| `force_removal.mode`           | `block`, `off`                | `git worktree remove --force` and `git branch -D` are denied when they would lose work                                                                     |
-| `evacuation.mode`              | `block`, `warn`, `off`        | Copying work to an untracked file and destroying its worktree or branch is denied, in one command or one turn                                              |
-| `cleanup_after_merge.mode`     | `advise`, `act`, `off`        | After a merge lands: advise the delete command, or delete the branch when it is proven merged; `regenerable` lists the ignored globs that may be discarded |
-| `sweep.budget_ms`              | `3000` / integer milliseconds | Wall-clock budget for the per-branch inventory steps; `behind_threshold` (default 50) is the commits-behind-default count that earns a warning             |
+| Key                            | Values (default first)        | Effect                                                                                                                                                                         |
+| ------------------------------ | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `wip.cap` / `wip.mode`         | `10` / `block`, `warn`, `off` | Open work branches allowed before a creation is denied (`R-BRANCH-WIP-CAP`); `count_remote` also counts remote ones                                                            |
+| `wip.creation_grace`           | `2` (>= 0)                    | Creation is a backstop: denied only at `cap + creation_grace` open branches, and warns between `cap` and that. `0` denies at the cap. Pressure lands at session start and stop |
+| `duplicates.mode`              | `warn`, `off`                 | Warn when a new branch name is close to an existing one; never denies                                                                                                          |
+| `stop_guard.mode`              | `block`, `warn`, `off`        | Stop and SubagentStop refuse while a touched branch is dirty, holds commits no remote has, or is merged but undeleted                                                          |
+| `stop_guard.unpushed_subagent` | `block`, `advise`, `off`      | How the unpushed-commits finding is treated at a SubagentStop (this repository sets `advise`)                                                                                  |
+| `force_removal.mode`           | `block`, `off`                | `git worktree remove --force` and `git branch -D` are denied when they would lose work                                                                                         |
+| `evacuation.mode`              | `block`, `warn`, `off`        | Copying work to an untracked file and destroying its worktree or branch is denied, in one command or one turn                                                                  |
+| `cleanup_after_merge.mode`     | `advise`, `act`, `off`        | After a merge lands: advise the delete command, or delete the branch when it is proven merged; `regenerable` lists the ignored globs that may be discarded                     |
+| `sweep.budget_ms`              | `3000` / integer milliseconds | Wall-clock budget for the per-branch inventory steps; `behind_threshold` (default 50) is the commits-behind-default count that earns a warning                                 |
 
 **Regenerable stores.** Besides the `regenerable` globs, an ignored directory is discarded without blocking when it sits beside a manifest and lock file that are both committed at that location (`composer.json` + `composer.lock` for `vendor/` and its bin dir, `package.json` + a lock for `node_modules/`, `Gemfile`, `Cargo.toml` and `pyproject.toml` pairs likewise), at any depth. A directory holding a committed file, or lacking a committed lock, still blocks; `untracked/scratch/` never qualifies. The pairs are the `LOCK_REGENERATED_RULES` table in `utils/regenerable_paths.py`.
 

@@ -52,7 +52,7 @@ def handler(repo: Path) -> BranchCreationGuardHandler:
     guard = BranchCreationGuardHandler()
     guard._branches = BranchesConfig(
         default="main",
-        wip=BranchWipConfig(cap=2, mode="block"),
+        wip=BranchWipConfig(cap=2, mode="block", creation_grace=0),
         duplicates=BranchDuplicatesConfig(mode="warn"),
     )
     guard._project_root_override = repo

@@ -229,7 +229,9 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             "## branch_creation_guard — three branch pools, each capped\n\n"
             "Creating a branch (`git switch -c`, `checkout -b`, `branch <name>`, "
             '`worktree add`, or an Agent dispatch with `isolation: "worktree"`) is '
-            "denied while a pool is full: OPEN work at `branches.wip.cap`, PARKED "
+            "denied while a pool is full: OPEN work at `branches.wip.cap` plus "
+            "`branches.wip.creation_grace` (the cap itself only warns; the stop gate and "
+            "session start carry that pressure), PARKED "
             "branches at `branches.parked.cap` (or one parked past "
             "`branches.parked.max_age_days`), MERGED branches at `branches.merged.cap` "
             "(or one unkept or kept past `branches.merged.max_age_days`). Each pool "

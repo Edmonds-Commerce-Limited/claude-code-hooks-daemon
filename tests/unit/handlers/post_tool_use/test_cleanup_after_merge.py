@@ -200,3 +200,25 @@ class TestHandle:
         assert result.decision == Decision.ALLOW
         assert "boom" in "\n".join(result.context)
         assert "feat" in _branches(repo)
+
+
+class TestPoolClearCommandAfterMerge:
+    """Plan 00594 Task 4.2: after a merge the advisory names the command that clears the pool."""
+
+    def test_full_merged_pool_names_the_sweep_command(self, repo: Path) -> None:
+        _git(repo, "branch", "old-done", "main")
+        _merge(repo, "feat")
+        handler = CleanupAfterMergeHandler()
+        handler._branches = BranchesConfig.model_validate(
+            {"default": "main", "cleanup_after_merge": {"mode": "advise"}, "merged": {"cap": 1}}
+        )
+        result = handler.handle(_input("git merge --no-ff feat", repo))
+        assert result.decision == Decision.ALLOW
+        text = "\n".join(result.context)
+        assert "branch-sweep" in text
+        assert "--clean" in text
+
+    def test_no_pool_line_when_the_merged_pool_has_room(self, repo: Path) -> None:
+        _merge(repo, "feat")
+        result = _handler("advise").handle(_input("git merge --no-ff feat", repo))
+        assert "branch-sweep" not in "\n".join(result.context)

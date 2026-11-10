@@ -63,7 +63,7 @@ def _config(
 ) -> BranchesConfig:
     return BranchesConfig(
         default="main",
-        wip=BranchWipConfig(cap=cap, mode=mode, count_remote=True),
+        wip=BranchWipConfig(cap=cap, mode=mode, count_remote=True, creation_grace=0),
         duplicates=BranchDuplicatesConfig(mode=dup),
     )
 
@@ -144,7 +144,8 @@ class TestCap:
         _git(repo, "update-ref", "refs/remotes/origin/trunkish", sha)
         _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunkish")
         config = BranchesConfig(
-            default="auto", wip=BranchWipConfig(cap=2, mode="block", count_remote=False)
+            default="auto",
+            wip=BranchWipConfig(cap=2, mode="block", count_remote=False, creation_grace=0),
         )
         assert creation_verdict(repo, config, "fresh").decision == "allow"
 
@@ -188,7 +189,11 @@ class TestLegacyCap:
                         "branch_sweep": {"enabled": True, "options": {"max_open_branches": 2}}
                     }
                 },
-                "branches": {"default": "main", "duplicates": {"mode": "off"}},
+                "branches": {
+                    "default": "main",
+                    "duplicates": {"mode": "off"},
+                    "wip": {"creation_grace": 0},
+                },
             }
         )
 
