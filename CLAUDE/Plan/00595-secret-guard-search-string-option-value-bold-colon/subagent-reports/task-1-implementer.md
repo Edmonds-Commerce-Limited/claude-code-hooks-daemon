@@ -13,3 +13,13 @@ QA `changed`: 39/42 pass. Failures not caused by this change:
 
 - pyright: tests/integration/test_branch_install_tracking_record.py:141 (file untouched here).
 - changed_tests: 4739 passed, 0 failed, but src/.../secret_file_matching.py is "unmapped [too-broad]" in changed_tests_map.yaml, which fails the run.
+
+## Review fixes
+
+The grep/rg filter-value relaxation (`_searched_paths_hold_no_protected_file`) now allows only when every searched root, after `os.path.realpath`, lies inside the index's project root, and no link-following flag is present (grep `-R` or a cluster containing R, `--dereference-recursive`; rg `-L` or a cluster containing L, `--follow`). Otherwise the old deny stands. grep `-L` (files-without-match) is not treated as link-following.
+
+Tests added (class `TestGrepFilterRelaxationNeedsRootsInsideProject`): `/etc`, `/root/.ssh`, an outside dir holding a protected file, the `outlnk` symlink root, `-R`, `--dereference-recursive`, `rg -L` and `rg --follow` all deny; clean in-project roots (relative and absolute) still allow. RED first (9 failures), now green; 1918 passed over test_secret_file_guard\*.py and tests/unit/utils/test_secret\_\*.py.
+
+Probe harness: the four classes now deny.
+
+Open follow-up (not fixed): `rg --follow x clean -g '*'` still ALLOWs. The separate-value quoted `'*'` after `-g` never reaches the filter-value judgement (already allowed on main), so the new flag check is not consulted. Fixing needs the separate-value filter spelling judged by the same function.

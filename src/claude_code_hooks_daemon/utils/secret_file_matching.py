@@ -2136,6 +2136,10 @@ _FILTER_VALUE_PREFIXES: Final = (
     "--glob=",
     "--iglob=",
 )
+#: grep/rg flags that make the search follow symlinks out of the named roots.
+#: grep -R is the dereferencing spelling of -r; rg spells it -L. (grep -L is
+#: --files-without-match and follows nothing.)
+_LINK_FOLLOWING_LONG_OPTIONS: Final = frozenset({"--dereference-recursive", "--follow"})
 _SEARCH_PATH_COMMANDS: Final = frozenset({"grep", "egrep", "fgrep", "rg"})
 
 
@@ -2154,6 +2158,8 @@ def _searched_paths_hold_no_protected_file(
     rest = segment_words[command + 1 :]
     if any(word in _PATTERN_FILE_OPTIONS for word in rest):
         return False
+    if any(_follows_links(word, names[command]) for word in rest):
+        return False
     operands = [word for word in rest if not word.startswith("-")]
     paths = operands[1:]
     if not paths or any(char in _WORD_EXPANDING_CHARACTERS for p in paths for char in p):
@@ -2161,9 +2167,30 @@ def _searched_paths_hold_no_protected_file(
     bases = [cwd for cwd in cwds if cwd]
     for path in paths:
         roots = [path] if path.startswith("/") else [str(Path(base) / path) for base in bases]
-        if not roots or any(index.find_under(root) is not None for root in roots):
+        if not roots:
             return False
+        for root in roots:
+            # The index only lists the project tree, so it cannot vouch for a root
+            # outside it, or one a link leads out of.
+            if not _is_inside(os.path.realpath(root), os.path.realpath(index.project_root)):
+                return False
+            if index.find_under(root) is not None:
+                return False
     return True
+
+
+def _follows_links(word: str, tool: str) -> bool:
+    """Whether a grep/rg option word makes the search follow symlinks."""
+    if word in _LINK_FOLLOWING_LONG_OPTIONS:
+        return True
+    if not word.startswith("-") or word.startswith("--"):
+        return False
+    return "R" in word or (tool == "rg" and "L" in word)
+
+
+def _is_inside(path: str, root: str) -> bool:
+    """Whether ``path`` is ``root`` or lies under it (both already resolved)."""
+    return path == root or path.startswith(root.rstrip("/") + "/")
 
 
 def _is_scoped_filter_value(

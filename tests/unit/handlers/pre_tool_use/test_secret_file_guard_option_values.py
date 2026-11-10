@@ -140,6 +140,61 @@ class TestGrepFilterValueIsScopedToSearchedPath:
         assert _verdict(project, command) is Decision.DENY
 
 
+class TestGrepFilterRelaxationNeedsRootsInsideProject:
+    """The index only vouches for the project: roots outside it, or reached by a link, deny."""
+
+    @pytest.fixture()
+    def outside(self, project: Path) -> Path:
+        """A directory beside the project holding a protected file, plus link fixtures."""
+        out = project.parent / "outside"
+        out.mkdir()
+        (out / f"o.{_SUFFIX}").write_bytes(b"not-a-real-secret\n")
+        (project / "outlnk").symlink_to(out)
+        (project / "clean").mkdir()
+        (project / "clean" / "lnk").symlink_to(project / "deep")
+        return out
+
+    def test_absolute_root_outside_project_denied(self, project: Path, outside: Path) -> None:
+        command = f"grep -r . --include=* {outside}"
+        assert _verdict(project, command) is Decision.DENY
+
+    def test_absolute_root_outside_project_with_secret_glob_denied(
+        self, project: Path, outside: Path
+    ) -> None:
+        command = f"grep -r . --include=*.{_SUFFIX}* {outside}"
+        assert _verdict(project, command) is Decision.DENY
+
+    @pytest.mark.parametrize("root", ["/etc", "/root/.ssh"])
+    def test_system_roots_denied(self, project: Path, root: str) -> None:
+        assert _verdict(project, f"grep -r . --include=* {root}") is Decision.DENY
+        assert _verdict(project, f"grep -r . --include=*.{_SUFFIX}* {root}") is Decision.DENY
+
+    def test_symlink_root_resolving_outside_denied(self, project: Path, outside: Path) -> None:
+        assert _verdict(project, "grep -r . --include=* outlnk") is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -R x --include=* clean",
+            "grep --dereference-recursive x --include=* clean",
+            "rg -L x clean --glob=*",
+            "rg --follow x clean --glob=*",
+        ],
+    )
+    def test_symlink_following_flags_denied(
+        self, project: Path, outside: Path, command: str
+    ) -> None:
+        assert _verdict(project, command) is Decision.DENY
+
+    def test_clean_root_inside_project_still_allowed(self, project: Path) -> None:
+        (project / "untracked" / "scratch" / "sub").mkdir(parents=True)
+        command = "grep -rl zz untracked/scratch/sub --include=*"
+        assert _verdict(project, command) is Decision.ALLOW
+
+    def test_clean_absolute_root_inside_project_still_allowed(self, project: Path) -> None:
+        assert _verdict(project, f"grep -rl zz {project / 'sub'} --include=*") is Decision.ALLOW
+
+
 class TestColonSplitYieldsNoWildcardOnlyPart:
     """(c) ``2:**`` is bold markdown, not ``prefix:path``."""
 
