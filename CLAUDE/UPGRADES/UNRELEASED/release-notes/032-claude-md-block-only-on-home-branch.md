@@ -13,10 +13,11 @@ The block is now written and committed only while HEAD is attached to a home
 branch. By default that is the repository's default branch. On any other
 branch, or on a detached HEAD, the daemon writes nothing, commits nothing and
 logs at info level why, naming `regenerate-docs`. If HEAD or the default
-branch cannot be named by git, it falls back to `init.defaultBranch`, then the
+branch cannot be named by git, it falls back to `init.defaultBranch` (only when
+that branch exists or HEAD is unborn on it), then the
 branch of an unborn HEAD (the block is written, no root commit is made), then a
-sole local branch. If none resolves, nothing is written and the SessionStart
-notice tells the agent to set `branches.home`.
+sole local branch. If none resolves to a local branch, nothing is written and
+the SessionStart notice tells the agent to set `branches.home`.
 
 If a checkout lives on an environment, release or production branch for weeks,
 declare it, because a configured list replaces the default:
@@ -35,5 +36,7 @@ commit deliberately. Linked worktrees are still left alone at startup.
 For a home branch that only accepts pull requests, set `home_commit: false`.
 The daemon then never writes CLAUDE.md on a home branch: a modified file there
 would make the next `git pull` fail whenever an upstream change touches
-CLAUDE.md. A stale block is reported once in the log and at SessionStart; run
-`regenerate-docs` on a pull-request branch and commit the result there.
+CLAUDE.md. A stale block is reported at every SessionStart (recomputed each
+time, so the notice goes once the block is current); run `regenerate-docs` in a
+pull-request worktree or branch and commit the result there. On a home branch
+under `home_commit: false`, `regenerate-docs` itself refuses and exits non-zero.

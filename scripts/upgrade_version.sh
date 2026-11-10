@@ -134,11 +134,6 @@ TRACK_REF="${HOOKS_DAEMON_UNSAFE_TRACK_REF:-}"
 TRACK_REASON="${HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE:-}"
 INSTALL_STAMP="$TARGET_VERSION"
 
-# _resolve_install_stamp() - Set INSTALL_STAMP for the commit HEAD is on.
-#
-# Called once the daemon dir sits on the target (the fast path finds it there
-# already; the slow path arrives after Step 6). A release install keeps the
-# tag as its stamp; a branch install computes and announces its own.
 # Plan 00594: a restart refreshes the CLAUDE.md <hooksdaemon> block only on a
 # home branch (and not under branches.home_commit: false). Off home it leaves
 # the block as it was, so say so instead of letting the upgrade look complete.
@@ -151,16 +146,29 @@ from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.core.claude_md_injector import block_not_refreshed_reason
 root = Path(sys.argv[1])
 config = Config.load(root / ".claude" / "hooks-daemon.yaml")
-print(block_not_refreshed_reason(root, config.branches) or "")
+
+
+def block_is_stale() -> bool:
+    from claude_code_hooks_daemon.daemon.cli import _build_initialised_controller
+
+    return bool(_build_initialised_controller(config, root).claude_md_notices())
+
+
+print(block_not_refreshed_reason(root, config.branches, block_is_stale) or "")
 ' "$project_root")"; then
         print_warning "Could not tell whether the CLAUDE.md hooks-daemon block was refreshed; run 'hooks-daemon regenerate-docs' on a pull-request branch if it is stale"
         return 0
     fi
     if [ -n "$reason" ]; then
-        print_warning "CLAUDE.md hooks-daemon block was NOT refreshed by the restart: $reason. Run 'hooks-daemon regenerate-docs' (it writes the block without committing it) and commit the result on a pull-request branch."
+        print_warning "CLAUDE.md hooks-daemon block was NOT refreshed by the restart: $reason. Run 'hooks-daemon regenerate-docs' in a pull-request worktree or branch (it refuses on a home branch under branches.home_commit: false) and commit the result there."
     fi
 }
 
+# _resolve_install_stamp() - Set INSTALL_STAMP for the commit HEAD is on.
+#
+# Called once the daemon dir sits on the target (the fast path finds it there
+# already; the slow path arrives after Step 6). A release install keeps the
+# tag as its stamp; a branch install computes and announces its own.
 _resolve_install_stamp() {
     if [ "$BRANCH_INSTALL_STATE" != "armed" ]; then
         INSTALL_STAMP="$TARGET_VERSION"

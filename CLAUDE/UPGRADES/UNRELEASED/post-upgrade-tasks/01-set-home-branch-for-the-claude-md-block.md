@@ -24,7 +24,7 @@ This applies when the two branch names differ, or when the default branch is pro
 ## How to handle
 
 - Main checkout on a non-default branch: set `branches.home` in `.claude/hooks-daemon.yaml` to the exact names (globs are rejected) of the branches it lives on, then restart the daemon.
-- Default branch accepts only pull requests: set `branches.home_commit: false`. The daemon then never writes CLAUDE.md on a home branch, so a pull is never blocked by a modified file; it reports a stale block at SessionStart. Run `regenerate-docs` on a pull-request branch and commit the result there.
+- Default branch accepts only pull requests: set `branches.home_commit: false`. The daemon then never writes CLAUDE.md on a home branch, so a pull is never blocked by a modified file; it reports a stale block at SessionStart. Run `regenerate-docs` in a pull-request worktree or branch and commit the result there; it refuses on a home branch.
 - Not sure which applies: ask the user.
 
 ## How to confirm
