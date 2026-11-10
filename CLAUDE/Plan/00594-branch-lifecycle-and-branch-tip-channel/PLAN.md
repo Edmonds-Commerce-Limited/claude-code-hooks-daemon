@@ -203,7 +203,10 @@ names, people or hashes appear here.
   cleared". Open: a branch only the remote holds still
   parks nothing on a refused push, the group-pool PARKED resolution, and the
   session-start "park cleared" print (DESIGN 2.4).
-- [ ] ⬜ **Task 4.4**: Pools are counted per owner.
+- [x] ✅ **Task 4.4**: (on main, release note 050, report `task-4-4-report.md`)
+  Pools are counted per owner. A foreign branch is listed, in no pool, and
+  cleaned only when its merge is proven. Not done: a configured owner for
+  foreign-branch pressure.
 - [x] ✅ **Task 4.5**: (done: `clear_label_stale_at_tips`; release note 037)
   A keep covers every branch name at the kept tip, in the creation guard as
   in the sweep. Client report: a same-tip `-parked` twin stayed stale to the
