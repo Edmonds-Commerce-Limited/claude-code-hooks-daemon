@@ -32,7 +32,7 @@ _The CLAUDE.md block is written and committed only on a home branch, a run of fi
 - An installer or upgrader settings backup identical to the merged `settings.json` is removed instead of left as a stray untracked file (Plan 00594 Task 3.6).
 - `lsp_enforcement` no longer reads `semgrep <name>` (a tool name ending in `grep` or `rg`) as a grep for a symbol.
 - `destructive_git` chained-rm check uses linear shlex and path-containment helpers, clearing a semgrep finding in CI (Plan 00478).
-- `branches.home` rejects an empty or whitespace-padded name at load, and a name matching no local or remote branch is reported at SessionStart instead of leaving the block unwritten on every branch without a word (Plan 00594).
+- `branches.home` rejects an empty or whitespace-padded name at load, and a name matching no local or remote branch is reported at SessionStart instead of leaving the block unwritten on every branch without a word. The notice says the block is not written only when no entry matches; with a partial match it is informational, and it suggests fetching the branch as well as correcting the config (Plan 00594).
 - A worktree removal no longer treats `vendor/bundle/` as rebuildable when Bundler left a `git:` gem there as a real clone, whose commits exist nowhere else (Plan 00594 Task 3.3).
 - A `~user` word in a chained `rm` no longer turns the worktree-removal deny into an "evaluation error"; the blocker list and delete-first advice are kept (Plan 00594 Task 3.5).
 - Plan 00474 ledger items N600 (a test or QA step writing change reports into the checkout `untracked/`), N601 (Go testdata under staged lint) and N602 (the review round counter counted non-reviews).

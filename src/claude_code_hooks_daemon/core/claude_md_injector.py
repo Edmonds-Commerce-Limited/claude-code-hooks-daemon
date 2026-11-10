@@ -164,6 +164,12 @@ _COMMIT_MESSAGE_WITH_USER_EDITS = (
     "have prompted."
 )
 _GIT_HEAD_REF = "HEAD"
+# Shared tail of both unmatched-``branches.home`` notices. A single-branch clone
+# lacks the remote ref of a correct entry, so fetching is offered before editing.
+_UNMATCHED_HOME_ADVICE = (
+    "match no local or remote branch: not found in this clone "
+    "(fetch it, or correct `branches.home` in .claude/hooks-daemon.yaml)"
+)
 
 # Fingerprint of the last markdown format, kept inside the git dir.
 _FORMAT_MEMORY_FILENAME = "hooks-daemon-claude-md-format"
@@ -654,8 +660,10 @@ class ClaudeMdInjector:
     def _unmatched_home_notices(self, config: "BranchesConfig") -> list[str]:
         """A notice naming the ``branches.home`` entries that match no local or remote branch.
 
-        A typo there is otherwise silent: every branch reads as off home, so the
-        block is never written anywhere.
+        When NO entry matches, a typo there is otherwise silent: every branch
+        reads as off home, so the block is never written anywhere. When only
+        some entries are unmatched, the matching ones still receive the block,
+        so the notice is informational and says nothing about where it goes.
         """
         unmatched = [
             name
@@ -665,10 +673,15 @@ class ClaudeMdInjector:
         ]
         if not unmatched:
             return []
+        if len(unmatched) < len(config.home):
+            return [
+                f"branches.home names {unmatched}, which {_UNMATCHED_HOME_ADVICE}. "
+                "Informational: the other entries are unaffected."
+            ]
         return [
-            f"CLAUDE.md hooks-daemon block not written: branches.home names {unmatched}, which "
-            "match no local or remote branch, so no branch counts as home. Correct "
-            "`branches.home` in .claude/hooks-daemon.yaml, then restart the daemon."
+            f"CLAUDE.md hooks-daemon block not written: branches.home names {unmatched}, "
+            f"which {_UNMATCHED_HOME_ADVICE}, so no branch counts as home. Restart the "
+            "daemon after the fix."
         ]
 
     def _stale_message(self, claude_md_path: Path, generated: str) -> str | None:

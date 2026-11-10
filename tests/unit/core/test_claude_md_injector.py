@@ -2620,11 +2620,31 @@ class TestConfiguredHomeNamesNoBranch:
         notices = self._notices(tmp_path, ["mian"])
         assert any("mian" in n and "branches.home" in n for n in notices)
 
-    def test_only_the_unmatched_entries_are_named(self, tmp_path: Path) -> None:
+    def test_no_match_at_all_says_the_block_is_not_written(self, tmp_path: Path) -> None:
         _init_repo_on_main(tmp_path)
         _git(tmp_path, "checkout", "-q", "-b", "feature/x")
-        notices = self._notices(tmp_path, ["main", "mian"])
-        assert any("mian" in n and "'main'" not in n for n in notices)
+        notices = self._notices(tmp_path, ["mian", "mastr"])
+        assert len(notices) == 1
+        assert "block not written" in notices[0]
+        assert "no branch counts as home" in notices[0]
+        assert "mian" in notices[0] and "mastr" in notices[0]
+
+    def test_a_partial_match_never_claims_the_block_is_not_written(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
+        notices = self._notices(tmp_path, ["main", "master"])
+        assert len(notices) == 1
+        assert "master" in notices[0] and "'main'" not in notices[0]
+        assert "not written" not in notices[0]
+        assert "no branch counts as home" not in notices[0]
+
+    def test_unmatched_advice_allows_for_a_clone_missing_the_branch(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
+        for home in (["mian"], ["main", "mian"]):
+            (notice,) = self._notices(tmp_path, home)
+            assert "not found in this clone" in notice
+            assert "fetch it" in notice
 
     def test_an_existing_home_has_no_notice(self, tmp_path: Path) -> None:
         _init_repo_on_main(tmp_path)
