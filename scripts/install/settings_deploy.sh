@@ -112,6 +112,7 @@ deploy_settings_json() {
     # rewrite — so it is also the right trigger for taking the copy. Backing up
     # an identical file would just be litter, and warning on every upgrade would
     # train people to ignore the warning.
+    local backup=""
     if [ -n "$snapshot_path" ]; then
         print_warning "Your settings.json differs from the daemon's; merging."
         print_warning "  Pre-upgrade copy: $snapshot_path"
@@ -121,7 +122,6 @@ deploy_settings_json() {
             print_error "deploy_settings_json: cannot determine a backup timestamp (see stderr above)"
             return 1
         fi
-        local backup
         backup="${target}.bak-${backup_stamp}"
         if ! cp "$target" "$backup"; then
             print_error "Could not back up $target before merging it - aborting"
@@ -152,6 +152,13 @@ deploy_settings_json() {
 
     case "$merge_status" in
         0)
+            # A merge that changed nothing leaves the backup byte-identical to
+            # the file it copied; kept, it is a stray untracked path in the
+            # client repo that blocks clean-tree checks and worktree removal.
+            if [ -n "$backup" ] && cmp -s "$target" "$backup"; then
+                rm -f "$backup"
+                print_verbose "Merge left settings.json unchanged; removed identical backup"
+            fi
             print_success "Merged settings.json"
             return 0
             ;;

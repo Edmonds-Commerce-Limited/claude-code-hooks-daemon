@@ -207,6 +207,36 @@ class TestWhenNothingElseIsKeepingACopy:
         assert target.read_text() == _CLIENT_JSON, "the client file must survive"
 
 
+def _fake_python(tmp_path: Path, *, rewrite: bool) -> str:
+    """An 'interpreter' standing in for the merge: it rewrites the client file or leaves it."""
+    fake = tmp_path / "fake-python"
+    body = 'printf \'{"merged": true}\\n\' > "$5"' if rewrite else ":"
+    fake.write_text(f"#!/bin/bash\n# args: -m mod settings-merge --client FILE ...\n{body}\n")
+    fake.chmod(0o755)
+    return str(fake)
+
+
+class TestABackupOfAnUnchangedFileIsNotLeftBehind:
+    """A merge that rewrites nothing leaves the backup byte-identical to the target."""
+
+    def test_an_unchanged_merge_removes_the_backup(self, tmp_path: Path) -> None:
+        py = _fake_python(tmp_path, rewrite=False)
+        _run(tmp_path, client=_CLIENT_JSON, venv_python=py)
+        assert _backups(tmp_path) == []
+
+    def test_an_unchanged_merge_keeps_the_client_file(self, tmp_path: Path) -> None:
+        py = _fake_python(tmp_path, rewrite=False)
+        _, target = _run(tmp_path, client=_CLIENT_JSON, venv_python=py)
+        assert target.read_text() == _CLIENT_JSON
+
+    def test_a_changing_merge_keeps_the_backup(self, tmp_path: Path) -> None:
+        py = _fake_python(tmp_path, rewrite=True)
+        _run(tmp_path, client=_CLIENT_JSON, venv_python=py)
+        backups = _backups(tmp_path)
+        assert len(backups) == 1
+        assert backups[0].read_text() == _CLIENT_JSON
+
+
 class TestTheInstallCopyCanFail:
     """The backup was checked; the copy it protects was not.
 
