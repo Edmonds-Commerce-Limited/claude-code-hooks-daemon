@@ -6,7 +6,10 @@ Uses 1-day cache to avoid excessive git operations.
 
 import json
 import logging
+import re
+import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
@@ -20,6 +23,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.daemon.metadata import read_daemon_metadata
 from claude_code_hooks_daemon.install.background_sync import (
     SyncStatus,
     log_path,
@@ -29,6 +33,7 @@ from claude_code_hooks_daemon.install.expected_version import read_expected_vers
 from claude_code_hooks_daemon.install.install_stamp import InstallStamp, read_install_stamp
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.remote_refs import list_remote_refs
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 from claude_code_hooks_daemon.version import __version__
 
@@ -63,6 +68,36 @@ _REMOTE_ONLY_CWD: Final[Path] = Path("/")
 _PROVISION_SCRIPT_NAME: Final[str] = "provision.sh"
 
 _DEFAULT_CACHE_TTL_HOURS: Final[int] = 24
+
+#: The branch-tip answer has its own cache file: the release cache is read as
+#: "up to date" whenever it holds no ``is_outdated``, which a tip entry never has.
+_CACHE_FILENAME: Final[str] = "version_check_cache.json"
+_TIP_CACHE_FILENAME: Final[str] = "version_check_tip_cache.json"
+
+#: A failed or empty listing is cached too, but briefly: long enough that an
+#: offline machine does not wait at every session start, short enough that the
+#: network coming back is noticed within the hour.
+_NEGATIVE_TTL_SECONDS: Final[int] = 3600
+
+_TIP_KIND_TIP: Final[str] = "tip"
+_TIP_KIND_TAG: Final[str] = "tag"
+_TIP_KIND_ABSENT: Final[str] = "absent"
+_TIP_KIND_UNREAD: Final[str] = "unread"
+_TIP_KINDS: Final[frozenset[str]] = frozenset(
+    {_TIP_KIND_TIP, _TIP_KIND_TAG, _TIP_KIND_ABSENT, _TIP_KIND_UNREAD}
+)
+
+
+@dataclass(frozen=True)
+class _TipLookup:
+    """What the remote said about the tracked ref (``sha`` is set only for a branch tip)."""
+
+    kind: str
+    sha: str | None
+
+
+_FULL_SHA_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{40}$")
+_SHORT_SHA_LENGTH: Final[int] = 7
 _SECONDS_PER_HOUR: Final[int] = 3600
 
 
@@ -97,16 +132,17 @@ class VersionCheckHandler(SessionStartHandlerBase):
         """Apply configuration."""
         self.config.update(config)
 
-    def _get_cache_file(self) -> Path:
-        """Get path to version check cache file."""
+    def _get_cache_file(self, *, tip: bool = False) -> Path:
+        """Get path to the version check cache file (``tip``: the branch-tip one)."""
+        name = _TIP_CACHE_FILENAME if tip else _CACHE_FILENAME
         try:
             cache_dir = ProjectContext.daemon_untracked_dir()
-            return cache_dir / "version_check_cache.json"
+            return cache_dir / name
         except (OSError, RuntimeError):
             # Fallback to project-relative untracked dir (avoid /tmp per B108)
             fallback = Path.cwd() / "untracked"
             fallback.mkdir(parents=True, exist_ok=True)
-            return fallback / "version_check_cache.json"
+            return fallback / name
 
     def _is_cache_valid(self, cache_file: Path) -> bool:
         """Check if cache file exists and is not expired."""
@@ -229,7 +265,7 @@ class VersionCheckHandler(SessionStartHandlerBase):
                 return AdvisoryResult(
                     decision=Decision.ALLOW,
                     reason=None,
-                    context=self._branch_install_context(stamp),
+                    context=self._branch_install_context(stamp) + self._tracked_ref_lines(),
                 )
 
             # Plan 00477 Task 5.1: the project expects another version than the
@@ -454,6 +490,130 @@ class VersionCheckHandler(SessionStartHandlerBase):
             "release that contains it ships. Reinstall from a release tag before",
             "relying on it (Skill tool: skill=hooks-daemon, args=upgrade).",
         ]
+
+    def _tracked_ref_lines(self) -> list[str]:
+        """Whether the ref this install tracks has moved, and the way back.
+
+        One cached, time-bounded listing of the tracked branch, only for a branch
+        install that recorded its ref. A pinned full sha never moves, so it makes
+        no call; a listing that fails is "not checked", never "current".
+        """
+        meta = read_daemon_metadata(Path(sys.prefix))
+        if meta is None or meta.tracked_ref is None or meta.tracked_sha is None:
+            return [
+                "",
+                "Tracked ref: not checked (this install recorded no ref; re-run the "
+                "upgrade that installed it to record one).",
+            ]
+        ref, installed = meta.tracked_ref, meta.tracked_sha
+        short = installed[:_SHORT_SHA_LENGTH]
+        lines = [""]
+        if _FULL_SHA_RE.fullmatch(ref):
+            lines.append(f"Pinned to commit {ref[:_SHORT_SHA_LENGTH]}; a pin never moves.")
+        else:
+            lookup = self._remote_tip(ref, installed)
+            tip = lookup.sha
+            if lookup.kind == _TIP_KIND_TAG:
+                lines.append(
+                    f"Tracked ref {ref} is a tag, not a branch: it does not move, "
+                    "so there is nothing to follow."
+                )
+            elif lookup.kind == _TIP_KIND_ABSENT:
+                lines.append(
+                    f"Tracked ref {ref}: not checked (the remote has no branch or tag by that name)."
+                )
+            elif tip is None:
+                lines.append(f"Tracked ref {ref}: not checked (the remote could not be read).")
+            elif tip == installed:
+                lines.append(f"Tracked ref {ref} has not moved since {short}.")
+            else:
+                lines.extend(
+                    [
+                        f"tracked ref {ref} moved {short}..{tip[:_SHORT_SHA_LENGTH]}; "
+                        "re-run the upgrade to follow it:",
+                        f"  HOOKS_DAEMON_UNSAFE_TRACK_REF={ref} "
+                        'HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE="<why>" '
+                        'bash untracked/scratch/upgrade.sh --project-root "$PWD"',
+                    ]
+                )
+        back = meta.last_release_tag or "the latest release"
+        lines.append(
+            f"To return to {back} in one step: "
+            'bash untracked/scratch/upgrade.sh --project-root "$PWD" --release '
+            "(Skill tool: skill=hooks-daemon, args=upgrade --release)."
+        )
+        return lines
+
+    def _cached_tip(self, cache_file: Path, ref: str, installed: str) -> _TipLookup | None:
+        """The cached answer for ``ref`` as seen from ``installed``, or None when stale.
+
+        An entry applies only to the install it was made for: after the install
+        follows a move, the tip cached against the old commit would read as a
+        move back. A good answer lives for the configured TTL, a failed or empty
+        one for the shorter ``_NEGATIVE_TTL_SECONDS``.
+        """
+        cached = self._get_cached_result(cache_file)
+        if (
+            not cached
+            or cached.get("tracked_ref") != ref
+            or cached.get("installed_sha") != installed
+        ):
+            return None
+        kind = cached.get("kind")
+        sha = cached.get("remote_tip")
+        if kind not in _TIP_KINDS or (kind == _TIP_KIND_TIP and not sha):
+            return None
+        ttl_hours = self._cache_ttl_hours
+        if not isinstance(ttl_hours, int | float | str):
+            ttl_hours = _DEFAULT_CACHE_TTL_HOURS
+        ttl = int(ttl_hours) * _SECONDS_PER_HOUR if kind == _TIP_KIND_TIP else _NEGATIVE_TTL_SECONDS
+        cached_at = cached.get("cached_at")
+        if not isinstance(cached_at, int | float):
+            return None
+        if time.time() - cached_at >= ttl:
+            return None
+        return _TipLookup(str(kind), str(sha) if sha else None)
+
+    def _remote_tip(self, ref: str, installed: str) -> _TipLookup:
+        """What the remote holds under ``ref``: a branch tip, a tag, nothing, or unread.
+
+        One bounded listing of the branch and of a tag of that name (a tag is
+        accepted by the install's fetch but never moves). Every outcome is
+        cached, so an offline machine does not wait at each session start.
+        """
+        cache_file = self._get_cache_file(tip=True)
+        cached_lookup = self._cached_tip(cache_file, ref, installed)
+        if cached_lookup is not None:
+            return cached_lookup
+        head, tag = f"refs/heads/{ref}", f"refs/tags/{ref}"
+        listing = list_remote_refs(
+            _REMOTE_ONLY_CWD,
+            _GITHUB_REPO_URL,
+            patterns=(head, tag),
+            timeout=Timeout.VERSION_CHECK,
+        )
+        if listing.failure is not None:
+            logger.debug("tracked ref listing failed: %s", listing.failure)
+            lookup = _TipLookup(_TIP_KIND_UNREAD, None)
+        else:
+            by_name = dict(listing.refs)
+            if head in by_name:
+                lookup = _TipLookup(_TIP_KIND_TIP, by_name[head])
+            elif tag in by_name:
+                lookup = _TipLookup(_TIP_KIND_TAG, None)
+            else:
+                lookup = _TipLookup(_TIP_KIND_ABSENT, None)
+        self._write_cache(
+            cache_file,
+            {
+                "cached_at": time.time(),
+                "tracked_ref": ref,
+                "installed_sha": installed,
+                "kind": lookup.kind,
+                "remote_tip": lookup.sha,
+            },
+        )
+        return lookup
 
     def _compare_versions(self, current: str, latest: str) -> bool:
         """Compare semantic versions.

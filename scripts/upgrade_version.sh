@@ -739,6 +739,10 @@ fi
 # the resolver's own cache rule (Plan 00466 N37). Resolved with GATE_SAFE_PATH,
 # like everything else that feeds the gate.
 INSTALLED_VERSION=""
+PREVIOUS_RELEASE_TAG=""
+PREVIOUS_TRACKED_REF=""
+PREVIOUS_TRACKED_SHA=""
+PREVIOUS_RECORDED_RELEASE=""
 
 # _read_installed_version() - Set INSTALLED_VERSION.
 _read_installed_version() {
@@ -759,6 +763,19 @@ _read_installed_version() {
             ;;
     esac
     INSTALLED_VERSION="$(get_venv_version "$venv_dir")"
+    # Read now, before ensure_venv: the venv folder name does not change with
+    # the version, so a rebuild wipes the record this comes from.
+    PREVIOUS_RELEASE_TAG="$(read_previous_release_tag "$venv_dir" "$INSTALLED_VERSION")"
+    PREVIOUS_TRACKED_REF="$(read_recorded_tracking_field "$venv_dir" tracked_ref)"
+    PREVIOUS_TRACKED_SHA="$(read_recorded_tracking_field "$venv_dir" tracked_sha)"
+    PREVIOUS_RECORDED_RELEASE="$(read_recorded_tracking_field "$venv_dir" last_release_tag)"
+}
+
+# _record_tracking() - Record (branch install) or clear (release install) the
+# tracking metadata of the venv just built (Plan 00594 Task 5.1). Called only
+# once the install has succeeded, so a rollback leaves the record untouched.
+_record_tracking() {
+    record_install_tracking "$VENV_PYTHON" "$VENV_PATH" "$DAEMON_DIR" "$PREVIOUS_RELEASE_TAG"
 }
 _read_installed_version
 
@@ -827,6 +844,13 @@ cleanup_on_failure() {
             else
                 print_error "Git rollback failed. Previous ref: $ROLLBACK_REF"
             fi
+        fi
+
+        # A venv rebuild blanked the tracking record before any restart; the
+        # code is back on the previous install, so its record goes back too.
+        if venv_python_usable "$VENV_PYTHON"; then
+            restore_install_tracking "$VENV_PYTHON" "$VENV_PATH" \
+                "$PREVIOUS_TRACKED_REF" "$PREVIOUS_TRACKED_SHA" "$PREVIOUS_RECORDED_RELEASE"
         fi
 
         # Try to restart daemon with old code
@@ -1089,6 +1113,9 @@ FASTPATH_CCY_PY
     if ! restart_daemon_verified "$VENV_PYTHON"; then
         fail_fast "Daemon failed to start after idempotent upgrade"
     fi
+
+    # The install has succeeded; only now does the tracking record change.
+    _record_tracking
 
     if ! run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false"; then
         fail_fast "Post-install verification failed after idempotent upgrade"
@@ -1602,8 +1629,13 @@ if ! restart_daemon_verified "$VENV_PYTHON"; then
     # Don't trigger rollback for daemon start failure - code is updated
     # User can fix config manually
     UPGRADE_STARTED=false
+    # The new code stays installed, so the record must describe it.
+    _record_tracking
     exit 1
 fi
+
+# The install has succeeded; only now does the tracking record change.
+_record_tracking
 
 # Clear version check cache to prevent stale upgrade indicators
 rm -f "$DAEMON_DIR/untracked/version_check_cache.json"

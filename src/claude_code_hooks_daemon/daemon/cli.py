@@ -76,6 +76,7 @@ from claude_code_hooks_daemon.daemon.install_layout import is_client_daemon_dir
 from claude_code_hooks_daemon.daemon.metadata import (
     DaemonVenvMetadata,
     compute_project_lock_hash,
+    record_tracking,
     write_daemon_metadata,
 )
 from claude_code_hooks_daemon.daemon.paths import (
@@ -4021,6 +4022,25 @@ def _write_venv_metadata(
         return f"failed to write metadata: {exc}"
 
     return None
+
+
+def cmd_record_venv_tracking(args: argparse.Namespace) -> int:
+    """Record (or clear) the ref a venv's branch install tracks (Plan 00594 Task 5.1).
+
+    Bash ``upgrade_version.sh`` shells out to this after ``ensure_venv`` so the
+    schema stays in the Python model. No ``--tracked-ref`` clears the fields.
+    """
+    try:
+        record_tracking(
+            Path(args.venv_path),
+            tracked_ref=args.tracked_ref,
+            tracked_sha=args.tracked_sha,
+            last_release_tag=args.last_release_tag,
+        )
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        print(f"ERROR: cannot record tracking metadata: {exc}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def cmd_init_config(args: argparse.Namespace) -> int:
@@ -11800,6 +11820,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Project root for lock-hash computation (defaults to current working directory)",
     )
     parser_write_venv_metadata.set_defaults(func=cmd_write_venv_metadata)
+
+    # record-venv-tracking command (Plan 00594 Task 5.1)
+    parser_record_tracking = subparsers.add_parser(
+        "record-venv-tracking",
+        help="Record or clear the ref a branch install tracks in .daemon-metadata.json",
+    )
+    parser_record_tracking.add_argument("--venv-path", required=True, help="The venv directory")
+    parser_record_tracking.add_argument(
+        "--tracked-ref", default=None, help="Exact tracked ref; omit to clear (release install)"
+    )
+    parser_record_tracking.add_argument(
+        "--tracked-sha", default=None, help="Full sha the tracked ref resolved to"
+    )
+    parser_record_tracking.add_argument(
+        "--last-release-tag", default=None, help="Release installed before the branch install"
+    )
+    parser_record_tracking.set_defaults(func=cmd_record_venv_tracking)
 
     # init-config command
     parser_init_config = subparsers.add_parser(
