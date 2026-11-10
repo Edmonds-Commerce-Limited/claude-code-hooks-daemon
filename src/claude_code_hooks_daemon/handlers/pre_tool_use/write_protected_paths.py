@@ -15,6 +15,10 @@ names a listed path and is not known to only read it (:data:`READ_ONLY_VERBS`) i
 (``flock``, ``chronic``), brace groups, ``for`` loops, ``bash -c`` / ``eval`` strings and absolute
 command paths are read through to the command they run. It is a guard against an agent's mistake,
 not against a human or a process running outside Claude Code.
+
+Where a command cannot be read and no listed path is literally named in it (a glob with no
+literal part, such as ``**``), the handler cannot decide: it allows with an advisory and an
+``UNKNOWN-VERDICT`` log line (Plan 00478). A command that names a listed path still denies.
 """
 
 from __future__ import annotations
@@ -54,6 +58,7 @@ from claude_code_hooks_daemon.utils.simple_commands import (
     unquote,
     unroll_for_loops,
 )
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 #: Commands known to only READ the files they are given. A command naming a listed
 #: path that is on none of these lists is denied (fail closed): what it does to
@@ -357,6 +362,28 @@ _UNFOLLOWABLE_CD: Final[re.Pattern[str]] = re.compile(r"[$`*?~]|^-$")
 #: Characters that make a name part of a longer one (`.env` inside `.envrc`).
 _NAME_CHARACTER: Final[str] = r"[\w.-]"
 
+#: Why a call could not be judged by name (Plan 00478): no protected text in any of them.
+_CAUSE_BRACES: Final[str] = (
+    "a command with too many brace spellings to list, and a protected-path glob with no "
+    "literal part to look for in it"
+)
+_CAUSE_UNREADABLE: Final[str] = (
+    "command text the shell parser could not read, and a protected-path glob with no "
+    "literal part to look for in it"
+)
+_CAUSE_TOO_DEEP: Final[str] = (
+    "shell code nested too deep or too large to read, and a protected-path glob with no "
+    "literal part to look for in it"
+)
+_CAUSE_AWK: Final[str] = (
+    "an awk program writing to a destination it computes, which the text does not "
+    "literally tie to a protected path"
+)
+_REPHRASE: Final[str] = (
+    "Write the command out plainly (no unclosed quotes, long brace groups or computed "
+    "destinations) so the guard can read it, or name the protected path literally"
+)
+
 _RULE: Final[Rule] = Rule(
     rule_id=RuleID.WRITE_PROTECTED_PATH,
     blocked="a write, move onto, deletion or truncation of a path the project keeps read-only",
@@ -636,7 +663,8 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
         self._project_root = project_root
-        self._last: tuple[str, str | None] | None = None
+        self._last: tuple[str, str | None, str | None] | None = None
+        self._unknown_cause: str | None = None
 
     def get_default_enabled(self) -> bool:
         """Off until a project lists the paths it keeps read-only."""
@@ -717,25 +745,43 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
                         return glob
         return None
 
-    def _text_naming(self, text: str, *, computed_destination: bool = False) -> str | None:
+    def _text_naming(
+        self, text: str, *, cause: str, computed_destination: bool = False
+    ) -> str | None:
         """The glob that command text we could not read visibly names, else None.
 
         A glob whose last component is wildcard-only (`dir/**`) is named by its
-        literal directory chain. A glob with no literal part at all (`**`) is
-        named by any text: nothing can be told from it, so it stays fail-closed.
+        literal directory chain. A glob with no literal part at all (`**`) has
+        nothing to look for in the text, so the text cannot be judged: that is
+        recorded as an unknown verdict (``cause``), not a denial.
 
         ``computed_destination`` is for text that is a WRITING program whose
         destination it computes (an awk `print > $1`): what it names says
-        nothing about where it writes, so a wildcard-only glob is named by it
-        whatever it mentions, as it was before the directory chain was read.
+        nothing about where it writes, so a wildcard-only glob that the text
+        does not literally mention is an unknown verdict as well.
         """
         for glob in self._globs():
-            pattern = _name_pattern(glob)
-            if pattern is None and not computed_destination:
-                pattern = _directory_pattern(glob)
-            if pattern is None or pattern.search(text):
+            name = _name_pattern(glob)
+            directory = _directory_pattern(glob) if name is None else None
+            pattern = name or directory
+            if pattern is None:
+                self._note_unknown(cause)
+            elif pattern.search(text):
                 return glob
+            elif computed_destination and name is None:
+                self._note_unknown(cause)
         return None
+
+    def _unread_naming(self, unreadable: str | None) -> str | None:
+        """The glob the text the shared scan could not read names, else None."""
+        if unreadable is None:
+            return None
+        return self._text_naming(unreadable, cause=_CAUSE_UNREADABLE)
+
+    def _note_unknown(self, cause: str) -> None:
+        """Remember the first reason this call could not be judged by name."""
+        if self._unknown_cause is None:
+            self._unknown_cause = cause
 
     @staticmethod
     def _runs(command: str, working: str) -> tuple[list[tuple[str | None, str]], bool]:
@@ -797,11 +843,12 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
     # Detection
     # ------------------------------------------------------------------
 
-    def _violation(self, hook_input: dict[str, Any]) -> str | None:
-        """The glob this call breaks, or None when it leaves every listed path alone.
+    def _verdict(self, hook_input: dict[str, Any]) -> tuple[str | None, str | None]:
+        """``(glob, cause)``: the glob this call breaks, or why it could not be judged.
 
-        ``matches`` and ``handle`` ask about the same call back to back, so the
-        last answer is kept and the command is read once.
+        ``(None, None)`` means the call leaves every listed path alone. A glob wins
+        over a cause. ``matches`` and ``handle`` ask about the same call back to
+        back, so the last answer is kept and the command is read once.
         """
         key = repr(
             (
@@ -811,10 +858,12 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             )
         )
         if self._last is not None and self._last[0] == key:
-            return self._last[1]
+            return self._last[1], self._last[2]
+        self._unknown_cause = None
         glob = self._judge(hook_input)
-        self._last = (key, glob)
-        return glob
+        cause = None if glob is not None else self._unknown_cause
+        self._last = (key, glob, cause)
+        return glob, cause
 
     def _judge(self, hook_input: dict[str, Any]) -> str | None:
         if not self._globs():
@@ -865,7 +914,7 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         except TooManyToEnumerateError:
             # Too many spellings to list: the command is judged by whether it
             # visibly names a listed path.
-            return self._text_naming(command)
+            return self._text_naming(command, cause=_CAUSE_BRACES)
         for variant in variants:
             glob = self._command_violation(
                 unroll_for_loops(variant), hook_input, roots, working, depth, judged
@@ -925,7 +974,7 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             glob = self._token_naming(token, roots, bases)
             if glob is not None:
                 return glob
-        return self._text_naming(unreadable) if unreadable is not None else None
+        return self._unread_naming(unreadable)
 
     # ------------------------------------------------------------------
     # Judging the verb each simple command runs (Plan 00499 Phase 1b)
@@ -1208,7 +1257,9 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
                 )
             for operand in files:
                 if _awk_program_writes(operand):
-                    glob = self._text_naming(operand, computed_destination=True)
+                    glob = self._text_naming(
+                        operand, cause=_CAUSE_AWK, computed_destination=True
+                    )
                     if glob is not None:
                         return glob
         return None
@@ -1226,7 +1277,7 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             glob = self._token_naming(token, roots, [base])
             if glob is not None:
                 return glob
-        return self._text_naming(unreadable) if unreadable is not None else None
+        return self._unread_naming(unreadable)
 
     def _nested_violation(
         self,
@@ -1262,7 +1313,7 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
                     if glob is not None:
                         return glob
         except (TooManyToEnumerateError, TimeoutError):
-            return self._text_naming(body)
+            return self._text_naming(body, cause=_CAUSE_TOO_DEEP)
         return None
 
     def _unknown_command_violation(
@@ -1342,7 +1393,8 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
         self._last = None
         if hook_input.get(HookInputField.TOOL_NAME) not in self._TOOLS:
             return False
-        return self._violation(hook_input) is not None
+        glob, cause = self._verdict(hook_input)
+        return glob is not None or cause is not None
 
     def get_rules(self) -> list[Rule]:
         """The Rule backing this handler's denial."""
@@ -1350,9 +1402,11 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny, saying the file is maintained outside the agent."""
-        glob = self._violation(hook_input)
+        glob, cause = self._verdict(hook_input)
         self._last = None
         if glob is None:
+            if cause is not None:
+                return unknown_verdict_allow("write_protected_paths", cause, _REPHRASE)
             return GatingResult(decision=Decision.ALLOW)
         return GatingResult.deny(f"{RuleFormatter().verbose(_RULE)}\n\nPROTECTED PATH: {glob}")
 
@@ -1396,6 +1450,12 @@ class WriteProtectedPathsHandler(PreToolUseHandlerBase):
             "here-stringed into a shell. The rule is the same whether or not the guard "
             "sees the route. Quote a heredoc delimiter (`<<'EOF'`) when its body only "
             "mentions the path.\n\n"
+            "**When the guard cannot tell, it warns instead of denying.** Where a command "
+            "cannot be read (an unclosed quote, a brace group with too many spellings, shell "
+            "code nested too deep, an awk program writing to a computed destination) and the "
+            "listed glob has no literal name to look for in it (`**`, `*`), the call is "
+            "allowed with an advisory and one `UNKNOWN-VERDICT` log line. Text that "
+            "literally names a listed path is still denied.\n\n"
             "**When it is denied, do not look for another route to the same file.** Ask the "
             "human for the change you need; the file is theirs (or the IaC's) to place."
         )

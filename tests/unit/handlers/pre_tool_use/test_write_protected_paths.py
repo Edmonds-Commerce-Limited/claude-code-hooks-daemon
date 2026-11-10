@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 from tests.load_scaling import scaled_seconds
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.write_protected_paths import (
@@ -336,11 +337,14 @@ class TestWildcardOnlyGlobAndHeredocBodies:
         assert guard.matches(_bash(root, command.replace("{root}", str(root)))) is True
 
     @pytest.mark.parametrize("glob", ["**", "*"])
-    def test_a_glob_with_no_literal_directory_stays_fail_closed(
-        self, root: Path, glob: str
+    def test_a_glob_with_no_literal_directory_warns_on_text_it_cannot_read(
+        self, root: Path, glob: str, caplog: pytest.LogCaptureFixture
     ) -> None:
         guard = _make(root, [glob])
-        assert guard.matches(_bash(root, 'true\necho "never closed')) is True
+        hook_input = _bash(root, 'true\necho "never closed')
+        assert guard.matches(hook_input) is True
+        result = guard.handle(hook_input)
+        assert_unknown_verdict(result, caplog, "write_protected_paths", "literal", "not read")
 
 
 class TestWildcardsFollowTheShell:
@@ -1627,6 +1631,88 @@ class TestReviewRound2:
         self, handler: WriteProtectedPathsHandler, root: Path, template: str
     ) -> None:
         assert _denied(handler, root, template) is True
+
+
+class TestAPathNobodyNamedWarnsInsteadOfDenying:
+    """Plan 00478 row 16: no literal mention of a listed path means no verdict, so warn.
+
+    Where the command text visibly names a listed path, the deny stays.
+    """
+
+    _MANY_SPELLINGS = "echo " + "{a,b}" * 20
+
+    def _warned(
+        self,
+        guard: WriteProtectedPathsHandler,
+        root: Path,
+        command: str,
+        caplog: pytest.LogCaptureFixture,
+        *needles: str,
+    ) -> None:
+        hook_input = _bash(root, command)
+        assert guard.matches(hook_input) is True
+        assert_unknown_verdict(guard.handle(hook_input), caplog, "write_protected_paths", *needles)
+
+    def test_a_brace_cap_overflow_under_a_glob_with_no_literal_part_warns(
+        self, root: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        self._warned(_make(root, ["**"]), root, self._MANY_SPELLINGS, caplog, "brace")
+
+    def test_a_brace_cap_overflow_that_names_a_literal_path_is_denied(
+        self, root: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        guard = _make(root, ["**", PROTECTED])
+        hook_input = _bash(root, f"rm {'{a,b}' * 20} ccy.env.local")
+        assert guard.handle(hook_input).decision == Decision.DENY
+
+    def test_code_too_deep_to_read_under_a_glob_with_no_literal_part_warns(
+        self, root: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.handlers.pre_tool_use import write_protected_paths as module
+        from claude_code_hooks_daemon.utils.shell_expansion import TooManyToEnumerateError
+
+        def too_much(_body: str) -> Any:
+            raise TooManyToEnumerateError("too much")
+
+        monkeypatch.setattr(module, "iter_normalised_shell_words", too_much)
+        self._warned(_make(root, ["**"]), root, _nest("true", 4), caplog, "nested")
+
+    def test_code_too_deep_to_read_that_names_the_path_is_still_denied(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.handlers.pre_tool_use import write_protected_paths as module
+        from claude_code_hooks_daemon.utils.shell_expansion import TooManyToEnumerateError
+
+        def too_much(_body: str) -> Any:
+            raise TooManyToEnumerateError("too much")
+
+        monkeypatch.setattr(module, "iter_normalised_shell_words", too_much)
+        guard = _make(root)
+        assert guard.matches(_bash(root, _nest("echo ccy.env.local", 4))) is True
+        assert guard.handle(_bash(root, _nest("echo ccy.env.local", 4))).decision == Decision.DENY
+
+    def test_an_awk_program_writing_to_a_computed_destination_warns(
+        self, root: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        (root / "protected").mkdir()
+        guard = _make(root, ["protected/**"])
+        self._warned(guard, root, "awk '{print > $1}' notes.txt", caplog, "awk")
+
+    def test_an_awk_program_that_names_the_directory_is_still_denied(self, root: Path) -> None:
+        (root / "protected").mkdir()
+        guard = _make(root, ["protected/**"])
+        hook_input = _bash(root, "awk '{print > \"protected/\" $1}' notes.txt")
+        assert guard.handle(hook_input).decision == Decision.DENY
+
+    def test_a_named_path_beside_an_unnamed_glob_is_denied(self, root: Path) -> None:
+        guard = _make(root, ["**", PROTECTED])
+        hook_input = _bash(root, f'true\necho "never closed {root}/{PROTECTED}')
+        assert guard.handle(hook_input).decision == Decision.DENY
+
+    def test_the_warning_is_not_kept_for_the_next_call(self, root: Path) -> None:
+        guard = _make(root, ["**"])
+        assert guard.matches(_bash(root, 'true\necho "never closed')) is True
+        assert guard.matches(_bash(root, "echo hello")) is False
 
 
 class TestGuidanceAndAcceptance:
