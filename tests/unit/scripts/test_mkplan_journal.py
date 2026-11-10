@@ -379,9 +379,7 @@ class TestEntryShape:
         assert "waiting on upstream" in content
 
     @pytest.mark.parametrize("ref_args", [[], ["--ref", "T2.1"]])
-    def test_titled_heading_is_single_spaced(
-        self, plan_repo: Path, ref_args: list[str]
-    ) -> None:
+    def test_titled_heading_is_single_spaced(self, plan_repo: Path, ref_args: list[str]) -> None:
         """Plan 00594 class 9: a run of spaces in a heading is collapsed by
         common markdown formatters, and an entry is immutable once committed,
         so the scaffolder must emit the already-collapsed form."""

@@ -7655,11 +7655,11 @@ def _is_project_journal_file(path: Path, project_root: Path) -> bool:
 
     if not (project_root / ".claude" / "hooks-daemon.yaml").is_file():
         return is_journal_file(path)
-    try:
-        relative = path.resolve().relative_to(project_root.resolve())
-    except ValueError:
-        relative = path
-    return is_journal_file(relative)
+    root_prefix = f"{project_root.resolve()}{os.sep}"
+    resolved = str(path.resolve())
+    if not resolved.startswith(root_prefix):
+        return is_journal_file(path)
+    return is_journal_file(Path(resolved[len(root_prefix) :]))
 
 
 def cmd_format_markdown(args: argparse.Namespace) -> int:
