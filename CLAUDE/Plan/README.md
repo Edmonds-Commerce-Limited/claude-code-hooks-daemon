@@ -30,8 +30,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00420: dangerous command rule modes and config migration](00420-dangerous-command-rule-modes-and-config-migration/PLAN.md) - Not Started (per-rule-ID `block`/`warn`/`off` across the dangerous-command handlers, plus the loud, migrating config upgrade that a moved key requires)
 
-- [00579: copy seeded files and worktree removal](00579-copy-seeded-files-and-worktree-removal/PLAN.md) - Not Started (GitHub #164, owner-ruled: a seeded copy identical to its source in the main checkout cannot be lost, so it never blocks a worktree removal; a diverged copy still blocks and is named; the guard reads the seed list directly; #173 stays separate)
-
 - [00582: guard rollout and transitional grandfathering](00582-guard-rollout-and-transitional-grandfathering/PLAN.md) - Not Started (owner request: one best-practice document for introducing or tightening a guard, and a shared shrink-only, deadline-bound grandfather snapshot recorded by a command, adopted first by the branch guards; past the deadline the normal deny applies)
 
 - [00585: repository facts service](00585-repository-facts-service/PLAN.md) - Not Started (owner ruling: one rich, automatically refreshed cache of GitHub repository facts — visibility, native drafts, default branch, branch protection, the account's permission — with per-fact age and an `unknown` state, never hand-kept config; per-clone and untracked, not the Plan 00564 meta ref; Plan 00584 and `issue-validity` consume it)
@@ -204,6 +202,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00580: optional seed entries are not missing](Completed/00580-optional-seed-entries-are-not-missing/PLAN.md) - Complete at `1b1cbb079` (CI run 42636878356 success) + the archiving commit (GitHub #167, closed: `check-worktree-seed` no longer lists an absent `optional: true` seed entry as MISSING or tells the reader to remove it; an absent required entry still is; release note 016)
 
+- [00579: copy seeded files and worktree removal](Completed/00579-copy-seeded-files-and-worktree-removal/PLAN.md) - Complete at merge `a26be56b0` (main CI run 42762876632 green) + the archiving commit (#164, closed: a copy-mode seed byte-identical to its source in the main checkout no longer blocks a worktree removal; a diverged, missing or worktree-resolving source still blocks and is named; bounded comparison; release note 030)
+
 - [00577: forwarder stubs shellcheck clean](Completed/00577-forwarder-stubs-shellcheck-clean/PLAN.md) - Complete at `43250b5fb` (CI run 42627973690 success) + the archiving commit (GitHub #163, closed: generated hook stubs export the relay-unused marker the sourced init.sh reads, so `shellcheck --severity=warning` is clean with no suppression; a test shellchecks the stub generated for every event; release note 015)
 
 - [00576: hotfix release fast path](Completed/00576-hotfix-release-fast-path/PLAN.md) - Complete at merge `8bfcad71f` (PR #190) + the archiving commit (owner request after v3.73.1: `/release hotfix` runs the RELEASING.md "Hotfix fast path" and the state file and `release_blocker` name the mode; advise-severity plan/docs QA findings never fail CI; a test pins the release gate's cancel-in-progress concurrency, which the journal shows did cancel the superseded v3.73.1 run; release note 013)
@@ -243,8 +243,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 - [00553: supervisor indicator scoped to session](Completed/00553-supervisor-indicator-scoped-to-session/PLAN.md) - Complete at `2234dc879` (green CI run 40424574049) + the archiving commit (#140: the green top hat counts only a supervisor whose own process tree holds the session; release note 004)
 
 - [00552: conflict marker hook bricking](Completed/00552-conflict-marker-hook-bricking/PLAN.md) - Complete at merges `a5a2e6970`, `b5c7d834c`, `5612cce6d` + the archiving commit (owner field report: hook stubs fail open on a corrupt `init.sh`, a `.gitattributes` `-merge` block, and `repair-install`; release note 003)
-
-- [00551: supervisor own session ids from child tree](Completed/00551-supervisor-own-session-ids-from-child-tree/PLAN.md) - Complete at merges `e39f0ee88` + `77749bd36` (green CI run 39962905189) + the archiving commit (#138, closed: own session ids come only from the supervisor's own process tree, never a `/proc`-wide scan; the hot-reload fallback walks the host tree; release note 027 in UNRELEASED)
 
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
@@ -299,9 +297,9 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - **Total Plans Created**: 592 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 499 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 500 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 70 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 69 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

@@ -1,6 +1,6 @@
 # Plan 00579: copy seeded files and worktree removal
 
-**Status**: Not Started
+**Status**: Complete (2026-11-10)
 **Created**: 2026-11-09
 **Owner**: dev
 **Priority**: Medium
@@ -53,23 +53,27 @@ on its own by Plan 00580.
 
 ### Phase 1: Fix
 
-- [ ] ⬜ **Task 1.1**: RED tests in real temporary repositories: a merged clean worktree whose only leftover is an
+- [x] ✅ **Task 1.1**: RED tests in real temporary repositories: a merged clean worktree whose only leftover is an
   identical seeded copy is removable; the same with a diverged copy is denied and names the file; a missing source
   counts as diverged
-- [ ] ⬜ **Task 1.2**: GREEN in `core/branch_cleanup.py` (and wherever the removal judge lists unregenerable ignored
+- [x] ✅ **Task 1.2**: GREEN in `core/branch_cleanup.py` (and wherever the removal judge lists unregenerable ignored
   entries), reading the seed entries through the existing seed-list loader
-- [ ] ⬜ **Task 1.3**: release-notes callout
+- [x] ✅ **Task 1.3**: release-notes callout
 
 ### Phase 2: Delivery
 
-- [ ] ⬜ **Task 2.1**: targeted QA, merge, verify CI, close #164
+- [x] ✅ **Task 2.1**: targeted QA, merge, verify CI, close #164
 
 ## Success Criteria
 
-- [ ] The new tests failed before the fix and pass after it, in every direction above
-- [ ] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
-- [ ] Merged to main with green CI; #164 closed
+- [x] The new tests failed before the fix and pass after it, in every direction above
+- [x] Release-bound consequence recorded: a callout in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+  (`030-seeded-copies-do-not-block-worktree-removal.md`)
+- [x] Merged to main with green CI; #164 closed
 
 ## Delivery & Milestones
 
-- (pending)
+- Fix `ab67ed785`; review fixes `5d173fdd6` (a source resolving into the worktree blocks; the comparison is bounded
+  at 64 MiB / 2000 files, over budget counts as differing). Independent review approved
+  (`subagent-reports/task-1-review-code-reviewer.md`); the coordinator re-ran the review-fix tests against the
+  pre-fix source and saw them fail. Merged to main as `a26be56b0`, main CI run 42762876632 green; #164 closed.
