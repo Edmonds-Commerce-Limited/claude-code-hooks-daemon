@@ -126,7 +126,8 @@ class TestDisposition:
         assert "--reap" in by_name["worktree-reap-reap"].cli_argv
         assert "--fix" in by_name["check-permissions-fix"].cli_argv
         assert by_name["branch-sweep"].cli_argv == ("branch-sweep",)
-        assert by_name["branch-sweep-clean"].cli_argv == ("branch-sweep", "--clean")
+        # --clean alone only previews (Plan 00594 Task 3.4): the acting step must say --apply.
+        assert by_name["branch-sweep-clean"].cli_argv == ("branch-sweep", "--clean", "--apply")
         assert by_name["branch-sweep-clean"].confirmation_required
         assert by_name["remote-docs-check"].cli_argv == ("remote-docs", "check")
         assert by_name["remote-docs-refresh"].cli_argv == ("remote-docs", "refresh")

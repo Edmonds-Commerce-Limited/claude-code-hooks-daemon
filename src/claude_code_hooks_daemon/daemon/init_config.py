@@ -61,7 +61,7 @@ _BRANCHES_BLOCK = (
     "    cap: null                # null = wip.cap\n"
     "    max_age_days: null       # null = the dormancy preset's block_days\n"
     "    mode: block              # block | warn | off\n"
-    "  merged:                    # merged but not deleted: branch-sweep --clean clears them\n"
+    "  merged:                    # merged but not deleted: branch-sweep --clean --apply clears them\n"
     "    cap: null                # null = wip.cap\n"
     "    max_age_days: null       # how long a branch-keep lasts; null = block_days\n"
     "    mode: block              # block | warn | off\n"

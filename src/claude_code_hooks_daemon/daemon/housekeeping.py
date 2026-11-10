@@ -159,6 +159,7 @@ HOUSEKEEPING_STEPS: Final[tuple[HousekeepingStep, ...]] = (
         "Delete the branches branch-sweep proved merged or patch-equivalent, with a recovery bundle",
         "branch-sweep",
         "--clean",
+        "--apply",
     ),
     HousekeepingStep(
         name="optimise",
