@@ -442,6 +442,8 @@ _NEGATION: Final[str] = "!"
 _GIT_EXCLUDE_MAGIC: Final[tuple[str, ...]] = (":(exclude)", ":!", ":^")
 _WILDCARD_CHARS: Final[str] = "*?[{"
 _SHELL_EXPANSION: Final[re.Pattern[str]] = re.compile(r"[$`]")
+# git's global options (other than -C) whose value is the next word.
+_GIT_VALUE_OPTIONS: Final[frozenset[str]] = frozenset({"-c", "--namespace", "--exec-path"})
 
 
 @dataclass(frozen=True)
@@ -499,6 +501,36 @@ def _is_prefix(shorter: list[str], longer: list[str]) -> bool:
     return longer[: len(shorter)] == shorter
 
 
+def _git_working_directory(words: list[str], grep_index: int) -> str | None:
+    """The directory a ``git [-C <abs>]... grep`` runs in, or None when it cannot be placed.
+
+    Only a literal absolute ``-C`` value is placeable. ``--git-dir`` and
+    ``--work-tree`` move the tree somewhere this reader does not follow, and a
+    ``-C`` value that is relative or built by expansion has no known target.
+    """
+    git_index = next(
+        (i for i in range(grep_index - 1, -1, -1) if posixpath.basename(words[i]) == "git"),
+        None,
+    )
+    if git_index is None:
+        return None
+    directory: str | None = None
+    position = git_index + 1
+    while position < grep_index:
+        word = words[position]
+        if word == "-C":
+            value = words[position + 1] if position + 1 < grep_index else ""
+            if not posixpath.isabs(value) or _SHELL_EXPANSION.search(value):
+                return None
+            directory = value
+            position += 2
+        elif word.partition("=")[0] in ("--git-dir", "--work-tree"):
+            return None
+        else:
+            position += 2 if word in _GIT_VALUE_OPTIONS else 1
+    return directory
+
+
 def _recursive_search_reaches(
     segment: str, globs: tuple[str, ...], *, cwd: str | None, piped_in: bool
 ) -> _Reach | None:
@@ -526,7 +558,9 @@ def _recursive_search_reaches(
     if not scan.recursive:
         return None
     if relocated:
-        return unplaceable
+        cwd = _git_working_directory(words, start - 1)
+        if cwd is None:
+            return unplaceable
     pathspec_excludes: list[str] = []
     unplaced = False
     roots = scan.operands

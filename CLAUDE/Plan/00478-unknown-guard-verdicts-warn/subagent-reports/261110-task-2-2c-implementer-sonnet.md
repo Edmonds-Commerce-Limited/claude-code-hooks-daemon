@@ -37,3 +37,15 @@ The implementation was written before the tests were run, so the RED run was pro
 ## Text updated
 
 Rule/`get_claude_md` text of the five src handlers, the module docstring of `release_merge_freeze`, the `rule_ids.py` comment, `docs/guides/HANDLER_REFERENCE.md` (curl, root recursion, flaggable, journal, reference repo table), release note 028.
+
+## Review fixes
+
+Review: `261110-task-2-2c-review-code-reviewer.md`. Probe `untracked/scratch/478-2c-review/test_probe_478_2c.py`: 12 failed before, 17 passed after.
+
+- plan_journal_guard (critical): a destination with a literal day-file name, or a literal `JOURNAL/` before its first run-time part, is a positive finding and denies; only a destination unknown all the way through warns. The flipped deny tests are restored, with the reviewer's cases added.
+- curl_pipe_shell (critical): an unresolved word right after a value option (`-W`, `-X`, `-I`, `-r`) is that option's value, not an unknown program, so those pipes deny again.
+- curl_pipe_shell (suggestion, done): a shell name after a wrapper with an unresolved argument (`sudo $FLAG bash`, `env $X bash`) denies.
+- flaggable_content_channel_guard (important): a literal absolute `git -C /path` is the working directory; relative or built `-C` values and `--git-dir`/`--work-tree` still warn.
+- Release note 028 updated.
+
+QA: `llm_qa.py changed --range main..HEAD --allow-unmapped` gave 42/42 PASSED; the holding-area test gave 19 passed.

@@ -101,6 +101,8 @@ _UNREADABLE_WORD = "\x00"
 # What closes the text a pipe stage can sit in, glued to the stage's last word.
 _CLOSING_SYNTAX = ")`'\""
 
+_EXPANSION = re.compile(r"[$`]")
+
 _DOWNLOADER = re.compile(r"\b(?:curl|wget)\b", re.IGNORECASE)
 _DOWNLOADER_NAMES = frozenset({"curl", "wget"})
 _SHELL_NAMES = frozenset({"bash", "sh", "zsh", "ksh", "dash"})
@@ -167,7 +169,11 @@ def _stage_verdict(words: list[str | None]) -> _Verdict:
     skip_next = False
     for word in words[1:]:
         if word is None:
-            unresolved = True
+            # The value of `-W`/`-I`/`-r` is not the program, whatever it expands to.
+            if skip_next:
+                skip_next = False
+            else:
+                unresolved = True
             continue
         if skip_next:
             skip_next = False
@@ -220,7 +226,16 @@ def _interpreter_head(words: list[str]) -> int | None:
     if start >= len(words):
         return None
     name = words[start].rstrip(_CLOSING_SYNTAX).rsplit("/", 1)[-1]
-    return start if _INTERPRETER_NAME.fullmatch(name) else None
+    if _INTERPRETER_NAME.fullmatch(name):
+        return start
+    if start > 0 and _EXPANSION.search(words[start]):
+        # A wrapper's argument that cannot be read (`sudo $FLAG bash`) hides where
+        # the command begins, but a shell named after it is positively present.
+        for index in range(start + 1, len(words)):
+            later = words[index].rstrip(_CLOSING_SYNTAX).rsplit("/", 1)[-1].lower()
+            if later in _SHELL_NAMES:
+                return index
+    return None
 
 
 def _stage_words(text: str) -> tuple[list[str], list[str | None]]:

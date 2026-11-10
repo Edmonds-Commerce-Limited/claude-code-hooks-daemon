@@ -632,6 +632,8 @@ class TestUnplaceableRootsWarnInsteadOfBlocking:
             "grep -rn foo $SOME_DIR",
             'rg foo "$S"',
             "git -C elsewhere grep foo",
+            "git -C $REPO grep foo",
+            "git --git-dir=/x/.git grep foo",
             "git grep foo -- ':(top)x'",
             "grep -rn 'unterminated",
         ],
@@ -671,6 +673,20 @@ class TestUnplaceableRootsWarnInsteadOfBlocking:
     ) -> None:
         result = flagged_handler.handle(_bash_in(command))
         assert result.decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"git -C {_ROOT} grep -n foo",
+            f"git -C {_ROOT} grep -n foo -- tests",
+            "grep -rn foo tests --exclude-dir=$X",
+            "rg foo $A tests | sort",
+        ],
+    )
+    def test_a_literal_absolute_git_dash_c_is_placed_and_still_denies(
+        self, flagged_handler: FlaggableContentChannelGuardHandler, command: str
+    ) -> None:
+        assert flagged_handler.handle(_bash_in(command)).decision == Decision.DENY, command
 
     def test_unanchored_glob_says_it_cannot_be_excluded(self, project_root: str) -> None:
         handler = FlaggableContentChannelGuardHandler()

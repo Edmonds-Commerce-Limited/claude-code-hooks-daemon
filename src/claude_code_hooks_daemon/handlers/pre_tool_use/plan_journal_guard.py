@@ -447,6 +447,11 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         unplaced: _JournalTarget | None = None
         for raw in writes.destinations:
             if _needs_expansion(raw) or (writes.directories and not _is_anchored(raw)):
+                if _is_literal_journal_write(raw):
+                    # `JOURNAL/` or a day-file name is spelled out: a journal
+                    # write is certain, only the rest of the path is built later.
+                    found = self._unplaced_target(raw, writes.directories, cwd, plan_dir)
+                    return replace(found, placed=True)
                 if unplaced is None and _could_name_dayfile(raw, writes.directories):
                     unplaced = self._unplaced_target(raw, writes.directories, cwd, plan_dir)
                 continue
@@ -834,6 +839,23 @@ def _could_mention_dayfile(text: str) -> bool:
         if _DAYFILE_MENTION_RE.search(word) or _PLAN_FOLDER_MENTION_RE.search(word):
             return True
         if _names_journal_dir(word):
+            return True
+    return False
+
+
+def _is_literal_journal_write(token: str) -> bool:
+    """Whether a destination positively lands in a journal despite an unresolved part.
+
+    True when a day-file name is spelled out, or a literal `JOURNAL/` folder
+    comes before the first part built at run time. A destination unknown all
+    the way through is not one.
+    """
+    if _DAYFILE_MENTION_RE.search(token):
+        return True
+    for part in token.split(_PATH_SEPARATOR)[:-1]:
+        if _needs_expansion(part):
+            return False
+        if part == DEFAULT_JOURNAL_DIR_NAME:
             return True
     return False
 

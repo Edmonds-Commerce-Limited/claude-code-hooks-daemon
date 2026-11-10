@@ -574,6 +574,20 @@ class TestUnplaceableDestinationsWarn:
             f"echo x >> {_live_journal_dir()}/00461-Journal-`date -u +%y-%m-%d`.md",
             f"echo x >> {_live_journal_dir()}/*.md",
             f"echo x >> $PLANS/{LIVE_FOLDER}/JOURNAL/{LIVE_DAYFILE}",
+            f"cat > {_live_journal_dir()}/$(date -u +%F)/$(date -u +%H%M%SZ)-note.md <<'EOF'\nx\nEOF",
+            f"echo x | tee -a {_live_journal_dir()}/$(date -u +%F)/a.md untracked/scratch/b.md",
+            f"echo x | tee -a untracked/scratch/$N.md {_live_journal_dir()}/{LIVE_DAYFILE}",
+        ],
+    )
+    def test_a_literal_journal_part_before_the_unresolved_one_is_denied(
+        self, handler: PlanJournalGuardHandler, project: Path, command: str
+    ) -> None:
+        result = handler.handle(_bash(command, project))
+        assert result.decision == Decision.DENY, command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
             f'cd {_live_journal_dir()} && echo x >> "$F"',
         ],
     )
