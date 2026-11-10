@@ -190,7 +190,7 @@ names, people or hashes appear here.
 - [ ] ⬜ **Task 4.3**: The park record survives a rejected push, and a merge
   clears it visibly.
 - [ ] ⬜ **Task 4.4**: Pools are counted per owner.
-- [x] ✅ **Task 4.5**: (done: `clear_label_stale_at_tips`; release note 035)
+- [x] ✅ **Task 4.5**: (done: `clear_label_stale_at_tips`; release note 037)
   A keep covers every branch name at the kept tip, in the creation guard as
   in the sweep. Client report: a same-tip `-parked` twin stayed stale to the
   guard after its sibling was kept, and a same-reason re-keep was refused
