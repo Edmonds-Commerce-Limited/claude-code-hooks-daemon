@@ -6602,16 +6602,19 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
 
     Returns:
         0 when the park stands (a failed push is reported, with its retry command),
-        1 when it could not be written, 2 on a usage error.
+        1 when it could not be written, 2 on a usage error, ``EXIT_PARKED_NOT_PUSHED``
+        when the park stands locally but the push was refused or failed.
     """
     from claude_code_hooks_daemon.core.branch_creation import (
         LABELS_RELATIVE_PATH,
         clear_label_stage,
     )
     from claude_code_hooks_daemon.core.branch_park import (
+        EXIT_PARKED_NOT_PUSHED,
         BranchParkError,
         BranchParkSameReason,
         park_branch,
+        read_park_record,
     )
 
     if args.clear and args.reason:
@@ -6619,6 +6622,7 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
         return 2
     repo = get_project_path(getattr(args, "project_root", None))
     branches = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml").branches
+    cleared_record = read_park_record(repo, args.name) if args.clear else None
     try:
         result = park_branch(
             repo, args.name, reason=args.reason, remote=branches.remote, clear=args.clear
@@ -6633,9 +6637,15 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
     print(f"{verb} {args.name} at {result.sha[:12]}.")
     if not args.clear:
         clear_label_stage(repo / LABELS_RELATIVE_PATH, args.name)
+    if cleared_record is not None:
+        print(f"Park record cleared: {args.name} ({cleared_record.reason})")
     if not result.pushed:
-        print(f"WARNING: the push failed ({result.push_error}); the local {verb.lower()} stands.")
+        print(
+            f"WARNING: {verb.lower()} locally, not pushed: {args.name} stands {verb.lower()} here, "
+            f"but git refused or failed the push: {result.push_error}"
+        )
         print(f"Retry: {result.retry_command}")
+        return EXIT_PARKED_NOT_PUSHED
     return 0
 
 

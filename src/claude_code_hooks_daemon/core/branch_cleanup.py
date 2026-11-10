@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.core.agent_ownership import (
     running_holds,
 )
 from claude_code_hooks_daemon.core.branch_inventory import BranchRecord, BranchState
+from claude_code_hooks_daemon.core.branch_park import clear_park_record
 from claude_code_hooks_daemon.core.remote_branch_proof import (
     REMOTES_PREFIX,
     named_ref_problem,
@@ -131,6 +132,7 @@ class CleanupReport:
     commands: tuple[str, ...] = ()
     bundle: Path | None = None
     deleted_remote: tuple[str, ...] = ()
+    park_cleared: tuple[str, ...] = ()
 
 
 def _never_work(
@@ -521,6 +523,19 @@ def _classify(
     )
 
 
+def _clear_parks(repo: Path, names: Sequence[str]) -> tuple[str, ...]:
+    """Clear the park record of each merged branch; ``"<name>: <reason>"`` for each cleared.
+
+    A merge ends a park, so the record goes with it and the report says so.
+    """
+    cleared: list[str] = []
+    for name in names:
+        record = clear_park_record(repo, name)
+        if record is not None:
+            cleared.append(f"{name}: {record.reason}")
+    return tuple(cleared)
+
+
 def cleanup_after_merge(
     repo: Path,
     names: Sequence[str],
@@ -552,6 +567,7 @@ def cleanup_after_merge(
     deleted: list[str] = []
     skipped: list[str] = []
     commands: list[str] = []
+    park_cleared: list[str] = []
     delete_command = (
         daemon_cli_command_for_docs("delete-branch") + " {name} --protected-ref " + target
     )
@@ -580,6 +596,7 @@ def cleanup_after_merge(
         if verdict.tier not in MERGED_TIERS:
             skipped.append(f"{name}: {verdict.detail}")
             continue
+        park_cleared += _clear_parks(repo, [name])
         if held_by is not None:
             skipped.append(f"{name}: checked out in the worktree {held_by}")
             commands += [f"git worktree remove {held_by}", delete_command.format(name=name)]
@@ -605,7 +622,10 @@ def cleanup_after_merge(
         if remote is not None:
             commands.append(remote)
     return CleanupReport(
-        deleted=tuple(deleted), skipped=tuple(skipped), commands=tuple(dict.fromkeys(commands))
+        deleted=tuple(deleted),
+        skipped=tuple(skipped),
+        commands=tuple(dict.fromkeys(commands)),
+        park_cleared=tuple(park_cleared),
     )
 
 
@@ -658,6 +678,7 @@ def delete_if_merged(
     )
     if verdict.refusal is not None or verdict.tier not in MERGED_TIERS:
         return CleanupReport(skipped=(f"{name}: {verdict.detail}",))
+    park_cleared = _clear_parks(repo, [name])
     report = delete_branches(
         repo,
         [name],
@@ -669,12 +690,14 @@ def delete_if_merged(
         line_targets=line_targets,
     )
     if name not in report.deleted:
-        return CleanupReport(skipped=tuple(f"{name}: {b}" for b in report.blockers))
+        return CleanupReport(
+            skipped=tuple(f"{name}: {b}" for b in report.blockers), park_cleared=park_cleared
+        )
     commands = [f"git branch {name} {verdict.tip}"]
     remote = remote_delete_advice(repo, config, default, name)
     if remote is not None:
         commands.append(remote)
-    return CleanupReport(deleted=(name,), commands=tuple(commands))
+    return CleanupReport(deleted=(name,), commands=tuple(commands), park_cleared=park_cleared)
 
 
 def _remove_worktree(repo: Path, path: Path) -> str | None:
@@ -821,6 +844,7 @@ def clean_sweep(
 
     deleted: tuple[str, ...] = ()
     bundle: Path | None = None
+    park_cleared = _clear_parks(repo, proven)
     if proven:
         report = delete_branches(
             repo,
@@ -865,6 +889,7 @@ def clean_sweep(
         commands=tuple(commands),
         bundle=bundle,
         deleted_remote=tuple(deleted_remote),
+        park_cleared=park_cleared,
     )
 
 
@@ -985,6 +1010,9 @@ def render(report: CleanupReport) -> list[str]:
     lines += [f"Removed worktree: {path}" for path in report.removed_worktrees]
     if report.deleted:
         lines.append(f"Deleted branch(es): {', '.join(report.deleted)}")
+    for cleared in report.park_cleared:
+        name, _, reason = cleared.partition(": ")
+        lines.append(f"Park cleared: {name} ({reason})")
     if report.deleted_remote:
         lines.append(f"Deleted remote branch(es): {', '.join(report.deleted_remote)}")
     if report.bundle is not None:
