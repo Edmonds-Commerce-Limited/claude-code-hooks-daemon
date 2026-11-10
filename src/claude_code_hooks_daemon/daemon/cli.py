@@ -6586,6 +6586,7 @@ def cmd_branch_keep(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.core.branch_creation import (
         LABELS_RELATIVE_PATH,
         clear_label_stale,
+        clear_label_stale_at_tips,
     )
     from claude_code_hooks_daemon.core.branch_keep import (
         BranchKeepError,
@@ -6624,6 +6625,9 @@ def cmd_branch_keep(args: argparse.Namespace) -> int:
             now=time.time(),
         )
     except BranchKeepSameReason as e:
+        # Already kept at this tip: the guard's snapshot must agree all the same.
+        clear_label_stale(repo / LABELS_RELATIVE_PATH, args.name)
+        clear_label_stale_at_tips(repo / LABELS_RELATIVE_PATH, tips)
         print(f"ERROR: branch-keep: {e}", file=sys.stderr)
         return 2
     except BranchKeepError as e:
@@ -6631,6 +6635,7 @@ def cmd_branch_keep(args: argparse.Namespace) -> int:
         return 1
     print(f"Kept {args.name}: {args.reason}")
     clear_label_stale(repo / LABELS_RELATIVE_PATH, args.name)
+    clear_label_stale_at_tips(repo / LABELS_RELATIVE_PATH, tips)
     if not result.pushed:
         print(f"WARNING: the push failed ({result.push_error}); the local keep stands.")
         print(f"Retry: {result.retry_command}")

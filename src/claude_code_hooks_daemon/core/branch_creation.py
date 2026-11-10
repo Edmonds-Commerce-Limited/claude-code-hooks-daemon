@@ -19,7 +19,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, Literal
@@ -197,6 +197,34 @@ def clear_label_stale(path: Path, name: str) -> None:
     if name not in labels:
         return
     labels[name] = {**labels[name], "stale": None}
+    try:
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(labels, sort_keys=True), encoding="utf-8")
+        temporary.replace(path)
+    except OSError as exc:
+        log_and_continue(
+            logger, exc, reason="the next SessionStart rewrites the snapshot from the inventory"
+        )
+
+
+def clear_label_stale_at_tips(path: Path, tips: Iterable[str]) -> None:
+    """Drop the stale mark of every name labelled at one of ``tips``.
+
+    A keep is a note on the tip commit, so it keeps every branch name at that
+    tip; clearing only the name the caller typed would leave a same-tip
+    sibling stale to this guard while the sweep reports it kept (Plan 00594).
+    """
+    wanted = set(tips)
+    labels = read_labels(path)
+    names = [
+        name
+        for name, label in labels.items()
+        if label.get("stale") and wanted & {label.get("local_tip"), label.get("remote_tip")}
+    ]
+    if not names:
+        return
+    for name in names:
+        labels[name] = {**labels[name], "stale": None}
     try:
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(labels, sort_keys=True), encoding="utf-8")
