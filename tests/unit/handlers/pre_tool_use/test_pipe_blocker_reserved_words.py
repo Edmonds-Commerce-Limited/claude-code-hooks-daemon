@@ -80,6 +80,7 @@ class TestEveryReservedWordIsSkipped:
     ) -> None:
         """Skipping the word must not launder the pipe: `do pytest | head` still denies."""
         assert handler.matches(_bash(f"{prefix}pytest tests/ | head")) is True
+        assert handler.handle(_bash(f"{prefix}pytest tests/ | head")).decision == "deny"
 
     @pytest.mark.parametrize("prefix", _PREFIXES)
     def test_the_expensive_producer_is_named_as_itself(

@@ -196,3 +196,25 @@ class TestPlan00200FalsePositivesStayFixed:
     ) -> None:
         command = f'git commit -m "fix" && pytest tests/{TO_TAIL_20}'
         assert handler.matches(_bash(command)) is True
+
+
+class TestTheExpensiveSubstitutionsAreDeniedByHandle:
+    """handle()'s verdict for each blocked shape above (Plan 00478 review I1).
+
+    An unknown producer only warns, so a matches()-only assertion no longer
+    proves a deny.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f'git commit -m "$(pytest tests/{TO_TAIL})"',
+            f'git commit -m "result: `pytest tests/{TO_TAIL}`"',
+            f'git tag -a v1.0.0 -m "$(pytest tests/{TO_TAIL})"',
+            f'git commit --message "$(pytest tests/{TO_TAIL})"',
+            f"python -m pytest tests/{TO_TAIL}",
+            f'git commit -m "fix" && pytest tests/{TO_TAIL_20}',
+        ],
+    )
+    def test_denied(self, handler: PipeBlockerHandler, command: str) -> None:
+        assert handler.handle(_bash(command)).decision == "deny"
