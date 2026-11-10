@@ -754,6 +754,13 @@ class ClaudeMdInjector:
         if off_home is not None:
             logger.info("ClaudeMdInjector: not auto-committing %s: %s", filename, off_home)
             return
+        if branches is not None and not branches.home_commit:
+            logger.info(
+                "ClaudeMdInjector: wrote %s but not committing it (branches.home_commit: "
+                "false); include it in your next pull request",
+                filename,
+            )
+            return
 
         held_by = ClaudeMdInjector._uncommitted_handler_source(cwd, handler_sources)
         if held_by is not None:
