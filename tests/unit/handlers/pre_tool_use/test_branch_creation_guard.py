@@ -233,6 +233,58 @@ class TestHandle:
         assert any("continue there" in line for line in result.context)
 
 
+class TestBranchPracticeAdvisories:
+    """Recovery-copy names and nested worktrees draw an advisory, never a deny."""
+
+    @pytest.fixture
+    def roomy(self, handler: BranchCreationGuardHandler) -> BranchCreationGuardHandler:
+        handler._branches = handler._branches.model_copy(
+            update={"wip": BranchWipConfig(cap=50, mode="block")}
+        )
+        return handler
+
+    def test_recovery_shaped_branch_draws_the_archive_advice(
+        self, roomy: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        result = roomy.handle(_bash("git switch -c rescue/plan-9", repo))
+        assert result.decision == Decision.ALLOW
+        assert any("refs/archive/rescue/plan-9" in line for line in result.context)
+
+    def test_ordinary_branch_draws_no_archive_advice(
+        self, roomy: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        result = roomy.handle(_bash("git switch -c fresh", repo))
+        assert not any("refs/archive" in line for line in result.context)
+
+    def test_recovery_advice_does_not_hide_the_cap_deny(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        result = handler.handle(_bash("git switch -c backup/x", repo))
+        assert result.decision == Decision.DENY
+
+    def test_nested_worktree_names_the_main_checkout(
+        self, roomy: BranchCreationGuardHandler, repo: Path, tmp_path: Path
+    ) -> None:
+        linked = tmp_path / "linked"
+        _git(repo, "worktree", "add", "-q", "-b", "three", str(linked))
+        result = roomy.handle(_bash("git worktree add -b four inner", linked))
+        assert result.decision == Decision.ALLOW
+        assert any(
+            "never nested" in line and str(repo.resolve()) in line for line in result.context
+        )
+
+    def test_worktree_from_the_main_checkout_draws_no_nesting_advice(
+        self, roomy: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        result = roomy.handle(_bash("git worktree add -b four .claude/worktrees/four", repo))
+        assert not any("never nested" in line for line in result.context)
+
+    def test_guidance_states_the_practice(self, handler: BranchCreationGuardHandler) -> None:
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "refs/archive" in guidance and "never nested" in guidance
+
+
 def test_rules_guidance_and_acceptance_tests(handler: BranchCreationGuardHandler) -> None:
     assert [rule.rule_id for rule in handler.get_rules()] == [
         "R-BRANCH-WIP-CAP",

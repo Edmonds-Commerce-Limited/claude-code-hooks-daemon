@@ -35,6 +35,8 @@ _SWITCH_SHORT: Final[tuple[str, ...]] = ("-c", "-C")
 _CHECKOUT_CREATE: Final[frozenset[str]] = frozenset({"-b", "-B", "--orphan"})
 _CHECKOUT_SHORT: Final[tuple[str, ...]] = ("-b", "-B")
 _WORKTREE_CREATE: Final[frozenset[str]] = frozenset({"-b", "-B"})
+#: ``git worktree add`` options that consume the next word as their value.
+_WORKTREE_VALUED: Final[frozenset[str]] = frozenset({"-b", "-B", "--reason"})
 _WORKTREE_DETACH: Final[frozenset[str]] = frozenset({"-d", "--detach"})
 _BRANCH_CREATE_OPTIONS: Final[frozenset[str]] = frozenset(
     {
@@ -134,3 +136,26 @@ def _creation(run: GitInvocation) -> Creation | None:
 def created_branches(command: str) -> list[Creation]:
     """Every branch ``command`` would create, in the order its git runs appear."""
     return [c for c in (_creation(run) for run in git_invocations(command)) if c is not None]
+
+
+def worktree_add_path(arguments: tuple[str, ...]) -> str | None:
+    """The directory a ``git worktree add`` run creates, else ``None``.
+
+    ``arguments`` are the words after ``worktree``. The path is the first
+    positional once option values (``-b <name>``, ``--reason <text>``) are
+    skipped; everything after ``--`` is positional.
+    """
+    if not arguments or arguments[0] != "add":
+        return None
+    skip = False
+    after_separator = False
+    for word in arguments[1:]:
+        if skip:
+            skip = False
+        elif after_separator or not word.startswith("-"):
+            return word
+        elif word == "--":
+            after_separator = True
+        elif word in _WORKTREE_VALUED:
+            skip = True
+    return None

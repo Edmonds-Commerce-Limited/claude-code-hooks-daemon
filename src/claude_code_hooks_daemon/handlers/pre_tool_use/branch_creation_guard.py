@@ -26,12 +26,21 @@ from claude_code_hooks_daemon.core.branch_creation import (
     creation_verdict,
     read_labels,
 )
+from claude_code_hooks_daemon.core.branch_practice import (
+    nested_worktree_advisory,
+    recovery_copy_advisory,
+)
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.git_branch_creation import created_branches
+from claude_code_hooks_daemon.utils.git_branch_creation import (
+    ROUTE_WORKTREE,
+    created_branches,
+    worktree_add_path,
+)
+from claude_code_hooks_daemon.utils.git_commit_parsing import GitInvocation
 from claude_code_hooks_daemon.utils.git_invocation_directory import (
     invocation_directory,
     placement_problem,
@@ -164,24 +173,47 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             ]
         verdicts: list[CreationVerdict] = []
         for creation in created_branches(get_bash_command(hook_input) or ""):
-            run = creation.invocation
-            directory = cwd if placement_problem(run, cwd) else invocation_directory(run, cwd)
+            directory = self._creation_directory(creation.invocation, cwd)
             verdicts.append(
                 creation_verdict(directory, self._branches, creation.name, labels=labels)
             )
         return verdicts
 
+    @staticmethod
+    def _creation_directory(run: GitInvocation, cwd: Path) -> Path:
+        """The directory a git run acts in, or ``cwd`` when it cannot be placed."""
+        return cwd if placement_problem(run, cwd) else invocation_directory(run, cwd)
+
+    def _practice_advisories(self, hook_input: dict[str, Any]) -> list[str]:
+        """Branch-practice advice for a git command: recovery-copy names, nested worktrees."""
+        if self._is_isolated_dispatch(hook_input):
+            return []
+        cwd = Path(str(hook_input.get(HookInputField.CWD) or self._project_root()))
+        lines: list[str] = []
+        for creation in created_branches(get_bash_command(hook_input) or ""):
+            advice = recovery_copy_advisory(creation.name)
+            if advice is not None:
+                lines.append(advice)
+            if creation.route == ROUTE_WORKTREE:
+                target = worktree_add_path(creation.invocation.arguments)
+                directory = self._creation_directory(creation.invocation, cwd)
+                nested = nested_worktree_advisory(directory, target) if target else None
+                if nested is not None:
+                    lines.append(nested)
+        return lines
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny at the cap in block mode; otherwise allow with any warning lines."""
         verdicts = self._verdicts(hook_input)
         lines = [line for verdict in verdicts for line in verdict.lines]
+        advice = self._practice_advisories(hook_input)
         worst = max((verdict.decision for verdict in verdicts), key=_SEVERITY.__getitem__)
         if worst == "deny":
             denying = next(verdict for verdict in verdicts if verdict.decision == "deny")
             rule = self._rules_by_id.get(denying.rule_id or "", self._rule)
             reason = "\n".join([self._formatter.headline(rule), "", *lines])
             return GatingResult(decision=Decision.DENY, reason=reason)
-        return GatingResult(decision=Decision.ALLOW, context=list(dict.fromkeys(lines)))
+        return GatingResult(decision=Decision.ALLOW, context=list(dict.fromkeys([*lines, *advice])))
 
     def get_claude_md(self) -> str | None:
         return (
@@ -198,7 +230,12 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             "`branch-keep <name> --reason ...`. Bot-owned branches (`branches.bot_owned`) "
             "are in no pool. A name already in `refs/heads` is a "
             "reset, never a creation. A name close to an existing branch's draws a "
-            "duplicate warning naming it; that never blocks."
+            "duplicate warning naming it; that never blocks. Advisory only: a branch named "
+            "like a recovery copy (`rescue/*`, `recovery/*`, `backup/*`, `*-rescue`, "
+            "`*-backup`) is told to archive under `refs/archive/<name>` or a bundle "
+            "instead, since pools count only branches; a worktree created inside "
+            "another worktree is told the main checkout is where it is created, never "
+            "nested."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
