@@ -224,24 +224,44 @@ class TestLongRealCommandsAreNotProse:
         Every one exceeds the old 80-character trigger and every one is a
         genuine command, so each must receive actionable remediation.
         """
+        # The venv `python3 -m pytest` runs pytest, so it denies as expensive;
+        # the others are unknown producers and get the advisory. Neither is
+        # the prose reason.
         long_real_commands = (
-            "git log --oneline --graph --decorate --all --since=2026-01-01 "
-            "-- src/claude_code_hooks_daemon/handlers/pre_tool_use",
-            "/workspace/untracked/venv-workspace-py311-81c29529/bin/python3 "
-            "-m pytest tests/unit/handlers/pre_tool_use --tb=short -q",
-            "git diff --stat main...agent-ad3d35fcc36d13959-4c36fb42 "
-            "-- src/claude_code_hooks_daemon/plan_qa/checks/index_row_length.py",
-            "docker run --rm -v /workspace:/workspace -w /workspace "
-            "--entrypoint /bin/bash ghcr.io/example/builder:latest -lc make",
+            (
+                "git log --oneline --graph --decorate --all --since=2026-01-01 "
+                "-- src/claude_code_hooks_daemon/handlers/pre_tool_use",
+                Decision.ALLOW,
+            ),
+            (
+                "/workspace/untracked/venv-workspace-py311-81c29529/bin/python3 "
+                "-m pytest tests/unit/handlers/pre_tool_use --tb=short -q",
+                Decision.DENY,
+            ),
+            (
+                "git diff --stat main...agent-ad3d35fcc36d13959-4c36fb42 "
+                "-- src/claude_code_hooks_daemon/plan_qa/checks/index_row_length.py",
+                Decision.ALLOW,
+            ),
+            (
+                "docker run --rm -v /workspace:/workspace -w /workspace "
+                "--entrypoint /bin/bash ghcr.io/example/builder:latest -lc make",
+                Decision.ALLOW,
+            ),
         )
         handler = PipeBlockerHandler()
-        for command in long_real_commands:
+        for command, decision in long_real_commands:
             assert len(command) > 80, f"fixture too short to exercise the bug: {command}"
             result = handler.handle(
                 {"tool_name": "Bash", "tool_input": {"command": f"{command} | head -20"}}
             )
-            assert result.decision == Decision.ALLOW, f"real command misclassified: {command}"
-            assert "extra_whitelist" in "\n".join(result.context)
+            assert result.decision == decision, f"real command misclassified: {command}"
+            if decision == Decision.ALLOW:
+                assert "extra_whitelist" in "\n".join(result.context)
+            else:
+                assert result.reason is not None
+                assert "does not look like a real shell command" not in result.reason
+                assert "expensive" in result.reason
 
     def test_commands_carrying_quoted_english_are_not_prose(self) -> None:
         """Shell quoting is where English legitimately lives inside a command.

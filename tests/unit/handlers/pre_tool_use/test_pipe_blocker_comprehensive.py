@@ -845,7 +845,11 @@ class TestPipeBlockerHandleUnknown:
         return PipeBlockerHandler()
 
     def _advisory(self, handler: PipeBlockerHandler, command: str) -> str:
-        result = handler.handle({"tool_name": "Bash", "tool_input": {"command": command}})
+        event = {"tool_name": "Bash", "tool_input": {"command": command}}
+        # A whitelisted producer never reaches handle() through the daemon, so
+        # each fixture must genuinely reach the unknown tier.
+        assert handler.matches(event) is True
+        result = handler.handle(event)
         from claude_code_hooks_daemon.core import Decision
 
         assert result.decision == Decision.ALLOW
@@ -853,13 +857,13 @@ class TestPipeBlockerHandleUnknown:
         return "\n".join(result.context)
 
     def test_handle_allows_unknown(self, handler: PipeBlockerHandler) -> None:
-        assert self._advisory(handler, "find . | tail -n 20")
+        assert self._advisory(handler, "mytool . | tail -n 20")
 
     def test_advisory_mentions_extra_whitelist(self, handler: PipeBlockerHandler) -> None:
-        assert "extra_whitelist" in self._advisory(handler, "find . | tail -n 20")
+        assert "extra_whitelist" in self._advisory(handler, "mytool . | tail -n 20")
 
     def test_advisory_suggests_the_capture_helper(self, handler: PipeBlockerHandler) -> None:
-        advisory = self._advisory(handler, "find . | tail -n 20")
+        advisory = self._advisory(handler, "mytool . | tail -n 20")
         assert "echd-capture" in advisory
         assert "pipefail" in advisory
 
@@ -867,13 +871,13 @@ class TestPipeBlockerHandleUnknown:
         assert "docker" in self._advisory(handler, "docker logs container | tail -n 50").lower()
 
     def test_advisory_suggests_a_whitelist_regex(self, handler: PipeBlockerHandler) -> None:
-        assert "^find\\b" in self._advisory(handler, "find . | tail -n 20")
+        assert "^mytool\\b" in self._advisory(handler, "mytool . | tail -n 20")
 
     def test_head_consumer_is_allowed_too(self, handler: PipeBlockerHandler) -> None:
         assert self._advisory(handler, "docker ps | head -n 5")
 
     def test_complex_unknown_command_is_allowed(self, handler: PipeBlockerHandler) -> None:
-        assert self._advisory(handler, "find . -name '*.log' -exec cat {} \\; | tail -n 100")
+        assert self._advisory(handler, "mytool . -name '*.log' -exec cat {} \\; | tail -n 100")
 
 
 # ===================================================================================
@@ -897,7 +901,7 @@ class TestPipeBlockerMessageDifferentiation:
 
     def test_unknown_has_extra_whitelist_message(self, handler: PipeBlockerHandler) -> None:
         """Unknown commands get an advisory with an 'add to extra_whitelist' hint."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "mytool . | tail -20"}}
         result = handler.handle(hook_input)
         assert "extra_whitelist" in "\n".join(result.context)
 
@@ -910,7 +914,7 @@ class TestPipeBlockerMessageDifferentiation:
 
     def test_unknown_does_not_claim_information_loss(self, handler: PipeBlockerHandler) -> None:
         """The unknown advisory does not claim the pipe loses information (not known)."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "mytool . | tail -20"}}
         result = handler.handle(hook_input)
         assert "information" not in "\n".join(result.context).lower()
 
@@ -918,7 +922,7 @@ class TestPipeBlockerMessageDifferentiation:
         from claude_code_hooks_daemon.core import Decision
 
         blacklisted = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
-        unknown = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
+        unknown = {"tool_name": "Bash", "tool_input": {"command": "mytool . | tail -20"}}
         assert handler.handle(blacklisted).decision == Decision.DENY
         assert handler.handle(unknown).decision == Decision.ALLOW
 

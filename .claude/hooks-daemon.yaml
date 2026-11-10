@@ -398,6 +398,13 @@ handlers:
     pipe_blocker:          # Blocks dangerous pipe patterns in bash commands
       enabled: true
       priority: 17
+      options:
+        # This project's full QA scripts are expensive. An unknown producer is
+        # only warned about (Plan 00478), so they are named here to keep their
+        # truncating pipes denied, at any path (`./scripts/qa/run_all.sh`).
+        extra_blacklist:
+          - '^run_all\.sh\b'
+          - '^run_tests\.sh\b'
 
     dangerous_permissions: # Warns about dangerous file permission changes
       enabled: true

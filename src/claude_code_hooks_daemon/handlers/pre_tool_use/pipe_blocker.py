@@ -16,7 +16,8 @@ The handler itself has ZERO language awareness.
 import logging
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,13 @@ from claude_code_hooks_daemon.utils.command_evasion import (
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    END_OF_OPTIONS,
+    FLAG_PREFIX,
+    LONE_DASH,
+    command_word,
+    iter_shell_words,
+    peel_command_wrappers,
+    resolve_shell_word,
     split_unquoted,
     strip_inert_spans,
 )
@@ -279,6 +287,149 @@ _SHELL_WORDS_THAT_ARE_NOT_PRODUCERS: frozenset[str] = frozenset(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _Runner:
+    """A tool that runs the command named after it (`uv run pytest`, `xargs pytest`).
+
+    Attributes:
+        subcommand: The word that must follow the tool for it to run a command
+            (`run` for `uv run`), or None when the tool itself runs it (`xargs`).
+        value_flags: Flags whose following word is a value, not the command.
+    """
+
+    subcommand: str | None
+    value_flags: frozenset[str]
+
+
+# Plan 00478 review C2: the blacklist is matched on the command a producer
+# RUNS, not only on its first word. While an unknown producer denied, a wrapped
+# pytest denied too, so the blacklist never needed to see through wrappers;
+# once unknown became a warning it did. `COMMAND_WRAPPERS` (env, timeout, sudo,
+# nice, ...) is the shared table; these runners are the ones it does not carry,
+# because the other guards that read it have no reason to see through them.
+# Lenient on purpose: this only ever WIDENS a deny, so an unknown flag is
+# skipped rather than treated as the end of the wrapper.
+_RUNNERS: dict[str, _Runner] = {
+    "uv": _Runner(
+        "run",
+        frozenset(
+            {
+                "--with",
+                "--with-requirements",
+                "--with-editable",
+                "--python",
+                "-p",
+                "--project",
+                "--directory",
+                "--package",
+                "--extra",
+                "--group",
+                "--env-file",
+                "--index",
+                "--from",
+            }
+        ),
+    ),
+    "poetry": _Runner("run", frozenset({"-C", "--directory", "-P", "--project"})),
+    "pipenv": _Runner("run", frozenset()),
+    "pdm": _Runner("run", frozenset({"-p", "--project"})),
+    "hatch": _Runner("run", frozenset()),
+    "pnpm": _Runner("exec", frozenset({"-C", "--dir", "--filter"})),
+    "npx": _Runner(None, frozenset({"-p", "--package"})),
+    "bunx": _Runner(None, frozenset()),
+    "xargs": _Runner(
+        None,
+        frozenset(
+            {
+                "-a",
+                "-d",
+                "-E",
+                "-I",
+                "-L",
+                "-n",
+                "-P",
+                "-s",
+                "--arg-file",
+                "--delimiter",
+                "--eof",
+                "--replace",
+                "--max-lines",
+                "--max-args",
+                "--max-procs",
+                "--max-chars",
+            }
+        ),
+    ),
+}
+# `python -m <module>` / `python3.13 -m <module>` runs the module.
+_PYTHON_INTERPRETER = re.compile(r"python[0-9.]*")
+_PYTHON_MODULE_FLAG = "-m"
+# Shells whose `-c` body is the program the pipe is fed by.
+_SHELL_C_RUNNERS: frozenset[str] = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+_SHELL_C_FLAG_LETTER = "c"
+# A leading `NAME=value` word sets a variable for the command after it.
+_ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+# A `bash -c` body can itself hold `bash -c`; nesting deeper than this is
+# not unwrapped further (the raw segment is still matched).
+_MAX_UNWRAP_DEPTH = 4
+# Shell options whose next word is a value (`bash -o pipefail -c '...'`).
+_SHELL_VALUE_FLAGS: frozenset[str] = frozenset({"-o", "+o", "-O", "+O"})
+_SHELL_OPTION_PREFIXES: tuple[str, ...] = ("-", "+")
+
+
+def _segment_words(segment: str) -> list[str]:
+    """The segment's words after quote removal, up to the first one a substitution hides.
+
+    A word bash would still expand (``$VAR``, a glob) is kept as written:
+    these words are only ever matched against the blacklist, so keeping
+    them can widen a deny but never grant an allow.
+    """
+    words: list[str] = []
+    for raw in iter_shell_words(segment):
+        if raw is None:
+            break
+        resolved = resolve_shell_word(raw)
+        words.append(raw if resolved is None else resolved)
+    return words
+
+
+def _past_flags(words: Sequence[str], index: int, value_flags: frozenset[str]) -> int:
+    """Index of the first word after the flags starting at ``index`` (and their values)."""
+    while index < len(words) and words[index].startswith(FLAG_PREFIX) and words[index] != LONE_DASH:
+        if words[index] == END_OF_OPTIONS:
+            return index + 1
+        index += 2 if words[index] in value_flags else 1
+    return index
+
+
+def _past_runner(words: Sequence[str], index: int) -> int:
+    """Index of the command a runner at ``index`` runs, or ``index`` when it is no runner."""
+    name = command_word(words[index])
+    if _PYTHON_INTERPRETER.fullmatch(name):
+        has_module = index + 1 < len(words) and words[index + 1] == _PYTHON_MODULE_FLAG
+        return index + 2 if has_module else index
+    runner = _RUNNERS.get(name)
+    if runner is None:
+        return index
+    after = index + 1
+    if runner.subcommand is not None:
+        if after >= len(words) or words[after] != runner.subcommand:
+            return index
+        after += 1
+    return _past_flags(words, after, runner.value_flags)
+
+
+def _shell_c_body(words: Sequence[str], index: int) -> str | None:
+    """The program of ``bash [options] -c '<body>'``; ``index`` is the word after the shell."""
+    saw_c = False
+    while index < len(words) and words[index].startswith(_SHELL_OPTION_PREFIXES):
+        option = words[index]
+        if not option.startswith(END_OF_OPTIONS) and _SHELL_C_FLAG_LETTER in option[1:]:
+            saw_c = True
+        index += 2 if option in _SHELL_VALUE_FLAGS else 1
+    return words[index] if saw_c and index < len(words) else None
+
+
 # Single generic teaching paragraph shared by both rules below (Plan 00116):
 # get_rules()'s Rule.verbose is a STATIC per-rule fallback used for the
 # always-on CLAUDE.md table; the actual deny messages this handler emits stay
@@ -468,8 +619,10 @@ class PipeBlockerHandler(
           was attributed to the outer command (see
           ``_substitution_content_start``)
 
-        An empty producer (extraction failed) is deliberately NOT whitelisted,
-        preserving the pre-existing "unknown ⇒ block" tier.
+        An empty producer (extraction failed) is deliberately NOT whitelisted:
+        it offends, so handle() judges it, and as it names nothing on the
+        blacklist it lands in the unknown tier (allowed with the advisory,
+        Plan 00478) unless another pipe in the command denies.
         """
         match = self._find_offending_match(command)
         if match is None:
@@ -481,9 +634,16 @@ class PipeBlockerHandler(
 
         Factored out of :meth:`_find_offending_producer` (Plan 00116) so the
         winning pipe's CONSUMER (``tail`` vs ``head``, captured group 1) is
-        available too, for resolving which Rule fired — without changing
-        which pipe is judged first or how (NG2: zero matching-behaviour
-        change). ``_find_offending_producer`` now delegates here.
+        available too, for resolving which Rule fired.
+        """
+        return next(self._offending_matches(command), None)
+
+    def _offending_matches(self, command: str) -> Iterator[re.Match[str]]:
+        """Every pipe that is not exempt, in order: none is skipped for an earlier one.
+
+        handle() judges each of them (Plan 00478 review C1): once an unknown
+        producer only warns, judging the first alone let `docker ps | tail &&
+        pytest | tail` through on docker's advisory.
         """
         for match in self._pipe_matches(command):
             consumer_segment = self._extract_consumer_segment(command, match.start())
@@ -498,14 +658,18 @@ class PipeBlockerHandler(
             producer = self._extract_producer(command, match.start())
             if self._matches_whitelist(producer):
                 continue
-            return match
-        return None
+            yield match
 
     def _match_rule_id(self, command: str) -> str | None:
         """RuleID for the first offending pipe's CONSUMER, or None if none offend."""
         match = self._find_offending_match(command)
         if match is None:
             return None
+        return self._consumer_rule_id(match)
+
+    @staticmethod
+    def _consumer_rule_id(match: re.Match[str]) -> str:
+        """RuleID for one pipe's CONSUMER (``tail`` vs ``head``, captured group 1)."""
         return RuleID.PIPE_TO_HEAD if match.group(1).lower() == "head" else RuleID.PIPE_TO_TAIL
 
     @staticmethod
@@ -748,15 +912,65 @@ class PipeBlockerHandler(
         return _matches_any_configured(self._extra_whitelist, source_segment)
 
     def _matches_blacklist(self, source_segment: str) -> bool:
-        """Check if source segment matches any blacklisted pattern (known expensive)."""
+        """Check if source segment, or a command it runs, is blacklisted (known expensive)."""
+        return self._blacklisted_target(source_segment) is not None
+
+    def _blacklisted_target(self, source_segment: str) -> str | None:
+        """The blacklisted command ``source_segment`` runs, or None.
+
+        Matched on the segment AND on every command it runs through a wrapper
+        (:meth:`_run_targets`), so `timeout 60 pytest` is judged as pytest.
+        """
         if not source_segment:
-            return False
-        # Check language strategy patterns
+            return None
+        for target in self._run_targets(source_segment):
+            if self._matches_blacklist_text(target):
+                return target
+        return None
+
+    def _matches_blacklist_text(self, text: str) -> bool:
+        """Does ``text`` itself match a strategy or configured blacklist pattern?"""
         for pattern_str in self._registry.get_blacklist_patterns():
-            if re.search(pattern_str, source_segment, re.IGNORECASE):
+            if re.search(pattern_str, text, re.IGNORECASE):
                 return True
-        # Check extra blacklist from config
-        return _matches_any_configured(self._extra_blacklist, source_segment)
+        return _matches_any_configured(self._extra_blacklist, text)
+
+    @classmethod
+    def _run_targets(cls, segment: str, depth: int = 0) -> list[str]:
+        """``segment``, then each command it runs once wrappers are seen through.
+
+        Peels, repeatedly and in any order: leading ``NAME=value`` words, the
+        shared :data:`COMMAND_WRAPPERS` (env, timeout, sudo, nice, ...), the
+        runners in :data:`_RUNNERS` (``uv run``, ``xargs``, ``npx``, ...) and
+        ``python -m``. The command word is then reduced to its basename, so
+        ``.venv/bin/pytest`` is pytest. A ``bash -c '<body>'`` contributes the
+        command of each statement's last pipeline stage, which is what feeds
+        the outer pipe.
+        """
+        targets = [segment]
+        words = _segment_words(segment)
+        index = 0
+        while index < len(words):
+            start = index
+            while index < len(words) and _ENV_ASSIGNMENT.match(words[index]):
+                index += 1
+            index += peel_command_wrappers(words[index:])[1]
+            if index < len(words):
+                index = _past_runner(words, index)
+            if index == start:
+                break
+        if index >= len(words):
+            return targets
+        name = command_word(words[index])
+        if name in _SHELL_C_RUNNERS:
+            body = _shell_c_body(words, index + 1)
+            if body is not None and depth < _MAX_UNWRAP_DEPTH:
+                for statement in split_unquoted(body, _CHAIN_SEPARATORS):
+                    stage = cls._command_inside(split_unquoted(statement, _PIPE_SEPARATORS)[-1])
+                    targets.extend(cls._run_targets(stage, depth + 1))
+            return targets
+        targets.append(" ".join([name, *words[index + 1 :]]))
+        return targets
 
     def _resolve_echd_capture_path(self) -> Path | None:
         """Resolve the deployed ``echd-capture`` helper to an absolute path.
@@ -1051,9 +1265,15 @@ class PipeBlockerHandler(
             f"      {capture}"
         )
 
-    def _blacklisted_reason(self, rule_id: str, source_segment: str, command: str) -> str:
-        """Return verbose block message for known-expensive commands (blacklisted)."""
-        label = self._producer_label(source_segment)
+    def _blacklisted_reason(
+        self, rule_id: str, source_segment: str, command: str, target: str | None = None
+    ) -> str:
+        """Return verbose block message for known-expensive commands (blacklisted).
+
+        ``target`` is the blacklisted command the segment runs (pytest for
+        `timeout 60 pytest`); the label names it, not the wrapper.
+        """
+        label = self._producer_label(target or source_segment)
         return (
             f"BLOCKED [{rule_id}]: Pipe to tail/head detected\n\n"
             f"COMMAND: {self._truncate_command(command)}\n\n"
@@ -1065,86 +1285,58 @@ class PipeBlockerHandler(
             f"{self._echd_capture_recommendation(source_segment)}"
         )
 
-    def _blacklisted_terse_reason(self, rule_id: str, source_segment: str, command: str) -> str:
+    def _blacklisted_terse_reason(
+        self, rule_id: str, source_segment: str, command: str, target: str | None = None
+    ) -> str:
         """Return terse block message for known-expensive commands (subsequent blocks)."""
-        label = self._producer_label(source_segment)
+        label = self._producer_label(target or source_segment)
         return (
             f"BLOCKED [{rule_id}]: Pipe to tail/head — {label} is expensive\n\n"
             f"COMMAND: {self._truncate_command(command)}\n\n"
             f"{self._echd_capture_terse(source_segment)}"
         )
 
-    def _unknown_producer_verdict(self, source_segment: str) -> GatingResult:
-        """ALLOW a pipe fed by a producer on neither list, with the shared advisory.
+    def _unknown_producer_verdict(self, source_segments: Sequence[str]) -> GatingResult:
+        """ALLOW pipes fed only by producers on neither list, with the shared advisory.
 
-        The guard cannot tell whether the producer is expensive. The advisory
-        names the capture helper (for an expensive one) and ``extra_whitelist``
-        (for a cheap one, to stop the advisory), and the shared helper writes
-        the ``UNKNOWN-VERDICT`` log line.
+        Reached only when NO offending pipe in the command denies. The guard
+        cannot tell whether these producers are expensive. The advisory names
+        each of them, the capture helper (for an expensive one) and
+        ``extra_whitelist`` (for a cheap one, to stop the advisory), and the
+        shared helper writes the ``UNKNOWN-VERDICT`` log line.
         """
-        label = self._producer_label(source_segment)
-        anchor = self._producer_regex_anchor(source_segment)
+        labels = list(dict.fromkeys(self._producer_label(s) for s in source_segments))
+        anchors = list(dict.fromkeys(self._producer_regex_anchor(s) for s in source_segments))
+        named = ", ".join(f"`{label}`" for label in labels)
+        entries = ", ".join(f"`^{anchor}\\b`" for anchor in anchors)
         helper = self._capture_helper_invocation() or _ECHD_CAPTURE_NAME
         return unknown_verdict_allow(
             "pipe_blocker",
-            f"`{label}` piped to tail/head is on neither the cheap-command whitelist nor "
+            f"{named} piped to tail/head is on neither the cheap-command whitelist nor "
             "the expensive-command blacklist, so it is not known whether the pipe discards "
             "output that would be costly to regenerate",
             f"If it is expensive, capture the full output instead: "
-            f"`set -o pipefail; {label} ... 2>&1 | {helper} {_ECHD_CAPTURE_DEFAULT_LINES}`. "
-            f"If it is cheap, add `^{anchor}\\b` to {_CONFIG_HINT_EXTRA_WHITELIST} under "
+            f"`set -o pipefail; {labels[0]} ... 2>&1 | {helper} "
+            f"{_ECHD_CAPTURE_DEFAULT_LINES}`. "
+            f"If it is cheap, add {entries} to {_CONFIG_HINT_EXTRA_WHITELIST} under "
             f"{_CONFIG_YAML_KEY} in .claude/hooks-daemon.yaml to stop this advisory",
         )
 
-    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block with a verbose-first/terse-after blacklisted/prose message; warn when unknown.
+    def _denying_verdict(
+        self, hook_input: dict[str, Any], rule_id: str, source_segment: str, command: str
+    ) -> GatingResult | None:
+        """The DENY one offending pipe earns, or None when its producer is unknown.
 
-        Verbosity is decided per (transcript_path, rule_id) via the shared
-        DisclosureTracker (Plan 00116, Decision G) rather than a running
-        block count: the first fire of a rule for a given agent is verbose;
-        subsequent fires of the SAME rule for the SAME agent are terse. An
-        event with no transcript_path fails toward verbose every time
-        (unknown disclosure state -> more info) since there is no key to
-        track against. Which rule fires (tail vs head consumer) is resolved
-        from the SAME offending-pipe match matches()/handle() both use, so
-        the two can never disagree about which pipe triggered the block.
+        Prose-shaped matches, compound closers and blacklisted producers deny.
+        An unknown producer returns None BEFORE the disclosure state is
+        touched: a warning must not use up the verbose message of the first
+        real deny for this rule.
         """
-        command = get_bash_command(hook_input) or "unknown command"
-        # Extract the segment from a message-blanked copy so a fake pipe
-        # inside a -m/-F value earlier in the string can never be mistaken
-        # for the real one that triggered the block. The displayed COMMAND
-        # below still shows the full, un-redacted original.
-        scan_target = self._strip_inert_spans(command)
-
-        # Report the producer of the OFFENDING pipe, which is not necessarily
-        # the first one: naming a whitelisted `git log` as the reason a
-        # command was blocked would send the agent to whitelist something
-        # that is already whitelisted.
-        offending_producer = self._find_offending_producer(scan_target)
-        source_segment = (
-            offending_producer
-            if offending_producer is not None
-            else self._extract_source_segment(scan_target)
-        )
-
-        rule_id = self._match_rule_id(scan_target)
-        if rule_id is None:
-            # Defensive only: handle() is normally invoked exclusively after
-            # matches() returned True, so this path is unreachable via the
-            # daemon's dispatch. Kept for callers that invoke handle()
-            # directly with a scan_target none of the pipe patterns matches.
-            rule_id = RuleID.PIPE_TO_TAIL
-
         prose = self._looks_like_prose(source_segment)
         closer = None if prose else self._compound_closer(source_segment)
-        blacklisted = self._matches_blacklist(source_segment)
-
-        # Plan 00478: a producer on neither list is not known to be expensive, so
-        # it is allowed with an advisory. It is decided BEFORE the disclosure
-        # state is touched: a warning must not use up the verbose message of the
-        # first real deny for this rule.
-        if not prose and closer is None and not blacklisted:
-            return self._unknown_producer_verdict(source_segment)
+        target = None if prose or closer is not None else self._blacklisted_target(source_segment)
+        if not prose and closer is None and target is None:
+            return None
 
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
@@ -1173,11 +1365,54 @@ class PipeBlockerHandler(
 
         # Known expensive: verbose first, terse after.
         if first_fire:
-            reason = self._blacklisted_reason(rule_id, source_segment, command)
+            reason = self._blacklisted_reason(rule_id, source_segment, command, target)
         else:
-            reason = self._blacklisted_terse_reason(rule_id, source_segment, command)
-
+            reason = self._blacklisted_terse_reason(rule_id, source_segment, command, target)
         return GatingResult(decision=Decision.DENY, reason=reason, rule=rule_id)
+
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
+        """Block with a verbose-first/terse-after blacklisted/prose message; warn when unknown.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G) rather than a running
+        block count: the first fire of a rule for a given agent is verbose;
+        subsequent fires of the SAME rule for the SAME agent are terse. An
+        event with no transcript_path fails toward verbose every time
+        (unknown disclosure state -> more info) since there is no key to
+        track against. Which rule fires (tail vs head consumer) is resolved
+        from the SAME offending-pipe match matches()/handle() both use, so
+        the two can never disagree about which pipe triggered the block.
+        """
+        command = get_bash_command(hook_input) or "unknown command"
+        # Extract the segment from a message-blanked copy so a fake pipe
+        # inside a -m/-F value earlier in the string can never be mistaken
+        # for the real one that triggered the block. The displayed COMMAND
+        # below still shows the full, un-redacted original.
+        scan_target = self._strip_inert_spans(command)
+
+        # Every OFFENDING pipe is judged, each on its own producer and consumer
+        # (Plan 00478 review C1). The first one that denies decides, and its
+        # producer is the one reported: naming a whitelisted `git log`, or an
+        # unknown `docker ps` beside a blacklisted pytest, would send the agent
+        # to whitelist the wrong thing. Only when none denies is the command
+        # allowed, with one advisory naming every unknown producer.
+        judged = [
+            (self._consumer_rule_id(match), self._extract_producer(scan_target, match.start()))
+            for match in self._offending_matches(scan_target)
+        ]
+        if not judged:
+            # Defensive only: handle() is normally invoked exclusively after
+            # matches() returned True, so this path is unreachable via the
+            # daemon's dispatch. Kept for callers that invoke handle()
+            # directly with a scan_target none of the pipe patterns matches.
+            judged = [(RuleID.PIPE_TO_TAIL, self._extract_source_segment(scan_target))]
+
+        for rule_id, source_segment in judged:
+            verdict = self._denying_verdict(hook_input, rule_id, source_segment, command)
+            if verdict is not None:
+                return verdict
+
+        return self._unknown_producer_verdict([segment for _, segment in judged])
 
     def get_rules(self) -> list[Rule]:
         """Return the 2 Rule objects backing this handler's blocking behaviour."""
