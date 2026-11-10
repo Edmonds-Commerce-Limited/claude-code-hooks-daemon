@@ -61,6 +61,7 @@ def repo(tmp_path: Path) -> Path:
     path = tmp_path / "repo"
     path.mkdir()
     _git(path, "init", "-b", "main")
+    _git(path, "config", "user.email", "test@example.com")
     _commit(path, "base.txt", "base\n")
     _git(path, "remote", "add", "origin", str(bare))
     _git(path, "push", "--quiet", "origin", "main")

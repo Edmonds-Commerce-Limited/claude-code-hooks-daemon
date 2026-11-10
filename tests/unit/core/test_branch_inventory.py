@@ -96,6 +96,9 @@ def fixture_repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
     repo = root / "clone"
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "main")
+    # The fixture's commits are authored as t@example.com (see _git), so this
+    # clone owns its remote-only branches by the author-email rule.
+    _git(repo, "config", "user.email", "t@example.com")
     _git(repo, "remote", "add", "origin", str(remote))
 
     _commit(repo, "base", 60)

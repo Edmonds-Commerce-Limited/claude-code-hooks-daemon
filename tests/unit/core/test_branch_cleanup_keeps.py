@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.config.models import (
 )
 from claude_code_hooks_daemon.core.branch_cleanup import CleanupReport, clean_sweep
 from claude_code_hooks_daemon.core.branch_keep import keep_branch
+from tests.conftest import HERMETIC_GIT_EMAIL
 from tests.support.git_fixtures import git_setup_timeout
 
 _DAY = 86_400
@@ -38,7 +39,7 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _identify(repo: Path) -> None:
-    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.email", HERMETIC_GIT_EMAIL)
     _git(repo, "config", "user.name", "Tess")
 
 

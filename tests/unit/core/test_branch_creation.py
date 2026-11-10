@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.core.branch_creation import (
     write_labels,
 )
 from claude_code_hooks_daemon.core.branch_sweep import effective_wip_cap
+from tests.conftest import HERMETIC_GIT_EMAIL
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -42,7 +43,7 @@ def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
     _git(root, "init", "-q", "-b", "main")
-    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.email", HERMETIC_GIT_EMAIL)
     _git(root, "config", "user.name", "t")
     _git(root, "commit", "-q", "--allow-empty", "-m", "root")
     return root

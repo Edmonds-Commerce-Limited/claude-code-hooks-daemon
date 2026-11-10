@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.core.branch_park import (
     BranchParkSameReason,
     park_branch,
 )
+from tests.conftest import HERMETIC_GIT_EMAIL
 from tests.support.git_fixtures import git_setup_timeout
 
 
@@ -43,7 +44,7 @@ def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
     _git(root, "init", "-q", "-b", "main")
-    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.email", HERMETIC_GIT_EMAIL)
     _git(root, "config", "user.name", "Tess")
     _git(root, "remote", "add", "origin", str(bare))
     _git(root, "commit", "-q", "--allow-empty", "-m", "root")
