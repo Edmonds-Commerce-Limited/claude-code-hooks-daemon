@@ -152,12 +152,14 @@ scope and row 26 in scope (warn).
 
 - [x] No safety guard denies solely because it could not decide. Rows 1-3, 5, 21, 23
   and 25 stay deny as positively recognised actions, under the stand-in's ruling.
-- [x] Every positive-match deny in the existing suites is still a deny. Each batch's
-  adversarial review compared verdicts before and after the change.
+- [x] Every positive-match deny in the existing suites is still a deny. The existing
+  deny tests stayed green in every batch. The 2.2e and 2.2f reviews also compared
+  verdicts before and after the change over broad probe sets. 2.2b is test-only.
 - [x] A converted route emits an advisory and a log line, and a test pins both: the
   shared `unknown_verdict_allow` helper with an `UNKNOWN-VERDICT` log line.
-- [x] Release-bound consequences in the holding area: release notes 027-029, 031
-  (shipped in v3.73.2) and 037 in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] Release-bound consequences in the holding area: release note 037 in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`. Notes 027-029 and 031 have already
+  shipped, in `CLAUDE/UPGRADES/v3/v3.73.1-to-v3.73.2/release-notes/`.
 
 ## Delivery & Milestones
 
