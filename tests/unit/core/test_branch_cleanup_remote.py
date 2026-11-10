@@ -111,6 +111,22 @@ class TestRemoteClean:
         assert report.deleted_remote == ("origin/feat",)
         assert "feat" not in _remote_branches(bare)
 
+    def test_a_patch_equivalent_remote_branch_is_deleted_behind_a_bundle(
+        self, repo: Path, bare: Path, tmp_path: Path
+    ) -> None:
+        # Plan 00594 Task 3.1: the sweep no longer keeps a cherry-picked remote branch.
+        _git(repo, "checkout", "-q", "-b", "picked")
+        _commit(repo, "picked")
+        _git(repo, "push", "--quiet", "origin", "picked")
+        _git(repo, "checkout", "-q", "main")
+        _commit(repo, "unrelated")
+        _git(repo, "cherry-pick", "main..picked")
+        _git(repo, "push", "--quiet", "origin", "main")
+        report = _sweep(repo, tmp_path)
+        assert report.deleted_remote == ("origin/picked",)
+        assert report.bundle is not None
+        assert "picked" not in _remote_branches(bare)
+
     def test_a_remote_only_merged_branch_is_deleted(
         self, repo: Path, bare: Path, tmp_path: Path
     ) -> None:

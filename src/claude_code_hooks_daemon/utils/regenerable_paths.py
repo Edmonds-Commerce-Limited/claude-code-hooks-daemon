@@ -118,6 +118,10 @@ def _composer_outputs(manifest_text: str | None) -> tuple[str, ...]:
     return (f"{vendor}/", f"{setting('bin-dir', f'{vendor}/bin')}/")
 
 
+#: Where Bundler checks a ``git:`` gem out as a real clone, below ``vendor/bundle/``.
+BUNDLER_CLONE_PROBE = "ruby/*/bundler/gems/*/.git"
+
+
 @dataclass(frozen=True)
 class LockRegeneratedRule:
     """A package manager that rebuilds ``outputs`` from a manifest and its lock file."""
@@ -127,6 +131,9 @@ class LockRegeneratedRule:
     outputs: tuple[str, ...]
     #: Derives ``outputs`` from the committed manifest text, when it can move them.
     resolve_outputs: Callable[[str | None], tuple[str, ...]] | None = None
+    #: Globs, relative to an output directory, of a git clone the manager can leave
+    #: deeper than the generic two-level probe reaches (Bundler's ``git:`` gems).
+    clone_probes: tuple[str, ...] = ()
 
 
 #: One row per package manager; the single source for what a lock file regenerates.
@@ -139,7 +146,9 @@ LOCK_REGENERATED_RULES: tuple[LockRegeneratedRule, ...] = (
         ("package-lock.json", "yarn.lock", "pnpm-lock.yaml"),
         ("node_modules/",),
     ),
-    LockRegeneratedRule("Gemfile", ("Gemfile.lock",), ("vendor/bundle/",)),
+    LockRegeneratedRule(
+        "Gemfile", ("Gemfile.lock",), ("vendor/bundle/",), clone_probes=(BUNDLER_CLONE_PROBE,)
+    ),
     LockRegeneratedRule("Cargo.toml", ("Cargo.lock",), ("target/",)),
     LockRegeneratedRule("pyproject.toml", ("uv.lock", "poetry.lock"), (".venv/",)),
 )
@@ -182,6 +191,20 @@ def lock_regenerated_dirs(
     return tuple(found)
 
 
+def clone_probe_globs(directory: str) -> tuple[str, ...]:
+    """Extra clone-probe globs for a lock-regenerated ``directory`` (``sub/vendor/bundle/``).
+
+    Taken from the rule whose output the directory ends with, so a manager whose
+    clones sit deeper than the generic probe reaches is still checked.
+    """
+    return tuple(
+        probe
+        for rule in LOCK_REGENERATED_RULES
+        if any(directory.endswith(output) for output in rule.outputs)
+        for probe in rule.clone_probes
+    )
+
+
 def _occupied_directories(tree: Collection[str]) -> frozenset[str]:
     """Every directory (``a/``, ``a/b/``) that has a committed file somewhere inside it."""
     occupied: set[str] = set()
@@ -217,6 +240,7 @@ __all__ = [
     "LOCK_REGENERATED_RULES",
     "NEVER_REGENERABLE",
     "LockRegeneratedRule",
+    "clone_probe_globs",
     "is_regenerable",
     "lock_regenerated_dirs",
     "never_regenerable_violations",

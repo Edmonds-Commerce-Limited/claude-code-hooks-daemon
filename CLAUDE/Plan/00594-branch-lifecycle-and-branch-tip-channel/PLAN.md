@@ -163,10 +163,10 @@ names, people or hashes appear here.
 
 ### Phase 3: Proof of merge and agent-performable deletion (classes 3, 6, 8)
 
-- [ ] ⬜ **Task 3.1**: Proof of merge covers squash merges, renamed-PR merges
+- [x] ✅ **Task 3.1**: (release note 040) Proof of merge covers squash merges, renamed-PR merges
   and patch-equivalent branches, with tests for each shape.
-- [ ] ⬜ **Task 3.2**: Remote delete of a proven-merged branch is allowed for
-  an agent, behind the recovery bundle.
+- [x] ✅ **Task 3.2**: (release note 040) Remote delete of a proven-merged branch is allowed for
+  an agent; `branch-sweep --clean --remote` keeps its recovery bundle.
 - [x] ✅ **Task 3.3**: (on main, release note 034) An ignored directory that
   a committed manifest and lock file let a package manager rebuild counts as
   regenerable, unless it holds a nested git clone or contains the scratch
@@ -189,7 +189,13 @@ names, people or hashes appear here.
 - [ ] ⬜ **Task 4.2**: Move pressure to stop, session start and merge per
   `DESIGN.md`.
 - [ ] ⬜ **Task 4.3**: The park record survives a rejected push, and a merge
-  clears it visibly.
+  clears it visibly. On main (release note 043, report `task-4-3-report.md`):
+  the park writes a git-config record before the push; a refused push exits 3
+  and says "parked locally, not pushed" with the command to push later; a
+  merge, `delete_if_merged`, the sweep and `branch-park --clear` remove the
+  record and print "Park cleared". Open: a branch only the remote holds still
+  parks nothing on a refused push, the group-pool PARKED resolution, and the
+  session-start "park cleared" print (DESIGN 2.4).
 - [ ] ⬜ **Task 4.4**: Pools are counted per owner.
 - [x] ✅ **Task 4.5**: (done: `clear_label_stale_at_tips`; release note 037)
   A keep covers every branch name at the kept tip, in the creation guard as
@@ -198,6 +204,28 @@ names, people or hashes appear here.
   before the stale mark was cleared. In the lifecycle model, a keep, a park
   and a proof are all facts about a COMMIT. Every per-name cache of them
   must be keyed or invalidated by tip, never by the name typed.
+- [ ] ⬜ **Task 4.6**: (second client seat) A stack of dependent pull-request
+  branches counts once per link against the open cap, so a five-deep stack
+  alone uses half of a cap of 10. Decide (design review): count a stack as
+  one stream, cap stack depth, or keep counting each link and document the
+  practice of landing the bottom first.
+- [x] ✅ **Task 4.7**: (second client seat; on main, release note 042,
+  report `task-4-7-report.md`) `branch-sweep` prints a
+  `git push --delete` for a patch-equivalent remote branch that the
+  remote-delete guard then refuses. Every command the sweep prints must pass
+  the guard that judges it; the sweep now takes its remote-delete lines from
+  the same proof as the guard, and a test feeds every printed line to the
+  guard. (The test was written after the fix, so it was never seen failing.)
+- [x] ✅ **Task 4.8**: (second client seat; on main, release note 044, report
+  `task-4-8-report.md`; the practice is the "Branch Practice" section of
+  `CLAUDE/core/Worktree.core.md`, and `branch_creation_guard` advises on a
+  recovery-shaped branch name and on a worktree created inside a worktree)
+  Write the branch practice down
+  for clients: recovery copies go to a bundle or `refs/archive/<name>`
+  (pools count only branches), never to a branch; worktrees are created
+  from the main checkout, never nested; agents' worktrees are reaped after
+  each agent. Prefer a daemon advisory where the practice can be detected
+  (a new `rescue/*`-shaped branch, a nested worktree).
 
 ### Phase 5: Branch tip channel
 
@@ -209,7 +237,10 @@ names, people or hashes appear here.
   a client seat and confirmed the class 6 fix the same day.
 - [ ] ⬜ **Task 5.1**: A client can follow a branch or commit, is told when it
   has moved, and can return to the last tag in one step. Proven on the client
-  test seat.
+  test seat. On main (release note 041): the install records `tracked_ref`,
+  `tracked_sha` and `last_release_tag`, `version_check` reports a moved ref, and
+  `upgrade.sh --release` returns to the last release. Still open: proof on the
+  client test seat, and the stop/build/start handover (Plan 00535).
 - [x] ✅ **Task 5.2**: (RC feedback; done on the release branch, release note
   034\) A guarded unreleased install no longer exits 141 when the ref's
   `pyproject.toml` is larger than one pipe write. Layer 1 reads the blob

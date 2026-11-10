@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.core.agent_ownership import (
     running_holds,
 )
 from claude_code_hooks_daemon.core.branch_inventory import BranchRecord, BranchState
+from claude_code_hooks_daemon.core.branch_park import clear_park_record
 from claude_code_hooks_daemon.core.remote_branch_proof import (
     REMOTES_PREFIX,
     named_ref_problem,
@@ -67,6 +68,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
 )
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.regenerable_paths import (
+    clone_probe_globs,
     is_regenerable,
     lock_regenerated_dirs,
     under_any,
@@ -130,6 +132,7 @@ class CleanupReport:
     commands: tuple[str, ...] = ()
     bundle: Path | None = None
     deleted_remote: tuple[str, ...] = ()
+    park_cleared: tuple[str, ...] = ()
 
 
 def _never_work(
@@ -299,21 +302,25 @@ def _lock_regenerated(path: Path) -> tuple[str, ...]:
         return shown.stdout if shown.returncode == 0 else None
 
     rebuilt = lock_regenerated_dirs([p for p in listing.stdout.split("\0") if p], read_committed)
-    return tuple(d for d in rebuilt if not _holds_git_clone(path / d))
+    return tuple(d for d in rebuilt if not _holds_git_clone(path / d, clone_probe_globs(d)))
 
 
-def _holds_git_clone(directory: Path) -> bool:
+def _holds_git_clone(directory: Path, extra_probes: Sequence[str] = ()) -> bool:
     """Whether ``<directory>/.git``, ``<dir>/*/.git`` or ``<dir>/*/*/.git`` exists.
 
     A package manager can install a dependency as a real clone (``--prefer-source``),
     and commits made inside it exist nowhere else, so such a directory is work.
     Only those paths are statted, never every file, because this runs on the
     destructive-git guard path over directories that can hold thousands of packages.
+    ``extra_probes`` are the package manager's own globs (relative to ``directory``)
+    for clones it leaves deeper than that, each a fixed-depth pattern.
     A directory that is not there (an uninstalled ``vendor/``) holds nothing.
     """
     if not directory.is_dir():
         return False
     if os.path.lexists(directory / ".git"):
+        return True
+    if any(next(directory.glob(probe), None) is not None for probe in extra_probes):
         return True
     return any(
         os.path.lexists(Path(grandchild) / ".git")
@@ -474,11 +481,24 @@ def preview_paths(paths: Sequence[str]) -> str:
     return f"{shown} and {rest} more" if rest > 0 else shown
 
 
-def remote_delete_command(repo: Path, remote: str, name: str) -> str | None:
-    """The remote delete to run by hand, when the remote holds the branch."""
-    if _ref_exists(repo, f"refs/remotes/{remote}/{name}"):
-        return f"git push {remote} --delete {name}"
-    return None
+def remote_delete_advice(repo: Path, config: BranchesConfig, default: str, name: str) -> str | None:
+    """What to tell a person about the remote copy of ``name``, when the remote holds one.
+
+    The runnable delete line only when the remote-delete guard's own proof
+    (:func:`prove_remote_merged`) accepts the branch, so a printed command is one the
+    guard allows. Otherwise owner-only wording, which is advice and not a command.
+    """
+    remote = config.remote
+    if not _ref_exists(repo, f"refs/remotes/{remote}/{name}"):
+        return None
+    problem = named_ref_problem(remote, name, default, config)
+    if problem is None:
+        proof = prove_remote_merged(repo, remote, [name], default, config)
+        problem = proof.problems.get(name)
+        if problem is None and name in proof.tips:
+            return f"git push {remote} --delete {name}"
+        problem = problem or "the proof did not accept it"
+    return f"remote delete of {remote}/{name} is for the owner: {problem}"
 
 
 def _classify(
@@ -501,6 +521,19 @@ def _classify(
         line_names=lines,
         line_targets=line_targets,
     )
+
+
+def _clear_parks(repo: Path, names: Sequence[str]) -> tuple[str, ...]:
+    """Clear the park record of each merged branch; ``"<name>: <reason>"`` for each cleared.
+
+    A merge ends a park, so the record goes with it and the report says so.
+    """
+    cleared: list[str] = []
+    for name in names:
+        record = clear_park_record(repo, name)
+        if record is not None:
+            cleared.append(f"{name}: {record.reason}")
+    return tuple(cleared)
 
 
 def cleanup_after_merge(
@@ -534,6 +567,7 @@ def cleanup_after_merge(
     deleted: list[str] = []
     skipped: list[str] = []
     commands: list[str] = []
+    park_cleared: list[str] = []
     delete_command = (
         daemon_cli_command_for_docs("delete-branch") + " {name} --protected-ref " + target
     )
@@ -562,6 +596,7 @@ def cleanup_after_merge(
         if verdict.tier not in MERGED_TIERS:
             skipped.append(f"{name}: {verdict.detail}")
             continue
+        park_cleared += _clear_parks(repo, [name])
         if held_by is not None:
             skipped.append(f"{name}: checked out in the worktree {held_by}")
             commands += [f"git worktree remove {held_by}", delete_command.format(name=name)]
@@ -583,11 +618,14 @@ def cleanup_after_merge(
                 continue
             deleted.append(name)
             commands.append(f"git branch {name} {verdict.tip}")
-        remote = remote_delete_command(repo, config.remote, name)
+        remote = remote_delete_advice(repo, config, protected_default, name)
         if remote is not None:
             commands.append(remote)
     return CleanupReport(
-        deleted=tuple(deleted), skipped=tuple(skipped), commands=tuple(dict.fromkeys(commands))
+        deleted=tuple(deleted),
+        skipped=tuple(skipped),
+        commands=tuple(dict.fromkeys(commands)),
+        park_cleared=tuple(park_cleared),
     )
 
 
@@ -640,6 +678,7 @@ def delete_if_merged(
     )
     if verdict.refusal is not None or verdict.tier not in MERGED_TIERS:
         return CleanupReport(skipped=(f"{name}: {verdict.detail}",))
+    park_cleared = _clear_parks(repo, [name])
     report = delete_branches(
         repo,
         [name],
@@ -651,12 +690,14 @@ def delete_if_merged(
         line_targets=line_targets,
     )
     if name not in report.deleted:
-        return CleanupReport(skipped=tuple(f"{name}: {b}" for b in report.blockers))
+        return CleanupReport(
+            skipped=tuple(f"{name}: {b}" for b in report.blockers), park_cleared=park_cleared
+        )
     commands = [f"git branch {name} {verdict.tip}"]
-    remote = remote_delete_command(repo, config.remote, name)
+    remote = remote_delete_advice(repo, config, default, name)
     if remote is not None:
         commands.append(remote)
-    return CleanupReport(deleted=(name,), commands=tuple(commands))
+    return CleanupReport(deleted=(name,), commands=tuple(commands), park_cleared=park_cleared)
 
 
 def _remove_worktree(repo: Path, path: Path) -> str | None:
@@ -794,7 +835,7 @@ def clean_sweep(
     if dry_run:
         commands += [f"would delete remote {config.remote}/{name}" for name in remote_tips]
         for name in proven:
-            advice = remote_delete_command(repo, config.remote, name)
+            advice = remote_delete_advice(repo, config, default, name)
             if advice is not None and name not in remote_tips:
                 commands.append(advice)
         return CleanupReport(
@@ -803,6 +844,7 @@ def clean_sweep(
 
     deleted: tuple[str, ...] = ()
     bundle: Path | None = None
+    park_cleared = _clear_parks(repo, proven)
     if proven:
         report = delete_branches(
             repo,
@@ -837,7 +879,7 @@ def clean_sweep(
             for name in gone
         ]
     for name in deleted:
-        advice = remote_delete_command(repo, config.remote, name)
+        advice = remote_delete_advice(repo, config, default, name)
         if advice is not None and name not in remote_tips:
             commands.append(advice)
     return CleanupReport(
@@ -847,6 +889,7 @@ def clean_sweep(
         commands=tuple(commands),
         bundle=bundle,
         deleted_remote=tuple(deleted_remote),
+        park_cleared=park_cleared,
     )
 
 
@@ -878,7 +921,8 @@ def _proven_remote(
     Candidates are the inventory's merged and patch-equivalent records with a remote
     copy, past the cleanup policy; each is then judged by the remote-delete guard's
     own proof (:func:`prove_remote_merged`), so this deletes nothing the guard would
-    refuse an agent. A patch-equivalent remote branch fails that proof and is kept.
+    refuse an agent. That proof accepts ancestry, patch-id and tree containment, so a
+    patch-equivalent remote branch is deleted too (behind the same bundle).
     """
     names: list[str] = []
     problems: dict[str, str] = {}
@@ -900,6 +944,28 @@ def _proven_remote(
         return {}, problems
     proof = prove_remote_merged(repo, config.remote, names, default, config)
     return proof.tips, {**problems, **proof.problems}
+
+
+def proven_remote_only(
+    repo: Path, config: BranchesConfig, inventory: branch_inventory.BranchInventory
+) -> frozenset[str]:
+    """Remote-only done branches the remote-delete guard's proof accepts.
+
+    These are the only names the ``branch-sweep`` report may print a runnable remote
+    delete for. The remote is contacted only when such a branch exists.
+    """
+    default = inventory.default_branch
+    if default is None:
+        return frozenset()
+    remote_only = {
+        name: record
+        for name, record in inventory.records.items()
+        if record.local_tip is None and record.remote_tip is not None
+    }
+    if not remote_only:
+        return frozenset()
+    tips, _problems = _proven_remote(repo, config, default, remote_only)
+    return frozenset(tips)
 
 
 def _push_deletes(repo: Path, remote: str, tips: Mapping[str, str]) -> tuple[list[str], list[str]]:
@@ -944,6 +1010,9 @@ def render(report: CleanupReport) -> list[str]:
     lines += [f"Removed worktree: {path}" for path in report.removed_worktrees]
     if report.deleted:
         lines.append(f"Deleted branch(es): {', '.join(report.deleted)}")
+    for cleared in report.park_cleared:
+        name, _, reason = cleared.partition(": ")
+        lines.append(f"Park cleared: {name} ({reason})")
     if report.deleted_remote:
         lines.append(f"Deleted remote branch(es): {', '.join(report.deleted_remote)}")
     if report.bundle is not None:
@@ -969,7 +1038,8 @@ __all__ = [
     "merge_target_qualifies",
     "policy_refusal",
     "preview_paths",
-    "remote_delete_command",
+    "proven_remote_only",
+    "remote_delete_advice",
     "render",
     "sweep_clean_command",
     "sweep_clean_line",

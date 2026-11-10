@@ -76,6 +76,7 @@ from claude_code_hooks_daemon.daemon.install_layout import is_client_daemon_dir
 from claude_code_hooks_daemon.daemon.metadata import (
     DaemonVenvMetadata,
     compute_project_lock_hash,
+    record_tracking,
     write_daemon_metadata,
 )
 from claude_code_hooks_daemon.daemon.paths import (
@@ -4023,6 +4024,25 @@ def _write_venv_metadata(
     return None
 
 
+def cmd_record_venv_tracking(args: argparse.Namespace) -> int:
+    """Record (or clear) the ref a venv's branch install tracks (Plan 00594 Task 5.1).
+
+    Bash ``upgrade_version.sh`` shells out to this after ``ensure_venv`` so the
+    schema stays in the Python model. No ``--tracked-ref`` clears the fields.
+    """
+    try:
+        record_tracking(
+            Path(args.venv_path),
+            tracked_ref=args.tracked_ref,
+            tracked_sha=args.tracked_sha,
+            last_release_tag=args.last_release_tag,
+        )
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        print(f"ERROR: cannot record tracking metadata: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_init_config(args: argparse.Namespace) -> int:
     """Generate configuration template.
 
@@ -6539,7 +6559,7 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
         0 on a report, 1 when there is no inventory.
     """
     from claude_code_hooks_daemon.config.models import handler_options
-    from claude_code_hooks_daemon.core import branch_inventory, branch_sweep
+    from claude_code_hooks_daemon.core import branch_cleanup, branch_inventory, branch_sweep
     from claude_code_hooks_daemon.utils.remote_refs import LazyRemoteRefs
 
     repo = get_project_path(getattr(args, "project_root", None))
@@ -6559,10 +6579,17 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
         print(f"ERROR: no branch inventory for {repo}: {e}", file=sys.stderr)
         return 1
     cap = branch_sweep.effective_wip_cap(branches, legacy)
+    # A runnable remote delete is printed only for what the remote-delete guard's proof accepts.
+    proven = branch_cleanup.proven_remote_only(repo, branches, inventory)
     if args.json:
-        print(json.dumps(branch_sweep.report_json(inventory, cap=cap, config=branches), indent=2))
+        document = branch_sweep.report_json(
+            inventory, cap=cap, config=branches, remote_proven=proven
+        )
+        print(json.dumps(document, indent=2))
         return 0
-    for line in branch_sweep.render_report(inventory, branches, cap=cap, show_all=args.all):
+    for line in branch_sweep.render_report(
+        inventory, branches, cap=cap, show_all=args.all, remote_proven=proven
+    ):
         print(line)
     notice = branch_sweep.deprecation_line(branches, legacy)
     if notice is not None:
@@ -6575,16 +6602,19 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
 
     Returns:
         0 when the park stands (a failed push is reported, with its retry command),
-        1 when it could not be written, 2 on a usage error.
+        1 when it could not be written, 2 on a usage error, ``EXIT_PARKED_NOT_PUSHED``
+        when the park stands locally but the push was refused or failed.
     """
     from claude_code_hooks_daemon.core.branch_creation import (
         LABELS_RELATIVE_PATH,
         clear_label_stage,
     )
     from claude_code_hooks_daemon.core.branch_park import (
+        EXIT_PARKED_NOT_PUSHED,
         BranchParkError,
         BranchParkSameReason,
         park_branch,
+        read_park_record,
     )
 
     if args.clear and args.reason:
@@ -6592,6 +6622,7 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
         return 2
     repo = get_project_path(getattr(args, "project_root", None))
     branches = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml").branches
+    cleared_record = read_park_record(repo, args.name) if args.clear else None
     try:
         result = park_branch(
             repo, args.name, reason=args.reason, remote=branches.remote, clear=args.clear
@@ -6606,9 +6637,15 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
     print(f"{verb} {args.name} at {result.sha[:12]}.")
     if not args.clear:
         clear_label_stage(repo / LABELS_RELATIVE_PATH, args.name)
+    if cleared_record is not None:
+        print(f"Park record cleared: {args.name} ({cleared_record.reason})")
     if not result.pushed:
-        print(f"WARNING: the push failed ({result.push_error}); the local {verb.lower()} stands.")
+        print(
+            f"WARNING: {verb.lower()} locally, not pushed: {args.name} stands {verb.lower()} here, "
+            f"but git refused or failed the push: {result.push_error}"
+        )
         print(f"Retry: {result.retry_command}")
+        return EXIT_PARKED_NOT_PUSHED
     return 0
 
 
@@ -11800,6 +11837,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Project root for lock-hash computation (defaults to current working directory)",
     )
     parser_write_venv_metadata.set_defaults(func=cmd_write_venv_metadata)
+
+    # record-venv-tracking command (Plan 00594 Task 5.1)
+    parser_record_tracking = subparsers.add_parser(
+        "record-venv-tracking",
+        help="Record or clear the ref a branch install tracks in .daemon-metadata.json",
+    )
+    parser_record_tracking.add_argument("--venv-path", required=True, help="The venv directory")
+    parser_record_tracking.add_argument(
+        "--tracked-ref", default=None, help="Exact tracked ref; omit to clear (release install)"
+    )
+    parser_record_tracking.add_argument(
+        "--tracked-sha", default=None, help="Full sha the tracked ref resolved to"
+    )
+    parser_record_tracking.add_argument(
+        "--last-release-tag", default=None, help="Release installed before the branch install"
+    )
+    parser_record_tracking.set_defaults(func=cmd_record_venv_tracking)
 
     # init-config command
     parser_init_config = subparsers.add_parser(

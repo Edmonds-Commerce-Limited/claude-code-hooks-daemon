@@ -33,8 +33,11 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     DormancyStage,
     Pool,
     is_work_branch,
+    merge_proof_key,
+    read_merge_proofs,
     worktrees_by_branch,
 )
+from claude_code_hooks_daemon.daemon.branch_safety import TIER_UNPROVEN, matches_any_glob
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -309,7 +312,36 @@ def _merged_refnames(
     if result.returncode != 0:
         logger.info("branch_creation: merged listing failed: %s", result.stderr.strip())
         return set()
-    return {line for line in result.stdout.splitlines() if line}
+    merged = {line for line in result.stdout.splitlines() if line}
+    return merged | _proven_refnames(repo, config, refs, targets, merged)
+
+
+def _proven_refnames(
+    repo: Path, config: BranchesConfig, refs: list[_Ref], targets: list[str], merged: set[str]
+) -> set[str]:
+    """Refs whose net-change proof is cached for this tip and default.
+
+    Creation READS cached proofs only and never computes one: it is read-only and
+    offline, so it runs no ``git diff``, ``ls-tree`` or ``cherry`` itself. The proof
+    is computed on the explicit commands (the remote delete proof, ``branch-sweep``)
+    and cached by algorithm version, tip and default sha. A squash-merged branch
+    therefore counts as open until one of those commands has proven it, which only
+    over-counts open work (the safe direction). An integration line is never read
+    this way: the proof is keyed by tip alone, so a line whose tip equals a proven
+    feature tip would otherwise be taken for merged, and a line is only ever merged
+    by ancestry.
+    """
+    default_shas = [ref.tip for ref in refs if ref.refname in targets]
+    proofs = read_merge_proofs(repo)
+    if not proofs:
+        return set()
+    return {
+        ref.refname
+        for ref in refs
+        if ref.refname not in merged
+        and not matches_any_glob(ref.name, config.integration_lines)
+        and proofs.get(merge_proof_key(ref.tip, default_shas), TIER_UNPROVEN) != TIER_UNPROVEN
+    }
 
 
 def _tip_label(ref: _Ref, labels: Labels) -> Mapping[str, str | None]:

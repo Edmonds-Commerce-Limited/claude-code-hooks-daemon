@@ -497,7 +497,7 @@ def _paths_in_tree(repo: Path, ref: str) -> set[str]:
     return {line for line in result.stdout.splitlines() if line}
 
 
-def _blobs_in_tree(repo: Path, ref: str) -> dict[str, str]:
+def _blobs_in_tree(repo: Path, ref: str, *, check: bool = False) -> dict[str, str]:
     """Map every path in ``ref``'s tip tree to its blob sha.
 
     Blob sha IS content identity in git: two files with the same sha are
@@ -506,7 +506,7 @@ def _blobs_in_tree(repo: Path, ref: str) -> dict[str, str]:
     paths are also printed to a human deciding whether to abandon work, so they
     are emitted unquoted too (:data:`_NO_QUOTE_PATH`).
     """
-    result = _git(repo, *_NO_QUOTE_PATH, "ls-tree", "-r", ref, check=False)
+    result = _git(repo, *_NO_QUOTE_PATH, "ls-tree", "-r", ref, check=check)
     blobs: dict[str, str] = {}
     for line in result.stdout.splitlines():
         meta, _, path = line.partition("\t")
@@ -516,7 +516,7 @@ def _blobs_in_tree(repo: Path, ref: str) -> dict[str, str]:
     return blobs
 
 
-def _reachable_object_shas(repo: Path, ref: str) -> set[str]:
+def reachable_object_shas(repo: Path, ref: str) -> set[str]:
     """Every object sha reachable from ``ref``, including long-deleted blobs."""
     result = _git(repo, "rev-list", "--objects", ref, check=False)
     shas: set[str] = set()
@@ -541,6 +541,23 @@ def _paths_in_history(repo: Path, ref: str) -> set[str]:
         if path:
             paths.add(path)
     return paths
+
+
+def content_unique_paths_of(repo: Path, tip_ref: str, reachable: set[str]) -> tuple[str, ...]:
+    """Paths of ``tip_ref``'s tree whose blob is absent from ``reachable`` (sorted).
+
+    Empty means every file version on the branch is byte-identical to one still
+    reachable from the protected refs (the ``content-preserved`` tier): nothing is
+    lost by deleting the branch, which is what a squash merge looks like afterwards.
+    ``reachable`` is :func:`reachable_object_shas` of every base, computed once by
+    the caller so a batch of branches shares one walk.
+
+    Raises:
+        subprocess.CalledProcessError: ``ls-tree`` failed. An empty listing from a
+            failed call must never read as "nothing is unique", i.e. as a proof.
+    """
+    blobs = _blobs_in_tree(repo, tip_ref, check=True)
+    return tuple(sorted(path for path, sha in blobs.items() if sha not in reachable))
 
 
 def _protected_base_ref(repo: Path, protected_ref: str) -> str:
@@ -571,7 +588,7 @@ def _protected_base_ref(repo: Path, protected_ref: str) -> str:
     return protected_ref
 
 
-def _patch_equivalent(repo: Path, target: str, tip_ref: str) -> tuple[bool, int | None]:
+def patch_equivalent(repo: Path, target: str, tip_ref: str) -> tuple[bool, int | None]:
     """Whether every patch of ``tip_ref`` is in ``target``, and the unique count.
 
     Fails CLOSED: a failed ``git cherry`` or merge listing is never equivalent,
@@ -706,7 +723,7 @@ def classify_branch(
 
     known_counts: list[int] = []
     for base in bases:
-        equivalent, count = _patch_equivalent(repo, base, tip_ref)
+        equivalent, count = patch_equivalent(repo, base, tip_ref)
         if equivalent:
             return BranchClassification(
                 name=name,
@@ -749,13 +766,10 @@ def classify_branch(
     # Commit-level uniqueness does not imply content loss: a stale branch is
     # usually byte-identical to a target and merely arranged differently.
     # Compare blob shas, which ARE content identity in git.
-    branch_blobs = _blobs_in_tree(repo, tip_ref)
     reachable: set[str] = set()
     for base in bases:
-        reachable |= _reachable_object_shas(repo, base)
-    content_unique_paths = tuple(
-        sorted(path for path, sha in branch_blobs.items() if sha not in reachable)
-    )
+        reachable |= reachable_object_shas(repo, base)
+    content_unique_paths = content_unique_paths_of(repo, tip_ref, reachable)
     if not content_unique_paths:
         return BranchClassification(
             name=name,

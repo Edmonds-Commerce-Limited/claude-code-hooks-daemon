@@ -167,3 +167,19 @@ releases:
       review already covered, so the review range was empty and nothing was
       filed. The hook contract is not re-audited at 2.1.319, so it is not
       recorded as the tested version.
+  v3.74.0:
+    claude_code_version: unknown
+    evidence: ""
+    review_date: "2026-11-10"
+    reviewed_through: "2.1.322"
+    review_report: CLAUDE/Plan/00474-niggles-ledger-seventeen/subagent-reports/261110-claude-code-review-v3.74.0.md
+    note: >-
+      The release host ran Claude Code 2.1.322, but the hook contract
+      (contracts/claude-code-hooks/META.json) has not been re-audited at that
+      version, so 2.1.322 is not recorded as the tested version. The review
+      ran FROM 2.1.319 (v3.73.1's reviewed_through) to 2.1.322; the vendored
+      changelog has no 2.1.320 entry. One adopt (verify) row (cp and mv
+      spelled by a path) and one redundant (partial) row (deny rules now
+      apply to the file a cp or mv into a directory writes), filed as
+      niggles N603 and N604. No conflict row and no instruction-loading
+      change.

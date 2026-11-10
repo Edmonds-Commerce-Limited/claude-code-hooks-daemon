@@ -45,6 +45,8 @@ class _FakeGit:
 
     def __call__(self, cwd: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         self.calls.append(args)
+        if args[0] == "rev-parse":
+            return _done(0, f"{cwd}\n")
         if args[0] == "ls-remote":
             assert kwargs["env"] == {"GIT_TERMINAL_PROMPT": "0"}
             assert kwargs["timeout"] > 0

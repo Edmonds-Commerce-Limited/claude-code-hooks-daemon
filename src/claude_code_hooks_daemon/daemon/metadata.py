@@ -17,7 +17,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
@@ -29,6 +29,8 @@ _LOCK_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 # ``vX.Y.Z`` for a release; ``vX.Y.Z+<ref>.<sha>`` for a guarded branch install
 # (Plan 00291) -- see ``install.install_stamp`` for the reader of that suffix.
 _DAEMON_VERSION_RE = re.compile(r"^v\d+\.\d+\.\d+(\+[0-9A-Za-z._-]+)?$")
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_RELEASE_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
 
 
 class DaemonVenvMetadata(BaseModel):
@@ -46,6 +48,12 @@ class DaemonVenvMetadata(BaseModel):
     lock_hash: str
     daemon_version: str
     written_at: str
+    # Plan 00594 Task 5.1: what a guarded branch install tracks. The stamp
+    # replaces the ref's "/" with "-", so the exact ref lives here. All three are
+    # None for a release install.
+    tracked_ref: str | None = None
+    tracked_sha: str | None = None
+    last_release_tag: str | None = None
 
     @field_validator("python_path")
     @classmethod
@@ -69,6 +77,33 @@ class DaemonVenvMetadata(BaseModel):
                 "daemon_version must match 'vMAJOR.MINOR.PATCH' or 'vMAJOR.MINOR.PATCH+<ref>.<sha>'"
             )
         return value
+
+    @field_validator("tracked_sha")
+    @classmethod
+    def _tracked_sha_must_be_full_sha(cls, value: str | None) -> str | None:
+        if value is not None and not _FULL_SHA_RE.fullmatch(value):
+            raise ValueError("tracked_sha must be a full 40-character lowercase hex sha")
+        return value
+
+    @field_validator("tracked_ref")
+    @classmethod
+    def _tracked_ref_must_not_be_empty(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("tracked_ref must not be empty")
+        return value
+
+    @field_validator("last_release_tag")
+    @classmethod
+    def _last_release_tag_must_be_a_release_tag(cls, value: str | None) -> str | None:
+        if value is not None and not _RELEASE_TAG_RE.fullmatch(value):
+            raise ValueError("last_release_tag must match 'vMAJOR.MINOR.PATCH'")
+        return value
+
+    @model_validator(mode="after")
+    def _tracked_ref_and_sha_come_together(self) -> DaemonVenvMetadata:
+        if (self.tracked_ref is None) != (self.tracked_sha is None):
+            raise ValueError("tracked_ref and tracked_sha must be set together")
+        return self
 
     @field_validator("written_at")
     @classmethod
@@ -137,6 +172,41 @@ def read_daemon_metadata(venv_dir: Path | str) -> DaemonVenvMetadata | None:
             level=logging.DEBUG,
         )
         return None
+
+
+def record_tracking(
+    venv_dir: Path | str,
+    *,
+    tracked_ref: str | None,
+    tracked_sha: str | None,
+    last_release_tag: str | None,
+) -> None:
+    """Record (or, with no ref, clear) what ``venv_dir``'s install tracks.
+
+    A branch install passes its ref, full sha and the release installed before
+    it; a release install passes neither, which clears all three fields.
+
+    Raises:
+        FileNotFoundError: if ``venv_dir`` has no readable metadata to update.
+        ValueError: if the values fail the schema.
+    """
+    current = read_daemon_metadata(venv_dir)
+    if current is None:
+        raise FileNotFoundError(f"no usable {_DAEMON_METADATA_FILENAME} in {venv_dir}")
+    if tracked_ref is None:
+        update: dict[str, str | None] = {
+            "tracked_ref": None,
+            "tracked_sha": None,
+            "last_release_tag": None,
+        }
+    else:
+        update = {
+            "tracked_ref": tracked_ref,
+            "tracked_sha": tracked_sha,
+            "last_release_tag": last_release_tag,
+        }
+    updated = DaemonVenvMetadata.model_validate({**current.model_dump(), **update})
+    write_daemon_metadata(venv_dir, updated)
 
 
 _PYPROJECT_FILENAME = "pyproject.toml"

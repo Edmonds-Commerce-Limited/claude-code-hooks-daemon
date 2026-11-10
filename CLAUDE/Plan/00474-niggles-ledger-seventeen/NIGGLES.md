@@ -7261,3 +7261,107 @@ plan's lifetime total. The owner read that number as review churn and was alarme
 **Status**: ⬜ Open. Count only dispatches of reviewer agent types (or exclude the fact-checker
 and other daemon-requested agents), say in the advisory what is counted, and consider counting
 rounds per branch head or per day rather than per plan lifetime.
+
+### N603 — check that write_protected_paths cp/mv verb matching handles path-spelled `/bin/cp` and `/usr/bin/mv`
+
+**Source**: the Claude Code changelog review for v3.74.0 (2.1.319 to 2.1.322), row "adopt (verify)".
+Report: `subagent-reports/261110-claude-code-review-v3.74.0.md`.
+
+**Evidence**: Claude Code 2.1.321 now gives `cp` and `mv` spelled by a path, such as `/bin/cp`, the same
+path checks as the bare verbs. The daemon side looks already correct: the command parser reduces the
+verb to its basename (`utils/simple_commands.py`, `verb = _basename(words[index])`), so `/bin/cp`
+reaches `_TREE_COPY_VERBS` (`write_protected_paths.py:284`, used at :1259) as `cp`. A fact-check
+refuted the first suspicion that a path-spelled verb slips past.
+
+**Status**: ⬜ Open, low priority. Pin it with a test that `/bin/cp` and `/usr/bin/mv` into a protected
+path are denied exactly as the bare verbs are; fix only if that test fails.
+
+### N604 — review whether the write_protected_paths cp/mv-into-directory guard overlaps Claude Code 2.1.321's deny-rule fix
+
+**Source**: the same review, row "redundant (partial)".
+
+**Evidence**: Claude Code 2.1.321 now applies deny rules and protected-file prompts to the file a `cp`
+or `mv` into a directory writes. The daemon's guard at `write_protected_paths.py:457` resolves that
+target directory itself.
+
+**Status**: ⬜ Open. Keep the guard unless the project's `permissions.deny` already covers the same
+paths; record the comparison before removing anything.
+
+### N605 — lint_on_edit denies a shell file on shellcheck info-level findings that the project's own gate passes
+
+**Source**: a client seat (10 November 2026), daemon v3.73.1.
+
+**Evidence**: `lint_on_edit` for bash denied a file on info-level SC2329 and SC2016. The hook runs
+`shellcheck -x {file}` (`strategies/lint/shell_strategy.py:12`) with no severity option, so shellcheck's
+default applies and every level, info and style included, fails the edit. The client's own gate runs at
+severity `warning` (a client-side fact not checked here) and passes the same file, so the hook and the
+project gate disagree on what counts as a failure.
+
+**Status**: ⬜ Open. Take the severity from the project's shellcheck configuration when it has one
+(`.shellcheckrc`, or the severity its QA gate passes), otherwise default to `warning`, and add a test
+with an info-only finding that is allowed.
+
+### N606 — lint_on_edit reports SC1091 (not following a sourced file) as a failure
+
+**Source**: the same client seat.
+
+**Evidence**: SC1091 fires when shellcheck cannot follow a `source` whose path is resolved at run time.
+The project's own gate passes the file. It is a limit of static analysis, not a defect in the script.
+
+**Status**: ⬜ Open. The hook already passes `-x`, so that is not the remedy. Treat SC1091 as
+non-failing in the hook, or pass the script's directory as the source path (this repository's own
+`.shellcheckrc` sets `source-path=SCRIPTDIR`), with a test. May share its fix with N605. The client
+behaviour itself is not reproduced here.
+
+### N607 — branch-park pushes the branch, and a project's pre-push gate can refuse the push, leaving the park half done
+
+**Source**: the same client seat.
+
+**Evidence**: `branch-park` pushes after parking. The client's pre-push gate requires a fresh full-QA
+verdict, so a park from a worktree without one is refused. A fact-check of the code found the local
+park is NOT half done: `branch_park.py:159-168` writes the park commit and runs `update-ref` before the
+push, a failed push returns a "parked locally, not pushed" result with a retry command, and
+`cmd_branch_park` (cli.py around :6600) exits 0 while reporting it. The remote-only path
+(`branch_park.py:101-112`) parks nothing on a failed push. What the client met as "fails half-done" is
+therefore the exit status and wording, or the remote-only path.
+
+**Status**: ⬜ Open. Belongs with Task 4.3. Pin the existing behaviour with a failing pre-push hook, and
+fix whatever gap that shows (a distinct exit status for "parked locally, not pushed", the remote-only
+path).
+
+### N608 — R-SECRET-BASH-MENTION blocked a heredoc whose prose only resembled a vault filename glob
+
+**Source**: the same client seat.
+
+**Evidence**: a heredoc body that mentioned text matching a protected-path glob for vault files was
+denied, though no protected path was read, named as a command argument or written.
+
+**Status**: ⬜ Open. Reproduce with a prose-only heredoc, then decide whether a quoted-delimiter heredoc
+body that is only written to a file should be judged for the paths it names. Note that
+`R-SECRET-BASH-MENTION` is deny-by-design for a command that names a protected path, so the fix has to
+distinguish a mention in written prose from a path the command acts on.
+
+### N609 — a dangling legacy `untracked/venv` symlink survives install and upgrade
+
+**Source**: Plan 00594 release housekeeping (10 November 2026).
+
+**Evidence**: `untracked/venv` was a symlink to a venv directory that no longer existed. The install
+script removes the pre-v3.7.0 `untracked/venv` only when `[ -d "$LEGACY_VENV" ]`, and `-d` is false for a
+dangling link, so the link stayed for months and the session-start venv report did not name it
+(`paths.py:3190-3192` skips any candidate that is not a directory, so the report has the same blind spot).
+
+**Status**: ⬜ Open. Test `-L` as well as `-d` at all three sites (`install_version.sh:404`,
+`upgrade_version.sh:1011` and `:1384`) and make the venv report name a dangling `venv*` link, with a test
+that builds a dangling link and expects it removed.
+
+### N610 — a version-only bump marks the venv "not built for this source" until `repair` runs
+
+**Source**: Plan 00594 release Step 12.1 (10 November 2026).
+
+**Evidence**: after the release bump, `restart` and `status` both warned that the venv was built for a
+different `lock_hash`, because `pyproject.toml` and `uv.lock` carry the project's own version. No
+dependency had changed. The release procedure has no step that runs `repair` before the acceptance gate,
+so each release meets the warning and has to work out the fix.
+
+**Status**: ⬜ Open. Either exclude the project's own version line from the lock hash, or add the
+`repair` step to RELEASING.md Step 12.1.

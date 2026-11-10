@@ -129,7 +129,26 @@ class TestCleanupTargets:
         assert cleanup_targets(repo, _CONFIG, "main") == ["main", "refs/heads/release/1"]
 
 
-def _lock_pair_branch(repo: Path, name: str, where: str, manifest: str, lock: str | None) -> Path:
+_BUNDLE_IGNORE = "untracked/\n**/vendor/bundle/\n"
+
+
+def _track_beside_bundle(path: Path) -> Path:
+    """Track a file in ``svc/vendor`` so git reports ``vendor/bundle/`` itself, not ``vendor/``."""
+    (path / "svc/vendor").mkdir(parents=True, exist_ok=True)
+    (path / "svc/vendor/keep.rb").write_text("x\n", encoding="utf-8")
+    _git(path, "add", "svc/vendor/keep.rb")
+    _git(path, "commit", "-m", "track a vendor file")
+    return path / "svc/vendor/bundle/ruby/3.3.0/bundler/gems/foo-abc123"
+
+
+def _lock_pair_branch(
+    repo: Path,
+    name: str,
+    where: str,
+    manifest: str,
+    lock: str | None,
+    ignore: str = "untracked/\nvendor/\nnode_modules/\n",
+) -> Path:
     """A worktree whose branch commits ``manifest`` (and ``lock``) under ``where``."""
     _git(repo, "checkout", "-b", name)
     directory = repo / where
@@ -138,7 +157,7 @@ def _lock_pair_branch(repo: Path, name: str, where: str, manifest: str, lock: st
         if filename is not None:
             (directory / filename).write_text("{}\n", encoding="utf-8")
             _git(repo, "add", f"{where}/{filename}")
-    (repo / ".gitignore").write_text("untracked/\nvendor/\nnode_modules/\n", encoding="utf-8")
+    (repo / ".gitignore").write_text(ignore, encoding="utf-8")
     _git(repo, "add", ".gitignore")
     _git(repo, "commit", "-m", f"Add {name}")
     _git(repo, "checkout", "main")
@@ -182,6 +201,22 @@ class TestLockRegeneratedBlockers:
         blockers = worktree_blockers(path, [])
         assert blockers
         assert all(b.startswith("svc/vendor/") for b in blockers)
+
+    def test_bundler_gems_without_a_clone_are_regenerable(self, repo: Path) -> None:
+        path = _lock_pair_branch(repo, "f7", "svc", "Gemfile", "Gemfile.lock", _BUNDLE_IGNORE)
+        gem = _track_beside_bundle(path)
+        gem.mkdir(parents=True)
+        (gem / "foo.rb").write_text("x\n", encoding="utf-8")
+        assert worktree_blockers(path, []) == ()
+
+    def test_a_bundler_git_gem_clone_five_levels_down_still_blocks(self, repo: Path) -> None:
+        path = _lock_pair_branch(repo, "f8", "svc", "Gemfile", "Gemfile.lock", _BUNDLE_IGNORE)
+        gem = _track_beside_bundle(path)
+        (gem / ".git").mkdir(parents=True)
+        (gem / "foo.rb").write_text("x\n", encoding="utf-8")
+        blockers = worktree_blockers(path, [])
+        assert blockers
+        assert all(b.startswith("svc/vendor/bundle/") for b in blockers)
 
     def test_a_clone_at_depth_one_and_two_is_found(self, tmp_path: Path) -> None:
         shallow = tmp_path / "shallow"

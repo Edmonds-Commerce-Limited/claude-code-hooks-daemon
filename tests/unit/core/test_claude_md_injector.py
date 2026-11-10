@@ -2186,11 +2186,13 @@ class TestClaudeMdInjectorHomeBranch:
         from claude_code_hooks_daemon.config.models import BranchesConfig
         from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 
-        return ClaudeMdInjector(
+        injector = ClaudeMdInjector(
             workspace_root=path,
             handlers=[_StubHandler("h", "## H\n\nContent.")],
             branches=BranchesConfig(),
-        ).inject()
+        )
+        injector.inject()
+        return injector.current_notices()
 
     def test_home_defaults_to_empty(self) -> None:
         from claude_code_hooks_daemon.config.models import BranchesConfig
@@ -2249,12 +2251,14 @@ class TestClaudeMdInjectorHomeBranch:
 
         _init_repo_on_main(tmp_path)
         head = _git(tmp_path, "rev-parse", "HEAD")
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=[_StubHandler("h", "## H\n\nContent.")],
+            branches=BranchesConfig(home_commit=False),
+        )
         with caplog.at_level(logging.INFO):
-            notices = ClaudeMdInjector(
-                workspace_root=tmp_path,
-                handlers=[_StubHandler("h", "## H\n\nContent.")],
-                branches=BranchesConfig(home_commit=False),
-            ).inject()
+            assert injector.inject() is None
+        notices = injector.current_notices()
         assert not _has_block(tmp_path)
         assert _claude_md_is_clean(tmp_path)
         assert _git(tmp_path, "rev-parse", "HEAD") == head
@@ -2269,12 +2273,13 @@ class TestClaudeMdInjectorHomeBranch:
         handlers = [_StubHandler("h", "## H\n\nContent.")]
         ClaudeMdInjector(workspace_root=tmp_path, handlers=handlers).inject()
         assert _claude_md_is_clean(tmp_path)
-        notices = ClaudeMdInjector(
+        injector = ClaudeMdInjector(
             workspace_root=tmp_path,
             handlers=handlers,
             branches=BranchesConfig(home_commit=False),
-        ).inject()
-        assert notices == []
+        )
+        assert injector.inject() is None
+        assert injector.current_notices() == []
 
     def test_home_commit_false_leaves_a_pull_from_upstream_able_to_fast_forward(
         self, tmp_path: Path
@@ -2299,7 +2304,7 @@ class TestClaudeMdInjectorHomeBranch:
         assert "changed upstream" in (local / "CLAUDE.md").read_text()
 
     def test_on_request_on_a_home_branch_with_home_commit_false_refuses(
-        self, tmp_path: Path
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Plan 00594 round 2: `regenerate-docs` never writes on a home branch either."""
         from claude_code_hooks_daemon.config.models import BranchesConfig
@@ -2307,15 +2312,17 @@ class TestClaudeMdInjectorHomeBranch:
 
         _init_repo_on_main(tmp_path)
         head = _git(tmp_path, "rev-parse", "HEAD")
-        notices = ClaudeMdInjector(
-            workspace_root=tmp_path,
-            handlers=[_StubHandler("h", "## H\n\nContent.")],
-            on_request=True,
-            branches=BranchesConfig(home_commit=False),
-        ).inject()
+        with caplog.at_level(logging.WARNING):
+            result = ClaudeMdInjector(
+                workspace_root=tmp_path,
+                handlers=[_StubHandler("h", "## H\n\nContent.")],
+                on_request=True,
+                branches=BranchesConfig(home_commit=False),
+            ).inject()
+        assert result is None
         assert not _has_block(tmp_path)
         assert _git(tmp_path, "rev-parse", "HEAD") == head
-        assert any("pull-request" in n for n in notices)
+        assert "pull-request" in caplog.text
 
     def test_on_request_off_home_with_home_commit_false_still_writes(self, tmp_path: Path) -> None:
         from claude_code_hooks_daemon.config.models import BranchesConfig
@@ -2576,3 +2583,103 @@ class TestCurrentNotices:
         _git(tmp_path, "branch", "other")
         _git(tmp_path, "config", "init.defaultBranch", "nowhere")
         assert any("branches.home" in n for n in self._injector(tmp_path).current_notices())
+
+
+class TestInjectCarriesNoNotices:
+    """Review finding 1: ``current_notices`` is the only carrier of notices."""
+
+    def test_off_home_start_up_pays_no_notice_computation(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path, handlers=[_StubHandler("h", "## H\n\nContent.")]
+        )
+        with patch.object(injector, "_unresolved_home_notices") as notices:
+            assert injector.inject() is None
+        notices.assert_not_called()
+
+
+class TestConfiguredHomeNamesNoBranch:
+    """Review finding 2: a ``branches.home`` that names nothing is said, not silent."""
+
+    @staticmethod
+    def _notices(path: Path, home: list[str]) -> list[str]:
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        return ClaudeMdInjector(
+            workspace_root=path,
+            handlers=[_StubHandler("h", "## H\n\nContent.")],
+            branches=BranchesConfig(home=home),
+        ).current_notices()
+
+    def test_a_typoed_home_is_noticed_and_named(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        notices = self._notices(tmp_path, ["mian"])
+        assert any("mian" in n and "branches.home" in n for n in notices)
+
+    def test_no_match_at_all_says_the_block_is_not_written(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
+        notices = self._notices(tmp_path, ["mian", "mastr"])
+        assert len(notices) == 1
+        assert "block not written" in notices[0]
+        assert "no branch counts as home" in notices[0]
+        assert "mian" in notices[0] and "mastr" in notices[0]
+
+    def test_a_partial_match_never_claims_the_block_is_not_written(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
+        notices = self._notices(tmp_path, ["main", "master"])
+        assert len(notices) == 1
+        assert "master" in notices[0] and "'main'" not in notices[0]
+        assert "not written" not in notices[0]
+        assert "no branch counts as home" not in notices[0]
+
+    def test_unmatched_advice_allows_for_a_clone_missing_the_branch(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
+        for home in (["mian"], ["main", "mian"]):
+            (notice,) = self._notices(tmp_path, home)
+            assert "not found in this clone" in notice
+            assert "fetch it" in notice
+
+    def test_an_existing_home_has_no_notice(self, tmp_path: Path) -> None:
+        _init_repo_on_main(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "feature/x")
+        assert self._notices(tmp_path, ["main"]) == []
+
+    @pytest.mark.parametrize("entry", ["", "  ", " main", "main "])
+    def test_blank_or_padded_home_entries_are_rejected(self, entry: str) -> None:
+        from pydantic import ValidationError
+
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+
+        with pytest.raises(ValidationError):
+            BranchesConfig(home=[entry])
+
+
+class TestHomeCommitFalseFormatsOnce:
+    """Review finding 3: the staleness check does not re-run the formatter every call."""
+
+    def test_formatter_runs_once_across_two_calls(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+        from claude_code_hooks_daemon.core import claude_md_injector as module
+
+        _init_repo_on_main(tmp_path)
+        injector = module.ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=[_StubHandler("h", "## H\n\nContent.")],
+            branches=BranchesConfig(home_commit=False),
+        )
+        real = module.ClaudeMdInjector._format_fail_safe
+        with patch.object(
+            module.ClaudeMdInjector, "_format_fail_safe", side_effect=real
+        ) as formatter:
+            first = injector.current_notices()
+            second = injector.current_notices()
+        assert first == second
+        assert first
+        assert formatter.call_count == 1

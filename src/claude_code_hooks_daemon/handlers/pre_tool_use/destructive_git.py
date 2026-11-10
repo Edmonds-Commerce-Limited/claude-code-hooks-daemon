@@ -397,7 +397,9 @@ _PUSH_DELETE_VERBOSE: Final[str] = (
     "machines share that ref, and nothing in this checkout (reflog included) restores it.\n\n"
     "It is ALLOWED when every named branch's remote-tracking ref is already merged into the "
     "default branch or an integration line (`branches.integration_lines`; one "
-    "`git for-each-ref --merged` per target) AND `git ls-remote` shows the remote's live tip "
+    "`git for-each-ref --merged` per target), or its patches are all in the default branch "
+    "(`git cherry`), or every file version on it is byte-identical to one the default branch "
+    "holds (a squash merge or a renamed pull request), AND `git ls-remote` shows the remote's live tip "
     "equal to it (a stale tracking ref is denied: run `git fetch` and retry), judged in the "
     "repository the command runs in; nothing is lost then. An integration line itself is "
     "judged against the DEFAULT branch only (merged into another line does not count). "
@@ -617,7 +619,19 @@ def _rm_covers(command: str, cwd: Path, target: Path) -> bool:
         for word in words[1:]:
             if word.startswith("-"):
                 continue
-            named = Path(word).expanduser()
+            try:
+                named = Path(word).expanduser()
+            except RuntimeError as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=(
+                        f"`{word}` names a home directory that cannot be resolved, so it covers "
+                        "no path; this advice-building code must never fail the judgement"
+                    ),
+                    level=logging.DEBUG,
+                )
+                continue
             named = named if named.is_absolute() else cwd / named
             if path_is_relative_to(target, named):
                 return True

@@ -37,6 +37,7 @@ TARGET_VERSION=""
 # config-optimisation review reminder.
 UPGRADE_FLAGS=""
 UV_OVERRIDE=""
+_RELEASE_ROUTE="false"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -56,6 +57,11 @@ while [ $# -gt 0 ]; do
             [ -n "${2:-}" ] || { echo "ERR --project-root requires a path argument" >&2; exit 1; }
             PROJECT_ROOT="$2"
             shift 2
+            ;;
+        --release)
+            # Plan 00594 Task 5.1: back from a branch install to a release.
+            _RELEASE_ROUTE="true"
+            shift
             ;;
         --uv|--uv=*)
             # N271: the uv that builds the venv, for this run only. It decides
@@ -90,6 +96,8 @@ while [ $# -gt 0 ]; do
             echo "  --skip-reading-confirmation=DIGEST"
             echo "                             Confirm you have read what the pre-deploy gate listed;"
             echo "                             DIGEST is the value its stop printed for that listing"
+            echo "  --release                  Return to the release installed before an unreleased"
+            echo "                             install (the latest release if none was recorded)"
             echo "  VERSION                    Git tag to upgrade to (default: latest)"
             exit 0
             ;;
@@ -731,6 +739,42 @@ git -C "$DAEMON_DIR" fetch --tags --force --quiet
 _TRACK_REF="${HOOKS_DAEMON_UNSAFE_TRACK_REF:-}"
 _TRACK_REASON="${HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE:-}"
 _BRANCH_INSTALL="false"
+
+# Plan 00594 Task 5.1: --release is the one-step way back from a branch
+# install. It targets the release a branch install recorded as installed before
+# it (venv .daemon-metadata.json "last_release_tag"), else the latest tag, and
+# runs as an ordinary release install, which needs no tracking variables and
+# clears the tracking metadata.
+if [ "$_RELEASE_ROUTE" = "true" ]; then
+    if [ -n "$_TRACK_REF" ] || [ -n "$_TRACK_REASON" ]; then
+        _fail "--release returns to a release and cannot be combined with the branch-install variables, refusing."
+    fi
+    if [ -n "$TARGET_VERSION" ]; then
+        _fail "--release and a version argument ($TARGET_VERSION) cannot both be given: --release chooses the release itself, refusing."
+    fi
+    # Only the ACTIVE venv's record counts: other venvs (another Python, a
+    # host or container view) stay on disk with records of older cycles. The
+    # venv is named by the resolver the rest of the install uses.
+    _RELEASE_RESOLVER="$DAEMON_DIR/scripts/install/venv_resolver.sh"
+    _ACTIVE_VENV=""
+    if [ -f "$_RELEASE_RESOLVER" ]; then
+        # shellcheck source=install/venv_resolver.sh
+        _ACTIVE_VENV="$(
+            unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH
+            source "$_RELEASE_RESOLVER"
+            resolve_existing_venv_dir "$DAEMON_DIR" 2>/dev/null
+        )" || _ACTIVE_VENV=""
+    fi
+    if [ -n "$_ACTIVE_VENV" ] && [ -f "$_ACTIVE_VENV/.daemon-metadata.json" ] \
+        && _recorded_tag="$(grep -o '"last_release_tag": *"v[0-9.]*"' "$_ACTIVE_VENV/.daemon-metadata.json")"; then
+        TARGET_VERSION="$(cut -d'"' -f4 <<<"$_recorded_tag")"
+    fi
+    if [ -n "$TARGET_VERSION" ]; then
+        _info "Returning to the release recorded before the branch install: $TARGET_VERSION"
+    else
+        _info "No earlier release was recorded; returning to the latest release."
+    fi
+fi
 if [ -n "$_TRACK_REF" ] || [ -n "$_TRACK_REASON" ]; then
     if [ -z "$_TRACK_REF" ]; then
         _fail "HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE is set but HOOKS_DAEMON_UNSAFE_TRACK_REF is not: a branch install needs both, refusing."
@@ -763,8 +807,10 @@ if [ "$_BRANCH_INSTALL" = "true" ]; then
     TARGET_DISPLAY="${TARGET_SEMVER}+${_TRACK_REF//\//-}.${_TARGET_SHORT}"
 else
     if [ -z "$TARGET_VERSION" ]; then
-        TARGET_VERSION=$(git -C "$DAEMON_DIR" describe --tags \
-            "$(git -C "$DAEMON_DIR" rev-list --tags --max-count=1)" 2>/dev/null || echo "")
+        # Highest VERSION, as version_check orders it: the newest commit's tag
+        # is a patch release on an older line as often as it is the latest.
+        _ALL_RELEASE_TAGS="$(git -C "$DAEMON_DIR" tag --list 'v[0-9]*' --sort=-v:refname)" || _ALL_RELEASE_TAGS=""
+        TARGET_VERSION="${_ALL_RELEASE_TAGS%%$'\n'*}"
         if [ -z "$TARGET_VERSION" ]; then
             _fail "No tags found. Specify a version explicitly."
         fi
