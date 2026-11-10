@@ -169,7 +169,8 @@ class BranchSweepHandler(SessionStartHandlerBase):
             "`branches.wip.cap` / `branches.sweep.behind_threshold` are unset. The same summary "
             "carries a `CLAUDE.MD BLOCK` notice, recomputed at every SessionStart, when the "
             "`<hooksdaemon>` block is stale on a home branch under `branches.home_commit: "
-            "false` or no home branch resolves to a local branch (set `branches.home`). Advisory only."
+            "false` or no home branch resolves to a local branch (set `branches.home`); this handler is "
+            "the only carrier of that notice, so with it disabled nothing tells an agent. Advisory only."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

@@ -144,17 +144,15 @@ import sys
 from pathlib import Path
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.core.claude_md_injector import block_not_refreshed_reason
+from claude_code_hooks_daemon.daemon.cli import claude_md_block_is_stale
 root = Path(sys.argv[1])
 config = Config.load(root / ".claude" / "hooks-daemon.yaml")
-
-
-def block_is_stale() -> bool:
-    from claude_code_hooks_daemon.daemon.cli import _build_initialised_controller
-
-    return bool(_build_initialised_controller(config, root).claude_md_notices())
-
-
-print(block_not_refreshed_reason(root, config.branches, block_is_stale) or "")
+print(
+    block_not_refreshed_reason(
+        root, config.branches, lambda: claude_md_block_is_stale(config, root)
+    )
+    or ""
+)
 ' "$project_root")"; then
         print_warning "Could not tell whether the CLAUDE.md hooks-daemon block was refreshed; run 'hooks-daemon regenerate-docs' on a pull-request branch if it is stale"
         return 0

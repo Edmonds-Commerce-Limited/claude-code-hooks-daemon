@@ -2404,7 +2404,9 @@ class TestClaudeMdInjectorHomeBranch:
         assert self._inject_notices(tmp_path) == []
         assert _has_block(tmp_path)
 
-    def test_a_resolved_home_with_no_local_branch_raises_the_notice(self, tmp_path: Path) -> None:
+    def test_a_home_resolved_from_the_remote_head_needs_no_local_branch(
+        self, tmp_path: Path
+    ) -> None:
         _init_repo_on_main(tmp_path)
         _git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
         _git(tmp_path, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
@@ -2412,7 +2414,7 @@ class TestClaudeMdInjectorHomeBranch:
         _git(tmp_path, "branch", "-q", "-D", "main")
         notices = self._inject_notices(tmp_path)
         assert not _has_block(tmp_path)
-        assert any("branches.home" in n for n in notices)
+        assert notices == []
 
     def test_unborn_head_writes_the_block_but_creates_no_root_commit(self, tmp_path: Path) -> None:
         _git(tmp_path, "init", "-q", "-b", "main")
@@ -2535,3 +2537,42 @@ class TestCurrentNotices:
         _init_git_repo(main)
         linked = _add_linked_worktree(main, "worktree-x")
         assert self._injector(linked).current_notices() == []
+
+    @staticmethod
+    def _clone_on_feature(tmp_path: Path) -> Path:
+        """A clone made with ``-b feat``: no local main, origin/HEAD names main."""
+        origin = tmp_path / "origin"
+        origin.mkdir()
+        _init_repo_on_main(origin)
+        _git(origin, "branch", "feat")
+        clone = tmp_path / "clone"
+        _git(tmp_path, "clone", "-q", "-b", "feat", str(origin), str(clone))
+        return clone
+
+    def test_clone_on_a_feature_branch_has_no_notice(self, tmp_path: Path) -> None:
+        """Round 3: a home known only as origin/<name> is resolved, so nothing to tell."""
+        clone = self._clone_on_feature(tmp_path)
+        assert self._injector(clone).current_notices() == []
+
+    def test_configured_home_existing_only_on_the_remote_has_no_notice(
+        self, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.config.models import BranchesConfig
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        clone = self._clone_on_feature(tmp_path)
+        injector = ClaudeMdInjector(
+            workspace_root=clone,
+            handlers=[_StubHandler("h", "## H\n\nContent.")],
+            branches=BranchesConfig(home=["main"], home_commit=False),
+        )
+        assert injector.current_notices() == []
+
+    def test_init_default_branch_naming_a_missing_branch_still_notices(
+        self, tmp_path: Path
+    ) -> None:
+        _init_git_repo(tmp_path)
+        _git(tmp_path, "branch", "-M", "trunk-like")
+        _git(tmp_path, "branch", "other")
+        _git(tmp_path, "config", "init.defaultBranch", "nowhere")
+        assert any("branches.home" in n for n in self._injector(tmp_path).current_notices())

@@ -493,9 +493,16 @@ class DaemonController:
             BranchSweepHandler,
         )
 
-        for handler in handlers:
-            if isinstance(handler, BranchSweepHandler):
-                handler.claude_md_notices = provider
+        recipients = [h for h in handlers if isinstance(h, BranchSweepHandler)]
+        for handler in recipients:
+            handler.claude_md_notices = provider
+        if not recipients:
+            logger.warning(
+                "CLAUDE.md block notices have no recipient: the branch_sweep session_start "
+                "handler is not registered (disabled, or switched off through its legacy "
+                "branch_count_advisor key). Enable handlers.session_start.branch_sweep for "
+                "an agent to be told when the block is stale or unwritten."
+            )
 
     def claude_md_notices(self) -> list[str]:
         """What the CLAUDE.md block currently needs an agent to know; empty before initialise."""

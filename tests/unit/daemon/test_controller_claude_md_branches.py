@@ -116,3 +116,23 @@ def test_the_controller_answers_the_upgrade_script_with_the_current_notices(repo
     assert DaemonController().claude_md_notices() == []
     controller = _initialise(repo, BranchesConfig(home_commit=False))
     assert any("stale on main" in notice for notice in controller.claude_md_notices())
+
+
+def test_a_missing_branch_sweep_is_logged_as_a_notice_with_no_recipient(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Plan 00594 round 3: with no sweep handler the CLAUDE.md notice reaches no agent."""
+    with caplog.at_level("WARNING"):
+        DaemonController._publish_claude_md_notices([], lambda: [])
+    warnings = [r for r in caplog.records if "no recipient" in r.getMessage()]
+    assert len(warnings) == 1
+    assert warnings[0].levelname == "WARNING"
+    assert "branch_sweep" in warnings[0].getMessage()
+
+
+def test_no_recipient_warning_when_the_sweep_is_registered(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING"):
+        DaemonController._publish_claude_md_notices([BranchSweepHandler()], lambda: [])
+    assert not [r for r in caplog.records if "no recipient" in r.getMessage()]

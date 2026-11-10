@@ -265,6 +265,12 @@ def _is_local_or_unborn_branch(cwd: Path, name: str) -> bool:
     return _head_is_unborn(cwd) and current_branch(cwd) == name
 
 
+def _is_remote_branch(cwd: Path, remote: str, name: str) -> bool:
+    """``refs/remotes/<remote>/<name>`` exists."""
+    ref = f"refs/remotes/{remote}/{name}"
+    return run_git(cwd, "show-ref", "--verify", "--quiet", ref).returncode == 0
+
+
 def _fallback_default_branch(cwd: Path) -> str | None:
     """The default branch for a repository with no remote HEAD and no ``main``/``master``."""
     configured = run_git(cwd, "config", "init.defaultBranch").stdout.strip()
@@ -628,8 +634,16 @@ class ClaudeMdInjector:
             return []
         from claude_code_hooks_daemon.config.models import BranchesConfig
 
-        home = _home_branches(self._workspace_root, config or BranchesConfig())
-        if any(_is_local_or_unborn_branch(self._workspace_root, name) for name in home):
+        resolved = config or BranchesConfig()
+        # A home read from the remote's HEAD is real without a local copy (a
+        # `git clone -b feat`); the init.defaultBranch fallback is already
+        # vetted as local-or-unborn inside _fallback_default_branch.
+        home = _home_branches(self._workspace_root, resolved)
+        if any(
+            _is_local_or_unborn_branch(self._workspace_root, name)
+            or _is_remote_branch(self._workspace_root, resolved.remote, name)
+            for name in home
+        ):
             return []
         return [
             "CLAUDE.md hooks-daemon block not written: the default branch could not be "

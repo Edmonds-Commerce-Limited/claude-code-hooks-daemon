@@ -4448,6 +4448,21 @@ def _build_initialised_controller(
     return controller
 
 
+def claude_md_block_is_stale(config: Config, project_path: Path) -> bool:
+    """Whether the CLAUDE.md block needs an agent's attention, with no write side effect.
+
+    The upgrade script asks this after a restart. The controller is built with
+    the deferred start-up and the deferred steps (CLAUDE.md injection, asset and
+    rules syncs) are dropped, so the answer comes from the registered handlers
+    alone.
+    """
+    controller = _build_initialised_controller(
+        config, project_path, defer_nonessential_startup=True
+    )
+    controller.take_deferred_startup()
+    return bool(controller.claude_md_notices())
+
+
 def _regenerate_docs_refusal(project_path: Path) -> str | None:
     """Why ``regenerate-docs`` must not write here (``home_commit: false`` on a home branch).
 
