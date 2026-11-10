@@ -3,7 +3,10 @@
 Three-tier logic:
   1. Matches whitelist?  → ALLOW (grep, awk, jq, ls, git tag, etc.)
   2. Matches blacklist?  → DENY: "expensive command, use temp file"
-  3. Unknown?           → DENY: "unrecognized, add to extra_whitelist or use temp file"
+  3. Unknown?           → ALLOW with an advisory (Plan 00478, "warn dont block"):
+     the producer is on neither list, so the guard cannot tell whether it is
+     expensive; the advisory names the capture helper and ``extra_whitelist``
+     and one ``UNKNOWN-VERDICT`` log line is written.
 
 Uses Strategy Pattern: all language-specific blacklist patterns are delegated to
 PipeBlockerStrategy implementations registered in PipeBlockerStrategyRegistry.
@@ -45,6 +48,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted,
     strip_inert_spans,
 )
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 logger = logging.getLogger(__name__)
 
@@ -279,7 +283,7 @@ _SHELL_WORDS_THAT_ARE_NOT_PRODUCERS: frozenset[str] = frozenset(
 # get_rules()'s Rule.verbose is a STATIC per-rule fallback used for the
 # always-on CLAUDE.md table; the actual deny messages this handler emits stay
 # fully dynamic (source name, resolved echd-capture path, truncated command)
-# and are built by the existing _blacklisted_reason/_unknown_reason/
+# and are built by the existing _blacklisted_reason/
 # _prose_reason methods, which a static Rule.verbose cannot represent
 # (Migration Pattern: "Rule.verbose has no access to the invocation's actual
 # command text"). Declaring rules is still required for the disclosure ladder
@@ -325,7 +329,8 @@ class PipeBlockerHandler(
     1. Whitelist (universal + extra_whitelist): always ALLOW
     2. Blacklist (language strategies + extra_blacklist): always DENY with
        "expensive command" message
-    3. Unknown: DENY with "unrecognized command, add to extra_whitelist" message
+    3. Unknown: ALLOW with an advisory naming the capture helper and
+       ``extra_whitelist`` (the guard cannot tell whether it is expensive)
 
     Language-specific blacklists are managed by PipeBlockerStrategy implementations
     in the pipe_blocker strategy domain. The handler has zero language awareness.
@@ -1068,42 +1073,30 @@ class PipeBlockerHandler(
             f"{self._echd_capture_terse(source_segment)}"
         )
 
-    def _unknown_reason(self, rule_id: str, source_segment: str, command: str) -> str:
-        """Return verbose block message for unrecognized commands (not in whitelist or blacklist)."""
-        anchor = self._producer_regex_anchor(source_segment)
-        return (
-            f"BLOCKED [{rule_id}]: Pipe to tail/head detected\n\n"
-            f"COMMAND: {self._truncate_command(command)}\n\n"
-            f"WHY BLOCKED:\n"
-            f"  • This command is unrecognized by the pipe blocker\n"
-            f"  • If it is cheap/safe to pipe, add it to {_CONFIG_HINT_EXTRA_WHITELIST} in "
-            f".claude/hooks-daemon.yaml:\n\n"
-            f"    {_CONFIG_YAML_KEY}:\n"
-            f"      {_CONFIG_HINT_EXTRA_WHITELIST}:\n"
-            f'        - "^{anchor}\\\\b"\n\n'
-            f"  • If it IS expensive, capture it with the helper below\n\n"
-            f"{self._echd_capture_recommendation(source_segment)}\n"
-            f"INFO: WHITELISTED COMMANDS (piping is OK):\n"
-            f"  Commands that already filter output: grep, rg, awk, sed, jq, ls, cat, etc.\n\n"
-            f"  Example: grep error /var/log/syslog | tail -n 20  (allowed)"
-        )
+    def _unknown_producer_verdict(self, source_segment: str) -> GatingResult:
+        """ALLOW a pipe fed by a producer on neither list, with the shared advisory.
 
-    def _unknown_terse_reason(self, rule_id: str, source_segment: str, command: str) -> str:
-        """Return terse block message for unrecognized commands (subsequent blocks)."""
+        The guard cannot tell whether the producer is expensive. The advisory
+        names the capture helper (for an expensive one) and ``extra_whitelist``
+        (for a cheap one, to stop the advisory), and the shared helper writes
+        the ``UNKNOWN-VERDICT`` log line.
+        """
         label = self._producer_label(source_segment)
         anchor = self._producer_regex_anchor(source_segment)
-        return (
-            f"BLOCKED [{rule_id}]: Pipe to tail/head — {label} unrecognized\n\n"
-            f"COMMAND: {self._truncate_command(command)}\n\n"
-            f"Add to whitelist in .claude/hooks-daemon.yaml:\n"
-            f"  {_CONFIG_YAML_KEY}:\n"
-            f"    {_CONFIG_HINT_EXTRA_WHITELIST}:\n"
-            f'      - "^{anchor}\\\\b"\n\n'
-            f"{self._echd_capture_terse(source_segment)}"
+        helper = self._capture_helper_invocation() or _ECHD_CAPTURE_NAME
+        return unknown_verdict_allow(
+            "pipe_blocker",
+            f"`{label}` piped to tail/head is on neither the cheap-command whitelist nor "
+            "the expensive-command blacklist, so it is not known whether the pipe discards "
+            "output that would be costly to regenerate",
+            f"If it is expensive, capture the full output instead: "
+            f"`set -o pipefail; {label} ... 2>&1 | {helper} {_ECHD_CAPTURE_DEFAULT_LINES}`. "
+            f"If it is cheap, add `^{anchor}\\b` to {_CONFIG_HINT_EXTRA_WHITELIST} under "
+            f"{_CONFIG_YAML_KEY} in .claude/hooks-daemon.yaml to stop this advisory",
         )
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block with a verbose-first/terse-after blacklisted/unknown/prose message.
+        """Block with a verbose-first/terse-after blacklisted/prose message; warn when unknown.
 
         Verbosity is decided per (transcript_path, rule_id) via the shared
         DisclosureTracker (Plan 00116, Decision G) rather than a running
@@ -1141,6 +1134,17 @@ class PipeBlockerHandler(
             # directly with a scan_target none of the pipe patterns matches.
             rule_id = RuleID.PIPE_TO_TAIL
 
+        prose = self._looks_like_prose(source_segment)
+        closer = None if prose else self._compound_closer(source_segment)
+        blacklisted = self._matches_blacklist(source_segment)
+
+        # Plan 00478: a producer on neither list is not known to be expensive, so
+        # it is allowed with an advisory. It is decided BEFORE the disclosure
+        # state is touched: a warning must not use up the verbose message of the
+        # first real deny for this rule.
+        if not prose and closer is None and not blacklisted:
+            return self._unknown_producer_verdict(source_segment)
+
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
         first_fire = not (transcript_path and tracker.was_disclosed(transcript_path, rule_id))
@@ -1152,15 +1156,13 @@ class PipeBlockerHandler(
         # skips the extra_whitelist/echd-capture template entirely — that
         # template is what turned a defensible block into an embarrassing
         # one (Plan 00209 §1).
-        if self._looks_like_prose(source_segment):
+        if prose:
             return GatingResult(
                 decision=Decision.DENY, reason=self._prose_reason(rule_id), rule=rule_id
             )
 
         # A pipe fed by a whole loop/if/case/group has no one producer, so no
-        # whitelist line can name it; the unknown-command template would
-        # suggest whitelisting `^done\b` (Plan 00422 N25).
-        closer = self._compound_closer(source_segment)
+        # whitelist line can name it (Plan 00422 N25).
         if closer is not None:
             return GatingResult(
                 decision=Decision.DENY,
@@ -1168,17 +1170,11 @@ class PipeBlockerHandler(
                 rule=rule_id,
             )
 
-        # Differentiate: known expensive vs unrecognized, verbose vs terse
-        if self._matches_blacklist(source_segment):
-            if first_fire:
-                reason = self._blacklisted_reason(rule_id, source_segment, command)
-            else:
-                reason = self._blacklisted_terse_reason(rule_id, source_segment, command)
+        # Known expensive: verbose first, terse after.
+        if first_fire:
+            reason = self._blacklisted_reason(rule_id, source_segment, command)
         else:
-            if first_fire:
-                reason = self._unknown_reason(rule_id, source_segment, command)
-            else:
-                reason = self._unknown_terse_reason(rule_id, source_segment, command)
+            reason = self._blacklisted_terse_reason(rule_id, source_segment, command)
 
         return GatingResult(decision=Decision.DENY, reason=reason, rule=rule_id)
 
