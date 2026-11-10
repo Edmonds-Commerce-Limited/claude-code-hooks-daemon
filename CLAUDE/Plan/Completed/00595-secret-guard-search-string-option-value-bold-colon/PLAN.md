@@ -61,14 +61,15 @@ path that is genuinely named or opened still denies.
 - [x] ✅ **Task 2.1**: independent adversarial review, merge, main CI green, close #200.
   Four review rounds closed seven ways the first version printed a protected file.
   The causes were roots outside the project, symlink roots, link-following flags,
-  unquoted separate globs, empty-quote prefixes (`''*`), a symlinked cwd, and
-  `rg --follow … -g '*'` (already allowed on main). The final round approved. Merged
+  unquoted separate globs and empty-quote prefixes (`''*`). The same rounds also closed
+  two cases main already allowed: a symlinked cwd and `rg --follow … -g '*'`. The final
+  round approved (`subagent-reports/task-1-review-final-approve-code-reviewer.md`). Merged
   at `eae5878e9`; main CI run 42912436475 green; #200 closed.
 
 ## Success Criteria
 
 - [x] The three reproductions in #200 are allowed; the controls are unchanged
-- [x] No existing secret guard deny test changes verdict (1969 secret-guard tests pass)
+- [x] No existing secret guard deny test changes verdict (the final targeted QA ran 1969 secret-guard tests by path, all passing)
 - [x] Release-bound consequences in the holding area: release note
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/045-secret-guard-search-string-option-value-and-bold-colon.md`
 
