@@ -873,3 +873,25 @@ class TestIsWorktreeOfRepo:
         project.mkdir()
         worktree = self._worktree(project / "wt", f"{project}/.git/worktrees/wt")
         assert is_worktree_of_repo(worktree, project) is False
+
+
+class TestGitCommandErrors:
+    """``GIT_COMMAND_ERRORS`` is the one tuple callers catch around a git run."""
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            subprocess.CalledProcessError(1, ["git"]),
+            subprocess.TimeoutExpired(["git"], 1),
+            OSError("git missing"),
+        ],
+    )
+    def test_catches_every_git_launch_failure(self, error: BaseException) -> None:
+        from claude_code_hooks_daemon.utils.git_repo import GIT_COMMAND_ERRORS
+
+        caught = False
+        try:
+            raise error
+        except GIT_COMMAND_ERRORS:
+            caught = True
+        assert caught

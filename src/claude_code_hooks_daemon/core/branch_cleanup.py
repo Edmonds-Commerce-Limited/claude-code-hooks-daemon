@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -61,6 +60,7 @@ from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
+    GIT_COMMAND_ERRORS,
     HEADS_PREFIX,
     WorktreeRecord,
     branch_ref,
@@ -934,7 +934,7 @@ def _apply_in_batches(
         except KeyboardInterrupt:
             logger.warning("branch cleanup interrupted during batch %d", index + 1)
             stopped = f"interrupted during batch {index + 1} of {len(batches)}"
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        except GIT_COMMAND_ERRORS as exc:
             logger.warning("branch cleanup batch %d of %d failed: %s", index + 1, len(batches), exc)
             stopped = f"batch {index + 1} of {len(batches)} failed: {exc}"
         if stopped is not None:
