@@ -398,8 +398,9 @@ class TestAStagingThatCannotBeSimulatedIsAnAdvisory:
             "cwd": str(repo),
         }
 
-        with caplog.at_level(logging.WARNING), patch(
-            _STAGING_RUN_GIT, side_effect=self._fail_every_add()
+        with (
+            caplog.at_level(logging.WARNING),
+            patch(_STAGING_RUN_GIT, side_effect=self._fail_every_add()),
         ):
             result = handler.handle(hook_input)
 

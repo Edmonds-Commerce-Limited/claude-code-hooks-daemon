@@ -1718,9 +1718,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         except sr.SecretWordListUnreadableError as exc:
             # The path is named; the message carries no content or term. With no
             # terms to compare against, no positive finding is possible.
-            unchecked.append(
-                f"this call was NOT checked against the secret word list: {exc}"
-            )
+            unchecked.append(f"this call was NOT checked against the secret word list: {exc}")
             terms = ()
         for hay in haystacks:
             index = sr.find_first_match_index(hay.text, terms)

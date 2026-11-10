@@ -45,7 +45,7 @@ def failing_add_run_git() -> Any:
 
     from claude_code_hooks_daemon.utils.git_repo import run_git
 
-    def run(directory: Any, *args: str, **kwargs: Any) -> "subprocess.CompletedProcess[str]":
+    def run(directory: Any, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if "add" in args[:3]:
             return subprocess.CompletedProcess(["git"], 127, "", "timed out after 5s")
         return run_git(directory, *args, **kwargs)

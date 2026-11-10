@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 import pytest
 from tests.support.git_fixtures import git_setup_timeout
+from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -32,7 +33,6 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.conflict_marker_commit_gate 
     _parse_grep_stream,
 )
 from claude_code_hooks_daemon.utils.git_repo import run_git
-from tests.support.unknown_verdict_asserts import assert_unknown_verdict
 
 _GUARD = "conflict_marker_commit_gate"
 OPEN = "<" * 7
@@ -678,8 +678,9 @@ class TestAnUncheckableCommitIsAnAdvisory:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """EACCES on the commit's directory is an uncheckable commit, not a crash."""
-        with caplog.at_level(logging.WARNING), patch.object(
-            Path, "is_dir", side_effect=PermissionError(13, "denied")
+        with (
+            caplog.at_level(logging.WARNING),
+            patch.object(Path, "is_dir", side_effect=PermissionError(13, "denied")),
         ):
             result = _verdict(handler, f"git -C {repo} commit -m x", repo)
         assert_unknown_verdict(result, caplog, _GUARD, "NOT checked")

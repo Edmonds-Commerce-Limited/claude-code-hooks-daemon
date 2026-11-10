@@ -735,9 +735,7 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
                     r"NOT checked",
                     r"git -C /absolute/path/to/repo commit",
                 ],
-                safety_notes=(
-                    "The pathspec matches no file, so git refuses and records nothing."
-                ),
+                safety_notes=("The pathspec matches no file, so git refuses and records nothing."),
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
