@@ -7220,3 +7220,17 @@ commit. This was already wrong on main, and it is an ordinary shape.
 **Status**: ✅ Fixed (merge 530ffc83d). The reading carries
 every commit (`CommitReading.runs`), each with its own form, moves and `-a`; the gates judge every
 commit's pathspecs from the directory that commit runs in (`commit_scopes`).
+
+### N600 — a test or QA step writes `untracked/config-changes/` and `untracked/truth-changes/` into the checkout it runs in
+
+**Source**: Plan 00594 worktree cleanup (10 November 2026).
+
+**Evidence**: every agent worktree that ran targeted tests or QA held
+`untracked/config-changes/v3.62.0-to-v3.63.0/` and `untracked/truth-changes/v3.62.0-to-v3.63.0/`,
+and the main checkout holds the same pair. The worktree-removal guard counts them as ignored and
+unregenerable, so each removal is denied until they are deleted by hand. The version pair is a
+fixture range, which points at a test or QA step writing its report into the real repository's
+`untracked/` instead of a temporary directory.
+
+**Status**: ⬜ Open. Find the writer (search tests and scripts for the `truth-changes` output
+path), redirect it to `tmp_path`, and add a test that a run leaves `untracked/` unchanged.
