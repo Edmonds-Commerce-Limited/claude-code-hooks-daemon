@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, Literal
 
@@ -95,13 +96,25 @@ BLOCKER_PREVIEW = 10
 _STATUS_PREFIX = 3
 
 
-def sweep_clean_command(*, remote: bool = False) -> str:
+#: Branches (local and remote together) one ``--clean --apply`` batch deletes: one recovery
+#: bundle and one ``git push --delete`` per batch, so an interruption loses at most one.
+BULK_BATCH_SIZE: Final = 50
+
+
+#: Inventory time budget (ms) for ``--clean``: ten minutes, in place of the hook-sized default.
+BULK_SWEEP_BUDGET_MS: Final = 600_000
+
+
+def sweep_clean_command(*, remote: bool = False, apply: bool = True) -> str:
     """The ``branch-sweep --clean`` invocation, spelled for this install's wrapper.
 
     ``remote`` adds ``--remote``: name it wherever a listed merged branch has a
-    remote copy, so the one command clears that copy too.
+    remote copy, so the one command clears that copy too. ``apply`` (the default)
+    adds ``--apply``, without which ``--clean`` only previews.
     """
     flags = ("--clean", "--remote") if remote else ("--clean",)
+    if apply:
+        flags = (*flags, "--apply")
     return daemon_cli_command_for_docs("branch-sweep", *flags)
 
 
@@ -124,6 +137,11 @@ class CleanupReport:
         commands: Commands to run by hand (advice, restore lines, remote deletes).
         bundle: The recovery bundle written, if any.
         deleted_remote: Remote branches removed, as ``<remote>/<name>``.
+        bundles: Every recovery bundle written, one per batch (``bundle`` is the last).
+        remaining: Branches proven for deletion that this run did not delete
+            (``<name>``, or ``<remote>/<name>`` for a remote copy).
+        stopped: Why a bulk run ended early (interrupt or failed batch), else None.
+        next_command: The command to run next: apply after a preview, resume after a stop.
     """
 
     deleted: tuple[str, ...] = ()
@@ -133,6 +151,10 @@ class CleanupReport:
     bundle: Path | None = None
     deleted_remote: tuple[str, ...] = ()
     park_cleared: tuple[str, ...] = ()
+    bundles: tuple[Path, ...] = ()
+    remaining: tuple[str, ...] = ()
+    stopped: str | None = None
+    next_command: str | None = None
 
 
 def _never_work(
@@ -742,7 +764,12 @@ def clean_sweep(
         ValueError: No default branch can be resolved.
     """
     keep_fetch_error = branch_keep.fetch_keeps(repo, config.remote) if remote else None
-    inventory = branch_inventory.build_inventory(repo, config)
+    # The hook-sized sweep budget would skip reading keep notes on a large repository
+    # and leave a kept branch looking deletable; a bulk clean is not a hook.
+    unhurried = config.model_copy(
+        update={"sweep": config.sweep.model_copy(update={"budget_ms": BULK_SWEEP_BUDGET_MS})}
+    )
+    inventory = branch_inventory.build_inventory(repo, unhurried)
     default = inventory.default_branch
     if default is None:
         raise ValueError("cannot determine the default branch; set branches.default")
@@ -769,7 +796,6 @@ def clean_sweep(
         and policy_refusal(name, config, default) is None
     )
     proven: list[str] = []
-    removed: list[Path] = []
     skipped: list[str] = []
     commands: list[str] = []
     for name in candidates:
@@ -803,15 +829,7 @@ def clean_sweep(
         if dry_run:
             if held_by is not None:
                 commands.append(f"would remove the worktree {held_by}")
-            commands.append(f"would delete {name} ({verdict.tier})")
-            proven.append(name)
-            continue
-        if held_by is not None:
-            refused = _remove_worktree(repo, held_by)
-            if refused is not None:
-                skipped.append(f"{name}: git refused to remove {held_by}: {refused}")
-                continue
-            removed.append(held_by)
+            commands.append(f"would delete {name} (proven {verdict.tier})")
         proven.append(name)
 
     remote_tips: dict[str, str] = {}
@@ -831,66 +849,184 @@ def clean_sweep(
             if inventory.records[name].remote_tip is not None
             and inventory.records[name].state in CLEAN_STATES
         ]
-    tracking = {name: f"{REMOTES_PREFIX}{config.remote}/{name}" for name in remote_tips}
+    apply_command = sweep_clean_command(remote=remote)
     if dry_run:
-        commands += [f"would delete remote {config.remote}/{name}" for name in remote_tips]
+        commands += [
+            f"would delete remote {config.remote}/{name} (tip {tip[:_TIP_PREVIEW]}, "
+            f"proven merged into {default})"
+            for name, tip in remote_tips.items()
+        ]
         for name in proven:
             advice = remote_delete_advice(repo, config, default, name)
             if advice is not None and name not in remote_tips:
                 commands.append(advice)
         return CleanupReport(
-            removed_worktrees=tuple(removed), skipped=tuple(skipped), commands=tuple(commands)
+            skipped=tuple(skipped),
+            commands=tuple(commands),
+            next_command=apply_command if proven or remote_tips else None,
         )
 
-    deleted: tuple[str, ...] = ()
+    plan = _BulkPlan(
+        repo=repo,
+        config=config,
+        default=default,
+        bundle_dir=bundle_dir,
+        targets=targets,
+        line_targets=line_targets,
+        never_work=never_work,
+        proven=frozenset(proven),
+        remote_tips=remote_tips,
+        worktrees=worktrees,
+    )
+    return _apply_in_batches(plan, sorted({*proven, *remote_tips}), skipped, apply_command)
+
+
+#: Leading hex digits of a tip shown in the preview.
+_TIP_PREVIEW: Final = 12
+
+
+@dataclass(frozen=True)
+class _BulkPlan:
+    """What ``clean_sweep --apply`` decided before it deleted anything."""
+
+    repo: Path
+    config: BranchesConfig
+    default: str
+    bundle_dir: Path
+    targets: Sequence[str]
+    line_targets: Sequence[str]
+    never_work: Sequence[str]
+    proven: frozenset[str]
+    remote_tips: Mapping[str, str]
+    worktrees: Mapping[str, Path]
+
+
+@dataclass
+class _Outcome:
+    """What the batches did so far; every field only grows."""
+
+    deleted: list[str] = field(default_factory=list)
+    removed: list[Path] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    commands: list[str] = field(default_factory=list)
+    bundles: list[Path] = field(default_factory=list)
+    deleted_remote: list[str] = field(default_factory=list)
+    park_cleared: list[str] = field(default_factory=list)
+    remaining: list[str] = field(default_factory=list)
+
+
+def _apply_in_batches(
+    plan: _BulkPlan, units: Sequence[str], skipped: list[str], apply_command: str
+) -> CleanupReport:
+    """Delete ``units`` ``BULK_BATCH_SIZE`` at a time, stopping cleanly on an interrupt.
+
+    The only state is the repository: a deleted branch is no longer a candidate, so
+    running the same command again continues where this one stopped, and a bundle is
+    written before each batch's deletions. A SIGINT or a failed batch ends the loop;
+    the units not yet handled are reported with the command that resumes.
+    """
+    outcome = _Outcome(skipped=skipped)
+    batches = [list(units[i : i + BULK_BATCH_SIZE]) for i in range(0, len(units), BULK_BATCH_SIZE)]
+    stopped: str | None = None
+    for index, batch in enumerate(batches):
+        try:
+            _run_batch(plan, batch, outcome)
+        except KeyboardInterrupt:
+            logger.warning("branch cleanup interrupted during batch %d", index + 1)
+            stopped = f"interrupted during batch {index + 1} of {len(batches)}"
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            logger.warning("branch cleanup batch %d of %d failed: %s", index + 1, len(batches), exc)
+            stopped = f"batch {index + 1} of {len(batches)} failed: {exc}"
+        if stopped is not None:
+            pending = [name for rest in batches[index:] for name in rest]
+            outcome.remaining += [
+                name
+                for name in pending
+                if name in plan.remote_tips or _ref_exists(plan.repo, branch_ref(name))
+            ]
+            break
+    needs_resume = bool(outcome.remaining)
+    return CleanupReport(
+        deleted=tuple(outcome.deleted),
+        removed_worktrees=tuple(outcome.removed),
+        skipped=tuple(outcome.skipped),
+        commands=tuple(outcome.commands),
+        bundle=outcome.bundles[-1] if outcome.bundles else None,
+        bundles=tuple(outcome.bundles),
+        deleted_remote=tuple(outcome.deleted_remote),
+        park_cleared=tuple(outcome.park_cleared),
+        remaining=tuple(dict.fromkeys(outcome.remaining)),
+        stopped=stopped,
+        next_command=apply_command if needs_resume else None,
+    )
+
+
+def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None:
+    """One batch: worktrees, bundle, local deletes, then one push for the remote copies.
+
+    An already-deleted local branch is skipped, never an error. A batch whose delete
+    is refused, or whose remote push is refused, adds what is left to ``remaining``
+    so the report can name it; a later run retries exactly those.
+    """
+    repo, config = plan.repo, plan.config
+    local: list[str] = []
+    for name in batch:
+        if name not in plan.proven:
+            continue
+        if not _ref_exists(repo, branch_ref(name)):
+            outcome.skipped.append(f"{name}: already deleted")
+            continue
+        held_by = plan.worktrees.get(name)
+        if held_by is not None:
+            refused = _remove_worktree(repo, held_by)
+            if refused is not None:
+                outcome.skipped.append(f"{name}: git refused to remove {held_by}: {refused}")
+                continue
+            outcome.removed.append(held_by)
+        local.append(name)
+    tips = {name: plan.remote_tips[name] for name in batch if name in plan.remote_tips}
+    tracking = {name: f"{REMOTES_PREFIX}{config.remote}/{name}" for name in tips}
+    outcome.park_cleared += _clear_parks(repo, local)
     bundle: Path | None = None
-    park_cleared = _clear_parks(repo, proven)
-    if proven:
+    bundle_path = new_bundle_path(plan.bundle_dir, "branch-cleanup")
+    deleted: tuple[str, ...] = ()
+    if local:
         report = delete_branches(
             repo,
-            proven,
-            protected_names=never_work,
-            targets=targets,
-            bundle_path=new_bundle_path(bundle_dir, "branch-cleanup"),
+            local,
+            protected_names=plan.never_work,
+            targets=plan.targets,
+            bundle_path=bundle_path,
             content_tier=False,
             line_names=config.integration_lines,
-            line_targets=line_targets,
+            line_targets=plan.line_targets,
             extra_bundle_refs=list(tracking.values()),
         )
         deleted, bundle = report.deleted, report.bundle
-        skipped += list(report.blockers)
+        outcome.skipped += report.blockers
     elif tracking:
-        bundle = write_recovery_bundle(
-            repo,
-            [],
-            new_bundle_path(bundle_dir, "branch-cleanup"),
-            extra_refs=list(tracking.values()),
-        )
+        bundle = write_recovery_bundle(repo, [], bundle_path, extra_refs=list(tracking.values()))
     if bundle is not None:
-        commands += [bundle_restore_command(bundle, branch_ref(name)) for name in deleted]
-    deleted_remote: list[str] = []
-    if bundle is not None and remote_tips:
-        gone, push_refusals = _push_deletes(repo, config.remote, remote_tips)
-        skipped += push_refusals
-        deleted_remote = [f"{config.remote}/{name}" for name in gone]
-        commands += [
+        outcome.bundles.append(bundle)
+        outcome.commands += [bundle_restore_command(bundle, branch_ref(name)) for name in deleted]
+    outcome.deleted += deleted
+    outcome.remaining += [name for name in local if name not in deleted]
+    if bundle is not None and tips:
+        gone, push_refusals = _push_deletes(repo, config.remote, tips)
+        outcome.skipped += push_refusals
+        outcome.deleted_remote += [f"{config.remote}/{name}" for name in gone]
+        outcome.remaining += [name for name in tips if name not in gone]
+        outcome.commands += [
             f"{bundle_restore_command(bundle, tracking[name])} && "
             f"git push {config.remote} {tracking[name]}:{branch_ref(name)}"
             for name in gone
         ]
+    elif tips:
+        outcome.remaining += list(tips)
     for name in deleted:
-        advice = remote_delete_advice(repo, config, default, name)
-        if advice is not None and name not in remote_tips:
-            commands.append(advice)
-    return CleanupReport(
-        deleted=deleted,
-        removed_worktrees=tuple(removed),
-        skipped=tuple(skipped),
-        commands=tuple(commands),
-        bundle=bundle,
-        deleted_remote=tuple(deleted_remote),
-        park_cleared=park_cleared,
-    )
+        advice = remote_delete_advice(repo, config, plan.default, name)
+        if advice is not None and name not in tips:
+            outcome.commands.append(advice)
 
 
 def _spared(config: BranchesConfig, records: Mapping[str, BranchRecord]) -> dict[str, str]:
@@ -1015,17 +1151,30 @@ def render(report: CleanupReport) -> list[str]:
         lines.append(f"Park cleared: {name} ({reason})")
     if report.deleted_remote:
         lines.append(f"Deleted remote branch(es): {', '.join(report.deleted_remote)}")
-    if report.bundle is not None:
+    if len(report.bundles) > 1:
+        lines.append(f"Recovery bundles ({len(report.bundles)}): {report.bundles[0].parent}")
+    elif report.bundle is not None:
         lines.append(f"Recovery bundle: {report.bundle}")
     lines += [f"Skipped {line}" for line in report.skipped]
     if report.commands:
         lines.append("Commands:")
         lines += [f"  {command}" for command in report.commands]
+    if report.stopped is not None:
+        lines.append(f"Stopped: {report.stopped}")
+    if report.remaining:
+        lines.append(
+            f"Remaining {len(report.remaining)} not yet deleted: "
+            f"{preview_paths(report.remaining)}"
+        )
+    if report.next_command is not None:
+        label = "Resume with" if report.remaining else "Apply with"
+        lines.append(f"{label}: {report.next_command}")
     return lines
 
 
 __all__ = [
     "BLOCKER_PREVIEW",
+    "BULK_BATCH_SIZE",
     "CLEAN_STATES",
     "MERGED_TIERS",
     "CleanupMode",

@@ -6565,7 +6565,12 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     repo = get_project_path(getattr(args, "project_root", None))
     config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
     branches = config.branches
-    if args.clean or args.dry_run or getattr(args, "remote", False):
+    if (
+        args.clean
+        or args.dry_run
+        or getattr(args, "remote", False)
+        or getattr(args, "apply", False)
+    ):
         return _branch_sweep_clean(args, repo, branches)
     legacy = handler_options(config.handlers.session_start.get(HandlerID.BRANCH_SWEEP.config_key))
     try:
@@ -6725,7 +6730,10 @@ _BRANCH_CLEANUP_BUNDLE_DIR = Path("untracked") / "branch-cleanup"
 
 
 def _branch_sweep_clean(args: argparse.Namespace, repo: Path, branches: BranchesConfig) -> int:
-    """``branch-sweep --clean [--remote] [--dry-run]``: delete merged branches.
+    """``branch-sweep --clean [--remote] [--apply]``: preview, or delete, merged branches.
+
+    ``--clean`` alone is the dry run: it prints the whole plan and deletes nothing.
+    ``--apply`` deletes, in batches, each behind its own recovery bundle.
 
     Returns:
         0 when the sweep ran, 1 when it could not, 2 on a usage error.
@@ -6733,17 +6741,21 @@ def _branch_sweep_clean(args: argparse.Namespace, repo: Path, branches: Branches
     from claude_code_hooks_daemon.core import branch_cleanup, branch_inventory
 
     remote = bool(getattr(args, "remote", False))
+    apply = bool(getattr(args, "apply", False))
     if not args.clean:
-        print("ERROR: --dry-run and --remote only apply to --clean", file=sys.stderr)
+        print("ERROR: --dry-run, --apply and --remote only apply to --clean", file=sys.stderr)
         return 2
     if args.json or args.all:
         print("ERROR: --clean does not take --json or --all", file=sys.stderr)
+        return 2
+    if apply and args.dry_run:
+        print("ERROR: --apply and --dry-run contradict each other", file=sys.stderr)
         return 2
     try:
         report = branch_cleanup.clean_sweep(
             repo,
             branches,
-            dry_run=args.dry_run,
+            dry_run=not apply,
             bundle_dir=repo / _BRANCH_CLEANUP_BUNDLE_DIR,
             remote=remote,
         )
@@ -13356,14 +13368,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser_branch_sweep.add_argument(
         "--clean",
         action="store_true",
-        help="Delete every merged and patch-equivalent local branch behind a recovery bundle "
-        "(untracked/branch-cleanup/), removing a linked worktree only when it holds nothing "
-        "outside branches.cleanup_after_merge.regenerable",
+        help="Plan the removal of every merged and patch-equivalent branch: prints each one "
+        "with its proof and deletes nothing. Add --apply to delete",
+    )
+    parser_branch_sweep.add_argument(
+        "--apply",
+        action="store_true",
+        help="With --clean: delete, in batches of 50, one recovery bundle per batch "
+        "(untracked/branch-cleanup/) and one remote push per batch, removing a linked worktree "
+        "only when it holds nothing outside branches.cleanup_after_merge.regenerable. An "
+        "interrupted run is resumed by running the same command again",
     )
     parser_branch_sweep.add_argument(
         "--dry-run",
         action="store_true",
-        help="With --clean: print what would be removed and deleted, change nothing",
+        help="With --clean: the default; accepted for clarity, cannot be combined with --apply",
     )
     parser_branch_sweep.add_argument(
         "--remote",

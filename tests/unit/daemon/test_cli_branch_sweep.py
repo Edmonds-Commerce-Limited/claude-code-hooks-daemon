@@ -73,6 +73,7 @@ def _args(
     clean: bool = False,
     dry_run: bool = False,
     remote: bool = False,
+    apply: bool = False,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         project_root=project,
@@ -81,6 +82,7 @@ def _args(
         clean=clean,
         dry_run=dry_run,
         remote=remote,
+        apply=apply,
     )
 
 
@@ -102,10 +104,26 @@ class TestClean:
         assert "would delete done" in capsys.readouterr().out
         assert "done" in _heads(project)
 
-    def test_clean_deletes_behind_a_bundle(
+    def test_clean_alone_previews_and_names_the_apply_command(
         self, project: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         assert cmd_branch_sweep(_args(project, clean=True)) == 0
+        out = capsys.readouterr().out
+        assert "would delete done" in out
+        assert "--clean --apply" in out
+        assert "done" in _heads(project)
+
+    def test_apply_is_what_deletes(self, project: Path) -> None:
+        with patch(_CLEAN, return_value=CleanupReport()) as clean:
+            cmd_branch_sweep(_args(project, clean=True))
+            assert clean.call_args.kwargs["dry_run"] is True
+            cmd_branch_sweep(_args(project, clean=True, apply=True))
+            assert clean.call_args.kwargs["dry_run"] is False
+
+    def test_clean_deletes_behind_a_bundle(
+        self, project: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cmd_branch_sweep(_args(project, clean=True, apply=True)) == 0
         out = capsys.readouterr().out
         assert "done" not in _heads(project)
         assert "work" in _heads(project)
@@ -114,15 +132,17 @@ class TestClean:
     def test_nothing_to_clean_says_so(
         self, project: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        cmd_branch_sweep(_args(project, clean=True))
+        cmd_branch_sweep(_args(project, clean=True, apply=True))
         capsys.readouterr()
-        assert cmd_branch_sweep(_args(project, clean=True)) == 0
+        assert cmd_branch_sweep(_args(project, clean=True, apply=True)) == 0
         assert "Nothing to clean" in capsys.readouterr().out
 
     @pytest.mark.parametrize(
         "kwargs",
         [
             {"dry_run": True},
+            {"apply": True},
+            {"clean": True, "apply": True, "dry_run": True},
             {"clean": True, "as_json": True},
             {"clean": True, "show_all": True},
             {"remote": True},
@@ -170,6 +190,8 @@ class TestParser:
         assert (plain.clean, plain.dry_run, plain.remote) == (False, False, False)
         remote = build_parser().parse_args(["branch-sweep", "--clean", "--remote"])
         assert remote.remote is True
+        assert plain.apply is False
+        assert build_parser().parse_args(["branch-sweep", "--clean", "--apply"]).apply is True
 
     def test_help_documents_the_json_keys(self) -> None:
         parser = build_parser()
