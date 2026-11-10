@@ -1,6 +1,6 @@
 # Plan 00594: branch lifecycle and branch tip channel
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-10
 **Owner**: joseph
 **Priority**: High
@@ -139,7 +139,8 @@ names, people or hashes appear here.
 - [ ] ⬜ **Task 1.1**: Collect the counts and sequences behind each class from
   the client test seat (generic: counts, orderings, git shapes; no names).
   Store them in `EVIDENCE.md` in generic form.
-- [ ] ⬜ **Task 1.2**: Write `DESIGN.md`: the lifecycle state machine, and the
+- [x] ✅ **Task 1.2**: (draft written in [DESIGN.md](DESIGN.md); open
+  questions in its §4) Write `DESIGN.md`: the lifecycle state machine, and the
   answers to every decision above, each with its reason and the failure class
   it closes.
 - [ ] ⬜ **Task 1.3**: Review the design with the client test seat before any
