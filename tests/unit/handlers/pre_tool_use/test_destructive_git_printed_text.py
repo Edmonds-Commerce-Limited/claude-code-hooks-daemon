@@ -98,7 +98,7 @@ class TestPrintfDashVAssignsRatherThanPrints:
     @pytest.mark.parametrize(
         "command",
         [
-            f"m=$(printf '{_RESET}'); printf -v n \"$m\"; eval \"$n\"",
+            f'm=$(printf \'{_RESET}\'); printf -v n "$m"; eval "$n"',
             f"printf -v n '%s' '{_RESET}'; $n",
             f"printf -v n '%s' '{_RESET}'; eval \"$n\"",
         ],
