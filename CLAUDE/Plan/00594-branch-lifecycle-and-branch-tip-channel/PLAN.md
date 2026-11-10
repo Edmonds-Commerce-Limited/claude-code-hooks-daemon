@@ -153,6 +153,15 @@ names, people or hashes appear here.
   for client design review) Write a failing test that reproduces a housekeeping
   regeneration leaving a dirty tracked file and an auto-commit on a non-default
   or throwaway branch. Then fix it per `DESIGN.md`.
+- [ ] ⬜ **Task 2.2**: (RC feedback) A home branch that only accepts changes
+  by pull request gets no local auto-commit of the CLAUDE.md block. Observed:
+  a client named its PR-protected release line as a home branch, and
+  switching the main checkout to it committed five generated lines locally.
+  Landing those then needed a branch, a full gate and a bot review, and the
+  release tip moved each time. Design: a per-home-branch commit mode in
+  config. One mode commits (direct push allowed). Another writes the block,
+  leaves it uncommitted and says so, so it is batched into the next real PR.
+  Choose the default when the design is reviewed.
 
 ### Phase 3: Proof of merge and agent-performable deletion (classes 3, 6, 8)
 
