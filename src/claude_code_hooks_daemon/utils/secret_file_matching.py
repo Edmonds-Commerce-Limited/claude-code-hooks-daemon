@@ -2169,7 +2169,13 @@ def _searched_paths_hold_no_protected_file(
         return False
     bases = [cwd for cwd in cwds if cwd]
     for path in paths:
-        roots = [path] if path.startswith("/") else [str(Path(base) / path) for base in bases]
+        # A relative root is anchored at the REAL cwd: a cwd that is itself a link
+        # leading out of the project must not pass as an in-project directory.
+        roots = (
+            [path]
+            if path.startswith("/")
+            else [str(Path(os.path.realpath(base)) / path) for base in bases]
+        )
         if not roots:
             return False
         for root in roots:
@@ -2203,15 +2209,36 @@ _FILTER_SEPARATE_OPTIONS: Final = frozenset(
 
 
 def _follows_separate_filter_option(before: str) -> bool:
-    """Whether the text ``before`` a value ends in a filter option and its opening quote."""
+    """Whether the text ``before`` a value ends in a filter option and its opening quote.
+
+    The quote is required: bash passes a quoted word literally, but expands an
+    unquoted glob (``--include *``) into the cwd's file names, so the protected
+    file would become a search operand.
+    """
     words = before.rstrip("'\"").split()
-    return bool(words) and words[-1] in _FILTER_SEPARATE_OPTIONS and before[-1:] in " '\"\t"
+    return bool(words) and words[-1] in _FILTER_SEPARATE_OPTIONS and before[-1:] in "'\""
 
 
 def _is_separate_filter_value(word: str, command: str) -> bool:
     """Whether every occurrence of ``word`` is the separate value of a filter option."""
     starts = [m.start() for m in re.finditer(re.escape(word), command)]
     return bool(starts) and all(_follows_separate_filter_option(command[:s]) for s in starts)
+
+
+def _is_wildcard_filter_over_foreign_cwd(
+    word: str, cwds: tuple[str, ...], index: "ProtectedFileIndex"
+) -> bool:
+    """Whether ``word`` is an attached ``--include=*``-style filter and a cwd really lies outside.
+
+    A cwd that is a link leading out of the project holds files the index never
+    listed, so the wildcard filter over a relative root cannot be vouched for.
+    """
+    prefix = next((p for p in _FILTER_VALUE_PREFIXES if word.startswith(p)), "")
+    value = word[len(prefix) :]
+    if not prefix or not value or value.strip("*") != "":
+        return False
+    project = os.path.realpath(index.project_root)
+    return any(not _is_inside(os.path.realpath(cwd), project) for cwd in cwds if cwd)
 
 
 def _is_scoped_filter_value(
@@ -2555,6 +2582,14 @@ def iter_protected_mentions(
             default_globs=default_globs,
         )
         core = word.strip(_TOKEN_PUNCTUATION)
+        if (
+            found is None
+            and index is not None
+            and _is_wildcard_filter_over_foreign_cwd(word, effective, index)
+        ):
+            # The index lists only the project, so it cannot say what a wildcard
+            # filter reads when the real cwd lies outside it: not judged clean.
+            return patterns[0]
         if (
             found is None
             and index is not None

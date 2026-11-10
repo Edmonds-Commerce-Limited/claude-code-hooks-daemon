@@ -213,6 +213,39 @@ class TestGrepFilterRelaxationNeedsRootsInsideProject:
     ) -> None:
         assert _verdict(project, command) is Decision.ALLOW
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -r x --exclude-dir * sub",
+            "grep -r x --exclude * sub",
+            "grep -r x --include * sub",
+            "rg x -g * sub",
+            "rg x --glob * sub",
+            "rg x --iglob * sub",
+            "grep -r x --exclude-dir d* sub",
+            "rg x -g [d]* sub",
+            f"rg x -g *.{_SUFFIX} sub",
+        ],
+    )
+    def test_unquoted_separate_value_is_expanded_by_bash_so_denied(
+        self, project: Path, command: str
+    ) -> None:
+        assert _verdict(project, command) is Decision.DENY
+
+    def test_cwd_symlink_resolving_outside_project_denied(
+        self, project: Path, outside: Path
+    ) -> None:
+        link = project / "sub" / "cwdlnk"
+        link.symlink_to(outside)
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "grep -r x --include=* ."},
+            "cwd": str(link),
+        }
+        handler = SecretFileGuardHandler()
+        assert handler.matches(hook_input)
+        assert handler.handle(hook_input).decision is Decision.DENY
+
     def test_clean_root_inside_project_still_allowed(self, project: Path) -> None:
         (project / "untracked" / "scratch" / "sub").mkdir(parents=True)
         command = "grep -rl zz untracked/scratch/sub --include=*"

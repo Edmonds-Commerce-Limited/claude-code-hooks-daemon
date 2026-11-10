@@ -23,3 +23,10 @@ Tests added (class `TestGrepFilterRelaxationNeedsRootsInsideProject`): `/etc`, `
 Probe harness: the four classes now deny.
 
 Open follow-up (not fixed): `rg --follow x clean -g '*'` still ALLOWs. The separate-value quoted `'*'` after `-g` never reaches the filter-value judgement (already allowed on main), so the new flag check is not consulted. Fixing needs the separate-value filter spelling judged by the same function.
+
+### Round 3 review fixes
+
+1. Separate filter spelling (`--include *`, `-g *`, `--exclude-dir d*`, `-g [d]*`) now counts as a filter value only when the value word is quoted (`_follows_separate_filter_option` requires the opening quote); bash expands an unquoted glob into cwd file names. RED tests: all nine reviewed commands deny; quoted forms (`rg x sub -g '*'`) stay allowed. Attached forms (`--include=*`) unchanged: bash cannot expand them into a protected file name.
+2. Cwd symlink resolving outside the project: relative roots are anchored at `realpath(cwd)`, and an attached wildcard filter (`--include=*`) with any effective cwd really outside the project is not judged clean (`_is_wildcard_filter_over_foreign_cwd`). RED test `test_cwd_symlink_resolving_outside_project_denied`. Plain `grep -r x .` from such a cwd (no filter) is still not judged: the index lists only the project, pre-existing design.
+
+Results: option_values file 77 passed; test_secret_file_guard*.py + tests/unit/utils/test_secret_*.py 1939 passed; probe harness: the nine deny, no regressions (remaining ALLOWs are the pre-existing out-of-scope ones).
