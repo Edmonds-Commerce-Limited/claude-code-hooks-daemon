@@ -7234,3 +7234,30 @@ fixture range, which points at a test or QA step writing its report into the rea
 
 **Status**: ⬜ Open. Find the writer (search tests and scripts for the `truth-changes` output
 path), redirect it to `tmp_path`, and add a test that a run leaves `untracked/` unchanged.
+
+### N601 — staged_lint_gate type-checks Go files under `testdata/` as module code
+
+**Source**: a client seat (10 November 2026).
+
+**Evidence**: a commit that staged Go analysistest fixtures (a GOPATH-layout tree under a
+`testdata/` directory) got R-STAGED-LINT-FAILURE "package ... is not in std" for three files. The
+go tool ignores every `testdata/` directory, and analysistest loads those fixtures with its own
+GOPATH, so their imports never resolve as module code. The commit still went through, but a
+message that says FAILED on a correct commit teaches the reader to ignore the gate.
+
+**Status**: ⬜ Open. The Go tier skips any path with a `testdata` component, as `go build` does,
+with a test using a GOPATH-layout fixture.
+
+### N602 — review_round_advisor counts any dispatch that says "review" and names a plan, fact-checks included
+
+**Source**: a client seat (10 November 2026), on a reported "review round 275".
+
+**Evidence**: `review_round_advisor.review_key` matches `\breview` anywhere in the description or
+prompt (so also "reviewed", "reviews") plus a plan number. It does not look at the agent type, so
+a `hooks-daemon-plan-fact-checker` dispatch the daemon itself asked for counts as a review round
+when its prompt says "review". Nothing seen in the handler resets the per-plan count, so it is the
+plan's lifetime total. The owner read that number as review churn and was alarmed.
+
+**Status**: ⬜ Open. Count only dispatches of reviewer agent types (or exclude the fact-checker
+and other daemon-requested agents), say in the advisory what is counted, and consider counting
+rounds per branch head or per day rather than per plan lifetime.
