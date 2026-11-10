@@ -642,3 +642,37 @@ class TestCmdFormatMarkdownDanglingSymlink:
         assert _ALIGNED_MARKER in (tmp_path / "good.md").read_text()
         captured = capsys.readouterr()
         assert "dangling.md" not in captured.err
+
+
+_UNSTABLE_JOURNAL_ENTRY = "## 10:50 · finding · —   — title\n\nBody.\n"
+
+
+class TestCmdFormatMarkdownLeavesJournalEntriesAlone:
+    """Plan 00594 class 9: a journal entry is immutable once committed, so the
+    verb never rewrites one, whichever way the caller reaches it."""
+
+    @pytest.mark.parametrize("check", [False, True])
+    def test_directory_walk_skips_journal_entries(self, tmp_path: Path, check: bool) -> None:
+        entry = tmp_path / "CLAUDE" / "Plan" / "00042-x" / "JOURNAL" / "2026-01-01" / "e.md"
+        entry.parent.mkdir(parents=True)
+        entry.write_text(_UNSTABLE_JOURNAL_ENTRY)
+        (tmp_path / "doc.md").write_text(_UNALIGNED_TABLE)
+
+        result = cmd_format_markdown(argparse.Namespace(path=tmp_path, check=check))
+
+        assert entry.read_text() == _UNSTABLE_JOURNAL_ENTRY
+        assert result == (1 if check else 0)  # doc.md still counts
+
+    @pytest.mark.parametrize("check", [False, True])
+    def test_named_journal_entry_is_skipped_not_rewritten(
+        self, tmp_path: Path, check: bool, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        entry = tmp_path / "JOURNAL" / "2026-01-01" / "e.md"
+        entry.parent.mkdir(parents=True)
+        entry.write_text(_UNSTABLE_JOURNAL_ENTRY)
+
+        result = cmd_format_markdown(argparse.Namespace(path=entry, check=check))
+
+        assert result == 0
+        assert entry.read_text() == _UNSTABLE_JOURNAL_ENTRY
+        assert "journal" in capsys.readouterr().out.lower()
