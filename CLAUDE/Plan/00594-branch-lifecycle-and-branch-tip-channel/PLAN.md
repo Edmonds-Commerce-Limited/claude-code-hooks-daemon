@@ -173,10 +173,10 @@ names, people or hashes appear here.
   directories, and the list is configurable.
 - [ ] ⬜ **Task 3.4**: Bulk cleanup is batched, resumable and dry-run first,
   and is tested against a fixture with hundreds of branches.
-- [ ] ⬜ **Task 3.5**: (RC feedback) When the worktree-removal guard names a
-  blocking path, its deny says "delete it first, then retry the removal". A
-  single command that deletes the path and removes the worktree is judged
-  before it runs, so it is still denied.
+- [x] ✅ **Task 3.5**: (RC feedback; done, release note 038) When the
+  worktree-removal guard names ignored blocking paths, its deny says to keep
+  what matters and delete what is disposable in a separate command first. A
+  chained delete is still denied, and the deny says it was not counted.
 - [x] ✅ **Task 3.6**: (RC feedback; done, release note 039) The installer
   removes the settings backup it took when the merge left the file
   byte-identical to it.
