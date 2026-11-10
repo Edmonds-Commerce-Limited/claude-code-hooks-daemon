@@ -3,7 +3,10 @@
 Three-tier logic:
   1. Matches whitelist?  → ALLOW (grep, awk, jq, ls, git tag, etc.)
   2. Matches blacklist?  → DENY: "expensive command, use temp file"
-  3. Unknown?           → DENY: "unrecognized, add to extra_whitelist or use temp file"
+  3. Unknown?           → ALLOW with an advisory (Plan 00478, "warn dont block"):
+     the producer is on neither list, so the guard cannot tell whether it is
+     expensive; the advisory names the capture helper and ``extra_whitelist``
+     and one ``UNKNOWN-VERDICT`` log line is written.
 
 Uses Strategy Pattern: all language-specific blacklist patterns are delegated to
 PipeBlockerStrategy implementations registered in PipeBlockerStrategyRegistry.
@@ -13,7 +16,9 @@ The handler itself has ZERO language awareness.
 import logging
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -42,9 +47,18 @@ from claude_code_hooks_daemon.utils.command_evasion import (
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    END_OF_OPTIONS,
+    FLAG_PREFIX,
+    LONE_DASH,
+    command_word,
+    iter_shell_words,
+    peel_command_wrappers,
+    resolve_shell_word,
     split_unquoted,
+    split_unquoted_spans,
     strip_inert_spans,
 )
+from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 logger = logging.getLogger(__name__)
 
@@ -275,11 +289,202 @@ _SHELL_WORDS_THAT_ARE_NOT_PRODUCERS: frozenset[str] = frozenset(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _Runner:
+    """A tool that runs the command named after it (`uv run pytest`, `xargs pytest`).
+
+    Attributes:
+        subcommand: The word that must follow the tool for it to run a command
+            (`run` for `uv run`), or None when the tool itself runs it (`xargs`).
+        value_flags: Flags whose following word is a value, not the command.
+    """
+
+    subcommand: str | None
+    value_flags: frozenset[str]
+
+
+# Plan 00478 review C2: the blacklist is matched on the command a producer
+# RUNS, not only on its first word. While an unknown producer denied, a wrapped
+# pytest denied too, so the blacklist never needed to see through wrappers;
+# once unknown became a warning it did. `COMMAND_WRAPPERS` (env, timeout, sudo,
+# nice, ...) is the shared table; these runners are the ones it does not carry,
+# because the other guards that read it have no reason to see through them.
+# Lenient on purpose: this only ever WIDENS a deny, so an unknown flag is
+# skipped rather than treated as the end of the wrapper.
+_RUNNERS: dict[str, _Runner] = {
+    "uv": _Runner(
+        "run",
+        frozenset(
+            {
+                "--with",
+                "--with-requirements",
+                "--with-editable",
+                "--python",
+                "-p",
+                "--project",
+                "--directory",
+                "--package",
+                "--extra",
+                "--group",
+                "--env-file",
+                "--index",
+                "--from",
+            }
+        ),
+    ),
+    "poetry": _Runner("run", frozenset({"-C", "--directory", "-P", "--project"})),
+    "pipenv": _Runner("run", frozenset()),
+    "pdm": _Runner("run", frozenset({"-p", "--project"})),
+    "hatch": _Runner("run", frozenset()),
+    "pnpm": _Runner("exec", frozenset({"-C", "--dir", "--filter"})),
+    "npx": _Runner(None, frozenset({"-p", "--package"})),
+    "bunx": _Runner(None, frozenset()),
+    "xargs": _Runner(
+        None,
+        frozenset(
+            {
+                "-a",
+                "-d",
+                "-E",
+                "-I",
+                "-L",
+                "-n",
+                "-P",
+                "-s",
+                "--arg-file",
+                "--delimiter",
+                "--eof",
+                "--replace",
+                "--max-lines",
+                "--max-args",
+                "--max-procs",
+                "--max-chars",
+            }
+        ),
+    ),
+}
+# `python -m <module>` / `python3.13 -m <module>` runs the module.
+_PYTHON_INTERPRETER = re.compile(r"python[0-9.]*")
+_PYTHON_MODULE_FLAG = "-m"
+# Shells whose `-c` body is the program the pipe is fed by.
+_SHELL_C_RUNNERS: frozenset[str] = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+_SHELL_C_FLAG_LETTER = "c"
+# A leading `NAME=value` word sets a variable for the command after it.
+_ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+# A `bash -c` body can itself hold `bash -c`; nesting deeper than this is
+# not unwrapped further (the raw segment is still matched).
+_MAX_UNWRAP_DEPTH = 4
+# Shell options whose next word is a value (`bash -o pipefail -c '...'`).
+_SHELL_VALUE_FLAGS: frozenset[str] = frozenset({"-o", "+o", "-O", "+O"})
+_SHELL_OPTION_PREFIXES: tuple[str, ...] = ("-", "+")
+
+
+# A single `&` backgrounds the command before it and starts the next statement
+# (Plan 00478 second review C-1). It is NOT a separator when it is part of a
+# redirect or a pipe: `2>&1`, `>&2`, `<&3`, `&>f`, `&>>f`, `|&`.
+_BACKGROUND = "&"
+_REDIRECT_BEFORE_AMPERSAND = frozenset("<>|&")
+_REDIRECT_AFTER_AMPERSAND = frozenset(">&")
+
+# Whole-command blacklist scan (Plan 00478 second review). Characters that end a
+# word for the scan: whitespace, shell operators, quotes, braces, `=` (so
+# `--cmd=pytest` and `X=pytest` expose pytest) and backslash.
+_SCAN_WORD_BREAK = re.compile(r"[\s;&|()<>`'\"{}=\\]+")
+# Words after a candidate joined onto it, so a multi-word pattern
+# (`^npm\s+test\b`, `^python\s+-m\s+pytest\b`) can match where it appears.
+_SCAN_FOLLOWING_WORDS = 4
+# `python3 -mpytest`: the module is glued to the flag.
+_GLUED_MODULE_FLAG = "-m"
+_PATH_SEPARATOR = "/"
+
+
+def _last_background_statement(text: str) -> str:
+    """The statement after the last unquoted background ``&`` in ``text``.
+
+    ``sleep 1 & pytest`` runs pytest as its own statement, so the pipe after
+    it is fed by pytest alone. An ``&`` that belongs to a redirect or to ``|&``
+    is kept as part of the statement.
+    """
+    spans = split_unquoted_spans(text, (_BACKGROUND,))
+    start = spans[0][0]
+    for (_, separator_at), (next_start, _) in pairwise(spans):
+        before = text[separator_at - 1 : separator_at]
+        after = text[separator_at + 1 : separator_at + 2]
+        if before in _REDIRECT_BEFORE_AMPERSAND or after in _REDIRECT_AFTER_AMPERSAND:
+            continue
+        start = next_start
+    return text[start:]
+
+
+def _scan_candidates(word: str) -> list[str]:
+    """The names a raw word could run as: itself, its basename, a glued `-m` module."""
+    candidates = [word]
+    basename = word.rsplit(_PATH_SEPARATOR, 1)[-1]
+    if basename and basename != word:
+        candidates.append(basename)
+    if word.startswith(_GLUED_MODULE_FLAG) and len(word) > len(_GLUED_MODULE_FLAG):
+        candidates.append(word[len(_GLUED_MODULE_FLAG) :])
+    return candidates
+
+
+def _segment_words(segment: str) -> list[str]:
+    """The segment's words after quote removal, up to the first one a substitution hides.
+
+    A word bash would still expand (``$VAR``, a glob) is kept as written:
+    these words are only ever matched against the blacklist, so keeping
+    them can widen a deny but never grant an allow.
+    """
+    words: list[str] = []
+    for raw in iter_shell_words(segment):
+        if raw is None:
+            break
+        resolved = resolve_shell_word(raw)
+        words.append(raw if resolved is None else resolved)
+    return words
+
+
+def _past_flags(words: Sequence[str], index: int, value_flags: frozenset[str]) -> int:
+    """Index of the first word after the flags starting at ``index`` (and their values)."""
+    while index < len(words) and words[index].startswith(FLAG_PREFIX) and words[index] != LONE_DASH:
+        if words[index] == END_OF_OPTIONS:
+            return index + 1
+        index += 2 if words[index] in value_flags else 1
+    return index
+
+
+def _past_runner(words: Sequence[str], index: int) -> int:
+    """Index of the command a runner at ``index`` runs, or ``index`` when it is no runner."""
+    name = command_word(words[index])
+    if _PYTHON_INTERPRETER.fullmatch(name):
+        has_module = index + 1 < len(words) and words[index + 1] == _PYTHON_MODULE_FLAG
+        return index + 2 if has_module else index
+    runner = _RUNNERS.get(name)
+    if runner is None:
+        return index
+    after = index + 1
+    if runner.subcommand is not None:
+        if after >= len(words) or words[after] != runner.subcommand:
+            return index
+        after += 1
+    return _past_flags(words, after, runner.value_flags)
+
+
+def _shell_c_body(words: Sequence[str], index: int) -> str | None:
+    """The program of ``bash [options] -c '<body>'``; ``index`` is the word after the shell."""
+    saw_c = False
+    while index < len(words) and words[index].startswith(_SHELL_OPTION_PREFIXES):
+        option = words[index]
+        if not option.startswith(END_OF_OPTIONS) and _SHELL_C_FLAG_LETTER in option[1:]:
+            saw_c = True
+        index += 2 if option in _SHELL_VALUE_FLAGS else 1
+    return words[index] if saw_c and index < len(words) else None
+
+
 # Single generic teaching paragraph shared by both rules below (Plan 00116):
 # get_rules()'s Rule.verbose is a STATIC per-rule fallback used for the
 # always-on CLAUDE.md table; the actual deny messages this handler emits stay
 # fully dynamic (source name, resolved echd-capture path, truncated command)
-# and are built by the existing _blacklisted_reason/_unknown_reason/
+# and are built by the existing _blacklisted_reason/
 # _prose_reason methods, which a static Rule.verbose cannot represent
 # (Migration Pattern: "Rule.verbose has no access to the invocation's actual
 # command text"). Declaring rules is still required for the disclosure ladder
@@ -291,10 +496,11 @@ def _pipe_verbose_content(consumer: str) -> str:
         f"re-run — wasting time and resources.\n\n"
         f"Cheap filtering/output commands (grep, rg, awk, sed, jq, ls, cat, "
         f"git log/tag/branch, etc.) may still be piped to {consumer} — they "
-        f"already produce bounded output. Anything else should capture full "
-        f"output first (the `echd-capture` helper, or a temp-file redirect) "
-        f"and read a bounded slice from that capture, never from a truncating "
-        f"pipe."
+        f"already produce bounded output. A known expensive command (pytest, "
+        f"npm, cargo, ...) is blocked; a command on neither list is allowed "
+        f"with an advisory. Either way, capture full output first (the "
+        f"`echd-capture` helper, or a temp-file redirect) and read a bounded "
+        f"slice from that capture, never from a truncating pipe."
     )
 
 
@@ -325,7 +531,8 @@ class PipeBlockerHandler(
     1. Whitelist (universal + extra_whitelist): always ALLOW
     2. Blacklist (language strategies + extra_blacklist): always DENY with
        "expensive command" message
-    3. Unknown: DENY with "unrecognized command, add to extra_whitelist" message
+    3. Unknown: ALLOW with an advisory naming the capture helper and
+       ``extra_whitelist`` (the guard cannot tell whether it is expensive)
 
     Language-specific blacklists are managed by PipeBlockerStrategy implementations
     in the pipe_blocker strategy domain. The handler has zero language awareness.
@@ -462,8 +669,10 @@ class PipeBlockerHandler(
           was attributed to the outer command (see
           ``_substitution_content_start``)
 
-        An empty producer (extraction failed) is deliberately NOT whitelisted,
-        preserving the pre-existing "unknown ⇒ block" tier.
+        An empty producer (extraction failed) is deliberately NOT whitelisted:
+        it offends, so handle() judges it, and as it names nothing on the
+        blacklist it lands in the unknown tier (allowed with the advisory,
+        Plan 00478) unless another pipe in the command denies.
         """
         match = self._find_offending_match(command)
         if match is None:
@@ -475,9 +684,16 @@ class PipeBlockerHandler(
 
         Factored out of :meth:`_find_offending_producer` (Plan 00116) so the
         winning pipe's CONSUMER (``tail`` vs ``head``, captured group 1) is
-        available too, for resolving which Rule fired — without changing
-        which pipe is judged first or how (NG2: zero matching-behaviour
-        change). ``_find_offending_producer`` now delegates here.
+        available too, for resolving which Rule fired.
+        """
+        return next(self._offending_matches(command), None)
+
+    def _offending_matches(self, command: str) -> Iterator[re.Match[str]]:
+        """Every pipe that is not exempt, in order: none is skipped for an earlier one.
+
+        handle() judges each of them (Plan 00478 review C1): once an unknown
+        producer only warns, judging the first alone let `docker ps | tail &&
+        pytest | tail` through on docker's advisory.
         """
         for match in self._pipe_matches(command):
             consumer_segment = self._extract_consumer_segment(command, match.start())
@@ -492,14 +708,18 @@ class PipeBlockerHandler(
             producer = self._extract_producer(command, match.start())
             if self._matches_whitelist(producer):
                 continue
-            return match
-        return None
+            yield match
 
     def _match_rule_id(self, command: str) -> str | None:
         """RuleID for the first offending pipe's CONSUMER, or None if none offend."""
         match = self._find_offending_match(command)
         if match is None:
             return None
+        return self._consumer_rule_id(match)
+
+    @staticmethod
+    def _consumer_rule_id(match: re.Match[str]) -> str:
+        """RuleID for one pipe's CONSUMER (``tail`` vs ``head``, captured group 1)."""
         return RuleID.PIPE_TO_HEAD if match.group(1).lower() == "head" else RuleID.PIPE_TO_TAIL
 
     @staticmethod
@@ -576,6 +796,7 @@ class PipeBlockerHandler(
             # Quote-aware so a separator inside a quoted argument (grep -E "a;b")
             # is not mistaken for a chain.
             before_pipe = split_unquoted(before_pipe, _CHAIN_SEPARATORS)[-1]
+            before_pipe = _last_background_statement(before_pipe)
 
             # Handle multiple actual pipes — take the last segment.
             # Quote-aware split prevents false splits on | inside grep patterns
@@ -742,15 +963,90 @@ class PipeBlockerHandler(
         return _matches_any_configured(self._extra_whitelist, source_segment)
 
     def _matches_blacklist(self, source_segment: str) -> bool:
-        """Check if source segment matches any blacklisted pattern (known expensive)."""
+        """Check if source segment, or a command it runs, is blacklisted (known expensive)."""
+        return self._blacklisted_target(source_segment) is not None
+
+    def _blacklisted_target(self, source_segment: str) -> str | None:
+        """The blacklisted command ``source_segment`` runs, or None.
+
+        Matched on the segment AND on every command it runs through a wrapper
+        (:meth:`_run_targets`), so `timeout 60 pytest` is judged as pytest.
+        """
         if not source_segment:
-            return False
-        # Check language strategy patterns
+            return None
+        for target in self._run_targets(source_segment):
+            if self._matches_blacklist_text(target):
+                return target
+        return None
+
+    def _matches_blacklist_text(self, text: str) -> bool:
+        """Does ``text`` itself match a strategy or configured blacklist pattern?"""
         for pattern_str in self._registry.get_blacklist_patterns():
-            if re.search(pattern_str, source_segment, re.IGNORECASE):
+            if re.search(pattern_str, text, re.IGNORECASE):
                 return True
-        # Check extra blacklist from config
-        return _matches_any_configured(self._extra_blacklist, source_segment)
+        return _matches_any_configured(self._extra_blacklist, text)
+
+    def _blacklisted_word_anywhere(self, command: str) -> str | None:
+        """The first blacklisted producer named ANYWHERE in ``command``, or None.
+
+        The safety net under the unknown tier (Plan 00478 second review). The
+        parser places a pipe's producer through wrappers, runners, `-c` bodies
+        and substitutions, but no list of such shapes is complete: `unbuffer
+        pytest`, `script -c pytest`, `bash <<< '...'`. While an unknown producer
+        denied, every shape it missed denied with it. Now that it warns, a
+        pipe may only be allowed when no blacklisted command is named
+        anywhere in the text at all: every segment, substitution, `-c` body
+        and here-string. Each word is tried as written, as its basename
+        (`scripts/qa/run_all.sh`, `.venv/bin/pytest`) and with a glued `-m`
+        removed (`-mpytest`), joined to the words after it so multi-word
+        patterns (`npm test`) match. Whole words only: `pytester` is not
+        pytest.
+        """
+        words = [word for word in _SCAN_WORD_BREAK.split(command) if word]
+        for index, word in enumerate(words):
+            following = words[index + 1 : index + 1 + _SCAN_FOLLOWING_WORDS]
+            for candidate in _scan_candidates(word):
+                text = " ".join([candidate, *following])
+                if self._matches_blacklist_text(text):
+                    return text
+        return None
+
+    @classmethod
+    def _run_targets(cls, segment: str, depth: int = 0) -> list[str]:
+        """``segment``, then each command it runs once wrappers are seen through.
+
+        Peels, repeatedly and in any order: leading ``NAME=value`` words, the
+        shared :data:`COMMAND_WRAPPERS` (env, timeout, sudo, nice, ...), the
+        runners in :data:`_RUNNERS` (``uv run``, ``xargs``, ``npx``, ...) and
+        ``python -m``. The command word is then reduced to its basename, so
+        ``.venv/bin/pytest`` is pytest. A ``bash -c '<body>'`` contributes the
+        command of each statement's last pipeline stage, which is what feeds
+        the outer pipe.
+        """
+        targets = [segment]
+        words = _segment_words(segment)
+        index = 0
+        while index < len(words):
+            start = index
+            while index < len(words) and _ENV_ASSIGNMENT.match(words[index]):
+                index += 1
+            index += peel_command_wrappers(words[index:])[1]
+            if index < len(words):
+                index = _past_runner(words, index)
+            if index == start:
+                break
+        if index >= len(words):
+            return targets
+        name = command_word(words[index])
+        if name in _SHELL_C_RUNNERS:
+            body = _shell_c_body(words, index + 1)
+            if body is not None and depth < _MAX_UNWRAP_DEPTH:
+                for statement in split_unquoted(body, _CHAIN_SEPARATORS):
+                    stage = cls._command_inside(split_unquoted(statement, _PIPE_SEPARATORS)[-1])
+                    targets.extend(cls._run_targets(stage, depth + 1))
+            return targets
+        targets.append(" ".join([name, *words[index + 1 :]]))
+        return targets
 
     def _resolve_echd_capture_path(self) -> Path | None:
         """Resolve the deployed ``echd-capture`` helper to an absolute path.
@@ -1045,9 +1341,15 @@ class PipeBlockerHandler(
             f"      {capture}"
         )
 
-    def _blacklisted_reason(self, rule_id: str, source_segment: str, command: str) -> str:
-        """Return verbose block message for known-expensive commands (blacklisted)."""
-        label = self._producer_label(source_segment)
+    def _blacklisted_reason(
+        self, rule_id: str, source_segment: str, command: str, target: str | None = None
+    ) -> str:
+        """Return verbose block message for known-expensive commands (blacklisted).
+
+        ``target`` is the blacklisted command the segment runs (pytest for
+        `timeout 60 pytest`); the label names it, not the wrapper.
+        """
+        label = self._producer_label(target or source_segment)
         return (
             f"BLOCKED [{rule_id}]: Pipe to tail/head detected\n\n"
             f"COMMAND: {self._truncate_command(command)}\n\n"
@@ -1059,51 +1361,134 @@ class PipeBlockerHandler(
             f"{self._echd_capture_recommendation(source_segment)}"
         )
 
-    def _blacklisted_terse_reason(self, rule_id: str, source_segment: str, command: str) -> str:
+    def _blacklisted_terse_reason(
+        self, rule_id: str, source_segment: str, command: str, target: str | None = None
+    ) -> str:
         """Return terse block message for known-expensive commands (subsequent blocks)."""
-        label = self._producer_label(source_segment)
+        label = self._producer_label(target or source_segment)
         return (
             f"BLOCKED [{rule_id}]: Pipe to tail/head — {label} is expensive\n\n"
             f"COMMAND: {self._truncate_command(command)}\n\n"
             f"{self._echd_capture_terse(source_segment)}"
         )
 
-    def _unknown_reason(self, rule_id: str, source_segment: str, command: str) -> str:
-        """Return verbose block message for unrecognized commands (not in whitelist or blacklist)."""
-        anchor = self._producer_regex_anchor(source_segment)
-        return (
-            f"BLOCKED [{rule_id}]: Pipe to tail/head detected\n\n"
-            f"COMMAND: {self._truncate_command(command)}\n\n"
-            f"WHY BLOCKED:\n"
-            f"  • This command is unrecognized by the pipe blocker\n"
-            f"  • If it is cheap/safe to pipe, add it to {_CONFIG_HINT_EXTRA_WHITELIST} in "
-            f".claude/hooks-daemon.yaml:\n\n"
-            f"    {_CONFIG_YAML_KEY}:\n"
-            f"      {_CONFIG_HINT_EXTRA_WHITELIST}:\n"
-            f'        - "^{anchor}\\\\b"\n\n'
-            f"  • If it IS expensive, capture it with the helper below\n\n"
-            f"{self._echd_capture_recommendation(source_segment)}\n"
-            f"INFO: WHITELISTED COMMANDS (piping is OK):\n"
-            f"  Commands that already filter output: grep, rg, awk, sed, jq, ls, cat, etc.\n\n"
-            f"  Example: grep error /var/log/syslog | tail -n 20  (allowed)"
+    def _unknown_producer_verdict(self, source_segments: Sequence[str]) -> GatingResult:
+        """ALLOW pipes fed only by producers on neither list, with the shared advisory.
+
+        Reached only when NO offending pipe in the command denies. The guard
+        cannot tell whether these producers are expensive. The advisory names
+        each of them, the capture helper (for an expensive one) and
+        ``extra_whitelist`` (for a cheap one, to stop the advisory), and the
+        shared helper writes the ``UNKNOWN-VERDICT`` log line.
+        """
+        labels = list(dict.fromkeys(self._producer_label(s) for s in source_segments))
+        anchors = list(dict.fromkeys(self._producer_regex_anchor(s) for s in source_segments))
+        named = ", ".join(f"`{label}`" for label in labels)
+        entries = ", ".join(f"`^{anchor}\\b`" for anchor in anchors)
+        helper = self._capture_helper_invocation() or _ECHD_CAPTURE_NAME
+        return unknown_verdict_allow(
+            "pipe_blocker",
+            f"{named} piped to tail/head is on neither the cheap-command whitelist nor "
+            "the expensive-command blacklist, so it is not known whether the pipe discards "
+            "output that would be costly to regenerate",
+            f"If it is expensive, capture the full output instead: "
+            f"`set -o pipefail; {labels[0]} ... 2>&1 | {helper} "
+            f"{_ECHD_CAPTURE_DEFAULT_LINES}`. "
+            f"If it is cheap, add {entries} to {_CONFIG_HINT_EXTRA_WHITELIST} under "
+            f"{_CONFIG_YAML_KEY} in .claude/hooks-daemon.yaml to stop this advisory",
         )
 
-    def _unknown_terse_reason(self, rule_id: str, source_segment: str, command: str) -> str:
-        """Return terse block message for unrecognized commands (subsequent blocks)."""
-        label = self._producer_label(source_segment)
-        anchor = self._producer_regex_anchor(source_segment)
+    @staticmethod
+    def _first_fire(hook_input: dict[str, Any], rule_id: str) -> bool:
+        """Is this the first deny of ``rule_id`` for this agent? Records it if so.
+
+        Called only once a deny is certain: a warning must not use up the
+        verbose message of the first real deny for this rule.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        first_fire = not (transcript_path and tracker.was_disclosed(transcript_path, rule_id))
+        if transcript_path and first_fire:
+            tracker.mark_disclosed(transcript_path, rule_id)
+        return first_fire
+
+    def _unplaced_verdict(
+        self,
+        hook_input: dict[str, Any],
+        rule_id: str,
+        source_segment: str,
+        command: str,
+        unplaced: str,
+    ) -> GatingResult:
+        """DENY a pipe on a blacklisted command named in the text but not placed.
+
+        ``unplaced`` comes from :meth:`_blacklisted_word_anywhere`. The reason is
+        the blacklisted one, naming it, plus a note saying the guard could
+        not tell which pipe it feeds.
+        """
+        if self._first_fire(hook_input, rule_id):
+            reason = self._blacklisted_reason(rule_id, source_segment, command, unplaced)
+        else:
+            reason = self._blacklisted_terse_reason(rule_id, source_segment, command, unplaced)
+        note = self._unplaced_note(self._producer_label(unplaced))
+        return GatingResult(decision=Decision.DENY, reason=f"{reason}\n\n{note}", rule=rule_id)
+
+    def _denying_verdict(
+        self, hook_input: dict[str, Any], rule_id: str, source_segment: str, command: str
+    ) -> GatingResult | None:
+        """The DENY one offending pipe earns, or None when its producer is unknown.
+
+        Prose-shaped matches, compound closers and blacklisted producers deny.
+        An unknown producer returns None BEFORE the disclosure state is
+        touched: a warning must not use up the verbose message of the first
+        real deny for this rule.
+        """
+        prose = self._looks_like_prose(source_segment)
+        closer = None if prose else self._compound_closer(source_segment)
+        target = None if prose or closer is not None else self._blacklisted_target(source_segment)
+        if not prose and closer is None and target is None:
+            return None
+
+        first_fire = self._first_fire(hook_input, rule_id)
+
+        # Task 1.2: sanity-check BEFORE templating. Matched text that looks
+        # like prose, not a shell command, gets a short accurate reason and
+        # skips the extra_whitelist/echd-capture template entirely — that
+        # template is what turned a defensible block into an embarrassing
+        # one (Plan 00209 §1).
+        if prose:
+            return GatingResult(
+                decision=Decision.DENY, reason=self._prose_reason(rule_id), rule=rule_id
+            )
+
+        # A pipe fed by a whole loop/if/case/group has no one producer, so no
+        # whitelist line can name it (Plan 00422 N25).
+        if closer is not None:
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=self._compound_reason(rule_id, closer, command, verbose=first_fire),
+                rule=rule_id,
+            )
+
+        # Known expensive: verbose first, terse after.
+        if first_fire:
+            reason = self._blacklisted_reason(rule_id, source_segment, command, target)
+        else:
+            reason = self._blacklisted_terse_reason(rule_id, source_segment, command, target)
+        return GatingResult(decision=Decision.DENY, reason=reason, rule=rule_id)
+
+    @staticmethod
+    def _unplaced_note(label: str) -> str:
+        """Why a pipe was judged on an expensive command it may not be fed by."""
         return (
-            f"BLOCKED [{rule_id}]: Pipe to tail/head — {label} unrecognized\n\n"
-            f"COMMAND: {self._truncate_command(command)}\n\n"
-            f"Add to whitelist in .claude/hooks-daemon.yaml:\n"
-            f"  {_CONFIG_YAML_KEY}:\n"
-            f"    {_CONFIG_HINT_EXTRA_WHITELIST}:\n"
-            f'      - "^{anchor}\\\\b"\n\n'
-            f"{self._echd_capture_terse(source_segment)}"
+            f"NOTE: `{label}` is a known expensive command, and it appears in this "
+            f"command where the pipe blocker could not tell which pipe it feeds, so "
+            f"the pipe is treated as feeding it. If it does not, run `{label}` as a "
+            f"separate command."
         )
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block with a verbose-first/terse-after blacklisted/unknown/prose message.
+        """Block with a verbose-first/terse-after blacklisted/prose message; warn when unknown.
 
         Verbosity is decided per (transcript_path, rule_id) via the shared
         DisclosureTracker (Plan 00116, Decision G) rather than a running
@@ -1122,65 +1507,37 @@ class PipeBlockerHandler(
         # below still shows the full, un-redacted original.
         scan_target = self._strip_inert_spans(command)
 
-        # Report the producer of the OFFENDING pipe, which is not necessarily
-        # the first one: naming a whitelisted `git log` as the reason a
-        # command was blocked would send the agent to whitelist something
-        # that is already whitelisted.
-        offending_producer = self._find_offending_producer(scan_target)
-        source_segment = (
-            offending_producer
-            if offending_producer is not None
-            else self._extract_source_segment(scan_target)
-        )
-
-        rule_id = self._match_rule_id(scan_target)
-        if rule_id is None:
+        # Every OFFENDING pipe is judged, each on its own producer and consumer
+        # (Plan 00478 review C1). The first one that denies decides, and its
+        # producer is the one reported: naming a whitelisted `git log`, or an
+        # unknown `docker ps` beside a blacklisted pytest, would send the agent
+        # to whitelist the wrong thing. Only when none denies is the command
+        # allowed, with one advisory naming every unknown producer.
+        judged = [
+            (self._consumer_rule_id(match), self._extract_producer(scan_target, match.start()))
+            for match in self._offending_matches(scan_target)
+        ]
+        if not judged:
             # Defensive only: handle() is normally invoked exclusively after
             # matches() returned True, so this path is unreachable via the
             # daemon's dispatch. Kept for callers that invoke handle()
             # directly with a scan_target none of the pipe patterns matches.
-            rule_id = RuleID.PIPE_TO_TAIL
+            judged = [(RuleID.PIPE_TO_TAIL, self._extract_source_segment(scan_target))]
 
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        tracker = get_data_layer().disclosure
-        first_fire = not (transcript_path and tracker.was_disclosed(transcript_path, rule_id))
-        if transcript_path and first_fire:
-            tracker.mark_disclosed(transcript_path, rule_id)
+        for rule_id, source_segment in judged:
+            verdict = self._denying_verdict(hook_input, rule_id, source_segment, command)
+            if verdict is not None:
+                return verdict
 
-        # Task 1.2: sanity-check BEFORE templating. Matched text that looks
-        # like prose, not a shell command, gets a short accurate reason and
-        # skips the extra_whitelist/echd-capture template entirely — that
-        # template is what turned a defensible block into an embarrassing
-        # one (Plan 00209 §1).
-        if self._looks_like_prose(source_segment):
-            return GatingResult(
-                decision=Decision.DENY, reason=self._prose_reason(rule_id), rule=rule_id
-            )
+        # Every pipe left is unknown. It may only be allowed if no blacklisted
+        # command is named anywhere in the text: one that is, the parser
+        # failed to place (Plan 00478 second review), and the pipe denies on it.
+        unplaced = self._blacklisted_word_anywhere(scan_target)
+        if unplaced is not None:
+            rule_id, source_segment = judged[0]
+            return self._unplaced_verdict(hook_input, rule_id, source_segment, command, unplaced)
 
-        # A pipe fed by a whole loop/if/case/group has no one producer, so no
-        # whitelist line can name it; the unknown-command template would
-        # suggest whitelisting `^done\b` (Plan 00422 N25).
-        closer = self._compound_closer(source_segment)
-        if closer is not None:
-            return GatingResult(
-                decision=Decision.DENY,
-                reason=self._compound_reason(rule_id, closer, command, verbose=first_fire),
-                rule=rule_id,
-            )
-
-        # Differentiate: known expensive vs unrecognized, verbose vs terse
-        if self._matches_blacklist(source_segment):
-            if first_fire:
-                reason = self._blacklisted_reason(rule_id, source_segment, command)
-            else:
-                reason = self._blacklisted_terse_reason(rule_id, source_segment, command)
-        else:
-            if first_fire:
-                reason = self._unknown_reason(rule_id, source_segment, command)
-            else:
-                reason = self._unknown_terse_reason(rule_id, source_segment, command)
-
-        return GatingResult(decision=Decision.DENY, reason=reason, rule=rule_id)
+        return self._unknown_producer_verdict([segment for _, segment in judged])
 
     def get_rules(self) -> list[Rule]:
         """Return the 2 Rule objects backing this handler's blocking behaviour."""
@@ -1230,8 +1587,19 @@ class PipeBlockerHandler(
         """Return CLAUDE.md guidance about the pipe blocker."""
         return (
             "### Pipe Blocker\n\n"
-            "Commands piped to `tail` or `head` are **blocked** — piping truncates output "
-            "and causes information loss.\n\n"
+            "Known expensive commands (pytest, npm, cargo, ...) piped to `tail` or `head` "
+            "are **blocked** — piping truncates output and causes information loss. That "
+            "includes one run through a wrapper or runner (`VAR=x`, `env`, `timeout N`, "
+            "`uv run`, `xargs`, `python3 -m`, a `bash -c` body, `.venv/bin/pytest`). A "
+            "producer on neither the whitelist nor the blacklist is **allowed with an "
+            "advisory** naming the capture helper and `extra_whitelist` — but ONLY when "
+            "no blacklisted command is named anywhere in the command (any statement, "
+            "substitution, `-c` body or here-string; as a word, a path's basename or "
+            "`-mNAME`). If one is, the pipe is blocked on it whatever wrapper hides it "
+            "(`unbuffer pytest | tail`); if it really feeds no pipe, run it as a separate "
+            "command. Prose-shaped matches and pipes fed by a whole loop/`if`/`case`/group "
+            "are still blocked, a single `&` ends a statement, and an unknown pipe never "
+            "excuses a blocked one elsewhere in the same command.\n\n"
             "**Do NOT do the theatre** of capturing output to a file and then echoing the "
             "WHOLE file to stdout — that defeats the point and just bloats tokens.\n\n"
             f"{self._capture_guidance()}"
@@ -1264,8 +1632,9 @@ class PipeBlockerHandler(
             "them. That is the supported way to sample a large append-only file such "
             "as a plan's `JOURNAL/` entry files or legacy day-file — which you "
             "should tail or grep rather than read whole.\n\n"
-            "**Add to whitelist** (if safe to pipe): set `extra_whitelist` in "
-            "`.claude/hooks-daemon.yaml` under `pipe_blocker`.\n\n"
+            "**Add to whitelist** (if safe to pipe, and to silence the unknown-producer "
+            "advisory): set `extra_whitelist` in `.claude/hooks-daemon.yaml` under "
+            "`pipe_blocker`.\n\n"
             "**A git message VALUE is exempt only while the shell cannot run "
             "it.** Prose in `git commit -m`/`git tag -m` is not scanned, so a "
             "literal `| tail` inside a message never counts as a pipe — but "
@@ -1397,20 +1766,21 @@ class PipeBlockerHandler(
                 requires_main_thread=False,
             ),
             AcceptanceTest(
-                title="docker ps piped to tail (unknown command — extra_whitelist path)",
+                title="docker ps piped to tail (unknown producer — advisory)",
                 command='[[ "docker ps -a | tail -20" == 0 ]]',
                 dispatch_as_bash=True,
                 description=(
-                    "Blocks docker ps | tail via unknown-command path (extra_whitelist hint). "
-                    "docker ps is not in blacklist so handler suggests adding to extra_whitelist."
+                    "Allows docker ps | tail with an advisory. docker ps is on neither "
+                    "list, so the handler cannot tell whether it is expensive and names "
+                    "echd-capture and extra_whitelist."
                 ),
-                expected_decision=Decision.DENY,
+                expected_decision=Decision.ALLOW,
                 expected_message_patterns=[
-                    r"Pipe to tail/head",
+                    r"pipe_blocker",
                     r"extra_whitelist",
                 ],
                 safety_notes="No-op: [[ ... ]] evaluates to false (exit 1), no side effects",
-                test_type=TestType.BLOCKING,
+                test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

@@ -752,8 +752,12 @@ if [ "$_BRANCH_INSTALL" = "true" ]; then
         || _fail "Ref '$_TRACK_REF' not found on origin"
     TARGET_VERSION="$(git -C "$DAEMON_DIR" rev-parse FETCH_HEAD)"
     _TARGET_SHORT="$(git -C "$DAEMON_DIR" rev-parse --short FETCH_HEAD)"
-    TARGET_SEMVER="$(git -C "$DAEMON_DIR" show "FETCH_HEAD:pyproject.toml" \
-        | awk -F'"' '/^version[[:space:]]*=/ {print $2; exit}')"
+    # Read the whole blob into a variable before parsing it: a reader that
+    # stops at the version line would close a pipe git is still writing to,
+    # and under pipefail that SIGPIPE (141) ends the install.
+    _TARGET_PYPROJECT="$(git -C "$DAEMON_DIR" show "FETCH_HEAD:pyproject.toml")" \
+        || _fail "Ref '$_TRACK_REF' carries no pyproject.toml"
+    TARGET_SEMVER="$(awk -F'"' '/^version[[:space:]]*=/ {print $2; exit}' <<<"$_TARGET_PYPROJECT")"
     [ -n "$TARGET_SEMVER" ] || _fail "Ref '$_TRACK_REF' carries no [project].version in pyproject.toml"
     TARGET_SEMVER="v$TARGET_SEMVER"
     TARGET_DISPLAY="${TARGET_SEMVER}+${_TRACK_REF//\//-}.${_TARGET_SHORT}"

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pytest
 
+from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
 
 
@@ -47,6 +48,21 @@ class TestEnvIsNotACheapFilter:
         self, handler: PipeBlockerHandler, command: str
     ) -> None:
         assert handler.matches(_bash(command)) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "env pytest tests/ | head -20",
+            "env pytest tests/ | tail -20",
+            "env FOO=1 pytest tests/ | head -5",
+            "env -u PYTHONPATH npm run build | tail -n 30",
+        ],
+    )
+    def test_a_wrapped_expensive_command_is_denied(
+        self, handler: PipeBlockerHandler, command: str
+    ) -> None:
+        """Judged on the WRAPPED command: a pytest behind env is a pytest (Plan 00478 C2)."""
+        assert handler.handle(_bash(command)).decision == Decision.DENY
 
 
 class TestTheCheapUseSurvives:

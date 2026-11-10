@@ -203,6 +203,28 @@ class TestGateArmed:
         assert result.returncode == 0, result.stdout + result.stderr
         assert f"to_version=v1.1.0+main.{short}" in result.stdout
 
+    def test_a_large_pyproject_on_the_tip_does_not_kill_the_install(
+        self, client_project: Path, tmp_path: Path
+    ) -> None:
+        """The version is read from the whole file, never a pipe a reader closes early.
+
+        A reader that stops at the version line closes the pipe while git is
+        still writing the rest of the file; under pipefail that SIGPIPE (141)
+        ended the install before anything was checked out.
+        """
+        work = tmp_path / "daemon-work"
+        padding = "".join(f'# padding line {i:06d} {"x" * 60}\n' for i in range(20000))
+        (work / "pyproject.toml").write_text(
+            f'[project]\nname = "fixture"\nversion = "1.2.0"\n{padding}'
+        )
+        big_tip = _commit_all(work, "large pyproject")
+        _require_ok(_git("push", "-q", "origin", "main", cwd=work), "push big tip")
+
+        result = _run_layer1(client_project, gate={REF_VAR: "main", REASON_VAR: "x"})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _daemon_head(client_project) == big_tip
+        assert f"to_version=v1.2.0+main.{big_tip[:7]}" in result.stdout
+
     def test_positional_version_alongside_the_gate_is_refused(
         self, client_project: Path, daemon_remote: dict[str, object]
     ) -> None:

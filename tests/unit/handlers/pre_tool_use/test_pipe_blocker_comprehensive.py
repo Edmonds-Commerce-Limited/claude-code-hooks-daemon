@@ -806,7 +806,7 @@ class TestPipeBlockerPythonModuleLabel:
         assert "pytest is expensive" in result.reason
         assert "python is expensive" not in result.reason
 
-    def test_unknown_terse_label_names_module_not_interpreter(
+    def test_unknown_advisory_names_module_not_interpreter(
         self, handler: PipeBlockerHandler
     ) -> None:
         """An unrecognised module still gets a module-named label, but the
@@ -817,24 +817,12 @@ class TestPipeBlockerPythonModuleLabel:
             "tool_name": "Bash",
             "tool_input": {"command": "python -m mymodule | tail -5"},
         }
-        transcript_input = {**hook_input, "transcript_path": "/tmp/t-py-module-unknown-terse"}
-        handler.handle(transcript_input)
-        result = handler.handle(transcript_input)
-        assert result.reason is not None
-        assert "mymodule unrecognized" in result.reason
-        assert "python unrecognized" not in result.reason
-        assert r'"^python\\b"' in result.reason
-
-    def test_unknown_verbose_extra_whitelist_still_anchors_on_python(
-        self, handler: PipeBlockerHandler
-    ) -> None:
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "python -m mymodule | tail -5"},
-        }
         result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert r'"^python\\b"' in result.reason
+        assert result.decision == "allow"
+        advisory = "\n".join(result.context)
+        assert "`mymodule` piped to tail/head" in advisory
+        assert "`python` piped to tail/head" not in advisory
+        assert "^python\\b" in advisory
 
     def test_plain_python_script_without_dash_m_is_unaffected(
         self, handler: PipeBlockerHandler
@@ -844,144 +832,52 @@ class TestPipeBlockerPythonModuleLabel:
             "tool_name": "Bash",
             "tool_input": {"command": "python script.py | tail -5"},
         }
-        transcript_input = {**hook_input, "transcript_path": "/tmp/t-py-plain-script-terse"}
-        handler.handle(transcript_input)
-        result = handler.handle(transcript_input)
-        assert result.reason is not None
-        assert "python unrecognized" in result.reason
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"
+        assert "`python` piped to tail/head" in "\n".join(result.context)
 
 
 class TestPipeBlockerHandleUnknown:
-    """Tests for handle() when command is unknown (not in whitelist or blacklist)."""
+    """handle() for a producer on neither list: allow with the shared advisory (Plan 00478)."""
 
     @pytest.fixture
     def handler(self) -> PipeBlockerHandler:
         return PipeBlockerHandler()
 
-    def test_handle_returns_deny_for_unknown(self, handler: PipeBlockerHandler) -> None:
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
+    def _advisory(self, handler: PipeBlockerHandler, command: str) -> str:
+        event = {"tool_name": "Bash", "tool_input": {"command": command}}
+        # A whitelisted producer never reaches handle() through the daemon, so
+        # each fixture must genuinely reach the unknown tier.
+        assert handler.matches(event) is True
+        result = handler.handle(event)
         from claude_code_hooks_daemon.core import Decision
 
-        assert result.decision == Decision.DENY
+        assert result.decision == Decision.ALLOW
+        assert result.reason is None
+        return "\n".join(result.context)
 
-    def test_unknown_reason_mentions_command(self, handler: PipeBlockerHandler) -> None:
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "docker ps -a | tail -n 20"},
-        }
-        result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "docker ps -a | tail -n 20" in result.reason
+    def test_handle_allows_unknown(self, handler: PipeBlockerHandler) -> None:
+        assert self._advisory(handler, "mytool . | tail -n 20")
 
-    def test_unknown_reason_mentions_extra_whitelist(self, handler: PipeBlockerHandler) -> None:
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "extra_whitelist" in result.reason
+    def test_advisory_mentions_extra_whitelist(self, handler: PipeBlockerHandler) -> None:
+        assert "extra_whitelist" in self._advisory(handler, "mytool . | tail -n 20")
 
-    def test_unknown_reason_suggests_temp_file(self, handler: PipeBlockerHandler) -> None:
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "temp" in result.reason.lower() or "/tmp" in result.reason
+    def test_advisory_suggests_the_capture_helper(self, handler: PipeBlockerHandler) -> None:
+        advisory = self._advisory(handler, "mytool . | tail -n 20")
+        assert "echd-capture" in advisory
+        assert "pipefail" in advisory
 
-    def test_unknown_reason_shows_whitelist_examples(self, handler: PipeBlockerHandler) -> None:
-        """Unknown message should list some whitelisted commands as examples."""
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "docker ps | tail -n 20"},
-        }
-        result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "grep" in result.reason.lower() or "awk" in result.reason.lower()
+    def test_advisory_names_the_source_command(self, handler: PipeBlockerHandler) -> None:
+        assert "docker" in self._advisory(handler, "docker logs container | tail -n 50").lower()
 
-    def test_unknown_reason_mentions_source_command(self, handler: PipeBlockerHandler) -> None:
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "docker logs container | tail -n 50"},
-        }
-        result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "docker" in result.reason.lower()
+    def test_advisory_suggests_a_whitelist_regex(self, handler: PipeBlockerHandler) -> None:
+        assert "^mytool\\b" in self._advisory(handler, "mytool . | tail -n 20")
 
-    def test_unknown_reason_has_blocked_marker(self, handler: PipeBlockerHandler) -> None:
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "🚫" in result.reason or "BLOCKED" in result.reason
+    def test_head_consumer_is_allowed_too(self, handler: PipeBlockerHandler) -> None:
+        assert self._advisory(handler, "docker ps | head -n 5")
 
-    def test_unknown_reason_has_sections(self, handler: PipeBlockerHandler) -> None:
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "\n\n" in result.reason
-
-    def test_unknown_reason_does_not_mention_rerun(self, handler: PipeBlockerHandler) -> None:
-        """Unknown message should NOT mention re-run (that's blacklisted-only messaging)."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "re-run" not in result.reason.lower() and "rerun" not in result.reason.lower()
-
-    def test_unknown_reason_redirects_stdout_and_stderr(self, handler: PipeBlockerHandler) -> None:
-        """Snippet redirects both stdout and stderr to the temp file."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert '> "$TEMP_FILE" 2>&1' in result.reason
-
-    def test_unknown_reason_captures_exit_code(self, handler: PipeBlockerHandler) -> None:
-        """Snippet captures the exit code after running the command."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "EXIT_CODE=$?" in result.reason
-
-    def test_unknown_reason_echoes_completed_ok_on_success(
-        self, handler: PipeBlockerHandler
-    ) -> None:
-        """Snippet echoes 'Completed OK' when exit code is 0."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "Completed OK" in result.reason
-
-    def test_unknown_reason_echoes_completed_with_errors_on_failure(
-        self, handler: PipeBlockerHandler
-    ) -> None:
-        """Snippet echoes 'Completed with errors' when exit code is non-zero."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "Completed with errors (exit code: $EXIT_CODE)" in result.reason
-
-    def test_handle_head_command_reason_mentions_head(self, handler: PipeBlockerHandler) -> None:
-        """Reason should mention head when that's the dest command."""
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "docker ps | head -n 5"},
-        }
-        result = handler.handle(hook_input)
-        # Command appears in reason message
-        assert result.reason is not None
-        assert "head" in result.reason.lower()
-
-    def test_handle_with_complex_command(self, handler: PipeBlockerHandler) -> None:
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "find . -name '*.log' -exec cat {} \\; | tail -n 100"},
-        }
-        result = handler.handle(hook_input)
-        from claude_code_hooks_daemon.core import Decision
-
-        assert result.decision == Decision.DENY
-
-    def test_handle_long_message(self, handler: PipeBlockerHandler) -> None:
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "docker ps | tail -n 20"}}
-        result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert len(result.reason) > 50
+    def test_complex_unknown_command_is_allowed(self, handler: PipeBlockerHandler) -> None:
+        assert self._advisory(handler, "mytool . -name '*.log' -exec cat {} \\; | tail -n 100")
 
 
 # ===================================================================================
@@ -1004,11 +900,10 @@ class TestPipeBlockerMessageDifferentiation:
         assert "information" in result.reason.lower()
 
     def test_unknown_has_extra_whitelist_message(self, handler: PipeBlockerHandler) -> None:
-        """Unknown commands get 'add to extra_whitelist' message."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
+        """Unknown commands get an advisory with an 'add to extra_whitelist' hint."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "mytool . | tail -20"}}
         result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "extra_whitelist" in result.reason
+        assert "extra_whitelist" in "\n".join(result.context)
 
     def test_blacklisted_does_not_have_extra_whitelist(self, handler: PipeBlockerHandler) -> None:
         """Blacklisted message should NOT suggest adding to whitelist."""
@@ -1017,31 +912,19 @@ class TestPipeBlockerMessageDifferentiation:
         assert result.reason is not None
         assert "extra_whitelist" not in result.reason
 
-    def test_unknown_does_not_have_information_loss(self, handler: PipeBlockerHandler) -> None:
-        """Unknown message should NOT claim information loss (we don't know if expensive)."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
+    def test_unknown_does_not_claim_information_loss(self, handler: PipeBlockerHandler) -> None:
+        """The unknown advisory does not claim the pipe loses information (not known)."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "mytool . | tail -20"}}
         result = handler.handle(hook_input)
-        # find is unknown, not blacklisted, so no 'information loss' message
-        assert result.reason is not None
-        assert "information" not in result.reason.lower()
+        assert "information" not in "\n".join(result.context).lower()
 
-    def test_both_have_deny_decision(self, handler: PipeBlockerHandler) -> None:
+    def test_only_the_blacklisted_command_denies(self, handler: PipeBlockerHandler) -> None:
         from claude_code_hooks_daemon.core import Decision
 
         blacklisted = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
-        unknown = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
+        unknown = {"tool_name": "Bash", "tool_input": {"command": "mytool . | tail -20"}}
         assert handler.handle(blacklisted).decision == Decision.DENY
-        assert handler.handle(unknown).decision == Decision.DENY
-
-    def test_both_have_blocked_marker(self, handler: PipeBlockerHandler) -> None:
-        blacklisted = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
-        unknown = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
-        blacklisted_reason = handler.handle(blacklisted).reason
-        unknown_reason = handler.handle(unknown).reason
-        assert blacklisted_reason is not None
-        assert unknown_reason is not None
-        assert "BLOCKED" in blacklisted_reason
-        assert "BLOCKED" in unknown_reason
+        assert handler.handle(unknown).decision == Decision.ALLOW
 
 
 # ===================================================================================
