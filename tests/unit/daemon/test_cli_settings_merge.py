@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     HOOK_EVENTS_IN_SETTINGS,
     build_hook_registration,
 )
+from claude_code_hooks_daemon.utils.permission_surface import daemon_deny_rules
 
 
 def _shipped() -> dict[str, Any]:
@@ -31,7 +32,7 @@ def _shipped() -> dict[str, Any]:
             json_key: build_hook_registration(bash_key)
             for json_key, bash_key in HOOK_EVENTS_IN_SETTINGS.items()
         },
-        "permissions": {"deny": ["Edit(//tmp/**)"]},
+        "permissions": {"deny": list(daemon_deny_rules())},
     }
 
 

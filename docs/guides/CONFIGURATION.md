@@ -85,9 +85,38 @@ daemon:
 | `self_install_mode`            | `false` | Used when the daemon runs from the project root instead of `.claude/hooks-daemon/`. Only needed for daemon development.                                                                                                     |
 | `input_validation.enabled`     | `true`  | Validates hook event data before processing. Catches malformed events early.                                                                                                                                                |
 | `input_validation.strict_mode` | `false` | When `true`, invalid events are denied. When `false`, invalid events are allowed through with a warning logged.                                                                                                             |
+| `omit_permission_surface`      | `false` | When `true`, the daemon registers no `PermissionRequest` hook and writes no `permissions.deny` rules — see [Omitting the permission surface](#omitting-the-permission-surface) below.                                       |
 | `chain.deadline_seconds`       | `20`    | Per-event chain deadline in seconds, well under the client's own 30s socket timeout — see [Chain Deadline](#chain-deadline) below.                                                                                          |
 | `chain.max_inflight`           | `16`    | How many handler chains run at once, across every session the daemon serves — see [Dispatch Capacity](#dispatch-capacity) below.                                                                                            |
 | `chain.slot_wait_seconds`      | `2`     | Seconds a chain waits for a free slot before it is refused, spent from its own deadline — see [Dispatch Capacity](#dispatch-capacity) below.                                                                                |
+
+### Omitting the permission surface
+
+Claude Code keeps its critical-path removal prompt (the `rm` prompt) on even under
+`CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1` when a `PermissionRequest` hook of any
+matcher is registered or a deny rule targets Bash, Edit or Read. The daemon ships both. See the
+vendored page
+[permission-modes](../../remote-docs/code.claude.com/docs/en/permission-modes.md), section "Why the
+critical-path removal prompt stays on".
+
+```yaml
+daemon:
+  omit_permission_surface: true
+```
+
+With it on, the daemon registers no `PermissionRequest` hook and writes no `permissions.deny`
+rules. Entries it wrote earlier are removed on the next settings merge or reconcile; your own rules
+and hooks are never touched.
+
+**Warning: this lowers defence in depth for sessions that are NOT in bypass mode.** Those sessions
+lose the deny rules and the hook, and rely on the PreToolUse handlers alone. The daemon itself
+never returns `ask`.
+
+`hooks-daemon permission-surface` prints the omitted entries as JSON for a user-level
+`settings.json`. It writes nothing; the notice goes to stderr.
+
+Switching the option off again restores the hook and appends any missing daemon deny rules to your
+`permissions.deny`, keeping your own rules.
 
 ---
 

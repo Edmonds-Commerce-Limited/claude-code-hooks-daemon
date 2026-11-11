@@ -53,7 +53,10 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     expected_hook_events,
     validate_settings_hooks,
 )
-from claude_code_hooks_daemon.utils.permission_surface import strip_permission_surface
+from claude_code_hooks_daemon.utils.permission_surface import (
+    restore_deny_rules,
+    strip_permission_surface,
+)
 
 _HOOKS_KEY: Final = "hooks"
 _STATUS_LINE_KEY: Final = "statusLine"
@@ -155,8 +158,17 @@ def merge_settings(
     upgraded = _merge_recommended_defaults(merged, new_default, old_default)
 
     removed: tuple[str, ...] = ()
-    if omit_permission_surface:
-        merged, removed = strip_permission_surface(merged)
+    if not omit_permission_surface:
+        # Switching the option off again must bring back the daemon's deny rules
+        # even when the user's own `permissions` block exists (Plan 00474).
+        merged, restored = restore_deny_rules(merged)
+        if restored:
+            delivered = (*delivered, *(f"permissions.deny:{rule}" for rule in restored))
+    else:
+        merged, _ = strip_permission_surface(merged)
+        # Report only what the CLIENT actually carried: entries delivered and
+        # stripped again inside this one pass are not a change.
+        _, removed = strip_permission_surface(client)
         # Delivered or added in this same pass, then removed again: not a change.
         delivered = tuple(key for key in delivered if key in merged)
         hooks_added = tuple(key for key in hooks_added if key in merged[_HOOKS_KEY])

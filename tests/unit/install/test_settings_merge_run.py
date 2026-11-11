@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     HOOK_EVENTS_IN_SETTINGS,
     build_hook_registration,
 )
+from claude_code_hooks_daemon.utils.permission_surface import daemon_deny_rules
 
 _EVENT = "PreToolUse"
 _BASH_KEY = HOOK_EVENTS_IN_SETTINGS[_EVENT]
@@ -43,7 +44,7 @@ def _shipped() -> dict[str, Any]:
             for json_key, bash_key in HOOK_EVENTS_IN_SETTINGS.items()
         },
         "statusLine": {"type": "command", "command": "x", "refreshInterval": 1},
-        "permissions": {"deny": ["Edit(//tmp/**)"]},
+        "permissions": {"deny": list(daemon_deny_rules())},
     }
 
 
@@ -81,7 +82,7 @@ class TestAMergeThatSucceeds:
         outcome = run_settings_merge(paths["client"], paths["new_default"])
         written = json.loads(paths["client"].read_text(encoding="utf-8"))
         assert outcome.status is MergeStatus.MERGED
-        assert written["permissions"] == {"deny": ["Bash(rm:*)"]}
+        assert written["permissions"] == {"deny": ["Bash(rm:*)", *daemon_deny_rules()]}
         assert set(HOOK_EVENTS_IN_SETTINGS) <= set(written["hooks"])
 
     def test_the_file_it_writes_is_valid_json_with_a_trailing_newline(
@@ -241,7 +242,9 @@ class TestTheMergedResultIsValidatedBeforeItLands:
         """The gate is real: force a bad result and the client file survives."""
         import claude_code_hooks_daemon.install.settings_merge as module
 
-        monkeypatch.setattr(module, "validate_settings_hooks", lambda _s: ["missing: PreToolUse"])
+        monkeypatch.setattr(
+            module, "validate_settings_hooks", lambda _s, **_k: ["missing: PreToolUse"]
+        )
         original = json.dumps({"hooks": {}})
         paths["client"].write_text(original, encoding="utf-8")
         outcome = run_settings_merge(paths["client"], paths["new_default"])
@@ -255,7 +258,7 @@ class TestTheMergedResultIsValidatedBeforeItLands:
         """Naming the paths alone leaves a human diffing two files by hand."""
         import claude_code_hooks_daemon.install.settings_merge as module
 
-        monkeypatch.setattr(module, "validate_settings_hooks", lambda _s: ["nope"])
+        monkeypatch.setattr(module, "validate_settings_hooks", lambda _s, **_k: ["nope"])
         paths["client"].write_text(json.dumps({"hooks": {}}), encoding="utf-8")
         outcome = run_settings_merge(paths["client"], paths["new_default"])
         assert any("hooks" in message and "~" in message for message in outcome.messages)

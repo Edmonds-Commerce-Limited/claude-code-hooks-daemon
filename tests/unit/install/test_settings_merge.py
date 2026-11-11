@@ -20,6 +20,7 @@ from typing import Any
 from claude_code_hooks_daemon.install.settings_merge import merge_settings
 from claude_code_hooks_daemon.utils.hook_command_migration import canonical_hook_command
 from claude_code_hooks_daemon.utils.hook_registration import HOOK_EVENTS_IN_SETTINGS
+from claude_code_hooks_daemon.utils.permission_surface import daemon_deny_rules
 
 # A real wired event, taken from the SSoT so this never drifts from the daemon.
 _EVENT = "PreToolUse"
@@ -47,7 +48,7 @@ def _new_default() -> dict[str, Any]:
             "command": canonical_hook_command("status-line"),
             "refreshInterval": 1,
         },
-        "permissions": {"deny": ["Edit(//tmp/**)"]},
+        "permissions": {"deny": list(daemon_deny_rules())},
         "enableArtifact": False,
         "plansDirectory": "./CLAUDE/Plan",
     }
@@ -71,7 +72,11 @@ class TestTheClientDocumentIsTheStartingPoint:
     def test_the_client_permissions_block_is_not_replaced(self) -> None:
         client = {"permissions": {"deny": ["Bash(rm:*)"], "allow": ["Read(//etc/**)"]}}
         merged, _ = merge_settings(client, _new_default(), _old_default())
-        assert merged["permissions"] == {"deny": ["Bash(rm:*)"], "allow": ["Read(//etc/**)"]}
+        # The user's rules and keys stay; the daemon's own deny rules are added.
+        assert merged["permissions"] == {
+            "deny": ["Bash(rm:*)", *daemon_deny_rules()],
+            "allow": ["Read(//etc/**)"],
+        }
 
     def test_the_inputs_are_never_mutated(self) -> None:
         client = {"hooks": {}, "permissions": {"deny": []}}
@@ -241,7 +246,7 @@ class TestWithNoBaselineNothingIsGuessed:
     def test_an_absent_security_default_IS_delivered_and_reported(self) -> None:
         """Declining to deliver a deny rule destroys nothing, but withholds a guard."""
         merged, report = merge_settings({}, _new_default(), None)
-        assert merged["permissions"] == {"deny": ["Edit(//tmp/**)"]}
+        assert merged["permissions"] == {"deny": list(daemon_deny_rules())}
         assert "permissions" in report.keys_delivered
 
     def test_the_wired_set_is_still_completed(self) -> None:

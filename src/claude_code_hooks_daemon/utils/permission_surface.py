@@ -26,6 +26,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final
 
+import yaml
+
 from claude_code_hooks_daemon.config.yaml_loading import safe_load_yaml
 from claude_code_hooks_daemon.constants.events import EventID
 from claude_code_hooks_daemon.constants.paths import ProjectPath
@@ -65,9 +67,7 @@ def daemon_permission_surface() -> dict[str, Any]:
     """
     return {
         "permissions": {"deny": list(daemon_deny_rules())},
-        "hooks": {
-            PERMISSION_REQUEST_EVENT: build_hook_registration(_PERMISSION_REQUEST_BASH_KEY)
-        },
+        "hooks": {PERMISSION_REQUEST_EVENT: build_hook_registration(_PERMISSION_REQUEST_BASH_KEY)},
     }
 
 
@@ -86,7 +86,7 @@ def read_omit_permission_surface(settings_path: Path) -> bool:
         with config_path.open(encoding="utf-8") as stream:
             document = safe_load_yaml(stream)
         return _switch_from_document(document)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, yaml.YAMLError) as exc:
         log_and_continue(
             logger,
             exc,
@@ -100,6 +100,8 @@ def read_omit_permission_surface(settings_path: Path) -> bool:
 
 def _switch_from_document(document: Any) -> bool:
     """Extract ``daemon.omit_permission_surface``; raise ValueError if malformed."""
+    if document is None:
+        return False
     if not isinstance(document, dict):
         raise ValueError("configuration is not a mapping")
     daemon = document.get("daemon")
@@ -168,6 +170,36 @@ def _strip_deny_rules(permissions: dict[str, Any]) -> tuple[str, ...]:
     else:
         del permissions["deny"]
     return removed
+
+
+def restore_deny_rules(settings: Mapping[str, Any]) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Add the daemon's deny rules that a ``permissions`` block is missing.
+
+    The inverse of the deny half of :func:`strip_permission_surface`, used when
+    the switch is off so that turning it off again brings the rules back even
+    though the user's ``permissions`` key exists. Only absent daemon rules are
+    appended; every user rule and other ``permissions`` key is left exactly as
+    it was. A ``permissions`` or ``deny`` value of the wrong type is the user's
+    to fix and is left alone. An absent ``permissions`` key is not handled here:
+    the merge delivers it whole.
+
+    Pure: ``settings`` is not mutated.
+
+    Returns:
+        ``(new_settings, added)`` where ``added`` lists each rule appended.
+    """
+    new_settings = copy.deepcopy(dict(settings))
+    permissions = new_settings.get("permissions")
+    if not isinstance(permissions, dict):
+        return new_settings, ()
+    deny = permissions.get("deny", [])
+    if not isinstance(deny, list):
+        return new_settings, ()
+    present = {rule for rule in deny if isinstance(rule, str)}
+    added = tuple(rule for rule in daemon_deny_rules() if rule not in present)
+    if added:
+        permissions["deny"] = [*deny, *added]
+    return new_settings, added
 
 
 def strip_permission_surface(
