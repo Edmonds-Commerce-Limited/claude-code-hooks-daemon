@@ -197,6 +197,7 @@ from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to,
 from claude_code_hooks_daemon.utils.permission_surface import (
     daemon_permission_surface,
     read_omit_permission_surface,
+    read_permission_surface_setting,
 )
 from claude_code_hooks_daemon.utils.plugin_hooks import ACKNOWLEDGED_PLUGINS_OPTION, health_lines
 from claude_code_hooks_daemon.utils.relay_host import relay_fix_subcommand
@@ -4709,11 +4710,13 @@ def cmd_settings_merge(args: argparse.Namespace) -> int:
     )
 
     old_default = getattr(args, "old_default", None)
+    switch = read_permission_surface_setting(Path(args.client))
     outcome = run_settings_merge(
         Path(args.client),
         Path(args.new_default),
         Path(old_default) if old_default else None,
-        omit_permission_surface=read_omit_permission_surface(Path(args.client)),
+        omit_permission_surface=switch is True,
+        restore_permission_surface=switch is False,
     )
 
     if outcome.escalated:

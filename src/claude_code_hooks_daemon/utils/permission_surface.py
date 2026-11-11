@@ -79,9 +79,22 @@ def read_omit_permission_surface(settings_path: Path) -> bool:
     carries a non-boolean value is also treated as off, and is logged at
     WARNING: the default keeps the protections, which is the safe direction.
     """
+    return read_permission_surface_setting(settings_path) is True
+
+
+def read_permission_surface_setting(settings_path: Path) -> bool | None:
+    """The switch as written: True, False, or None when the project never set it.
+
+    The merge needs the difference between "absent" and "explicitly false": only
+    an explicit ``false`` (the user switching the option back off) restores deny
+    rules the daemon removed earlier. An absent key leaves a client's
+    ``permissions`` exactly as it was, so a config without the key behaves as it
+    did before the switch existed. Unreadable or malformed config is None and is
+    logged at WARNING, as in :func:`read_omit_permission_surface`.
+    """
     config_path = settings_path.parent / CONFIG_FILE_NAME
     if not config_path.is_file():
-        return False
+        return None
     try:
         with config_path.open(encoding="utf-8") as stream:
             document = safe_load_yaml(stream)
@@ -95,21 +108,23 @@ def read_omit_permission_surface(settings_path: Path) -> bool:
                 "switch is treated as off and the permission surface is kept"
             ),
         )
-        return False
+        return None
 
 
-def _switch_from_document(document: Any) -> bool:
+def _switch_from_document(document: Any) -> bool | None:
     """Extract ``daemon.omit_permission_surface``; raise ValueError if malformed."""
     if document is None:
-        return False
+        return None
     if not isinstance(document, dict):
         raise ValueError("configuration is not a mapping")
     daemon = document.get("daemon")
     if daemon is None:
-        return False
+        return None
     if not isinstance(daemon, dict):
         raise ValueError("`daemon` is not a mapping")
-    value = daemon.get(OMIT_KEY, False)
+    value = daemon.get(OMIT_KEY)
+    if value is None:
+        return None
     if not isinstance(value, bool):
         raise ValueError(f"daemon.{OMIT_KEY} must be true or false, got {value!r}")
     return value

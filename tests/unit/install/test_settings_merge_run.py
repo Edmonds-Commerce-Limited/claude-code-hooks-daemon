@@ -82,7 +82,7 @@ class TestAMergeThatSucceeds:
         outcome = run_settings_merge(paths["client"], paths["new_default"])
         written = json.loads(paths["client"].read_text(encoding="utf-8"))
         assert outcome.status is MergeStatus.MERGED
-        assert written["permissions"] == {"deny": ["Bash(rm:*)", *daemon_deny_rules()]}
+        assert written["permissions"] == {"deny": ["Bash(rm:*)"]}
         assert set(HOOK_EVENTS_IN_SETTINGS) <= set(written["hooks"])
 
     def test_the_file_it_writes_is_valid_json_with_a_trailing_newline(

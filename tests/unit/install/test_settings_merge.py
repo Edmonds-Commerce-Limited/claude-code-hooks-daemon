@@ -72,11 +72,9 @@ class TestTheClientDocumentIsTheStartingPoint:
     def test_the_client_permissions_block_is_not_replaced(self) -> None:
         client = {"permissions": {"deny": ["Bash(rm:*)"], "allow": ["Read(//etc/**)"]}}
         merged, _ = merge_settings(client, _new_default(), _old_default())
-        # The user's rules and keys stay; the daemon's own deny rules are added.
-        assert merged["permissions"] == {
-            "deny": ["Bash(rm:*)", *daemon_deny_rules()],
-            "allow": ["Read(//etc/**)"],
-        }
+        # A config that never set daemon.omit_permission_surface merges exactly
+        # as before the switch existed: the client's block is left as it was.
+        assert merged["permissions"] == {"deny": ["Bash(rm:*)"], "allow": ["Read(//etc/**)"]}
 
     def test_the_inputs_are_never_mutated(self) -> None:
         client = {"hooks": {}, "permissions": {"deny": []}}

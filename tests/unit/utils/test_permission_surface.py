@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.utils.permission_surface import (
     PERMISSION_REQUEST_EVENT,
     daemon_deny_rules,
     read_omit_permission_surface,
+    read_permission_surface_setting,
     strip_permission_surface,
 )
 
@@ -85,6 +86,27 @@ class TestReadSwitch:
         with caplog.at_level(logging.WARNING):
             assert read_omit_permission_surface(path) is False
         assert caplog.text
+
+
+class TestReadSettingAsWritten:
+    def test_absent_config_is_none(self, tmp_path: Path) -> None:
+        assert read_permission_surface_setting(tmp_path / ".claude" / "settings.json") is None
+
+    def test_key_absent_is_none(self, tmp_path: Path) -> None:
+        path = _write_config(tmp_path, "daemon:\n  log_level: INFO\n")
+        assert read_permission_surface_setting(path) is None
+
+    def test_explicit_false_is_false(self, tmp_path: Path) -> None:
+        path = _write_config(tmp_path, f"daemon:\n  {OMIT_KEY}: false\n")
+        assert read_permission_surface_setting(path) is False
+
+    def test_true_is_true(self, tmp_path: Path) -> None:
+        path = _write_config(tmp_path, f"daemon:\n  {OMIT_KEY}: true\n")
+        assert read_permission_surface_setting(path) is True
+
+    def test_malformed_is_none(self, tmp_path: Path) -> None:
+        path = _write_config(tmp_path, f"daemon:\n  {OMIT_KEY}: 'maybe'\n")
+        assert read_permission_surface_setting(path) is None
 
 
 class TestStrip:
