@@ -1,6 +1,6 @@
 # Plan 00604: claude code internal state research
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-11
 **Owner**: joseph
 **Priority**: High
@@ -31,27 +31,27 @@ This plan is pure research. It finds out how this version of Claude Code (2.1.32
 
 ### Phase 1: Documentation
 
-- [ ] ⬜ **Task 1.1**: Read the vendored and online Claude Code documentation (hooks, status line, settings, sub-agents, background tasks, monitors, scheduled tasks, teams and the inbox, `/goal`, SDK and headless modes). Use the remote-docs tool for capture. List every documented state surface and field.
-- [ ] ⬜ **Task 1.2**: Diff the hook input schemas and status-line input between what the docs say and what this daemon's captured payloads show (debug capture of real events).
+- [x] ✅ **Task 1.1**: Read the vendored and online Claude Code documentation (hooks, status line, settings, sub-agents, background tasks, monitors, scheduled tasks, teams and the inbox, `/goal`, SDK and headless modes). Use the remote-docs tool for capture. List every documented state surface and field.
+- [ ] 🔄 **Task 1.2**: Diff the hook input schemas and status-line input between what the docs say and what this daemon's captured payloads show (debug capture of real events). Docs side done in RESEARCH.md. Payload side not run: `daemon.payload_capture` is off, and switching it on needs a restart of the shared daemon.
 
 ### Phase 2: On disk
 
-- [ ] ⬜ **Task 2.1**: Map the state under `~/.claude/` and under the temporary task directories (for example `/tmp/claude-*/<project>/<session>/tasks/*.output`), by listing, sizes and redacted samples. Identify which files change when a background task starts, runs and ends.
-- [ ] ⬜ **Task 2.2**: Run small controlled experiments in a scratch session where cheap and safe (start and stop a background command, a monitor, a sub-agent, a cron) and record what changes on disk and in hook payloads.
+- [x] ✅ **Task 2.1**: Map the state under `~/.claude/` and under the temporary task directories (for example `/tmp/claude-*/<project>/<session>/tasks/*.output`), by listing, sizes and redacted samples. Identify which files change when a background task starts, runs and ends.
+- [x] ✅ **Task 2.2**: Run small controlled experiments in a scratch session where cheap and safe (start and stop a background command, a monitor, a sub-agent, a cron) and record what changes on disk and in hook payloads.
 
 ### Phase 3: The program
 
-- [ ] ⬜ **Task 3.1**: Inspect the installed program as far as the terms allow (package layout, bundled documentation, help output, debug flags, environment variables, any status or introspection command) for state tracking and any API that exposes it.
+- [x] ✅ **Task 3.1**: Inspect the installed program as far as the terms allow (package layout, bundled documentation, help output, debug flags, environment variables, any status or introspection command) for state tracking and any API that exposes it.
 
 ### Phase 4: Synthesis
 
-- [ ] ⬜ **Task 4.1**: Write `RESEARCH.md` with the map, the ranked hook points, the gaps and the per-consumer recommendations; update Plan 00603 and Plan 00501 with what it settles.
-- [ ] ⬜ **Task 4.2**: File a plan for the best hook point if one is worth building, or record that none is.
+- [ ] 🔄 **Task 4.1**: Write `RESEARCH.md` with the map, the ranked hook points, the gaps and the per-consumer recommendations; update Plan 00603 and Plan 00501 with what it settles. RESEARCH.md is written. The cross-plan notes for 00603 and 00501 are left to the coordinator.
+- [ ] 🔄 **Task 4.2**: File a plan for the best hook point if one is worth building, or record that none is. RESEARCH.md recommends one plan: a composite `true_idle()` reader built from session status, sub-agent metas and task output trailers. Filing it is left to the coordinator.
 
 ## Success Criteria
 
-- [ ] `RESEARCH.md` answers, with evidence, whether a true idle (no background task, no sub-agent, no monitor) can be read reliably, and from where.
-- [ ] Every surface in the map is marked documented or internal, with the Claude Code version it was observed on (2.1.322).
+- [x] `RESEARCH.md` answers, with evidence, whether a true idle (no background task, no sub-agent, no monitor) can be read reliably, and from where.
+- [x] Every surface in the map is marked documented or internal, with the Claude Code version it was observed on (2.1.322).
 - [ ] The pending-release holding area has no release-bound consequence recorded, because this plan changes no shipped code (say so in the plan on completion).
 
 ## Delivery & Milestones
