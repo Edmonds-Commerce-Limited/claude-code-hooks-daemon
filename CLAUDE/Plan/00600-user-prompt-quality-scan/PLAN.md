@@ -1,6 +1,6 @@
 # Plan 00600: user prompt quality scan
 
-**Status**: Research
+**Status**: Not Started
 **Created**: 2026-11-11
 **Owner**: joseph
 **Priority**: Medium
