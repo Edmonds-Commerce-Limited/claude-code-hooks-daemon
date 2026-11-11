@@ -106,8 +106,10 @@ _SIMPLE_WRAPPERS: Final[frozenset[str]] = frozenset(
 #: ``<runner> run <command>`` launchers.
 _RUN_LAUNCHERS: Final[frozenset[str]] = frozenset({"uv", "poetry", "pipenv"})
 
-#: Programs that answer at once. Case by program name; see ``_git_is_slow`` and
-#: the slow patterns for the exceptions.
+#: Programs that answer at once and never draw the no-timeout advisory. Matched
+#: by program basename; a project adds its own through ``extra_fast_programs``.
+#: ``git`` is fast except for the verbs in ``_GIT_SLOW_SUBCOMMANDS`` (network
+#: and object-store work), which still advise even when ``git`` is listed.
 DEFAULT_FAST_PROGRAMS: Final[frozenset[str]] = frozenset(
     {
         "ls", "cat", "grep", "egrep", "fgrep", "rg", "head", "tail", "wc", "echo", "printf",
@@ -118,6 +120,7 @@ DEFAULT_FAST_PROGRAMS: Final[frozenset[str]] = frozenset(
         "realpath", "readlink", "file", "ps", "pgrep", "kill", "id", "whoami", "hostname",
         "uname", "seq", "expr", "source", ".", ":", "find", "git", "gh", "hooks-daemon",
         "column", "xxd", "od", "du", "df", "tree", "less", "more", "bash", "sh",
+        "mkplan.bash", "pingbus",
     }
 )  # fmt: skip
 

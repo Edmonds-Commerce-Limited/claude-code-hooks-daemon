@@ -706,7 +706,9 @@ handlers:
 | `threshold_seconds`   | `30`    | A `timeout` or `sleep` above this is a finding                     |
 | `extra_slow_patterns` | `[]`    | Regexes added to the slow list, matched against `<program> <args>` |
 | `extra_fast_programs` | `[]`    | Program names added to the fast list (silences the advisory)       |
-| `exempt_patterns`     | `[]`    | Regexes matched against the whole command; a match is never judged |
+
+The built-in fast list (`DEFAULT_FAST_PROGRAMS`) covers `git`, `gh`, `ls`, `cat`, `grep`, `rg`, `jq`, `awk`, `hooks-daemon`, `mkplan.bash`, `pingbus` and similar. `git` is fast for its local verbs (`status`, `log`, `diff`, `add`, `commit`, `merge`, ...) but still draws the advisory for `clone`, `fetch`, `pull`, `push`, `gc`, `fsck`, `submodule`, `lfs`, `repack` and `prune`, even if `git` is listed in `extra_fast_programs`. The fast list never weakens a deny: a `timeout` above the threshold, `sleep`, a wait loop or a slow command is denied whatever program it wraps.
+| `exempt_patterns` | `[]` | Regexes matched against the whole command; a match is never judged |
 
 **Config example:**
 
