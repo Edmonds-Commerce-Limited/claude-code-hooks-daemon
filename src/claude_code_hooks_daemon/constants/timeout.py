@@ -197,6 +197,15 @@ class Timeout:
     # Plan 00558 Task 4.2: the creator record after the add -- three git config
     # writes (creator, created, route).
     GIT_BRANCH_RECORD_CALLS = 3
+    # Plan 00474 N621: git never retries `.git/config.lock`, and every checkout
+    # of a repository (parallel agents) shares the one config file. A config
+    # write waits for the lock for a base scaled by host load
+    # (utils/load_scaling.py), bounded by the ceiling, polling at the interval.
+    GIT_CONFIG_LOCK_WAIT = 5
+    GIT_CONFIG_LOCK_WAIT_MAX = 30
+    GIT_CONFIG_LOCK_POLL = 0.05
+    # A lock this old with no git process running is reported as stale.
+    GIT_CONFIG_LOCK_STALE_AGE = 60
     # Plan 00558 Task 4.4: the Stop and SubagentStop branch guard spends at most
     # this many seconds on its own git calls (status, remote containment, ancestry
     # per judged branch); past it the branches left are reported as unjudged and

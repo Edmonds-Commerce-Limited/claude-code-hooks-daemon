@@ -601,7 +601,10 @@ class GitRepo:
         other invocation and re-raises here, rather than keeping its own
         ``check=True`` spawn outside the one bounded home.
         """
-        result = run_git(self.root, "config", "--local", key, value)
+        # Local import: git_config_write itself builds on run_git from this module.
+        from claude_code_hooks_daemon.utils.git_config_write import run_git_config_write
+
+        result = run_git_config_write(self.root, "--local", key, value)
         if result.returncode != 0:
             raise subprocess.CalledProcessError(
                 result.returncode, result.args, result.stdout, result.stderr

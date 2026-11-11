@@ -7474,7 +7474,7 @@ lock file in one change, because a version-only edit marks the venv stale (N610)
 
 **Evidence**: `/workspace/.git/config.lock` was an empty file dated 18:42:03 with no git process running; one sub-agent's `branch-park --no-commit --no-push` could not write its record and its branch drew the "abandoned at stop" line. I removed the lock by hand. What created it is NOT established: no log line names it. What the code shows (`core/branch_park.py`, `write_park_record`): four separate `git config` calls, each failing at once if the lock is held, with no retry and no stale-lock handling, and parks from parallel agents share one config file.
 
-**Status**: ⬜ Open. Defence first: a test that holds `config.lock` for a moment while a park writes and expects the park to succeed; then write the four keys with `git config --file`-style batching or a short bounded retry, and report a lock older than a minute with no holder as stale. Also check the other `git config` writers (`hooksdaemon.latestPlanNumber`, park clear).
+**Status**: ✅ Fixed. Class: a multi-step write to a shared single-writer file that fails on first contention instead of waiting. Git has no multi-key write in one invocation, so each key now goes through `utils/git_config_write.run_git_config_write`: it retries only on "could not lock config file" for a load-scaled wait (`Timeout.GIT_CONFIG_LOCK_*`), then raises `GitConfigLockError` naming the lock path, adding a stale note (with the `rm` command, never run) when the lock is over a minute old and no git process runs. Used by `write_park_record`, `clear_park_record` and `GitRepo.write_config` (the plan counter; `mkplan.bash` already retried). Defence: `tests/unit/utils/test_git_config_write.py`. Release note 064. The remaining writer is N624.
 
 ### N609 — a dangling legacy `untracked/venv` symlink survives install and upgrade
 
@@ -7540,3 +7540,11 @@ the budgets are pinned in `EVENT_HANDLER_BUDGET`. They are read-mostly metadata 
 smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open. Scale them with `scaled_timeout` and size the event budget for the new ceilings.
+
+### N624 — `branch_records.write_creator` writes three config keys with no wait for `config.lock`
+
+**Source**: the N621 sweep of `git config` writers.
+
+**Evidence**: `core/branch_records._set` runs `git config` once per key and reports a held `config.lock` as a logged False, so a creator record is silently lost under contention. It was left out of the N621 fix because it runs inside the WorktreeCreate event, whose budget is pinned in `EVENT_HANDLER_BUDGET` (`GIT_BRANCH_RECORD_CALLS` x `GIT_WORKTREE_CLEANUP`); a lock wait of up to `GIT_CONFIG_LOCK_WAIT_MAX` per key would need that budget, the event tables and `init.sh` re-derived.
+
+**Status**: ⬜ Open. Route `_set` through `run_git_config_write` with a wait the event budget can afford, and size the budget with N623.
