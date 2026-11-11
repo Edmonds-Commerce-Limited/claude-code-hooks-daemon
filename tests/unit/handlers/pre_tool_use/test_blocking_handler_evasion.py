@@ -103,6 +103,16 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             "git reset --ha\\\nrd HEAD",
         ),
     ),
+    "LongRunningCommandGuardHandler": (
+        "sleep 45",
+        (
+            "env sleep 45",
+            "/bin/sleep 45",
+            "FOO=1 sleep 45",
+            "sleep \\\n 45",
+            "timeout 600 true",
+        ),
+    ),
     "BashSafeModeHandler": (
         "pytest tests/\ngit commit -m x",
         (
@@ -362,6 +372,14 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
 # wrappers), never shapes built to defeat a parser: those are out of scope
 # (CLAUDE/ARCHITECTURE.md, "Threat model: the agent is careless, not hostile").
 _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
+    "LongRunningCommandGuardHandler": (
+        # A short sleep, a timeout at the threshold, a mention and a quick
+        # read are all things the guard must leave alone.
+        "sleep 5",
+        "timeout 20 sleep 10",
+        "echo sleep 45",
+        "git status --short",
+    ),
     "BranchCreationGuardHandler": (
         # Reading, switching to or deleting a branch creates none.
         "git branch --list",
