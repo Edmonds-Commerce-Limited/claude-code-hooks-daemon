@@ -7468,6 +7468,14 @@ lock file in one change, because a version-only edit marks the venv stale (N610)
 
 **Status**: ✅ Fixed. `git` local verbs were already fast in the classifier; the noise that remained came from `mkplan.bash` and `pingbus`, now on `DEFAULT_FAST_PROGRAMS`. Network git verbs (`clone`, `fetch`, `pull`, `push`) and unknown programs still advise, and the deny rules are untouched. Corpus tests cover both sides; the option is documented in `docs/guides/HANDLER_REFERENCE.md`; release note 060.
 
+### N621 — a park writes four `git config` keys with no retry, so one stale or contended `config.lock` fails it
+
+**Source**: three parallel sub-agents finishing at once, 11 November 2026, host load 40 to 80.
+
+**Evidence**: `/workspace/.git/config.lock` was an empty file dated 18:42:03 with no git process running; one sub-agent's `branch-park --no-commit --no-push` could not write its record and its branch drew the "abandoned at stop" line. I removed the lock by hand. What created it is NOT established: no log line names it. What the code shows (`core/branch_park.py`, `write_park_record`): four separate `git config` calls, each failing at once if the lock is held, with no retry and no stale-lock handling, and parks from parallel agents share one config file.
+
+**Status**: ⬜ Open. Defence first: a test that holds `config.lock` for a moment while a park writes and expects the park to succeed; then write the four keys with `git config --file`-style batching or a short bounded retry, and report a lock older than a minute with no holder as stale. Also check the other `git config` writers (`hooksdaemon.latestPlanNumber`, park clear).
+
 ### N609 — a dangling legacy `untracked/venv` symlink survives install and upgrade
 
 **Source**: Plan 00594 release housekeeping (10 November 2026).
