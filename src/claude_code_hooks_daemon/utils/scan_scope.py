@@ -21,8 +21,6 @@ import os
 import subprocess  # nosec B404 - only ever runs the trusted system git binary
 from pathlib import Path
 
-from claude_code_hooks_daemon.utils.path_containment import path_relative_to
-
 #: The entry git keeps a checkout's metadata in: a directory, or in a linked
 #: worktree or submodule a file pointing at it.
 _GIT_ENTRY = ".git"
@@ -138,7 +136,7 @@ def walk_files(root: Path, pattern: str = "*") -> list[Path]:
         if here != root and (_GIT_ENTRY in dirnames or _GIT_ENTRY in filenames):
             dirnames.clear()
             continue
-        below = path_relative_to(here, root).as_posix()
+        below = Path(os.path.relpath(directory, root)).as_posix()
         prefix = "" if below == "." else f"{below}/"
         dirnames[:] = [
             name
