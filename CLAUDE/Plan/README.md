@@ -8,6 +8,10 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00599: claude md ownership statement and hint drops](00599-claude-md-ownership-statement-and-hint-drops/PLAN.md) - Not Started (a `claude_md.ownership` toggle, on by default, plus hint drops where the tree should stay clean)
+
+- [00600: user prompt quality scan](00600-user-prompt-quality-scan/PLAN.md) - Not Started (research: warn on or block clearly non-optimal human prompts at UserPromptSubmit)
+
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
 - [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - In Progress (DESIGN.md draft written, awaiting client-seat review; owner request via a client team: redesign the whole branch lifecycle (birth, finish, proof of merge, delete, park, owner) from nine failure classes seen in multi-agent client use, plus letting a client follow a daemon branch tip with a one-step return to the last tag; design first, no guard change ships before review)
