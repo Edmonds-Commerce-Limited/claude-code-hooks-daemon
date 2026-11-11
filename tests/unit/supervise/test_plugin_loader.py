@@ -235,12 +235,15 @@ class TestPluginHost:
     def test_record_failure_disables_once_and_survives_in_worker_argv(self, tmp_path: Path) -> None:
         a = write_plugin(tmp_path, "a")
         host = _host([spec("a", a)])
-        assert host.record_failure("a", _mod._PLUGIN_KIND_EXCEPTION, _mod._PLUGIN_HOOK_ON_IDLE)
+        # exit-stuck is not forgiven at a restart, so the disable must ride on every start.
+        assert host.record_failure("a", _mod._PLUGIN_KIND_EXIT_STUCK, _mod._PLUGIN_HOOK_ON_IDLE)
         assert not host.record_failure("a", _mod._PLUGIN_KIND_OVERRUN, _mod._PLUGIN_HOOK_ON_IDLE)
-        assert host.worker_argv() == ["--plugin", spec("a", a), "--disable-plugin", "a"]
+        expected = ["--plugin", spec("a", a), "--disable-plugin", "a"]
+        assert host.worker_argv() == expected
+        assert host.worker_argv() == expected
         [entry] = host.status_entries()
         assert entry["state"] == _mod._PLUGIN_STATE_DISABLED
-        assert entry["reason"] == "exception in on_idle"
+        assert entry["reason"] == "exit-stuck in on_idle"
 
     def test_a_load_failure_reported_by_the_worker_is_failed_not_disabled(
         self, tmp_path: Path

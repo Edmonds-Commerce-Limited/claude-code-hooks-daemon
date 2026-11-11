@@ -196,6 +196,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import enum
 import errno
 import fcntl
@@ -220,7 +221,7 @@ import threading
 import time
 import traceback
 import tty
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -2759,6 +2760,24 @@ def open_worker_error_log() -> TextIO | None:
         return None
 
 
+# When set, `append_worker_error` writes here instead of the live worker log. Only
+# `PluginTestHarness` sets it (through `_worker_error_log_redirected`), so a plugin
+# author's test run never appends to the running session's own log.
+_worker_error_log_override: Path | None = None
+
+
+@contextlib.contextmanager
+def _worker_error_log_redirected(path: Path) -> Iterator[None]:
+    """Send `append_worker_error` to ``path`` for the duration of the block."""
+    global _worker_error_log_override
+    previous = _worker_error_log_override
+    _worker_error_log_override = path
+    try:
+        yield
+    finally:
+        _worker_error_log_override = previous
+
+
 def append_worker_error(message: str) -> None:
     """Append a timestamped diagnostic to the worker error log (last resort).
 
@@ -2772,8 +2791,9 @@ def append_worker_error(message: str) -> None:
     matters has already landed on disk.
     """
     stamp = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
-    path = worker_error_log_path()
+    path = _worker_error_log_override or worker_error_log_path()
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(f"[{stamp}] {message}\n")
     except OSError:
@@ -4902,6 +4922,56 @@ _PLUGIN_LOAD_BUDGET_SECONDS = 1.0
 # A marker older than a hook's budget plus this grace means the worker is stuck
 # INSIDE that hook (a budgeted thread could not return it), not merely slow.
 _PLUGIN_WEDGE_GRACE_SECONDS = 0.25
+# A wall-clock age alone cannot tell a stuck worker from one the kernel has not
+# scheduled (a host at load 55-105 on 22 CPUs stalls a process for longer than
+# the budget plus grace). A wedge is therefore only declared when the SAME
+# marker is seen at this many consecutive checks, each with no CPU progress by
+# the worker since the previous one.
+_PLUGIN_WEDGE_STRIKES = 2
+# CPU seconds the worker must gain between two checks to count as progressing.
+_PLUGIN_WEDGE_CPU_PROGRESS_SECONDS = 0.0
+# A plugin disabled for a failure that host load can mimic comes back at the next
+# worker restart, or after this many ticks the worker answered with no failure.
+_PLUGIN_REENABLE_CLEAN_TICKS_DEFAULT = 120
+_PLUGIN_REENABLE_CLEAN_TICKS_ENV_VAR = "CCY_PLUGIN_REENABLE_CLEAN_TICKS"
+_PROC_STAT_AFTER_COMM_UTIME_INDEX = 11
+_PROC_STAT_AFTER_COMM_STIME_INDEX = 12
+
+
+def _plugin_reenable_clean_ticks() -> int:
+    """Clean ticks before a load-mimicable plugin failure is forgiven (env override)."""
+    raw = os.environ.get(_PLUGIN_REENABLE_CLEAN_TICKS_ENV_VAR)
+    if raw is None:
+        return _PLUGIN_REENABLE_CLEAN_TICKS_DEFAULT
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return _PLUGIN_REENABLE_CLEAN_TICKS_DEFAULT
+    return value if value > 0 else _PLUGIN_REENABLE_CLEAN_TICKS_DEFAULT
+
+
+def _process_cpu_seconds(pid: int) -> float | None:
+    """User plus system CPU seconds process ``pid`` has used, or None if unreadable."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+        # The command name may contain spaces and parentheses: fields start after the LAST ')'.
+        fields = stat.rsplit(")", 1)[1].split()
+        ticks = int(fields[_PROC_STAT_AFTER_COMM_UTIME_INDEX]) + int(
+            fields[_PROC_STAT_AFTER_COMM_STIME_INDEX]
+        )
+        return ticks / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _load_snapshot() -> str:
+    """The host load averages for a log line, or ``n/a`` where the OS gives none."""
+    try:
+        one, five, fifteen = os.getloadavg()
+    except OSError:
+        return "n/a"
+    return f"{one:.2f} {five:.2f} {fifteen:.2f}"
+
 
 _PLUGIN_TEXT_MAX_CHARS = 200
 _PLUGIN_VERSION_MAX_CHARS = 64
@@ -4980,6 +5050,12 @@ _PLUGIN_KINDS = frozenset(
 # running plugin code, so the host recovers by restarting the worker.
 _PLUGIN_KINDS_NEEDING_WORKER_RESTART = frozenset(
     {_PLUGIN_KIND_OVERRUN, _PLUGIN_KIND_WEDGE, _PLUGIN_KIND_EXIT_STUCK, _PLUGIN_KIND_HOST_FAULT}
+)
+# Failures a descheduled worker or a transient fault can produce, so the plugin is
+# forgiven at the next worker restart or after enough clean ticks. A load refusal,
+# a plugin that keeps asking for an exit nobody honours, and a host fault are not.
+_PLUGIN_KINDS_REENABLEABLE = frozenset(
+    {_PLUGIN_KIND_EXCEPTION, _PLUGIN_KIND_OVERRUN, _PLUGIN_KIND_WEDGE, _PLUGIN_KIND_BAD_RESULT}
 )
 
 _PLUGIN_STATE_LOADED = "loaded"
@@ -5244,15 +5320,15 @@ _PLUGIN_HOOK_PHRASES = {
 }
 _PLUGIN_RECOVERY_SENTENCES = {
     _PLUGIN_KIND_LOAD: "It was skipped, and this session is running without it.",
-    _PLUGIN_KIND_EXCEPTION: "It is disabled for the rest of this session.",
-    _PLUGIN_KIND_BAD_RESULT: "It is disabled for the rest of this session.",
+    _PLUGIN_KIND_EXCEPTION: "It is disabled until the next policy-worker restart or {ticks} clean ticks.",
+    _PLUGIN_KIND_BAD_RESULT: "It is disabled until the next policy-worker restart or {ticks} clean ticks.",
     _PLUGIN_KIND_OVERRUN: (
-        "It is disabled for the rest of this session, and the policy worker was "
-        "restarted without it."
+        "The policy worker was restarted without it; it comes back at the next "
+        "policy-worker restart or after {ticks} clean ticks."
     ),
     _PLUGIN_KIND_WEDGE: (
-        "It is disabled for the rest of this session, and the policy worker was "
-        "restarted without it."
+        "The policy worker was restarted without it; it comes back at the next "
+        "policy-worker restart or after {ticks} clean ticks."
     ),
     _PLUGIN_KIND_EXIT_STUCK: (
         "It is disabled for the rest of this session, and the policy worker was "
@@ -5263,7 +5339,36 @@ _PLUGIN_RECOVERY_SENTENCES = {
         "restarted without any."
     ),
 }
-_PLUGIN_NOTICE_CLOSING = "No action is needed from you."
+# Why each kind happened, in terms the session can act on. Fixed text: the kinds
+# a busy host can produce say so, because a disable the supervisor cannot tell
+# from a starved worker must not read as a verdict on the plugin.
+_PLUGIN_CAUSE_SENTENCES = {
+    _PLUGIN_KIND_LOAD: "The plugin file was refused or failed to import.",
+    _PLUGIN_KIND_EXCEPTION: "Its hook raised; the traceback is in the log.",
+    _PLUGIN_KIND_OVERRUN: (
+        "Its hook did not return within its time budget; a worker the host has not "
+        "scheduled (high host load) looks the same."
+    ),
+    _PLUGIN_KIND_WEDGE: (
+        "Its in-hook marker stayed set across two consecutive checks while the policy "
+        "worker used no CPU; a worker starved by high host load can look the same."
+    ),
+    _PLUGIN_KIND_BAD_RESULT: "Its hook returned a value outside the plugin API.",
+    _PLUGIN_KIND_EXIT_STUCK: "The session did not end after its repeated restart requests.",
+    _PLUGIN_KIND_HOST_FAULT: "The supervisor's own plugin handling failed.",
+}
+# What stops working while a plugin is off. A plugin not listed gets the generic
+# sentence; listing one here is how its owner makes the notice specific.
+_PLUGIN_OFF_FEATURES = {
+    "ccy-lifecycle": "relaunch on a team join, the max-age restart and the deadline notice",
+}
+_PLUGIN_OFF_FEATURES_GENERIC = "everything that plugin provides"
+
+
+def _plugin_off_sentence(name: str) -> str:
+    return (
+        f"While it is off, {_PLUGIN_OFF_FEATURES.get(name, _PLUGIN_OFF_FEATURES_GENERIC)} is off."
+    )
 
 
 def parse_plugin_notice_item(item: str) -> tuple[str, str, str] | None:
@@ -5288,10 +5393,11 @@ def render_plugin_notice(name: str, kind: str, hook: str) -> str:
     (`parse_plugin_notice_item`); they select or fill literal templates and
     nothing else reaches the text.
     """
+    recovery = _PLUGIN_RECOVERY_SENTENCES[kind].format(ticks=_plugin_reenable_clean_ticks())
     return (
         f"{_PLUGIN_NOTICE_HEADER}: plugin `{name}` {_PLUGIN_KIND_PHRASES[kind]}"
-        f"{_PLUGIN_HOOK_PHRASES[hook]}. {_PLUGIN_RECOVERY_SENTENCES[kind]} "
-        f"{_PLUGIN_NOTICE_CLOSING}"
+        f"{_PLUGIN_HOOK_PHRASES[hook]}. {_PLUGIN_CAUSE_SENTENCES[kind]} {recovery} "
+        f"{_plugin_off_sentence(name)} Details: {worker_error_log_path()}"
     )
 
 
@@ -5821,6 +5927,9 @@ class PluginTestHarness:
         self._plugin_path = plugin_path
         self._audit: list[str] = []
         self._started = False
+        # The worker error log is redirected here while a hook runs, so a plugin
+        # that raises under test never appends to the live session's log.
+        self._error_log = work_dir / _WORKER_ERROR_LOG_NAME
         self._runtime = PluginRuntime(
             state_root=work_dir / "state",
             status_dir=work_dir / "untracked",
@@ -5852,18 +5961,20 @@ class PluginTestHarness:
 
     def start(self) -> None:
         """Load the half and run ``on_start``; raise on any failure."""
-        self._runtime.load([(self._name, self._plugin_path)], frozenset())
-        self._raise_on_failure()
-        self._runtime.start()
-        self._raise_on_failure()
+        with _worker_error_log_redirected(self._error_log):
+            self._runtime.load([(self._name, self._plugin_path)], frozenset())
+            self._raise_on_failure()
+            self._runtime.start()
+            self._raise_on_failure()
         self._started = True
 
     def idle(self, now: float | None = None) -> PluginExitRequest | None:
         """Ask the plugin ``on_idle`` once; return its exit request, if any; raise on failure."""
         if not self._started:
             raise PluginHarnessError("call start() before idle()")
-        request = self._runtime.run_idle(time.time() if now is None else now)
-        self._raise_on_failure()
+        with _worker_error_log_redirected(self._error_log):
+            request = self._runtime.run_idle(time.time() if now is None else now)
+            self._raise_on_failure()
         return request
 
     def _record_status(self, _name: str, text: str, level: str, ttl: float) -> None:
@@ -5888,6 +5999,22 @@ class _PluginEntry:
     version: str = ""
     state: str = _PLUGIN_STATE_LOADED
     reason: str = ""
+    # Why the plugin was disabled at runtime ("" when it was not, or when the
+    # command line switched it off), and how far it is from being forgiven.
+    failure_kind: str = ""
+    clean_ticks: int = 0
+    # True once a worker start has been told to keep it off, so the NEXT start
+    # (a hot reload, a respawn) may bring a re-enableable plugin back.
+    off_start_served: bool = False
+
+
+@dataclass(frozen=True)
+class _WedgeWatch:
+    """What the previous silent-worker check saw: one marker, the strikes, the CPU."""
+
+    marker_id: tuple[str, str, float]
+    cpu_seconds: float | None
+    strikes: int
 
 
 class PluginHost:
@@ -5909,9 +6036,15 @@ class PluginHost:
         status_dir: Path | None = None,
         marker_path: Path | None = None,
         disabled: Collection[str] = (),
+        wedge_strikes: int = _PLUGIN_WEDGE_STRIKES,
     ) -> None:
         self._write_status = write_status
         self._allowed_uids = allowed_uids
+        self._wedge_strikes = max(1, wedge_strikes)
+        self._worker_cpu_source: Callable[[], float | None] | None = None
+        self._wedge_watch: _WedgeWatch | None = None
+        # Age of the marker behind the latest wedge `detect_wedge` returned, for the log.
+        self.last_wedge_marker_age: float | None = None
         self._all_off = False
         self._status_dir = status_dir
         self._marker_path = marker_path
@@ -5992,13 +6125,68 @@ class PluginHost:
         argv: list[str] = []
         if self._all_off:
             return argv
+        self._forgive_on_restart()
         for entry in self._entries:
             if entry.state != _PLUGIN_STATE_FAILED and entry.path is not None:
                 argv += [_PLUGIN_FLAG, f"{entry.name}{_PLUGIN_SPEC_SEPARATOR}{entry.path}"]
         for entry in self._entries:
             if entry.state == _PLUGIN_STATE_DISABLED:
+                entry.off_start_served = True
                 argv += [_DISABLE_PLUGIN_FLAG, entry.name]
         return argv
+
+    def _forgive_on_restart(self) -> None:
+        """A worker is starting: re-enable what an earlier start already kept off.
+
+        The start that follows the failure itself (``off_start_served`` still
+        False for a kind that needs a restart) keeps the plugin off; the next one
+        is a fresh worker with no stuck thread, so the plugin gets another go.
+        """
+        forgiven = [
+            e
+            for e in self._entries
+            if e.state == _PLUGIN_STATE_DISABLED
+            and e.failure_kind in _PLUGIN_KINDS_REENABLEABLE
+            and e.off_start_served
+        ]
+        for entry in forgiven:
+            self._reenable(entry)
+        if forgiven:
+            self._publish()
+
+    def _reenable(self, entry: _PluginEntry) -> None:
+        entry.state = _PLUGIN_STATE_LOADED
+        entry.reason = ""
+        entry.failure_kind = ""
+        entry.clean_ticks = 0
+        entry.off_start_served = False
+
+    def note_clean_tick(self) -> list[str]:
+        """Count one tick the worker answered with no plugin failure.
+
+        Returns the names forgiven by it (their worker must be restarted to load
+        them): a plugin disabled for a kind in `_PLUGIN_KINDS_REENABLEABLE` is
+        re-enabled once it has been off for the configured number of clean ticks.
+        """
+        limit = _plugin_reenable_clean_ticks()
+        forgiven: list[_PluginEntry] = []
+        for entry in self._entries:
+            if entry.state != _PLUGIN_STATE_DISABLED or (
+                entry.failure_kind not in _PLUGIN_KINDS_REENABLEABLE
+            ):
+                continue
+            entry.clean_ticks += 1
+            if entry.clean_ticks >= limit:
+                forgiven.append(entry)
+        for entry in forgiven:
+            self._reenable(entry)
+        if forgiven:
+            self._publish()
+        return [e.name for e in forgiven]
+
+    def set_worker_cpu_source(self, source: Callable[[], float | None]) -> None:
+        """Where `detect_wedge` reads the worker's CPU seconds (None when unreadable)."""
+        self._worker_cpu_source = source
 
     def disabled_names(self) -> frozenset[str]:
         """Every plugin that must stay off for the rest of this supervisor process."""
@@ -6023,13 +6211,33 @@ class PluginHost:
         entry.version = _clean_text(version, _PLUGIN_VERSION_MAX_CHARS)
         self._publish()
 
-    def record_failure(self, name: str, kind: str, hook: str, detail: str = "") -> bool:
-        """Disable ``name`` for a failure; True only the first time (idempotent)."""
+    def record_failure(
+        self,
+        name: str,
+        kind: str,
+        hook: str,
+        detail: str = "",
+        *,
+        marker_age: float | None = None,
+    ) -> bool:
+        """Disable ``name`` for a failure; True only the first time (idempotent).
+
+        Every disable is written to the worker error log with the in-hook marker's
+        age (when the caller knows it) and the host load, the two facts that tell a
+        stuck plugin from a starved worker.
+        """
         entry = self._by_name.get(name)
         if entry is None or entry.state != _PLUGIN_STATE_LOADED:
             return False
         entry.state = _PLUGIN_STATE_FAILED if kind == _PLUGIN_KIND_LOAD else _PLUGIN_STATE_DISABLED
         entry.reason = _failure_reason(PluginFailure(name, kind, hook, detail))
+        entry.failure_kind = kind
+        entry.clean_ticks = 0
+        entry.off_start_served = kind not in _PLUGIN_KINDS_NEEDING_WORKER_RESTART
+        age = "n/a" if marker_age is None else f"{marker_age:.2f}s"
+        append_worker_error(
+            f"plugin {name} disabled: {entry.reason}; marker age {age}; loadavg {_load_snapshot()}"
+        )
         self._publish()
         return True
 
@@ -6064,11 +6272,52 @@ class PluginHost:
         """Name the plugin a silent worker is stuck inside, from its in-hook marker.
 
         The worker writes the marker atomically before each hook call and clears
-        it after, so a marker that has outlived the hook's budget (plus a
-        grace) means the worker is stuck INSIDE that hook -- a budgeted thread
-        could not return it. A fresh marker is a slow hook, not a wedge, and
-        anything outside the closed sets blames nobody.
+        it after. A marker older than the hook's budget (plus a grace) is only a
+        SUSPECT: a worker the kernel has not scheduled for that long shows the
+        same marker. A wedge is declared when the same marker (plugin, hook and
+        start time) is seen at ``wedge_strikes`` consecutive checks and the
+        worker's CPU time did not advance between them; a marker that cleared, a
+        different marker or CPU progress starts the count again. A fresh marker is
+        a slow hook, and anything outside the closed sets blames nobody.
         """
+        marker = self._read_marker()
+        if marker is None:
+            self._wedge_watch = None
+            return None
+        name, hook, started_at = marker
+        entry = self._by_name.get(name)
+        budget = (
+            _PLUGIN_LOAD_BUDGET_SECONDS
+            if hook == _PLUGIN_HOOK_LOAD
+            else _PLUGIN_HOOK_BUDGET_SECONDS
+        )
+        age = now_wall - started_at
+        if (
+            entry is None
+            or entry.state != _PLUGIN_STATE_LOADED
+            or (age < budget + _PLUGIN_WEDGE_GRACE_SECONDS)
+        ):
+            self._wedge_watch = None
+            return None
+        marker_id = (name, hook, started_at)
+        cpu = self._worker_cpu_source() if self._worker_cpu_source is not None else None
+        watch = self._wedge_watch
+        strikes = 1
+        if watch is not None and watch.marker_id == marker_id:
+            progressed = (
+                cpu is not None
+                and watch.cpu_seconds is not None
+                and cpu > watch.cpu_seconds + _PLUGIN_WEDGE_CPU_PROGRESS_SECONDS
+            )
+            strikes = 1 if progressed else watch.strikes + 1
+        self._wedge_watch = _WedgeWatch(marker_id, cpu, strikes)
+        if strikes < self._wedge_strikes:
+            return None
+        self.last_wedge_marker_age = age
+        return PluginFailure(name, _PLUGIN_KIND_WEDGE, hook)
+
+    def _read_marker(self) -> tuple[str, str, float] | None:
+        """The in-hook marker's ``(plugin, hook, started_at)``, or None unless well-formed."""
         try:
             payload = json.loads(self._resolved_marker_path().read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -6088,20 +6337,11 @@ class PluginHost:
             or not isinstance(started_at, (int, float))
         ):
             return None
-        entry = self._by_name.get(name)
-        if entry is None or entry.state != _PLUGIN_STATE_LOADED:
-            return None
-        budget = (
-            _PLUGIN_LOAD_BUDGET_SECONDS
-            if hook == _PLUGIN_HOOK_LOAD
-            else _PLUGIN_HOOK_BUDGET_SECONDS
-        )
-        if now_wall - started_at < budget + _PLUGIN_WEDGE_GRACE_SECONDS:
-            return None
-        return PluginFailure(name, _PLUGIN_KIND_WEDGE, hook)
+        return name, hook, float(started_at)
 
     def clear_marker(self) -> None:
         """Forget the in-hook marker (the worker that wrote it has been replaced)."""
+        self._wedge_watch = None
         try:
             self._resolved_marker_path().unlink(missing_ok=True)
         except OSError as error:
@@ -10158,6 +10398,11 @@ class PolicyWorker:
     def alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
+    def cpu_seconds(self) -> float | None:
+        """CPU seconds the worker process has used, or None if it is not running."""
+        proc = self._proc
+        return None if proc is None else _process_cpu_seconds(proc.pid)
+
     def decide(self, facts: TickFacts) -> TickOutcome | None:
         """Ask the worker for a decision; None on any failure (host falls back).
 
@@ -10819,6 +11064,28 @@ def arm_restarted_notice(
         return False
 
 
+def _forgive_plugins_after_clean_ticks(
+    plugin_host: PluginHost,
+    *,
+    log: DecisionLog | None,
+    restart_worker: Callable[[], bool] | None,
+) -> None:
+    """Count a clean tick; re-enable what has been off long enough and reload the worker.
+
+    The worker holds a disabled plugin off for its whole life, so a plugin the
+    host forgives only comes back when the worker is restarted.
+    """
+    forgiven = plugin_host.note_clean_tick()
+    if not forgiven:
+        return
+    for name in forgiven:
+        _log_line(
+            log, f"plugin {name}: re-enabled after {_plugin_reenable_clean_ticks()} clean ticks"
+        )
+    if restart_worker is not None:
+        restart_worker()
+
+
 def handle_plugin_outcome(
     outcome: TickOutcome,
     *,
@@ -10852,6 +11119,8 @@ def handle_plugin_outcome(
                 _log_line(log, failure_log_line(PluginFailure(plugin, kind, hook, detail)))
                 if kind in _PLUGIN_KINDS_NEEDING_WORKER_RESTART and restart_worker is not None:
                     restart_worker()
+        if not outcome.plugin_failures:
+            _forgive_plugins_after_clean_ticks(plugin_host, log=log, restart_worker=restart_worker)
     if outcome.exit_for_restart is not None:
         plugin, reason = outcome.exit_for_restart
         restart.request(
@@ -10888,7 +11157,12 @@ def handle_worker_silence(
     failure = plugin_host.detect_wedge(now_wall)
     if failure is None:
         return
-    if not plugin_host.record_failure(failure.plugin, failure.kind, failure.hook):
+    if not plugin_host.record_failure(
+        failure.plugin,
+        failure.kind,
+        failure.hook,
+        marker_age=plugin_host.last_wedge_marker_age,
+    ):
         return
     _log_line(log, failure_log_line(failure))
     report_plugin_failure(machine, failure, status_dir=status_dir, now=now_wall)
@@ -11756,6 +12030,8 @@ def main(argv: list[str] | None = None) -> int:
     # to an identical in-process decision — so the session is never at risk.
     worker = _make_policy_worker(flags.dry_run, plugin_host=plugin_host)
     decider = _make_worker_decider(worker, log=log) if worker is not None else None
+    if plugin_host is not None and worker is not None:
+        plugin_host.set_worker_cpu_source(worker.cpu_seconds)
     try:
         return supervise(
             child_argv,
