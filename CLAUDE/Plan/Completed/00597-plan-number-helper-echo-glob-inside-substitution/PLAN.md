@@ -1,6 +1,6 @@
 # Plan 00597: plan number helper echo glob inside substitution
 
-**Status**: In Progress
+**Status**: Complete (2026-11-11)
 **Created**: 2026-11-11
 **Owner**: dev
 **Priority**: Medium
@@ -39,21 +39,31 @@ more literal digits as naming one plan.
 
 ### Phase 1: Fix (TDD)
 
-- [ ] ⬜ **Task 1.1**: rule 3 does not read past the start of a substitution; a glob that
+- [x] ✅ **Task 1.1**: rule 3 does not read past the start of a substitution; a glob that
   names one plan by its number is not a discovery glob. RED tests both ways.
-- [ ] ⬜ **Task 1.2**: release note
+- [x] ✅ **Task 1.2**: release note 053
 
 ### Phase 2: Delivery
 
-- [ ] ⬜ **Task 2.1**: independent review, merge, main CI green, close #198
+- [x] ✅ **Task 2.1**: independent review, merge, main CI green, close #198. The review
+  approved with two suggestions. One was a gap this branch opened: arithmetic `$((…))`
+  and nested parentheses ended the echo gap early. It was fixed before merge.
 
 ## Success Criteria
 
-- [ ] The #198 reproduction is allowed; its controls are unchanged
-- [ ] Every existing R-PLAN-NUMBER-DISCOVERY deny test still denies
-- [ ] Release-bound consequences in the holding area: a release note in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+- [x] The #198 reproduction is allowed; its controls are unchanged
+- [x] Every existing R-PLAN-NUMBER-DISCOVERY deny test still denies (271 tests pass)
+- [x] Release-bound consequences in the holding area: release note
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/053-plan-number-helper-echo-glob-inside-substitution.md`
+
+## Follow-ups (not done here)
+
+- `echo "next: $(realpath <plan-dir>/0* | tail -1)"` and
+  `echo "$(for d in <plan-dir>/0*; do :; done; echo $d)"` are now allowed. main denied
+  them only by accident, through the echo rule; the bare commands are allowed on main
+  too. Fix: add `matches()` rules for `realpath`/`readlink -f` over a plan-dir glob and
+  for a `for … in <plan-dir>/<glob>` loop, with the same five-digit allowance.
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hash -->
+- Merged at `fe34001a3`; main CI run 42948971640 green; GitHub #198 closed.

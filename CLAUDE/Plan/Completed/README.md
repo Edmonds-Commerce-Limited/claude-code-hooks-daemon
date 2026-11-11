@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00555: self install venv python version lockout](00555-self-install-venv-python-version-lockout/PLAN.md) - Complete at merge `ed18bf779` + the archiving commit (the self-install venv was locked out after a system Python moved under it; venv checks compare the `pyvenv.cfg` major.minor, daemon-down access is read-only, Stops are bounded; release note 010)
+
 - [00554: rust relay transport default](00554-rust-relay-transport-default/PLAN.md) - Complete at merge `654ec98e1`, reverted `bce74f191`, reapplied `0bef7acaa` + the archiving commit (owner request: the Rust relay is the default hook transport where the host can run it when `relay_enabled` is absent; `relay_enabled: false` is the legacy opt-in; release note 009)
 
 - [00553: supervisor indicator scoped to session](00553-supervisor-indicator-scoped-to-session/PLAN.md) - Complete at `2234dc879` (green CI run 40424574049) + the archiving commit (#140: the green top hat counts only a supervisor whose own process tree holds the session; release note 004)
