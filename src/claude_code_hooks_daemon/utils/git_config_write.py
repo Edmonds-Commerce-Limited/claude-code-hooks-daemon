@@ -11,13 +11,12 @@ is never deleted here, because a lock a live process holds must not be removed.
 from __future__ import annotations
 
 import re
-import subprocess
 import time
 from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import GitResult, run_git
 from claude_code_hooks_daemon.utils.load_scaling import describe_load, scaled_timeout
 
 _LOCK_MESSAGE: Final[str] = "could not lock config file"
@@ -79,7 +78,7 @@ def run_git_config_write(
     *args: str,
     base_wait: float | None = None,
     ceiling: float | None = None,
-) -> subprocess.CompletedProcess[str]:
+) -> GitResult:
     """Run ``git config <args>``, retrying while ``config.lock`` is held.
 
     Any other failure is returned as-is for the caller to judge. The wait

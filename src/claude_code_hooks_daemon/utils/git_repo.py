@@ -43,6 +43,10 @@ from claude_code_hooks_daemon.utils.secret_file_matching import (
 
 logger = logging.getLogger(__name__)
 
+#: What a git call returns. Callers that only NAME the type import this alias, so
+#: the one trusted ``subprocess`` import above stays the only one in the git layer.
+GitResult = subprocess.CompletedProcess[str]
+
 #: ``git status`` is not a read. It refreshes the index and writes it back,
 #: which acquires ``.git/index.lock`` — so a daemon merely ASKING whether a file
 #: is dirty contends for the lock with the agent working in the same tree, and a
