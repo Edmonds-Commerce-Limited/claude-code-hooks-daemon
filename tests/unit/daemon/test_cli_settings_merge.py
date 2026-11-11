@@ -71,8 +71,9 @@ class TestTheExitCodeTellsTheShellWhatHappened:
     ) -> None:
         """1 means abort to these scripts; an escalation must not abort them."""
         workspace["client"].write_text("{ broken", encoding="utf-8")
-        assert cmd_settings_merge(_args(workspace)) == ESCALATION_EXIT_CODE
-        assert ESCALATION_EXIT_CODE != 1
+        exit_code = cmd_settings_merge(_args(workspace))
+        assert exit_code == ESCALATION_EXIT_CODE
+        assert exit_code != 1
 
     def test_an_unreadable_daemon_source_also_escalates_rather_than_aborting(
         self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]
