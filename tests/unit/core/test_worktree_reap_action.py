@@ -238,7 +238,9 @@ class TestRemovingATreeIsNotAMetadataQuery:
     def test_the_removal_is_given_a_timeout_sized_for_deleting_a_tree(self) -> None:
         git = _TimeoutRecordingGit()
         reap_worktree(Path("/repo"), _clean_state(), run_fn=git)
-        assert git.timeouts["worktree"] == Timeout.GIT_WORKTREE_REMOVE
+        budget = git.timeouts["worktree"]
+        assert isinstance(budget, float)
+        assert Timeout.GIT_WORKTREE_REMOVE <= budget <= Timeout.GIT_WORKTREE_REMOVE_MAX
         assert Timeout.GIT_WORKTREE_REMOVE > Timeout.GIT_CONTEXT
 
     def test_a_timed_out_removal_says_it_was_interrupted_and_may_be_partial(self) -> None:

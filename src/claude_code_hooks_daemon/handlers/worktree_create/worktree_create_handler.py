@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.core.worktree_seed import (
     parse_seed_config,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import GIT_TIMED_OUT, GitRepo, run_git
 from claude_code_hooks_daemon.utils.load_scaling import describe_load, scaled_timeout
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
@@ -380,8 +381,13 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         try:
             shutil.rmtree(path)
         except OSError as exc:
-            logger.warning(
-                "worktree_create: could not delete the partial checkout %s: %s", path, exc
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    f"worktree_create: could not delete the partial checkout {path}; "
+                    "the leftover is reported to the caller by _left_behind"
+                ),
             )
             return False
         logger.warning("worktree_create: deleted the partial checkout %s git did not own", path)

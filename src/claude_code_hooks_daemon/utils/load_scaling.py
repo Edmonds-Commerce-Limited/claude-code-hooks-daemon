@@ -12,20 +12,48 @@ The base is always the floor, so scaling only ever lengthens a budget.
 
 from __future__ import annotations
 
+import logging
 import os
+from dataclasses import dataclass
 from typing import Final
+
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
+logger = logging.getLogger(__name__)
 
 #: The 1 and 5 minute load averages count; the 5 minute one stays because a
 #: spike that just ended still leaves the host slow to schedule.
 _LOAD_AVERAGES_USED: Final[int] = 2
 
 
-def _load_averages() -> tuple[float, float, float] | None:
-    """The host's 1, 5 and 15 minute load averages, or ``None`` when unreadable."""
+@dataclass(frozen=True)
+class _LoadReading:
+    """One read of the host load: the averages, or the reason there are none."""
+
+    averages: tuple[float, float, float] | None
+    unavailable: str | None = None
+
+
+def _read_load() -> _LoadReading:
+    """Read the host's 1, 5 and 15 minute load averages; a failed read is a typed result."""
     try:
-        return os.getloadavg()
-    except OSError:
-        return None
+        return _LoadReading(averages=os.getloadavg())
+    except OSError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                "host load average is unreadable on this platform, so the "
+                "budget is not scaled and stays at its idle-host base"
+            ),
+            level=logging.DEBUG,
+        )
+        return _LoadReading(averages=None, unavailable=str(exc))
+
+
+def _load_averages() -> tuple[float, float, float] | None:
+    """The host's load averages, or ``None`` when the host does not report them."""
+    return _read_load().averages
 
 
 def load_factor(
