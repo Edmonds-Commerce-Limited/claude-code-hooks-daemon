@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from claude_code_hooks_daemon.utils.hook_registration import reconcile_settings_hooks
+from claude_code_hooks_daemon.utils.permission_surface import read_omit_permission_surface
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,10 @@ def repair_settings_registrations(settings_path: Path) -> RepairResult:
     if not isinstance(settings, dict):
         return RepairResult(repaired=False)
 
-    new_settings, reconcile_result = reconcile_settings_hooks(settings)
+    omit_surface = read_omit_permission_surface(settings_path)
+    new_settings, reconcile_result = reconcile_settings_hooks(
+        settings, omit_permission_surface=omit_surface
+    )
     if not reconcile_result.changed:
         return RepairResult(repaired=False)
 
@@ -144,7 +148,9 @@ def repair_settings_registrations(settings_path: Path) -> RepairResult:
                     settings_path,
                 )
                 return RepairResult(repaired=False)
-            new_settings, reconcile_result = reconcile_settings_hooks(current_settings)
+            new_settings, reconcile_result = reconcile_settings_hooks(
+                current_settings, omit_permission_surface=omit_surface
+            )
             if not reconcile_result.changed:
                 # The concurrent writer already made this repair unnecessary.
                 return RepairResult(repaired=False)

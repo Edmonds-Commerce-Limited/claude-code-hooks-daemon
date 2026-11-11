@@ -23,6 +23,14 @@ def _get_enforcement_line() -> str:
         return "  # enforce_single_daemon_process: false  # Enable to prevent multiple daemon instances (auto-enabled in containers)\n"
 
 
+# daemon.omit_permission_surface (Plan 00474). Shipped commented out, so the
+# generated settings stay as before.
+_PERMISSION_SURFACE_LINE = (
+    "  # omit_permission_surface: true  # No PermissionRequest hook, no permissions.deny rules\n"
+    "  #   (keeps Claude Code's rm prompt off in bypass sessions; lowers defence in depth\n"
+    "  #   elsewhere). `hooks-daemon permission-surface` prints the entries for user settings\n"
+)
+
 # daemon.chain (Plan 00242). Shipped OFF: a terminal deny short-circuits the
 # chain. ON keeps running after a deny and merges every violation into one
 # response — costs the extra handlers' time on the blocked path.
@@ -133,6 +141,7 @@ class ConfigTemplate:
             "  idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes\n"
             "  log_level: INFO            # DEBUG, INFO, WARNING, ERROR\n"
             + enforcement_line
+            + _PERMISSION_SURFACE_LINE
             + _CHAIN_BLOCK
             + _TRANSPORT_BLOCK
             + "\n"
@@ -199,6 +208,7 @@ class ConfigTemplate:
             "  idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes\n"
             "  log_level: INFO            # DEBUG, INFO, WARNING, ERROR\n"
             + enforcement_line
+            + _PERMISSION_SURFACE_LINE
             + _CHAIN_BLOCK
             + _TRANSPORT_BLOCK
             + "\n"

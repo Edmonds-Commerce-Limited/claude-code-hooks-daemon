@@ -2040,6 +2040,8 @@ class DaemonConfig(BaseModel):
         request_timeout_seconds: Request processing timeout
         self_install_mode: Whether daemon runs from project root (vs .claude/hooks-daemon/)
         strict_mode: Fail-fast on ALL errors (handler exceptions, validation errors, etc.)
+        omit_permission_surface: Opt in to omitting the daemon's PermissionRequest hook
+            and permissions.deny rules (Plan 00474); default off
         input_validation: Input validation configuration
         expected_version: Daemon version this project expects (Plan 00477), strictly
             X.Y.Z. Written by install and upgrade; ``.claude/provision.sh`` installs
@@ -2085,6 +2087,14 @@ class DaemonConfig(BaseModel):
     strict_mode: bool = Field(
         default=False,
         description="Strict mode: FAIL FAST on ALL errors - handler exceptions, validation errors, etc. (fail-closed vs fail-open)",
+    )
+    omit_permission_surface: bool = Field(
+        default=False,
+        description=(
+            "Register no PermissionRequest hook and write no permissions.deny rules, so "
+            "Claude Code's critical-path removal prompt is not forced on in bypass sessions "
+            "(Plan 00474). Lowers defence in depth for sessions NOT in bypass mode"
+        ),
     )
     input_validation: InputValidationConfig = Field(
         default_factory=InputValidationConfig,

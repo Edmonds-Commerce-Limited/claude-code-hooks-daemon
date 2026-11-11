@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     validate_hook_commands,
     validate_settings_hooks,
 )
+from claude_code_hooks_daemon.utils.permission_surface import read_omit_permission_surface
 from claude_code_hooks_daemon.utils.safe_signal import (
     DaemonStop,
     RefusedSignalTarget,
@@ -572,7 +573,11 @@ class ClientInstallValidator:
                 warnings.append(f"Failed to read {local_path}: {exc}")
 
         # Run validations using shared utilities
-        warnings.extend(validate_settings_hooks(settings))
+        warnings.extend(
+            validate_settings_hooks(
+                settings, omit_permission_surface=read_omit_permission_surface(settings_path)
+            )
+        )
         warnings.extend(detect_duplicate_hooks(settings, local_settings))
         warnings.extend(detect_local_hooks_misplacement(local_settings))
         warnings.extend(validate_hook_commands(settings))
