@@ -20,6 +20,7 @@ import logging
 import os
 import shutil
 import subprocess  # nosec B404 — CalledProcessError typing only; run_git owns the spawn
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -71,11 +72,22 @@ _STATUS_COMMAND_NOT_FOUND = 127
 
 #: The lock reason git itself writes while ``worktree add`` is still running.
 _INITIALIZING_LOCK_REASON = "initializing"
+_RETRIED_NOTE = (
+    " [one automatic retry was already made after the first add timed out, "
+    "and it failed too; retrying now will most likely fail the same way until the load drops]"
+)
+_OPTION_ADD_BASE = "add_base_seconds"
+_OPTION_ADD_CEILING = "add_ceiling_seconds"
 _NOT_FOUND_HINT = (
     " [status 127 has two origins: git could not be spawned (searched PATH={path}), "
     "or a git hook such as post-checkout ran a command that was not found - in that "
     "case the worktree was still created and the hook's own stderr is quoted above]"
 )
+
+
+def _is_positive_number(value: object) -> bool:
+    """A real number above zero (a bool is not a number here)."""
+    return isinstance(value, int | float) and not isinstance(value, bool) and value > 0
 
 
 def _cleanup_budget() -> float:
@@ -99,6 +111,8 @@ class _WorktreeAddError(subprocess.CalledProcessError):
     left_behind: str = ""
     #: Set when the add hit its budget: the cause, load average and the safe retry.
     timeout_note: str = ""
+    #: Set when this is the error of the automatic retry, so the deny says one was made.
+    retried: bool = False
 
     @property
     def deny_detail(self) -> str:
@@ -111,6 +125,8 @@ class _WorktreeAddError(subprocess.CalledProcessError):
         message = f"{base}: {stderr}" if stderr else base
         if self.left_behind:
             message += f" [{self.left_behind}]"
+        if self.retried:
+            message += _RETRIED_NOTE
         if self.returncode == _STATUS_COMMAND_NOT_FOUND:
             message += _NOT_FOUND_HINT.format(path=os.environ.get("PATH", "<unset>"))
         return message
@@ -132,6 +148,10 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         self._seed: Any = None
         self._resolved_seed: list[SeedEntry] | None = None
         self._branches: BranchesConfig = BranchesConfig()
+        # Options ``add_base_seconds`` / ``add_ceiling_seconds``: the idle-host
+        # base and the ceiling of the load-scaled ``git worktree add`` budget.
+        self._add_base_seconds: float = Timeout.GIT_WORKTREE
+        self._add_ceiling_seconds: float = Timeout.GIT_WORKTREE_ADD_MAX
 
     def _seed_entries(self) -> list[SeedEntry]:
         """Return the validated seed entries, parsing the option once."""
@@ -176,7 +196,13 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             validate_seed_sources(Path(root), entries)
 
             path.parent.mkdir(parents=True, exist_ok=True)
-            self._git_worktree_add(cwd, path, branch)
+            self._git_worktree_add(
+                cwd,
+                path,
+                branch,
+                base=self._add_base_seconds,
+                ceiling=self._add_ceiling_seconds,
+            )
             # `worktree add -b` refuses an existing branch, so this call made it.
             # The agent is bound later by its first touch (branch_touch_recorder);
             # a failed write is logged and the worktree still answers.
@@ -237,10 +263,43 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         return str(repo.main_worktree_root())
 
     @staticmethod
+    def validate_options(options: Mapping[str, Any]) -> dict[str, str]:
+        """Refuse a malformed add budget; the handler then runs on its default for it.
+
+        Each value must be a positive number, the ceiling may not exceed
+        ``Timeout.GIT_WORKTREE_ADD_MAX`` (the event deadline is sized for it),
+        and the base may not exceed the ceiling.
+        """
+        problems: dict[str, str] = {}
+        for key in (_OPTION_ADD_BASE, _OPTION_ADD_CEILING):
+            if key in options and not _is_positive_number(options[key]):
+                problems[key] = f"{key} must be a positive number of seconds"
+        if _OPTION_ADD_CEILING in options and _OPTION_ADD_CEILING not in problems:
+            if options[_OPTION_ADD_CEILING] > Timeout.GIT_WORKTREE_ADD_MAX:
+                problems[_OPTION_ADD_CEILING] = (
+                    f"{_OPTION_ADD_CEILING} may not exceed {Timeout.GIT_WORKTREE_ADD_MAX}: "
+                    "the WorktreeCreate event deadline is sized for that"
+                )
+        base = options.get(_OPTION_ADD_BASE, Timeout.GIT_WORKTREE)
+        ceiling = options.get(_OPTION_ADD_CEILING, Timeout.GIT_WORKTREE_ADD_MAX)
+        if (
+            _OPTION_ADD_BASE not in problems
+            and _OPTION_ADD_CEILING not in problems
+            and base > ceiling
+        ):
+            culprit = _OPTION_ADD_BASE if _OPTION_ADD_BASE in options else _OPTION_ADD_CEILING
+            problems[culprit] = (
+                f"{_OPTION_ADD_BASE} ({base}) may not exceed {_OPTION_ADD_CEILING} ({ceiling})"
+            )
+        return problems
+
+    @staticmethod
     def _git_worktree_add(
         cwd: str,
         path: Path,
         branch: str,
+        *,
+        base: float = Timeout.GIT_WORKTREE,
         ceiling: float = Timeout.GIT_WORKTREE_ADD_MAX,
     ) -> None:
         """Run ``git worktree add -b <branch> <path>`` from ``cwd``.
@@ -251,11 +310,17 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         explicitly and translated into the same ``CalledProcessError`` a
         ``check=True`` spawn would have raised.
 
-        The add runs on a budget scaled to host load (``Timeout.GIT_WORKTREE`` on
-        an idle host, up to ``ceiling``): populating a checkout is the work that
-        a loaded host slows most. A failed or timed-out add is undone before it
-        raises (Plan 00512): git can leave the worktree and the new branch
-        behind, and the caller gets no path to find them by.
+        The add runs on a budget scaled to host load (``base`` on an idle host,
+        up to ``ceiling``): populating a checkout is the work that a loaded
+        host slows most. A failed or timed-out add is undone before it raises
+        (Plan 00512): git can leave the worktree and the new branch behind, and
+        the caller gets no path to find them by.
+
+        A TIMED-OUT add whose undo left nothing behind is attempted ONE more
+        time, on a budget scaled from a fresh load reading. Any other failure
+        (an existing branch or path, a refused hook) is deterministic and is
+        never retried. The event deadline in ``constants/timeout.py`` is sized
+        for both attempts and both undos.
         """
         branch_preexisted = (
             run_git(
@@ -268,31 +333,63 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             ).returncode
             == 0
         )
-        budget = scaled_timeout(Timeout.GIT_WORKTREE, max(ceiling, Timeout.GIT_WORKTREE))
+        error = WorktreeCreateHandler._add_once(cwd, path, branch, branch_preexisted, base, ceiling)
+        if error is None:
+            return
+        if error.returncode == GIT_TIMED_OUT and not error.left_behind:
+            logger.warning(
+                "worktree_create: retrying the timed-out git worktree add once, "
+                "on a budget scaled from a fresh load reading"
+            )
+            retry_error = WorktreeCreateHandler._add_once(
+                cwd, path, branch, branch_preexisted, base, ceiling
+            )
+            if retry_error is None:
+                return
+            retry_error.retried = True
+            raise retry_error
+        raise error
+
+    @staticmethod
+    def _add_once(
+        cwd: str,
+        path: Path,
+        branch: str,
+        branch_preexisted: bool,
+        base: float,
+        ceiling: float,
+    ) -> _WorktreeAddError | None:
+        """One ``git worktree add`` on a freshly load-scaled budget; undo it on failure.
+
+        Returns ``None`` on success, else the error describing the failed add
+        AFTER the undo ran (its ``left_behind`` says what the undo could not remove).
+        """
+        budget = scaled_timeout(base, ceiling)
         result = run_git(Path(cwd), "worktree", "add", "-b", branch, str(path), timeout=budget)
-        if result.returncode != 0:
-            timed_out = result.returncode == GIT_TIMED_OUT
-            load = describe_load()
-            if timed_out:
-                logger.warning(
-                    "worktree_create: git worktree add timed out after %.0fs (%s); undoing it",
-                    budget,
-                    load,
+        if result.returncode == 0:
+            return None
+        timed_out = result.returncode == GIT_TIMED_OUT
+        load = describe_load()
+        if timed_out:
+            logger.warning(
+                "worktree_create: git worktree add timed out after %.0fs (%s); undoing it",
+                budget,
+                load,
+            )
+        left = WorktreeCreateHandler._undo_failed_add(cwd, path, branch, branch_preexisted)
+        error = _WorktreeAddError(result.returncode, result.args, result.stdout, result.stderr)
+        error.left_behind = left
+        if timed_out:
+            error.timeout_note = (
+                f"git worktree add timed out after {budget:.0f}s under host load ({load}); "
+                + (
+                    "remove the leftover named here, then retry"
+                    if left
+                    else "it was undone and nothing is left behind, so retry the creation "
+                    "once the load drops"
                 )
-            left = WorktreeCreateHandler._undo_failed_add(cwd, path, branch, branch_preexisted)
-            error = _WorktreeAddError(result.returncode, result.args, result.stdout, result.stderr)
-            error.left_behind = left
-            if timed_out:
-                error.timeout_note = (
-                    f"git worktree add timed out after {budget:.0f}s under host load ({load}); "
-                    + (
-                        "remove the leftover named here, then retry"
-                        if left
-                        else "it was undone and nothing is left behind, so retry the creation "
-                        "once the load drops"
-                    )
-                )
-            raise error
+            )
+        return error
 
     @staticmethod
     def _lock_reason(cwd: str, path: Path) -> str | None:

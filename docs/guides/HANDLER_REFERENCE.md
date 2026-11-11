@@ -5268,6 +5268,30 @@ handlers:
 
 ---
 
+## WorktreeCreate Handlers
+
+#### worktree_create
+
+| Property       | Value                     |
+| -------------- | ------------------------- |
+| **Config key** | `worktree_create`         |
+| **Type**       | Path-returning (terminal) |
+| **Event**      | WorktreeCreate            |
+
+**Description:** Creates the git worktree for an `isolation: "worktree"` agent or a `--worktree` session at `.claude/worktrees/<slug>-<hash>/` and returns that path. The `git worktree add` runs on a budget scaled to host load (the base on an idle host, growing with load per CPU up to the ceiling). A timed-out add is undone, and when the undo leaves nothing behind it is retried ONCE on a budget scaled from a fresh load reading; any other git error (an existing branch or path) is never retried. If the retry fails too, the deny says one automatic retry was already made. `seed` lists git-ignored files to link or copy into the new worktree (see `check-worktree-seed`).
+
+**Options:**
+
+| Option                | Default | Meaning                                                                                                                          |
+| --------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `seed`                | none    | Files seeded into the worktree on creation                                                                                       |
+| `add_base_seconds`    | `30`    | Idle-host budget of one `git worktree add`; a positive number, at most `add_ceiling_seconds`                                     |
+| `add_ceiling_seconds` | `120`   | Most a loaded host can stretch one add to; a positive number, at most `120` (the WorktreeCreate event deadline is sized for it). |
+
+A value that fails validation is reported at session start and that option runs on its default.
+
+---
+
 ## Quick Reference Table
 
 ### All Blocking Handlers

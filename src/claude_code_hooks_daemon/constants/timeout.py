@@ -183,10 +183,18 @@ class Timeout:
     # idle-host floors.
     GIT_WORKTREE_ADD_MAX = 120
     GIT_WORKTREE_CLEANUP_MAX = 10
-    # The calls made at the cleanup budget: the branch pre-check, then on
-    # failure the lock read, unlock, remove, prune, branch delete, and the
-    # leftover probe's worktree read and branch read less the pre-check's twin.
-    GIT_WORKTREE_CLEANUP_CALLS = 7
+    # The calls made at the cleanup budget. One branch pre-check, then per
+    # failed add the undo: lock read, unlock, remove, prune, the second prune
+    # after a partial directory is deleted, branch delete, and the leftover
+    # probe's lock read and branch read.
+    GIT_WORKTREE_PRECHECK_CALLS = 1
+    GIT_WORKTREE_UNDO_CALLS = 8
+    # A timed-out add is undone and then retried ONCE, so the event can make
+    # two adds and two undos. The event budget below is sized for both.
+    GIT_WORKTREE_ADD_ATTEMPTS = 2
+    GIT_WORKTREE_CLEANUP_CALLS = (
+        GIT_WORKTREE_PRECHECK_CALLS + GIT_WORKTREE_ADD_ATTEMPTS * GIT_WORKTREE_UNDO_CALLS
+    )
     # `worktree remove` deletes a whole checkout, so its budget scales with the
     # tree and the host (Plan 00474 N464); bounded so a wedged git still ends.
     GIT_WORKTREE_REMOVE_MAX = 1_200
@@ -227,9 +235,10 @@ class Timeout:
     # test_event_budgets.py pins the two equal.
     CHAIN_DEADLINE_HANDLER_MARGIN_SECONDS = 5
     EVENT_HANDLER_BUDGET: ClassVar[dict[EventType, int]] = {
-        # The add at its load-scaled ceiling, its pre-check and cleanup calls at
-        # theirs, then the branch-cap verdict and creator-record calls.
-        EventType.WORKTREE_CREATE: GIT_WORKTREE_ADD_MAX
+        # Every add attempt at its load-scaled ceiling, the pre-check and each
+        # attempt's undo at theirs, then the branch-cap verdict and
+        # creator-record calls.
+        EventType.WORKTREE_CREATE: GIT_WORKTREE_ADD_ATTEMPTS * GIT_WORKTREE_ADD_MAX
         + GIT_WORKTREE_CLEANUP_MAX * GIT_WORKTREE_CLEANUP_CALLS
         + GIT_CONTEXT * GIT_BRANCH_CREATION_CALLS
         + GIT_WORKTREE_CLEANUP * GIT_BRANCH_RECORD_CALLS,
