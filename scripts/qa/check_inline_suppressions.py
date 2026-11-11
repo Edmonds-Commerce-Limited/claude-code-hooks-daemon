@@ -54,7 +54,6 @@ from claude_code_hooks_daemon.strategies.qa_suppression.python_strategy import (
     PythonQaSuppressionStrategy,
 )
 from claude_code_hooks_daemon.utils.escape_hatch import is_acceptable_reason
-from claude_code_hooks_daemon.utils.git_file_states import scan_git_file_states
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import (
     relative_parts,
@@ -322,16 +321,14 @@ def _candidate_files(root: Path) -> tuple[list[Path], int]:
     """The files that could hold a directive, and how many files the walk saw.
 
     A file git ignores is not the project's own code (a plugin cache, a vendored
-    tree), so it is not judged. When git cannot answer (no repository, a timeout)
-    nothing is dropped: the scan then over-reports rather than passing unseen.
+    tree): ``walk_files`` never lists it, and fails the walk, rather than listing
+    everything, when git cannot say what is ignored.
     """
     walked = walk_files(root)
-    states = scan_git_file_states(root)
     found = [
         path
         for path in walked
         if not any(part in _SKIP_DIRS for part in relative_parts(path, root))
-        and (states is None or not states.is_ignored(path_relative_to(path, root).as_posix()))
         and path.is_file()
         and not path.is_symlink()
         and (path.suffix == _PYTHON_SUFFIX or path.suffix in _SHELL_SUFFIXES or not path.suffix)

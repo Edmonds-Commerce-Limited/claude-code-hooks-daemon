@@ -1134,11 +1134,12 @@ def _summarize_changed_tests(data: QaReport) -> str:
         )
     if unmapped_files:
         verdict = (
-            "allowed, the full gate must cover them"
+            "allowed, a whole-suite run (CI fallback or the Full tier) must cover them"
             if data.get("unmapped_allowed")
             else (
-                "each FAILS the run: add a test, a changed_tests_map.yaml rule, "
-                "or pass --allow-unmapped"
+                "each FAILS the run, a --range run included: [uncovered] add a test or a "
+                "changed_tests_map.yaml rule; [too-broad] no rule can narrow it, so pass "
+                "--allow-unmapped and say so when you hand over"
             )
         )
         reasons = data.get("unmapped_reasons", {})

@@ -6,6 +6,9 @@ Two rules every walker follows:
   scan root, never on its absolute path. Every agent worktree lives under
   ``untracked/worktrees/``, so an absolute-path test for ``untracked`` or
   ``worktrees`` excludes the whole checkout.
+- A walk never enters a directory git ignores (a plugin marketplace, a vendored
+  cache): that is not this project's content. When git cannot say what is ignored
+  the walk fails instead of listing everything.
 - A check that examined nothing has not passed, whether its exclusions dropped
   every candidate or its scan root is missing or empty. It reports a failure
   instead, so a broken discovery cannot look like a clean tree.
@@ -15,6 +18,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import subprocess  # nosec B404 - only ever runs the trusted system git binary
 from pathlib import Path
 
 #: The entry git keeps a checkout's metadata in: a directory, or in a linked
@@ -39,6 +43,70 @@ def _refuse_unlistable(error: OSError) -> None:
     ) from error
 
 
+#: ``git`` exit status for "not a git repository"; a tree outside one has no ignore rules.
+_NOT_A_REPOSITORY = 128
+#: Variables that would point git at a repository other than ``root``'s own.
+_RELOCATING_VARIABLES = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"})
+#: Generous: ``--directory`` keeps the listing small, so this only bounds a wedged git.
+_IGNORED_LISTING_TIMEOUT_SECONDS = 120
+
+
+def _git_ignored(root: Path) -> tuple[frozenset[str], frozenset[str]]:
+    """``(directories, files)`` below ``root`` that an ignore rule excludes, relative to it.
+
+    ``--directory`` reports an ignored directory as ONE entry instead of listing
+    every file in it, so a large ignored install costs one line. Files git tracks
+    are never listed (``--others``). A tree that is not a git repository has no
+    ignore rules and yields nothing.
+
+    Raises:
+        WalkError: git is missing, timed out or failed: what is ignored is then
+            unknown, and treating it as "nothing" is how an untracked tree got scanned.
+    """
+    environment = {k: v for k, v in os.environ.items() if k not in _RELOCATING_VARIABLES}
+    argv = [
+        "git",
+        "-C",
+        str(root),
+        "ls-files",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--directory",
+        "-z",
+    ]
+    try:
+        result = subprocess.run(  # nosec B603 B607 - fixed argv, no shell, trusted binary
+            argv,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=_IGNORED_LISTING_TIMEOUT_SECONDS,
+            env=environment,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise WalkError(
+            f"cannot ask git what {root} ignores: {exc}; "
+            "an ignored tree might have been scanned, so this is not a pass"
+        ) from exc
+    if result.returncode == _NOT_A_REPOSITORY:
+        return frozenset(), frozenset()
+    if result.returncode != 0:
+        raise WalkError(
+            f"git ls-files failed in {root} (exit {result.returncode}): "
+            f"{result.stderr.strip()}; what it ignores is unknown, so this is not a pass"
+        )
+    directories: set[str] = set()
+    files: set[str] = set()
+    for entry in result.stdout.split("\0"):
+        if entry.endswith("/"):
+            directories.add(entry.rstrip("/"))
+        elif entry:
+            files.add(entry)
+    return frozenset(directories), frozenset(files)
+
+
 def walk_files(root: Path, pattern: str = "*") -> list[Path]:
     """Every file below ``root`` whose name matches ``pattern``, sorted.
 
@@ -46,7 +114,9 @@ def walk_files(root: Path, pattern: str = "*") -> list[Path]:
     skips a nested checkout entirely: any directory below the root holding a
     ``.git`` entry is a worktree, submodule or clone of some other project.
     ``git ls-files`` lists neither, so a walker that meant "this project's
-    files" reads the same set whichever way it enumerates. Symlinked
+    files" reads the same set whichever way it enumerates. For the same reason
+    it leaves out what a ``.gitignore`` rule excludes; a tracked file stays.
+    Symlinked
     directories are not followed, as with ``rglob``.
 
     Args:
@@ -54,21 +124,31 @@ def walk_files(root: Path, pattern: str = "*") -> list[Path]:
         pattern: An ``fnmatch`` pattern for the file NAME, as ``rglob`` takes.
 
     Raises:
-        WalkError: A directory below the root could not be listed.
+        WalkError: A directory below the root could not be listed, or git could
+            not say which paths are ignored.
     """
     found: list[Path] = []
     if not root.is_dir():
         return found
+    ignored_dirs, ignored_files = _git_ignored(root)
     for directory, dirnames, filenames in os.walk(root, onerror=_refuse_unlistable):
         here = Path(directory)
         if here != root and (_GIT_ENTRY in dirnames or _GIT_ENTRY in filenames):
             dirnames.clear()
             continue
-        dirnames[:] = [name for name in dirnames if name != _GIT_ENTRY]
+        below = here.relative_to(root).as_posix()
+        prefix = "" if below == "." else f"{below}/"
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if name != _GIT_ENTRY and f"{prefix}{name}" not in ignored_dirs
+        ]
         found.extend(
             here / name
             for name in filenames
-            if name != _GIT_ENTRY and fnmatch.fnmatchcase(name, pattern)
+            if name != _GIT_ENTRY
+            and f"{prefix}{name}" not in ignored_files
+            and fnmatch.fnmatchcase(name, pattern)
         )
     return sorted(found)
 

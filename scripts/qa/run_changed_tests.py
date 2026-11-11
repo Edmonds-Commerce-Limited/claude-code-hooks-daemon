@@ -78,6 +78,7 @@ import yaml
 
 from claude_code_hooks_daemon.qa.pytest_text_report import parse_pytest_text_output
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+from claude_code_hooks_daemon.utils.scan_scope import walk_files
 
 logger = logging.getLogger(__name__)
 
@@ -437,7 +438,7 @@ def build_test_index(root: Path) -> dict[str, list[str]]:
     test_root = root / _TEST_ROOT
     if not test_root.is_dir():
         return index
-    for path in sorted(test_root.rglob(_TEST_GLOB)):
+    for path in walk_files(test_root, _TEST_GLOB):
         index.setdefault(path.name, []).append(path_relative_to(path, root).as_posix())
     return index
 
@@ -1011,7 +1012,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--allow-unmapped",
         action="store_true",
-        help="pass with unmapped files; the coordinator's full gate must cover them",
+        help="pass with unmapped files; a whole-suite run (CI fallback or Full tier) must cover them",
     )
     parser.add_argument("--json", action="store_true", help="write the JSON artefact")
     args = parser.parse_args(argv)
