@@ -77,7 +77,15 @@ _OPTION_EXEMPT: Final = "exempt_patterns"
 _ESCAPE_HATCH: Final = "MUST_RUN_FOREGROUND_BECAUSE"
 
 _RUN_IN_BACKGROUND: Final = "run_in_background"
-_TOOL_INPUT: Final = "tool_input"
+
+#: Why the playbook harness cannot drive this handler (scope=MAIN).
+_HARNESS_CANNOT_PRODUCE: Final = (
+    "The handler judges only the main thread. The playbook harness marks its "
+    "events synthetic, and a synthetic event is admitted as the main thread "
+    "only for a probe-class source, which the harness is deliberately not, so "
+    "the handler never sees the call. The deny and allow paths are covered in "
+    "tests/unit/handlers/pre_tool_use/test_long_running_command_guard.py."
+)
 
 #: Longest command text echoed back in a message.
 _ECHO_LIMIT: Final = 240
@@ -281,7 +289,7 @@ class LongRunningCommandGuardHandler(PreToolUseHandlerBase):
             return ()
         if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return ()
-        tool_input = hook_input.get(_TOOL_INPUT)
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT)
         if isinstance(tool_input, dict) and tool_input.get(_RUN_IN_BACKGROUND) is True:
             return ()
         command = get_bash_command(hook_input)
@@ -382,7 +390,7 @@ class LongRunningCommandGuardHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Long-running guard - a long foreground sleep is denied",
                 command="sleep 45",
-                dispatch_as_bash=True,
+                harness_cannot_produce=_HARNESS_CANNOT_PRODUCE,
                 description=(
                     "A foreground `sleep 45` in the main thread is denied; the reason "
                     "gives the run_in_background form and names the Monitor tool."
@@ -397,7 +405,7 @@ class LongRunningCommandGuardHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Long-running guard - a short foreground command is allowed",
                 command="git status --short",
-                dispatch_as_bash=True,
+                harness_cannot_produce=_HARNESS_CANNOT_PRODUCE,
                 description="A short, known-fast command is never blocked.",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

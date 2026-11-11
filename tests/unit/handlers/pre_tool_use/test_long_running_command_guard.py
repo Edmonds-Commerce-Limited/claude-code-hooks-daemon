@@ -271,3 +271,13 @@ class TestDocumentationSurface:
         decisions = {t.expected_decision for t in tests}
         assert decisions == {Decision.DENY, Decision.ALLOW}
         assert all(t.requires_main_thread for t in tests)
+
+    def test_acceptance_tests_declare_the_harness_cannot_stand_for_the_main_thread(
+        self, handler: LongRunningCommandGuardHandler
+    ) -> None:
+        """A playbook-harness event is synthetic, and the scope admits no synthetic
+        event as the main thread, so a probe here would observe silence and
+        pass or fail for a reason that is not the handler's verdict."""
+        for test in handler.get_acceptance_tests():
+            assert test.harness_cannot_produce, test.title
+            assert "main thread" in test.harness_cannot_produce
