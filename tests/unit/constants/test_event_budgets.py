@@ -78,6 +78,53 @@ class TestBudgetOrdering:
         verdict = Timeout.GIT_CONTEXT * Timeout.GIT_BRANCH_CREATION_CALLS
         assert sum(timeouts) + verdict <= Timeout.EVENT_HANDLER_BUDGET[EventType.WORKTREE_CREATE]
 
+    def test_create_budget_is_two_adds_two_undos_and_the_verdict_and_record(self) -> None:
+        """Pin the arithmetic: a retried add fits, so the next edit cannot shrink it silently."""
+        attempts = Timeout.GIT_WORKTREE_ADD_ATTEMPTS
+        assert attempts == 2  # the base add and ONE retry
+        cleanup_calls = Timeout.GIT_WORKTREE_PRECHECK_CALLS + attempts * (
+            Timeout.GIT_WORKTREE_UNDO_CALLS
+        )
+        assert Timeout.GIT_WORKTREE_CLEANUP_CALLS == cleanup_calls
+        expected = (
+            attempts * Timeout.GIT_WORKTREE_ADD_MAX
+            + Timeout.GIT_WORKTREE_CLEANUP_MAX * cleanup_calls
+            + Timeout.GIT_CONTEXT * Timeout.GIT_BRANCH_CREATION_CALLS
+            + Timeout.GIT_WORKTREE_CLEANUP * Timeout.GIT_BRANCH_RECORD_CALLS
+        )
+        assert Timeout.EVENT_HANDLER_BUDGET[EventType.WORKTREE_CREATE] == expected
+        assert expected == 440
+
+    def test_a_timed_out_add_and_its_retry_at_the_ceiling_fit_the_budget(
+        self, tmp_path: Path
+    ) -> None:
+        """Both adds time out on a saturated host: every git call at its ceiling still fits."""
+        from claude_code_hooks_daemon.utils.git_repo import GIT_TIMED_OUT
+
+        timeouts: list[float] = []
+        adds = 0
+
+        def fake_run_git(cwd: Path, *args: str, timeout: float = 0, **_: Any) -> Any:
+            nonlocal adds
+            timeouts.append(timeout)
+            if args[:2] == ("worktree", "add"):
+                adds += 1
+                return subprocess.CompletedProcess(["git", *args], GIT_TIMED_OUT, "", "")
+            return subprocess.CompletedProcess(["git", *args], 1, "", "boom")
+
+        handler = WorktreeCreateHandler()
+        with (
+            patch.object(wch, "run_git", fake_run_git),
+            patch("claude_code_hooks_daemon.utils.load_scaling.os.getloadavg") as loadavg,
+            patch.object(WorktreeCreateHandler, "_judge_branch_cap"),
+            pytest.raises(subprocess.CalledProcessError),
+        ):
+            loadavg.return_value = (700.0, 700.0, 700.0)
+            handler.handle({"cwd": str(tmp_path), "name": "x", "prompt_id": "p", "session_id": "s"})
+        assert adds == Timeout.GIT_WORKTREE_ADD_ATTEMPTS
+        verdict = Timeout.GIT_CONTEXT * Timeout.GIT_BRANCH_CREATION_CALLS
+        assert sum(timeouts) + verdict <= Timeout.EVENT_HANDLER_BUDGET[EventType.WORKTREE_CREATE]
+
     def test_creation_verdict_calls_are_short(self, tmp_path: Path) -> None:
         from claude_code_hooks_daemon.config.models import BranchesConfig, BranchWipConfig
         from claude_code_hooks_daemon.core import branch_creation, branch_inventory
@@ -144,7 +191,7 @@ class TestSlowAddStillYieldsThePath:
         slow_seconds = 0.6
         guard_sized = 0.2
 
-        def slow_add(cwd: str, path: Path, branch: str) -> None:
+        def slow_add(cwd: str, path: Path, branch: str, **_: float) -> None:
             import time
 
             time.sleep(slow_seconds)
