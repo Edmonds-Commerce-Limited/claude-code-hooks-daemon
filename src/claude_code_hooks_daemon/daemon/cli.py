@@ -195,6 +195,7 @@ from claude_code_hooks_daemon.utils.hook_registration import (
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_document
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.permission_surface import (
+    SwitchSetting,
     daemon_permission_surface,
     read_omit_permission_surface,
     read_permission_surface_setting,
@@ -4715,8 +4716,8 @@ def cmd_settings_merge(args: argparse.Namespace) -> int:
         Path(args.client),
         Path(args.new_default),
         Path(old_default) if old_default else None,
-        omit_permission_surface=switch is True,
-        restore_permission_surface=switch is False,
+        omit_permission_surface=switch is SwitchSetting.ON,
+        restore_permission_surface=switch is SwitchSetting.OFF,
     )
 
     if outcome.escalated:
