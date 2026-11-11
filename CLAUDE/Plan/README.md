@@ -10,7 +10,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
-- [00603: supervisor idle compact at 30 percent](00603-supervisor-idle-compact-at-30-percent/PLAN.md) - Not Started (verify Claude Code's idleCompaction, and add a supervisor compaction at true idle once context reaches 30%)
+- [00603: supervisor idle compact at 30 percent](00603-supervisor-idle-compact-at-30-percent/PLAN.md) - In Progress (built, dry-run first: verify Claude Code's idleCompaction, and add a supervisor compaction at true idle once context reaches 30%)
 
 - [00602: long running command guard](00602-long-running-command-guard/PLAN.md) - In Progress (main-thread Bash that may exceed 30 seconds must run in the background or carry a timeout)
 
