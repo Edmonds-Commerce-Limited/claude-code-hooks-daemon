@@ -68,6 +68,9 @@ tool_policy:
 # add: stop-hook blocks are not tool_result denies, so the transcript scan
 # cannot count them, but they fire in nearly every session.
 claude_md:
+  # Plan 00599: lead the block with the ownership sentence and drop the ownership
+  # hints. The daemon's own repository is owned by the agents working in it.
+  ownership: own
   promotion:
     min_blocks: 20
     min_sessions: 3

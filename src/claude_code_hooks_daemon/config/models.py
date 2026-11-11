@@ -3023,16 +3023,48 @@ class PromotionConfig(BaseModel):
     )
 
 
+class ClaudeMdOwnership(StrEnum):
+    """Whether the injected block tells the model the codebase is its own (Plan 00599)."""
+
+    OWN = "own"
+    OFF = "off"
+    CUSTOM = "custom"
+
+
 class ClaudeMdConfig(BaseModel):
-    """Injected-``CLAUDE.md``-block configuration (Plan 00116).
+    """Injected-``CLAUDE.md``-block configuration (Plan 00116, 00599).
 
     Attributes:
         promotion: Data-driven handler promotion policy (Decision I).
+        ownership: ``own`` (default) leads the block with the ownership
+            sentence and enables the daemon's ownership hint drops; ``off``
+            does neither; ``custom`` leads with ``ownership_text`` instead.
+        ownership_text: The project's own wording, required by (and only
+            allowed with) ``ownership: custom``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     promotion: PromotionConfig = Field(default_factory=PromotionConfig)
+    ownership: ClaudeMdOwnership = Field(
+        default=ClaudeMdOwnership.OWN,
+        description="own | off | custom: the ownership sentence and hint drops",
+    )
+    ownership_text: str | None = Field(
+        default=None, description="Project wording for ownership: custom"
+    )
+
+    @model_validator(mode="after")
+    def _check_ownership_text(self) -> "ClaudeMdConfig":
+        """``custom`` needs non-blank text; any other mode must not carry text."""
+        if self.ownership == ClaudeMdOwnership.CUSTOM:
+            if self.ownership_text is None or not self.ownership_text.strip():
+                raise ValueError("claude_md.ownership_text is required (non-blank) for custom")
+        elif self.ownership_text is not None:
+            raise ValueError(
+                "claude_md.ownership_text is only valid with claude_md.ownership: custom"
+            )
+        return self
 
 
 class ReferenceReposConfig(BaseModel):

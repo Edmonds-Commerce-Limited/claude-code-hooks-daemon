@@ -401,6 +401,37 @@ Recovery bundles accumulate: `delete-branch` writes a new file per call under `u
 
 `branch-sweep --clean` leaves a live agent's worktree and branch alone, locally and on the remote, and prints `Skipped <name>: ...` with the reason. Three signals mark one: a `running` work-queue record naming the branch or worktree, a worktree under `.claude/worktrees/` (Claude Code creates and cleans those itself), and a worktree git reports `locked`. `worktree-reap` honours the work-queue and lock signals too.
 
+## Ownership statement (`claude_md.ownership`)
+
+```yaml
+claude_md:
+  ownership: own        # own (default) | off | custom
+  # ownership_text: "This codebase is yours except vendor/ and infra/, which are not."
+```
+
+The model responds closely to what its prompt says about who owns the code. With `own` the daemon writes this sentence at the top of the injected `CLAUDE.md` block, right under its heading: "This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it."
+
+| Mode     | The block leads with       | Ownership hints |
+| -------- | -------------------------- | --------------- |
+| `own`    | the sentence above         | on              |
+| `off`    | nothing                    | off             |
+| `custom` | `claude_md.ownership_text` | on              |
+
+`ownership_text` is required (non-blank) with `custom` and rejected with any other mode. Use it to carve out what is NOT the model's, for example paths another team owns.
+
+**Ownership hints.** Unless the mode is `off`, existing handlers add one short line where it matters, each at most once per session (or per report): plan, ledger and index edits ("keep them tidy: merge duplicates, fix stale links you meet"); a lint failure in code just written ("you own this code: fix the cause"); the branch summary, the branch pool report and `branch-sweep` ("clean or keep each branch, do not only report it"); and the first sub-agent dispatch brief. Wherever foreign branches are listed (`branch-sweep`), a counter-hint says they are not the model's to change.
+
+**Measured costs.** Anthropic measured the sentence on its Fable 5.2 model; the effect is real and so is the price:
+
+- It merged repeated code in about half of tries, against under a tenth without it, and fixed nearby problems instead of only reporting them.
+- Output tokens rose about 1.5 times.
+- It made several unrequested changes, mostly new tests and docs.
+- An existing feature's behaviour changed in roughly one try in six to ten.
+- The closing summary omits small changes, so review the diff, not the summary.
+- A scope rule elsewhere in the prompt (such as "no drive-by refactors") does NOT cancel the sentence: the code was still merged about a third of the time.
+
+Set `ownership: off` where the user owns the code and wants minimal change.
+
 ## Handler Configuration
 
 Handlers are grouped by the event type they respond to. Each handler has at minimum an `enabled` flag and a `priority` number.

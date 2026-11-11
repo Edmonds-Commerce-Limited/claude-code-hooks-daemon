@@ -42,6 +42,20 @@ _TRANSPORT_BLOCK = (
 )
 
 
+# claude_md.ownership (Plan 00599): the sentence that leads the injected CLAUDE.md
+# block, and the hint drops that follow from it. Ships ON.
+_CLAUDE_MD_BLOCK = (
+    "\n"
+    "# The injected CLAUDE.md block\n"
+    "claude_md:\n"
+    "  ownership: own   # own | off | custom. own: lead the block with 'This codebase is yours' and\n"
+    "                   # drop short ownership hints. Costs: ~1.5x output tokens, unrequested tests/docs,\n"
+    "                   # sometimes changed behaviour; review the diff, not the summary. Use off where\n"
+    "                   # you own the code and want minimal change.\n"
+    "  # ownership_text: 'This codebase is yours except vendor/ ...'  # required with ownership: custom\n"
+)
+
+
 # branches (Plan 00558): one block for the branch inventory, guards and CLI.
 # Written out at the model defaults so a project sees every key it can set.
 _BRANCHES_BLOCK = (
@@ -163,7 +177,7 @@ class ConfigTemplate:
             "# Daemon plugins: custom handler modules (not Claude Code plugins)\n"
             "plugins:\n"
             "  paths: []\n"
-            "  plugins: []\n"
+            "  plugins: []\n" + _CLAUDE_MD_BLOCK
         )
 
     @staticmethod
@@ -519,7 +533,7 @@ class ConfigTemplate:
             "# Daemon plugins: custom handler modules (not Claude Code plugins)\n"
             "plugins:\n"
             "  paths: []\n"
-            "  plugins: []\n" + _BRANCHES_BLOCK
+            "  plugins: []\n" + _CLAUDE_MD_BLOCK + _BRANCHES_BLOCK
         )
 
 

@@ -20,10 +20,11 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
-from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_layer
+from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_layer, ownership
 from claude_code_hooks_daemon.core.apply_once import ApplyOnce, LazyLanguageFilterMixin
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.core.ownership import OwnershipHint
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.core.workspace import Workspace, resolve_workspace
@@ -572,7 +573,11 @@ class LintOnEditHandler(LazyLanguageFilterMixin[LintStrategyRegistry], PostToolU
                 tracker.mark_disclosed(transcript_path, rule.rule_id)
             message = self._formatter.verbose(rule)
 
-        return f"{message}\n\n{dynamic_detail}"
+        hint = ownership.hint_once(
+            OwnershipHint.QA_FAILURE, hook_input.get(HookInputField.SESSION_ID)
+        )
+        suffix = f"\n\n{hint}" if hint else ""
+        return f"{message}\n\n{dynamic_detail}{suffix}"
 
     def get_enforcement_status(self, project_root: Path) -> list[str]:
         """Advisory when an active strategy's extended linter is unresolvable.

@@ -35,8 +35,9 @@ from claude_code_hooks_daemon.constants import (
     HookInputField,
     Priority,
 )
-from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext
+from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext, ownership
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.ownership import OwnershipHint
 from claude_code_hooks_daemon.handlers.status_line.thread_registry import (
     _REGISTRY_SUBDIR,
     read_live_entries,
@@ -123,14 +124,26 @@ class AgentIsolationAdvisorHandler(PreToolUseHandlerBase):
         return definition is not None and definition.declares_worktree_isolation
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """True when a subagent spawn (Task/Agent) would join a shared checkout."""
-        if hook_input.get(HookInputField.TOOL_NAME) not in SUBAGENT_DISPATCH_TOOL_NAMES:
+        """A subagent spawn that would join a shared checkout, or is due the dispatch hint."""
+        tool_input = self._dispatch_input(hook_input)
+        if tool_input is None:
             return False
+        return self._isolation_advice_due(tool_input) or ownership.hint_pending(
+            OwnershipHint.DISPATCH, hook_input.get(HookInputField.SESSION_ID)
+        )
 
+    @staticmethod
+    def _dispatch_input(hook_input: dict[str, Any]) -> dict[str, Any] | None:
+        """The tool input of a subagent dispatch that carries a prompt, else ``None``."""
+        if hook_input.get(HookInputField.TOOL_NAME) not in SUBAGENT_DISPATCH_TOOL_NAMES:
+            return None
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         if not isinstance(tool_input, dict) or not tool_input.get("prompt"):
-            return False
+            return None
+        return tool_input
 
+    def _isolation_advice_due(self, tool_input: dict[str, Any]) -> bool:
+        """True when the spawn would join a shared checkout with live peers."""
         isolation = tool_input.get(_ISOLATION_FIELD)
         if isinstance(isolation, str) and isolation.strip().lower() == _WORKTREE_ISOLATION:
             return False
@@ -140,26 +153,35 @@ class AgentIsolationAdvisorHandler(PreToolUseHandlerBase):
         return not self._definition_declares_isolation(tool_input.get(_SUBAGENT_TYPE_FIELD))
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
+        """Suggest isolation when it applies, plus the ownership dispatch hint when due."""
+        tool_input = self._dispatch_input(hook_input)
+        context: list[str] = []
+        if tool_input is not None and self._isolation_advice_due(tool_input):
+            context.append(self._isolation_advice())
+        hint = ownership.hint_once(
+            OwnershipHint.DISPATCH, hook_input.get(HookInputField.SESSION_ID)
+        )
+        if hint:
+            context.append(hint)
+        return GatingResult(decision=Decision.ALLOW, context=context)
+
+    def _isolation_advice(self) -> str:
         """Suggest isolation, and name the case where the shared tree is correct."""
         live = self._count_live_threads()
-
-        return GatingResult(
-            decision=Decision.ALLOW,
-            context=[
-                f"🌳 CONCURRENT AGENTS: {live} live threads share this checkout\n\n"
-                f"Agents dispatched into one working tree share a single .git/index. "
-                f"A peer's bare `git commit` can absorb another agent's staged work, "
-                f"and that failure is silent — the losing agent sees its changes "
-                f"committed by someone else, or not at all.\n\n"
-                f'CONSIDER: pass `isolation: "worktree"` to the Agent tool so this '
-                f"agent gets its own checkout. Merge back with `git merge` or "
-                f"`git cherry-pick`.\n\n"
-                f"KEEP THE SHARED TREE when the agent needs it — daemon restart "
-                f"verification and client-mode testing are anchored to the project "
-                f"root and do NOT work in a worktree. Isolation is the default worth "
-                f"reaching for, not a blanket rule.\n\n"
-                f"Advisory only — proceeding as dispatched.",
-            ],
+        return (
+            f"🌳 CONCURRENT AGENTS: {live} live threads share this checkout\n\n"
+            f"Agents dispatched into one working tree share a single .git/index. "
+            f"A peer's bare `git commit` can absorb another agent's staged work, "
+            f"and that failure is silent — the losing agent sees its changes "
+            f"committed by someone else, or not at all.\n\n"
+            f'CONSIDER: pass `isolation: "worktree"` to the Agent tool so this '
+            f"agent gets its own checkout. Merge back with `git merge` or "
+            f"`git cherry-pick`.\n\n"
+            f"KEEP THE SHARED TREE when the agent needs it — daemon restart "
+            f"verification and client-mode testing are anchored to the project "
+            f"root and do NOT work in a worktree. Isolation is the default worth "
+            f"reaching for, not a blanket rule.\n\n"
+            f"Advisory only — proceeding as dispatched."
         )
 
     def get_claude_md(self) -> str | None:
