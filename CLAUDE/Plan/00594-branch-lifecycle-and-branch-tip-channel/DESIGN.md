@@ -106,6 +106,7 @@ What is new:
 4. Does any seat keep the main checkout on a non-default branch for long periods? If so, the §2.5 rule leaves the block stale there.
 5. Is a creation grace of 2 enough for the urgent-fix sequence that was observed?
 6. Which vendor directory names actually blocked cleanup in client worktrees?
+7. Stacks (Task 4.6). Recommendation, pending the seat's answer: count a stack as one stream against the open cap, and cap stack depth at 5. A stack is a chain where each branch's tip is an ancestor of the next one's; the group key is the chain's top. Reason: a link in a stack is not independent work, and landing the bottom first is already the practice, so counting every link punishes the practice the guard should encourage. Alternatives rejected: keep counting each link (a five-deep stack uses half a cap of 10), and document only (leaves the guard blocking correct work). Needs from the seat: typical stack depth, and whether stacked branches are pushed as separate pull requests (they are, per the report), since that decides whether the grouping must work from remote tips alone.
 
 ## 5. Critical files for implementation
 

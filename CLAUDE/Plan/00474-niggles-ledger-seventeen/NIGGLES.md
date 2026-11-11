@@ -4272,7 +4272,7 @@ that N255 and N256 need redoing against the N101 code.
 
 **Status**: ✅ N253 (dbb744f26), N254 (9b589c4fc) and N256 part 1 (efe0ec517)
 merged; N255 not reproducible, regression-tested. N256 part 2, the enumeration
-cap, moves to [Plan 00478](../00478-unknown-guard-verdicts-warn/PLAN.md).
+cap, moves to [Plan 00478](../Completed/00478-unknown-guard-verdicts-warn/PLAN.md).
 
 ### N264 — a sub-agent's edits landed, uncommitted, in another branch's worktree
 
@@ -7394,6 +7394,21 @@ It appears to match the agent's result text, not the harness's failure status.
 view; it is noise unrelated to the deletion.
 
 **Status**: ⬜ Open. Say it once per session or only when the venv is the one in use.
+
+### N616 — no supported session-state interface; a peer team reads internal files
+
+**Source**: a peer seat (11 November 2026), for its own Plan 00251.
+
+**Evidence**: a coordinator wants each seat's state (working, idle, blocked, rate-limited until, gone). The
+daemon records it in `untracked/` files (`session-mode-transitions.jsonl`, `limit-events.json`,
+`usage-snapshot.json`, `stop-events.jsonl`, `stop-failures.json`), but only `mode-history --json` is a CLI
+contract. Requested: `session-state --json --session ID` with a `schema` field (modes with since,
+last turn edge start/stop/stop_failure with error, usage five_hour/seven_day with resets_at, usage pause),
+cheap per hook edge, ideally a `--watch` streaming one JSON line per change. Open: whether a main-thread
+usage-limit stop is recorded with its reset time.
+
+**Status**: ⬜ Open. Confirm the usage-limit stop recording first, then design the verb as a versioned
+contract (feature work, needs its own plan).
 
 ### N609 — a dangling legacy `untracked/venv` symlink survives install and upgrade
 
