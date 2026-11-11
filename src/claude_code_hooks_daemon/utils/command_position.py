@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     strip_reserved_word_prefix,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    DATA_SINKS,
     is_inert_pipeline_stage,
     resolve_shell_word,
     segment_command_chain,
@@ -658,7 +659,27 @@ _BODY_ACTIVE_CHARS: tuple[str, ...] = ("$", "`", "\n")
 #: Shell operators; in a substitution body they are tolerated only inside quotes.
 _BODY_OPERATORS: str = "(){};&|<>"
 
-_ASSIGNMENT_ONLY = re.compile(r"\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)=(?P<q>[\"']?)_+(?P=q)\s*")
+#: A whole segment assigning a masked capture: `m=____` or `m="____"`.
+_CAPTURED_ASSIGNMENT = re.compile(
+    r"\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)=(?P<q>\"?)(?P<value>_+)(?P=q)\s*"
+)
+
+#: A printed word that expands one variable: `$m`, `"$m"`, `${m}`, `"${m}"`.
+_PRINTED_REFERENCE = re.compile(
+    r"(?P<q>\"?)\$(?:(?P<bare>[A-Za-z_][A-Za-z0-9_]*)|\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\})(?P=q)"
+)
+
+#: Characters that make a word more than literal text (a quote is checked separately).
+_UNLITERAL_WORD_CHARS: str = "$`\\"
+
+#: Characters that make the unquoted part of a word an operator, glob or comment.
+_UNQUOTED_ACTIVE_CHARS: str = "<>&(){}*?[]!#~"
+
+#: Data sinks with an option that writes a file or runs git; never a print-only stage.
+_UNSAFE_PRINTED_SINKS: frozenset[str] = frozenset({"git", "sort"})
+
+#: An option-only word of a formatter stage: `-w`, `-c5`, `40`.
+_FORMATTER_OPTION = re.compile(r"-[A-Za-z]+[0-9]*|[0-9]+")
 
 
 def _outside_quotes(text: str) -> str:
@@ -704,8 +725,19 @@ def _assigned_name(words: list[str | None]) -> str | None:
 
 
 def _expanded_names(command: str) -> frozenset[str]:
-    """Every variable name ``command`` expands anywhere: `$n`, `${n}`, `${!n}`, `${#n}`."""
-    return frozenset(_VARIABLE_REFERENCE.findall(command))
+    """Every variable name ``command`` expands (`$n`, `${n}`, `${!n}`, `${#n}`)
+    outside a print-only segment whose output nothing may run."""
+    spans = _segment_spans(command)
+    segments = [command[start:end] for start, end in spans]
+    names: set[str] = set()
+    for index, segment in enumerate(segments):
+        found = set(_VARIABLE_REFERENCE.findall(segment))
+        printed = _is_print_only_segment(segment, False, found) and not (
+            _pipeline_may_run_output(command, spans, segments, index)
+        )
+        if not printed:
+            names |= found
+    return frozenset(names)
 
 
 def _assigns_expanded_variable(words: list[str | None], expanded: frozenset[str]) -> bool:
@@ -790,39 +822,80 @@ def _substitution_end(command: str, start: int) -> int | None:
     return None
 
 
-def _prints_only(masked: str, spans: list[tuple[int, int]], index: int) -> bool:
-    """Whether segment ``index`` of ``masked`` is a `echo`/`printf` that nothing can
-    turn into a command: no other substitution and no pipe into a stage that may run it."""
-    segments = [masked[start:end] for start, end in spans]
-    segment = segments[index]
-    words = [resolve_shell_word(segment[a:b]) for a, b in shell_word_spans(segment)]
+def _is_literal_word(raw: str) -> bool:
+    """Whether ``raw`` is plain text: no expansion, escape, operator, glob or comment."""
     return (
-        _head(segment) in _PRINTING_HEADS
-        and not _assigns_variable(words)
-        and not any(marker in segment for marker in ("$(", "`", "<(", ">("))
-        and not _pipeline_may_run_output(masked, spans, segments, index)
+        not any(char in raw for char in _UNLITERAL_WORD_CHARS)
+        and not any(char in _outside_quotes(raw) for char in _UNQUOTED_ACTIVE_CHARS)
+        and resolve_shell_word(raw) is not None
     )
 
 
-def _variable_only_printed(masked: str, spans: list[tuple[int, int]], name: str) -> bool:
-    """Whether every reference to variable ``name`` sits in a printing-only segment."""
-    reference = re.compile(r"\$\{?[!#]?" + re.escape(name) + r"(?![A-Za-z0-9_])")
-    for match in reference.finditer(masked):
-        at = next((i for i, (a, b) in enumerate(spans) if a <= match.start() < b), None)
-        if at is None or not _prints_only(masked, spans, at):
+def _is_printed_word(raw: str, assigned: set[str]) -> bool:
+    """Whether ``raw`` is literal text or the plain expansion of a captured variable."""
+    reference = _PRINTED_REFERENCE.fullmatch(raw)
+    if reference is not None:
+        return (reference.group("bare") or reference.group("braced")) in assigned
+    return _is_literal_word(raw)
+
+
+def _is_print_only_segment(segment: str, piped: bool, assigned: set[str]) -> bool:
+    """Whether ``segment`` is an `echo`/`printf` (not `printf -v`) of printed words,
+    or, when ``piped``, a data sink given options only: no redirect, no file operand."""
+    spans = shell_word_spans(segment)
+    # Text no word span covers (a substitution, a backtick) is not printed text.
+    uncovered = segment
+    for start, end in spans:
+        uncovered = uncovered[:start] + " " * (end - start) + uncovered[end:]
+    if uncovered.strip():
+        return False
+    raws = [segment[start:end] for start, end in spans]
+    if not raws:
+        return True
+    if raws[0] in _PRINTING_HEADS:
+        option = resolve_shell_word(raws[1]) if len(raws) > 1 else ""
+        assigns = raws[0] == "printf" and (option is None or option.startswith("-v"))
+        return not assigns and all(_is_printed_word(raw, assigned) for raw in raws[1:])
+    return (
+        piped
+        and raws[0] in DATA_SINKS - _UNSAFE_PRINTED_SINKS
+        and all(_FORMATTER_OPTION.fullmatch(raw) for raw in raws[1:])
+    )
+
+
+def _whole_command_prints_only(masked: str, candidates: list[tuple[int, int]]) -> bool:
+    """Whether every segment of ``masked`` (its print-only substitutions masked)
+    only assigns a capture, prints, or reformats a pipe.
+
+    An ALLOWLIST that fails closed: any other command, word or operator means
+    the captured text may still be run, so it stays as written.
+    """
+    values = set(candidates)
+    assigned: set[str] = set()
+    previous_end: int | None = None
+    for start, end in _segment_spans(masked):
+        segment = masked[start:end]
+        piped = previous_end is not None and masked[previous_end:start] == _PIPE
+        previous_end = end
+        assignment = _CAPTURED_ASSIGNMENT.fullmatch(segment)
+        if assignment is not None:
+            value = (start + assignment.start("value"), start + assignment.end("value"))
+            if value not in values:
+                return False
+            assigned.add(assignment.group("name"))
+        elif not _is_print_only_segment(segment, piped, assigned):
             return False
     return True
 
 
 def blank_printed_substitutions(command: str) -> str:
-    """``command`` with each print-only substitution that stays data replaced by a placeholder.
+    """``command`` with its print-only substitutions replaced by a placeholder,
+    when the WHOLE command provably only prints.
 
     `msg=$(printf '%s' 'git push origin --delete b'); echo "$msg"` and
-    `echo "$(printf ...)"` run no git: the substitution only prints, and its
-    output lands as a variable's value or a printing command's argument. A
-    substitution that is the command, is piped to an executor, is evaluated
-    through its variable, or sits in a command that runs a script it wrote
-    stays as written.
+    `echo "$(printf ...)"` run no git: every segment only assigns the capture,
+    prints literal words or the captured variable, or reformats a pipe
+    (:func:`_whole_command_prints_only`). Anything else leaves ``command`` as written.
     """
     candidates = _printing_substitutions(command)
     if not candidates:
@@ -830,22 +903,9 @@ def blank_printed_substitutions(command: str) -> str:
     masked = command
     for start, end in reversed(candidates):
         masked = masked[:start] + "_" * (end - start) + masked[end:]
-    if _runs_written_script(masked):
+    if not _whole_command_prints_only(masked, candidates):
         return command
-    spans = _segment_spans(masked)
-    keep: list[tuple[int, int]] = []
-    for start, end in candidates:
-        at = next((i for i, (a, b) in enumerate(spans) if a <= start < b), None)
-        if at is None:
-            continue
-        segment = masked[spans[at][0] : spans[at][1]]
-        assignment = _ASSIGNMENT_ONLY.fullmatch(segment)
-        if assignment is not None:
-            if _variable_only_printed(masked, spans, assignment.group("name")):
-                keep.append((start, end))
-        elif _prints_only(masked, spans, at):
-            keep.append((start, end))
-    for start, end in reversed(keep):
+    for start, end in reversed(candidates):
         command = command[:start] + _PRINTED_PLACEHOLDER + command[end:]
     return command
 

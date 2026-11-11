@@ -64,3 +64,56 @@ command_position and shell_segmentation files: 1949 passed. The 13 other
 handlers importing command_position: 1674 passed. command_position.py
 coverage is 95.8% over its own tests, and the lines still uncovered existed
 before this round.
+
+## Review fixes (round 3: fail-closed redesign)
+
+Root cause (round-3 review, Critical 1): `blank_printed_substitutions` removed
+a deny whenever `_runs_written_script` returned False, but that function can
+only CONFIRM a run and returns False whenever it cannot read a word. A
+deny-adder was being used as a deny-remover.
+
+Redesign, an allowlist (`_whole_command_prints_only`): the print-only
+substitutions are blanked only when EVERY segment of the command (split on
+`;`, `&&`, `||`, `|`, `&` and newlines) is one of:
+
+- `NAME=$(<print-only body>)` or `NAME="$(...)"`, the value being exactly
+  one masked candidate (`_CAPTURED_ASSIGNMENT`);
+- an `echo`/`printf` (not `printf -v`, however quoted) whose every word is a
+  literal (no `$`, backtick, backslash; no unquoted `<>&(){}*?[]!#~`) or a
+  plain `$NAME`/`"$NAME"`/`${NAME}` of a captured variable; text no word span
+  covers (a substitution, a backtick) disqualifies the segment;
+- after a `|`, a DATA_SINKS stage other than `git` and `sort` (`sort -o`
+  writes a file) whose words are options or integers only.
+
+Anything else keeps the original command, so main's verdict applies.
+`_prints_only`, `_variable_only_printed` and the `_runs_written_script` call
+in the capture path are gone. The round-1/2 stdin and `cp`/`mv` additions to
+`_runs_written_script` are kept: they only add correct denies on the plain
+literal-echo forms (listed below).
+
+The round-2 minor over-block is fixed too: `_expanded_names` ignores a
+reference that sits in a print-only segment whose pipeline nothing may run,
+so `printf -v cmd '<reset>'; echo "$cmd"` is data again (as on main), while
+`echo "$n" | sh`, `echo "$n" > s.sh; sh s.sh`, `echo "${!n}"` and
+`echo "$(eval "$n")"` still deny.
+
+Tests (handle()-level, RED first: 24 + 3 failing):
+`TestACaptureIsDataOnlyWhenTheWholeCommandOnlyPrints` (all 18 bar-(1) cases
+without the `then` prefix, plus `local`/`typeset -n`, `export`, redirect,
+`tee`, file operand, `&`, unknown variable, re-assignment, array, quoted
+command word, backtick and here-doc twins; and 6 allows). The stdin-spelling
+class now runs over both the captured and the literal write; the not-fed
+allows use the literal write, plus the four ordinary commands.
+
+Comparison, fresh detached origin/main (41c1cac6c) vs HEAD over cases, c2,
+rv596out v/w and rv596v3 new/new2/new3 (229 cases, 0 errors):
+
+- main DENY -> HEAD ALLOW: 8. Formatter pipes (`| fold -w 40`, `| fmt`,
+  `| rev | rev`, `rev <<'EOF'`) and print-only capture/echo (`msg=$(printf
+  ...); echo "$msg"`, `echo "$(printf ...)"`, `m=$(printf ...); echo "$m"`).
+- main ALLOW -> HEAD DENY: 29. Each runs written text: a written script fed
+  to a shell on stdin or a pipe (22), or a `printf -v` variable then run as
+  `$n` / `eval "$n"` (7).
+
+Autofix, ruff and mypy --strict clean. pytest over the 26 destructive_git,
+command_position and shell_segmentation files: 2016 passed.

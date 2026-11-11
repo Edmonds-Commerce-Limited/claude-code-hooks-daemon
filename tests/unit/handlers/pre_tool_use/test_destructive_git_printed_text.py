@@ -76,6 +76,69 @@ class TestAnythingThatMayRunTheCapturedTextStillDenies:
         assert not _allowed(command, tmp_path)
 
 
+_CAPTURE_RESET = f"m=$(printf '{_RESET}');"
+_CAPTURE_DELETE = f"m=$(printf '%s\\n' '{_DELETE}');"
+
+
+class TestACaptureIsDataOnlyWhenTheWholeCommandOnlyPrints:
+    """Fail closed: a capture's text is blanked only when every segment of the
+    command is an assignment of it, a print of it, or a formatter stage."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f'{_CAPTURE_RESET} echo "$m"',
+            f'{_CAPTURE_DELETE} echo "$m"',
+            f"{_CAPTURE_DELETE} echo $m",
+            f'{_CAPTURE_DELETE} echo "$m" | fold -w 40',
+            f'{_CAPTURE_DELETE} n=$(echo hi); printf "%s %s" "$m" "$n"',
+            f'{_CAPTURE_DELETE} echo "${{m}}" && echo done',
+        ],
+    )
+    def test_a_print_only_command_is_allowed(self, command: str, tmp_path: Path) -> None:
+        assert _allowed(command, tmp_path)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f'{_CAPTURE_RESET} echo "$m" > s.sh; sh "$x" < s.sh',
+            f'{_CAPTURE_RESET} echo "$m" > s.sh; sh -- "$x" < s.sh',
+            f'{_CAPTURE_RESET} echo "$m" > s.sh; sh $opt < s.sh',
+            f'{_CAPTURE_RESET} echo "$m" > s.sh; sh ${{o:-}} < s.sh',
+            f'{_CAPTURE_RESET} echo "$m" > s.sh; bash "$@" < s.sh',
+            f'{_CAPTURE_RESET} echo "$m" > s.sh; sh $opt s.sh',
+            f'{_CAPTURE_RESET} echo "$m" > s.sh; bash $flags s.sh',
+            f'{_CAPTURE_RESET} echo "$m" > s.sh; sh "$PWD/s.sh"',
+            f'{_CAPTURE_RESET} echo "$m" > s.sh; $SHELL s.sh',
+            f'{_CAPTURE_RESET} echo "$m" > s.sh; cat s.sh | $SHELL',
+            f"{_CAPTURE_RESET} echo \"$m\" > s.sh; xargs -a s.sh -I{{}} sh -c '{{}}'",
+            f"{_CAPTURE_RESET} r=m; ${{!r}}",
+            f"{_CAPTURE_DELETE} declare -n r=m; $r",
+            f"{_CAPTURE_DELETE} local -n r=m; $r",
+            f"{_CAPTURE_DELETE} typeset -n r=m; $r",
+            f"{_CAPTURE_DELETE} export m; bash -c 'eval \"$m\"'",
+            f"echo \"$(printf '%s\\n' '{_DELETE}')\" >> ~/.bashrc; bash -i",
+            f"echo \"$(printf '%s\\n' '{_DELETE}')\" > ~/.bash_profile",
+            f"echo \"$(printf '%s\\n' '{_DELETE}')\" > .git/hooks/pre-commit",
+            f'{_CAPTURE_RESET} echo "$m" > notes.md',
+            f'{_CAPTURE_RESET} echo "$m" 2>&1',
+            f'{_CAPTURE_RESET} echo "$m" | tee s.sh',
+            f'{_CAPTURE_RESET} echo "$m" | fold s.sh',
+            f'{_CAPTURE_RESET} echo "$m" & sh s.sh',
+            f'{_CAPTURE_RESET} echo "$q"; $q',
+            f"{_CAPTURE_RESET} m=$m; $m",
+            f'{_CAPTURE_RESET} a=($m); "${{a[@]}}"',
+            f'{_CAPTURE_RESET} echo "$m"; "$m"',
+            f'{_CAPTURE_RESET} echo "$m" `sh`',
+            f"{_CAPTURE_RESET} cat <<EOF\n$m\nEOF",
+        ],
+    )
+    def test_anything_else_in_the_command_keeps_the_text_a_command(
+        self, command: str, tmp_path: Path
+    ) -> None:
+        assert not _allowed(command, tmp_path)
+
+
 class TestAWrittenScriptRunThroughStdinDenies:
     @pytest.mark.parametrize(
         "command",
@@ -95,9 +158,11 @@ class TestAWrittenScriptRunThroughStdinDenies:
 
 
 _WRITE_CAPTURED = f"m=$(printf '{_RESET}'); echo \"$m\" > s.sh;"
+_WRITE_LITERAL = f"echo '{_RESET}' > s.sh;"
 
 
 class TestAWrittenScriptReachesTheShellHoweverStdinIsSpelled:
+    @pytest.mark.parametrize("write", [_WRITE_CAPTURED, _WRITE_LITERAL])
     @pytest.mark.parametrize(
         "runner",
         [
@@ -124,8 +189,8 @@ class TestAWrittenScriptReachesTheShellHoweverStdinIsSpelled:
             "cat s.sh - | bash",
         ],
     )
-    def test_it_is_denied(self, runner: str, tmp_path: Path) -> None:
-        assert not _allowed(f"{_WRITE_CAPTURED} {runner}", tmp_path)
+    def test_it_is_denied(self, write: str, runner: str, tmp_path: Path) -> None:
+        assert not _allowed(f"{write} {runner}", tmp_path)
 
 
 class TestAShellThatDoesNotReadTheWrittenFileIsNotFedIt:
@@ -139,16 +204,18 @@ class TestAShellThatDoesNotReadTheWrittenFileIsNotFedIt:
             f"echo '{_RESET}' > s.sh; bash -n < s.sh",
             f"echo '{_RESET}' > s.sh; sh < other.sh",
             f"echo '{_RESET}' > s.sh; cat s.sh | wc -l",
-            f"{_WRITE_CAPTURED} cat s.sh; bash build.sh",
-            f"{_WRITE_CAPTURED} bash -c 'echo hi' < s.sh",
-            f"{_WRITE_CAPTURED} bash build.sh < s.sh",
-            f"{_WRITE_CAPTURED} bash -- build.sh < s.sh",
-            f"{_WRITE_CAPTURED} bash -o errexit build.sh < s.sh",
-            f"{_WRITE_CAPTURED} cp -r; sh < t.sh",
-            f"{_WRITE_CAPTURED} cp other.sh t.sh; sh < t.sh",
-            f'{_WRITE_CAPTURED} env "$w" sh < s.sh',
-            f'{_WRITE_CAPTURED} sh "$script" < s.sh',
-            f"{_WRITE_CAPTURED} sh <",
+            f"{_WRITE_LITERAL} cat s.sh; bash build.sh",
+            f"{_WRITE_LITERAL} bash -c 'echo hi' < s.sh",
+            f"{_WRITE_LITERAL} bash build.sh < s.sh",
+            f"{_WRITE_LITERAL} bash -- build.sh < s.sh",
+            f"{_WRITE_LITERAL} bash -o errexit build.sh < s.sh",
+            f"{_WRITE_LITERAL} cp -r; sh < t.sh",
+            f"{_WRITE_LITERAL} cp other.sh t.sh; sh < t.sh",
+            f"{_WRITE_LITERAL} sh <",
+            "cat README.md && bash scripts/qa.sh",
+            "bash -n < a.txt",
+            "cp a b; sh setup.sh",
+            "printf -v x '%s' hi; echo \"$x\"",
             "sh < s.sh",
             "cat notes.md | less",
             "echo 'git status' > s.sh; cat s.sh | bash",
@@ -178,6 +245,11 @@ class TestPrintfDashVAssignsRatherThanPrints:
             f"m=$(printf '%s' 'then {_RESET}'); printf -vn '%s' \"$m\"; eval \"$n\"",
             f"m=$(printf '%s' 'then {_RESET}'); builtin printf -v n '%s' \"$m\"; eval \"$n\"",
             f"m=$(printf '%s' 'then {_RESET}'); command printf -v n '%s' \"$m\"; eval \"$n\"",
+            f"printf -v n '{_RESET}'; echo \"$n\" | sh",
+            f"printf -v n '{_RESET}'; echo \"$n\" > s.sh; sh s.sh",
+            f"printf -v n '{_RESET}'; echo \"${{!n}}\"",
+            f'printf -v n \'{_RESET}\'; echo "$(eval "$n")"',
+            f"printf -v n '{_RESET}'; echo \"$n\"; $n",
         ],
     )
     def test_it_is_denied(self, command: str, tmp_path: Path) -> None:
@@ -189,6 +261,9 @@ class TestPrintfDashVAssignsRatherThanPrints:
             f"printf -v x '%s' '{_RESET}'",
             f"printf -v x '{_RESET}'; echo done",
             f"printf -vx '%s' '{_RESET}'; echo \"$y\"",
+            f"printf -v cmd '{_RESET}'; echo \"$cmd\"",
+            f"printf -v cmd '%s' 'run {_RESET} later'; echo \"$cmd\"",
+            f"printf -v cmd '%s' '{_RESET}'; echo $cmd | fold -w 40",
         ],
     )
     def test_an_assignment_nothing_expands_is_allowed(self, command: str, tmp_path: Path) -> None:
