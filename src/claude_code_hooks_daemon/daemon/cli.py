@@ -2291,10 +2291,15 @@ def _print_mode_line(mode: dict[str, Any], *, indent: str) -> None:
 
 
 def _send_session_mode_ipc(
-    args: argparse.Namespace, hook_input: dict[str, Any]
+    args: argparse.Namespace, hook_input: dict[str, Any], *, project_path: Path | None = None
 ) -> dict[str, Any] | None:
-    """Send one session-mode IPC request; its result, or None after printing why not."""
-    project_path = get_project_path(getattr(args, "project_root", None))
+    """Send one session-mode IPC request; its result, or None after printing why not.
+
+    ``project_path`` is the already-resolved project: resolving it validates the
+    whole config, so a caller making several requests passes it in.
+    """
+    if project_path is None:
+        project_path = get_project_path(getattr(args, "project_root", None))
     socket_path = _resolve_socket_path(args, project_path)
     if read_pid_file(str(_resolve_pid_path(args, project_path))) is None:
         print("Daemon not running", file=sys.stderr)
@@ -2393,7 +2398,8 @@ def _session_state_fetcher(
     """
     from claude_code_hooks_daemon.core.session_state_document import build_session_state
 
-    untracked_dir = _daemon_untracked_dir(get_project_path(getattr(args, "project_root", None)))
+    project_path = get_project_path(getattr(args, "project_root", None))
+    untracked_dir = _daemon_untracked_dir(project_path)
 
     def fetch() -> dict[str, Any] | None:
         result = _send_session_mode_ipc(
@@ -2402,6 +2408,7 @@ def _session_state_fetcher(
                 "action": SessionModeIPC.ACTION_GET_SESSION_MODES,
                 SessionModeIPC.KEY_SESSION_ID: args.session,
             },
+            project_path=project_path,
         )
         if result is None:
             return None
