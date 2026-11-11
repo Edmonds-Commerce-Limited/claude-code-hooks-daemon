@@ -8,6 +8,11 @@ is signed (``commit-tree`` ignores that key itself); a failed signing aborts the
 park before any ref moves. The branch is then pushed with a plain
 fast-forward ``git push``; a failed push leaves the local park standing and
 is reported with the command to retry.
+
+The park record in git config is the park itself, written before any push. The
+trailer commit and the push are optional: ``commit=False`` records the park with
+the tip untouched (and so never pushes), ``push=False`` commits but does not push.
+A park with no commit is local to this clone: no other checkout can see it.
 """
 
 from __future__ import annotations
@@ -58,6 +63,8 @@ class ParkResult:
     pushed: bool
     push_error: str | None
     retry_command: str | None
+    #: No push was attempted by choice (no commit, or push off): the park is this clone's alone.
+    local_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -275,6 +282,30 @@ def _park_remote_only(
     return ParkResult(new, True, None, None)
 
 
+def _is_record_only_park(repo: Path, name: str, tip: str) -> bool:
+    """True when ``tip`` is the recorded park of ``name`` and carries no park trailer."""
+    record = read_park_record(repo, name)
+    if record is None or record.sha != tip:
+        return False
+    trailers = run_git(
+        repo, "log", "-1", "--format=%(trailers:key=Parked-Reason,valueonly,unfold)", tip
+    )
+    return trailers.returncode == 0 and not trailers.stdout.strip()
+
+
+def _park_record_only(repo: Path, name: str, tip: str, reason: str) -> ParkResult:
+    """Record the park of ``name`` at its unchanged ``tip``: no commit, no push."""
+    existing = read_park_record(repo, name)
+    if existing is not None and existing.sha == tip and existing.reason == reason:
+        raise BranchParkSameReason(
+            f"{name} is already parked with this reason; a re-park needs a new reason "
+            "(say why it is still waiting), or merge or delete the branch"
+        )
+    _refuse_same_reason(repo, tip, name, reason)
+    _record_park(repo, name, tip, reason, clear=False)
+    return ParkResult(tip, False, None, None, local_only=True)
+
+
 def park_branch(
     repo: Path,
     name: str,
@@ -282,15 +313,23 @@ def park_branch(
     reason: str | None,
     remote: str,
     clear: bool = False,
+    commit: bool = True,
+    push: bool = True,
 ) -> ParkResult:
     """Park (or, with ``clear``, unpark) branch ``name`` and push it.
 
     A branch with no local ref but a ``<remote>/<name>`` tracking ref is parked on
     the remote alone (no local branch is created).
 
+    With ``commit=False`` the park is only the record in git config (the tip is
+    untouched, so QA run on it stays valid) and nothing is pushed: such a park is
+    local to this clone. With ``push=False`` the trailer commit is written but the
+    branch is not pushed. Clearing a record-only park just removes the record.
+
     Raises:
-        BranchParkError: The reason is unusable, the branch is missing, or the
-            tip moved while the park commit was written.
+        BranchParkError: The reason is unusable, the branch is missing, the tip
+            moved while the park commit was written, or a record-only park was
+            asked of a branch no local ref holds.
     """
     stripped = reason.strip() if reason is not None else ""
     if not clear and (not stripped or "\n" in stripped):
@@ -299,6 +338,10 @@ def park_branch(
     verified = run_git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
     remote_ref = f"{_REMOTES}{remote}/{name}"
     if verified.returncode != 0:
+        if not commit and not clear:
+            raise BranchParkError(
+                f"a park with no commit needs a local branch, and {name} has none"
+            )
         remote_tip = run_git(repo, "rev-parse", "--verify", "--quiet", f"{remote_ref}^{{commit}}")
         if remote_tip.returncode != 0:
             raise BranchParkError(f"no local branch {name} and no {remote}/{name}")
@@ -306,6 +349,11 @@ def park_branch(
             repo, name, remote, remote_ref, remote_tip.stdout.strip(), stripped, clear=clear
         )
     old = verified.stdout.strip()
+    if clear and _is_record_only_park(repo, name, old):
+        clear_park_record(repo, name)
+        return ParkResult(old, False, None, None, local_only=True)
+    if not clear and not commit:
+        return _park_record_only(repo, name, old, stripped)
     if not clear:
         _refuse_same_reason(repo, old, name, stripped)
     new = _write_park_commit(repo, old, stripped, clear=clear)
@@ -315,6 +363,8 @@ def park_branch(
             f"{name} moved while parking; nothing changed: {moved.stderr.strip()}"
         )
     _record_park(repo, name, new, stripped, clear=clear)
+    if not push:
+        return ParkResult(new, False, None, None, local_only=True)
     retry = f"git push {remote} {name}"
     pushed = run_git(repo, "push", remote, name, timeout=Timeout.GIT_FETCH_SESSION)
     if pushed.returncode != 0:

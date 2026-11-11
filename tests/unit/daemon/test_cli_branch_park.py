@@ -113,3 +113,32 @@ def test_clear_says_the_park_record_is_cleared(
     capsys.readouterr()
     assert _run(project, "work", "--clear") == 0
     assert "Park record cleared: work (waiting)" in capsys.readouterr().out
+
+
+def test_no_commit_records_the_park_and_pushes_nothing(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tip = _git(project, "rev-parse", "work")
+    assert _run(project, "work", "--reason", "waiting", "--no-commit") == 0
+    out = capsys.readouterr().out
+    assert "this clone only" in out and "invisible to other checkouts" in out
+    assert _git(project, "rev-parse", "work") == tip
+    assert _git(project, "config", "--get", "branch.work.hooksDaemonParkedReason") == "waiting"
+    assert _git(project, "ls-remote", "--heads", "origin", "work") == ""
+
+
+def test_no_push_commits_but_does_not_push(project: Path) -> None:
+    assert _run(project, "work", "--reason", "waiting", "--no-push") == 0
+    assert "Parked-Reason: waiting" in _git(project, "log", "-1", "--format=%B", "work")
+    assert _git(project, "ls-remote", "--heads", "origin", "work") == ""
+
+
+def test_config_key_sets_the_default_and_a_flag_overrides_it(project: Path) -> None:
+    (project / ".claude" / "hooks-daemon.yaml").write_text(
+        "version: '2.0'\nbranches:\n  park:\n    commit: false\n", encoding="utf-8"
+    )
+    tip = _git(project, "rev-parse", "work")
+    assert _run(project, "work", "--reason", "waiting") == 0
+    assert _git(project, "rev-parse", "work") == tip
+    assert _run(project, "work", "--reason", "now committed", "--commit", "--no-push") == 0
+    assert _git(project, "rev-parse", "work") != tip

@@ -2299,6 +2299,21 @@ class BranchParkedConfig(BranchPoolConfig):
     """``branches.parked``: branches whose tip carries a ``Parked-Reason`` trailer."""
 
 
+class BranchParkConfig(BaseModel):
+    """``branches.park``: what ``branch-park`` does by default (a flag overrides per call).
+
+    ``commit: false`` records the park in git config only (no trailer commit at
+    the tip, so QA already run on the tip stays valid); such a park is local to
+    this clone and invisible to other checkouts. ``push: false`` skips the push.
+    A park with no commit is never pushed, because the record is not a ref.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    commit: bool = Field(default=True, description="Write the empty Parked-Reason trailer commit")
+    push: bool = Field(default=True, description="Push the branch after parking it")
+
+
 class BranchMergedConfig(BranchPoolConfig):
     """``branches.merged``: merged or patch-equivalent branches not yet deleted.
 
@@ -2473,6 +2488,7 @@ class BranchesConfig(BaseModel):
     )
     wip: BranchWipConfig = Field(default_factory=BranchWipConfig)
     parked: BranchParkedConfig = Field(default_factory=BranchParkedConfig)
+    park: BranchParkConfig = Field(default_factory=BranchParkConfig)
     merged: BranchMergedConfig = Field(default_factory=BranchMergedConfig)
     duplicates: BranchDuplicatesConfig = Field(default_factory=BranchDuplicatesConfig)
     dormancy: BranchDormancyConfig = Field(default_factory=BranchDormancyConfig)

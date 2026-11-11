@@ -6768,8 +6768,16 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
     branches = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml").branches
     cleared_record = read_park_record(repo, args.name) if args.clear else None
     try:
+        commit = branches.park.commit if args.commit is None else args.commit
+        push = branches.park.push if args.push is None else args.push
         result = park_branch(
-            repo, args.name, reason=args.reason, remote=branches.remote, clear=args.clear
+            repo,
+            args.name,
+            reason=args.reason,
+            remote=branches.remote,
+            clear=args.clear,
+            commit=commit,
+            push=push,
         )
     except BranchParkSameReason as e:
         print(f"ERROR: branch-park: {e}", file=sys.stderr)
@@ -6783,6 +6791,14 @@ def cmd_branch_park(args: argparse.Namespace) -> int:
         clear_label_stage(repo / LABELS_RELATIVE_PATH, args.name)
     if cleared_record is not None:
         print(f"Park record cleared: {args.name} ({cleared_record.reason})")
+    if result.local_only:
+        if not args.clear:
+            print(
+                f"Note: not pushed by choice: this park is recorded in this clone only and "
+                f"is invisible to other checkouts. Push later: git push {branches.remote} "
+                f"{args.name}"
+            )
+        return 0
     if not result.pushed:
         print(
             f"WARNING: {verb.lower()} locally, not pushed: {args.name} stands {verb.lower()} here, "
@@ -13587,6 +13603,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--clear",
         action="store_true",
         help="Unpark: write an Unparked commit so the dormancy clock runs again",
+    )
+    parser_branch_park.add_argument(
+        "--commit",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Write the empty trailer commit at the tip (default: branches.park.commit, true). "
+        "--no-commit records the park in git config only, leaves the tip untouched and "
+        "pushes nothing; such a park is local to this clone",
+    )
+    parser_branch_park.add_argument(
+        "--push",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Push the branch after parking it (default: branches.park.push, true)",
     )
     parser_branch_park.set_defaults(func=cmd_branch_park)
 
