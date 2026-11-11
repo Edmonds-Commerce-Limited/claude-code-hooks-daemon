@@ -7356,6 +7356,45 @@ merged park commits, and the work had to be cherry-picked onto a clean line.
 commit the repository will reject. The wider design question of whether a park needs a commit at all is
 DESIGN.md's open "park record" question.
 
+### N612 — R-LSP-SYMBOL-LOOKUP fires on an output filter that merely contains a symbol-like word
+
+**Source**: a peer seat (11 November 2026).
+
+**Evidence**: `cmd 2>&1 | grep -v resolve_venv` was denied as a symbol lookup. The grep filters another
+command's output and searches no indexed file, which the handler's own guidance says is never judged.
+
+**Status**: ⬜ Open. Reproduce with that command shape, then make the filter-on-a-pipe case exempt.
+
+### N613 — the merged-pool message names age as the trigger when the branch is only unkept
+
+**Source**: a peer seat (11 November 2026).
+
+**Evidence**: with one merged branch (cap 10), six days old, the block text read "1 stale (unkept or keep
+lapsed, past branches.merged.max_age_days 30)" and the sweep labelled it "STALE (unkept, past ... 30)". The
+branch is not past 30 days; it is unkept. The owner read it as being near the cap.
+
+**Status**: ⬜ Open. State the real trigger first ("1 merged branch neither deleted nor kept") and say
+"past N days" only when it is. Fits Plan 00594's preflight wording.
+
+### N614 — the usage-limit-killed-agent notice fires on a finished agent whose reply quotes limit text
+
+**Source**: a peer seat (11 November 2026).
+
+**Evidence**: a claude-code-guide agent finished with a complete report that quoted Claude Code's docs about
+session limits; the UserPromptSubmit check reported it as killed by a usage limit and said to re-brief it.
+It appears to match the agent's result text, not the harness's failure status.
+
+**Status**: ⬜ Open. Match the failure status field only; add a test with a reply that quotes the phrase.
+
+### N615 — `delete-branch` prints a `resolve_venv` interpreter-drift line on every run
+
+**Source**: a peer seat (11 November 2026).
+
+**Evidence**: every run prints an interpreter-drift line for an unproven venv belonging to another checkout
+view; it is noise unrelated to the deletion.
+
+**Status**: ⬜ Open. Say it once per session or only when the venv is the one in use.
+
 ### N609 — a dangling legacy `untracked/venv` symlink survives install and upgrade
 
 **Source**: Plan 00594 release housekeeping (10 November 2026).
