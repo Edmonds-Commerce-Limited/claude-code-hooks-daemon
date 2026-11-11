@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     Pool,
     pool_of,
 )
+from claude_code_hooks_daemon.core.ownership import HINT_TEXT, OwnershipHint
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 
 #: Entry lines the SessionStart summary prints before "and N more".
@@ -438,11 +439,14 @@ def render_report(
     cap: int,
     show_all: bool = False,
     remote_proven: frozenset[str] = frozenset(),
+    ownership_hints: bool = False,
 ) -> list[str]:
     """The ``branch-sweep`` text: actionable groups first, then the count against the cap.
 
     ``remote_proven`` names the remote-only branches the remote-delete guard's proof
-    accepted (see :func:`delete_action`).
+    accepted (see :func:`delete_action`). ``ownership_hints`` (``claude_md.ownership``
+    not ``off``) adds the owned-branch hint after the actionable groups and the
+    foreign-branch counter-hint under the foreign list.
     """
     groups = group_records(inventory)
     out: list[str] = []
@@ -483,6 +487,10 @@ def render_report(
         ),
     )
     out += _section("Dormant:", _dormant_section(groups.dormant))
+    if ownership_hints and (
+        groups.contained_nowhere or groups.merged or groups.patch_equivalent or groups.dormant
+    ):
+        out += [HINT_TEXT[OwnershipHint.BRANCH_OWNED], ""]
     out += _section("Live work:", [_work_line(r) for r in groups.live])
     out += _section(
         "Parked:",
@@ -496,10 +504,13 @@ def render_report(
         "Bot-owned (branches.bot_owned: in no pool, never cleaned; the bot removes them):",
         [f"  {r.name}: {_age(r)}" for r in groups.bot_owned],
     )
+    foreign_lines = [_foreign_line(r) for r in groups.foreign]
+    if foreign_lines and ownership_hints:
+        foreign_lines.append(f"  {HINT_TEXT[OwnershipHint.BRANCH_FOREIGN]}")
     out += _section(
         "Foreign (not this clone's branches: in no pool, never cleaned automatically; "
         "listed so they are not invisible):",
-        [_foreign_line(r) for r in groups.foreign],
+        foreign_lines,
     )
     if show_all:
         out += _section(
@@ -626,8 +637,12 @@ def session_summary(
     new_session: bool,
     deprecation: str | None = None,
     behind_threshold: int | None = None,
+    ownership_hints: bool = False,
 ) -> list[str]:
     """The SessionStart lines; empty when there is nothing to say.
+
+    ``ownership_hints`` adds the owned-branch hint once, on a new session that has
+    branches to act on.
 
     Contained-nowhere branches are named on every source; the merged count,
     the dormant branches, the work branches more than ``behind_threshold``
@@ -674,6 +689,8 @@ def session_summary(
     if hidden:
         lines.append(f"  and {hidden} more: run `{sweep_command()}`")
     lines += notes
+    if ownership_hints and new_session and (entries or groups.merged):
+        lines.append(HINT_TEXT[OwnershipHint.BRANCH_OWNED])
     if deprecation is not None:
         lines.append(deprecation)
     return lines

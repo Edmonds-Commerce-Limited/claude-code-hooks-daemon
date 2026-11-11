@@ -452,6 +452,7 @@ class ClaudeMdInjector:
         promoted_handlers: list[str] | None = None,
         on_request: bool = False,
         branches: "BranchesConfig | None" = None,
+        ownership_statement: str | None = None,
     ) -> None:
         """Initialise injector.
 
@@ -475,7 +476,10 @@ class ClaudeMdInjector:
             branches: The ``branches:`` config; ``branches.home`` names the
                 branches the block may be written and committed on. ``None``
                 means the defaults (the repo's default branch).
+            ownership_statement: The ``claude_md.ownership`` sentence, written
+                right under the block's heading; ``None`` writes none.
         """
+        self._ownership_statement = ownership_statement
         self._branches = branches
         self._workspace_root = workspace_root
         self._handlers = handlers
@@ -600,7 +604,10 @@ class ClaudeMdInjector:
             if not (tiers.promoted or tiers.progressive or tiers.fallback):
                 return None
             self._generated_block_cache = self._build_section(
-                tiers.promoted, tiers.progressive, tiers.fallback
+                tiers.promoted,
+                tiers.progressive,
+                tiers.fallback,
+                ownership_statement=self._ownership_statement,
             )
         return self._generated_block_cache
 
@@ -1251,8 +1258,12 @@ class ClaudeMdInjector:
         promoted: list[tuple[str, str]],
         progressive: list[tuple[str, list[Rule]]],
         fallback: list[tuple[str, str]],
+        ownership_statement: str | None = None,
     ) -> str:
         """Build the full <hooksdaemon>...</hooksdaemon> block.
+
+        ``ownership_statement`` (``claude_md.ownership``) leads the block, right
+        under the heading, before the shared intro.
 
         Layout (Plan 00116 Decision I, ``DESIGN-HYBRID-PROMOTION.md``): the
         shared meta-rule + explain pointer are stated once in
@@ -1265,9 +1276,10 @@ class ClaudeMdInjector:
             _AUTO_COMMENT,
             "",
             _SECTION_HEADER,
-            _section_intro(),
-            "",
         ]
+        if ownership_statement:
+            parts += [f"**{ownership_statement}**", ""]
+        parts += [_section_intro(), ""]
 
         if promoted:
             parts.append(_PROMOTED_TIER_HEADING)

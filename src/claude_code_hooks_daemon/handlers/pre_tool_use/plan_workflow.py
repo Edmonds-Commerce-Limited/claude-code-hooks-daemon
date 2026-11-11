@@ -9,9 +9,10 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core import Decision, GatingResult, ownership
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.ownership import OwnershipHint
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.remedy import remedy_markdown_list
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
@@ -61,23 +62,54 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
         layout = self._project_layout
         return layout.workflow_docs if layout is not None else _FALLBACK_WORKFLOW_DOCS
 
-    def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if writing PLAN.md in the configured plan directory."""
-        tool_name = hook_input.get(HookInputField.TOOL_NAME)
-        if tool_name != ToolName.WRITE:
-            return False
-
+    def _normalized_path(self, hook_input: dict[str, Any]) -> str | None:
+        """The edited path in the plan directory, or ``None`` when it is elsewhere."""
         file_path = get_file_path(hook_input)
         if not file_path:
-            return False
-
-        # Match {plan_dir}/*/PLAN.md (case-insensitive)
+            return None
         normalized = file_path.replace("\\", "/")
-        plan_dir_marker = f"{self._plan_dir()}/"
-        return plan_dir_marker in normalized and normalized.lower().endswith("/plan.md")
+        return normalized if f"{self._plan_dir()}/" in normalized else None
+
+    def _is_plan_md_write(self, hook_input: dict[str, Any]) -> bool:
+        """Writing ``{plan_dir}/*/PLAN.md`` (case-insensitive)."""
+        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.WRITE:
+            return False
+        normalized = self._normalized_path(hook_input)
+        return normalized is not None and normalized.lower().endswith("/plan.md")
+
+    def _is_tidy_hint_edit(self, hook_input: dict[str, Any]) -> bool:
+        """A Write/Edit of a plan, ledger or index file the ownership hint is due for.
+
+        Journal entries are excluded: they are append-only and written through the
+        journal tool, so "merge duplicates" is not advice for them.
+        """
+        if hook_input.get(HookInputField.TOOL_NAME) not in (ToolName.WRITE, ToolName.EDIT):
+            return False
+        normalized = self._normalized_path(hook_input)
+        if normalized is None or "/JOURNAL/" in normalized:
+            return False
+        return ownership.hint_pending(
+            OwnershipHint.PLAN_TIDY, hook_input.get(HookInputField.SESSION_ID)
+        )
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        """Writing PLAN.md in the plan directory, or a plan-tree edit due the tidy hint."""
+        return self._is_plan_md_write(hook_input) or self._is_tidy_hint_edit(hook_input)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Provide guidance about plan workflow."""
+        """Provide guidance about plan workflow, and the ownership hint when due."""
+        context: list[str] = []
+        if self._is_plan_md_write(hook_input):
+            context.append(self._plan_md_guidance(hook_input))
+        hint = ownership.hint_once(
+            OwnershipHint.PLAN_TIDY, hook_input.get(HookInputField.SESSION_ID)
+        )
+        if hint:
+            context.append(hint)
+        return GatingResult(decision=Decision.ALLOW, context=context)
+
+    def _plan_md_guidance(self, hook_input: dict[str, Any]) -> str:
+        """The plan-creation reminders for a PLAN.md write."""
         file_path = get_file_path(hook_input)
 
         guidance = (
@@ -90,7 +122,7 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
             f"See {self._workflow_docs()} for full guidelines."
         )
 
-        return GatingResult(decision=Decision.ALLOW, context=[guidance])
+        return guidance
 
     def get_claude_md(self) -> str | None:
         return (

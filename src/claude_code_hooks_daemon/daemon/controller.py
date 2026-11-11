@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.config.models import ChainConfig, Config, VerdictL
 from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.constants.protocol import RequestEnvelopeField
+from claude_code_hooks_daemon.core import ownership
 from claude_code_hooks_daemon.core.bounded_dispatch import (
     configure_default_dispatcher,
     get_default_dispatcher,
@@ -444,7 +445,9 @@ class DaemonController:
             promoted_handlers=promoted_handlers,
             on_request=claude_md_on_request,
             branches=branches,
+            ownership_statement=ownership.ownership_statement(claude_md),
         )
+        ownership.configure(claude_md)
         # Wired now, not after the injection: the SessionStart that started this
         # daemon is answered before the deferred injection runs, and the notice
         # is asked for afresh at each SessionStart rather than fixed here.

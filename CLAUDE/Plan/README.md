@@ -8,7 +8,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00599: claude md ownership statement and hint drops](00599-claude-md-ownership-statement-and-hint-drops/PLAN.md) - Not Started (a `claude_md.ownership` toggle, on by default, plus hint drops where the tree should stay clean)
+- [00599: claude md ownership statement and hint drops](00599-claude-md-ownership-statement-and-hint-drops/PLAN.md) - In Progress (a `claude_md.ownership` toggle, on by default, plus hint drops where the tree should stay clean)
 
 - [00600: user prompt quality scan](00600-user-prompt-quality-scan/PLAN.md) - Not Started (research: warn on or block clearly non-optimal human prompts at UserPromptSubmit)
 

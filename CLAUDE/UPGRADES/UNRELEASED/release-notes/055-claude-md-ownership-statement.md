@@ -1,0 +1,8 @@
+# Callout: the injected CLAUDE.md block now tells the model the codebase is its own, and a setting turns it off
+
+**Plan**: 00599
+**Audience**: everyone
+
+The block the daemon injects into `CLAUDE.md` now leads with "This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it.", and existing handlers drop one-line ownership hints (tidy plan and ledger files, fix the cause of a lint failure in code just written, clean or keep your own branches, the sub-agent brief), plus a counter-hint wherever foreign branches are listed saying they are not the model's to change. It is on by default; `claude_md.ownership: off` removes the sentence and every hint, and `custom` with `claude_md.ownership_text` uses your own wording (for example to name paths that are not the model's).
+
+Know the costs before keeping it on, as Anthropic measured them: the sentence made the model merge repeated code in about half of tries (under a tenth without it) and fix nearby problems rather than only report them, but output rose about 1.5 times, it made several unrequested changes (mostly new tests and docs), an existing feature's behaviour changed in one try in six to ten, and the closing summary omits small changes, so review the diff, not the summary. A scope rule such as "no drive-by refactors" does not cancel it. Where you own the code and want minimal change, set `ownership: off`. Details: `docs/guides/CONFIGURATION.md`.
