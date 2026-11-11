@@ -77,9 +77,28 @@ class TestSwitchOffRestores:
     def test_the_deny_rules_come_back_beside_the_users_own(self) -> None:
         client = _shipped()
         client["permissions"] = {"deny": [_USER_RULE]}
-        merged, report = merge_settings(client, _shipped())
+        merged, report = merge_settings(client, _shipped(), restore_permission_surface=True)
         assert merged["permissions"]["deny"] == [_USER_RULE, *daemon_deny_rules()]
         assert report.changed
+
+    def test_a_project_that_never_set_the_switch_keeps_its_permissions_as_they_were(self) -> None:
+        client = _shipped()
+        client["permissions"] = {"deny": [_USER_RULE]}
+        merged, _ = merge_settings(client, _shipped())
+        assert merged["permissions"] == {"deny": [_USER_RULE]}
+
+    def test_an_explicit_false_in_config_restores_through_the_cli_path(
+        self, tmp_path: Path
+    ) -> None:
+        new_default = tmp_path / "new.json"
+        new_default.write_text(json.dumps(_shipped()), encoding="utf-8")
+        client = tmp_path / "settings.json"
+        existing = _shipped()
+        existing["permissions"] = {"deny": [_USER_RULE]}
+        client.write_text(json.dumps(existing), encoding="utf-8")
+        run_settings_merge(client, new_default, restore_permission_surface=True)
+        written = json.loads(client.read_text(encoding="utf-8"))
+        assert written["permissions"]["deny"] == [_USER_RULE, *daemon_deny_rules()]
 
     def test_a_full_set_is_left_alone(self) -> None:
         merged, report = merge_settings(_shipped(), _shipped())

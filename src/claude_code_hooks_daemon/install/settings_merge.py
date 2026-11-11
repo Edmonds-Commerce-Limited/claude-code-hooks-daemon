@@ -124,6 +124,7 @@ def merge_settings(
     old_default: Mapping[str, Any] | None = None,
     *,
     omit_permission_surface: bool = False,
+    restore_permission_surface: bool = False,
 ) -> tuple[dict[str, Any], MergeReport]:
     """Merge the daemon's shipped settings into a client's, preserving theirs.
 
@@ -142,6 +143,10 @@ def merge_settings(
         omit_permission_surface: ``daemon.omit_permission_surface`` is on
             (Plan 00474): no PermissionRequest forwarder and no daemon deny
             rule is delivered, and any the daemon wrote earlier are removed.
+        restore_permission_surface: the project set the switch to an explicit
+            ``false``, so daemon deny rules missing from an existing
+            ``permissions`` block are put back. Off by default: a project that
+            never set the switch merges exactly as it did before it existed.
 
     Returns:
         ``(merged, report)``. ``merged`` is a deep copy of ``client`` with the
@@ -159,11 +164,13 @@ def merge_settings(
 
     removed: tuple[str, ...] = ()
     if not omit_permission_surface:
-        # Switching the option off again must bring back the daemon's deny rules
-        # even when the user's own `permissions` block exists (Plan 00474).
-        merged, restored = restore_deny_rules(merged)
-        if restored:
-            delivered = (*delivered, *(f"permissions.deny:{rule}" for rule in restored))
+        if restore_permission_surface:
+            # An explicit `false` brings back the daemon's deny rules even when
+            # the user's own `permissions` block exists (Plan 00474). An absent
+            # key does not: that merges exactly as it did before the switch.
+            merged, restored = restore_deny_rules(merged)
+            if restored:
+                delivered = (*delivered, *(f"permissions.deny:{rule}" for rule in restored))
     else:
         merged, _ = strip_permission_surface(merged)
         # Report only what the CLIENT actually carried: entries delivered and
@@ -465,6 +472,7 @@ def run_settings_merge(
     old_default_path: Path | None = None,
     *,
     omit_permission_surface: bool = False,
+    restore_permission_surface: bool = False,
 ) -> MergeOutcome:
     """Merge the shipped settings into the client's file on disk.
 
@@ -521,7 +529,11 @@ def run_settings_merge(
         )
 
     merged, report = merge_settings(
-        client, new_default, old_default, omit_permission_surface=omit_permission_surface
+        client,
+        new_default,
+        old_default,
+        omit_permission_surface=omit_permission_surface,
+        restore_permission_surface=restore_permission_surface,
     )
 
     problems = validate_settings_hooks(
@@ -547,7 +559,11 @@ def run_settings_merge(
     latest, _ = _load_json_object(client_path)
     if latest is not None and latest != client:
         merged, report = merge_settings(
-            latest, new_default, old_default, omit_permission_surface=omit_permission_surface
+            latest,
+            new_default,
+            old_default,
+            omit_permission_surface=omit_permission_surface,
+            restore_permission_surface=restore_permission_surface,
         )
 
     _write_atomically(client_path, _serialise(merged))
