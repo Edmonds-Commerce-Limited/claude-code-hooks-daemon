@@ -753,6 +753,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="unreachable_handle_branch.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "fixed_worktree_budget": ToolConfig(
+        command=_python("check_fixed_worktree_budget.py", "--json"),
+        json_file="fixed_worktree_budget.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
     "declared_invariant_pairs": ToolConfig(
         command=_python("check_declared_invariant_pairs.py", "--json"),
         json_file="declared_invariant_pairs.json",
@@ -956,6 +961,7 @@ CHANGED_TOOL_NAMES: Final[list[str]] = [
     "signal_targets",
     "venv_interpreter_trust",
     "unreachable_handle_branch",
+    "fixed_worktree_budget",
     "fail_open_inventory",
     "security",
     "capture_corruption",
@@ -1320,6 +1326,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "venv_interpreter_trust": _summarize_violations,
     "skip_list_substring": _summarize_violations,
     "unreachable_handle_branch": _summarize_violations,
+    "fixed_worktree_budget": _summarize_violations,
     "declared_invariant_pairs": _summarize_violations,
     "fail_open_inventory": _summarize_violations,
     "dangerous_invocation_corpus": _summarize_violations,

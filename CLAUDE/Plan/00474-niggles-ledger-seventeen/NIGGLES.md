@@ -7492,3 +7492,43 @@ so each release meets the warning and has to work out the fix.
 
 **Status**: ⬜ Open. Either exclude the project's own version line from the lock hash, or add the
 `repair` step to RELEASING.md Step 12.1.
+
+### N621 — WorktreeRemove removes a worktree on a fixed 30 s budget inside a fixed event budget
+
+**Source**: the `worktree add` timeout under load (host load average near 70), found by the class sweep
+for a fixed wall-clock budget on a load-scaled subprocess.
+
+**Evidence**: `worktree_remove_handler._remove` passes `clock.timeout(Timeout.GIT_WORKTREE, ...)` to
+`worktree remove`. The clock caps it at the time left of `EVENT_HANDLER_BUDGET[WORKTREE_REMOVE]` (60 s),
+which `init.sh` mirrors as a 70 s client wait, so scaling the call alone would change nothing. A removal
+killed at 30 s leaves a half-deleted `prunable` worktree, the N464 shape. `check_fixed_worktree_budget.py`
+lists the function in its allowlist against this entry.
+
+**Status**: ⬜ Open. Give the event the same treatment as WorktreeCreate: a load-scaled ceiling for the
+removal, the event tables and `init.sh` re-derived from it, and the allowlist row deleted.
+
+### N622 — git calls that gate a hard failure on a fixed budget that scales with host load
+
+**Source**: the same sweep (10 November 2026 timeout under load).
+
+**Evidence**: each of these treats a timeout as a failure with no retry, on a budget that does not follow
+load. `core/claude_md_injector.py` commits on `Timeout.GIT_COMMIT` (30 s; killing git mid-commit is how
+`index.lock` is orphaned); `core/branch_park.py` and `core/branch_keep.py` fetch and push on
+`GIT_FETCH_SESSION` (30 s); `daemon/branch_safety.py` runs the recovery bundle on `GIT_BUNDLE_CREATE` (300 s)
+and the proof walks on `GIT_BRANCH_SAFETY` (120 s), both of which scale with repository size; the protected
+file index build uses `INDEX_BUILD_GIT` (120 s). The detector covers only `worktree add` and `remove`, so
+none of these is flagged.
+
+**Status**: ⬜ Open. Wrap each in `scaled_timeout` with a ceiling its own caller can afford, and widen the
+detector's verb list to match as each is fixed.
+
+### N623 — the branch-cap and creator-record calls around WorktreeCreate stay on the 5 s default
+
+**Source**: the same sweep.
+
+**Evidence**: `creation_verdict` (branch cap) and `write_creator` run on `GIT_CONTEXT` and
+`GIT_WORKTREE_CLEANUP` (5 s). A timeout there is read as a failed judgement before the add is reached, and
+the budgets are pinned in `EVENT_HANDLER_BUDGET`. They are read-mostly metadata calls, so the exposure is
+smaller than the add's, but at a load average near 70 they time out too.
+
+**Status**: ⬜ Open. Scale them with `scaled_timeout` and size the event budget for the new ceilings.

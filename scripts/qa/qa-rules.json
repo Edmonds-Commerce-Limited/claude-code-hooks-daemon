@@ -565,6 +565,11 @@
       "fix": "Signal through `claude_code_hooks_daemon.utils.safe_signal`, or through a handle it returned (`verified_daemon_process`), or signal the Popen itself. An inline check of the handle's command line or start time is not proof. There is no exemption marker.",
       "checks": ["check_signal_targets.py"]
     },
+    "fixed-git-budget": {
+      "statement": "A function that writes a worktree (`git worktree add` or `remove`) runs a git call on a fixed timeout, so host load turns a slow call into a hard failure and a cleanup on the same short budget cannot undo it.",
+      "fix": "Pass `timeout=scaled_timeout(<base>, <ceiling>)` from `claude_code_hooks_daemon.utils.load_scaling` on the mutation and on every git call of its failure path, and make the failure path delete what the caller created even when git does not know it.",
+      "checks": ["check_fixed_worktree_budget.py"]
+    },
     "unreachable-handle-branch": {
       "statement": "A handler's `handle()` does work under `if not self.matches(...)`, which the chain never executes.",
       "fix": "Make `matches()` return True for every input `handle()` must see and let `handle()` choose the decision; keep the `if not self.matches(...)` branch, if at all, as a bare `return` of an ALLOW.",

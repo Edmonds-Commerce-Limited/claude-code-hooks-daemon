@@ -58,6 +58,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
     run_git,
     strip_branch_ref,
 )
+from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 
@@ -494,9 +495,8 @@ def reap_worktree(
             ),
         )
 
-    removal = run_fn(
-        repo_root, "worktree", "remove", str(state.path), timeout=Timeout.GIT_WORKTREE_REMOVE
-    )
+    removal_budget = scaled_timeout(Timeout.GIT_WORKTREE_REMOVE, Timeout.GIT_WORKTREE_REMOVE_MAX)
+    removal = run_fn(repo_root, "worktree", "remove", str(state.path), timeout=removal_budget)
     if removal.returncode == GIT_TIMED_OUT:
         # git was killed part-way through deleting the tree, so what is on disk
         # is neither the worktree nor its absence. Retrying `worktree remove`
@@ -510,7 +510,7 @@ def reap_worktree(
             branch_removed=False,
             detail=(
                 f"removal of {state.path} was interrupted at the "
-                f"{Timeout.GIT_WORKTREE_REMOVE} s limit and may be partial: "
+                f"{removal_budget:.0f} s limit and may be partial: "
                 f"{removal.stderr.strip()}. Recover with {recovery}"
             ),
         )
@@ -542,7 +542,13 @@ def reap_worktree(
     # `refs/heads/` and REJECTS an already-qualified `refs/heads/<name>`
     # outright — verified live (Plan 00372) after a full-ref argument here
     # made every branch delete fail with "not found", never once succeeding.
-    branch = run_fn(repo_root, "branch", "-d", state.branch)
+    branch = run_fn(
+        repo_root,
+        "branch",
+        "-d",
+        state.branch,
+        timeout=scaled_timeout(Timeout.GIT_CONTEXT, Timeout.GIT_WORKTREE_CLEANUP_MAX),
+    )
     if branch.returncode != 0:
         return ReapOutcome(
             state.name,

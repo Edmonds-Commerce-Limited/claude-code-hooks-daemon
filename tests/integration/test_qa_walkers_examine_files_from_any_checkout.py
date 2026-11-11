@@ -56,6 +56,7 @@ WALKERS: dict[str, tuple[str, str]] = {
     "check_doc_snippets.py": ("doc_snippets.json", "documents_scanned"),
     "check_doc_truth.py": ("doc_truth.json", "docs_scanned"),
     "check_eacces_safe_predicates.py": ("eacces_safe.json", "files_scanned"),
+    "check_fixed_worktree_budget.py": ("fixed_worktree_budget.json", "files_scanned"),
     "check_git_history.py": ("git_history.json", "commits_scanned"),
     "check_github_urls.py": ("github_urls.json", "files_scanned"),
     "check_inline_suppressions.py": ("inline_suppressions.json", "files_scanned"),
@@ -299,6 +300,7 @@ ROOT_OPTIONS: dict[str, str] = {
     "check_skill_references.py": "--path",
     "check_skip_list_substring.py": "--path",
     "check_unreachable_handle_branch.py": "--path",
+    "check_fixed_worktree_budget.py": "--path",
 }
 
 

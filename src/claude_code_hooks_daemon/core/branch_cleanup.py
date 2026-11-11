@@ -67,6 +67,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
     parse_worktree_porcelain,
     run_git,
 )
+from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.regenerable_paths import (
     clone_probe_globs,
@@ -757,7 +758,13 @@ def delete_if_merged(
 
 def _remove_worktree(repo: Path, path: Path) -> str | None:
     """Remove a linked worktree without ``--force``; git's refusal verbatim, or None."""
-    result = run_git(repo, "worktree", "remove", str(path), timeout=Timeout.GIT_WORKTREE_REMOVE)
+    result = run_git(
+        repo,
+        "worktree",
+        "remove",
+        str(path),
+        timeout=scaled_timeout(Timeout.GIT_WORKTREE_REMOVE, Timeout.GIT_WORKTREE_REMOVE_MAX),
+    )
     if result.returncode == 0:
         return None
     return result.stderr.strip() or f"git worktree remove exited {result.returncode}"

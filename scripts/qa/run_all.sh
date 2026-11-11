@@ -462,6 +462,17 @@ else
 fi
 echo ""
 
+# Class: a fixed wall-clock budget on a load-scaled subprocess (git worktree add/remove).
+echo "35. Running Fixed-Worktree-Budget Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_fixed_worktree_budget.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Fixed-worktree-budget check FAILED"
+else
+    echo "✅ Fixed-worktree-budget check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -506,6 +517,7 @@ results = {
     "Skip List Substring": "untracked/qa/skip_list_substring.json",
     "Unreachable Handle Branch": "untracked/qa/unreachable_handle_branch.json",
     "Declared Invariant Pairs": "untracked/qa/declared_invariant_pairs.json",
+    "Fixed Worktree Budget": "untracked/qa/fixed_worktree_budget.json",
     "Fail-Open Inventory": "untracked/qa/fail_open_inventory.json",
     "Dangerous Invocation Corpus": "untracked/qa/dangerous_invocation_corpus.json",
     "Security Downgrade Flags": "untracked/qa/security_downgrade_flags.json",
