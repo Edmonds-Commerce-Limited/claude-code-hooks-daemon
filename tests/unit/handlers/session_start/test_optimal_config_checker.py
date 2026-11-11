@@ -768,6 +768,18 @@ class TestIdleCompactionCheck:
         assert result["passed"] is False
         assert ".claude/settings.json is unreadable" in result["current"]
 
+    def test_this_checkouts_own_project_settings_carry_no_disabler(self, handler: Any) -> None:
+        """Plan 00603 pin: the daemon's own committed settings keep idle compaction on.
+
+        Run against the real repository root (user settings and env neutral), so a
+        later commit that adds `idleCompaction: false`, `autoCompactEnabled: false`
+        or a disabling `env` entry to `.claude/settings*.json` fails here.
+        """
+        repo_root = Path(__file__).resolve().parents[4]
+        assert (repo_root / ".claude" / "settings.json").is_file()
+        check = self._idle(handler, {}, repo_root)
+        assert check["passed"] is True, check["current"]
+
     def test_why_states_scope_and_version(self, handler: Any) -> None:
         why = self._idle(handler, {})["why"]
         assert "interactive" in why

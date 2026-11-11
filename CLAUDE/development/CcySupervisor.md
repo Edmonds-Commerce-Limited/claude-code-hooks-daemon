@@ -383,6 +383,54 @@ up.
   tell this apart from a split `ESC b`, so the model holds, and the banner asks
   for one more Esc.
 
+## Idle compaction at a percentage (Plan 00603)
+
+Supplements Claude Code's own `idleCompaction` (about an hour idle, one-hour
+prompt cache, 200k-token default threshold; the daemon's optimal-config check
+and SessionStart sync keep it on). When the session is in a TRUE idle and the
+context is at or above `CCY_IDLE_COMPACT_PCT`, the supervisor injects ONE armed
+`/compact` and then the existing post-compaction `continue`. The RED and
+CRITICAL tiers and the status-line colours are untouched. The one place this
+lives is `CompactStateMachine.idle_compact_due` and the idle-compaction block in
+`decide_once` in `.claude/ccy/claude-supervise.py`.
+
+| Variable                            | Default   | Meaning                                                                    |
+| ----------------------------------- | --------- | -------------------------------------------------------------------------- |
+| `CCY_IDLE_COMPACT`                  | `dry-run` | `off`, `dry-run` (log only, nothing typed) or `on`; anything else is `off` |
+| `CCY_IDLE_COMPACT_PCT`              | `30`      | context percentage, exclusive of 0 and 100                                 |
+| `CCY_IDLE_COMPACT_SETTLE_SECONDS`   | `60`      | how long the true idle must hold unbroken                                  |
+| `CCY_IDLE_COMPACT_COOLDOWN_SECONDS` | `1800`    | after ANY compaction (this feature's, RED's, a human's)                    |
+| `CCY_IDLE_COMPACT_MIN_TOKENS`       | `100000`  | absolute floor: `pct * window_size`, so a small window is left alone       |
+
+A bad number falls back to its default. `dry-run` (and the supervisor's own
+dry-run, i.e. no `--arm`) writes a `would idle-compact` line to `decision.log`
+and starts the cooldown, so the firing rate and the context at each firing can
+be read before arming.
+
+**True idle** is every one of: the host's screen read shows the main prompt (not
+a transcript or a selected panel row) and its bottom rows name no background
+task, sub-agent, shell, monitor or running turn; the input box is empty and the
+focus hold is clear (`can_inject`); the child has been quiet (`work_idle`); no
+compaction signal, goal or other injection is pending; the sidecar is fresh,
+not compacting, and the session is not BLOCKED; and all of that has held for
+the settle period, tracked by `note_true_idle` (any break restarts it).
+
+**What can and cannot be detected.** The context sidecar carries `pct`,
+`window_size` and `tier` only. No sidecar field, hook or daemon file reports a
+running background task or sub-agent, so the only source is the rendered screen
+(`hooks-screen --dump`, bottom five non-blank rows, matched against
+`_SCREEN_BUSY_FOOTER`). The word list is a best effort against Claude Code's
+footer and has not been validated against every release; it is deliberately
+broad, and every doubt (no binary, a timeout, an empty rendering, any word but
+`main`) reads as not idle. Without the `hooks-screen` binary the feature never
+fires. A cron tick or sub-agent output that wakes the session resets the
+settle clock through `work_idle`.
+
+**Reload.** The decision runs in the worker and hot-reloads. The screen read
+(`true_idle` on `TickFacts`) is host-side, so it takes effect on the next ccy
+relaunch; a worker newer than its host receives `true_idle` False and does
+nothing.
+
 ## Own-session identity: the child's process tree
 
 Sessions in one checkout share one `context-sidecar/` directory, so the

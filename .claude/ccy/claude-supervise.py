@@ -1284,6 +1284,23 @@ class ScreenBuffer:
         return bytes(self._data)
 
 
+# Plan 00603: how many non-blank rows at the bottom of the rendered screen count
+# as the footer, and the words that mark work in flight there. NO sidecar or
+# hook signal says a background task or sub-agent is running (see the plan's
+# FINDINGS.md), so the screen is the only source; any match fails closed.
+_SCREEN_FOOTER_ROWS = 5
+_SCREEN_BUSY_FOOTER = re.compile(
+    r"\b(background|local agents?|sub-?agents?|shells?|tasks?|monitors?|interrupt)\b",
+    re.IGNORECASE,
+)
+
+
+def screen_shows_busy_footer(dump: str) -> bool:
+    """True when the bottom rows of a hooks-screen ``--dump`` name work in flight."""
+    rows = [row for row in dump.splitlines() if row.strip()]
+    return any(_SCREEN_BUSY_FOOTER.search(row) for row in rows[-_SCREEN_FOOTER_ROWS:])
+
+
 class ScreenFocusCheck:
     """Plan 00538: asks hooks-screen what the child's screen shows.
 
@@ -1325,6 +1342,9 @@ class ScreenFocusCheck:
         self._last_at = 0.0
         self._last_failure = ""
         self._seq = 0
+        self._last_quiet: bool | None = None
+        self._last_quiet_total = -1
+        self._last_quiet_at = 0.0
 
     def effective_hold(self, latch: FocusHold | None) -> FocusHold | None:
         """``latch`` if the screen confirms it, else None (fail open)."""
@@ -1349,6 +1369,31 @@ class ScreenFocusCheck:
     def verdict(self) -> str:
         """Spawn hooks-screen on the buffer now; the word, or `unknown` on any failure."""
         return self._render(self._buffer.snapshot(), "")
+
+    def quiet_prompt(self) -> bool:
+        """Plan 00603: True only when the screen is the main prompt with a quiet footer.
+
+        Fails CLOSED (the opposite of `effective_hold`): a missing binary, a
+        timeout, any word but `main`, an empty rendering, or a footer naming a
+        background task, sub-agent, shell, monitor or running turn all read as
+        not quiet, because the answer gates a `/compact`. Cached on the same
+        terms as `_current_word` -- no new output, or inside the minimum
+        interval, reuses the last answer.
+        """
+        now = self._clock()
+        total = self._buffer.total_appended
+        cached = self._last_quiet
+        if cached is not None and (
+            self._last_quiet_total == total or now - self._last_quiet_at < self._min_interval
+        ):
+            return cached
+        snapshot = self._buffer.snapshot()
+        quiet = self._render(snapshot, "") == "main"
+        if quiet:
+            dump = self._spawn(snapshot, "--dump")
+            quiet = bool(dump and dump.strip()) and not screen_shows_busy_footer(dump)
+        self._last_quiet, self._last_quiet_total, self._last_quiet_at = quiet, total, now
+        return quiet
 
     def _spawn(self, snapshot: bytes, extra: str) -> str | None:
         """Raw stdout text of one hooks-screen run, or None (reason noted)."""
@@ -2247,6 +2292,87 @@ def _flag_compact_enabled_from_env() -> bool:
     return _parse_flag_compact_enabled(raw)
 
 
+# ── Idle compaction at a configurable percentage (Plan 00603) ────────────────
+# Supplements Claude Code's own `idleCompaction` (about an hour idle, past a
+# token threshold): when the session is in a TRUE idle and the context is at or
+# above this percentage, ONE armed `/compact` is injected, well before RED.
+# The mode is a three-way toggle because the supervisor's own dry-run is global
+# (`--arm`), and a project that arms real compaction may still want this one
+# observed first. The shipped default is `dry-run`: a decision.log line and
+# nothing typed, so a client gets the data before it gets the behaviour.
+_IDLE_COMPACT_MODE_ENV_VAR = "CCY_IDLE_COMPACT"
+_IDLE_COMPACT_PCT_ENV_VAR = "CCY_IDLE_COMPACT_PCT"
+_IDLE_COMPACT_SETTLE_ENV_VAR = "CCY_IDLE_COMPACT_SETTLE_SECONDS"
+_IDLE_COMPACT_COOLDOWN_ENV_VAR = "CCY_IDLE_COMPACT_COOLDOWN_SECONDS"
+_IDLE_COMPACT_MIN_TOKENS_ENV_VAR = "CCY_IDLE_COMPACT_MIN_TOKENS"
+_IDLE_COMPACT_OFF = "off"
+_IDLE_COMPACT_DRY_RUN = "dry-run"
+_IDLE_COMPACT_ON = "on"
+_IDLE_COMPACT_MODES = (_IDLE_COMPACT_OFF, _IDLE_COMPACT_DRY_RUN, _IDLE_COMPACT_ON)
+_DEFAULT_IDLE_COMPACT_MODE = _IDLE_COMPACT_DRY_RUN
+_DEFAULT_IDLE_COMPACT_PCT = 30.0
+_DEFAULT_IDLE_COMPACT_SETTLE_SECONDS = 60.0
+_DEFAULT_IDLE_COMPACT_COOLDOWN_SECONDS = 1800.0
+# Absolute floor: 30% of a small window is not worth a compaction.
+_DEFAULT_IDLE_COMPACT_MIN_TOKENS = 100_000
+
+
+def _idle_compact_mode_from_env() -> str:
+    """Resolve CCY_IDLE_COMPACT; an unrecognised value is `off` (the safe side)."""
+    raw = os.environ.get(_IDLE_COMPACT_MODE_ENV_VAR)
+    if raw is None:
+        return _DEFAULT_IDLE_COMPACT_MODE
+    value = raw.strip().lower()
+    return value if value in _IDLE_COMPACT_MODES else _IDLE_COMPACT_OFF
+
+
+def _idle_compact_number_from_env(name: str, default: float, *, minimum: float, maximum: float) -> float:
+    """A float env value within ``(minimum, maximum)`` exclusive-low, else ``default``."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if minimum < value < maximum else default
+
+
+def _idle_compact_pct_from_env() -> float:
+    return _idle_compact_number_from_env(
+        _IDLE_COMPACT_PCT_ENV_VAR, _DEFAULT_IDLE_COMPACT_PCT, minimum=0.0, maximum=100.0
+    )
+
+
+def _idle_compact_settle_from_env() -> float:
+    return _idle_compact_number_from_env(
+        _IDLE_COMPACT_SETTLE_ENV_VAR,
+        _DEFAULT_IDLE_COMPACT_SETTLE_SECONDS,
+        minimum=-1.0,
+        maximum=float("inf"),
+    )
+
+
+def _idle_compact_cooldown_from_env() -> float:
+    return _idle_compact_number_from_env(
+        _IDLE_COMPACT_COOLDOWN_ENV_VAR,
+        _DEFAULT_IDLE_COMPACT_COOLDOWN_SECONDS,
+        minimum=-1.0,
+        maximum=float("inf"),
+    )
+
+
+def _idle_compact_min_tokens_from_env() -> int:
+    return int(
+        _idle_compact_number_from_env(
+            _IDLE_COMPACT_MIN_TOKENS_ENV_VAR,
+            float(_DEFAULT_IDLE_COMPACT_MIN_TOKENS),
+            minimum=-1.0,
+            maximum=float("inf"),
+        )
+    )
+
+
 def _model_family(model_id: str) -> str | None:
     """Return the canonical model family for ``model_id``, or None if unknown."""
     lowered = model_id.lower()
@@ -2318,6 +2444,9 @@ class SidecarReading:
     # Plan 00399: who started the compaction, from the daemon's record ("" when
     # no record or an unattributed one). Meaningful only while ``compacting``.
     compaction_origin: str = ""
+    # Plan 00603: the context window in tokens, for the idle-compaction token
+    # floor. 0 when the sidecar predates the field, which fails that gate closed.
+    window_size: int = 0
 
 
 @dataclass(frozen=True)
@@ -2352,6 +2481,13 @@ class CompactPolicy:
     focus_hold_escalate_seconds: tuple[float, float] = field(
         default_factory=_focus_hold_escalate_from_env
     )
+    # Plan 00603: idle compaction at a percentage. Env-resolved for host/worker
+    # agreement, like the toggles above.
+    idle_compact_mode: str = field(default_factory=_idle_compact_mode_from_env)
+    idle_compact_pct: float = field(default_factory=_idle_compact_pct_from_env)
+    idle_compact_settle_seconds: float = field(default_factory=_idle_compact_settle_from_env)
+    idle_compact_cooldown_seconds: float = field(default_factory=_idle_compact_cooldown_from_env)
+    idle_compact_min_tokens: int = field(default_factory=_idle_compact_min_tokens_from_env)
 
 
 @dataclass(frozen=True)
@@ -2441,6 +2577,12 @@ class TickFacts:
     # worker's own-session-id scan to that child's process tree. None from a
     # host that predates it (see `WorkerChildPid` for that case).
     child_pid: int | None = None
+    # Plan 00603: the host vouches that the screen shows the main prompt with no
+    # background-task or sub-agent indicator in its footer (see
+    # `ScreenFocusCheck.quiet_prompt`). Host-side because only the host holds
+    # the screen buffer. False -- not idle -- from a host that predates it, so
+    # idle compaction fails closed there.
+    true_idle: bool = False
 
 
 @dataclass(frozen=True)
@@ -3158,6 +3300,7 @@ def _build_sidecar_reading(
         compacting=bool(data.get("compacting", False)),
         stale=(now - ts) > freshness_seconds,
         model_id=str(data.get("model_id", "")),
+        window_size=_coerce_int(data.get("window_size")),
     )
 
 
@@ -5982,6 +6125,11 @@ class CompactStateMachine:
         # (round-tripped) and last-fire ts (process-local backoff).
         self._flag_compactions = 0
         self._flag_compact_last_ts: float | None = None
+        # Plan 00603: since when the host has reported a TRUE idle without a
+        # break (None while it is not), and when the last idle compaction was
+        # decided (or, in dry-run, would have been). Round-tripped.
+        self._true_idle_since: float | None = None
+        self._idle_compact_last_ts: float | None = None
         # Plan 00479 Task 4.5: the `paused_at` of the usage pause whose single
         # /compact has been decided (None while no pause has been compacted).
         # Round-tripped, so a worker restart cannot type a second one.
@@ -6128,6 +6276,69 @@ class CompactStateMachine:
         """
         self._flag_compactions += 1
         self._flag_compact_last_ts = time.time() if now_wall is None else now_wall
+
+    def note_true_idle(self, true_idle: bool, *, now: float) -> None:
+        """Track how long the session has been in an unbroken TRUE idle (Plan 00603).
+
+        Called every tick: the first idle tick starts the settle clock, any
+        non-idle tick clears it, so an interruption restarts the wait.
+        """
+        if not true_idle:
+            self._true_idle_since = None
+        elif self._true_idle_since is None:
+            self._true_idle_since = now
+
+    def idle_compact_due(self, reading: SidecarReading | None, *, now: float) -> str | None:
+        """The reason an idle compaction should fire on this tick, else None.
+
+        Every gate fails closed: no fresh reading, a compaction already under
+        way, an unknown window, context below the percentage or the absolute
+        token floor, a settle period not yet held, or any compaction (this
+        feature's or not) inside the cooldown.
+        """
+        policy = self._policy
+        if policy.idle_compact_mode == _IDLE_COMPACT_OFF:
+            return None
+        if reading is None or reading.stale or reading.compacting:
+            return None
+        if self._true_idle_since is None or self._injections >= policy.max_injections:
+            return None
+        if now - self._true_idle_since < policy.idle_compact_settle_seconds:
+            return None
+        if reading.pct < policy.idle_compact_pct:
+            return None
+        tokens = int(reading.pct / 100.0 * reading.window_size)
+        if reading.window_size <= 0 or tokens < policy.idle_compact_min_tokens:
+            return None
+        last = max(
+            (ts for ts in (self._last_action_ts, self._idle_compact_last_ts) if ts is not None),
+            default=None,
+        )
+        if last is not None and now - last < policy.idle_compact_cooldown_seconds:
+            return None
+        held = now - self._true_idle_since
+        return (
+            f"idle for {held:.0f}s at {reading.pct:.0f}% "
+            f"(~{tokens // 1000}k of {reading.window_size // 1000}k tokens)"
+        )
+
+    @property
+    def policy_idle_compact_armed(self) -> bool:
+        """True when the idle-compaction mode is `on` (not `dry-run` or `off`)."""
+        return self._policy.idle_compact_mode == _IDLE_COMPACT_ON
+
+    def mark_idle_compaction(self, *, now: float, armed: bool) -> None:
+        """Record a decided idle compaction (Plan 00603).
+
+        Armed: enter AWAIT_COMPACTING like every supervisor `/compact`, so the
+        existing ESC flush and post-compaction `continue` apply. Dry-run: only
+        the cooldown stamp, so the would-be firing is logged once per cooldown.
+        """
+        self._idle_compact_last_ts = now
+        if armed:
+            self._injections += 1
+            self._last_action_ts = now
+            self._enter_await(is_human=False)
 
     def flag_compact_due(self, now_wall: float) -> bool:
         """True when a flag-cleaning /compact should fire on this tick (Plan 00281).
@@ -6808,6 +7019,8 @@ class CompactStateMachine:
             "model_restores": self._model_restores,
             "model_restore_last_ts": self._model_restore_last_ts,
             "flag_compactions": self._flag_compactions,
+            "true_idle_since": self._true_idle_since,
+            "idle_compact_last_ts": self._idle_compact_last_ts,
             "pause_compacted_for": self._pause_compacted_for,
             "audit_pending": list(self._audit_pending),
             "plugin_notices_pending": list(self._plugin_notices_pending),
@@ -6918,6 +7131,12 @@ class CompactStateMachine:
             self._model_restore_last_ts = None if raw is None else _coerce_float(raw)
         if "flag_compactions" in state:
             self._flag_compactions = _coerce_int(state["flag_compactions"])
+        if "true_idle_since" in state:
+            raw = state["true_idle_since"]
+            self._true_idle_since = None if raw is None else _coerce_float(raw)
+        if "idle_compact_last_ts" in state:
+            raw = state["idle_compact_last_ts"]
+            self._idle_compact_last_ts = None if raw is None else _coerce_float(raw)
         if "pause_compacted_for" in state:
             raw = state["pause_compacted_for"]
             self._pause_compacted_for = None if raw is None else _coerce_float(raw)
@@ -8140,6 +8359,11 @@ def decide_once(
     # published, attributed now that it is -- after this tick's reading, so a
     # human who has since left the fallback is never restored.
     machine.settle_pending_drop(now_wall=facts.now_wall)
+    # Plan 00603: the settle clock for idle compaction. A true idle needs the
+    # host's screen verdict AND every gate that lets anything be typed.
+    machine.note_true_idle(
+        facts.true_idle and can_inject and facts.work_idle, now=facts.now_wall
+    )
     evaluation = machine.evaluate(
         reading,
         idle=can_inject,
@@ -8729,6 +8953,38 @@ def decide_once(
                 confirm_enters = model_confirm_enters
                 deferred_log = None
                 noop_reason_log = None
+    # ── Idle compaction at a percentage (Plan 00603) ─────────────────────────
+    # Below every other family, on an otherwise-NOOP MONITOR tick, so a pending
+    # goal, restore or flush always goes first and a compaction in flight is
+    # never stacked on. `note_true_idle` already folded `can_inject` and
+    # `work_idle` into the settle clock; the gates here are the rest. Dry-run
+    # (the supervisor's own or this feature's mode) logs and types nothing.
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+        and not foreground_ambiguous
+        and not modes_gate_closed
+        and can_inject
+    ):
+        idle_reason = machine.idle_compact_due(reading, now=facts.now_wall)
+        if idle_reason is not None:
+            armed = not dry_run and machine.policy_idle_compact_armed
+            machine.mark_idle_compaction(now=facts.now_wall, armed=armed)
+            if armed:
+                decision_value = Decision.WOULD_COMPACT.value
+                reason = f"idle compaction: {idle_reason} -> would inject /compact"
+                payload = f"/compact {_format_bot_prefix(facts.now_wall)} {_ARMED_COMPACT_BODY}"
+                machine.arm_audit("/compact (idle compaction)")
+                submit = True
+                deferred_log = None
+                noop_reason_log = None
+            else:
+                noop_reason_log = (
+                    f"{_NOOP_LOG_PREFIX}: would idle-compact (dry-run, nothing typed): "
+                    f"{idle_reason}"
+                )
     # ── Audit-trail flush: transient status-line banner (Plan 00318) ────────
     # LOWEST priority of all families: a pending /model, goal or restore
     # always lands first, so a switch sequence flushes as ONE banner once the
@@ -9389,6 +9645,7 @@ def _facts_to_json(facts: TickFacts) -> str:
             "focus_held_since": facts.focus_held_since,
             "focus_latch_bytes": facts.focus_latch_bytes,
             "child_pid": facts.child_pid,
+            "true_idle": facts.true_idle,
         }
     )
 
@@ -9412,6 +9669,7 @@ def _facts_from_json(line: str) -> TickFacts:
         focus_held_since=float(data.get("focus_held_since", 0.0)),
         focus_latch_bytes=str(data.get("focus_latch_bytes", "")),
         child_pid=int(data["child_pid"]) if data.get("child_pid") is not None else None,
+        true_idle=bool(data.get("true_idle", False)),
     )
 
 
@@ -10791,10 +11049,14 @@ def supervise(
     # enclosing scope, not just inside the closure. A variable whose ONLY
     # assignment is this one, of type `int`, carries no such ambiguity.
     resolved_stdin_fd: int = stdin_fd if stdin_fd is not None else sys.stdin.fileno()
-    if activity.screen is None and activity.focus.enabled:
+    policy = policy if policy is not None else CompactPolicy()
+    # Plan 00603: idle compaction also needs the screen (its only source for a
+    # background task or sub-agent), so it builds the check when the focus hold
+    # has not.
+    idle_compact_on = policy.idle_compact_mode != _IDLE_COMPACT_OFF
+    if activity.screen is None and (activity.focus.enabled or idle_compact_on):
         activity.screen = _build_screen_check(output_activity, stdin_fd=resolved_stdin_fd, log=log)
     sidecar_dir = sidecar_dir if sidecar_dir is not None else _default_sidecar_dir()
-    policy = policy if policy is not None else CompactPolicy()
     machine = CompactStateMachine(policy)
     restart = (
         restart_coordinator
@@ -10962,6 +11224,17 @@ def supervise(
         if not _fd_readable(resolved_stdin_fd):
             activity.focus.settle(now=now_wall)
         focus_hold = activity.effective_focus_hold()
+        # Plan 00603: the screen is rendered only once the cheap gates already
+        # hold, so a busy session never pays for a hooks-screen run.
+        true_idle = (
+            idle_compact_on
+            and idle
+            and work_idle
+            and activity.line.is_empty
+            and focus_hold is None
+            and activity.screen is not None
+            and activity.screen.quiet_prompt()
+        )
         outcome = None
         if decider is not None:
             outcome = decider(
@@ -10980,6 +11253,7 @@ def supervise(
                         output_quiet_seconds=output_quiet_seconds,
                         # Plan 00551: scopes the worker's identity scan.
                         child_pid=pid,
+                        true_idle=true_idle,
                     ),
                     focus_hold,
                 )

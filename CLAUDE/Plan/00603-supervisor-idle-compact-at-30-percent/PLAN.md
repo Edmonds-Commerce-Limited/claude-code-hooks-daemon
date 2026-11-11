@@ -1,6 +1,6 @@
 # Plan 00603: supervisor idle compact at 30 percent
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-11
 **Owner**: joseph
 **Priority**: High
@@ -30,18 +30,18 @@ The owner asked for two things. First, make sure Claude Code's own idle compacti
 
 ### Phase 1: Facts
 
-- [ ] ⬜ **Task 1.1**: Verify `idleCompaction` end to end: effective settings in this checkout, the Plan 00557 optimal-config check, and what Claude Code's idle compaction actually does and when (read the vendored or fetched Claude Code docs; record the trigger and any thresholds).
-- [ ] ⬜ **Task 1.2**: Read the supervisor's idle model (`idle`, `work_idle`, empty input box, the focus hold) and find how background tasks and running sub-agents can be detected from the sidecar or the screen. Record which signals exist and which do not.
+- [x] ✅ **Task 1.1**: Verify `idleCompaction` end to end: effective settings in this checkout, the Plan 00557 optimal-config check, and what Claude Code's idle compaction actually does and when (read the vendored or fetched Claude Code docs; record the trigger and any thresholds).
+- [x] ✅ **Task 1.2**: Read the supervisor's idle model (`idle`, `work_idle`, empty input box, the focus hold) and find how background tasks and running sub-agents can be detected from the sidecar or the screen. Record which signals exist and which do not. Result: no sidecar or hook signal reports either; the rendered screen footer is the only source and the trigger fails closed on it (recorded in `CLAUDE/development/CcySupervisor.md`, "Idle compaction at a percentage"; `idleCompaction` verified on and pinned by a test against the committed project settings).
 
 ### Phase 2: Trigger
 
-- [ ] ⬜ **Task 2.1**: Tests first for the decision function: true idle at and above 30%, not idle with a background task, not idle with a sub-agent running, below 30%, inside the cooldown, inside the settle period, dry-run.
-- [ ] ⬜ **Task 2.2**: Implement the trigger in `.claude/ccy/claude-supervise.py` and its deployed template; confirm the worker reloads (verify the new pid; never restart the session).
-- [ ] ⬜ **Task 2.3**: Configuration (env variables and `ccy.env` comments), `CLAUDE/development/CcySupervisor.md`, release note.
+- [x] ✅ **Task 2.1**: Tests first for the decision function: true idle at and above 30%, not idle with a background task, not idle with a sub-agent running, below 30%, inside the cooldown, inside the settle period, dry-run.
+- [x] ✅ **Task 2.2**: Implement the trigger in `.claude/ccy/claude-supervise.py` and its deployed template; confirm the worker reloads (verify the new pid; never restart the session).
+- [x] ✅ **Task 2.3**: Configuration (env variables and `ccy.env` comments), `CLAUDE/development/CcySupervisor.md`, release note.
 
 ### Phase 3: Proof
 
-- [ ] ⬜ **Task 3.1**: Run it dry first and read `decision.log` for a day of real use, then arm it. Report how often it fires and the context size at each firing.
+- [ ] 🔄 **Task 3.1**: Run it dry first and read `decision.log` for a day of real use, then arm it. Report how often it fires and the context size at each firing.
 
 ## Success Criteria
 
