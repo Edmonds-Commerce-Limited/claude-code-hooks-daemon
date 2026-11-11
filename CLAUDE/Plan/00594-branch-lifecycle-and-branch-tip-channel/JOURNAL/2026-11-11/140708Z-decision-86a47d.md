@@ -1,0 +1,3 @@
+## 14:07 · decision · — — Stand-in ruling: wait for the coordinator
+
+Stand-in tick on the awaiting-human stop for Plan 00594, handled by the working session, not by the owner. Option (a), wait for the coordinator to route Tasks 1.3, 4.6 and 5.1 to the second client seat after the prod cut-over, is the ruling. Option (b) is already satisfied: the Task 4.6 design recommendation (one stream per stack, depth cap 5) is in DESIGN.md section 4 item 7, and sub-agents ran normally after the weekly limit warning, so the limit is not the blocker. No release, remote delete or history rewrite was considered. Nothing further to do on the plan until the coordinator routes the seat.
