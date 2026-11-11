@@ -13,7 +13,7 @@ Note: `git branch -D` removes the branch's config section itself, so a deleted b
 ## Files
 
 - `src/claude_code_hooks_daemon/core/branch_park.py`, `core/branch_creation.py`, `handlers/session_start/branch_sweep.py`, `daemon/cli.py`
-- Tests: new `tests/unit/core/test_branch_park_gaps.py` (10); `tests/unit/handlers/session_start/test_branch_sweep.py` (+1); `tests/unit/core/test_branch_park.py` (the old "remote-only push failure parks nothing" test replaced by "keeps the park locally")
+- Tests: new `tests/unit/core/test_branch_park_gaps.py` (9); `tests/unit/handlers/session_start/test_branch_sweep.py` (+1); `tests/unit/core/test_branch_park.py` (the old "remote-only push failure parks nothing" test replaced by "keeps the park locally")
 - `docs/guides/CONFIGURATION.md`; release note `CLAUDE/UPGRADES/UNRELEASED/release-notes/051-branch-park-gaps-remote-only-group-pool-and-park-cleared.md`
 
 ## Tests seen failing first
@@ -31,4 +31,4 @@ Note: `git branch -D` removes the branch's config section itself, so a deleted b
 ## Open items
 
 - Merge of the branch, PLAN.md checkboxes and the push are left to the coordinator.
-- Release note 043 still says a remote-only branch parks nothing on a refused push; note 051 supersedes it (043 was left as written, since it describes what shipped then).
+- Release note 043 was corrected by the coordinator to say a remote-only branch is kept too.
