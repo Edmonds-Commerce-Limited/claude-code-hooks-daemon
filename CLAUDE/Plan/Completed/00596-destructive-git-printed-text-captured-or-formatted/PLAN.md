@@ -61,7 +61,8 @@ program the guard cannot classify.
   Round 1 approved with two suggestions. Round 2 found the fix for them over-blocking
   ordinary commands. Round 3 found 18 commands that ran written text getting through:
   the relaxation removed a deny whenever a check that can only CONFIRM a run returned
-  false. The fail-closed redesign then passed an independent check over 362 probes.
+  false. The fail-closed redesign was then approved by an independent check over 362 probes,
+  with one Suggestion (filed under Follow-ups).
 
 ## Success Criteria
 
