@@ -457,6 +457,10 @@ class Priority:
     # project's enforce-llm-qa handler holds that slot.
     BRANCH_CREATION_GUARD = 40
 
+    # Plan 00602: judges a foreground Bash call's length by shape. Same band
+    # as the other Bash workflow guards; it shares no shapes with them.
+    LONG_RUNNING_COMMAND_GUARD = 40
+
     # Plan 00490: judges issue-tied work only, after the cheap safety handlers
     # have had their say. A workflow guard, so it sits in the workflow band.
     GITHUB_ISSUE_ASSIGNMENT_GUARD = 53

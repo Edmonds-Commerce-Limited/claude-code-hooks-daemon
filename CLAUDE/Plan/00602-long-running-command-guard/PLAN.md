@@ -1,6 +1,6 @@
 # Plan 00602: long running command guard
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-11
 **Owner**: joseph
 **Priority**: High
@@ -31,24 +31,24 @@ A `timeout N` wrapper, a `sleep` loop, or a wait on a process or on CI is a stro
 ### Phase 1: Facts
 
 - [ ] ⬜ **Task 1.1**: Mine recent session transcripts (the transcript tooling) for foreground Bash calls that ran longer than 30 seconds or hit a tool timeout. List the shapes, so the detector is built from evidence.
-- [ ] ⬜ **Task 1.2**: Check the existing handlers that already touch this (the unbounded liveness loop guard, the pipe blocker, the background process tracker) so the new handler adds only what is missing.
+- [x] ✅ **Task 1.2**: Check the existing handlers that already touch this (the unbounded liveness loop guard, the pipe blocker, the background process tracker) so the new handler adds only what is missing.
 
 ### Phase 2: Handler
 
-- [ ] ⬜ **Task 2.1**: Tests first: foreground shapes that must be denied, advised and allowed, including `timeout N cmd`, `until` loops, `sleep` waits, `gh run watch`, test and QA runs.
-- [ ] ⬜ **Task 2.2**: The handler, its config (threshold, lists, mode: deny / advise / off), rule IDs and `explain-rule` text.
-- [ ] ⬜ **Task 2.3**: The block message names the background form and the Monitor tool; CLAUDE.md guidance text and an acceptance test.
+- [x] ✅ **Task 2.1**: Tests first: foreground shapes that must be denied, advised and allowed, including `timeout N cmd`, `until` loops, `sleep` waits, `gh run watch`, test and QA runs.
+- [x] ✅ **Task 2.2**: The handler, its config (threshold, lists, mode: deny / advise / off), rule IDs and `explain-rule` text.
+- [x] ✅ **Task 2.3**: The block message names the background form and the Monitor tool; CLAUDE.md guidance text and an acceptance test.
 
 ### Phase 3: Release
 
-- [ ] ⬜ **Task 3.1**: Release note, config docs, and the handler's entry in the generated handler guidance.
+- [x] ✅ **Task 3.1**: Release note, config docs, and the handler's entry in the generated handler guidance.
 
 ## Success Criteria
 
-- [ ] A foreground `timeout 590 bash -c 'until ...'` wait is denied in the main thread and allowed in a sub-agent.
-- [ ] A foreground test-suite run is denied with the background command to use.
-- [ ] Short commands (`git status`, `ls`) are never blocked.
-- [ ] The pending-release holding area has a release note for the handler.
+- [x] A foreground `timeout 590 bash -c 'until ...'` wait is denied in the main thread and allowed in a sub-agent (the handler has `scope=MAIN`; the chain scope gate is covered by `tests/unit/core/test_chain_handler_scope.py`).
+- [x] A foreground test-suite run is denied with the background command to use.
+- [x] Short commands (`git status`, `ls`) are never blocked.
+- [x] The pending-release holding area has a release note for the handler (`057-long-running-command-guard.md`).
 
 ## Delivery & Milestones
 

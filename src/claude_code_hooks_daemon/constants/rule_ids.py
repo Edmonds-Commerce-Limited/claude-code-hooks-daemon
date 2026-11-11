@@ -685,6 +685,25 @@ class RuleID:
     WAIT_ON_WRAPPER_PID: str = "R-WAIT-ON-WRAPPER-PID"
 
     # ------------------------------------------------------------------
+    # long_running_command_guard handler (Plan 00602)
+    # ------------------------------------------------------------------
+
+    #: A foreground `until`/`while` loop that sleeps in the main thread.
+    LONG_RUNNING_WAIT_LOOP: str = "R-LONG-RUNNING-WAIT-LOOP"
+
+    #: A foreground `timeout N` wrapper with N above the threshold.
+    LONG_RUNNING_TIMEOUT: str = "R-LONG-RUNNING-TIMEOUT"
+
+    #: A foreground `sleep N` with N above the threshold.
+    LONG_RUNNING_SLEEP: str = "R-LONG-RUNNING-SLEEP"
+
+    #: A foreground run of a known-slow program (tests, QA, builds, installs).
+    LONG_RUNNING_SLOW_COMMAND: str = "R-LONG-RUNNING-SLOW-COMMAND"
+
+    #: ADVISORY ONLY: a foreground command of unknown length with no timeout.
+    LONG_RUNNING_NO_TIMEOUT: str = "R-LONG-RUNNING-NO-TIMEOUT"
+
+    # ------------------------------------------------------------------
     # failsafe_cron_blockage_suppressor handler (Plan 00298)
     # ------------------------------------------------------------------
 
