@@ -1,6 +1,6 @@
 # Plan 00596: destructive git printed text captured or formatted
 
-**Status**: In Progress
+**Status**: Complete (2026-11-11)
 **Created**: 2026-11-10
 **Owner**: dev
 **Priority**: Medium
@@ -46,24 +46,44 @@ program the guard cannot classify.
 
 ### Phase 1: Fix (TDD)
 
-- [ ] ⬜ **Task 1.1**: (a) a print-only substitution captured into an assignment value or a
-  printing command's argument is data; RED tests both ways (the executing twins deny)
-- [ ] ⬜ **Task 1.2**: (b) text formatters (`fold`, `fmt`, `tr`, `cut`, `column`, `nl`,
-  `expand`, `unexpand`, `paste`, `rev`, `tac`) join the inert stage allowlist; RED tests
-- [ ] ⬜ **Task 1.3**: release note
+- [x] ✅ **Task 1.1**: (a) a print-only substitution captured into an assignment value or a
+  printing command's argument is data; RED tests both ways (the executing twins deny).
+  As shipped, this is a fail-closed allowlist: the capture is data only when every
+  segment of the command is an assignment from a print-only substitution, an
+  `echo`/`printf` (not `-v`) with no redirect, or a pure-formatter pipe stage.
+- [x] ✅ **Task 1.2**: (b) text formatters (`fold`, `fmt`, `nl`, `expand`, `unexpand`,
+  `paste`, `rev`, `tac`) join `DATA_SINKS`; `tr`, `cut` and `column` were already there
+- [x] ✅ **Task 1.3**: release note 052
 
 ### Phase 2: Delivery
 
-- [ ] ⬜ **Task 2.1**: independent adversarial review, merge, main CI green, close #197
+- [x] ✅ **Task 2.1**: independent adversarial review, merge, main CI green, close #197.
+  Round 1 approved with two suggestions. Round 2 found the fix for them over-blocking
+  ordinary commands. Round 3 found 18 commands that ran written text getting through:
+  the relaxation removed a deny whenever a check that can only CONFIRM a run returned
+  false. The fail-closed redesign then passed an independent check over 362 probes.
 
 ## Success Criteria
 
-- [ ] Reproductions 1, 2 and 4 in #197 are allowed; the `| sh`, `| bash`, `eval`,
+- [x] Reproductions 1, 2 and 4 in #197 are allowed; the `| sh`, `| bash`, `eval`,
   command-position and unknown-receiver twins still deny
-- [ ] No existing destructive_git deny test changes verdict
-- [ ] Release-bound consequences in the holding area: a release note in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+- [x] No existing destructive_git deny test changes verdict. Against main, 8 commands go
+  from deny to allow (all #197 shapes) and 29 go from allow to deny (all run written text)
+- [x] Release-bound consequences in the holding area: release note
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/052-destructive-git-printed-text-captured-or-formatted.md`
+
+## Follow-ups (not done here)
+
+From the final verification (`subagent-reports/`); none lets a destructive command run:
+
+- `echo "$m" | tee 40`, `| uniq -c 5` and `| less -o` write a file but count as
+  print-only (`_FORMATTER_OPTION` accepts a bare number and clustered options). Fix: add
+  `tee`, `uniq`, `less` and `more` to `_UNSAFE_PRINTED_SINKS`.
+- Already wrong on main and unchanged here:
+  - `n='git reset --hard'; echo "$n"` denies, a false positive.
+  - `n=git; echo "$n"; $n reset --hard` allows, a missed deny.
+  - `echo 'git reset --hard' > s.sh; sh "$x" < s.sh` allows, a missed deny.
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hash -->
+- Merged at `5638615ac`; main CI run 42936949523 green; GitHub #197 closed.
