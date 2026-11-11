@@ -50,8 +50,10 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     HOOK_EVENTS_IN_SETTINGS,
     build_hook_registration,
     canonical_hook_entry,
+    expected_hook_events,
     validate_settings_hooks,
 )
+from claude_code_hooks_daemon.utils.permission_surface import strip_permission_surface
 
 _HOOKS_KEY: Final = "hooks"
 _STATUS_LINE_KEY: Final = "statusLine"
@@ -99,6 +101,7 @@ class MergeReport:
     defaults_upgraded: tuple[str, ...] = ()
     keys_delivered: tuple[str, ...] = ()
     absences_preserved: tuple[str, ...] = ()
+    surface_removed: tuple[str, ...] = ()
 
     @property
     def changed(self) -> bool:
@@ -108,6 +111,7 @@ class MergeReport:
             or self.hooks_refreshed
             or self.defaults_upgraded
             or self.keys_delivered
+            or self.surface_removed
         )
 
 
@@ -115,6 +119,8 @@ def merge_settings(
     client: Mapping[str, Any],
     new_default: Mapping[str, Any],
     old_default: Mapping[str, Any] | None = None,
+    *,
+    omit_permission_surface: bool = False,
 ) -> tuple[dict[str, Any], MergeReport]:
     """Merge the daemon's shipped settings into a client's, preserving theirs.
 
@@ -130,6 +136,9 @@ def merge_settings(
             class preserves every client value and upgrades none. There is
             deliberately no fallback that infers a baseline — a
             plausible-but-wrong one misclassifies silently.
+        omit_permission_surface: ``daemon.omit_permission_surface`` is on
+            (Plan 00474): no PermissionRequest forwarder and no daemon deny
+            rule is delivered, and any the daemon wrote earlier are removed.
 
     Returns:
         ``(merged, report)``. ``merged`` is a deep copy of ``client`` with the
@@ -137,11 +146,20 @@ def merge_settings(
     """
     merged = copy.deepcopy(dict(client))
 
-    hooks, hooks_added, hooks_refreshed = _merge_hooks(merged.get(_HOOKS_KEY))
+    hooks, hooks_added, hooks_refreshed = _merge_hooks(
+        merged.get(_HOOKS_KEY), omit_permission_surface=omit_permission_surface
+    )
     merged[_HOOKS_KEY] = hooks
 
     delivered, absences = _merge_presence(merged, new_default, old_default)
     upgraded = _merge_recommended_defaults(merged, new_default, old_default)
+
+    removed: tuple[str, ...] = ()
+    if omit_permission_surface:
+        merged, removed = strip_permission_surface(merged)
+        # Delivered or added in this same pass, then removed again: not a change.
+        delivered = tuple(key for key in delivered if key in merged)
+        hooks_added = tuple(key for key in hooks_added if key in merged[_HOOKS_KEY])
 
     return merged, MergeReport(
         hooks_added=hooks_added,
@@ -149,6 +167,7 @@ def merge_settings(
         defaults_upgraded=upgraded,
         keys_delivered=delivered,
         absences_preserved=absences,
+        surface_removed=removed,
     )
 
 
@@ -172,7 +191,9 @@ def _daemon_bash_key(inner: Any) -> str | None:
     return _CANONICAL_COMMANDS.get(command)
 
 
-def _validate_daemon_forwarders(settings: Mapping[str, Any]) -> list[str]:
+def _validate_daemon_forwarders(
+    settings: Mapping[str, Any], *, omit_permission_surface: bool = False
+) -> list[str]:
     """Exactly one canonical daemon forwarder per wired event, and no more.
 
     Deliberately NOT ``validate_hook_commands``, which counts every ``type:
@@ -193,7 +214,8 @@ def _validate_daemon_forwarders(settings: Mapping[str, Any]) -> list[str]:
         return ["`hooks` is not an object"]
 
     issues: list[str] = []
-    for json_key, bash_key in sorted(HOOK_EVENTS_IN_SETTINGS.items()):
+    expected = expected_hook_events(omit_permission_surface=omit_permission_surface)
+    for json_key, bash_key in sorted(expected.items()):
         entries = hooks.get(json_key)
         if not isinstance(entries, list):
             issues.append(f"{json_key} has no daemon forwarder")
@@ -209,14 +231,17 @@ def _validate_daemon_forwarders(settings: Mapping[str, Any]) -> list[str]:
     return issues
 
 
-def _merge_hooks(existing: Any) -> tuple[dict[str, Any], tuple[str, ...], tuple[str, ...]]:
+def _merge_hooks(
+    existing: Any, *, omit_permission_surface: bool = False
+) -> tuple[dict[str, Any], tuple[str, ...], tuple[str, ...]]:
     """Complete and repair the wired forwarders, leaving client hooks alone."""
     hooks: dict[str, Any] = copy.deepcopy(existing) if isinstance(existing, dict) else {}
 
+    expected = expected_hook_events(omit_permission_surface=omit_permission_surface)
     added: list[str] = []
     refreshed: list[str] = []
-    for json_key in sorted(HOOK_EVENTS_IN_SETTINGS):
-        bash_key = HOOK_EVENTS_IN_SETTINGS[json_key]
+    for json_key in sorted(expected):
+        bash_key = expected[json_key]
         entries = hooks.get(json_key)
         if not isinstance(entries, list):
             hooks[json_key] = build_hook_registration(bash_key)
@@ -426,6 +451,8 @@ def run_settings_merge(
     client_path: Path,
     new_default_path: Path,
     old_default_path: Path | None = None,
+    *,
+    omit_permission_surface: bool = False,
 ) -> MergeOutcome:
     """Merge the shipped settings into the client's file on disk.
 
@@ -437,6 +464,8 @@ def run_settings_merge(
             baseline rather than as an empty one — an empty baseline would call
             every client value a deliberate override and freeze the project's
             settings permanently.
+        omit_permission_surface: ``daemon.omit_permission_surface`` is on; see
+            :func:`merge_settings`.
 
     Returns:
         A ``MergeOutcome``. On ``ESCALATED`` nothing was written to
@@ -450,7 +479,10 @@ def run_settings_merge(
         )
 
     if not client_path.exists():
-        _write_atomically(client_path, _serialise(new_default))
+        installed = (
+            strip_permission_surface(new_default)[0] if omit_permission_surface else new_default
+        )
+        _write_atomically(client_path, _serialise(installed))
         return MergeOutcome(status=MergeStatus.INSTALLED)
 
     notes: list[str] = []
@@ -476,9 +508,13 @@ def run_settings_merge(
             ),
         )
 
-    merged, report = merge_settings(client, new_default, old_default)
+    merged, report = merge_settings(
+        client, new_default, old_default, omit_permission_surface=omit_permission_surface
+    )
 
-    problems = validate_settings_hooks(merged) + _validate_daemon_forwarders(merged)
+    problems = validate_settings_hooks(
+        merged, omit_permission_surface=omit_permission_surface
+    ) + _validate_daemon_forwarders(merged, omit_permission_surface=omit_permission_surface)
     if problems:
         return _escalate(
             client_path,
@@ -498,7 +534,9 @@ def run_settings_merge(
     # adding when one is actually observed, not in anticipation.
     latest, _ = _load_json_object(client_path)
     if latest is not None and latest != client:
-        merged, report = merge_settings(latest, new_default, old_default)
+        merged, report = merge_settings(
+            latest, new_default, old_default, omit_permission_surface=omit_permission_surface
+        )
 
     _write_atomically(client_path, _serialise(merged))
     return MergeOutcome(status=MergeStatus.MERGED, report=report, messages=tuple(notes))

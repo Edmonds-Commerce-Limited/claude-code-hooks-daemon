@@ -59,16 +59,32 @@ def _build_hook_events_map() -> dict[str, str]:
 HOOK_EVENTS_IN_SETTINGS: dict[str, str] = _build_hook_events_map()
 
 
+def expected_hook_events(*, omit_permission_surface: bool = False) -> dict[str, str]:
+    """The json_key -> bash_key map of events settings.json must register.
+
+    With ``daemon.omit_permission_surface`` on (Plan 00474) the PermissionRequest
+    forwarder is deliberately absent, so it is not expected.
+    """
+    if not omit_permission_surface:
+        return HOOK_EVENTS_IN_SETTINGS
+    omitted = EventID.PERMISSION_REQUEST.json_key
+    return {key: value for key, value in HOOK_EVENTS_IN_SETTINGS.items() if key != omitted}
+
+
 # ---------------------------------------------------------------------------
 # Validation functions
 # ---------------------------------------------------------------------------
 
 
-def validate_settings_hooks(settings: Mapping[str, object]) -> list[str]:
+def validate_settings_hooks(
+    settings: Mapping[str, object], *, omit_permission_surface: bool = False
+) -> list[str]:
     """Check that settings dict contains all expected hook event registrations.
 
     Args:
         settings: Parsed contents of settings.json
+        omit_permission_surface: The project opted out of the PermissionRequest
+            forwarder (``daemon.omit_permission_surface``), so it is not required.
 
     Returns:
         List of issue descriptions (empty means all hooks are present)
@@ -78,7 +94,7 @@ def validate_settings_hooks(settings: Mapping[str, object]) -> list[str]:
         hooks = {}
 
     issues: list[str] = []
-    for json_key in sorted(HOOK_EVENTS_IN_SETTINGS.keys()):
+    for json_key in sorted(expected_hook_events(omit_permission_surface=omit_permission_surface)):
         if json_key not in hooks:
             issues.append(f"Missing hook registration for {json_key} in settings.json")
     return issues
@@ -381,6 +397,8 @@ def build_hook_registration(bash_key: str) -> list[dict[str, Any]]:
 
 def reconcile_settings_hooks(
     settings: dict[str, Any],
+    *,
+    omit_permission_surface: bool = False,
 ) -> tuple[dict[str, Any], ReconcileResult]:
     """Return a new settings dict with every missing wired hook registered.
 
@@ -394,6 +412,8 @@ def reconcile_settings_hooks(
 
     Args:
         settings: Parsed contents of a settings.json (may be empty/partial).
+        omit_permission_surface: The project opted out of the PermissionRequest
+            forwarder, so it is not re-added.
 
     Returns:
         ``(new_settings, ReconcileResult)`` where ``new_settings`` is a shallow
@@ -404,11 +424,12 @@ def reconcile_settings_hooks(
     existing_hooks = new_settings.get("hooks")
     new_hooks: dict[str, Any] = dict(existing_hooks) if isinstance(existing_hooks, dict) else {}
 
+    expected = expected_hook_events(omit_permission_surface=omit_permission_surface)
     events_added: list[str] = []
-    for json_key in sorted(HOOK_EVENTS_IN_SETTINGS.keys()):
+    for json_key in sorted(expected):
         if json_key in new_hooks:
             continue
-        new_hooks[json_key] = build_hook_registration(HOOK_EVENTS_IN_SETTINGS[json_key])
+        new_hooks[json_key] = build_hook_registration(expected[json_key])
         events_added.append(json_key)
 
     new_settings["hooks"] = new_hooks

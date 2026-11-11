@@ -194,6 +194,10 @@ from claude_code_hooks_daemon.utils.hook_registration import (
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_document
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
+from claude_code_hooks_daemon.utils.permission_surface import (
+    daemon_permission_surface,
+    read_omit_permission_surface,
+)
 from claude_code_hooks_daemon.utils.plugin_hooks import ACKNOWLEDGED_PLUGINS_OPTION, health_lines
 from claude_code_hooks_daemon.utils.relay_host import relay_fix_subcommand
 from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
@@ -1836,7 +1840,11 @@ def check_hook_registration_warnings(project_path: Path) -> list[str]:
         return []
 
     warnings: list[str] = []
-    warnings.extend(validate_settings_hooks(settings))
+    warnings.extend(
+        validate_settings_hooks(
+            settings, omit_permission_surface=read_omit_permission_surface(settings_path)
+        )
+    )
     warnings.extend(detect_duplicate_hooks(settings, local_settings))
     warnings.extend(detect_local_hooks_misplacement(local_settings))
     warnings.extend(validate_hook_commands(settings))
@@ -4705,6 +4713,7 @@ def cmd_settings_merge(args: argparse.Namespace) -> int:
         Path(args.client),
         Path(args.new_default),
         Path(old_default) if old_default else None,
+        omit_permission_surface=read_omit_permission_surface(Path(args.client)),
     )
 
     if outcome.escalated:
@@ -4733,9 +4742,38 @@ def cmd_settings_merge(args: argparse.Namespace) -> int:
         for label, keys in (
             ("upgraded", report.defaults_upgraded),
             ("delivered", report.keys_delivered),
+            ("removed (daemon.omit_permission_surface)", report.surface_removed),
         ):
             if keys:
                 print(f"settings.json: {label} {', '.join(keys)}")
+    return 0
+
+
+PERMISSION_SURFACE_NOTICE = (
+    "These entries lower nothing by themselves. They are the daemon-owned "
+    "PermissionRequest hook and permissions.deny rules that "
+    "daemon.omit_permission_surface removes from a project. Merge them into the "
+    "user-level settings.json of sessions that should keep those protections; "
+    "nothing was written."
+)
+
+
+def cmd_permission_surface(args: argparse.Namespace) -> int:
+    """Print the daemon-owned permission surface as a settings.json fragment.
+
+    Read-only: writes no file and takes no target path. The JSON goes to stdout
+    so it can be pasted as it is; the notice goes to stderr so stdout stays a
+    valid settings fragment.
+
+    Args:
+        args: Parsed CLI arguments (none are used).
+
+    Returns:
+        Always 0.
+    """
+    del args
+    print(PERMISSION_SURFACE_NOTICE, file=sys.stderr)
+    print(json.dumps(daemon_permission_surface(), indent=2))
     return 0
 
 
@@ -8570,7 +8608,9 @@ def cmd_reconcile_settings(args: argparse.Namespace) -> int:
     else:
         settings = {}
 
-    new_settings, result = reconcile_settings_hooks(settings)
+    new_settings, result = reconcile_settings_hooks(
+        settings, omit_permission_surface=read_omit_permission_surface(path)
+    )
 
     if check:
         if result.changed:
@@ -12185,6 +12225,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser_settings_merge.set_defaults(func=cmd_settings_merge)
+
+    # permission-surface command (Plan 00474)
+    parser_permission_surface = subparsers.add_parser(
+        "permission-surface",
+        help=(
+            "Print, as settings.json JSON, the PermissionRequest hook and deny rules "
+            "daemon.omit_permission_surface removes (read-only; for user-level settings)"
+        ),
+    )
+    parser_permission_surface.set_defaults(func=cmd_permission_surface)
 
     # Plan 00359: the release pipeline's slate-clean gate.
     parser_release_slate = subparsers.add_parser(

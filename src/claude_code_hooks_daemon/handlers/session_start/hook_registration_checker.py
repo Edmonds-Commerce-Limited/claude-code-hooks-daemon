@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     validate_hook_commands,
     validate_settings_hooks,
 )
+from claude_code_hooks_daemon.utils.permission_surface import read_omit_permission_surface
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 from claude_code_hooks_daemon.utils.settings_repair import (
     RepairResult,
@@ -167,7 +168,14 @@ class HookRegistrationCheckerHandler(SessionStartVerifiable, SessionStartHandler
         local_settings = self._read_json_file(project_root / _CLAUDE_DIR / _SETTINGS_LOCAL_FILE)
 
         issues: list[str] = []
-        issues.extend(validate_settings_hooks(settings))
+        issues.extend(
+            validate_settings_hooks(
+                settings,
+                omit_permission_surface=read_omit_permission_surface(
+                    project_root / _CLAUDE_DIR / _SETTINGS_FILE
+                ),
+            )
+        )
         issues.extend(detect_duplicate_hooks(settings, local_settings))
         issues.extend(detect_local_hooks_misplacement(local_settings))
         issues.extend(validate_hook_commands(settings))
@@ -243,7 +251,12 @@ class HookRegistrationCheckerHandler(SessionStartVerifiable, SessionStartHandler
 
         # Run all validations
         all_issues: list[str] = []
-        all_issues.extend(validate_settings_hooks(settings))
+        all_issues.extend(
+            validate_settings_hooks(
+                settings,
+                omit_permission_surface=read_omit_permission_surface(claude_dir / _SETTINGS_FILE),
+            )
+        )
         all_issues.extend(detect_duplicate_hooks(settings, local_settings))
         all_issues.extend(detect_local_hooks_misplacement(local_settings))
         all_issues.extend(validate_hook_commands(settings))

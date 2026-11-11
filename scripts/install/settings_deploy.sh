@@ -54,6 +54,24 @@ SETTINGS_NEEDS_ATTENTION=0
 export SETTINGS_NEEDS_ATTENTION
 
 #
+# _sd_omit_permission_surface() - Is daemon.omit_permission_surface switched on?
+#
+# A coarse text test on the project config beside the settings file, used only
+# to decide whether the plain-copy shortcuts may be taken (Plan 00474). The
+# merge CLI reads the value properly and is the authority.
+#
+# Args:
+#   $1 - target: the client's settings.json
+# Returns: 0 when the config opts in, 1 otherwise (including no config).
+#
+_sd_omit_permission_surface() {
+    local config
+    config="$(dirname "$1")/hooks-daemon.yaml"
+    [ -f "$config" ] &&
+        grep -Eq '^[[:space:]]+omit_permission_surface:[[:space:]]*true([[:space:]]|$)' "$config"
+}
+
+#
 # deploy_settings_json() - Merge settings.json, reporting anything it changes
 #
 # The daemon owns the wired-hook block; the client owns everything else in the
@@ -88,9 +106,19 @@ deploy_settings_json() {
         return 0
     fi
 
+    # Plan 00474: with daemon.omit_permission_surface on, the shipped file is NOT
+    # the answer (it carries the PermissionRequest hook and the deny rules the
+    # project opted out of), so the plain-copy shortcuts below are skipped and
+    # the merge, which knows the switch, does the work. The python side is the
+    # authority on the value; this grep only decides whether to take the shortcut.
+    local omit_surface=0
+    if _sd_omit_permission_surface "$target" && [ -n "$venv_python" ] && [ -x "$venv_python" ]; then
+        omit_surface=1
+    fi
+
     # Nothing on disk to lose, so there is nothing to protect and nothing to
     # merge: the shipped file IS the answer.
-    if [ ! -f "$target" ]; then
+    if [ ! -f "$target" ] && [ "$omit_surface" -eq 0 ]; then
         if ! cp "$source" "$target"; then
             print_error "Could not deploy settings.json to $target - aborting"
             return 1
@@ -103,8 +131,17 @@ deploy_settings_json() {
     # returns before the interpreter check below — otherwise the commonest case
     # of all, a project already current, would escalate for want of a tool it
     # never needed.
-    if cmp -s "$source" "$target"; then
+    if [ "$omit_surface" -eq 0 ] && cmp -s "$source" "$target"; then
         print_verbose "settings.json already matches the daemon's"
+        return 0
+    fi
+
+    # A first install under the switch has no client file to back up or merge
+    # into; the merge CLI writes it (minus the permission surface).
+    if [ ! -f "$target" ]; then
+        "$venv_python" -m claude_code_hooks_daemon.daemon.cli settings-merge \
+            --client "$target" --new-default "$source" || return 1
+        print_success "Installed settings.json (permission surface omitted)"
         return 0
     fi
 
