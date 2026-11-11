@@ -43,11 +43,11 @@ The work adds a `session-state --json --session ID` command and a `--watch` form
 
 - [x] ✅ **Task 3.1**: `session-state --json --session ID`, read-only, fail-open on a missing record.
 - [x] ✅ **Task 3.2**: `--watch` stream, one JSON line per change.
-- [ ] ⬜ **Task 3.3**: Measure run time per call; keep it cheap for per-hook use.
+- [x] ✅ **Task 3.3**: Measure run time per call; keep it cheap for per-hook use.
 
 ### Phase 4: Contract
 
-- [ ] ⬜ **Task 4.1**: Document the contract (versioning rule, compatibility promise) and ship the schemas in the release; release note and manifest entry.
+- [x] ✅ **Task 4.1**: Document the contract (versioning rule, compatibility promise) and ship the schemas in the release; release note and manifest entry.
 - [ ] ⬜ **Task 4.2**: Tell the consuming team the plan number, the schema location and the version to pin.
 
 ## Success Criteria

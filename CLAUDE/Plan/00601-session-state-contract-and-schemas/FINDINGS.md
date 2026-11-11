@@ -21,3 +21,18 @@ The implementing agent reported this answer in one sentence; its own longer writ
 | usage-ceiling pause      | read through the `usage-pause` verb |
 
 The command reads them through `core/session_state_document.py`; consumers never read the files.
+
+## Task 3.3: cost per call
+
+Measured on this daemon's own `untracked/` (4.1 GB directory; `stop-events.jsonl` 1.0 MB, so the bounded 256 KiB tail is fully used), best of 10-15 in-process runs, interpreter start-up excluded:
+
+| What                                                                     | Best      |
+| ------------------------------------------------------------------------ | --------- |
+| `build_session_state`, session with a recorded stop                      | 0.45 ms   |
+| `build_session_state`, unknown session (scans the whole 256 KiB tail)    | 1.65 ms   |
+| `cmd_session_state --json` end to end, before the fix (daemon running)   | 36.5 ms   |
+| `cmd_session_state --json` end to end, after the fix                     | 25.4 ms   |
+
+The document build is not the cost. The profile showed `get_project_path` running twice per call (once for the untracked directory, once inside the IPC helper), and each run validates the whole config through pydantic (about 25 ms, mostly 11,842 snake-case regex substitutions). The command now resolves the project once, for `--json` and for every poll of `--watch` (before, `--watch` paid it on every poll). Pinned by `TestPerCallCost` in `tests/unit/daemon/test_cli_session_state.py`.
+
+The remaining ~25 ms is that one config validation, shared by every `hooks-daemon` command; it is under the 100 ms target and is not changed here.

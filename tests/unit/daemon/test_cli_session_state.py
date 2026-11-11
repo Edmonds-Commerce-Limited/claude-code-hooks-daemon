@@ -106,6 +106,43 @@ class TestSessionStateCommand:
         assert "s1" in capsys.readouterr().out
 
 
+class TestPerCallCost:
+    """Resolving the project validates the whole config (about 25 ms), so once per call."""
+
+    def test_one_call_resolves_the_project_once(self, tmp_path: Path) -> None:
+        with patch(f"{_CLI}.get_project_path", return_value=str(tmp_path)) as resolve:
+            _run_with_resolver(_args("--json", "--session", "s1"), tmp_path)
+        assert resolve.call_count == 1
+
+    def test_watch_resolves_the_project_once_for_every_poll(self, tmp_path: Path) -> None:
+        sleeps: list[float] = []
+
+        def _sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            if len(sleeps) >= 3:
+                raise KeyboardInterrupt
+
+        with (
+            patch(f"{_CLI}.time.sleep", side_effect=_sleep),
+            patch(f"{_CLI}.get_project_path", return_value=str(tmp_path)) as resolve,
+        ):
+            _run_with_resolver(_args("--watch", "--session", "s1"), tmp_path)
+        assert len(sleeps) == 3
+        assert resolve.call_count == 1
+
+
+def _run_with_resolver(args: argparse.Namespace, tmp_path: Path) -> None:
+    """Run the command with only the project resolver left to the caller's patch."""
+    with (
+        patch(f"{_CLI}._daemon_untracked_dir", return_value=tmp_path),
+        patch(f"{_CLI}._resolve_socket_path", return_value="/tmp/sock"),
+        patch(f"{_CLI}._resolve_pid_path", return_value="/tmp/pid"),
+        patch(f"{_CLI}.read_pid_file", return_value=123),
+        patch(f"{_CLI}.send_daemon_request", return_value=_modes_response()),
+    ):
+        cmd_session_state(args)
+
+
 class TestWatch:
     def test_watch_streams_one_line_per_change_until_interrupted(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
