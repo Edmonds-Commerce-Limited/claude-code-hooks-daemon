@@ -87,9 +87,11 @@ _COMMAND_SEPARATORS: Final[str] = r";&|\n\r"
 _ARGUMENT_GAP: Final[str] = r"(?>[ \t]+)"
 # The text between an `echo`/`printf` and the path it echoes: any run of
 # non-separator characters, where a whole substitution is one opaque unit and
-# the start of one is never consumed as a plain character.
+# the start of one is never consumed as a plain character. A `$(...)` unit may
+# hold one level of nested parentheses, which also covers arithmetic `$((...))`.
 _ECHO_ARGUMENT_GAP: Final[str] = (
-    r"(?:\$\([^()]*\)|`[^`]*`|[<>]\([^()]*\)" rf"|(?!\$\(|`|[<>]\()[^{_COMMAND_SEPARATORS}])*"
+    r"(?:\$\((?:[^()]|\([^()]*\))*\)|`[^`]*`|[<>]\([^()]*\)"
+    rf"|(?!\$\(|`|[<>]\()[^{_COMMAND_SEPARATORS}])*"
 )
 
 # A `-name` pattern carrying this many consecutive literal digits is naming ONE

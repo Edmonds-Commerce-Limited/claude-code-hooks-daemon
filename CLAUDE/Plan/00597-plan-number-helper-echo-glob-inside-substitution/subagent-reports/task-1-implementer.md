@@ -6,3 +6,7 @@
 - Tests: new file tests/unit/handlers/pre_tool_use/test_plan_number_helper_echo_glob_substitution.py (13 pass); the three existing plan_number_helper test files plus it: 268 pass.
 - Release note: CLAUDE/UPGRADES/UNRELEASED/release-notes/053-plan-number-helper-echo-glob-inside-substitution.md.
 - `llm_qa.py changed`: 42/42 PASSED.
+
+## Review fixes
+
+Suggestion 2 (arithmetic or nested parentheses): the `$(...)` alternative of `_ECHO_ARGUMENT_GAP` now accepts one level of nested parentheses, which also covers arithmetic `$((...))`. Three handle()-level DENY tests added first (RED: 3 failed), then GREEN. The #198 reproduction still allows. Suggestion 1 not implemented as instructed. test_plan_number_helper*.py: 271 passed.

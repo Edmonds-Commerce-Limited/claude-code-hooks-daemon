@@ -72,6 +72,9 @@ class TestEchoDiscoveryStillDenied:
             f"echo `ls -d {PLAN_DIR}/0*`",
             f'echo "$(ls -d {PLAN_DIR}/* | tail -1)"',
             f'echo "$(ls {PLAN_DIR}/0*)" {PLAN_DIR}/*',
+            f"echo $((1+2)) {PLAN_DIR}/*",
+            f'echo "$(( 1 + 1 ))" {PLAN_DIR}/0*',
+            f"echo $(foo (bar)) {PLAN_DIR}/*",
         ],
     )
     def test_denied(self, tmp_path: Path, command: str) -> None:
