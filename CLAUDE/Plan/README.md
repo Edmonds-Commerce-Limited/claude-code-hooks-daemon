@@ -8,6 +8,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00597: plan number helper echo glob inside substitution](00597-plan-number-helper-echo-glob-inside-substitution/PLAN.md) - In Progress (GitHub #198: a grep's one-plan glob inside `echo "$(…)"` is read as an echoed discovery glob)
+
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
 - [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - In Progress (DESIGN.md draft written, awaiting client-seat review; owner request via a client team: redesign the whole branch lifecycle (birth, finish, proof of merge, delete, park, owner) from nine failure classes seen in multi-agent client use, plus letting a client follow a daemon branch tip with a one-step return to the last tag; design first, no guard change ships before review)
@@ -294,11 +296,11 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Plan Statistics
 
-- **Total Plans Created**: 596 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 597 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 504 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 69 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 70 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
