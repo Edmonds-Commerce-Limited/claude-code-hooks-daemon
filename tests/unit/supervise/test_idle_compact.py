@@ -76,12 +76,14 @@ def _write_sidecar(
     )
 
 
-def _decide(sidecar_dir: Path, machine, *, now: float, dry_run: bool = False, **kw: object):
+def _decide(
+    sidecar_dir: Path, machine, *, now: float, dry_run: bool = False, true_idle: bool = True
+):
     freshness = _mod.CompactPolicy().freshness_seconds
     return _mod.decide_once(
         machine,
         sidecar_dir=sidecar_dir,
-        facts=_facts(now, **kw),
+        facts=_facts(now, true_idle=true_idle),
         dry_run=dry_run,
         freshness_seconds=freshness,
     )
