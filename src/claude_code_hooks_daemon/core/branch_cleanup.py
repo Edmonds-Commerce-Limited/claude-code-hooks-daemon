@@ -298,6 +298,37 @@ def _holds_nothing(root: Path, entry: str) -> bool:
     return entry.endswith("/") and _empty_tree(root / entry.rstrip("/"))
 
 
+def _only_main_links(root: Path, entry: str, main: Path | None) -> bool:
+    """Whether ``entry`` is a directory holding only directories and links into the main checkout.
+
+    A ``worktree_create`` symlink-mode seed points at the main checkout's own
+    file, so unlinking it loses nothing. A link counts only when it resolves to
+    an existing path inside ``main`` and outside the worktree being removed;
+    a dangling link, a link elsewhere and any real file all keep the entry a blocker.
+    """
+    if main is None or not entry.endswith("/"):
+        return False
+    return _links_only_tree(root / entry.rstrip("/"), main.resolve(), root.resolve())
+
+
+def _links_only_tree(path: Path, main: Path, worktree: Path) -> bool:
+    """A real directory whose subtree holds only directories and main-checkout links."""
+    if path.is_symlink():
+        resolved = path.resolve()
+        return (
+            resolved.exists()
+            and path_is_relative_to(resolved, main)
+            and not path_is_relative_to(resolved, worktree)
+        )
+    if not path.is_dir():
+        return False
+    try:
+        children = list(path.iterdir())
+    except OSError:
+        return False
+    return all(_links_only_tree(child, main, worktree) for child in children)
+
+
 def _empty_tree(path: Path) -> bool:
     """A real directory whose subtree holds only directories (an unreadable one does not)."""
     if path.is_symlink() or not path.is_dir():
@@ -393,10 +424,12 @@ def worktree_blocker_groups(
     if ignored.returncode != 0:
         return ((*dirty, f"<git ls-files failed: {ignored.stderr.strip()}>"), ())
     entries = [e for line in ignored.stdout.splitlines() if line for e in _expand(path, line)]
+    main = _main_checkout(path)
     undecided = [
         entry
         for entry in entries
         if not _is_symlink(path, entry)
+        and not _only_main_links(path, entry, main)
         and not is_regenerable(entry, regenerable)
         and not _holds_nothing(path, entry)
         and not _is_generated_daemon_env(path, entry)

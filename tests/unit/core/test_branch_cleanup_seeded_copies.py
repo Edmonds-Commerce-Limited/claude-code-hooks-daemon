@@ -6,6 +6,7 @@ Real repositories: the subject is git's ignore semantics plus the seed list the
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -188,6 +189,61 @@ class TestSeededDirectoryCopy:
         path = self._seeded_directory(repo)
         (path / _SEED_DIR / "a.txt").unlink()
         assert "differs from its source" in worktree_blockers(path, _REGENERABLE)[0]
+
+
+class TestSymlinkSeedIntoMainCheckout:
+    """A link whose target is the main checkout's own file holds nothing to lose."""
+
+    def _ignore_idea(self, repo: Path) -> None:
+        exclude = repo / ".git" / "info" / "exclude"
+        exclude.write_text(exclude.read_text(encoding="utf-8") + ".idea/\n", encoding="utf-8")
+
+    def _link(self, path: Path, target: Path) -> None:
+        (path / ".idea").mkdir()
+        (path / ".idea" / "ds.xml").symlink_to(os.path.relpath(target, path / ".idea"))
+
+    def _main_file(self, repo: Path) -> Path:
+        (repo / ".idea").mkdir()
+        (repo / ".idea" / "ds.xml").write_text("x\n", encoding="utf-8")
+        return repo / ".idea" / "ds.xml"
+
+    def test_a_link_to_the_main_checkouts_file_is_not_a_blocker(self, repo: Path) -> None:
+        self._ignore_idea(repo)
+        target = self._main_file(repo)
+        path = _worktree(repo)
+        self._link(path, target)
+        assert worktree_blockers(path, _REGENERABLE) == ()
+
+    def test_a_dangling_link_still_blocks(self, repo: Path) -> None:
+        self._ignore_idea(repo)
+        path = _worktree(repo)
+        self._link(path, repo / ".idea" / "missing.xml")
+        assert worktree_blockers(path, _REGENERABLE) == (".idea/",)
+
+    def test_a_link_outside_the_main_checkout_still_blocks(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        self._ignore_idea(repo)
+        elsewhere = tmp_path / "elsewhere.xml"
+        elsewhere.write_text("x\n", encoding="utf-8")
+        path = _worktree(repo)
+        self._link(path, elsewhere)
+        assert worktree_blockers(path, _REGENERABLE) == (".idea/",)
+
+    def test_a_link_into_the_worktree_itself_still_blocks(self, repo: Path) -> None:
+        self._ignore_idea(repo)
+        path = _worktree(repo)
+        (path / "real.xml").write_text("work\n", encoding="utf-8")
+        self._link(path, path / "real.xml")
+        assert ".idea/" in worktree_blockers(path, _REGENERABLE)
+
+    def test_a_real_file_beside_the_link_still_blocks(self, repo: Path) -> None:
+        self._ignore_idea(repo)
+        target = self._main_file(repo)
+        path = _worktree(repo)
+        self._link(path, target)
+        (path / ".idea" / "mine.xml").write_text("work\n", encoding="utf-8")
+        assert worktree_blockers(path, _REGENERABLE) == (".idea/",)
 
 
 class TestSourceReachedThroughASymlink:
