@@ -8,8 +8,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00598: resolve venv prefers own slug over sibling view](00598-resolve-venv-prefers-own-slug-over-sibling-view/PLAN.md) - In Progress (GitHub #199: a sibling view's venv ties on lock_hash and its failed probe warns on every cache miss)
-
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
 - [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - In Progress (DESIGN.md draft written, awaiting client-seat review; owner request via a client team: redesign the whole branch lifecycle (birth, finish, proof of merge, delete, park, owner) from nine failure classes seen in multi-agent client use, plus letting a client follow a daemon branch tip with a one-step return to the last tag; design first, no guard change ships before review)
@@ -186,6 +184,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00598: resolve venv prefers own slug over sibling view](Completed/00598-resolve-venv-prefers-own-slug-over-sibling-view/PLAN.md) - Complete at merge `81ebd9bf9` + CI fix `0be1b9d19` (main CI run 42967283894 green) + the archiving commit (GitHub #199, closed: an own-slug venv is probed first among equal ranks; a failing venv of another path's slug is skipped without the drift warning; release note 054)
+
 - [00597: plan number helper echo glob inside substitution](Completed/00597-plan-number-helper-echo-glob-inside-substitution/PLAN.md) - Complete at `fe34001a3` (main CI run 42948971640 green) + the archiving commit (GitHub #198, closed: the echo glob rule steps over a substitution; a five-digit plan glob names one plan; release note 053)
 
 - [00596: destructive git printed text captured or formatted](Completed/00596-destructive-git-printed-text-captured-or-formatted/PLAN.md) - Complete at `5638615ac` (main CI run 42936949523 green) + the archiving commit (GitHub #197, closed: a print-only capture or a formatter pipe is data only when the whole command just prints; release note 052)
@@ -242,8 +242,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00561: worktree sub-agents load the root CLAUDE.md twice](Completed/00561-worktree-claudemd-duplicate-load/PLAN.md) - Complete at merge `3d50b7077` + the archiving commit (#156: `claudeMdExcludes` skips the worktree-root `CLAUDE.md` copies, so a worktree agent loads the root file once; a test derives every worktree root from the code; no release-bound consequence; owner question Q1, whether to recommend or install it for clients, stays open)
 
-- [00556: secret guard bare dotted token mentions](Completed/00556-secret-guard-bare-dotted-token-mentions/PLAN.md) - Complete at merges `209c8d334`, `88d63f4b7`, `3b65a47dc`, `ef9a9042d`, `3ba274408` and the #145/#143 merges + the archiving commit (#141–#146, owner-approved: the secret-guard and write-protected-paths false positives fixed with every true-positive test still denying; release notes 012, 013, 014, 016, 018)
-
 - [00557: Claude Code idle compact enforcement](Completed/00557-claude-code-idle-compact-enforcement/PLAN.md) - Complete at merge `5577aee1d` + the archiving commit (owner request: idle compaction defaults on and only autoCompactEnabled:false, DISABLE_AUTO_COMPACT, DISABLE_COMPACT and FORCE_PROMPT_CACHING_5M switch it off; the optimal config check reports any disabler and the SessionStart sync writes idleCompaction:true only when absent; release note 011)
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
@@ -298,9 +296,9 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - **Total Plans Created**: 598 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 505 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 506 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 70 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 69 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

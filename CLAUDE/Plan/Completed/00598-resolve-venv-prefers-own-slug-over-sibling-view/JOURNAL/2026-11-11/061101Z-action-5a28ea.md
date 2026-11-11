@@ -1,0 +1,3 @@
+## 06:11 · action · — — delivered and archived
+
+Delivered and archived. Merged at `81ebd9bf9`; main CI was red afterwards for two reasons. First, `_rv_count_other_path_venvs` judged a venv by its exec bit, which the venv_interpreter_trust check rejects. Second, stale `subagent_full_qa_blocker` tests still expected `bin/hooks-daemon status` to be unseen after `afc1debf8`. Both were fixed on `worktree-fix-main-ci-py311-trust` (`6f4f8a401`, `0be1b9d19`). Targeted QA over `81ebd9bf9..HEAD` passed 41 of 42 checks; the one failure was the shared resolver's expected `[too-broad]` unmapped entry. Main CI run 42967283894 was green. #199 was commented and closed.

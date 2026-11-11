@@ -1,6 +1,6 @@
 # Plan 00598: resolve venv prefers own slug over sibling view
 
-**Status**: In Progress
+**Status**: Complete (2026-11-11)
 **Created**: 2026-11-11
 **Owner**: dev
 **Priority**: Medium
@@ -36,23 +36,34 @@ venv. The call succeeds; only the warning is wrong, and agents read it as a faul
 
 ### Phase 1: Fix (TDD)
 
-- [ ] ⬜ **Task 1.1**: slug-match tie-break in `_rv_pick_ranked_scan` and `_scan_rank`, kept
-  in step (a parity test if one exists for the pair)
-- [ ] ⬜ **Task 1.2**: no drift warning for a non-matching-slug candidate; the own-slug
-  warning is unchanged
-- [ ] ⬜ **Task 1.3**: release note
+- [x] ✅ **Task 1.1**: own-slug tie-break in `_rv_pick_ranked_scan` and in the Python
+  mirror's `_scan_sort_key` (`_scan_rank`, then own slug first)
+- [x] ✅ **Task 1.2**: no drift warning for a non-matching-slug candidate; the own-slug
+  warning is unchanged; the no-usable-venv error adds a line counting the skipped
+  other-path venvs
+- [x] ✅ **Task 1.3**: release note
 
 ### Phase 2: Delivery
 
-- [ ] ⬜ **Task 2.1**: independent review, merge, main CI green, close #199
+- [x] ✅ **Task 2.1**: independent review, merge, main CI green, close #199
 
 ## Success Criteria
 
-- [ ] The #199 reproduction prints no warning and resolves the same venv
-- [ ] A broken own-slug venv still warns
-- [ ] Release-bound consequences in the holding area: a release note in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+- [x] The #199 reproduction prints no warning and resolves the same venv
+- [x] A broken own-slug venv still warns
+- [x] Release-bound consequences in the holding area: a release note in
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (054)
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hash -->
+- Merged at `81ebd9bf9` (commits `b74c48571`, `40d1dcf61`). CI follow-up `6f4f8a401`
+  counts a skipped other-path venv by `venv_python_usable` rather than the exec bit.
+  Main CI run 42967283894 green at `0be1b9d19`.
+
+## Follow-ups
+
+- Existing before this plan, raised by the review: the shell scan still accepts a
+  working venv slugged for another path, while `paths.py` `_venv_slug_eligible`
+  rejects one. Low impact (the shell's choice only runs `paths.py`); unscheduled.
+- `_rv_venv_is_own_slug` matches the slug as a literal prefix where Python takes the
+  rightmost match; they differ only for a slug that itself contains `-pyNN-<hex>`.
