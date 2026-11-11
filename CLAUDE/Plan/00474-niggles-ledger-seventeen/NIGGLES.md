@@ -7460,6 +7460,14 @@ jsonschema; the `session-state` command itself does not import it.
 **Status**: ⬜ Open. Raise the floor to the first jsonschema that requires `referencing`. Do it with the
 lock file in one change, because a version-only edit marks the venv stale (N610).
 
+### N620 — R-LONG-RUNNING-NO-TIMEOUT advises on ordinary `git` commands
+
+**Source**: the first session with the Plan 00602 guard live, 11 November 2026.
+
+**Evidence**: `git pull`, `git merge`, `git mv ... && git commit` and `git push` each drew "R-LONG-RUNNING-NO-TIMEOUT: no timeout on git" as an advisory. These are normally quick, and the owner asked for a timeout or a background run only for commands that may exceed about 30 seconds. A hint on every git call trains the reader to skip it, including the real deny.
+
+**Status**: ⬜ Open. Treat `git` as a known-fast command unless the verb is slow (`clone`, `fetch` of a large repo, `gc`), or drop the no-timeout advisory entirely and keep only the deny shapes.
+
 ### N609 — a dangling legacy `untracked/venv` symlink survives install and upgrade
 
 **Source**: Plan 00594 release housekeeping (10 November 2026).
