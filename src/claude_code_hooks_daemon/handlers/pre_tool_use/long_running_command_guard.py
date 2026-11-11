@@ -195,6 +195,10 @@ class LongRunningCommandGuardHandler(PreToolUseHandlerBase):
             is never judged.
     """
 
+    #: Ships off (see the module docstring); the template and the expected
+    #: opt-in set in ``test_default_enabled_template_consistency`` agree.
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.LONG_RUNNING_COMMAND_GUARD,
@@ -242,10 +246,6 @@ class LongRunningCommandGuardHandler(PreToolUseHandlerBase):
                 option = _OPTION_SLOW if _OPTION_SLOW in str(exc) else _OPTION_EXEMPT
                 problems[option] = f"long_running_command_guard {exc}"
         return problems
-
-    def get_default_enabled(self) -> bool:
-        """Ships off; see the module docstring. Keep consistent with the config template."""
-        return False
 
     def get_rules(self) -> list[Rule]:
         """The five rules this handler speaks with (four deny, one advisory)."""

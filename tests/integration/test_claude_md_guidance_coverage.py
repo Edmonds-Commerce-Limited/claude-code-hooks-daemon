@@ -80,6 +80,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "ProjectContainmentHandler": "T1 denies a write named outside the repo root",
     "PlanJournalGuardHandler": "T1 denies a journal entry written by hand",
     "SubagentCronDeleteBlockerHandler": "T1 denies CronDelete inside a subagent",
+    "LongRunningCommandGuardHandler": "T1 denies a long foreground Bash call in the main thread",
     "GithubIssueAssignmentGuardHandler": "T1 denies issue-tied work on an unclaimed or foreign issue",
     "WriteProtectedPathsHandler": "T1 denies a write, move onto or deletion of a read-only path",
     "ResumeGuardHandler": "T1 denies a cold resume of a large stopped agent under mode: deny",

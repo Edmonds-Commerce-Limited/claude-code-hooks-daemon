@@ -83,6 +83,10 @@ _EXPECTED_MAIN: frozenset[str] = frozenset(
         "goal-loop-detector",
         # Plan 00558 Task 4.4: judges the coordinator's own stop.
         "branch-stop-guard",
+        # Plan 00602: only the main thread's foreground call blocks the owner's
+        # messages; a subagent's Bash call blocks nobody, and `PreToolUse` fires
+        # for both roles, so MAIN is the whole role test.
+        "long-running-command-guard",
     }
 )
 

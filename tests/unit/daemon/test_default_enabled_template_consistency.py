@@ -66,6 +66,9 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     # Plan 00471 L9: a heuristic round count, dogfooded in the daemon's own
     # repository before any client gets it (Fable ruling, owner-delegated).
     "review_round_advisor",
+    # Plan 00602: a project that runs suites in the foreground on purpose keeps
+    # it off; enabled in the daemon's own repository first.
+    "long_running_command_guard",
 }
 
 
