@@ -7417,7 +7417,8 @@ overrule. Shape: one schema per `--json` output (session-state, mode-history, th
 with a versioned `$id` and a `schema_version` field in every document; semver, a breaking change is a new
 major; schema the CLI output, not the `untracked/` file layout; ship the schemas in the release; the
 daemon's own tests validate every output against them; consumers pin a major and refuse an unknown one.
-Not independently confirmed with the owner by this session.
+Confirmed by the owner in this session on 11 November 2026 (a one-word "confirmed" after the relayed ask;
+the choice of JSON Schema over OpenAPI was part of what was relayed).
 
 ### N617 — a perf-sweep timing test failed once on CI at 1.59s against a 1.5s ceiling
 
