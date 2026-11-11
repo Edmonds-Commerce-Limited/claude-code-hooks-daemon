@@ -53,6 +53,16 @@ handlers:
       enabled: true
       priority: 40
 
+    long_running_command_guard:  # Plan 00602: deny a long foreground Bash call in the main thread
+      enabled: false  # opt-in
+      priority: 40
+      options:
+        mode: deny  # deny | advise | off
+        threshold_seconds: 30  # a timeout or sleep above this is a long command
+        # extra_slow_patterns: ['^deploy\.sh\b']  # added to the known-slow list
+        # extra_fast_programs: [mytool]  # added to the known-fast list
+        # exempt_patterns: []  # matched against the whole command
+
     # SAFETY HANDLERS (Priority 10-20) - HIGHLY RECOMMENDED
     destructive_git:       # Blocks git reset --hard, git clean -f, etc
       enabled: true

@@ -362,6 +362,14 @@ class HandlerID:
         config_key="self_matching_process_probe",
         display_name="block-self-matching-process-probe",
     )
+    # Long-running foreground command guard (Plan 00602): a foreground Bash call
+    # in the main thread blocks the owner's messages, so a wait, a long
+    # `timeout` or a known-slow program is sent to `run_in_background`.
+    LONG_RUNNING_COMMAND_GUARD = HandlerIDMeta(
+        class_name="LongRunningCommandGuardHandler",
+        config_key="long_running_command_guard",
+        display_name="long-running-command-guard",
+    )
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = HandlerIDMeta(
         class_name="QaSuppressionHandler",

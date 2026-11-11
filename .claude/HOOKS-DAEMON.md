@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (82 handlers)
+### PreToolUse (83 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -62,6 +62,7 @@
 | 40 | branch_creation_guard | BLOCKING | Hold the open work branches at ``branches.wip.cap``; warn on likely duplicates |
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
+| 40 | long_running_command_guard | BLOCKING | Send a likely-long foreground Bash call to ``run_in_background`` |
 | 42 | conflict_marker_commit_gate | BLOCKING | Deny a commit that would record a merge-conflict marker |
 | 42 | global_npm_advisor | NON-TERMINAL | Advise on global npm/yarn package installations |
 | 42 | installed_plugin_edit_advisor | ADVISORY | Say so when a write lands in an installed Claude Code plugin's files |

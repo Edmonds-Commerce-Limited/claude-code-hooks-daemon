@@ -19,6 +19,7 @@ from .gh_pr_comments import GhPrCommentsHandler
 from .git_message_backtick import GitMessageBacktickHandler
 from .git_stash import GitStashHandler
 from .github_auto_close_keywords import GithubAutoCloseKeywordsHandler
+from .long_running_command_guard import LongRunningCommandGuardHandler
 from .markdown_organization import MarkdownOrganizationHandler
 from .merge_qa_advisor import MergeQaAdvisorHandler
 from .merge_to_main_approval import MergeToMainApprovalHandler
@@ -64,6 +65,7 @@ __all__ = [
     "GitMessageBacktickHandler",
     "GitStashHandler",
     "GithubAutoCloseKeywordsHandler",
+    "LongRunningCommandGuardHandler",
     "MarkdownOrganizationHandler",
     "MergeQaAdvisorHandler",
     "MergeToMainApprovalHandler",

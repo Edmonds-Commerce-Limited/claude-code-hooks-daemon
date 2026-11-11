@@ -124,14 +124,20 @@ class TestTheCoordinatorsFullGateUnderAnArmedOrchestrator:
     def test_the_main_threads_full_gate_is_allowed_by_the_whole_chain(
         self, armed_router: EventRouter
     ) -> None:
-        result = _route(armed_router, _event("Bash", {"command": _FULL_GATE}))
+        # Run in the background: the long-running guard (Plan 00602), enabled in
+        # this repository, denies a foreground full gate in the main thread.
+        result = _route(
+            armed_router, _event("Bash", {"command": _FULL_GATE, "run_in_background": True})
+        )
         assert result.result.decision == Decision.ALLOW, result.result.reason
         assert _verdict(result, _ORCHESTRATOR) == Decision.ALLOW
 
     def test_the_orchestrator_does_not_record_the_full_gate_as_a_would_be_denial(
         self, armed_router: EventRouter
     ) -> None:
-        result = _route(armed_router, _event("Bash", {"command": _FULL_GATE}))
+        result = _route(
+            armed_router, _event("Bash", {"command": _FULL_GATE, "run_in_background": True})
+        )
         assert "would have been denied" not in " ".join(result.result.context)
 
 

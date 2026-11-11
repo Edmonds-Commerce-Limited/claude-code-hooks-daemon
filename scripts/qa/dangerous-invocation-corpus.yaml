@@ -156,11 +156,16 @@ rows:
   - id: supply-npm-install
     command: "npm install left-pad"
     axis: remote-code-via-package-manager
-    verdict: UNCOVERED-accepted
+    verdict: COVERED
     note: >-
-      ACCEPTED. F-GAP reports a broad install deny as high-noise and
-      recommends only the `--index-url`/`--registry` redirection deny above.
-      Blocking ordinary dependency installation would be suppressed quickly.
+      Denied in this repository by long_running_command_guard
+      (R-LONG-RUNNING-SLOW-COMMAND), which is on here and off by default: a
+      foreground install in the main thread is a long command, so it must run
+      with run_in_background. That is a session-blocking rule, NOT a
+      supply-chain control. F-GAP reports a broad install deny as high-noise
+      and recommends only the `--index-url`/`--registry` redirection deny
+      above, so a project that does not enable the guard still allows this
+      command, as intended.
 
   # ------------------------------------------------ remote code run without inspection
   - id: remote-code-sh-c-substitution

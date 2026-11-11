@@ -580,6 +580,15 @@ handlers:
 
 For the complete per-handler options reference (all handlers, all options, defaults, and examples), see **[Handler Reference](HANDLER_REFERENCE.md)**.
 
+### Long-running command guard
+
+`long_running_command_guard` (opt-in) denies a foreground Bash call in the main thread that looks
+long: a `timeout N` above the threshold, a sleep loop, `sleep N`, or a known-slow program. The deny
+gives the `run_in_background` form. It takes `mode` (`deny`, `advise`, `off`), `threshold_seconds`
+(default 30), `extra_slow_patterns`, `extra_fast_programs` and `exempt_patterns`; one call opts out
+with `MUST_RUN_FOREGROUND_BECAUSE="reason"; <command>`. Sub-agent calls are never judged. Options
+and rules: [Handler Reference](HANDLER_REFERENCE.md#long_running_command_guard).
+
 ### Listing every exception
 
 `hooks-daemon exceptions [--json]` lists what exempts something from a guard, with the reason each

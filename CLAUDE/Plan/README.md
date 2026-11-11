@@ -12,7 +12,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00603: supervisor idle compact at 30 percent](00603-supervisor-idle-compact-at-30-percent/PLAN.md) - Not Started (verify Claude Code's idleCompaction, and add a supervisor compaction at true idle once context reaches 30%)
 
-- [00602: long running command guard](00602-long-running-command-guard/PLAN.md) - Not Started (main-thread Bash that may exceed 30 seconds must run in the background or carry a timeout)
+- [00602: long running command guard](00602-long-running-command-guard/PLAN.md) - In Progress (main-thread Bash that may exceed 30 seconds must run in the background or carry a timeout)
 
 - [00599: claude md ownership statement and hint drops](00599-claude-md-ownership-statement-and-hint-drops/PLAN.md) - In Progress (a `claude_md.ownership` toggle, on by default, plus hint drops where the tree should stay clean)
 

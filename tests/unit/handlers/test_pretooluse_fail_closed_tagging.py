@@ -164,6 +164,10 @@ _AUDITED_BLOCKING_ONLY_REASONS: dict[str, str] = {
     ),
     "comment_changelog": "Comment-content style gate (changelog narrative does not belong in code).",
     "comment_size": "Comment-length style gate, with its own MUST_EXCEED escape hatch.",
+    "long_running_command_guard": (
+        "Workflow gate (keeps the owner's messages unblocked), not a dangerous-action "
+        "guard; opt-in, with its own MUST_RUN_FOREGROUND_BECAUSE escape hatch."
+    ),
     "conflict_marker_commit_gate": (
         "History-integrity QA gate on a commit (a leftover merge-conflict marker), "
         "not a dangerous-action guard."

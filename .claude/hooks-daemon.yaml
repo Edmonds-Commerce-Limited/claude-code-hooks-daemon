@@ -780,6 +780,13 @@ handlers:
       enabled: true
       priority: 40
 
+    long_running_command_guard:  # Plan 00602: a long foreground Bash call blocks the owner's messages
+      enabled: true
+      priority: 40
+      options:
+        mode: deny
+        threshold_seconds: 30
+
     gh_issue_comments:     # Requires --comments flag for gh issue view
       enabled: true
       priority: 40
