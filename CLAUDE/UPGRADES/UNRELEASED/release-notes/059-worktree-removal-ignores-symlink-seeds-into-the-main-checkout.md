@@ -1,6 +1,6 @@
-# Fix: removing a worktree no longer blocks on a symlink seed that points at the main checkout
+# Callout: removing a worktree no longer blocks on a symlink seed that points at the main checkout
 
-**Plan**: none (client report)
+**Plan**: 00474
 **Audience**: client projects
 
 `git worktree remove` was denied by R-GIT-WORKTREE-REMOVE-FORCE ("holds 1 path(s) the removal would lose") when the only content of an ignored directory in the worktree was a `worktree_create` symlink-mode seed. The rule already recognised a copy-mode seed identical to its source, but not a link whose target is the main checkout's own file, and removing such a link loses nothing.
