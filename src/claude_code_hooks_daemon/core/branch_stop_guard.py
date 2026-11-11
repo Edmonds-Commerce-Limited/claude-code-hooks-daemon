@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     Pool,
     pool_of,
 )
+from claude_code_hooks_daemon.core.branch_park import BranchParkError, read_park_record
 from claude_code_hooks_daemon.core.branch_records import touched_by_session
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -172,6 +173,27 @@ def _unpushed(
         return True
     handed = _in_local_default(repo, tip, inventory.default_branch, budget)
     return None if handed is None else not handed
+
+
+def _handed_over_by_park(repo: Path, record: BranchRecord) -> bool:
+    """Whether the tip is the branch's recorded, uncleared park.
+
+    A parked branch has been handed over with a reason, so its tip being on no
+    remote (a sub-agent cannot push, or the park was made with no push) is not
+    abandonment. New work after the park moves the tip off the record, so the
+    branch is judged again. An unreadable record is not a park.
+    """
+    try:
+        park = read_park_record(repo, record.name)
+    except BranchParkError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="branch_stop_guard: the park record is unreadable, so the branch is judged "
+            "as if unparked rather than waved through on a git failure",
+        )
+        return False
+    return park is not None and park.sha == record.local_tip
 
 
 def _park_commands(record: BranchRecord) -> tuple[str, ...]:
@@ -321,7 +343,7 @@ def _judge_branch(
             )
         return findings, finished
     mode = config.stop_guard.unpushed_subagent if subagent and full else "block"
-    if mode == "off":
+    if mode == "off" or _handed_over_by_park(repo, record):
         return findings, finished
     unpushed = _unpushed(repo, record, inventory, budget)
     finished = finished and unpushed is not None

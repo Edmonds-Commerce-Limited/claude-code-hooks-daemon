@@ -53,6 +53,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.branch_keep import read_keeps
+from claude_code_hooks_daemon.core.branch_park import read_park_record
 from claude_code_hooks_daemon.core.branch_records import CREATOR_KEY
 from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.utils import git_sync
@@ -1149,6 +1150,13 @@ def _classify(
     row, verdict = undone[0]
     facts = _row_facts(row, context.moment)
     own: dict[str, Any] = {"ahead": verdict.ahead, "lines": verdict.lines}
+    if row.parked_reason is None and isinstance(local, _RefRow) and local.sha == row.sha:
+        # A park with no trailer commit lives only in the record; its age is the record's.
+        standing = read_park_record(run.repo, name)
+        if standing is not None and standing.sha == row.sha:
+            facts["parked_reason"] = standing.reason
+            facts["age_days"] = (context.moment - standing.parked_at) / _SECONDS_PER_DAY
+            return BranchRecord(state=BranchState.PARKED, **fixed, **facts, **own)
     if row.parked_reason is not None:
         return BranchRecord(state=BranchState.PARKED, **fixed, **facts, **own)
     stage = _stage(facts["age_days"], run.config)

@@ -38,7 +38,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     read_merge_proofs,
     worktrees_by_branch,
 )
-from claude_code_hooks_daemon.core.branch_park import read_park_record
+from claude_code_hooks_daemon.core.branch_park import ParkRecord, read_park_record
 from claude_code_hooks_daemon.daemon.branch_safety import TIER_UNPROVEN, matches_any_glob
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
@@ -384,21 +384,28 @@ def _with_standing_parks(repo: Path, refs: list[_Ref]) -> list[_Ref]:
     past, because its tip is an ancestor of the park commit.
     """
     standing = {
-        ref.name: record.sha
+        ref.name: record
         for ref in refs
         if ref.local and (record := read_park_record(repo, ref.name)) and record.sha == ref.tip
     }
-    return [
-        (
-            replace(ref, parked=True)
-            if not ref.local
-            and ref.name in standing
-            and not ref.parked
-            and _is_ancestor(repo, ref.tip, standing[ref.name])
-            else ref
-        )
-        for ref in refs
-    ]
+    return [_with_standing_park(repo, ref, standing) for ref in refs]
+
+
+def _with_standing_park(repo: Path, ref: _Ref, standing: dict[str, ParkRecord]) -> _Ref:
+    """``ref`` marked parked when a standing park covers it, else unchanged.
+
+    A local tip with a standing record but no park trailer is a park with no
+    commit: it is parked, and its age is the record's. A remote copy is parked
+    when it is the standing park's own past.
+    """
+    record = standing.get(ref.name)
+    if record is None or ref.parked:
+        return ref
+    if ref.local:
+        return replace(ref, parked=True, committed=float(record.parked_at))
+    if _is_ancestor(repo, ref.tip, record.sha):
+        return replace(ref, parked=True)
+    return ref
 
 
 def _owned_refs(repo: Path, refs: list[_Ref]) -> list[_Ref]:
