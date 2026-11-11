@@ -119,7 +119,8 @@ def test_bash_matching_venv_that_cannot_run_falls_through_to_the_next_rank(
     """The run-probe still applies to the best-ranked candidate."""
     current = _project_with_sources(tmp_path)
     untracked = tmp_path / "untracked"
-    broken = _make_venv(untracked / _SLUGGED, current)
+    # Only a venv slugged for THIS root is reported when it fails (GitHub #199).
+    broken = _make_venv(untracked / f"venv-{project_path_slug(tmp_path)}-py313-00000002", current)
     broken.write_text("#!/bin/bash\nexit 3\n")
     expected = _make_venv(untracked / _LEGACY, "sha256:stale")
 

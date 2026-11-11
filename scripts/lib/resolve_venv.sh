@@ -412,6 +412,53 @@ _rv_rank_scan_candidate() {
     fi
 }
 
+# _rv_project_path_slug <project_root>
+#
+# Echoes the filesystem-safe slug of the project root's physical path, as
+# paths.py's `project_path_slug` derives it: strip the leading `/`, `/` -> `_`,
+# drop characters outside [A-Za-z0-9_-], and when longer than 40 characters
+# keep 36 plus `-` plus the first 4 hex of the md5 of the full path. Echoes
+# nothing when the path cannot be resolved or the md5 tool is missing.
+_rv_project_path_slug() {
+    local abs slug md5
+    [ -d "$1" ] || return 0
+    abs="$(cd -P "$1" && pwd -P)" || return 0
+    slug="${abs#/}"
+    slug="${slug//\//_}"
+    slug="${slug//[^A-Za-z0-9_-]/}"
+    [ -n "$slug" ] || slug="root"
+    if [ "${#slug}" -gt 40 ]; then
+        if command -v md5sum > /dev/null; then
+            md5="$(printf '%s' "$abs" | md5sum)"
+        elif command -v md5 > /dev/null; then
+            md5="$(printf '%s' "$abs" | md5 -q)"
+        else
+            return 0
+        fi
+        slug="${slug:0:36}-${md5:0:4}"
+    fi
+    printf '%s\n' "$slug"
+}
+
+# _rv_venv_is_own_slug <venv_dir> <own_slug>
+#
+# Sets (no subshell): _RV_SCAN_OWN to 1 when the venv directory name carries
+# <own_slug> (`venv-<slug>-py{MM}-{hex}[-<host>]`), else 0; _RV_SCAN_SLUGGED to 1
+# when the name carries any slug, else 0 (legacy `venv-py{MM}-{hex}`).
+_rv_venv_is_own_slug() {
+    local name="${1##*/}" own_slug="$2"
+    local tail_re='py[0-9]+-[a-f0-9]+(-.+)?'
+    _RV_SCAN_OWN=0
+    _RV_SCAN_SLUGGED=0
+    if [[ "$name" =~ ^venv-py[0-9]+-[a-f0-9]+(-.+)?$ ]]; then
+        return 0
+    fi
+    _RV_SCAN_SLUGGED=1
+    if [ -n "$own_slug" ] && [[ "$name" =~ ^venv-${own_slug}-${tail_re}$ ]]; then
+        _RV_SCAN_OWN=1
+    fi
+}
+
 # _rv_pick_ranked_scan <daemon_dir> <python|python3>
 #
 # Echoes the first runnable untracked/venv-*/bin/<name> in rank order:
@@ -421,19 +468,31 @@ _rv_rank_scan_candidate() {
 # `_rv_pick_python` itself normally runs inside a caller's `$(...)`
 # subshell, so nothing downstream could read it back.
 _rv_pick_ranked_scan() {
-    local daemon_dir="$1" name="$2" rank candidate current_hash
+    local daemon_dir="$1" name="$2" rank own candidate current_hash own_slug
     current_hash="$(_rv_current_lock_hash "$daemon_dir")"
+    own_slug="$(_rv_project_path_slug "$daemon_dir")"
     for rank in 0 1 2; do
-        for candidate in "${daemon_dir}"/untracked/venv-*/bin/"$name"; do
-            [ -x "$candidate" ] || continue
-            _rv_rank_scan_candidate "${candidate%/bin/*}" "$current_hash"
-            [ "$_RV_SCAN_RANK" = "$rank" ] || continue
-            if venv_python_usable "$candidate"; then
-                echo "$candidate"
-                return 0
-            fi
-            echo "resolve_venv: candidate $candidate is executable but failed to run" \
-                "(${_RV_PROBE_OUTPUT:-no output}) -- skipping" >&2
+        # GitHub #199: within a rank, the venv slugged for THIS path is probed
+        # first (own=1), then the rest (own=0). A failed probe of a venv
+        # slugged for another path belongs to that view and is not reported.
+        for own in 1 0; do
+            for candidate in "${daemon_dir}"/untracked/venv-*/bin/"$name"; do
+                [ -x "$candidate" ] || continue
+                _rv_rank_scan_candidate "${candidate%/bin/*}" "$current_hash"
+                [ "$_RV_SCAN_RANK" = "$rank" ] || continue
+                _rv_venv_is_own_slug "${candidate%/bin/*}" "$own_slug"
+                [ "$_RV_SCAN_OWN" = "$own" ] || continue
+                if venv_python_usable "$candidate"; then
+                    echo "$candidate"
+                    return 0
+                fi
+                # Unknown own slug or a legacy un-slugged name: cannot tell, so warn.
+                if [ "$own" = 0 ] && [ -n "$own_slug" ] && [ "$_RV_SCAN_SLUGGED" = 1 ]; then
+                    continue
+                fi
+                echo "resolve_venv: candidate $candidate is executable but failed to run" \
+                    "(${_RV_PROBE_OUTPUT:-no output}) -- skipping" >&2
+            done
         done
     done
     return 1

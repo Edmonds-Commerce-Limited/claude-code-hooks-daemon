@@ -1119,6 +1119,20 @@ def _scan_rank(candidate_dir: Path, current_hash: str | None) -> int:
     return _SCAN_RANK_LEGACY
 
 
+def _scan_sort_key(
+    candidate_dir: Path, current_hash: str | None, current_slug: str
+) -> tuple[int, bool]:
+    """Sort key for the scan step: :func:`_scan_rank`, then own-slug before the rest.
+
+    Among candidates of equal rank, the venv slugged for THIS project path sorts
+    first (GitHub #199), so a sibling view's venv is not probed ahead of it.
+    """
+    return (
+        _scan_rank(candidate_dir, current_hash),
+        _parse_venv_dir_slug(candidate_dir.name) != current_slug,
+    )
+
+
 def _is_beneath(path: Path, root: Path) -> bool:
     """Whether ``path`` is ``root`` or lies under it, compared lexically on ``parts``.
 
@@ -1406,7 +1420,8 @@ def resolve_existing_venv_python_with_diagnostics(
         scan_current_slug = project_path_slug(daemon_path)
         scan_hash = _compute_project_lock_hash_stdlib(daemon_path)
         for candidate_dir in sorted(
-            sorted(untracked.glob("venv-*")), key=lambda d: _scan_rank(d, scan_hash)
+            sorted(untracked.glob("venv-*")),
+            key=lambda d: _scan_sort_key(d, scan_hash, scan_current_slug),
         ):
             scanned.append(str(candidate_dir / "bin" / "python"))
             eligible, slug_skip_reason = _venv_slug_eligible(candidate_dir, scan_current_slug)
