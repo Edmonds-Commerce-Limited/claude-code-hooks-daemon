@@ -23,6 +23,7 @@ from __future__ import annotations
 import copy
 import logging
 from collections.abc import Mapping
+from enum import Enum
 from pathlib import Path
 from typing import Any, Final
 
@@ -79,22 +80,36 @@ def read_omit_permission_surface(settings_path: Path) -> bool:
     carries a non-boolean value is also treated as off, and is logged at
     WARNING: the default keeps the protections, which is the safe direction.
     """
-    return read_permission_surface_setting(settings_path) is True
+    return read_permission_surface_setting(settings_path) is SwitchSetting.ON
 
 
-def read_permission_surface_setting(settings_path: Path) -> bool | None:
-    """The switch as written: True, False, or None when the project never set it.
+class SwitchSetting(Enum):
+    """What ``daemon.omit_permission_surface`` says in a project's config."""
+
+    #: No config file, or the key is not set. Nothing was asked for.
+    ABSENT = "absent"
+    #: ``true``: omit the daemon-owned permission surface.
+    ON = "on"
+    #: An explicit ``false``: the user switched the option back off.
+    OFF = "off"
+    #: The config exists but could not be read, or the value is not a boolean.
+    UNREADABLE = "unreadable"
+
+
+def read_permission_surface_setting(settings_path: Path) -> SwitchSetting:
+    """The switch as written, with an unreadable config as its own value.
 
     The merge needs the difference between "absent" and "explicitly false": only
     an explicit ``false`` (the user switching the option back off) restores deny
     rules the daemon removed earlier. An absent key leaves a client's
     ``permissions`` exactly as it was, so a config without the key behaves as it
-    did before the switch existed. Unreadable or malformed config is None and is
-    logged at WARNING, as in :func:`read_omit_permission_surface`.
+    did before the switch existed. An unreadable or malformed config is
+    ``UNREADABLE``, logged once at WARNING, and is not ``OFF``: it must not
+    restore anything, nor omit anything.
     """
     config_path = settings_path.parent / CONFIG_FILE_NAME
     if not config_path.is_file():
-        return None
+        return SwitchSetting.ABSENT
     try:
         with config_path.open(encoding="utf-8") as stream:
             document = safe_load_yaml(stream)
@@ -108,26 +123,26 @@ def read_permission_surface_setting(settings_path: Path) -> bool | None:
                 "switch is treated as off and the permission surface is kept"
             ),
         )
-        return None
+        return SwitchSetting.UNREADABLE
 
 
-def _switch_from_document(document: Any) -> bool | None:
+def _switch_from_document(document: Any) -> SwitchSetting:
     """Extract ``daemon.omit_permission_surface``; raise ValueError if malformed."""
     if document is None:
-        return None
+        return SwitchSetting.ABSENT
     if not isinstance(document, dict):
         raise ValueError("configuration is not a mapping")
     daemon = document.get("daemon")
     if daemon is None:
-        return None
+        return SwitchSetting.ABSENT
     if not isinstance(daemon, dict):
         raise ValueError("`daemon` is not a mapping")
     value = daemon.get(OMIT_KEY)
     if value is None:
-        return None
+        return SwitchSetting.ABSENT
     if not isinstance(value, bool):
         raise ValueError(f"daemon.{OMIT_KEY} must be true or false, got {value!r}")
-    return value
+    return SwitchSetting.ON if value else SwitchSetting.OFF
 
 
 def _is_daemon_forwarder(inner: Any) -> bool:

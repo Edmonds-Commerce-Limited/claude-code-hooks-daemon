@@ -82,6 +82,22 @@ class TestTheExitCodeTellsTheShellWhatHappened:
         assert cmd_settings_merge(_args(workspace)) == ESCALATION_EXIT_CODE
 
 
+class TestAnUnreadableSwitchConfigTouchesNothing:
+    """UNREADABLE is neither ON (strip) nor OFF (restore): permissions stay as they were."""
+
+    def test_deny_rules_are_neither_restored_nor_stripped(
+        self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        client_settings = {"permissions": {"deny": ["Read(./mine)"]}}
+        workspace["client"].write_text(json.dumps(client_settings), encoding="utf-8")
+        (workspace["client"].parent / "hooks-daemon.yaml").write_text(
+            "daemon: [unclosed\n", encoding="utf-8"
+        )
+        assert cmd_settings_merge(_args(workspace)) == 0
+        merged = json.loads(workspace["client"].read_text(encoding="utf-8"))
+        assert merged["permissions"] == {"deny": ["Read(./mine)"]}
+
+
 class TestWhatItPrints:
     def test_an_escalation_names_both_files(
         self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]
