@@ -7407,8 +7407,8 @@ last turn edge start/stop/stop_failure with error, usage five_hour/seven_day wit
 cheap per hook edge, ideally a `--watch` streaming one JSON line per change. Open: whether a main-thread
 usage-limit stop is recorded with its reset time.
 
-**Status**: ⬜ Open. Confirm the usage-limit stop recording first, then design the verb as a versioned
-contract (feature work, needs its own plan).
+**Status**: 🔄 Moved to Plan 00601 (session state contract and schemas), In Progress. Point 4 so far: a
+`rate_limit` StopFailure is recorded without a reset time; `resets_at` sits in `usage-snapshot.json`.
 
 **Owner's ask (relayed by the peer, 11 November 2026)**: a concrete versioned schema for the daemon's
 machine-read output, validated by the daemon itself. The owner suggested OpenAPI; the peer recommended
