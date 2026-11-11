@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00557: Claude Code idle compact enforcement](00557-claude-code-idle-compact-enforcement/PLAN.md) - Complete at merge `5577aee1d` + the archiving commit (owner request: idle compaction defaults on and only autoCompactEnabled:false, DISABLE_AUTO_COMPACT, DISABLE_COMPACT and FORCE_PROMPT_CACHING_5M switch it off; the optimal config check reports any disabler and the SessionStart sync writes idleCompaction:true only when absent; release note 011)
+
 - [00556: secret guard bare dotted token mentions](00556-secret-guard-bare-dotted-token-mentions/PLAN.md) - Complete at merges `209c8d334`, `88d63f4b7`, `3b65a47dc`, `ef9a9042d`, `3ba274408` and the #145/#143 merges + the archiving commit (#141–#146, owner-approved: the secret-guard and write-protected-paths false positives fixed with every true-positive test still denying; release notes 012, 013, 014, 016, 018)
 
 - [00555: self install venv python version lockout](00555-self-install-venv-python-version-lockout/PLAN.md) - Complete at merge `ed18bf779` + the archiving commit (the self-install venv was locked out after a system Python moved under it; venv checks compare the `pyvenv.cfg` major.minor, daemon-down access is read-only, Stops are bounded; release note 010)

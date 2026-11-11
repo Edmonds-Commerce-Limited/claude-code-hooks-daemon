@@ -10,8 +10,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00602: long running command guard](00602-long-running-command-guard/PLAN.md) - Not Started (main-thread Bash that may exceed 30 seconds must run in the background or carry a timeout)
 
-- [00601: session state contract and schemas](00601-session-state-contract-and-schemas/PLAN.md) - In Progress (a `session-state --json` command and versioned JSON Schemas for the daemon's machine-read output; niggle N616)
-
 - [00599: claude md ownership statement and hint drops](00599-claude-md-ownership-statement-and-hint-drops/PLAN.md) - In Progress (a `claude_md.ownership` toggle, on by default, plus hint drops where the tree should stay clean)
 
 - [00600: user prompt quality scan](00600-user-prompt-quality-scan/PLAN.md) - Not Started (research done; narrow GO in RESEARCH.md: one advisory handler for three deterministic facts, a gated bare approval, a pasted credential with an opt-in block, and a command a guard will refuse; no model-backed quality judge; Phase 1 measures on recorded transcripts before anything ships)
@@ -192,6 +190,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00601: session state contract and schemas](Completed/00601-session-state-contract-and-schemas/PLAN.md) - Complete at `896c8806b` + the archiving commit (niggle N616: `session-state --json` and `--watch`, versioned JSON Schemas shipped in the package, `schema_version` on `mode-history --json`, contract guide; release note 056; unreleased)
+
 - [00598: resolve venv prefers own slug over sibling view](Completed/00598-resolve-venv-prefers-own-slug-over-sibling-view/PLAN.md) - Complete at merge `81ebd9bf9` + CI fix `0be1b9d19` (main CI run 42967283894 green) + the archiving commit (GitHub #199, closed: an own-slug venv is probed first among equal ranks; a failing venv of another path's slug is skipped without the drift warning; release note 054)
 
 - [00597: plan number helper echo glob inside substitution](Completed/00597-plan-number-helper-echo-glob-inside-substitution/PLAN.md) - Complete at `fe34001a3` (main CI run 42948971640 green) + the archiving commit (GitHub #198, closed: the echo glob rule steps over a substitution; a five-digit plan glob names one plan; release note 053)
@@ -250,7 +250,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00561: worktree sub-agents load the root CLAUDE.md twice](Completed/00561-worktree-claudemd-duplicate-load/PLAN.md) - Complete at merge `3d50b7077` + the archiving commit (#156: `claudeMdExcludes` skips the worktree-root `CLAUDE.md` copies, so a worktree agent loads the root file once; a test derives every worktree root from the code; no release-bound consequence; owner question Q1, whether to recommend or install it for clients, stays open)
 
-- [00557: Claude Code idle compact enforcement](Completed/00557-claude-code-idle-compact-enforcement/PLAN.md) - Complete at merge `5577aee1d` + the archiving commit (owner request: idle compaction defaults on and only autoCompactEnabled:false, DISABLE_AUTO_COMPACT, DISABLE_COMPACT and FORCE_PROMPT_CACHING_5M switch it off; the optimal config check reports any disabler and the SessionStart sync writes idleCompaction:true only when absent; release note 011)
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -302,11 +301,11 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Plan Statistics
 
-- **Total Plans Created**: 598 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 602 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 506 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 507 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 69 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 72 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

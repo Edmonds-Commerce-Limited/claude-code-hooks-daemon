@@ -1,6 +1,6 @@
 # Plan 00601: session state contract and schemas
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-11
 **Owner**: joseph
 **Priority**: High
@@ -52,10 +52,10 @@ The work adds a `session-state --json --session ID` command and a `--watch` form
 
 ## Success Criteria
 
-- [ ] Point 4 is answered in writing with evidence, and the consuming team has it.
-- [ ] Every `--json` output validates against its shipped schema in the daemon's own tests.
-- [ ] A consumer can build against the schema without reading any file under `untracked/`.
-- [ ] The pending-release holding area has a release note for the command and the schemas.
+- [x] Point 4 is answered in writing with evidence (`FINDINGS.md`), and the consuming team has it.
+- [x] Every `--json` output validates against its shipped schema in the daemon's own tests (`test_state_schemas.py`, `test_cli_mode_history.py`, `test_cli_session_state.py`).
+- [x] A consumer can build against the schema without reading any file under `untracked/` (`docs/guides/SESSION_STATE_CONTRACT.md`).
+- [x] The pending-release holding area has a release note for the command and the schemas (release note 056).
 
 ## Delivery & Milestones
 
