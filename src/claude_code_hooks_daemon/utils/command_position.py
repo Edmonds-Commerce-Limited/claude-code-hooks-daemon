@@ -165,30 +165,156 @@ def _executed_path(words: list[str | None], written: set[str]) -> str | None:
     return candidate if candidate in written else None
 
 
+#: A redirect operator inside one unquoted word: `sh<s.sh`, `x>s.sh`, `0<s.sh`.
+#: A leading file-descriptor number belongs to the operator only at the word's start.
+_ATTACHED_REDIRECT = re.compile(r"((?:(?<!\S)[0-9]+)?(?:<<<|<<|<&|&>>|&>|>>|>&|<|>))")
+
+#: Characters that make a word quoted, escaped or computed, so it is not split.
+_UNSPLITTABLE_WORD_CHARS: tuple[str, ...] = ("'", '"', "\\", "$", "`", "(")
+
+#: A redirect of stdin from a file: `<`, `0<`, or either with the path attached.
+_STDIN_REDIRECT = re.compile(r"0?<(?P<path>[^<&(].*)?")
+
+#: Any redirect operator word, with or without its path attached.
+_ANY_REDIRECT = re.compile(r"[0-9]*(?:<<<|<<|<&|>>|>&|&>>|&>|<|>)(?P<path>.*)")
+
+#: Wrappers that run the command after them in the same process, and the
+#: options of each that take the next word as their value.
+_PASS_THROUGH_WRAPPERS: dict[str, frozenset[str]] = {
+    "exec": frozenset({"-a"}),
+    "env": frozenset({"-u", "-C", "-S", "--unset", "--chdir", "--split-string"}),
+    "command": frozenset(),
+    "builtin": frozenset(),
+}
+
+#: Commands that copy or move their source operands onto the last operand.
+_COPY_HEADS: frozenset[str] = frozenset({"cp", "mv"})
+
+#: Shell options that take the next word as their value.
+_SHELL_OPTIONS_WITH_VALUE: frozenset[str] = frozenset({"-o", "+o", "-O", "+O"})
+
+#: Script operands that still mean "read the program from stdin".
+_STDIN_OPERANDS: frozenset[str] = frozenset({"/dev/stdin", "-"})
+
+#: Prefixes that run the builtin after them unchanged: `builtin printf`, `command printf`.
+_BUILTIN_PREFIXES: frozenset[str | None] = frozenset({"builtin", "command"})
+
+#: An expansion of a named variable, capturing the name.
+_VARIABLE_REFERENCE = re.compile(r"\$\{?[!#]?([A-Za-z_][A-Za-z0-9_]*)")
+
+#: A variable assignment word ahead of a command: `A=1 sh`.
+_ASSIGNMENT_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
+
+
+def _split_attached_redirects(raw: str) -> list[str]:
+    """``raw`` cut at each redirect operator, when it is a plain unquoted word."""
+    if any(char in raw for char in _UNSPLITTABLE_WORD_CHARS) or not ("<" in raw or ">" in raw):
+        return [raw]
+    return [piece for piece in _ATTACHED_REDIRECT.split(raw) if piece]
+
+
+def _segment_words(segment: str) -> list[str | None]:
+    """The resolved words of one segment, each attached redirect split off."""
+    words: list[str | None] = []
+    for start, end in shell_word_spans(segment):
+        for piece in _split_attached_redirects(segment[start:end]):
+            words.append(resolve_shell_word(piece))
+    return words
+
+
+def _command_words(words: list[str | None]) -> list[str | None]:
+    """``words`` without redirects, leading assignments and pass-through wrappers.
+
+    `< s.sh exec env A=1 sh -e` is the shell `sh -e`.
+    """
+    plain: list[str | None] = []
+    index = 0
+    while index < len(words):
+        word = words[index]
+        match = None if word is None else _ANY_REDIRECT.fullmatch(word)
+        if match is not None:
+            index += 1 if match.group("path") else 2
+            continue
+        plain.append(word)
+        index += 1
+    while plain and plain[0] is not None and _ASSIGNMENT_WORD.fullmatch(plain[0]):
+        plain = plain[1:]
+    while plain and plain[0] is not None and plain[0] in _PASS_THROUGH_WRAPPERS:
+        valued = _PASS_THROUGH_WRAPPERS[plain[0]]
+        index = 1
+        while index < len(plain):
+            word = plain[index]
+            if word is None:
+                return plain[index:]
+            if word in valued:
+                index += 2
+            elif word.startswith("-") or (plain[0] == "env" and _ASSIGNMENT_WORD.fullmatch(word)):
+                index += 1
+            else:
+                break
+        plain = plain[index:]
+    return plain
+
+
 def _stdin_paths(words: list[str | None]) -> set[str]:
-    """Paths one segment feeds on stdin: `< p`, `<p`, and the operands of `cat`."""
+    """Paths one segment feeds on stdin: `< p`, `0< p`, `<p`, and the operands of `cat`."""
     paths: set[str] = set()
     for index, word in enumerate(words):
-        if word is None or not word.startswith("<") or word.startswith(("<<", "<(")):
+        match = None if word is None else _STDIN_REDIRECT.fullmatch(word)
+        if match is None:
             continue
-        target = word[1:] or (words[index + 1] if index + 1 < len(words) else None)
+        target = match.group("path") or (words[index + 1] if index + 1 < len(words) else None)
         if target:
             paths.add(_normalise_path(target))
-    if words and words[0] is not None and words[0].rsplit("/", 1)[-1] == "cat":
+    command = _command_words(words)
+    if command and command[0] is not None and command[0].rsplit("/", 1)[-1] == "cat":
         paths.update(
-            _normalise_path(word) for word in words[1:] if word and not word.startswith("-")
+            _normalise_path(word) for word in command[1:] if word and not word.startswith("-")
         )
     return paths
 
 
-def _reads_shell_input(words: list[str | None]) -> bool:
-    """Whether one segment is a shell that reads its program from stdin."""
-    if not words or words[0] is None:
+def _reads_shell_input(command: list[str | None]) -> bool:
+    """Whether a command (:func:`_command_words`) is a shell that RUNS its stdin.
+
+    Not when it runs a `-c` string or a script operand other than `/dev/stdin`
+    or `-` (`bash build.sh < s.sh` runs build.sh), nor under `-n`, which only
+    checks the syntax. Under `-s` every operand is a positional argument. A
+    word that cannot be read is taken as a script operand.
+    """
+    if not command or command[0] is None or command[0].rsplit("/", 1)[-1] not in SHELL_NAMES:
         return False
-    head = words[0].rsplit("/", 1)[-1]
-    if head not in SHELL_NAMES:
-        return False
-    return not any(word == "-c" or (word or "").startswith("-c") for word in words[1:])
+    index = 1
+    while index < len(command):
+        word = command[index]
+        if word is None:
+            return False
+        if word == "--":
+            index += 1
+            break
+        if word in _SHELL_OPTIONS_WITH_VALUE:
+            index += 2
+            continue
+        if not word.startswith(("-", "+")) or word == "-":
+            break
+        if not word.startswith("--"):
+            if is_shell_command_option(word) or "n" in word[1:]:
+                return False
+            if "s" in word[1:]:
+                return True
+        index += 1
+    return index >= len(command) or command[index] in _STDIN_OPERANDS
+
+
+def _copied_paths(command: list[str | None], written: set[str]) -> set[str]:
+    """The destination of a `cp`/`mv` whose source is a written path."""
+    if not command or command[0] is None or command[0].rsplit("/", 1)[-1] not in _COPY_HEADS:
+        return set()
+    operands = [word for word in command[1:] if word is None or not word.startswith("-")]
+    if len(operands) < 2 or operands[-1] is None:
+        return set()
+    sources = {_normalise_path(word) for word in operands[:-1] if word is not None}
+    return {_normalise_path(operands[-1])} if sources & written else set()
 
 
 def _runs_written_script(command: str) -> bool:
@@ -196,23 +322,27 @@ def _runs_written_script(command: str) -> bool:
 
     `echo 'git stash' > s.sh && bash s.sh` runs the text of the echo, so that
     text is a command however a data head would otherwise be read. So does a
-    shell fed the file on stdin: `sh < s.sh`, or `cat s.sh | sh`. Paths are
-    compared textually, so a path the shell computes is not matched; the caller
-    then judges the whole command exactly as written.
+    shell fed the file on stdin: `sh < s.sh`, or `cat s.sh | sh` (along the
+    `|` stages only; a `;`, `&&` or `||` feeds nothing). A
+    `cp`/`mv` of a written path writes its destination. Paths are compared
+    textually, so a path the shell computes is not matched; the caller then
+    judges the whole command exactly as written.
     """
     written: set[str] = set()
-    fed = False
+    feeds_next = False
+    previous_end: int | None = None
     for start, end in _segment_spans(command):
-        words = [
-            resolve_shell_word(command[a + start : b + start])
-            for a, b in shell_word_spans(command[start:end])
-        ]
-        if _executed_path(words, written) is not None:
+        fed = feeds_next and previous_end is not None and command[previous_end:start] == _PIPE
+        words = _segment_words(command[start:end])
+        plain = _command_words(words)
+        if _executed_path(plain, written) is not None:
             return True
-        if _reads_shell_input(words) and (fed or _stdin_paths(words) & written):
+        stdin = _stdin_paths(words)
+        if _reads_shell_input(plain) and (fed or stdin & written):
             return True
-        fed = fed or bool(_stdin_paths(words) & written)
-        written |= _written_paths(words)
+        feeds_next = fed or bool(stdin & written)
+        written |= _written_paths(words) | _copied_paths(plain, written)
+        previous_end = end
     return False
 
 
@@ -235,12 +365,15 @@ def command_position_view(
     stripped = strip_inert_spans(command)
     spans = _segment_spans(stripped)
     segments = [stripped[start:end] for start, end in spans]
+    expanded = _expanded_names(command)
     pieces: list[str] = []
     previous_end = 0
     for index, (start, end) in enumerate(spans):
         pieces.append(stripped[previous_end:start])
         may_run_output = _pipeline_may_run_output(stripped, spans, segments, index)
-        pieces.append(_narrow(segments[index], may_run_output, _depth, _keep_text, data_heads))
+        pieces.append(
+            _narrow(segments[index], may_run_output, _depth, _keep_text, data_heads, expanded)
+        )
         previous_end = end
     pieces.append(stripped[previous_end:])
     return "".join(pieces)
@@ -542,10 +675,49 @@ def _outside_quotes(text: str) -> str:
     return "".join(kept)
 
 
+def _printf_options(words: list[str | None]) -> list[str | None] | None:
+    """The words after `printf` (behind any `builtin`/`command`), or None if not a printf."""
+    index = 0
+    while index < len(words) and words[index] in _BUILTIN_PREFIXES:
+        index += 1
+    if index >= len(words) or words[index] != "printf":
+        return None
+    return words[index + 1 :]
+
+
 def _assigns_variable(words: list[str | None]) -> bool:
-    """Whether a `printf` stores its output in a variable (`printf -v name ...`)
-    instead of printing it, so the text can be run later through that variable."""
-    return any(word == "printf" for word in words[:1]) and "-v" in words[1:2]
+    """Whether a `printf` stores its output in a variable (`printf -v name ...`,
+    `printf -vname ...`) instead of printing it, so the text can be run later
+    through that variable."""
+    options = _printf_options(words) or []
+    return bool(options) and (options[0] or "").startswith("-v")
+
+
+def _assigned_name(words: list[str | None]) -> str | None:
+    """The variable a `printf -v` (:func:`_assigns_variable`) assigns, or None
+    when it cannot be read."""
+    options = _printf_options(words) or [None]
+    flag = options[0] or ""
+    if flag != "-v":
+        return flag[2:] or None
+    return options[1] if len(options) > 1 else None
+
+
+def _expanded_names(command: str) -> frozenset[str]:
+    """Every variable name ``command`` expands anywhere: `$n`, `${n}`, `${!n}`, `${#n}`."""
+    return frozenset(_VARIABLE_REFERENCE.findall(command))
+
+
+def _assigns_expanded_variable(words: list[str | None], expanded: frozenset[str]) -> bool:
+    """Whether a `printf -v` assigns a variable the command may later expand.
+
+    `printf -v x '...'` whose `x` is never expanded leaves its text unused, so it
+    is data; a name that cannot be read is assumed expanded.
+    """
+    if not _assigns_variable(words):
+        return False
+    name = _assigned_name(words)
+    return name is None or name in expanded
 
 
 def _printing_body(body: str) -> bool:
@@ -707,7 +879,10 @@ def _narrow(
     depth: int,
     keep_text: bool = False,
     data_heads: frozenset[str] = DATA_HEADS,
+    expanded: frozenset[str] = frozenset(),
 ) -> str:
+    """``segment`` with the text it cannot run blanked; ``expanded`` names the
+    variables the whole command expands (:func:`_assigns_expanded_variable`)."""
     head = _head(segment)
     if head is None:
         return segment
@@ -716,8 +891,9 @@ def _narrow(
             may_run_output
             or any(marker in segment for marker in _EXPANSION_MARKERS)
             or (head == "rg" and _has_rg_preprocessor(segment))
-            or _assigns_variable(
-                [resolve_shell_word(segment[a:b]) for a, b in shell_word_spans(segment)]
+            or _assigns_expanded_variable(
+                [resolve_shell_word(segment[a:b]) for a, b in shell_word_spans(segment)],
+                expanded,
             )
         ):
             return segment

@@ -94,6 +94,73 @@ class TestAWrittenScriptRunThroughStdinDenies:
         assert not _allowed(command, tmp_path)
 
 
+_WRITE_CAPTURED = f"m=$(printf '{_RESET}'); echo \"$m\" > s.sh;"
+
+
+class TestAWrittenScriptReachesTheShellHoweverStdinIsSpelled:
+    @pytest.mark.parametrize(
+        "runner",
+        [
+            "sh 0< s.sh",
+            "sh 0<s.sh",
+            "sh < ./s.sh",
+            "< s.sh sh",
+            "<s.sh sh",
+            "sh<s.sh",
+            "cp s.sh t.sh; sh < t.sh",
+            "mv s.sh t.sh; sh < t.sh",
+            "exec sh < s.sh",
+            "env sh < s.sh",
+            "env -i A=1 sh < s.sh",
+            "command sh < s.sh",
+            "env -u HOME sh < s.sh",
+            "env -i < s.sh sh",
+            "sh -e < s.sh",
+            "bash --noprofile < s.sh",
+            "bash -o errexit < s.sh",
+            "bash -- < s.sh",
+            "bash -s -- < s.sh",
+            "bash /dev/stdin < s.sh",
+            "cat s.sh - | bash",
+        ],
+    )
+    def test_it_is_denied(self, runner: str, tmp_path: Path) -> None:
+        assert not _allowed(f"{_WRITE_CAPTURED} {runner}", tmp_path)
+
+
+class TestAShellThatDoesNotReadTheWrittenFileIsNotFedIt:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"echo '{_RESET}' > notes.txt; cat notes.txt && bash scripts/qa.sh",
+            f"echo '{_RESET}' > notes.txt; cat notes.txt || bash scripts/qa.sh",
+            f"echo '{_RESET}' > s.sh; cat s.sh; sh other.sh",
+            f"echo '{_RESET}' > s.sh; cat s.sh; bash build.sh",
+            f"echo '{_RESET}' > s.sh; bash -n < s.sh",
+            f"echo '{_RESET}' > s.sh; sh < other.sh",
+            f"echo '{_RESET}' > s.sh; cat s.sh | wc -l",
+            f"{_WRITE_CAPTURED} cat s.sh; bash build.sh",
+            f"{_WRITE_CAPTURED} bash -c 'echo hi' < s.sh",
+            f"{_WRITE_CAPTURED} bash build.sh < s.sh",
+            f"{_WRITE_CAPTURED} bash -- build.sh < s.sh",
+            f"{_WRITE_CAPTURED} bash -o errexit build.sh < s.sh",
+            f"{_WRITE_CAPTURED} cp -r; sh < t.sh",
+            f"{_WRITE_CAPTURED} cp other.sh t.sh; sh < t.sh",
+            f'{_WRITE_CAPTURED} env "$w" sh < s.sh',
+            f'{_WRITE_CAPTURED} sh "$script" < s.sh',
+            f"{_WRITE_CAPTURED} sh <",
+            "sh < s.sh",
+            "cat notes.md | less",
+            "echo 'git status' > s.sh; cat s.sh | bash",
+            f"echo '{_RESET}' > notes.md; cat notes.md | less",
+            f"echo '{_RESET}' > s.sh; shellcheck < s.sh",
+            f"echo '{_RESET}' > s.sh; sha256sum < s.sh",
+        ],
+    )
+    def test_it_is_allowed(self, command: str, tmp_path: Path) -> None:
+        assert _allowed(command, tmp_path)
+
+
 class TestPrintfDashVAssignsRatherThanPrints:
     @pytest.mark.parametrize(
         "command",
@@ -101,10 +168,31 @@ class TestPrintfDashVAssignsRatherThanPrints:
             f'm=$(printf \'{_RESET}\'); printf -v n "$m"; eval "$n"',
             f"printf -v n '%s' '{_RESET}'; $n",
             f"printf -v n '%s' '{_RESET}'; eval \"$n\"",
+            f"printf -vn '%s' '{_RESET}'; $n",
+            f"printf -vn '%s' '{_RESET}'; eval \"$n\"",
+            f"builtin printf -v n '%s' '{_RESET}'; eval \"$n\"",
+            f"command printf -v n '%s' '{_RESET}'; eval \"$n\"",
+            f"printf -v \"$k\" '%s' '{_RESET}'; eval \"${{!k}}\"",
+            f"printf -v; printf -v n '{_RESET}'; eval \"$n\"",
+            f'echo "$(printf -v n \'{_RESET}\')"; eval "$n"',
+            f"m=$(printf '%s' 'then {_RESET}'); printf -vn '%s' \"$m\"; eval \"$n\"",
+            f"m=$(printf '%s' 'then {_RESET}'); builtin printf -v n '%s' \"$m\"; eval \"$n\"",
+            f"m=$(printf '%s' 'then {_RESET}'); command printf -v n '%s' \"$m\"; eval \"$n\"",
         ],
     )
     def test_it_is_denied(self, command: str, tmp_path: Path) -> None:
         assert not _allowed(command, tmp_path)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"printf -v x '%s' '{_RESET}'",
+            f"printf -v x '{_RESET}'; echo done",
+            f"printf -vx '%s' '{_RESET}'; echo \"$y\"",
+        ],
+    )
+    def test_an_assignment_nothing_expands_is_allowed(self, command: str, tmp_path: Path) -> None:
+        assert _allowed(command, tmp_path)
 
 
 class TestTextFormattersNeverRunTheirInput:
