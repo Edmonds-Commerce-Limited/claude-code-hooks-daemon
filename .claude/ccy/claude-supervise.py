@@ -3304,6 +3304,130 @@ def _build_sidecar_reading(
     )
 
 
+# ── Claude Code's own record of whether the session is idle (Plan 00603) ─────
+# Read locally: the worker runs in the same container as `claude`. Only the
+# `status` field is documented (through `claude agents --json`); the sub-agent
+# `finished` flag and the background-task exit trailer are INTERNAL files, seen
+# on Claude Code 2.1.322 (Plan 00604 RESEARCH.md), so a layout change reads as
+# "not idle" and idle compaction goes quiet rather than firing wrongly.
+_CC_SESSION_IDLE_STATUS = "idle"
+_CC_TASK_EXIT_TRAILER = re.compile(rb"\[exited with code -?\d+\]\s*\Z")
+_CC_TASK_TAIL_BYTES = 256
+
+
+def _claude_config_dir() -> Path:
+    """Claude Code's config directory: ``CLAUDE_CONFIG_DIR`` or ``~/.claude``."""
+    override = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(override) if override else Path.home() / ".claude"
+
+
+def _pid_alive(pid: int) -> bool:
+    """True when ``pid`` names a live process (signal 0; EPERM still means alive)."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _session_status_idle(
+    session_id: str, config_dir: Path, pid_alive: Callable[[int], bool]
+) -> str | None:
+    """None when every live record of the session says `idle`, else the reason."""
+    sessions = config_dir / "sessions"
+    live = 0
+    try:
+        paths = sorted(sessions.glob("*.json"))
+    except OSError as exc:
+        return f"sessions directory unreadable: {exc}"
+    for path in paths:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict) or data.get("sessionId") != session_id:
+            continue
+        pid = data.get("pid")
+        if not isinstance(pid, int) or not pid_alive(pid):
+            continue
+        live += 1
+        if data.get("status") != _CC_SESSION_IDLE_STATUS:
+            return f"session status is {data.get('status')!r}, not idle"
+    return None if live else "no live session record"
+
+
+def _unfinished_subagents(session_id: str, config_dir: Path) -> str | None:
+    """None when every sub-agent of the session has `finished: true`, else the reason."""
+    try:
+        metas = sorted(config_dir.glob(f"projects/*/{session_id}/subagents/*.meta.json"))
+    except OSError as exc:
+        return f"sub-agent records unreadable: {exc}"
+    for meta in metas:
+        try:
+            data = json.loads(meta.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return f"sub-agent record {meta.name} unreadable"
+        if not isinstance(data, dict) or data.get("finished") is not True:
+            return f"sub-agent {meta.name.removesuffix('.meta.json')} not finished"
+    return None
+
+
+def _running_background_tasks(session_id: str, tmp_root: Path, uid: int) -> str | None:
+    """None when every background task output ends with its exit trailer, else why."""
+    try:
+        outputs = sorted(tmp_root.glob(f"claude-{uid}/*/{session_id}/tasks/b*.output"))
+    except OSError as exc:
+        return f"background task outputs unreadable: {exc}"
+    for output in outputs:
+        try:
+            with output.open("rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                handle.seek(max(0, handle.tell() - _CC_TASK_TAIL_BYTES))
+                tail = handle.read()
+        except OSError:
+            return f"background task {output.name} unreadable"
+        if _CC_TASK_EXIT_TRAILER.search(tail) is None:
+            return f"background task {output.stem} has no exit line"
+    return None
+
+
+def session_internal_idle(
+    session_id: str,
+    *,
+    config_dir: Path | None = None,
+    tmp_root: Path | None = None,
+    uid: int | None = None,
+    pid_alive: Callable[[int], bool] = _pid_alive,
+) -> tuple[bool, str]:
+    """Plan 00603: is the session idle by Claude Code's own records? ``(idle, why-not)``.
+
+    All three must hold: the session's `status` is `idle` (the one documented
+    signal), every sub-agent `.meta.json` has `finished: true`, and every
+    background task output ends with `[exited with code N]`. An empty session id,
+    a missing or unreadable status record, or anything unparseable is NOT idle.
+    An absent sub-agent or task directory means nothing was started, which is
+    the normal case. The supervisor's own empty-input and quiet-output gates are
+    separate and still apply.
+    """
+    if not session_id:
+        return False, "no session id"
+    config = config_dir if config_dir is not None else _claude_config_dir()
+    root = tmp_root if tmp_root is not None else Path("/tmp")
+    user = uid if uid is not None else os.getuid()
+    for reason in (
+        _session_status_idle(session_id, config, pid_alive),
+        _unfinished_subagents(session_id, config),
+        _running_background_tasks(session_id, root, user),
+    ):
+        if reason is not None:
+            return False, reason
+    return True, ""
+
+
 def load_compaction_signal(
     directory: Path,
     *,
@@ -6323,6 +6447,11 @@ class CompactStateMachine:
         )
 
     @property
+    def idle_compact_enabled(self) -> bool:
+        """True unless the idle-compaction mode is `off`."""
+        return self._policy.idle_compact_mode != _IDLE_COMPACT_OFF
+
+    @property
     def policy_idle_compact_armed(self) -> bool:
         """True when the idle-compaction mode is `on` (not `dry-run` or `off`)."""
         return self._policy.idle_compact_mode == _IDLE_COMPACT_ON
@@ -8361,9 +8490,19 @@ def decide_once(
     machine.settle_pending_drop(now_wall=facts.now_wall)
     # Plan 00603: the settle clock for idle compaction. A true idle needs the
     # host's screen verdict AND every gate that lets anything be typed.
-    machine.note_true_idle(
-        facts.true_idle and can_inject and facts.work_idle, now=facts.now_wall
-    )
+    # Claude Code's own records (status, sub-agents, background tasks) are read
+    # only once every cheaper gate holds, so a busy session never pays for them.
+    held_true_idle = facts.true_idle and can_inject and facts.work_idle
+    if (
+        held_true_idle
+        and machine.idle_compact_enabled
+        and reading is not None
+        and not reading.stale
+    ):
+        held_true_idle, _ = session_internal_idle(reading.session_id)
+    else:
+        held_true_idle = False
+    machine.note_true_idle(held_true_idle, now=facts.now_wall)
     evaluation = machine.evaluate(
         reading,
         idle=can_inject,

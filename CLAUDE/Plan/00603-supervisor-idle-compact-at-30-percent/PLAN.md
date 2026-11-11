@@ -31,7 +31,7 @@ The owner asked for two things. First, make sure Claude Code's own idle compacti
 ### Phase 1: Facts
 
 - [x] ✅ **Task 1.1**: Verify `idleCompaction` end to end: effective settings in this checkout, the Plan 00557 optimal-config check, and what Claude Code's idle compaction actually does and when (read the vendored or fetched Claude Code docs; record the trigger and any thresholds).
-- [x] ✅ **Task 1.2**: Read the supervisor's idle model (`idle`, `work_idle`, empty input box, the focus hold) and find how background tasks and running sub-agents can be detected from the sidecar or the screen. Record which signals exist and which do not. Result: no sidecar or hook signal reports either; the rendered screen footer is the only source and the trigger fails closed on it (recorded in `CLAUDE/development/CcySupervisor.md`, "Idle compaction at a percentage"; `idleCompaction` verified on and pinned by a test against the committed project settings).
+- [x] ✅ **Task 1.2**: Read the supervisor's idle model (`idle`, `work_idle`, empty input box, the focus hold) and find how background tasks and running sub-agents can be detected from the sidecar or the screen. Record which signals exist and which do not. Result: no sidecar signal reports either; per Plan 00604 the trigger combines Claude Code's own session `status`, sub-agent `finished` flags and background-task exit lines with the rendered screen footer, and fails closed on every one (recorded in `CLAUDE/development/CcySupervisor.md`, "Idle compaction at a percentage"; `idleCompaction` verified on and pinned by a test against the committed project settings).
 
 ### Phase 2: Trigger
 

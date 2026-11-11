@@ -410,21 +410,40 @@ be read before arming.
 **True idle** is every one of: the host's screen read shows the main prompt (not
 a transcript or a selected panel row) and its bottom rows name no background
 task, sub-agent, shell, monitor or running turn; the input box is empty and the
-focus hold is clear (`can_inject`); the child has been quiet (`work_idle`); no
+focus hold is clear (`can_inject`); the child has been quiet (`work_idle`); Claude Code's own records say idle (below); no
 compaction signal, goal or other injection is pending; the sidecar is fresh,
 not compacting, and the session is not BLOCKED; and all of that has held for
 the settle period, tracked by `note_true_idle` (any break restarts it).
 
 **What can and cannot be detected.** The context sidecar carries `pct`,
-`window_size` and `tier` only. No sidecar field, hook or daemon file reports a
-running background task or sub-agent, so the only source is the rendered screen
-(`hooks-screen --dump`, bottom five non-blank rows, matched against
-`_SCREEN_BUSY_FOOTER`). The word list is a best effort against Claude Code's
-footer and has not been validated against every release; it is deliberately
-broad, and every doubt (no binary, a timeout, an empty rendering, any word but
-`main`) reads as not idle. Without the `hooks-screen` binary the feature never
-fires. A cron tick or sub-agent output that wakes the session resets the
-settle clock through `work_idle`.
+`window_size` and `tier` only; no sidecar field or daemon file reports a
+running background task or sub-agent. Two sources are combined, and either one
+saying "not idle" vetoes (research: `CLAUDE/Plan/00604-claude-code-internal-state-research/RESEARCH.md`):
+
+1. **Claude Code's own records, read by the worker** (`session_internal_idle`;
+   same container, stdlib only). All three must hold: the `status` in
+   `~/.claude/sessions/<pid>.json` for this session id, with a live pid, is
+   `idle` (the one documented signal, via `claude agents --json`); every
+   `projects/*/<session>/subagents/*.meta.json` has `"finished": true`; every
+   `/tmp/claude-<uid>/*/<session>/tasks/b*.output` ends with
+   `[exited with code N]`. A missing or unreadable status record, an
+   unparseable file or an empty session id is NOT idle; an absent sub-agent or
+   task directory means nothing was started. The last two are internal and were
+   seen on Claude Code 2.1.322 only, so a layout change makes the feature go
+   quiet, never fire. Not verified: that `status` returns to `idle` only when
+   nothing is left running (monitors, crons), and that a task killed by
+   TaskStop still gets its exit line (an untrailered file reads as running,
+   which is the safe error). The pid is the one in the file, matched by session
+   id, so it does not depend on the ccy child pid being the `claude` pid.
+2. **The rendered screen, read by the host** (`hooks-screen --dump`, bottom five
+   non-blank rows, matched against `_SCREEN_BUSY_FOOTER`). A best-effort word
+   list, deliberately broad; every doubt (no binary, a timeout, an empty
+   rendering, any word but `main`) reads as not idle. Without the
+   `hooks-screen` binary the feature never fires.
+
+A cron tick or sub-agent output that wakes the session resets the settle clock
+through `work_idle`. The supervisor's own empty-input and quiet-output gates
+still apply and are the only part that sees the input box.
 
 **Reload.** The decision runs in the worker and hot-reloads. The screen read
 (`true_idle` on `TickFacts`) is host-side, so it takes effect on the next ccy

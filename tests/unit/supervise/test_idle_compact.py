@@ -11,6 +11,7 @@ are untouched.
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING
 
 import pytest
@@ -21,10 +22,19 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _mod = load_supervisor_module()
+# The autouse fixture below replaces the module attribute; the reader's own
+# tests need the real one.
+_real_session_internal_idle = _mod.session_internal_idle
 
 _NOW = 50_000.0
 _SESSION = "idle-compact-sess-1"
 _WINDOW = 1_000_000
+
+
+@pytest.fixture(autouse=True)
+def _internal_idle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Claude Code's own records say idle unless a test says otherwise."""
+    monkeypatch.setattr(_mod, "session_internal_idle", lambda _sid: (True, ""))
 
 
 def _policy(**overrides: object):
@@ -380,3 +390,159 @@ class TestQuietPrompt:
 
     def test_empty_dump_fails_closed(self) -> None:
         assert _FakeScreen({"": "main\n", "--dump": "  \n"}).quiet_prompt() is False
+
+
+def _no_read(_sid: str) -> tuple[bool, str]:
+    raise AssertionError("Claude Code's records must not be read here")
+
+
+class TestInternalIdleGate:
+    def test_decision_consults_the_internal_records(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[str] = []
+
+        def busy(session_id: str) -> tuple[bool, str]:
+            seen.append(session_id)
+            return False, "busy"
+
+        monkeypatch.setattr(_mod, "session_internal_idle", busy)
+        machine = _mod.CompactStateMachine(_policy())
+        assert _settled(tmp_path, machine).payload is None
+        assert set(seen) == {_SESSION}
+
+    def test_not_read_when_the_feature_is_off(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_mod, "session_internal_idle", _no_read)
+        machine = _mod.CompactStateMachine(_policy(idle_compact_mode="off"))
+        assert _settled(tmp_path, machine).payload is None
+
+    def test_not_read_while_the_cheap_gates_fail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_mod, "session_internal_idle", _no_read)
+        machine = _mod.CompactStateMachine(_policy())
+        _write_sidecar(tmp_path)
+        assert _decide(tmp_path, machine, now=_NOW, true_idle=False).payload is None
+
+
+_CLAUDE_SID = "0a12-session"
+
+
+class _Layout:
+    """A fake config dir and tmp root laid out as Claude Code 2.1.322 does."""
+
+    def __init__(self, root: Path) -> None:
+        self.config = root / "config"
+        self.tmp = root / "tmp"
+        self.uid = 1234
+        (self.config / "sessions").mkdir(parents=True)
+        self.tmp.mkdir()
+
+    def session(self, *, status: str = "idle", pid: int = 111, sid: str = _CLAUDE_SID) -> None:
+        (self.config / "sessions" / f"{pid}.json").write_text(
+            json.dumps({"pid": pid, "sessionId": sid, "status": status}), encoding="utf-8"
+        )
+
+    def subagent(self, name: str, body: str) -> None:
+        folder = self.config / "projects" / "-proj" / _CLAUDE_SID / "subagents"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{name}.meta.json").write_text(body, encoding="utf-8")
+
+    def task(self, name: str, text: str) -> None:
+        folder = self.tmp / f"claude-{self.uid}" / "-proj" / _CLAUDE_SID / "tasks"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{name}.output").write_text(text, encoding="utf-8")
+
+    def check(self, *, alive: bool = True, sid: str = _CLAUDE_SID) -> tuple[bool, str]:
+        return _real_session_internal_idle(
+            sid,
+            config_dir=self.config,
+            tmp_root=self.tmp,
+            uid=self.uid,
+            pid_alive=lambda _pid: alive,
+        )
+
+
+@pytest.fixture
+def layout(tmp_path: Path) -> _Layout:
+    return _Layout(tmp_path)
+
+
+class TestSessionInternalIdle:
+    def test_idle_with_nothing_running(self, layout: _Layout) -> None:
+        layout.session()
+        assert layout.check() == (True, "")
+
+    def test_finished_agents_and_exited_tasks_are_idle(self, layout: _Layout) -> None:
+        layout.session()
+        layout.subagent("agent-a1", json.dumps({"finished": True}))
+        layout.task("b1", "start\nend\n\n[exited with code 0]")
+        layout.task("b2", "failed\n[exited with code 137]\n")
+        assert layout.check() == (True, "")
+
+    @pytest.mark.parametrize("status", ["busy", "waiting", "shell", ""])
+    def test_status_other_than_idle(self, layout: _Layout, status: str) -> None:
+        layout.session(status=status)
+        idle, why = layout.check()
+        assert idle is False
+        assert "not idle" in why
+
+    def test_missing_status_record_fails_closed(self, layout: _Layout) -> None:
+        assert layout.check() == (False, "no live session record")
+
+    def test_record_of_another_session_does_not_count(self, layout: _Layout) -> None:
+        layout.session(sid="someone-else")
+        assert layout.check()[0] is False
+
+    def test_dead_pid_record_does_not_count(self, layout: _Layout) -> None:
+        layout.session()
+        assert layout.check(alive=False) == (False, "no live session record")
+
+    def test_unparseable_status_record_fails_closed(self, layout: _Layout) -> None:
+        (layout.config / "sessions" / "9.json").write_text("{not json", encoding="utf-8")
+        assert layout.check()[0] is False
+
+    def test_empty_session_id(self, layout: _Layout) -> None:
+        layout.session()
+        assert layout.check(sid="") == (False, "no session id")
+
+    @pytest.mark.parametrize("body", ['{"agentType": "x"}', '{"finished": false}', "{broken", "[]"])
+    def test_unfinished_or_unreadable_subagent(self, layout: _Layout, body: str) -> None:
+        layout.session()
+        layout.subagent("agent-a1", body)
+        idle, why = layout.check()
+        assert idle is False
+        assert "agent-a1" in why
+
+    def test_task_without_exit_line(self, layout: _Layout) -> None:
+        layout.session()
+        layout.task("b7", "still going\n")
+        idle, why = layout.check()
+        assert idle is False
+        assert "b7" in why
+
+    def test_task_exit_line_only_counts_at_the_end(self, layout: _Layout) -> None:
+        layout.session()
+        layout.task("b7", "[exited with code 0]\nrestarted and running\n" + "x" * 400)
+        assert layout.check()[0] is False
+
+    def test_a_long_exited_task_is_read_from_its_tail(self, layout: _Layout) -> None:
+        layout.session()
+        layout.task("b8", "y" * 5000 + "\n[exited with code 0]")
+        assert layout.check() == (True, "")
+
+    def test_non_background_outputs_are_ignored(self, layout: _Layout) -> None:
+        layout.session()
+        layout.task("a1", "agent transcript link, no trailer")
+        assert layout.check() == (True, "")
+
+    def test_defaults_resolve_without_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/nonexistent-claude-config")
+        assert _real_session_internal_idle("sid")[0] is False
+
+    def test_pid_probe(self) -> None:
+        assert _mod._pid_alive(os.getpid()) is True
+        assert _mod._pid_alive(0) is False
+        assert _mod._pid_alive(2**22 + 12345678) is False
