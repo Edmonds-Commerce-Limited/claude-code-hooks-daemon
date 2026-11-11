@@ -31,18 +31,18 @@ The work adds a `session-state --json --session ID` command and a `--watch` form
 
 ### Phase 1: Facts
 
-- [ ] ⬜ **Task 1.1**: Confirm point 4. Verified so far: a `rate_limit` StopFailure is recorded in `stop-failures.json` with `session_id`, `error`, `recorded_at` and `resolved_at`, and carries no reset time. `resets_at` lives in `usage-snapshot.json` (seven_day seen; five_hour not checked). Establish whether the reset time can be joined reliably to the stop, and for a stop without a snapshot.
-- [ ] ⬜ **Task 1.2**: Inventory every record the command needs (session-mode transitions, stop events, stop failures, usage snapshot, usage pause) with owner module and write path.
+- [x] ✅ **Task 1.1** (answer in `FINDINGS.md`): Confirm point 4. Verified so far: a `rate_limit` StopFailure is recorded in `stop-failures.json` with `session_id`, `error`, `recorded_at` and `resolved_at`, and carries no reset time. `resets_at` lives in `usage-snapshot.json` (seven_day seen; five_hour not checked). Establish whether the reset time can be joined reliably to the stop, and for a stop without a snapshot.
+- [x] ✅ **Task 1.2**: Inventory every record the command needs (session-mode transitions, stop events, stop failures, usage snapshot, usage pause) with owner module and write path.
 
 ### Phase 2: Schemas first
 
-- [ ] ⬜ **Task 2.1**: Write the schemas and a test that validates recorded sample output against them (red before the command exists).
-- [ ] ⬜ **Task 2.2**: Add `schema_version` to `mode-history --json` output without breaking its current fields.
+- [x] ✅ **Task 2.1**: Write the schemas and a test that validates recorded sample output against them (red before the command exists).
+- [x] ✅ **Task 2.2**: Add `schema_version` to `mode-history --json` output without breaking its current fields.
 
 ### Phase 3: The command
 
-- [ ] ⬜ **Task 3.1**: `session-state --json --session ID`, read-only, fail-open on a missing record.
-- [ ] ⬜ **Task 3.2**: `--watch` stream, one JSON line per change.
+- [x] ✅ **Task 3.1**: `session-state --json --session ID`, read-only, fail-open on a missing record.
+- [x] ✅ **Task 3.2**: `--watch` stream, one JSON line per change.
 - [ ] ⬜ **Task 3.3**: Measure run time per call; keep it cheap for per-hook use.
 
 ### Phase 4: Contract

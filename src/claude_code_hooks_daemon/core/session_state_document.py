@@ -82,27 +82,34 @@ def _read_tail(path: Path) -> str:
 
 
 def _stop_time_of(line: str, session_id: str) -> float | None:
-    """The epoch time of one stop-events line when it is this session's valid record."""
-    try:
-        entry = json.loads(line)
-        if entry.get("session_id") != session_id:
-            return None
-        return datetime.fromisoformat(entry["timestamp"]).timestamp()
-    except (ValueError, KeyError, TypeError, AttributeError) as exc:
-        log_and_continue(
-            logger,
-            exc,
-            reason="a torn or foreign stop-events line is not this session's stop (None); the scan goes on to the previous line",
-            level=logging.DEBUG,
-        )
+    """The epoch time of one stop-events line, or None when it is another session's.
+
+    Raises ValueError, KeyError, TypeError or AttributeError for a torn line;
+    the caller skips it.
+    """
+    entry = json.loads(line)
+    if entry.get("session_id") != session_id:
         return None
+    return datetime.fromisoformat(entry["timestamp"]).timestamp()
 
 
 def _last_stop_at(untracked_dir: Path, session_id: str) -> float | None:
     """Epoch seconds of this session's newest recorded Stop, or None."""
     tail = _read_tail(untracked_dir / STOP_EVENTS_FILENAME)
-    times = (_stop_time_of(line, session_id) for line in reversed(tail.splitlines()))
-    return next((at for at in times if at is not None), None)
+    for line in reversed(tail.splitlines()):
+        try:
+            at = _stop_time_of(line, session_id)
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a torn stop-events line is not a stop; the scan goes on to the previous line",
+                level=logging.DEBUG,
+            )
+            continue
+        if at is not None:
+            return at
+    return None
 
 
 def _newest_failure(untracked_dir: Path, session_id: str) -> StopFailureRecord | None:
