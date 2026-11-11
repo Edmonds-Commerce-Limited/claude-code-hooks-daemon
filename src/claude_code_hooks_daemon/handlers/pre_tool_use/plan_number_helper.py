@@ -85,6 +85,12 @@ _COMMAND_SEPARATORS: Final[str] = r";&|\n\r"
 # characters back, which is semantically identical here: the class right
 # after it accepts space/tab too, so nothing that was reachable before is lost.
 _ARGUMENT_GAP: Final[str] = r"(?>[ \t]+)"
+# The text between an `echo`/`printf` and the path it echoes: any run of
+# non-separator characters, where a whole substitution is one opaque unit and
+# the start of one is never consumed as a plain character.
+_ECHO_ARGUMENT_GAP: Final[str] = (
+    r"(?:\$\([^()]*\)|`[^`]*`|[<>]\([^()]*\)" rf"|(?!\$\(|`|[<>]\()[^{_COMMAND_SEPARATORS}])*"
+)
 
 # A `-name` pattern carrying this many consecutive literal digits is naming ONE
 # specific plan (e.g. `00036-*`), not sweeping for whichever plans happen to
@@ -638,11 +644,16 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         # The gap after the command name is `_ARGUMENT_GAP`, not `\s+`: `\s`
         # matches a newline, which would step past the end of this command
         # before the negated class below excluded anything.
+        #
+        # The gap steps OVER a whole substitution (`$(...)`, backticks, `<(...)`)
+        # but never into it: a glob inside belongs to the inner command, which
+        # the other rules judge (GitHub #198). A glob opening with a full plan
+        # number (`00001*`) names one plan, as it does for the `ls` rule.
         glob_patterns = [
-            rf"echo{_ARGUMENT_GAP}[^{_COMMAND_SEPARATORS}]*{re.escape(plan_dir)}"
-            rf"/[^\s{_COMMAND_SEPARATORS}]*[\*\[?]",  # echo with glob chars
-            rf"printf{_ARGUMENT_GAP}[^{_COMMAND_SEPARATORS}]*{re.escape(plan_dir)}"
-            rf"/[^\s{_COMMAND_SEPARATORS}]*[\*\[?]",  # printf with glob chars
+            rf"echo{_ARGUMENT_GAP}{_ECHO_ARGUMENT_GAP}{re.escape(plan_dir)}"
+            rf"/(?!\d{{{PLAN_NUMBER_WIDTH}}})[^\s{_COMMAND_SEPARATORS}]*[\*\[?]",  # echo glob
+            rf"printf{_ARGUMENT_GAP}{_ECHO_ARGUMENT_GAP}{re.escape(plan_dir)}"
+            rf"/(?!\d{{{PLAN_NUMBER_WIDTH}}})[^\s{_COMMAND_SEPARATORS}]*[\*\[?]",  # printf glob
         ]
 
         for pattern in glob_patterns:
