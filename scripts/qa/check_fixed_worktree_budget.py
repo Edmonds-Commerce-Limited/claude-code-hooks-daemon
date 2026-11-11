@@ -45,7 +45,7 @@ from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
-_ARTEFACT_NAME: Final[str] = "fixed_git_budget.json"
+_ARTEFACT_NAME: Final[str] = "fixed_worktree_budget.json"
 _OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 _DEFAULT_SCAN_ROOT: Final[Path] = _REPO_ROOT / "src" / "claude_code_hooks_daemon"
 
@@ -54,6 +54,8 @@ _GIT_RUNNERS: Final[frozenset[str]] = frozenset({"run_git", "run_fn"})
 _SCALING_VERB: Final[str] = "worktree"
 _SCALING_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"add", "remove"})
 _SCALER: Final[str] = "scaled_timeout"
+#: ``scaled_timeout`` and the handler's own one-line wrapper over it.
+_SCALERS: Final[frozenset[str]] = frozenset({_SCALER, "_cleanup_budget"})
 _TIMEOUT_KEYWORD: Final[str] = "timeout"
 
 #: (path relative to the scan root, function name) -> why it is allowed.
@@ -135,15 +137,30 @@ def _runner_name(call: ast.Call) -> str | None:
     return None
 
 
-def _is_scaled(call: ast.Call) -> bool:
-    """Whether the call's ``timeout=`` contains a ``scaled_timeout(...)`` call."""
+def _contains_scaler(expression: ast.AST, scaled_names: set[str]) -> bool:
+    """Whether the expression calls a scaler or reads a name bound from one."""
+    for node in ast.walk(expression):
+        if isinstance(node, ast.Call) and _runner_name(node) in _SCALERS:
+            return True
+        if isinstance(node, ast.Name) and node.id in scaled_names:
+            return True
+    return False
+
+
+def _scaled_names(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    """Local names assigned from an expression that calls a scaler."""
+    names: set[str] = set()
+    for node in ast.walk(function):
+        if isinstance(node, ast.Assign) and _contains_scaler(node.value, set()):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    return names
+
+
+def _is_scaled(call: ast.Call, scaled_names: set[str]) -> bool:
+    """Whether the call's ``timeout=`` is derived from a load scaler."""
     for keyword in call.keywords:
-        if keyword.arg != _TIMEOUT_KEYWORD:
-            continue
-        return any(
-            isinstance(node, ast.Call) and _runner_name(node) == _SCALER
-            for node in ast.walk(keyword.value)
-        )
+        if keyword.arg == _TIMEOUT_KEYWORD:
+            return _contains_scaler(keyword.value, scaled_names)
     return False
 
 
@@ -165,10 +182,11 @@ def scan_file(path: Path, root: Path) -> tuple[list[Violation], set[tuple[str, s
         if not _names_scaling_verb(function):
             continue
         key = (relative, function.name)
+        scaled = _scaled_names(function)
         for node in ast.walk(function):
             if not isinstance(node, ast.Call) or _runner_name(node) not in _GIT_RUNNERS:
                 continue
-            if _is_scaled(node) or node.lineno in seen:
+            if _is_scaled(node, scaled) or node.lineno in seen:
                 continue
             seen.add(node.lineno)
             if key in _ALLOWED:
@@ -197,7 +215,9 @@ def scan_tree(scan_root: Path) -> tuple[list[Violation], list[Violation]]:
         violations.extend(found)
         matched |= used
     rotted = [
-        Violation(file=file, line=0, function=function, detail=f"allowlist row matches nothing: {why}")
+        Violation(
+            file=file, line=0, function=function, detail=f"allowlist row matches nothing: {why}"
+        )
         for (file, function), why in _ALLOWED.items()
         if (file, function) not in matched and (scan_root / file).exists()
     ]
@@ -220,7 +240,7 @@ def main() -> int:
     vacuous = vacuous_scan_failure(examined=files_scanned, noun="Python files", root=scan_root)
 
     output = {
-        "tool": "fixed_git_budget",
+        "tool": "fixed_worktree_budget",
         "summary": {
             "passed": not problems and vacuous is None,
             "vacuous_scan": vacuous,

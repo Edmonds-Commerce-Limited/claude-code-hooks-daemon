@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess  # nosec B404 — CalledProcessError typing only; run_git owns the spawn
 from pathlib import Path
 from typing import Any
@@ -47,7 +48,8 @@ from claude_code_hooks_daemon.core.worktree_seed import (
     parse_seed_config,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
-from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
+from claude_code_hooks_daemon.utils.git_repo import GIT_TIMED_OUT, GitRepo, run_git
+from claude_code_hooks_daemon.utils.load_scaling import describe_load, scaled_timeout
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.worktree_seeding import seed_worktree, validate_seed_sources
 
@@ -75,6 +77,11 @@ _NOT_FOUND_HINT = (
 )
 
 
+def _cleanup_budget() -> float:
+    """The budget of one short git call around a ``worktree add``, scaled to host load."""
+    return scaled_timeout(Timeout.GIT_WORKTREE_CLEANUP, Timeout.GIT_WORKTREE_CLEANUP_MAX)
+
+
 class BranchCapError(RuntimeError):
     """The new worktree's branch would exceed ``branches.wip.cap``."""
 
@@ -89,9 +96,16 @@ class _WorktreeAddError(subprocess.CalledProcessError):
 
     #: What the undo could not remove (path / branch); empty when nothing is left.
     left_behind: str = ""
+    #: Set when the add hit its budget: the cause, load average and the safe retry.
+    timeout_note: str = ""
+
+    @property
+    def deny_detail(self) -> str:
+        """The real cause, for the chain to put in the deny it raises for this crash."""
+        return str(self)
 
     def __str__(self) -> str:
-        stderr = (self.stderr or "").strip()
+        stderr = self.timeout_note or (self.stderr or "").strip()
         base = super().__str__()
         message = f"{base}: {stderr}" if stderr else base
         if self.left_behind:
@@ -222,7 +236,12 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         return str(repo.main_worktree_root())
 
     @staticmethod
-    def _git_worktree_add(cwd: str, path: Path, branch: str) -> None:
+    def _git_worktree_add(
+        cwd: str,
+        path: Path,
+        branch: str,
+        ceiling: float = Timeout.GIT_WORKTREE_ADD_MAX,
+    ) -> None:
         """Run ``git worktree add -b <branch> <path>`` from ``cwd``.
 
         Fails LOUDLY (raises) rather than returning an empty response — an
@@ -231,9 +250,11 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         explicitly and translated into the same ``CalledProcessError`` a
         ``check=True`` spawn would have raised.
 
-        A failed or timed-out add is undone before it raises (Plan 00512): git
-        can leave the worktree and the new branch behind, and the caller gets no
-        path to find them by.
+        The add runs on a budget scaled to host load (``Timeout.GIT_WORKTREE`` on
+        an idle host, up to ``ceiling``): populating a checkout is the work that
+        a loaded host slows most. A failed or timed-out add is undone before it
+        raises (Plan 00512): git can leave the worktree and the new branch
+        behind, and the caller gets no path to find them by.
         """
         branch_preexisted = (
             run_git(
@@ -242,17 +263,34 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
                 "--verify",
                 "--quiet",
                 f"refs/heads/{branch}",
-                timeout=Timeout.GIT_WORKTREE_CLEANUP,
+                timeout=_cleanup_budget(),
             ).returncode
             == 0
         )
-        result = run_git(
-            Path(cwd), "worktree", "add", "-b", branch, str(path), timeout=Timeout.GIT_WORKTREE
-        )
+        budget = scaled_timeout(Timeout.GIT_WORKTREE, max(ceiling, Timeout.GIT_WORKTREE))
+        result = run_git(Path(cwd), "worktree", "add", "-b", branch, str(path), timeout=budget)
         if result.returncode != 0:
+            timed_out = result.returncode == GIT_TIMED_OUT
+            load = describe_load()
+            if timed_out:
+                logger.warning(
+                    "worktree_create: git worktree add timed out after %.0fs (%s); undoing it",
+                    budget,
+                    load,
+                )
             left = WorktreeCreateHandler._undo_failed_add(cwd, path, branch, branch_preexisted)
             error = _WorktreeAddError(result.returncode, result.args, result.stdout, result.stderr)
             error.left_behind = left
+            if timed_out:
+                error.timeout_note = (
+                    f"git worktree add timed out after {budget:.0f}s under host load ({load}); "
+                    + (
+                        "remove the leftover named here, then retry"
+                        if left
+                        else "it was undone and nothing is left behind, so retry the creation "
+                        "once the load drops"
+                    )
+                )
             raise error
 
     @staticmethod
@@ -262,9 +300,7 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         ``""`` means locked with no reason. Read from ``worktree list --porcelain``
         (one blank-line separated record per worktree).
         """
-        result = run_git(
-            Path(cwd), "worktree", "list", "--porcelain", timeout=Timeout.GIT_WORKTREE_CLEANUP
-        )
+        result = run_git(Path(cwd), "worktree", "list", "--porcelain", timeout=_cleanup_budget())
         if result.returncode != 0:
             return None
         target = path.resolve()
@@ -311,17 +347,45 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         else:
             steps = []
         steps += [("worktree", "remove", "--force", str(path)), ("worktree", "prune")]
+        WorktreeCreateHandler._run_undo_steps(cwd, steps)
+        if WorktreeCreateHandler._remove_unregistered_directory(path):
+            WorktreeCreateHandler._run_undo_steps(cwd, [("worktree", "prune")])
         if not branch_preexisted:
-            steps.append(("branch", "-D", branch))
+            WorktreeCreateHandler._run_undo_steps(cwd, [("branch", "-D", branch)])
+        return WorktreeCreateHandler._left_behind(cwd, path, branch, branch_preexisted)
+
+    @staticmethod
+    def _run_undo_steps(cwd: str, steps: list[tuple[str, ...]]) -> None:
+        """Run each cleanup git call at the load-scaled budget; log, never raise."""
         for args in steps:
-            result = run_git(Path(cwd), *args, timeout=Timeout.GIT_WORKTREE_CLEANUP)
+            result = run_git(Path(cwd), *args, timeout=_cleanup_budget())
             if result.returncode != 0:
                 logger.warning(
                     "worktree_create: cleanup `git %s` failed: %s",
                     " ".join(args),
                     result.stderr.strip(),
                 )
-        return WorktreeCreateHandler._left_behind(cwd, path, branch, branch_preexisted)
+
+    @staticmethod
+    def _remove_unregistered_directory(path: Path) -> bool:
+        """Delete what a killed add left at ``path`` when git no longer owns it.
+
+        This handler created ``path`` (the caller proved it absent before the
+        add), so a directory still there with no registered worktree is its own
+        debris: ``git worktree remove`` answers "not a working tree" for it and
+        can never clear it. Returns whether a directory was removed.
+        """
+        if not path_exists(path, unreadable_means=True):
+            return False
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            logger.warning(
+                "worktree_create: could not delete the partial checkout %s: %s", path, exc
+            )
+            return False
+        logger.warning("worktree_create: deleted the partial checkout %s git did not own", path)
+        return True
 
     @staticmethod
     def _left_behind(cwd: str, path: Path, branch: str, branch_preexisted: bool) -> str:
@@ -339,7 +403,7 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
                 "--verify",
                 "--quiet",
                 f"refs/heads/{branch}",
-                timeout=Timeout.GIT_WORKTREE_CLEANUP,
+                timeout=_cleanup_budget(),
             )
             if exists.returncode == 0:
                 left.append(f"branch left behind: {branch}")

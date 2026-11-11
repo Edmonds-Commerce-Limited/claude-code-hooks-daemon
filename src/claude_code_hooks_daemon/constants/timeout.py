@@ -175,7 +175,21 @@ class Timeout:
     # pre-check before it, and on failure the three that undo it (remove the
     # worktree, prune its registration, delete its branch).
     GIT_WORKTREE_CLEANUP = GIT_CONTEXT
-    GIT_WORKTREE_CLEANUP_CALLS = 4
+    # A host at a load average near 70 timed out a 30 s `worktree add`, and the
+    # 5 s cleanup calls after it timed out too, leaving a half-populated
+    # directory. Both budgets are therefore a base scaled by host load
+    # (utils/load_scaling.py) and bounded by these ceilings, which the event
+    # budget below is sized for. GIT_WORKTREE and GIT_WORKTREE_CLEANUP stay the
+    # idle-host floors.
+    GIT_WORKTREE_ADD_MAX = 120
+    GIT_WORKTREE_CLEANUP_MAX = 10
+    # The calls made at the cleanup budget: the branch pre-check, then on
+    # failure the lock read, unlock, remove, prune, branch delete, and the
+    # leftover probe's worktree read and branch read less the pre-check's twin.
+    GIT_WORKTREE_CLEANUP_CALLS = 7
+    # `worktree remove` deletes a whole checkout, so its budget scales with the
+    # tree and the host (Plan 00474 N464); bounded so a wedged git still ends.
+    GIT_WORKTREE_REMOVE_MAX = 1_200
     # Plan 00558 Task 4.2: the branch-cap verdict before the add -- one
     # for-each-ref, the --merged for-each-ref that splits the pools (Plan
     # 00571), and a worktree list when a deny or a warning names worktrees.
@@ -204,11 +218,12 @@ class Timeout:
     # test_event_budgets.py pins the two equal.
     CHAIN_DEADLINE_HANDLER_MARGIN_SECONDS = 5
     EVENT_HANDLER_BUDGET: ClassVar[dict[EventType, int]] = {
-        # The add plus its short pre-check, branch-cap, creator-record and
-        # cleanup calls, each at its limit.
-        EventType.WORKTREE_CREATE: GIT_WORKTREE
-        + GIT_WORKTREE_CLEANUP
-        * (GIT_WORKTREE_CLEANUP_CALLS + GIT_BRANCH_CREATION_CALLS + GIT_BRANCH_RECORD_CALLS),
+        # The add at its load-scaled ceiling, its pre-check and cleanup calls at
+        # theirs, then the branch-cap verdict and creator-record calls.
+        EventType.WORKTREE_CREATE: GIT_WORKTREE_ADD_MAX
+        + GIT_WORKTREE_CLEANUP_MAX * GIT_WORKTREE_CLEANUP_CALLS
+        + GIT_CONTEXT * GIT_BRANCH_CREATION_CALLS
+        + GIT_WORKTREE_CLEANUP * GIT_BRANCH_RECORD_CALLS,
         # `worktree remove --force` and then `worktree prune`.
         EventType.WORKTREE_REMOVE: 2 * GIT_WORKTREE,
     }

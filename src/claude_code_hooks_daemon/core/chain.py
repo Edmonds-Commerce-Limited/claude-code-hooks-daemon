@@ -1198,9 +1198,15 @@ class HandlerChain:
 
                 if strict_mode:
                     # STRICT MODE: FAIL FAST - handler crash = BLOCK operation (fail-closed)
-                    error_result = HookResult.deny(
-                        reason=f"SYSTEM ERROR: Handler {handler.name} crashed - blocking for safety",
+                    crash_reason = (
+                        f"SYSTEM ERROR: Handler {handler.name} crashed - blocking for safety"
                     )
+                    # An exception that knows its own cause and safe retry says
+                    # so in the deny, instead of leaving it to the log.
+                    crash_detail = getattr(e, "deny_detail", None)
+                    if isinstance(crash_detail, str) and crash_detail:
+                        crash_reason += f": {crash_detail}"
+                    error_result = HookResult.deny(reason=crash_reason)
                     accumulated_context.append(f"Handler exception: {type(e).__name__}: {e}")
                     error_result.add_handler(handler.name)
 
