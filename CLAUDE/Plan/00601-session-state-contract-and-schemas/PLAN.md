@@ -48,7 +48,7 @@ The work adds a `session-state --json --session ID` command and a `--watch` form
 ### Phase 4: Contract
 
 - [x] ✅ **Task 4.1**: Document the contract (versioning rule, compatibility promise) and ship the schemas in the release; release note and manifest entry.
-- [ ] ⬜ **Task 4.2**: Tell the consuming team the plan number, the schema location and the version to pin.
+- [x] ✅ **Task 4.2**: Tell the consuming team the plan number, the schema location and the version to pin.
 
 ## Success Criteria
 
