@@ -7325,9 +7325,9 @@ push, a failed push returns a "parked locally, not pushed" result with a retry c
 (`branch_park.py:101-112`) parks nothing on a failed push. What the client met as "fails half-done" is
 therefore the exit status and wording, or the remote-only path.
 
-**Status**: ⬜ Open. Belongs with Task 4.3. Pin the existing behaviour with a failing pre-push hook, and
-fix whatever gap that shows (a distinct exit status for "parked locally, not pushed", the remote-only
-path).
+**Status**: ✅ Fixed on main by Plan 00594 Task 4.3 (release notes 043 and 051): a refused push exits 3 with
+"parked locally, not pushed" and the retry command, and a remote-only branch keeps its refused park on a
+local branch. The evidence above describes the state before that fix (its exit status is now 3, not 0).
 
 ### N608 — R-SECRET-BASH-MENTION blocked a heredoc whose prose only resembled a vault filename glob
 
@@ -7351,7 +7351,9 @@ The subagent stop guard makes a sub-agent park before it stops, so every sub-age
 unsigned commit. In a repository that requires verified signatures the host refused a push of three
 merged park commits, and the work had to be cherry-picked onto a clean line.
 
-**Status**: ⬜ Open, filed as Plan 00594 Task 4.9. Sign the park commit when `commit.gpgsign` is true
+**Status**: ✅ Fixed on main by Plan 00594 Task 4.9 (release note 048): the park commit is signed when
+`commit.gpgsign` is true and a signing failure stops the park before the ref moves. The text below is the
+original ask. Sign the park commit when `commit.gpgsign` is true
 (and honour `user.signingkey`/`gpg.format`), failing the park clearly rather than writing an unsigned
 commit the repository will reject. The wider design question of whether a park needs a commit at all is
 DESIGN.md's open "park record" question.
@@ -7427,7 +7429,8 @@ the choice of JSON Schema over OpenAPI was part of what was relayed).
 **Evidence**: `test_many_appends_each_run_are_judged_quickly`
 (`tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py`, marked `perf_sweep`) times 2000
 append-then-run statements with `time.perf_counter()` and compares to `scaled_cpu_seconds(1.5)`. It
-measures wall time, so a loaded runner can exceed a ceiling scaled only by CPU speed. It passed on the next
+measures wall time. The ceiling is already scaled by host load average and a tracing factor
+(`tests/load_scaling.py`), but a load spike inside the run can still exceed it. It passed on the next
 run; no code changed.
 
 **Status**: ⬜ Open, low priority. Measure with `time.process_time()` or take the best of three runs, so
@@ -7450,8 +7453,9 @@ empty.
 **Source**: Plan 00601 merge review, 11 November 2026.
 
 **Evidence**: `pyproject.toml` requires `jsonschema>=4.0`, but the new `core/state_schemas.py` imports the
-`referencing` package, which jsonschema depends on only from 4.18. An install that resolves an older
-jsonschema would fail on the first `session-state` or schema-validation call.
+`referencing` package (lazily, inside `schema_registry()` at line 68), which jsonschema depends on only from
+4.18. Only registry-based schema validation, which today only tests call, would fail on an older
+jsonschema; the `session-state` command itself does not import it.
 
 **Status**: ⬜ Open. Raise the floor to the first jsonschema that requires `referencing`. Do it with the
 lock file in one change, because a version-only edit marks the venv stale (N610).
