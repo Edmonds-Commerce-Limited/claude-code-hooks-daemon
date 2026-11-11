@@ -3206,6 +3206,11 @@ class TestTheDenial:
         assert [rule.rule_id for rule in _handler().get_rules()] == [RuleID.SUBAGENT_FULL_QA]
 
 
+#: A command the parser cannot read in full: an unrecognised interpreter
+#: running inline code (``TestUnrecognisedInterpreterRunningInlineCode``).
+_UNSEEN_COMMAND = "perl -e 1"
+
+
 class TestTheUnseenAdvisory:
     """Round 9d coordinator ruling: UNSEEN code is ALLOWED, with an advisory.
 
@@ -3221,18 +3226,18 @@ class TestTheUnseenAdvisory:
         return _handler().handle(_bash(command, cwd=str(_REPO_ROOT)))
 
     def test_unseen_allows(self) -> None:
-        result = self._result("bin/hooks-daemon status")
+        result = self._result(_UNSEEN_COMMAND)
         assert result.decision is Decision.ALLOW
 
     def test_unseen_carries_an_advisory_not_a_block(self) -> None:
-        result = self._result("bin/hooks-daemon status")
+        result = self._result(_UNSEEN_COMMAND)
         context = "\n".join(result.context)
         assert RuleID.SUBAGENT_FULL_QA in context
         assert "ADVISORY [" in context
         assert "BLOCKED [" not in context
 
     def test_unseen_advisory_names_the_sink(self) -> None:
-        result = self._result("bin/hooks-daemon status")
+        result = self._result(_UNSEEN_COMMAND)
         context = "\n".join(result.context)
         assert "lock" in context.lower()
 
@@ -3512,27 +3517,27 @@ class TestUnseenPolicyIsConfigurable:
         return _handler(**kwargs).handle(_bash(command, cwd=str(_REPO_ROOT)))
 
     def test_default_policy_is_advisory_not_deny(self) -> None:
-        result = self._result("bin/hooks-daemon status")
+        result = self._result(_UNSEEN_COMMAND)
         assert result.decision is Decision.ALLOW
 
     def test_policy_deny_denies_an_unseen_match_instead(self) -> None:
-        result = self._result("bin/hooks-daemon status", unseen_policy="deny")
+        result = self._result(_UNSEEN_COMMAND, unseen_policy="deny")
         assert result.decision is Decision.DENY
         assert "UNSEEN" in (result.reason or "")
 
     def test_an_unrecognised_policy_value_falls_back_to_advisory(self) -> None:
-        result = self._result("bin/hooks-daemon status", unseen_policy="block-it-please")
+        result = self._result(_UNSEEN_COMMAND, unseen_policy="block-it-please")
         assert result.decision is Decision.ALLOW
 
     def test_no_sink_description_states_plainly_that_none_is_declared(self) -> None:
-        result = self._result("bin/hooks-daemon status", unseen_sink_description=None)
+        result = self._result(_UNSEEN_COMMAND, unseen_sink_description=None)
         context = "\n".join(result.context)
         assert "none is declared" in context.lower()
         assert "tests/conftest.py" not in context
 
     def test_a_custom_sink_description_is_used_verbatim(self) -> None:
         result = self._result(
-            "bin/hooks-daemon status",
+            _UNSEEN_COMMAND,
             unseen_sink_description="a CI-only check, never a local one",
         )
         context = "\n".join(result.context)

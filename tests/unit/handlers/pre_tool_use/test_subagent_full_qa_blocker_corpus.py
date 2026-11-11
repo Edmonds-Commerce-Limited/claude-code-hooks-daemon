@@ -442,15 +442,12 @@ def test_a_full_by_design_script_is_denied_to_a_sub_agent(script: str) -> None:
 class TestUnseenScriptsAreAllowedNotDenied:
     """Round 9d coordinator ruling: UNSEEN code is ALLOWED, with an advisory.
 
-    ``bin/hooks-daemon`` is review 9 B1's residual, narrowed in round 9c: its
-    own self-location loop resolves, but a later two-hop ``cd`` chain in the
-    same script reaches a variable this handler's nested-substitution walk
-    cannot see, so ``find_full_qa_invocation`` still judges it UNSEEN (see
-    ``fail_closed`` on its match). What changed this round is the
-    CONSEQUENCE: the sink (the host-wide full-QA lock) is the guarantee now,
-    so this handler no longer denies what it merely could not see -- only a
-    POSITIVELY SEEN full run still does (``TestTheDenial`` in
-    ``test_subagent_full_qa_blocker.py``).
+    ``bin/hooks-daemon`` was review 9 B1's residual. Its last UNSEEN reason
+    was the wrapper body's ``[ -r /proc/$pid/stat ]``, read as an
+    inline-code flag; with shell file tests recognised as such, the parser
+    now reads the whole wrapper and finds no full run in it. Either way the
+    CONSEQUENCE is an ALLOW: only a POSITIVELY SEEN full run is denied
+    (``TestTheDenial`` in ``test_subagent_full_qa_blocker.py``).
     """
 
     @pytest.mark.parametrize(
@@ -462,12 +459,10 @@ class TestUnseenScriptsAreAllowedNotDenied:
             "bin/hooks-daemon find-plan 463",
         ],
     )
-    def test_still_judged_unseen_by_the_parser(
+    def test_read_in_full_and_not_a_full_run(
         self, command: str, patterns: list[FullQaPattern]
     ) -> None:
-        match = find_full_qa_invocation(command, patterns, cwd=_REPO_ROOT)
-        assert match is not None, command
-        assert match.fail_closed
+        assert find_full_qa_invocation(command, patterns, cwd=_REPO_ROOT) is None, command
 
     @pytest.mark.parametrize(
         "command",
