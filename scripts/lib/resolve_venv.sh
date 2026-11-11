@@ -464,20 +464,28 @@ _rv_venv_is_own_slug() {
 # _rv_count_other_path_venvs <daemon_dir>
 #
 # Echoes how many venvs under untracked/ carry a slug for a different project
-# path and have an executable interpreter. Called after the scan found nothing
-# usable, so each of them failed its probe silently. (The scan runs in a
-# `$(...)` subshell, so it cannot hand a counter back; this recounts.)
+# path and that `venv_python_usable` rejects for both bin/python and
+# bin/python3. Called after the scan found nothing usable, so these are the
+# other-path venvs it skipped silently. (The scan runs in a `$(...)` subshell,
+# so it cannot hand a counter back; this recounts through the same gate.)
 _rv_count_other_path_venvs() {
     local daemon_dir="$1" own_slug venv count=0
     own_slug="$(_rv_project_path_slug "$daemon_dir")"
+    [ -n "$own_slug" ] || {
+        echo 0
+        return 0
+    }
     for venv in "${daemon_dir}"/untracked/venv-*; do
-        if [ ! -x "$venv/bin/python" ] && [ ! -x "$venv/bin/python3" ]; then
+        # An unmatched glob leaves the literal pattern, which is no venv.
+        [ -d "$venv" ] || continue
+        _rv_venv_is_own_slug "$venv" "$own_slug"
+        if [ "$_RV_SCAN_SLUGGED" = 0 ] || [ "$_RV_SCAN_OWN" = 1 ]; then
             continue
         fi
-        _rv_venv_is_own_slug "$venv" "$own_slug"
-        if [ "$_RV_SCAN_SLUGGED" = 1 ] && [ "$_RV_SCAN_OWN" = 0 ] && [ -n "$own_slug" ]; then
-            count=$((count + 1))
+        if venv_python_usable "$venv/bin/python" || venv_python_usable "$venv/bin/python3"; then
+            continue
         fi
+        count=$((count + 1))
     done
     echo "$count"
 }
