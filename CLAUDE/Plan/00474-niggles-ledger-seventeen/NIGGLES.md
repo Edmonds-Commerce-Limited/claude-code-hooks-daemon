@@ -7410,6 +7410,15 @@ usage-limit stop is recorded with its reset time.
 **Status**: ⬜ Open. Confirm the usage-limit stop recording first, then design the verb as a versioned
 contract (feature work, needs its own plan).
 
+**Owner's ask (relayed by the peer, 11 November 2026)**: a concrete versioned schema for the daemon's
+machine-read output, validated by the daemon itself. The owner suggested OpenAPI; the peer recommended
+JSON Schema 2020-12 (no HTTP surface; OpenAPI 3.1 models are JSON Schema anyway) and the owner may
+overrule. Shape: one schema per `--json` output (session-state, mode-history, the `--watch` line), each
+with a versioned `$id` and a `schema_version` field in every document; semver, a breaking change is a new
+major; schema the CLI output, not the `untracked/` file layout; ship the schemas in the release; the
+daemon's own tests validate every output against them; consumers pin a major and refuse an unknown one.
+Not independently confirmed with the owner by this session.
+
 ### N617 — a perf-sweep timing test failed once on CI at 1.59s against a 1.5s ceiling
 
 **Source**: main CI QA run, 10 November 2026.

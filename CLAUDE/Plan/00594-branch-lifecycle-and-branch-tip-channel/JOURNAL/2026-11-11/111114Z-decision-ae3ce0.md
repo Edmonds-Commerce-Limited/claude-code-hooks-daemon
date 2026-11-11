@@ -1,0 +1,3 @@
+## 11:11 · decision · — — Goal retracted: remaining tasks wait on the second client seat
+
+The session goal for Plan 00594 cannot be satisfied from inside this session, so it was retracted with `clear-goal`. Everything the session could do alone is on main with green CI. The three open tasks each wait on the second client seat: 1.3 needs the seat's answers to the design review questions, 4.6 is a design decision pending the seat's stack depth and pull-request shape (recommendation recorded in DESIGN section 4 item 7), and 5.1 needs a stop/build/start handover window that only the coordinator can schedule. The coordinator said it will route all three after the prod cut-over. Sub-agents are also unavailable until the weekly usage limit resets on 13 November.
