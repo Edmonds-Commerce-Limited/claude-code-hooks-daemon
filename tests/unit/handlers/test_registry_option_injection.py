@@ -290,6 +290,9 @@ _VALID_NON_DEFAULTS: dict[tuple[str, str], object] = {
     ("goal_loop_detector", "blocked_hours"): 2.5,
     ("goal_loop_detector", "persist_every_crossings"): 9,
     ("bash_safe_mode", "exempt_patterns"): [r"^zzqx-exempt\b"],
+    # validate_options refuses anything but a positive number of seconds
+    ("worktree_create", "add_base_seconds"): 41.0,
+    ("worktree_create", "add_ceiling_seconds"): 97.0,
     # validate_options refuses anything but a list of logins and a bool
     ("github_issue_assignment_guard", "approved_issue_authors"): ["zzqx-login"],
     ("github_issue_assignment_guard", "auto_claim"): True,
