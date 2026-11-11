@@ -442,6 +442,8 @@ _rv_project_path_slug() {
 
 # _rv_venv_is_own_slug <venv_dir> <own_slug>
 #
+# Matches <own_slug> as a literal prefix; paths.py takes the rightmost `-pyNN-hex`
+# match instead. They differ only for slugs that themselves contain `-pyNN-hex`.
 # Sets (no subshell): _RV_SCAN_OWN to 1 when the venv directory name carries
 # <own_slug> (`venv-<slug>-py{MM}-{hex}[-<host>]`), else 0; _RV_SCAN_SLUGGED to 1
 # when the name carries any slug, else 0 (legacy `venv-py{MM}-{hex}`).
@@ -457,6 +459,27 @@ _rv_venv_is_own_slug() {
     if [ -n "$own_slug" ] && [[ "$name" =~ ^venv-${own_slug}-${tail_re}$ ]]; then
         _RV_SCAN_OWN=1
     fi
+}
+
+# _rv_count_other_path_venvs <daemon_dir>
+#
+# Echoes how many venvs under untracked/ carry a slug for a different project
+# path and have an executable interpreter. Called after the scan found nothing
+# usable, so each of them failed its probe silently. (The scan runs in a
+# `$(...)` subshell, so it cannot hand a counter back; this recounts.)
+_rv_count_other_path_venvs() {
+    local daemon_dir="$1" own_slug venv count=0
+    own_slug="$(_rv_project_path_slug "$daemon_dir")"
+    for venv in "${daemon_dir}"/untracked/venv-*; do
+        if [ ! -x "$venv/bin/python" ] && [ ! -x "$venv/bin/python3" ]; then
+            continue
+        fi
+        _rv_venv_is_own_slug "$venv" "$own_slug"
+        if [ "$_RV_SCAN_SLUGGED" = 1 ] && [ "$_RV_SCAN_OWN" = 0 ] && [ -n "$own_slug" ]; then
+            count=$((count + 1))
+        fi
+    done
+    echo "$count"
 }
 
 # _rv_pick_ranked_scan <daemon_dir> <python|python3>
@@ -653,6 +676,12 @@ _rv_resolve_python_impl() {
         echo "resolve_venv: no usable venv found under $daemon_dir/untracked/" >&2
         echo "  Searched: \$HOOKS_DAEMON_PYTHON, \$HOOKS_DAEMON_VENV_PATH/bin/python," >&2
         echo "    $daemon_dir/untracked/venv-*/bin/python" >&2
+        local skipped_other
+        skipped_other="$(_rv_count_other_path_venvs "$daemon_dir")"
+        if [ "$skipped_other" -gt 0 ]; then
+            echo "  $skipped_other venv(s) built for other project paths were skipped" \
+                "(built for a different checkout path; not this one)" >&2
+        fi
         if [ "$fallback_flag" != "--fallback-target" ]; then
             echo "  Build the venv for this project path with: $daemon_dir/bin/hooks-daemon repair" >&2
             echo "  (or pass --fallback-target if you intend to bootstrap from a fresh clone)." >&2

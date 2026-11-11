@@ -125,3 +125,57 @@ def test_python_sort_key_puts_own_slug_first_among_equal_rank(tmp_path: Path) ->
     ordered = sorted(sorted([other, own]), key=lambda d: _scan_sort_key(d, lock_hash, slug))
 
     assert ordered == [own, other]
+
+
+def _bash_resolve(daemon_dir: Path) -> subprocess.CompletedProcess[str]:
+    harness = textwrap.dedent(f"""\
+        unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH
+        . "{RESOLVE_VENV_SH}"
+        _rv_resolve_python_impl "{daemon_dir}"
+        """)
+    return subprocess.run(
+        [BASH, "-c", harness],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_TIMEOUT_SECONDS,
+    )
+
+
+def test_no_usable_venv_error_counts_skipped_other_path_venvs(tmp_path: Path) -> None:
+    """Two failing venvs built for other paths: the final error says they were skipped."""
+    lock_hash, _own_name = _project(tmp_path)
+    untracked = tmp_path / "untracked"
+    _fake_venv(untracked / _OTHER_VIEW_NAME, _OTHER, lock_hash)
+    _fake_venv(untracked / "venv-zzz_other_view-py313-00000004", _OTHER, lock_hash)
+
+    result = _bash_resolve(tmp_path)
+
+    assert result.returncode == 5
+    assert "no usable venv found" in result.stderr
+    assert "2 venv(s) built for other project paths were skipped" in result.stderr
+    assert "failed to run" not in result.stderr
+
+
+def test_no_usable_venv_error_omits_skip_line_without_other_path_venvs(tmp_path: Path) -> None:
+    _project(tmp_path)
+    (tmp_path / "untracked").mkdir()
+
+    result = _bash_resolve(tmp_path)
+
+    assert result.returncode == 5
+    assert "no usable venv found" in result.stderr
+    assert "built for other project paths" not in result.stderr
+
+
+def test_other_path_failure_across_ranks_is_silent(tmp_path: Path) -> None:
+    """A failing other-slug venv at rank 0 falls through to a usable own-slug venv at rank 1."""
+    lock_hash, own_name = _project(tmp_path)
+    untracked = tmp_path / "untracked"
+    _fake_venv(untracked / _OTHER_VIEW_NAME, _OTHER, lock_hash)
+    own = _fake_venv(untracked / own_name, _RUNNING, "0" * 32)
+
+    result = _bash_pick(tmp_path)
+
+    assert result.stdout.strip() == str(own)
+    assert result.stderr == ""
