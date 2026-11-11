@@ -14,8 +14,10 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from claude_code_hooks_daemon.constants.modes import SessionModeIPC
+from claude_code_hooks_daemon.core import state_schemas
 from claude_code_hooks_daemon.daemon.cli import build_parser, cmd_mode_history
 
 _CLI = "claude_code_hooks_daemon.daemon.cli"
@@ -104,9 +106,38 @@ class TestModeHistory:
         assert "no session mode is active" in out
         assert "no transitions recorded" in out
 
-    def test_json_output(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_json_output_keeps_every_current_field_and_adds_schema_version(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         _run(_args("--json"), {"result": _RESULT})
-        assert json.loads(capsys.readouterr().out) == _RESULT
+        document = json.loads(capsys.readouterr().out)
+        assert document.pop("schema_version") == state_schemas.SCHEMA_VERSION
+        assert document == _RESULT
+
+    def test_json_output_validates_against_the_shipped_schema(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        full = {
+            SessionModeIPC.KEY_SESSIONS: {
+                "abcdef0123456789": [
+                    {
+                        SessionModeIPC.KEY_LABEL: "focus",
+                        SessionModeIPC.KEY_MODE: "focus",
+                        SessionModeIPC.KEY_REASON: None,
+                        SessionModeIPC.KEY_SOURCE: "human",
+                        SessionModeIPC.KEY_DETAIL: "fix the parser",
+                        SessionModeIPC.KEY_ENTERED_AT: 1.0,
+                        SessionModeIPC.KEY_EXPIRES_AT: 2.0,
+                    }
+                ]
+            },
+            SessionModeIPC.KEY_TRANSITIONS: [_TRANSITION],
+        }
+        _run(_args("--json"), {"result": full})
+        Draft202012Validator(
+            state_schemas.load_schema(state_schemas.SCHEMA_MODE_HISTORY),
+            registry=state_schemas.schema_registry(),
+        ).validate(json.loads(capsys.readouterr().out))
 
     def test_a_daemon_error_is_printed_and_fails(self, capsys: pytest.CaptureFixture[str]) -> None:
         code, _sent = _run(_args(), {"error": "transition log unreadable: line 3"})

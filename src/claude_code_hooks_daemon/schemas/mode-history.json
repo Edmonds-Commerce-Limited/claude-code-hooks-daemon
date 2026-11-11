@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/schemas/mode-history/1.0.0.json",
+  "title": "hooks-daemon mode-history --json",
+  "description": "Live session modes and recent mode transitions. A later minor version may add fields; a consumer ignores fields it does not know and refuses a schema_version whose major it does not pin.",
+  "type": "object",
+  "required": ["schema_version", "sessions", "transitions"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+\\.\\d+$"
+    },
+    "sessions": {
+      "description": "Session id to that session's active modes.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/mode_entry" }
+      }
+    },
+    "transitions": {
+      "description": "Newest transitions, oldest first.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/transition" }
+    }
+  },
+  "$defs": {
+    "mode_entry": {
+      "type": "object",
+      "required": ["label", "mode", "reason", "source", "detail", "entered_at", "expires_at"],
+      "properties": {
+        "label": { "type": "string" },
+        "mode": { "type": "string" },
+        "reason": { "type": ["string", "null"] },
+        "source": { "type": "string" },
+        "detail": { "type": "string" },
+        "entered_at": { "type": "number", "description": "Epoch seconds." },
+        "expires_at": { "type": "number", "description": "Epoch seconds." }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "required": ["at", "session_id", "label", "action", "evidence", "detail"],
+      "properties": {
+        "at": { "type": "number", "description": "Epoch seconds." },
+        "session_id": { "type": "string" },
+        "label": { "type": "string" },
+        "action": { "type": "string" },
+        "evidence": { "type": "string" },
+        "detail": { "type": "string" }
+      }
+    }
+  }
+}

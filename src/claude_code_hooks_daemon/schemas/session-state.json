@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/schemas/session-state/1.0.0.json",
+  "title": "hooks-daemon session-state --json",
+  "description": "One session's state: modes, last turn edge, account usage, the reset time of a recorded usage-limit stop, and the usage pause. A missing record is null, never an error. A later minor version may add fields; a consumer ignores fields it does not know and refuses a schema_version whose major it does not pin.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "session_id",
+    "observed_at",
+    "modes",
+    "last_turn_edge",
+    "usage",
+    "limit_reset",
+    "usage_pause"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+\\.\\d+$"
+    },
+    "session_id": { "type": "string" },
+    "observed_at": { "type": "number", "description": "Epoch seconds at which this document was built." },
+    "modes": {
+      "type": "array",
+      "items": { "$ref": "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/schemas/mode-history/1.0.0.json#/$defs/mode_entry" }
+    },
+    "last_turn_edge": {
+      "description": "The newest turn edge recorded for the session, or null when none is.",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/turn_edge" }]
+    },
+    "usage": { "$ref": "#/$defs/usage" },
+    "limit_reset": {
+      "description": "When the usage window a recorded rate_limit stop is waiting on resets; null when no unresolved rate_limit stop exists or no live usage window can be joined to it.",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/limit_reset" }]
+    },
+    "usage_pause": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/usage_pause" }]
+    }
+  },
+  "$defs": {
+    "window_name": { "enum": ["five_hour", "seven_day"] },
+    "usage_window": {
+      "type": "object",
+      "required": ["used_percentage", "resets_at", "observed_at"],
+      "properties": {
+        "used_percentage": { "type": "number", "minimum": 0, "maximum": 100 },
+        "resets_at": { "type": "number", "description": "Epoch seconds." },
+        "observed_at": { "type": "number", "description": "Epoch seconds." }
+      }
+    },
+    "usage": {
+      "description": "Account-wide usage, not per session. A window past its reset is null.",
+      "type": "object",
+      "required": ["five_hour", "seven_day", "observed_at"],
+      "properties": {
+        "five_hour": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/usage_window" }] },
+        "seven_day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/usage_window" }] },
+        "observed_at": { "type": ["number", "null"], "description": "Newest observed_at of the windows present." }
+      }
+    },
+    "turn_edge": {
+      "type": "object",
+      "required": ["kind", "at"],
+      "properties": {
+        "kind": { "enum": ["start", "stop", "stop_failure"] },
+        "at": { "type": "number", "description": "Epoch seconds." },
+        "error": { "type": "string", "description": "The StopFailure error; present for stop_failure." },
+        "resolved_at": { "type": ["number", "null"], "description": "When the session moved on; present for stop_failure." }
+      }
+    },
+    "limit_reset": {
+      "type": "object",
+      "required": ["window", "resets_at"],
+      "properties": {
+        "window": { "$ref": "#/$defs/window_name" },
+        "resets_at": { "type": "number", "description": "Epoch seconds." }
+      }
+    },
+    "usage_pause": {
+      "type": "object",
+      "required": ["paused_at", "resume_at", "window", "used_percentage", "ceiling", "reason"],
+      "properties": {
+        "paused_at": { "type": "number" },
+        "resume_at": { "type": "number" },
+        "window": { "$ref": "#/$defs/window_name" },
+        "used_percentage": { "type": "number" },
+        "ceiling": { "type": "number" },
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}
