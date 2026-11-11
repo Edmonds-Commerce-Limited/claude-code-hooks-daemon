@@ -21,8 +21,8 @@ from types import ModuleType
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.scan_scope import WalkError, walk_files
+from tests.support.git_fixtures import git_setup_timeout
 
 _SCRIPTS_QA = Path(__file__).resolve().parents[3] / "scripts" / "qa"
 _VIOLATION = "x = 1  # no" + "qa: E501\n"
@@ -38,7 +38,10 @@ def _load(name: str) -> ModuleType:
 
 def _git(root: Path, *args: str) -> None:
     subprocess.run(  # nosec B603 B607 - fixed argv, trusted binary
-        ["git", "-C", str(root), *args], check=True, capture_output=True
+        ["git", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+        timeout=git_setup_timeout(),
     )
 
 
@@ -78,7 +81,7 @@ def test_a_git_that_cannot_answer_fails_the_walk_instead_of_listing_everything(
     """The failure that scanned a plugin marketplace: git timed out, nothing was dropped."""
 
     def _timed_out(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        raise subprocess.TimeoutExpired(cmd="git", timeout=Timeout.GIT_CONTEXT)
+        raise subprocess.TimeoutExpired(cmd="git", timeout=git_setup_timeout())
 
     monkeypatch.setattr(subprocess, "run", _timed_out)
     with pytest.raises(WalkError):
