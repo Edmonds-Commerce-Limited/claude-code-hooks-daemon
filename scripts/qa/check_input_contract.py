@@ -78,6 +78,8 @@ except ModuleNotFoundError:
         load_allowlist_file,
     )
 
+from claude_code_hooks_daemon.utils.scan_scope import walk_files
+
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent.parent.parent
 _SRC_PACKAGE_PARTS: Final[tuple[str, str]] = ("src", "claude_code_hooks_daemon")
 _CONTRACTS_DIR_PARTS: Final[tuple[str, str]] = ("contracts", "claude-code-hooks")
@@ -212,7 +214,7 @@ def package_to_event(package_name: str) -> str:
 
 def _reads_under(directory: Path, constants: dict[str, str]) -> set[str]:
     reads: set[str] = set()
-    for path in sorted(directory.rglob("*.py")):
+    for path in walk_files(directory, "*.py"):
         reads |= collect_reads_from_source(path.read_text(encoding="utf-8"), constants)
     return reads
 

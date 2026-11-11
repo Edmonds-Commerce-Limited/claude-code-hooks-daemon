@@ -80,8 +80,12 @@ whole-suite run. Two things provide one:
 
 So `--allow-unmapped` is a statement that the change is not fully certified
 locally, never a quiet pass. A branch that needed it says so when it hands over.
-(The tool's own message still says "the coordinator's full gate must cover them";
-that wording predates the tiers and is out of step with this document.)
+
+This holds for `--range A..B` exactly as for the working-tree run: a range over
+several commits is more likely to include a hub file (`config/models.py`,
+`daemon/cli.py`), and a `too-broad` file can only be passed with
+`--allow-unmapped`. A `changed_tests_map.yaml` rule ADDS tests to a file's cover
+but never clears `too-broad`, so do not add rules to chase one.
 
 ### Before Merging: the Coordinator's Check
 
