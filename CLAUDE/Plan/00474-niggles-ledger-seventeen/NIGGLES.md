@@ -7434,6 +7434,28 @@ run; no code changed.
 load on the runner cannot fail an algorithmic-complexity check. Do not simply raise the ceiling: the test
 exists to catch quadratic behaviour.
 
+### N618 — `test_a_steady_state_revalidation_logs_nothing` fails in a loaded multi-worker run and passes alone
+
+**Source**: Plan 00599 merge QA, 11 November 2026.
+
+**Evidence**: `tests/unit/docs_qa/test_corpus.py::TestRevalidateCorpus::test_a_steady_state_revalidation_logs_nothing`
+failed in the `changed` tier run (6023 passed, 1 failed) and again in the agent's run, then passed when
+the file ran alone (126 passed). Something else running at the same time writes to the log it asserts is
+empty.
+
+**Status**: ⬜ Open. Find what shares the log, then isolate it per test.
+
+### N619 — `jsonschema>=4.0` is too loose for `core/state_schemas.py`, which imports `referencing`
+
+**Source**: Plan 00601 merge review, 11 November 2026.
+
+**Evidence**: `pyproject.toml` requires `jsonschema>=4.0`, but the new `core/state_schemas.py` imports the
+`referencing` package, which jsonschema depends on only from 4.18. An install that resolves an older
+jsonschema would fail on the first `session-state` or schema-validation call.
+
+**Status**: ⬜ Open. Raise the floor to the first jsonschema that requires `referencing`. Do it with the
+lock file in one change, because a version-only edit marks the venv stale (N610).
+
 ### N609 — a dangling legacy `untracked/venv` symlink survives install and upgrade
 
 **Source**: Plan 00594 release housekeeping (10 November 2026).
