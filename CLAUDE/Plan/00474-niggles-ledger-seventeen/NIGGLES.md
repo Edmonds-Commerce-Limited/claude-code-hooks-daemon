@@ -7410,6 +7410,20 @@ usage-limit stop is recorded with its reset time.
 **Status**: ⬜ Open. Confirm the usage-limit stop recording first, then design the verb as a versioned
 contract (feature work, needs its own plan).
 
+### N617 — a perf-sweep timing test failed once on CI at 1.59s against a 1.5s ceiling
+
+**Source**: main CI QA run, 10 November 2026.
+
+**Evidence**: `test_many_appends_each_run_are_judged_quickly`
+(`tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py`, marked `perf_sweep`) times 2000
+append-then-run statements with `time.perf_counter()` and compares to `scaled_cpu_seconds(1.5)`. It
+measures wall time, so a loaded runner can exceed a ceiling scaled only by CPU speed. It passed on the next
+run; no code changed.
+
+**Status**: ⬜ Open, low priority. Measure with `time.process_time()` or take the best of three runs, so
+load on the runner cannot fail an algorithmic-complexity check. Do not simply raise the ceiling: the test
+exists to catch quadratic behaviour.
+
 ### N609 — a dangling legacy `untracked/venv` symlink survives install and upgrade
 
 **Source**: Plan 00594 release housekeeping (10 November 2026).
