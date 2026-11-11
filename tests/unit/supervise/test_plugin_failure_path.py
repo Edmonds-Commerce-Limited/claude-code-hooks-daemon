@@ -138,14 +138,15 @@ class TestNoticeRendering:
             "🤖 [ccy-supervisor] plugin notice — machine-generated, NOT a human instruction: "
         )
         assert f"plugin `credential-switch` {phrase}" in text
-        assert text.endswith("No action is needed from you.")
+        assert "No action is needed" not in text
+        assert str(_mod.worker_error_log_path()) in text
 
     def test_the_recovery_sentence_matches_what_was_done(self) -> None:
         skipped = _mod.render_plugin_notice("p", "load", "load")
         disabled = _mod.render_plugin_notice("p", "exception", "on_idle")
         restarted = _mod.render_plugin_notice("p", "overrun", "on_idle")
         assert "running without it" in skipped
-        assert "disabled for the rest of this session" in disabled
+        assert "disabled until the next policy-worker restart" in disabled
         assert "restarted without it" not in disabled
         assert "policy worker was restarted without it" in restarted
 
@@ -468,7 +469,6 @@ class TestHostHandling:
         )
         assert recorder.restarts == 0
         assert host.status_entries()[0]["state"] == "disabled"
-        assert "--disable-plugin" in host.worker_argv()
         assert (
             "plugin p: exception in on_idle -> disabled" in (tmp_path / "decision.log").read_text()
         )
@@ -534,7 +534,8 @@ class TestWedgeDetection:
     def test_an_old_marker_names_the_culprit(self, tmp_path: Path) -> None:
         host = _host_for(tmp_path, ["p"])
         _write_marker(self._marker(tmp_path))
-        failure = host.detect_wedge(NOW)
+        assert host.detect_wedge(NOW) is None  # the first strike only
+        failure = host.detect_wedge(NOW + 3.0)
         assert (failure.plugin, failure.kind, failure.hook) == ("p", "wedge", "on_idle")
 
     def test_a_fresh_marker_is_a_slow_hook_not_a_wedge(self, tmp_path: Path) -> None:
@@ -547,6 +548,7 @@ class TestWedgeDetection:
         _write_marker(self._marker(tmp_path), hook="load", started_at=NOW - 1.2)
         assert host.detect_wedge(NOW) is None
         _write_marker(self._marker(tmp_path), hook="load", started_at=NOW - 2.0)
+        assert host.detect_wedge(NOW) is None  # the first strike only
         assert host.detect_wedge(NOW) is not None
 
     @pytest.mark.parametrize(
@@ -577,14 +579,15 @@ class TestWedgeDetection:
         host, recorder, machine = _host_for(tmp_path, ["p"]), _Recorder(), _machine()
         _write_marker(self._marker(tmp_path))
         log = _mod.DecisionLog(tmp_path / "decision.log")
-        _mod.handle_worker_silence(
-            plugin_host=host,
-            machine=machine,
-            restart_worker=recorder.restart,
-            log=log,
-            status_dir=tmp_path / "untracked",
-            now_wall=NOW,
-        )
+        for now in (NOW, NOW + 3.0):  # two consecutive silent ticks make a wedge
+            _mod.handle_worker_silence(
+                plugin_host=host,
+                machine=machine,
+                restart_worker=recorder.restart,
+                log=log,
+                status_dir=tmp_path / "untracked",
+                now_wall=now,
+            )
         assert recorder.restarts == 1
         assert machine.plugin_notices_pending == ("p|wedge|on_idle",)
         assert host.status_entries()[0]["state"] == "disabled"
@@ -634,6 +637,7 @@ def _live_supervise(
     )
     worker = _mod.PolicyWorker(SCRIPT_PATH, dry_run=False, extra_argv=host.worker_argv)
     assert worker.start()
+    host.set_worker_cpu_source(worker.cpu_seconds)
     restarts = _Recorder()
 
     def restart_worker() -> bool:
@@ -679,16 +683,18 @@ class TestLiveFailurePath:
         code, received, host, restarts = _live_supervise(live_env, _SLOW_BODY, linger=3.0)
         assert code == 7
         assert restarts.restarts == 1
-        assert "--disable-plugin" in host.worker_argv()
+        assert host.status_entries()[0]["state"] == "disabled"
         assert received.read_bytes().decode().count("plugin notice") == 1
         assert "plugin culprit: overrun in on_idle" in (live_env / "decision.log").read_text()
 
     def test_a_worker_wedged_inside_a_hook_is_restarted_and_the_culprit_named(
-        self, live_env: Path
+        self, live_env: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # The poll here is 0.05 s, so keep the clean-tick forgiveness out of the run.
+        monkeypatch.setenv("CCY_PLUGIN_REENABLE_CLEAN_TICKS", "1000000")
         started = time.monotonic()
         code, received, host, restarts = _live_supervise(
-            live_env, _STOPS_THE_WORKER_BODY, linger=6.0
+            live_env, _STOPS_THE_WORKER_BODY, linger=12.0
         )
         assert code == 7
         assert restarts.restarts == 1

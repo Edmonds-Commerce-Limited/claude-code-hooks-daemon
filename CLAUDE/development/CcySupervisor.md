@@ -768,17 +768,43 @@ same four steps:
    leaves a thread possibly still running plugin code, so the host restarts the
    worker without the plugin. A wedge is found by the host's read timeout: before
    each hook the worker writes an atomic marker, `supervise/plugin-in-hook.<host pid>.json`, naming the plugin and the hook, and the host reads it when a tick
-   goes unanswered. A marker older than the hook's budget plus a short grace
-   names the culprit, which is disabled and the worker restarted without it
-   BEFORE the tick falls back to the in-process decision, so the plugin that just
-   wedged the worker is not run again in the host.
+   goes unanswered. A marker older than the hook's budget plus a short grace is
+   only a SUSPECT, because a worker the kernel has not scheduled (a host at load
+   55 to 105 on 22 CPUs stalls a process for longer than 0.75 s) shows the same
+   marker. The culprit is named only when the SAME marker (plugin, hook, start
+   time) is seen at two consecutive silent ticks (`_PLUGIN_WEDGE_STRIKES`) with
+   no CPU progress by the worker between them (the host reads
+   `/proc/<worker pid>/stat`; `PluginHost.set_worker_cpu_source`). A marker that
+   cleared, a different marker or CPU progress starts the count again. The
+   culprit is then disabled and the worker restarted without it BEFORE the tick
+   falls back to the in-process decision, so the plugin that just wedged the
+   worker is not run again in the host. The same class of defect (a wall-clock
+   budget judged without regard to host load) is why a disable is not final:
+
+   **Re-enabling.** A plugin disabled for `exception`, `bad-result`, `overrun` or
+   `wedge` is re-enabled at the next worker restart after the one the failure
+   caused, or after `CCY_PLUGIN_REENABLE_CLEAN_TICKS` (default 120) ticks the
+   worker answered with no plugin failure; the host restarts the worker so it
+   loads the plugin, and logs `plugin <name>: re-enabled after N clean ticks`.
+   `load`, `exit-stuck`, `host-fault` and `--disable-plugin` stay off for the
+   supervisor process. Every disable also writes one line to
+   `claude-supervise-worker.err.log` with the marker's age (`n/a` when the
+   failure left none) and `os.getloadavg()`.
+   The host-side parts (`PluginHost`, `handle_worker_silence`) do not hot-reload:
+   they take effect when the ccy session is next started; the notice text and
+   `render_plugin_notice` are worker-side and reload with the worker.
 
 4. **Tell the session.** A built-in *plugin-notice* family (`Decision.WOULD_PLUGIN_NOTICE`)
    types one provenance-marked line at the next idle point, ranked with the
    operator signal (after compact/continue, ahead of the model-switch and goal
    families):
 
-   > 🤖 [ccy-supervisor] plugin notice — machine-generated, NOT a human instruction: plugin `max-age` raised an exception in on_idle. It is disabled for the rest of this session. No action is needed from you.
+   > 🤖 [ccy-supervisor] plugin notice — machine-generated, NOT a human instruction: plugin `max-age` raised an exception in on_idle. Its hook raised; the traceback is in the log. It is disabled until the next policy-worker restart or 120 clean ticks. While it is off, everything that plugin provides is off. Details: <path of claude-supervise-worker.err.log>
+
+   The notice names the cause, what is off (`_PLUGIN_OFF_FEATURES`: for
+   `ccy-lifecycle` the relaunch on a team join, the max-age restart and the
+   deadline notice; any other plugin gets a generic sentence) and the worker
+   error log. It never says no action is needed.
 
    The text is rendered from FIXED templates (`render_plugin_notice`): only a
    name that matched the name pattern and phrases looked up by a closed-set kind
@@ -825,7 +851,10 @@ A supervisor that was given no plugin writes no `plugins` key at all.
 `PluginTestHarness` drives a worker half through the real loader with no
 worker process, PTY or live session. Unlike the supervisor, which disables a
 failing plugin and carries on, it raises `PluginHarnessError` with the
-traceback. The script's filename has a hyphen, so load it by path:
+traceback. Nothing is written outside `work_dir`: while a harness call runs,
+the worker error log is redirected to `work_dir/claude-supervise-worker.err.log`
+(`_worker_error_log_redirected`), so a hook that raises never appends to the live
+session's log. The script's filename has a hyphen, so load it by path:
 
 ```python
 import importlib.util
