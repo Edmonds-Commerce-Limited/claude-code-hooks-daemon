@@ -22,6 +22,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.utils.git_config_write import (
+    GitConfigLockError,
+    run_git_config_write,
+)
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
 _HEADS = "refs/heads/"
@@ -89,8 +93,10 @@ def write_park_record(repo: Path, name: str, record: ParkRecord) -> None:
         _AT_KEY: str(record.parked_at),
         _BY_KEY: record.parked_by,
     }
+    # Git offers no multi-key write in one invocation, so each key waits out the
+    # shared config lock on its own (N621).
     for key, value in values.items():
-        _git_out(repo, "config", _record_key(name, key), value)
+        _config_write(repo, _record_key(name, key), value)
 
 
 def read_park_record(repo: Path, name: str) -> ParkRecord | None:
@@ -112,7 +118,7 @@ def clear_park_record(repo: Path, name: str) -> ParkRecord | None:
     if record is None:
         return None
     for key in _RECORD_KEYS:
-        run_git(repo, "config", "--unset-all", _record_key(name, key))
+        _config_write(repo, "--unset-all", _record_key(name, key))
     return record
 
 
@@ -151,6 +157,16 @@ def announce_ended_parks(repo: Path) -> list[str]:
         clear_park_record(repo, name)
         lines.append(f"Park cleared: {name} ({record.reason})")
     return lines
+
+
+def _config_write(repo: Path, *args: str) -> None:
+    """``git config <args>`` waiting out ``config.lock``; a failure is a park error."""
+    try:
+        result = run_git_config_write(repo, *args)
+    except GitConfigLockError as exc:
+        raise BranchParkError(str(exc)) from exc
+    if result.returncode != 0:
+        raise BranchParkError(f"git config failed: {result.stderr.strip()}")
 
 
 def _git_out(repo: Path, *args: str) -> str:
