@@ -7466,7 +7466,7 @@ lock file in one change, because a version-only edit marks the venv stale (N610)
 
 **Evidence**: `git pull`, `git merge`, `git mv ... && git commit` and `git push` each drew "R-LONG-RUNNING-NO-TIMEOUT: no timeout on git" as an advisory. These are normally quick, and the owner asked for a timeout or a background run only for commands that may exceed about 30 seconds. A hint on every git call trains the reader to skip it, including the real deny.
 
-**Status**: ⬜ Open. Treat `git` as a known-fast command unless the verb is slow (`clone`, `fetch` of a large repo, `gc`), or drop the no-timeout advisory entirely and keep only the deny shapes.
+**Status**: ✅ Fixed. `git` local verbs were already fast in the classifier; the noise that remained came from `mkplan.bash` and `pingbus`, now on `DEFAULT_FAST_PROGRAMS`. Network git verbs (`clone`, `fetch`, `pull`, `push`) and unknown programs still advise, and the deny rules are untouched. Corpus tests cover both sides; the option is documented in `docs/guides/HANDLER_REFERENCE.md`; release note 060.
 
 ### N609 — a dangling legacy `untracked/venv` symlink survives install and upgrade
 

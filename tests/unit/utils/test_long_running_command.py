@@ -66,6 +66,9 @@ ADVISE_CORPUS: list[str] = [
     "curl -s https://example.com/x",
     "git fetch origin",
     "git push origin main",
+    "git pull --ff-only",
+    "git clone https://example.com/x.git",
+    "git -C sub fetch --all",
     "./scripts/something.sh --flag",
     "python3 -c 'print(1)'",
     "cd /work && ./build-docs.sh",
@@ -99,7 +102,21 @@ ALLOW_CORPUS: list[str] = [
     "echo pytest",
     "mkdir -p untracked/scratch && touch untracked/scratch/x",
     "bin/hooks-daemon status",
-    "",
+    "git add -A && git commit -m 'x'",
+    "git mv a b && git commit -m 'move'",
+    "git merge --no-ff topic",
+    "git rev-parse HEAD",
+    "git worktree list",
+    "git show HEAD~1 --stat",
+    "git branch --show-current",
+    "git -C sub status",
+    "CLAUDE/Plan/mkplan.bash my-plan",
+    "mkplan.bash --journal plan cat body.md",
+    "pingbus send peer hello",
+    "rg -n foo src",
+    "jq .a file.json",
+    "awk 'NR<3' file",
+    "gh pr view 3 --json state",
 ]
 
 
@@ -153,6 +170,18 @@ class TestPolicyLists:
     def test_extra_fast_program_silences_the_advisory(self) -> None:
         policy = LongRunningPolicy.build(extra_fast_programs=["mytool"])
         assert classify("mytool --version", policy) == ()
+
+    def test_extra_fast_program_does_not_silence_network_git(self) -> None:
+        policy = LongRunningPolicy.build(extra_fast_programs=["git"])
+        kinds = {f.kind for f in classify("git push origin main", policy)}
+        assert kinds == {FindingKind.UNBOUNDED}
+
+    def test_fast_program_never_hides_a_deny(self) -> None:
+        policy = LongRunningPolicy.build(extra_fast_programs=["mkplan.bash", "pingbus"])
+        assert {f.kind for f in classify("sleep 60", policy)} == {FindingKind.LONG_SLEEP}
+        assert FindingKind.LONG_TIMEOUT in {
+            f.kind for f in classify("timeout 600 pingbus wait", policy)
+        }
 
     def test_exempt_pattern_silences_everything_it_matches(self) -> None:
         policy = LongRunningPolicy.build(exempt_patterns=[r"^pytest tests/unit/test_one\.py"])
