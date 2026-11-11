@@ -150,6 +150,7 @@ rules:
       - tests/unit/handlers/test_autonomy_drivers.py
       - tests/unit/qa/test_measure_instruction_footprint.py
       - tests/unit/test_rule_parity.py
+      - tests/unit/utils/test_no_ask_decision.py
     why: these tests enumerate EVERY handler (pkgutil.walk_packages or
       HandlerRegistry.discover()), so they reach a changed handler through no
       import or path; tests/unit/qa/test_handler_enumerating_tests_are_selected.py
