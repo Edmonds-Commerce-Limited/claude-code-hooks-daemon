@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/schemas/session-state-watch/1.0.0.json",
+  "title": "hooks-daemon session-state --watch line",
+  "description": "One line of the --watch stream: the top-level fields that changed and the full state after the change. A later minor version may add fields; a consumer ignores fields it does not know and refuses a schema_version whose major it does not pin.",
+  "type": "object",
+  "required": ["schema_version", "changed", "state"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+\\.\\d+$"
+    },
+    "changed": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Names of the session-state fields that differ from the previous line; every field on the first line."
+    },
+    "state": { "$ref": "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/schemas/session-state/1.0.0.json" }
+  }
+}

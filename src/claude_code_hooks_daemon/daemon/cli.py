@@ -2371,13 +2371,89 @@ def cmd_mode_history(args: argparse.Namespace) -> int:
     if result is None:
         return 1
     if args.json:
-        print(json.dumps(result, indent=2))
+        from claude_code_hooks_daemon.core.state_schemas import KEY_SCHEMA_VERSION, SCHEMA_VERSION
+
+        print(json.dumps({KEY_SCHEMA_VERSION: SCHEMA_VERSION, **result}, indent=2))
         return 0
     try:
         _print_mode_history(result)
     except TransitionLogError as error:
         print(f"ERROR: the daemon returned a malformed transition: {error}", file=sys.stderr)
         return 1
+    return 0
+
+
+def _session_state_fetcher(
+    args: argparse.Namespace,
+) -> "Callable[[], dict[str, Any] | None]":
+    """A function building one session's state document, or None after printing why not.
+
+    The modes come from the daemon (they live in its memory); everything else is
+    read straight from the daemon's records, read-only.
+    """
+    from claude_code_hooks_daemon.core.session_state_document import build_session_state
+
+    untracked_dir = _daemon_untracked_dir(get_project_path(getattr(args, "project_root", None)))
+
+    def fetch() -> dict[str, Any] | None:
+        result = _send_session_mode_ipc(
+            args,
+            {
+                "action": SessionModeIPC.ACTION_GET_SESSION_MODES,
+                SessionModeIPC.KEY_SESSION_ID: args.session,
+            },
+        )
+        if result is None:
+            return None
+        return build_session_state(
+            args.session,
+            modes=result.get(SessionModeIPC.KEY_MODES, []),
+            untracked_dir=untracked_dir,
+            now=time.time(),
+        )
+
+    return fetch
+
+
+def cmd_session_state(args: argparse.Namespace) -> int:
+    """Print one session's state as a versioned JSON document (Plan 00601).
+
+    ``--watch`` prints one JSON line per change instead, until interrupted. A
+    session with no records is not an error: its fields are null.
+
+    Returns:
+        0 on success, 1 when the daemon is down or errs.
+    """
+    from claude_code_hooks_daemon.core.session_state_document import watch_lines
+
+    fetch = _session_state_fetcher(args)
+    if args.watch:
+        failed = False
+
+        def fetch_or_note() -> dict[str, Any] | None:
+            nonlocal failed
+            state = fetch()
+            failed = state is None
+            return state
+
+        try:
+            for line in watch_lines(fetch_or_note, interval=args.interval, sleep=time.sleep):
+                print(json.dumps(line), flush=True)
+        except KeyboardInterrupt:
+            return 0
+        return 1 if failed else 0
+    state = fetch()
+    if state is None:
+        return 1
+    if args.json:
+        print(json.dumps(state))
+    else:
+        edge = state["last_turn_edge"]
+        print(f"Session {state['session_id']}: {len(state['modes'])} mode(s)")
+        print(f"  last turn edge: {edge['kind'] if edge else 'none recorded'}")
+        reset = state["limit_reset"]
+        if reset:
+            print(f"  rate-limited until epoch {reset['resets_at']} ({reset['window']})")
     return 0
 
 
@@ -11756,6 +11832,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_mode_history.add_argument("--json", action="store_true", help="Output JSON")
     parser_mode_history.set_defaults(func=cmd_mode_history)
+
+    # session-state command (Plan 00601): one session's versioned state document
+    parser_session_state = subparsers.add_parser(
+        "session-state",
+        help="Show one session's state (modes, last turn edge, usage, pause) as versioned JSON",
+    )
+    parser_session_state.add_argument("--session", required=True, help="Session id")
+    parser_session_state.add_argument("--json", action="store_true", help="Output JSON")
+    parser_session_state.add_argument(
+        "--watch",
+        action="store_true",
+        help="Print one JSON line per change until interrupted (implies JSON output)",
+    )
+    parser_session_state.add_argument(
+        "--interval",
+        type=float,
+        default=2.0,
+        help="Seconds between checks for --watch (default 2)",
+    )
+    parser_session_state.set_defaults(func=cmd_session_state)
 
     # handlers command
     parser_handlers = subparsers.add_parser("handlers", help="List registered handlers")
