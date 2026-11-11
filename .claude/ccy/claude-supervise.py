@@ -214,6 +214,7 @@ import stat
 import struct
 import subprocess  # nosec B404 - spawns ONLY `python3 <self> --worker` and `<child> --version`, fixed argv, never a shell
 import sys
+import tempfile
 import termios
 import threading
 import time
@@ -1391,7 +1392,7 @@ class ScreenFocusCheck:
         quiet = self._render(snapshot, "") == "main"
         if quiet:
             dump = self._spawn(snapshot, "--dump")
-            quiet = bool(dump and dump.strip()) and not screen_shows_busy_footer(dump)
+            quiet = dump is not None and bool(dump.strip()) and not screen_shows_busy_footer(dump)
         self._last_quiet, self._last_quiet_total, self._last_quiet_at = quiet, total, now
         return quiet
 
@@ -2326,7 +2327,9 @@ def _idle_compact_mode_from_env() -> str:
     return value if value in _IDLE_COMPACT_MODES else _IDLE_COMPACT_OFF
 
 
-def _idle_compact_number_from_env(name: str, default: float, *, minimum: float, maximum: float) -> float:
+def _idle_compact_number_from_env(
+    name: str, default: float, *, minimum: float, maximum: float
+) -> float:
     """A float env value within ``(minimum, maximum)`` exclusive-low, else ``default``."""
     raw = os.environ.get(name)
     if raw is None:
@@ -3416,7 +3419,8 @@ def session_internal_idle(
     if not session_id:
         return False, "no session id"
     config = config_dir if config_dir is not None else _claude_config_dir()
-    root = tmp_root if tmp_root is not None else Path("/tmp")
+    # Claude Code keeps task output under its OS temp directory (TMPDIR aware).
+    root = tmp_root if tmp_root is not None else Path(tempfile.gettempdir())
     user = uid if uid is not None else os.getuid()
     for reason in (
         _session_status_idle(session_id, config, pid_alive),
