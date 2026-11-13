@@ -1,0 +1,34 @@
+# Semgrep expression of the host-state-dependent-test defect class (ledger N618).
+#
+# pytest's `caplog` handler sits on the ROOT logger, so it collects every record
+# any logger in the process emits while the test runs, not just the records of
+# the code under test. A test that asserts the whole capture is empty therefore
+# passes alone and fails when a thread, a daemon worker or a neighbouring test
+# in the same process logs something at the same time. The originating instance
+# was test_a_steady_state_revalidation_logs_nothing, red in a loaded
+# multi-worker run and green alone.
+#
+# The fix is to assert on the records of the logger under test:
+#     [r for r in caplog.records if r.name == LOGGER_NAME] == []
+# which this rule does not match, because the comparison is no longer on the
+# bare capture.
+
+rules:
+  - id: caplog-unscoped-emptiness
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Asserting that ALL of `caplog` is empty depends on whatever else logs in
+      the process while the test runs (threads, workers, other tests under a
+      parallel run). Filter to the logger under test first:
+      `[r for r in caplog.records if r.name == <logger name>] == []`.
+    pattern-either:
+      - pattern: assert caplog.records == []
+      - pattern: assert not caplog.records
+      - pattern: assert len(caplog.records) == 0
+      - pattern: assert caplog.text == ""
+      - pattern: assert not caplog.text
+      - pattern: assert caplog.messages == []
+      - pattern: assert not caplog.messages
+      - pattern: assert not caplog.records, $MSG
+      - pattern: assert not caplog.text, $MSG

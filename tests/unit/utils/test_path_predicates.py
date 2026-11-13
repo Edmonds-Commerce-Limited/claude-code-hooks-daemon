@@ -35,6 +35,7 @@ from typing import Any, Final
 
 import pytest
 
+from claude_code_hooks_daemon.utils import path_predicates
 from claude_code_hooks_daemon.utils.path_predicates import (
     _reset_unreadable_warning_burst,
     path_exists,
@@ -42,6 +43,7 @@ from claude_code_hooks_daemon.utils.path_predicates import (
     path_is_file,
     read_text_or_reason,
 )
+from tests.logger_records import records_from
 
 _PREDICATES: Final[dict[str, tuple[Callable[..., Any], str]]] = {
     "path_exists": (path_exists, "exists"),
@@ -204,7 +206,7 @@ class TestTheSubstitutionIsRecorded:
         with caplog.at_level(logging.WARNING):
             predicate(tmp_path, unreadable_means=False)
 
-        assert not caplog.records
+        assert not records_from(caplog, path_predicates.logger.name)
 
 
 class TestABurstOfUnreadablePathsIsRateLimited:

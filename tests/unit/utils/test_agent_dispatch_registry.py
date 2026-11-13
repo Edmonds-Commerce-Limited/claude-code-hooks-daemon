@@ -7,11 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.utils import agent_dispatch_registry
 from claude_code_hooks_daemon.utils.agent_dispatch_registry import (
     dispatch_budget,
     effective_agent_type,
     record_dispatch,
 )
+from tests.logger_records import records_from
 
 _UNNAMED = "a57801934993f0485"
 _NAMED = "aprobe-named-518-0123456789abcdef"
@@ -91,7 +93,7 @@ class TestDispatchBudget:
     ) -> None:
         with caplog.at_level(logging.DEBUG):
             assert dispatch_budget(tmp_path, "s1", "worker") is None
-        assert caplog.records == []
+        assert records_from(caplog, agent_dispatch_registry.logger.name) == []
 
     def test_garbled_record_is_no_override_and_is_logged(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture

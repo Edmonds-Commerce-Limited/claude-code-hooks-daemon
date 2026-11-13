@@ -7446,7 +7446,7 @@ failed in the `changed` tier run (6023 passed, 1 failed) and again in the agent'
 the file ran alone (126 passed). Something else running at the same time writes to the log it asserts is
 empty.
 
-**Status**: ⬜ Open. Find what shares the log, then isolate it per test.
+**Status**: ✅ Fixed. Class: `host-state-dependent-test`. `caplog` hangs its handler on the ROOT logger, so it collects every record any logger in the process emits (a daemon thread, a worker, a neighbouring test), and an assertion that the whole capture is empty passes alone and fails under load. Defence: the semgrep rule `caplog-unscoped-emptiness` (`scripts/qa/semgrep-tests/`), run by `run_semgrep_check.sh` over the test files, which fails on `assert caplog.records == []`, `assert not caplog.records`, `len(caplog.records) == 0` and the `.text` and `.messages` spellings; red on the original instance before the fix. Fix: `tests/logger_records.py::records_from` filters the capture to the logger under test, and all 10 instances across 9 test files (the count the rule found) assert through it.
 
 ### N619 — `jsonschema>=4.0` is too loose for `core/state_schemas.py`, which imports `referencing`
 
@@ -7457,8 +7457,7 @@ empty.
 4.18. Only registry-based schema validation, which today only tests call, would fail on an older
 jsonschema; the `session-state` command itself does not import it.
 
-**Status**: ⬜ Open. Raise the floor to the first jsonschema that requires `referencing`. Do it with the
-lock file in one change, because a version-only edit marks the venv stale (N610).
+**Status**: ✅ Fixed. Class: `transitive-import-with-loose-floor`. A package the code imports but does not declare is held at whatever version another dependency happens to allow, so the declared floor under-promises what the code needs. Defence: `deptry` no longer ignores DEP003 (transitive imports) in `pyproject.toml`, so the dependency gate fails on it; red on the originating import before the fix. It found 2 instances, `referencing` and `pydantic_core`. Fix: `jsonschema>=4.18` (the first release that depends on `referencing`), `referencing>=0.28.4` and `pydantic-core>=2.14` declared directly, with `uv.lock` regenerated in the same change.
 
 ### N620 — R-LONG-RUNNING-NO-TIMEOUT advises on ordinary `git` commands
 

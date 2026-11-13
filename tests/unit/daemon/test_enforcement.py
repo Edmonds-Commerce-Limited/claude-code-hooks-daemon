@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, call, patch
 import psutil
 import pytest
 from tests.daemon_like_process import daemon_like_process
+from tests.logger_records import records_from
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon import server
@@ -393,7 +394,7 @@ class TestAStalePidFileGoesOnlyUnderTheStartLock:
             self._enforce(tmp_path / "daemon.pid", tmp_path / "daemon.sock")
 
         assert not (tmp_path / "daemon.pid").exists()
-        assert not caplog.records
+        assert not records_from(caplog, "claude_code_hooks_daemon.daemon.enforcement")
 
 
 class TestEnforceSingleDaemonKillFailure:
