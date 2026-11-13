@@ -446,11 +446,11 @@ The model responds closely to what its prompt says about who owns the code. With
 | -------- | -------------------------- | --------------- |
 | `own`    | the sentence above         | on              |
 | `off`    | nothing                    | off             |
-| `custom` | `claude_md.ownership_text` | on              |
+| `custom` | `claude_md.ownership_text` | off             |
 
-`ownership_text` is required (non-blank) with `custom` and rejected with any other mode. Use it to carve out what is NOT the model's, for example paths another team owns.
+`ownership_text` is required (non-blank, one line, no `**`) with `custom` and rejected with any other mode. Use it to carve out what is NOT the model's, for example paths another team owns. The hints below assert ownership flatly, so `custom` keeps them silent: your text is the only voice and cannot be contradicted.
 
-**Ownership hints.** Unless the mode is `off`, existing handlers add one short line where it matters, each at most once per session (or per report): plan, ledger and index edits ("keep them tidy: merge duplicates, fix stale links you meet"); a lint failure in code just written ("you own this code: fix the cause"); the branch summary, the branch pool report and `branch-sweep` ("clean or keep each branch, do not only report it"); and the first sub-agent dispatch brief. Wherever foreign branches are listed (`branch-sweep`), a counter-hint says they are not the model's to change.
+**Ownership hints.** Under `own` only, existing handlers add one short line where it matters, each at most once per session (the owned-branch hint once across the whole SessionStart report; `branch-sweep` itself, a CLI report, prints it each run): plan, ledger and index edits ("keep them tidy: merge duplicates, fix stale links you meet"); a lint failure in code just written ("you own this code: fix the cause"); the branch summary, the branch pool report and `branch-sweep` ("clean or keep each branch, do not only report it"); and a sub-agent dispatch hint. The dispatch hint arrives with the Task call, after that brief is written, so it shapes the next brief rather than the one in hand. Wherever foreign branches are listed (`branch-sweep`), a counter-hint says they are not the model's to change.
 
 **Measured costs.** Anthropic measured the sentence on its Fable 5.2 model; the effect is real and so is the price:
 
