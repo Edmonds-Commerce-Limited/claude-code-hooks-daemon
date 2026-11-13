@@ -83,9 +83,7 @@ class TestBranchCapVerdictCalls:
         ],
         ids=["for-each-ref", "worktree-list"],
     )
-    def test_the_call_follows_host_load_up_to_the_ceiling(
-        self, tmp_path: Path, call: Any
-    ) -> None:
+    def test_the_call_follows_host_load_up_to_the_ceiling(self, tmp_path: Path, call: Any) -> None:
         seen: list[float] = []
 
         def fake_run_git(repo: Path, *args: str, timeout: float = 0, **_: Any) -> Any:
