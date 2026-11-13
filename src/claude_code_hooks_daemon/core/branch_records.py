@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants import Timeout
@@ -45,11 +46,22 @@ WORKTREE_CREATE_ROUTE = "worktree_create"
 _STATE_KIND = "branch-touch"
 _SEEN = "seen"
 
+
+@dataclass(frozen=True)
+class _LockWait:
+    """How long a config write waits out ``config.lock``: a base and a ceiling, in seconds."""
+
+    base: float
+    ceiling: float
+
+
 #: The touch record runs on the guard path, so its lock wait is fixed and short.
-_TOUCH_LOCK = {
-    "lock_wait": Timeout.GIT_TOUCH_LOCK_WAIT,
-    "lock_ceiling": Timeout.GIT_TOUCH_LOCK_WAIT,
-}
+_TOUCH_LOCK = _LockWait(base=Timeout.GIT_TOUCH_LOCK_WAIT, ceiling=Timeout.GIT_TOUCH_LOCK_WAIT)
+
+#: Creator keys are written by WorktreeCreate, whose event budget is sized for this wait.
+_CREATOR_LOCK = _LockWait(
+    base=Timeout.GIT_CONFIG_LOCK_WAIT, ceiling=Timeout.GIT_CREATOR_LOCK_WAIT_MAX
+)
 
 #: ``git config`` exit status for "no such key" (any other non-zero is a failure).
 _CONFIG_KEY_ABSENT = 1
@@ -83,8 +95,7 @@ def _set(
     value: str,
     timeout: float,
     *,
-    lock_wait: float,
-    lock_ceiling: float,
+    lock: _LockWait,
     add: bool = False,
 ) -> bool:
     """Write one key, waiting out ``config.lock``; a failure is logged and reported as False."""
@@ -95,8 +106,8 @@ def _set(
             *args,
             _key(name, key),
             value,
-            base_wait=lock_wait,
-            ceiling=lock_ceiling,
+            base_wait=lock.base,
+            ceiling=lock.ceiling,
             timeout=timeout,
         )
     except GitConfigLockError as exc:
@@ -144,8 +155,7 @@ def write_creator(
             key,
             value,
             git_timeout,
-            lock_wait=Timeout.GIT_CONFIG_LOCK_WAIT,
-            lock_ceiling=Timeout.GIT_CREATOR_LOCK_WAIT_MAX,
+            lock=_CREATOR_LOCK,
         )
         for key, value in ((CREATOR_KEY, creator), (CREATED_KEY, created), (ROUTE_KEY, route))
     ]
@@ -252,11 +262,11 @@ def record_touch(
         )
         return False
     if who not in touched and not _set(
-        repo, branch, TOUCHED_KEY, who, Timeout.GIT_CONTEXT, add=True, **_TOUCH_LOCK
+        repo, branch, TOUCHED_KEY, who, Timeout.GIT_CONTEXT, lock=_TOUCH_LOCK, add=True
     ):
         return False
     if creators == [identity(session_id, None)]:
-        _set(repo, branch, CREATOR_KEY, who, Timeout.GIT_CONTEXT, **_TOUCH_LOCK)
+        _set(repo, branch, CREATOR_KEY, who, Timeout.GIT_CONTEXT, lock=_TOUCH_LOCK)
     write_state(path, {**state, _SEEN: [*seen_list, marker]})
     return True
 

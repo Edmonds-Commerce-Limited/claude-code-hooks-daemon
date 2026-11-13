@@ -616,13 +616,17 @@ class TestMergedPool:
 
     def test_sweep_names_an_unkept_branch_as_unkept_not_as_aged(self, repo: Path) -> None:
         _merged_distinct(repo, "loose")
-        text = "\n".join(render_report(build_inventory(repo, _config(), now=NOW), _config(), cap=10))
+        text = "\n".join(
+            render_report(build_inventory(repo, _config(), now=NOW), _config(), cap=10)
+        )
         assert "STALE (neither deleted nor kept)" in text
         assert "past branches.merged.max_age_days" not in text
 
     def test_sweep_names_a_lapsed_keep_with_its_age_limit(self, repo: Path) -> None:
         _keep(repo, _merged_distinct(repo, "old"), days_ago=31)
-        text = "\n".join(render_report(build_inventory(repo, _config(), now=NOW), _config(), cap=10))
+        text = "\n".join(
+            render_report(build_inventory(repo, _config(), now=NOW), _config(), cap=10)
+        )
         assert "STALE (keep lapsed, past branches.merged.max_age_days 30)" in text
 
 
