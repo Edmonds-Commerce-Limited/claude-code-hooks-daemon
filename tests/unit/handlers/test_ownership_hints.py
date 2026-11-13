@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.agent_isolation_advisor impo
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_workflow import PlanWorkflowHandler
 
 _CONFIG = BranchesConfig()
+_HINT = HINT_TEXT[OwnershipHint.BRANCH_OWNED]
 
 
 @pytest.fixture(autouse=True)
@@ -138,7 +139,7 @@ class TestBranchHints:
     def test_session_summary_owned_hint_on_new_session_with_owned_work(self) -> None:
         inv = _inventory(_record("done", BranchState.MERGED_DEFAULT))
         lines = branch_sweep.session_summary(
-            inv, _CONFIG, cap=10, new_session=True, ownership_hints=True
+            inv, _CONFIG, cap=10, new_session=True, owned_hint=lambda: _HINT
         )
         assert HINT_TEXT[OwnershipHint.BRANCH_OWNED] in "\n".join(lines)
 
@@ -149,7 +150,7 @@ class TestBranchHints:
 
     def test_session_summary_silent_when_nothing_to_say(self) -> None:
         lines = branch_sweep.session_summary(
-            _inventory(), _CONFIG, cap=10, new_session=True, ownership_hints=True
+            _inventory(), _CONFIG, cap=10, new_session=True, owned_hint=lambda: _HINT
         )
         assert lines == []
 

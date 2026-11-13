@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
@@ -44,18 +45,30 @@ class TestHintsEnabled:
     def test_unconfigured_is_inactive(self) -> None:
         assert ownership.hints_enabled() is False
 
-    def test_own_and_custom_are_active_off_is_not(self) -> None:
+    def test_only_own_is_active_custom_and_off_are_silent(self) -> None:
         ownership.configure(ClaudeMdConfig())
         assert ownership.hints_enabled() is True
-        ownership.configure(ClaudeMdConfig(ownership=ClaudeMdOwnership.CUSTOM, ownership_text="x"))
-        assert ownership.hints_enabled() is True
+        ownership.configure(
+            ClaudeMdConfig(
+                ownership=ClaudeMdOwnership.CUSTOM, ownership_text="Mine except vendor/."
+            )
+        )
+        assert ownership.hints_enabled() is False
         ownership.configure(ClaudeMdConfig(ownership=ClaudeMdOwnership.OFF))
         assert ownership.hints_enabled() is False
 
     def test_config_helper_matches(self) -> None:
+        custom = ClaudeMdConfig(ownership=ClaudeMdOwnership.CUSTOM, ownership_text="x")
         assert ownership.config_hints_enabled(ClaudeMdConfig()) is True
+        assert ownership.config_hints_enabled(custom) is False
         assert (
             ownership.config_hints_enabled(ClaudeMdConfig(ownership=ClaudeMdOwnership.OFF)) is False
+        )
+
+    def test_custom_never_speaks_a_hint_that_asserts_ownership(self) -> None:
+        ownership.configure(ClaudeMdConfig(ownership=ClaudeMdOwnership.CUSTOM, ownership_text="x"))
+        assert [ownership.hint_once(hint, "s1") for hint in OwnershipHint] == [None] * len(
+            OwnershipHint
         )
 
 
@@ -88,10 +101,11 @@ class TestHintOnce:
 
 
 class TestTexts:
-    def test_every_hint_has_text(self) -> None:
+    def test_each_hint_is_consumed_by_a_call_site(self) -> None:
+        sources = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in Path(ownership.__file__).parents[1].rglob("*.py")
+            if path.name != "ownership.py"
+        )
         for hint in OwnershipHint:
-            assert ownership.HINT_TEXT[hint]
-
-    def test_foreign_counter_hint_says_not_yours(self) -> None:
-        text = ownership.HINT_TEXT[OwnershipHint.BRANCH_FOREIGN].lower()
-        assert "not yours" in text
+            assert f"OwnershipHint.{hint.name}" in sources, hint

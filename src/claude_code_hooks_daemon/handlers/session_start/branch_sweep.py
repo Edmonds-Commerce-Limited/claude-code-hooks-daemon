@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ownership
 from claude_code_hooks_daemon.core.branch_creation import (
     LABELS_RELATIVE_PATH,
@@ -41,7 +41,7 @@ from claude_code_hooks_daemon.core.branch_sweep import (
     session_summary,
 )
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
-from claude_code_hooks_daemon.core.ownership import HINT_TEXT, OwnershipHint
+from claude_code_hooks_daemon.core.ownership import OwnershipHint
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -156,6 +156,12 @@ class BranchSweepHandler(SessionStartHandlerBase):
             )
             return []
         cap = effective_wip_cap(self._branches, legacy)
+        session_id = hook_input.get(HookInputField.SESSION_ID)
+
+        def owned_hint() -> str | None:
+            """The owned-branch hint, the first time this session asks for it."""
+            return ownership.hint_once(OwnershipHint.BRANCH_OWNED, session_id)
+
         # The branch creation guard orders its deny list from this snapshot:
         # it cannot afford the inventory on the PreToolUse path.
         write_labels(
@@ -169,12 +175,12 @@ class BranchSweepHandler(SessionStartHandlerBase):
             new_session=not is_resume_session(hook_input),
             deprecation=deprecation_line(self._branches, legacy),
             behind_threshold=effective_behind_threshold(self._branches, legacy),
-            ownership_hints=ownership.hints_enabled(),
+            owned_hint=owned_hint,
         )
         out = [f"{_ICON}  GIT BRANCHES:", *lines] if lines else []
-        return [*out, *self._pool_lines(root)]
+        return [*out, *self._pool_lines(root, owned_hint)]
 
-    def _pool_lines(self, root: Path) -> list[str]:
+    def _pool_lines(self, root: Path, owned_hint: Callable[[], str | None]) -> list[str]:
         """Every full pool with its fix: the preflight report (``branch-preflight``)."""
         report = creation_report(
             root, self._branches, None, labels=read_labels(root / LABELS_RELATIVE_PATH)
@@ -182,7 +188,8 @@ class BranchSweepHandler(SessionStartHandlerBase):
         if not report.blockers:
             return []
         preflight = daemon_cli_command_for_docs("branch-preflight")
-        hint = [HINT_TEXT[OwnershipHint.BRANCH_OWNED]] if ownership.hints_enabled() else []
+        text = owned_hint()
+        hint = [] if text is None else [text]
         return [
             f"{_ICON}  BRANCH POOLS (same report as `{preflight}`):",
             *render_creation_report(report),

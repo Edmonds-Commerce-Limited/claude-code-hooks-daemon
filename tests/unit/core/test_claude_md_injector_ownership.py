@@ -17,9 +17,10 @@ class _Handler:
         return "## h\n\nguidance"
 
 
-def test_block_without_statement_is_unchanged() -> None:
+def test_block_without_statement_goes_from_heading_straight_to_intro() -> None:
     block = ClaudeMdInjector._build_section([], [], [])
-    assert OWNERSHIP_SENTENCE not in block
+    after_heading = block.split(_HEADER, 1)[1].lstrip()
+    assert after_heading.startswith("The handlers listed below")
 
 
 def test_statement_sits_between_heading_and_intro() -> None:

@@ -37,6 +37,11 @@ class TestOwnershipConfig:
         with pytest.raises(ValidationError, match="ownership_text"):
             ClaudeMdConfig(ownership=mode, ownership_text="x")
 
+    @pytest.mark.parametrize("text", ["line one\nline two", "has **bold** inside"])
+    def test_custom_text_must_survive_the_bold_wrapper(self, text: str) -> None:
+        with pytest.raises(ValidationError, match="single line"):
+            ClaudeMdConfig(ownership=ClaudeMdOwnership.CUSTOM, ownership_text=text)
+
     def test_unknown_mode_is_rejected(self) -> None:
         with pytest.raises(ValidationError):
             ClaudeMdConfig.model_validate({"ownership": "maybe"})

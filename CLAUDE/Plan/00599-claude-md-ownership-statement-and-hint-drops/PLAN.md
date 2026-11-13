@@ -58,7 +58,7 @@ the user owns the code and wants minimal change; `ownership: off` is that.
 ### Phase 3: Delivery
 
 - [x] ✅ **Task 3.1**: release note 055 with the measured costs
-- [ ] ⬜ **Task 3.2**: regenerate this repository's `CLAUDE.md` block on the home branch after merge (`bin/hooks-daemon regenerate-docs`; a worktree never writes it)
+- [x] ✅ **Task 3.2**: regenerate this repository's `CLAUDE.md` block on the home branch after merge (`bin/hooks-daemon regenerate-docs`; a worktree never writes it)
 - [ ] ⬜ **Task 3.3**: independent review and merge
 
 ## Success Criteria
@@ -73,4 +73,4 @@ the user owns the code and wants minimal change; `ownership: off` is that.
 
 ## Delivery & Milestones
 
-- Built on branch `plan-00599-ownership`; not yet merged.
+- Built on branch `plan-00599-ownership` and merged; the review's findings are fixed on a follow-up branch awaiting its own merge (Task 3.3).

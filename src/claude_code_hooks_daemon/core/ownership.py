@@ -10,7 +10,8 @@ Process-wide state is deliberate: the daemon is one process, the setting is
 one value read at start-up, and threading it through every handler's
 constructor would touch each one for a flag only these hints read. Unconfigured
 means inactive, so code that never configures it (the CLI, unit tests) gets
-no hints unless it opts in explicitly.
+no hints unless it opts in explicitly. The fired-hint set grows by at most one
+entry per hint per session for the daemon's lifetime, which is negligible.
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ HINT_TEXT: dict[OwnershipHint, str] = {
         "never to be cleaned, merged or edited."
     ),
     OwnershipHint.DISPATCH: (
-        "This codebase is yours, and so is the brief you write: tell the agent to fix "
+        "This codebase is yours, and so is the next brief you write: tell the agent to fix "
         "what it finds in the code it touches, not only to report it."
     ),
 }
@@ -74,8 +75,13 @@ def ownership_statement(config: ClaudeMdConfig | None) -> str | None:
 
 
 def config_hints_enabled(config: ClaudeMdConfig) -> bool:
-    """Whether ``config`` asks for hint drops (everything but ``off``)."""
-    return config.ownership != ClaudeMdOwnership.OFF
+    """Whether ``config`` asks for hint drops: only ``own``.
+
+    ``custom`` hands the wording to the project's own text, which may carve out
+    what is not the model's; the fixed hints assert ownership flatly, so they
+    stay silent rather than contradict it.
+    """
+    return config.ownership == ClaudeMdOwnership.OWN
 
 
 def configure(config: ClaudeMdConfig | None) -> None:
@@ -92,8 +98,8 @@ def reset() -> None:
 
 
 def hints_enabled() -> bool:
-    """True once configured with a mode other than ``off``."""
-    return _mode is not None and _mode != ClaudeMdOwnership.OFF
+    """True once configured with mode ``own`` (``off`` and ``custom`` stay silent)."""
+    return _mode == ClaudeMdOwnership.OWN
 
 
 def hint_pending(hint: OwnershipHint, session_id: str | None) -> bool:

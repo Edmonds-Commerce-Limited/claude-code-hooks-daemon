@@ -15,7 +15,7 @@ unpushed local ref gets no delete command.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -637,12 +637,13 @@ def session_summary(
     new_session: bool,
     deprecation: str | None = None,
     behind_threshold: int | None = None,
-    ownership_hints: bool = False,
+    owned_hint: Callable[[], str | None] | None = None,
 ) -> list[str]:
     """The SessionStart lines; empty when there is nothing to say.
 
-    ``ownership_hints`` adds the owned-branch hint once, on a new session that has
-    branches to act on.
+    ``owned_hint`` is asked for the owned-branch hint only when a new session has
+    branches to act on; it returns the text, or ``None`` once it has been said
+    (the caller owns the once-per-session state).
 
     Contained-nowhere branches are named on every source; the merged count,
     the dormant branches, the work branches more than ``behind_threshold``
@@ -689,8 +690,10 @@ def session_summary(
     if hidden:
         lines.append(f"  and {hidden} more: run `{sweep_command()}`")
     lines += notes
-    if ownership_hints and new_session and (entries or groups.merged):
-        lines.append(HINT_TEXT[OwnershipHint.BRANCH_OWNED])
+    if owned_hint is not None and new_session and (entries or groups.merged):
+        hint = owned_hint()
+        if hint is not None:
+            lines.append(hint)
     if deprecation is not None:
         lines.append(deprecation)
     return lines

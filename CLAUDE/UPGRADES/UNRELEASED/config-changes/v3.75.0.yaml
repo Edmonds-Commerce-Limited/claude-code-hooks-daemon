@@ -1,0 +1,29 @@
+# Drafted by Plan 00599.
+version: "3.75.0"
+date: "UNRELEASED"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: claude_md.ownership
+      description: >-
+        Whether the injected CLAUDE.md block leads with a sentence telling the
+        model the codebase is its own, and whether handlers drop short hints
+        that say the same at the moment it matters. own (the default) does
+        both, off does neither, custom leads the block with
+        claude_md.ownership_text and keeps the hints silent. The default is ON
+        and measurably lengthens output; set off to restore the previous
+        behaviour.
+      example_yaml: |
+        claude_md:
+          ownership: off
+      migration_note: "Default own changes behaviour on upgrade: set off to keep the old block."
+    - key: claude_md.ownership_text
+      description: >-
+        The single-line sentence that leads the block under ownership: custom.
+        Required and non-blank for custom, rejected in every other mode.
+      example_yaml: |
+        claude_md:
+          ownership: custom
+          ownership_text: "This codebase is yours except vendor/."
