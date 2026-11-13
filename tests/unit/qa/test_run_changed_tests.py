@@ -631,6 +631,17 @@ class TestDeclaredRules:
         other = "src/claude_code_hooks_daemon/core/hook_result.py"
         assert not any(harness in rule.tests for rule in rules if rule.matches(other))
 
+    @pytest.mark.parametrize(
+        "changed",
+        ["scripts/qa/run_semgrep_check.sh", "init.sh", "scripts/qa/acquire_full_qa_lock.bash"],
+    )
+    def test_shell_scripts_select_the_bash32_portability_scan(self, changed: str) -> None:
+        """A bash-4-only construct in a script reached main because no rule ran the scan."""
+        rules, problems = changed_tests.load_declared_rules(changed_tests.DEFAULT_RULES_PATH)
+        assert problems == []
+        scan = "tests/integration/test_bash32_portability.py"
+        assert any(scan in rule.tests for rule in rules if rule.matches(changed)), changed
+
     def test_this_repositorys_map_is_valid_and_honest(self) -> None:
         """Every tool it names is one `changed` runs; every test it names exists."""
         rules, problems = changed_tests.load_declared_rules(changed_tests.DEFAULT_RULES_PATH)

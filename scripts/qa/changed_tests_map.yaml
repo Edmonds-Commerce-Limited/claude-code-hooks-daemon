@@ -231,6 +231,13 @@ rules:
   - glob: "*.bash"
     tools: [shell_check]
     why: shell_check lints .bash scripts as well (run_shell_check.sh)
+  - glob: "*.sh"
+    tests: [tests/integration/test_bash32_portability.py]
+    why: it scans every shell script under scripts/ and src/ (plus init.sh) by
+      glob for bash-4-only constructs, so no import or name links it to them
+  - glob: "*.bash"
+    tests: [tests/integration/test_bash32_portability.py]
+    why: the same scan covers .bash scripts
   - glob: "*/utils/protected_file_index.py"
     tests:
       - tests/unit/utils/test_protected_file_index.py

@@ -93,7 +93,11 @@ fi
 TEST_RAW_OUTPUT="${OUTPUT_DIR}/semgrep-tests-raw.json"
 rm -f "${TEST_RAW_OUTPUT}"
 if [ "${SEMGREP_EXIT}" -eq 0 ] && [ -n "${TEST_RULES_DIR}" ] && [ -d "${TEST_RULES_DIR}" ]; then
-    mapfile -t TEST_FILES < <(find "${QA_SEMGREP_TEST_ROOT:-${REPO_ROOT}/tests}" -name 'test_*.py' -not -path '*/fixtures/*')
+    # `mapfile` is bash 4 only; macOS ships bash 3.2, so read line by line.
+    TEST_FILES=()
+    while IFS= read -r TEST_FILE; do
+        TEST_FILES+=("${TEST_FILE}")
+    done < <(find "${QA_SEMGREP_TEST_ROOT:-${REPO_ROOT}/tests}" -name 'test_*.py' -not -path '*/fixtures/*')
     if [ "${#TEST_FILES[@]}" -gt 0 ]; then
         "${SEMGREP}" scan \
             --config "${TEST_RULES_DIR}" \
