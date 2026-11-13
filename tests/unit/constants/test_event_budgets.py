@@ -74,8 +74,8 @@ class TestBudgetOrdering:
         )
         assert timeouts, "the handler made no git call"
         # The branch-cap verdict's calls run in core modules: at worst a
-        # for-each-ref and a worktree list, both at GIT_CONTEXT.
-        verdict = Timeout.GIT_CONTEXT * Timeout.GIT_BRANCH_CREATION_CALLS
+        # for-each-ref and a worktree list, both at the load-scaled metadata ceiling.
+        verdict = Timeout.GIT_BRANCH_METADATA_MAX * Timeout.GIT_BRANCH_CREATION_CALLS
         assert sum(timeouts) + verdict <= Timeout.EVENT_HANDLER_BUDGET[EventType.WORKTREE_CREATE]
 
     def test_create_budget_is_two_adds_two_undos_and_the_verdict_and_record(self) -> None:
@@ -89,11 +89,12 @@ class TestBudgetOrdering:
         expected = (
             attempts * Timeout.GIT_WORKTREE_ADD_MAX
             + Timeout.GIT_WORKTREE_CLEANUP_MAX * cleanup_calls
-            + Timeout.GIT_CONTEXT * Timeout.GIT_BRANCH_CREATION_CALLS
-            + Timeout.GIT_WORKTREE_CLEANUP * Timeout.GIT_BRANCH_RECORD_CALLS
+            + Timeout.GIT_BRANCH_METADATA_MAX * Timeout.GIT_BRANCH_CREATION_CALLS
+            + (Timeout.GIT_CREATOR_LOCK_WAIT_MAX + Timeout.GIT_BRANCH_METADATA_MAX)
+            * Timeout.GIT_BRANCH_RECORD_CALLS
         )
         assert Timeout.EVENT_HANDLER_BUDGET[EventType.WORKTREE_CREATE] == expected
-        assert expected == 440
+        assert expected == 500
 
     def test_a_timed_out_add_and_its_retry_at_the_ceiling_fit_the_budget(
         self, tmp_path: Path
@@ -122,7 +123,7 @@ class TestBudgetOrdering:
             loadavg.return_value = (700.0, 700.0, 700.0)
             handler.handle({"cwd": str(tmp_path), "name": "x", "prompt_id": "p", "session_id": "s"})
         assert adds == Timeout.GIT_WORKTREE_ADD_ATTEMPTS
-        verdict = Timeout.GIT_CONTEXT * Timeout.GIT_BRANCH_CREATION_CALLS
+        verdict = Timeout.GIT_BRANCH_METADATA_MAX * Timeout.GIT_BRANCH_CREATION_CALLS
         assert sum(timeouts) + verdict <= Timeout.EVENT_HANDLER_BUDGET[EventType.WORKTREE_CREATE]
 
     def test_creation_verdict_calls_are_short(self, tmp_path: Path) -> None:
@@ -149,7 +150,7 @@ class TestBudgetOrdering:
         ):
             assert branch_creation.creation_verdict(tmp_path, config, "b").decision == "deny"
         assert len(timeouts) == Timeout.GIT_BRANCH_CREATION_CALLS
-        assert all(value <= Timeout.GIT_CONTEXT for value in timeouts)
+        assert all(value <= Timeout.GIT_BRANCH_METADATA_MAX for value in timeouts)
 
     def test_remove_handler_worst_case_git_time_is_within_its_budget(self, tmp_path: Path) -> None:
         worktree = tmp_path / "wt"

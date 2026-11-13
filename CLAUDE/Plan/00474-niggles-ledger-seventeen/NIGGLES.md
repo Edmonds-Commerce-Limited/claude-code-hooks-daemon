@@ -7538,7 +7538,7 @@ detector's verb list to match as each is fixed.
 the budgets are pinned in `EVENT_HANDLER_BUDGET`. They are read-mostly metadata calls, so the exposure is
 smaller than the add's, but at a load average near 70 they time out too.
 
-**Status**: ⬜ Open. Scale them with `scaled_timeout` and size the event budget for the new ceilings.
+**Status**: ✅ Fixed. Class: a hard failure gated on a fixed wall-clock budget for a git call whose duration follows host load, inside an event whose total budget is pinned (same class as N622). The branch-cap verdict's `for-each-ref`, `--merged` listing and `worktree list` now run on `load_scaling.branch_metadata_timeout()` (the `GIT_CONTEXT` base scaled by load, ceiling `Timeout.GIT_BRANCH_METADATA_MAX`), and `EVENT_HANDLER_BUDGET[WORKTREE_CREATE]` is re-derived from the new ceilings (440 s to 500 s, `init.sh` client wait 450 s to 510 s). Defence: `tests/unit/core/test_worktree_create_metadata_load_scaling.py` (each call is scaled to the ceiling under a saturated host) and the arithmetic pin in `tests/unit/constants/test_event_budgets.py`. Release note 066.
 
 ### N624 — `branch_records.write_creator` writes three config keys with no wait for `config.lock`
 
@@ -7546,4 +7546,4 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Evidence**: `core/branch_records._set` runs `git config` once per key and reports a held `config.lock` as a logged False, so a creator record is silently lost under contention. It was left out of the N621 fix because it runs inside the WorktreeCreate event, whose budget is pinned in `EVENT_HANDLER_BUDGET` (`GIT_BRANCH_RECORD_CALLS` x `GIT_WORKTREE_CLEANUP`); a lock wait of up to `GIT_CONFIG_LOCK_WAIT_MAX` per key would need that budget, the event tables and `init.sh` re-derived.
 
-**Status**: ⬜ Open. Route `_set` through `run_git_config_write` with a wait the event budget can afford, and size the budget with N623.
+**Status**: ✅ Fixed. Class: a multi-step write to a shared single-writer file that fails on first contention instead of waiting (same class as N621). `branch_records._set` now goes through `run_git_config_write`, which gained a `timeout` argument. A creator-record key waits for the lock from the `GIT_CONFIG_LOCK_WAIT` base up to `Timeout.GIT_CREATOR_LOCK_WAIT_MAX` (10 s), and a lock held past that is a logged False, never a raise. The event budget carries `GIT_BRANCH_RECORD_CALLS x (GIT_CREATOR_LOCK_WAIT_MAX + GIT_BRANCH_METADATA_MAX)`. The sibling touch-record writes (`record_touch`, guard path) wait a fixed `GIT_TOUCH_LOCK_WAIT` of 2 s so they stay inside the 20 s chain deadline. Defence: `tests/unit/core/test_worktree_create_metadata_load_scaling.py` (held lock waited out, lock held past the wait is False) and the budget pin in `tests/unit/constants/test_event_budgets.py`. Release note 066.

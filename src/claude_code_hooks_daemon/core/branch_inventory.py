@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.load_scaling import branch_metadata_timeout
 from claude_code_hooks_daemon.utils.remote_refs import (
     RemoteRefs,
     RemoteSource,
@@ -455,7 +456,7 @@ def _default_ref(repo: Path, remote: str, default: str | None) -> str | None:
 
 def _worktrees(repo: Path) -> dict[str, Path] | None:
     """Branch name to worktree path; None (unknown, never "none") when git fails."""
-    result = run_git(repo, "worktree", "list", "--porcelain", timeout=_GIT_TIMEOUT)
+    result = run_git(repo, "worktree", "list", "--porcelain", timeout=branch_metadata_timeout())
     if result.returncode != 0:
         logger.info("branch_inventory: worktree list failed: %s", result.stderr.strip())
         return None

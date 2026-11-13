@@ -211,7 +211,6 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
                 branch,
                 identity(str(session_id or ""), None),
                 WORKTREE_CREATE_ROUTE,
-                timeout=Timeout.GIT_WORKTREE_CLEANUP,
             )
 
             seed_worktree(Path(root), path, entries)

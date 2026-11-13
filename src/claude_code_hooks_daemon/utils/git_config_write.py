@@ -78,6 +78,7 @@ def run_git_config_write(
     *args: str,
     base_wait: float | None = None,
     ceiling: float | None = None,
+    timeout: float = Timeout.GIT_CONTEXT,
 ) -> GitResult:
     """Run ``git config <args>``, retrying while ``config.lock`` is held.
 
@@ -93,7 +94,7 @@ def run_git_config_write(
     )
     deadline = time.monotonic() + wait
     while True:
-        result = run_git(repo, "config", *args)
+        result = run_git(repo, "config", *args, timeout=timeout)
         if result.returncode == 0 or _LOCK_MESSAGE not in result.stderr:
             return result
         if time.monotonic() >= deadline:
