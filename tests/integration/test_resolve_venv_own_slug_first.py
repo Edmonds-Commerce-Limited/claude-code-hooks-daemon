@@ -113,6 +113,19 @@ def test_broken_own_slug_venv_still_warns(tmp_path: Path) -> None:
     assert own_name in result.stderr
 
 
+def test_unproven_drifted_venv_is_silent_when_another_venv_is_picked(tmp_path: Path) -> None:
+    """A drifted venv of unknown ownership is noise when a usable one is chosen."""
+    lock_hash, own_name = _project(tmp_path)
+    untracked = tmp_path / "untracked"
+    _fake_venv(untracked / "venv-py313-00000001", _OTHER, lock_hash)
+    own = _fake_venv(untracked / own_name, _RUNNING, "0" * 32)
+
+    result = _bash_pick(tmp_path)
+
+    assert result.stdout.strip() == str(own)
+    assert result.stderr == ""
+
+
 def test_python_sort_key_puts_own_slug_first_among_equal_rank(tmp_path: Path) -> None:
     lock_hash, own_name = _project(tmp_path)
     untracked = tmp_path / "untracked"

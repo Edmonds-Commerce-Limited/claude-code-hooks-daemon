@@ -92,6 +92,12 @@ _MARKUP_RE: Final[re.Pattern[str]] = re.compile(r"<[^>]*>")
 #: ``status``, ``summary``). It is optional: without it the whole text is used.
 _SUMMARY_RE: Final[re.Pattern[str]] = re.compile(r"<summary>(.*?)</summary>", re.DOTALL)
 
+#: The ``status`` element of a task notification, and the value that says the agent
+#: finished: its report may quote the limit sentence without a limit having killed it.
+_STATUS_RE: Final[re.Pattern[str]] = re.compile(r"<status>\s*(.*?)\s*</status>", re.DOTALL)
+_FINISHED_STATUS: Final[str] = "completed"
+_RESULT_RE: Final[re.Pattern[str]] = re.compile(r"<result>.*?</result>", re.DOTALL)
+
 #: How much of a notification's text names the agent.
 _EXCERPT_CHARS: Final[int] = 200
 
@@ -132,8 +138,14 @@ def dead_agent_identity(prompt: str) -> str | None:
     the limit sentence is ignored.
     """
     text = prompt.lstrip()
-    if text.startswith(_TASK_NOTIFICATION_MARKER) and _is_limit_text(text):
+    if text.startswith(_TASK_NOTIFICATION_MARKER):
+        status = _STATUS_RE.search(text)
         summary = _SUMMARY_RE.search(text)
+        if status is not None and status.group(1).lower() == _FINISHED_STATUS:
+            return None
+        # The agent's own report is not the harness's word: a limit it quotes is no death.
+        if not _is_limit_text(_RESULT_RE.sub(" ", text)):
+            return None
         plain = " ".join(_MARKUP_RE.sub(" ", summary.group(1) if summary else text).split())
         return f"background task notification: {plain[:_EXCERPT_CHARS]}"
     if (

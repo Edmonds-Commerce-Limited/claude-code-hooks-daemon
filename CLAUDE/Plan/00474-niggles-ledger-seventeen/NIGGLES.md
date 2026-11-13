@@ -7365,7 +7365,7 @@ DESIGN.md's open "park record" question.
 **Evidence**: `cmd 2>&1 | grep -v resolve_venv` was denied as a symbol lookup. The grep filters another
 command's output and searches no indexed file, which the handler's own guidance says is never judged.
 
-**Status**: ⬜ Open. Reproduce with that command shape, then make the filter-on-a-pipe case exempt.
+**Status**: ✅ Fixed. The bare `| grep -v NAME` shape was already exempt (Plan 00588); the defect that remained was a class: the stdin-filter reading counted the value of a value-taking grep option (`-A 3`, `-m 2`, `--max-count 2`) or the arguments after `-e PATTERN` as a named file, so the grep read as a lookup again. Class: a command-line parser that does not know which options consume a value. `_stdin_filter_file_targets` now skips option values and treats `-e`/`-f`/`--regexp`/`--file` as supplying the pattern. Defence: `TestStdinGrepAndGitGrepAreNotLookups` in `tests/unit/handlers/pre_tool_use/test_lsp_enforcement.py` (filter forms stay exempt, a named file after a value option stays a lookup). Release note 066.
 
 ### N613 — the merged-pool message names age as the trigger when the branch is only unkept
 
@@ -7375,8 +7375,7 @@ command's output and searches no indexed file, which the handler's own guidance 
 lapsed, past branches.merged.max_age_days 30)" and the sweep labelled it "STALE (unkept, past ... 30)". The
 branch is not past 30 days; it is unkept. The owner read it as being near the cap.
 
-**Status**: ⬜ Open. State the real trigger first ("1 merged branch neither deleted nor kept") and say
-"past N days" only when it is. Fits Plan 00594's preflight wording.
+**Status**: ✅ Fixed. Class: a message that states one trigger for a condition with two causes (unkept, or keep lapsed by age) and so names the wrong one. The block text now leads with "neither deleted nor kept" and mentions the age limit only as the lapsed-keep case; the sweep labels an unkept branch "STALE (neither deleted nor kept)" and a lapsed keep "STALE (keep lapsed, past ... N)". Defence: `test_a_stale_label_denies_under_the_cap` and the two sweep-label tests in `tests/unit/core/test_branch_pools.py`. Release note 067.
 
 ### N614 — the usage-limit-killed-agent notice fires on a finished agent whose reply quotes limit text
 
@@ -7386,7 +7385,7 @@ branch is not past 30 days; it is unkept. The owner read it as being near the ca
 session limits; the UserPromptSubmit check reported it as killed by a usage limit and said to re-brief it.
 It appears to match the agent's result text, not the harness's failure status.
 
-**Status**: ⬜ Open. Match the failure status field only; add a test with a reply that quotes the phrase.
+**Status**: ✅ Fixed. Class: a detector that matches free text from a channel (an agent's own report) the harness does not author. A task notification whose `<status>` is `completed` is never a limit death, and the limit sentence is searched with the agent's `<result>` element removed. Defence: the two completed-agent tests in `tests/unit/handlers/user_prompt_submit/test_limit_rebrief.py`. Release note 068.
 
 ### N615 — `delete-branch` prints a `resolve_venv` interpreter-drift line on every run
 
@@ -7395,7 +7394,7 @@ It appears to match the agent's result text, not the harness's failure status.
 **Evidence**: every run prints an interpreter-drift line for an unproven venv belonging to another checkout
 view; it is noise unrelated to the deletion.
 
-**Status**: ⬜ Open. Say it once per session or only when the venv is the one in use.
+**Status**: ✅ Fixed. Class: a diagnostic about a candidate that was passed over, printed on every run although a later candidate was chosen. `_rv_pick_ranked_scan` now prints a skipped-candidate warning at once only for a venv slugged for this checkout; for one of unknown ownership (a legacy un-slugged venv) the warning is held and printed only when no venv turns out usable. Defence: `test_unproven_drifted_venv_is_silent_when_another_venv_is_picked` in `tests/integration/test_resolve_venv_own_slug_first.py`. Release note 069.
 
 ### N616 — no supported session-state interface; a peer team reads internal files
 

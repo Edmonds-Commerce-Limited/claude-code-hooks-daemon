@@ -499,7 +499,7 @@ _rv_count_other_path_venvs() {
 # `_rv_pick_python` itself normally runs inside a caller's `$(...)`
 # subshell, so nothing downstream could read it back.
 _rv_pick_ranked_scan() {
-    local daemon_dir="$1" name="$2" rank own candidate current_hash own_slug
+    local daemon_dir="$1" name="$2" rank own candidate current_hash own_slug deferred="" note
     current_hash="$(_rv_current_lock_hash "$daemon_dir")"
     own_slug="$(_rv_project_path_slug "$daemon_dir")"
     for rank in 0 1 2; do
@@ -521,11 +521,19 @@ _rv_pick_ranked_scan() {
                 if [ "$own" = 0 ] && [ -n "$own_slug" ] && [ "$_RV_SCAN_SLUGGED" = 1 ]; then
                     continue
                 fi
-                echo "resolve_venv: candidate $candidate is executable but failed to run" \
-                    "(${_RV_PROBE_OUTPUT:-no output}) -- skipping" >&2
+                note="resolve_venv: candidate $candidate is executable but failed to run (${_RV_PROBE_OUTPUT:-no output}) -- skipping"
+                if [ "$own" = 1 ]; then
+                    echo "$note" >&2
+                else
+                    # Not proven to be this checkout's venv: worth saying only if no
+                    # venv ends up usable, since a later candidate being picked makes
+                    # it noise on every run.
+                    deferred+="${note}"$'\n'
+                fi
             done
         done
     done
+    [ -z "$deferred" ] || printf '%s' "$deferred" >&2
     return 1
 }
 

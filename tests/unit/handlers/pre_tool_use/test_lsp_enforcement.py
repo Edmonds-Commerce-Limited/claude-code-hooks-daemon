@@ -1370,6 +1370,11 @@ class TestStdinGrepAndGitGrepAreNotLookups:
             "cmd 2>&1 | grep -n resolve_venv",
             "cmd | grep resolve_venv",
             "cmd | rg resolve_venv",
+            "cmd 2>&1 | grep -v -e resolve_venv -e other_name",
+            "cmd | grep -A 3 resolve_venv",
+            "cmd | grep -m 2 resolve_venv",
+            "cmd | grep --max-count 2 resolve_venv",
+            "cmd | grep --regexp resolve_venv",
             "grep resolve_venv <<< 'text resolve_venv'",
             "grep resolve_venv < out.txt",
             "git grep -lF venv_lock_hash_matches HEAD -- CLAUDE/Security",
@@ -1396,6 +1401,17 @@ class TestStdinGrepAndGitGrepAreNotLookups:
     )
     def test_still_a_lookup(self, handler: Any, command: str) -> None:
         assert handler.matches(_bash(command)) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cmd | grep -e some_identifier out.txt",
+            "cmd | grep -A 3 some_identifier src/",
+            "cmd | grep -m 2 some_identifier src/",
+        ],
+    )
+    def test_value_option_does_not_hide_a_named_file(self, command: str) -> None:
+        assert lsp_enforcement._has_lookup_grep(command) is True
 
     def test_grep_tool_still_a_lookup(self, handler: Any) -> None:
         hook_input = {

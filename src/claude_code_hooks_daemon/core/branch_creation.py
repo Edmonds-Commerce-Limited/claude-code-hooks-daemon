@@ -747,8 +747,8 @@ def _merged_pool_lines(
         head += " are at the cap"
     if stale:
         head += (
-            f"; {len(stale)} stale (unkept or keep lapsed, past "
-            f"branches.merged.max_age_days {config.effective_pool_max_age(Pool.MERGED)})"
+            f"; {len(stale)} stale (neither deleted nor kept, or kept and the keep lapsed "
+            f"past branches.merged.max_age_days {config.effective_pool_max_age(Pool.MERGED)})"
         )
     keep = daemon_cli_command_for_docs("branch-keep")
     remote = any(work.on_remote for work in merged)

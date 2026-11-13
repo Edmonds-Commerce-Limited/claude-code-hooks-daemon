@@ -394,6 +394,29 @@ class TestKilledAgentNotice:
         assert detail.startswith('background task notification: Agent "builder-7"')
         assert "toolu_01Example" not in detail
 
+    def test_a_completed_agent_whose_report_quotes_the_limit_text_is_not_killed(
+        self, tmp_path: Path
+    ) -> None:
+        text = (
+            "<task-notification>\n<task-id>a1b2c3</task-id>\n"
+            "<status>completed</status>\n"
+            '<summary>Agent "guide" completed</summary>\n'
+            f"<result>The docs say: {_LIMIT_TEXT}</result>\n"
+            "</task-notification>"
+        )
+        assert _Handler(tmp_path / "e.json").matches(_prompt(text)) is False
+
+    def test_limit_text_only_in_the_result_of_a_failed_agent_is_not_a_limit_death(
+        self, tmp_path: Path
+    ) -> None:
+        text = (
+            "<task-notification>\n<status>failed</status>\n"
+            '<summary>Agent "guide" failed</summary>\n'
+            f"<result>quoted: {_LIMIT_TEXT}</result>\n"
+            "</task-notification>"
+        )
+        assert _Handler(tmp_path / "e.json").matches(_prompt(text)) is False
+
     def test_a_long_notification_is_bounded(self, tmp_path: Path) -> None:
         text = _task_notification("y" * 5000 + _LIMIT_TEXT)
         _Handler(tmp_path / "e.json").handle(_prompt(text))
