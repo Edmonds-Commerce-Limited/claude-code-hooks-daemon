@@ -56,6 +56,20 @@ def test_callout_names_sort_in_numeric_arrival_order() -> None:
     assert sorted(names) == [n for _, n in sorted(zip(ordinals, names, strict=True))]
 
 
+def test_no_two_callouts_share_an_ordinal() -> None:
+    """Parallel agents each take the next ordinal from the same highest note.
+
+    Two of them finishing in one window then both claim it, and the arrival
+    order the release folds the notes in is no longer defined. The ordinal is
+    the only ordering a callout carries, so it must be unique.
+    """
+    by_ordinal: dict[str, list[str]] = {}
+    for callout in _callouts():
+        by_ordinal.setdefault(callout.name.partition("-")[0], []).append(callout.name)
+    shared = {ordinal: names for ordinal, names in by_ordinal.items() if len(names) > 1}
+    assert not shared, f"callouts sharing an ordinal: {shared}"
+
+
 @pytest.mark.parametrize("callout", _callouts(), ids=lambda p: p.name)
 def test_every_pending_callout_is_the_shape_the_release_folds_in(callout: Path) -> None:
     assert _CALLOUT_NAME.match(callout.name), f"{callout.name}: expected NN-kebab-slug.md"
