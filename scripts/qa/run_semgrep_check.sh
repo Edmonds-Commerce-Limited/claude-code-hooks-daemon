@@ -83,10 +83,16 @@ SEMGREP_EXIT=$?
 # test files named one by one: semgrep skips a whole `tests/` directory target
 # by default, and widening the source scan to it would also run every source
 # rule over the fixtures that plant violations on purpose.
-TEST_RULES_DIR="${QA_SEMGREP_TEST_RULES_DIR:-${SCRIPT_DIR}/semgrep-tests}"
+# A run that overrides the source rules dir is a planted-rule run and scans
+# nothing else unless it also names a test rules dir.
+if [ -n "${QA_SEMGREP_RULES_DIR:-}" ]; then
+    TEST_RULES_DIR="${QA_SEMGREP_TEST_RULES_DIR:-}"
+else
+    TEST_RULES_DIR="${QA_SEMGREP_TEST_RULES_DIR:-${SCRIPT_DIR}/semgrep-tests}"
+fi
 TEST_RAW_OUTPUT="${OUTPUT_DIR}/semgrep-tests-raw.json"
 rm -f "${TEST_RAW_OUTPUT}"
-if [ "${SEMGREP_EXIT}" -eq 0 ] && [ -d "${TEST_RULES_DIR}" ]; then
+if [ "${SEMGREP_EXIT}" -eq 0 ] && [ -n "${TEST_RULES_DIR}" ] && [ -d "${TEST_RULES_DIR}" ]; then
     mapfile -t TEST_FILES < <(find "${QA_SEMGREP_TEST_ROOT:-${REPO_ROOT}/tests}" -name 'test_*.py' -not -path '*/fixtures/*')
     if [ "${#TEST_FILES[@]}" -gt 0 ]; then
         "${SEMGREP}" scan \
