@@ -531,6 +531,8 @@ class TestMergedPool:
         assert verdict.rule_id == RuleID.BRANCH_MERGED_POOL
         text = "\n".join(verdict.lines)
         assert "stale" in text.lower() and "branches.merged.max_age_days" in text
+        assert "neither deleted nor kept" in text
+        assert text.index("neither deleted nor kept") < text.index("branches.merged.max_age_days")
 
     def test_a_label_whose_branch_gained_commits_is_not_trusted(self, repo: Path) -> None:
         """A merged+stale label recorded at an old tip must not outlive new commits."""
@@ -611,6 +613,17 @@ class TestMergedPool:
         text = "\n".join(render_report(inventory, _config(), cap=10))
         assert "kept: audit" in text
         assert "STALE" in text and "branch-keep" in text
+
+    def test_sweep_names_an_unkept_branch_as_unkept_not_as_aged(self, repo: Path) -> None:
+        _merged_distinct(repo, "loose")
+        text = "\n".join(render_report(build_inventory(repo, _config(), now=NOW), _config(), cap=10))
+        assert "STALE (neither deleted nor kept)" in text
+        assert "past branches.merged.max_age_days" not in text
+
+    def test_sweep_names_a_lapsed_keep_with_its_age_limit(self, repo: Path) -> None:
+        _keep(repo, _merged_distinct(repo, "old"), days_ago=31)
+        text = "\n".join(render_report(build_inventory(repo, _config(), now=NOW), _config(), cap=10))
+        assert "STALE (keep lapsed, past branches.merged.max_age_days 30)" in text
 
 
 class TestPoolPassHonoursTheBudget:

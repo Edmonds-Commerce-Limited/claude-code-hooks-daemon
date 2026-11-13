@@ -175,6 +175,28 @@ def _invocation_positionals(invocation: str) -> list[str]:
     return positionals
 
 
+#: grep/rg options that take a separate value, so the token after one is not a
+#: file target. The first group also supplies the search pattern itself.
+_PATTERN_OPTIONS: Final[frozenset[str]] = frozenset({"-e", "-f", "--regexp", "--file"})
+_VALUE_OPTIONS: Final[frozenset[str]] = _PATTERN_OPTIONS | frozenset(
+    {
+        "-m",
+        "-A",
+        "-B",
+        "-C",
+        "-d",
+        "-D",
+        "--max-count",
+        "--after-context",
+        "--before-context",
+        "--context",
+        "--exclude",
+        "--exclude-dir",
+        "--directories",
+        "--devices",
+    }
+)
+
 _PIPE_OPERATORS: Final[frozenset[str]] = frozenset({"|", "|&"})
 
 
@@ -186,7 +208,31 @@ def _reads_only_stdin(simple: SimpleCommand) -> bool:
     # grep -r with no target searches the cwd, whatever is piped in.
     if _RECURSIVE_SCAN_FLAG.search(invocation):
         return False
-    return not _invocation_positionals(shlex.join(simple.words))[1:]
+    return not _stdin_filter_file_targets(shlex.join(simple.words))
+
+
+def _stdin_filter_file_targets(invocation: str) -> list[str]:
+    """File targets of a grep/rg invocation: positionals minus option values and the pattern."""
+    targets: list[str] = []
+    skip_value = False
+    pattern_seen = False
+    for token in _split_invocation(invocation)[1:]:
+        if skip_value:
+            skip_value = False
+        elif token.startswith(_REDIRECT_PREFIXES):
+            break
+        elif token in _VALUE_OPTIONS:
+            skip_value = True
+            pattern_seen = pattern_seen or token in _PATTERN_OPTIONS
+        elif token.startswith("-"):
+            pattern_seen = pattern_seen or token.startswith(("--regexp=", "--file="))
+        elif token in _GLOB_OPTIONS | _TYPE_OPTIONS:
+            skip_value = True
+        elif pattern_seen:
+            targets.append(token)
+        else:
+            pattern_seen = True
+    return targets
 
 
 def _has_lookup_grep(command: str) -> bool:

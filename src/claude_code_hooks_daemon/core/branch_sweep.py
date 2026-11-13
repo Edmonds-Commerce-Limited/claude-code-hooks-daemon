@@ -326,8 +326,10 @@ def _keep_text(record: BranchRecord, config: BranchesConfig) -> str:
     if record.kept_reason is not None:
         text += f", kept: {record.kept_reason} (by {record.kept_by})"
     if record.stale:
-        lapsed = "keep lapsed, " if record.kept_reason is not None else "unkept, "
-        text += f", STALE ({lapsed}past {max_age})"
+        if record.kept_reason is not None:
+            text += f", STALE (keep lapsed, past {max_age})"
+        else:
+            text += ", STALE (neither deleted nor kept)"
     return text
 
 
