@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.utils.model_fallback_records import (
     parse_fallback_line,
     scan_transcript_tail,
 )
+from tests.logger_records import records_from
 
 
 def _subtype_line(
@@ -142,7 +143,7 @@ class TestParseFallbackLine:
         with caplog.at_level(logging.DEBUG, logger=logger_name):
             assert parse_fallback_line("   ") is None
 
-        assert caplog.records == []
+        assert records_from(caplog, logger_name) == []
 
     def test_an_assistant_message_with_no_fallback_block_yields_none(self) -> None:
         line = json.dumps(
@@ -342,7 +343,7 @@ class TestEventEpoch:
         with caplog.at_level(logging.DEBUG, logger=logger_name):
             assert event_epoch("") is None
 
-        assert caplog.records == []
+        assert records_from(caplog, logger_name) == []
 
 
 class TestRecordIdentity:

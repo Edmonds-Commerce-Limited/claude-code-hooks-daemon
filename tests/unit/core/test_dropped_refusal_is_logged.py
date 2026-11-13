@@ -32,12 +32,14 @@ import logging
 
 import pytest
 
+from claude_code_hooks_daemon.core import hook_result
 from claude_code_hooks_daemon.core.hook_result import (
     REFUSAL_CAPABLE_EVENTS,
     Decision,
     HookResult,
 )
 from claude_code_hooks_daemon.core.response_schemas import RESPONSE_SCHEMAS
+from tests.logger_records import records_from
 
 #: (event, decision) pairs where the refusal is silently dropped today.
 _DROPPED = [
@@ -96,7 +98,7 @@ class TestTheCommonPathStaysSilent:
         with caplog.at_level(logging.ERROR):
             HookResult(decision=decision, reason="blocked").to_json(event_name)
 
-        assert not caplog.records, (
+        assert not records_from(caplog, hook_result.logger.name), (
             f"a {decision.value} on {event_name} IS carried on the wire, so logging it "
             "as dropped would be a false alarm on a hot path"
         )
@@ -107,7 +109,7 @@ class TestTheCommonPathStaysSilent:
         with caplog.at_level(logging.ERROR):
             HookResult(decision=Decision.ALLOW).to_json(event_name)
 
-        assert not caplog.records
+        assert not records_from(caplog, hook_result.logger.name)
 
 
 class TestTheCapabilityTableMatchesTheSchemas:

@@ -38,7 +38,10 @@ from claude_code_hooks_daemon.docs_qa.policy import (
     DocumentationTreesPolicy,
 )
 from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
+from tests.logger_records import records_from
 from tests.support.git_fixtures import git_setup_timeout
+
+_CORPUS_LOGGER = "claude_code_hooks_daemon.docs_qa.corpus"
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -1143,10 +1146,10 @@ class TestRevalidateCorpus:
         """The reason INFO is affordable: the branch does not fire normally."""
         index_path = _staleness_scaffold(tmp_path, "# Own\n", f"# Partner\n\n{_STALENESS_FENCE}")
 
-        with caplog.at_level(logging.INFO, logger="claude_code_hooks_daemon.docs_qa.corpus"):
+        with caplog.at_level(logging.INFO, logger=_CORPUS_LOGGER):
             revalidate_corpus(load_or_cold_corpus(tmp_path, index_path), tmp_path)
 
-        assert caplog.records == []
+        assert records_from(caplog, _CORPUS_LOGGER) == []
 
 
 class TestLoadEditCorpus:

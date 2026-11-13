@@ -4,6 +4,7 @@
 #
 # Checks for:
 #   DEP001 - Missing dependencies (imported but not declared)
+#   DEP003 - Transitive dependencies (imported but only installed via another package)
 #   DEP004 - Misplaced dev dependencies (dev dep used in production code)
 #
 # Exit codes:
@@ -113,7 +114,7 @@ DEPTRY_BIN="${QA_DEPENDENCY_DEPTRY_BIN:-${VENV_DIR}/bin/deptry}"
 
 # Run deptry on src/ only, capture output
 # Only check DEP001 (missing) and DEP004 (misplaced) - the real issues
-# DEP002 (unused) and DEP003 (transitive/self) are configured as ignored in pyproject.toml
+# DEP002 (unused) is configured as ignored in pyproject.toml; DEP003 (transitive) fails
 #
 # 00466 N21: deptry's own contract is 0 = clean, 1 = issues found; it
 # writes its JSON output ONLY after a full, successful run. A CLI usage

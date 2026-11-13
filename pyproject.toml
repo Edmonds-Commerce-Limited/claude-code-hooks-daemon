@@ -28,7 +28,13 @@ requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.5",
-    "jsonschema>=4.0",
+    # 4.18 is the first jsonschema that depends on `referencing`, which
+    # core/state_schemas.py imports directly (ledger N619).
+    "jsonschema>=4.18",
+    "referencing>=0.28.4",
+    # Imported directly by config/validation_ux.py; pydantic pins the exact
+    # build, so the floor is the one pydantic 2.5 requires.
+    "pydantic-core>=2.14",
     "psutil>=5.9",
     "mdformat>=0.7",
     "mdformat-gfm>=0.4",
@@ -298,5 +304,7 @@ exclude = [
     "\\.venv/.*",
 ]
 # DEP002: dev tools (CLI-only, not imported in code) - false positives
-# DEP003: self-package imports (claude_code_hooks_daemon imports itself) - false positives
-ignore = ["DEP002", "DEP003"]
+# DEP003 (transitive import) is NOT ignored: importing a package that is only
+# present because another dependency pulls it in lets the declared floor of
+# that dependency under-promise what the code needs (ledger N619).
+ignore = ["DEP002"]

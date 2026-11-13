@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     DeletionReport,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
+from tests.logger_records import records_from
 
 _ENV = {
     "GIT_AUTHOR_NAME": "Test Author",
@@ -237,7 +238,7 @@ class TestLockRegeneratedBlockers:
     ) -> None:
         with caplog.at_level(logging.DEBUG):
             assert branch_cleanup._holds_git_clone(tmp_path / "vendor") is False
-        assert caplog.records == []
+        assert records_from(caplog, branch_cleanup.logger.name) == []
 
     def test_the_committed_tree_is_not_read_when_no_ignored_directory_could_be_rebuilt(
         self, repo: Path

@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.utils.markdown_format import (
     parse_frontmatter_lenient,
     parse_frontmatter_yaml,
 )
+from tests.logger_records import records_from
 
 
 class TestFormatMarkdownText:
@@ -123,7 +124,7 @@ class TestFootnotePluginPresent:
         markdown_format._mdformat_extensions.cache_clear()
         with caplog.at_level("WARNING", logger=markdown_format.logger.name):
             assert "footnote" in markdown_format._mdformat_extensions()
-        assert not caplog.records
+        assert not records_from(caplog, markdown_format.logger.name)
 
 
 class TestParseFrontmatterYaml:

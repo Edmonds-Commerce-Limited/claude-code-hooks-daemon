@@ -79,6 +79,35 @@ rm -f "${RAW_OUTPUT}"
     "${SCAN_TARGETS[@]}"
 SEMGREP_EXIT=$?
 
+# Rules that read the TEST suite live in their own directory and run over the
+# test files named one by one: semgrep skips a whole `tests/` directory target
+# by default, and widening the source scan to it would also run every source
+# rule over the fixtures that plant violations on purpose.
+# A run that overrides the source rules dir is a planted-rule run and scans
+# nothing else unless it also names a test rules dir.
+if [ -n "${QA_SEMGREP_RULES_DIR:-}" ]; then
+    TEST_RULES_DIR="${QA_SEMGREP_TEST_RULES_DIR:-}"
+else
+    TEST_RULES_DIR="${QA_SEMGREP_TEST_RULES_DIR:-${SCRIPT_DIR}/semgrep-tests}"
+fi
+TEST_RAW_OUTPUT="${OUTPUT_DIR}/semgrep-tests-raw.json"
+rm -f "${TEST_RAW_OUTPUT}"
+if [ "${SEMGREP_EXIT}" -eq 0 ] && [ -n "${TEST_RULES_DIR}" ] && [ -d "${TEST_RULES_DIR}" ]; then
+    mapfile -t TEST_FILES < <(find "${QA_SEMGREP_TEST_ROOT:-${REPO_ROOT}/tests}" -name 'test_*.py' -not -path '*/fixtures/*')
+    if [ "${#TEST_FILES[@]}" -gt 0 ]; then
+        "${SEMGREP}" scan \
+            --config "${TEST_RULES_DIR}" \
+            --metrics=off \
+            --disable-version-check \
+            --quiet \
+            --json \
+            --timeout "${RULE_TIMEOUT_SECONDS}" \
+            --output "${TEST_RAW_OUTPUT}" \
+            "${TEST_FILES[@]}"
+        SEMGREP_EXIT=$?
+    fi
+fi
+
 # Without --error semgrep exits 0 whether or not it finds anything, so any
 # other status means it did not complete the scan.
 if [ "${SEMGREP_EXIT}" -ne 0 ] || [ ! -s "${RAW_OUTPUT}" ]; then
@@ -90,12 +119,17 @@ fi
 
 # Normalise into the shape every other QA check emits, so llm_qa.py and
 # run_all.sh consume it identically.
-"${VENV_PYTHON}" - "${RAW_OUTPUT}" "${OUTPUT_FILE}" <<'PYEOF'
+"${VENV_PYTHON}" - "${RAW_OUTPUT}" "${OUTPUT_FILE}" "${TEST_RAW_OUTPUT}" <<'PYEOF'
 import json
 import sys
 from pathlib import Path
 
 raw = json.loads(Path(sys.argv[1]).read_text())
+test_raw_path = Path(sys.argv[3])
+if test_raw_path.exists():
+    test_raw = json.loads(test_raw_path.read_text())
+    raw["results"] = [*raw.get("results", []), *test_raw.get("results", [])]
+    raw["errors"] = [*raw.get("errors", []), *test_raw.get("errors", [])]
 violations = [
     {
         "file": r.get("path", ""),

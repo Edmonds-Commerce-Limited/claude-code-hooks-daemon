@@ -134,3 +134,68 @@ class TestSemgrepGateFailsClosed:
 
         assert crashed.returncode != 0, crashed.stdout + crashed.stderr
         assert output["summary"]["passed"] is False
+
+
+_CAPLOG_RULE = _REPO_ROOT / "scripts" / "qa" / "semgrep-tests" / "caplog-unscoped-emptiness.yaml"
+_UNSCOPED_TEST = "def test_it(caplog):\n    assert caplog.records == []\n"
+_SCOPED_TEST = (
+    "def test_it(caplog):\n    assert [r for r in caplog.records if r.name == 'x'] == []\n"
+)
+
+
+def _run_test_rules(
+    tmp_path: Path, test_body: str
+) -> tuple[subprocess.CompletedProcess[str], dict]:
+    """Run the wrapper with the shipped test-suite rule over one planted test file.
+
+    SECURITY: fixed argv, no shell, the repository's own QA wrapper.
+    """
+    rules = tmp_path / "rules"
+    rules.mkdir()
+    (rules / "slow.yaml").write_text(_SLOW_RULE, encoding="utf-8")
+    test_rules = tmp_path / "test-rules"
+    test_rules.mkdir()
+    (test_rules / _CAPLOG_RULE.name).write_text(
+        _CAPLOG_RULE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    test_root = tmp_path / "suite"
+    test_root.mkdir()
+    (test_root / "test_planted.py").write_text(test_body, encoding="utf-8")
+    target = tmp_path / "quick.py"
+    target.write_text("foo(a, b)\n", encoding="utf-8")
+    output_dir = tmp_path / "qa"
+    env = {
+        **os.environ,
+        "QA_SEMGREP_RULES_DIR": str(rules),
+        "QA_SEMGREP_TEST_RULES_DIR": str(test_rules),
+        "QA_SEMGREP_TEST_ROOT": str(test_root),
+        "QA_SEMGREP_TARGETS": str(target),
+        "QA_SEMGREP_OUTPUT_DIR": str(output_dir),
+    }
+    completed = subprocess.run(
+        ["bash", str(_WRAPPER)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=_WRAPPER_TIMEOUT_SECONDS,
+        check=False,
+    )
+    output = json.loads((output_dir / "semgrep.json").read_text(encoding="utf-8"))
+    return completed, output
+
+
+class TestTestSuiteRules:
+    """The rules in ``semgrep-tests/`` run over the test files named one by one."""
+
+    def test_an_unscoped_caplog_emptiness_assertion_fails_the_gate(self, tmp_path: Path) -> None:
+        completed, output = _run_test_rules(tmp_path, _UNSCOPED_TEST)
+
+        assert completed.returncode != 0, completed.stdout + completed.stderr
+        (entry,) = output["violations"]
+        assert entry["rule"] == "caplog-unscoped-emptiness"
+
+    def test_an_assertion_scoped_to_one_logger_passes(self, tmp_path: Path) -> None:
+        completed, output = _run_test_rules(tmp_path, _SCOPED_TEST)
+
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        assert output["violations"] == []

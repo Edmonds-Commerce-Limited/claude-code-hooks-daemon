@@ -14,6 +14,7 @@ import pytest
 
 from claude_code_hooks_daemon.utils import usage_pause
 from claude_code_hooks_daemon.utils.usage_pause import UsagePause
+from tests.logger_records import records_from
 
 _SESSION = "sess-abc"
 _NOW = 1_000_000.0
@@ -176,7 +177,7 @@ class TestFailsOpenOnAnyReadError:
     ) -> None:
         with caplog.at_level("WARNING"):
             assert usage_pause.read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
-        assert caplog.text == ""
+        assert records_from(caplog, usage_pause.logger.name) == []
 
 
 class TestSpanCap:
