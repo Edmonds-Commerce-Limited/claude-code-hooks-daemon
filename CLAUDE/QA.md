@@ -801,7 +801,7 @@ other checkers still take directories only.
   - To run the whole stage alone, use `./scripts/qa/llm_qa.py tests`.
     `run_tests.sh` alone runs only the primary.
 - **Security** (Bandit) — zero HIGH/MEDIUM/LOW issues; only B101 is filtered
-- **Dependencies** (Deptry) — missing (DEP001) and misplaced (DEP004)
+- **Dependencies** (Deptry) — missing (DEP001), transitive-only (DEP003) and misplaced (DEP004)
 - **Plan QA** / **Docs QA** (`run_corpus_qa.py`) — the `plan-qa --sweep` and
   `docs-qa --sweep` catalogues, run through the shipped CLI so QA cannot
   disagree with the gate it backs up. **Only a block-severity finding
