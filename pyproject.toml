@@ -28,7 +28,13 @@ requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.5",
-    "jsonschema>=4.0",
+    # 4.18 is the first jsonschema that depends on `referencing`, which
+    # core/state_schemas.py imports directly (ledger N619).
+    "jsonschema>=4.18",
+    "referencing>=0.28.4",
+    # Imported directly by config/validation_ux.py; pydantic pins the exact
+    # build, so the floor is the one pydantic 2.5 requires.
+    "pydantic-core>=2.14",
     "psutil>=5.9",
     "mdformat>=0.7",
     "mdformat-gfm>=0.4",
