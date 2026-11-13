@@ -44,6 +44,7 @@ from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.load_scaling import branch_metadata_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -333,7 +334,7 @@ def _read_refs(repo: Path, config: BranchesConfig) -> tuple[list[_Ref], str | No
     if config.wip.count_remote:
         namespaces.append(f"{_REMOTES}{config.remote}")
     result = run_git(
-        repo, "for-each-ref", f"--format={_FORMAT}", *namespaces, timeout=Timeout.GIT_CONTEXT
+        repo, "for-each-ref", f"--format={_FORMAT}", *namespaces, timeout=branch_metadata_timeout()
     )
     if result.returncode != 0:
         return result.stderr.strip() or f"git exited {result.returncode}"
@@ -452,7 +453,7 @@ def _merged_refnames(
         *(f"--merged={target}" for target in targets),
         "--format=%(refname)",
         *namespaces,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=branch_metadata_timeout(),
     )
     if result.returncode != 0:
         logger.info("branch_creation: merged listing failed: %s", result.stderr.strip())

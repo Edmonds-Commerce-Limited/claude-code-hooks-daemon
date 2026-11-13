@@ -26,7 +26,9 @@ from pathlib import Path
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.worktree_naming import is_worktree_create_name
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.git_config_write import GitConfigLockError, run_git_config_write
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git
+from claude_code_hooks_daemon.utils.load_scaling import branch_metadata_timeout
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path, write_state
 
 logger = logging.getLogger(__name__)
@@ -42,6 +44,12 @@ WORKTREE_CREATE_ROUTE = "worktree_create"
 #: Spend-ledger state kind holding the branches already recorded this session.
 _STATE_KIND = "branch-touch"
 _SEEN = "seen"
+
+#: The touch record runs on the guard path, so its lock wait is fixed and short.
+_TOUCH_LOCK = {
+    "lock_wait": Timeout.GIT_TOUCH_LOCK_WAIT,
+    "lock_ceiling": Timeout.GIT_TOUCH_LOCK_WAIT,
+}
 
 #: ``git config`` exit status for "no such key" (any other non-zero is a failure).
 _CONFIG_KEY_ABSENT = 1
@@ -68,10 +76,37 @@ def _get_all(repo: Path, name: str, key: str, timeout: float) -> list[str]:
     return [line for line in result.stdout.splitlines() if line]
 
 
-def _set(repo: Path, name: str, key: str, value: str, timeout: float, *, add: bool = False) -> bool:
-    """Write one key; a failure is logged and reported as False."""
-    args = ["config", "--add"] if add else ["config"]
-    result = run_git(repo, *args, _key(name, key), value, timeout=timeout)
+def _set(
+    repo: Path,
+    name: str,
+    key: str,
+    value: str,
+    timeout: float,
+    *,
+    lock_wait: float,
+    lock_ceiling: float,
+    add: bool = False,
+) -> bool:
+    """Write one key, waiting out ``config.lock``; a failure is logged and reported as False."""
+    args = ["--add"] if add else []
+    try:
+        result = run_git_config_write(
+            repo,
+            *args,
+            _key(name, key),
+            value,
+            base_wait=lock_wait,
+            ceiling=lock_ceiling,
+            timeout=timeout,
+        )
+    except GitConfigLockError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"branch_records: {_key(name, key)} is left unwritten; a recorder "
+            "never blocks the call it observes",
+        )
+        return False
     if result.returncode != 0:
         logger.warning(
             "branch_records: could not write %s in %s: %s",
@@ -90,18 +125,29 @@ def write_creator(
     route: str,
     *,
     now: float | None = None,
-    timeout: float = Timeout.GIT_CONTEXT,
+    timeout: float | None = None,
 ) -> bool:
-    """Write the three creator keys unconditionally (three git calls).
+    """Write the three creator keys unconditionally (three git config writes).
 
     For a caller that has just created ``name`` itself, such as WorktreeCreate;
-    ``record_creation`` is the checked form. Returns False when any write failed.
+    ``record_creation`` is the checked form. Each write waits for ``config.lock``
+    for a load-scaled wait bounded by ``GIT_CREATOR_LOCK_WAIT_MAX`` and runs git
+    on ``timeout`` (default: the load-scaled branch-metadata budget); the event
+    budget is sized for both. Returns False when any write failed.
     """
     created = str(int(time.time() if now is None else now))
+    git_timeout = branch_metadata_timeout() if timeout is None else timeout
     results = [
-        _set(repo, name, CREATOR_KEY, creator, timeout),
-        _set(repo, name, CREATED_KEY, created, timeout),
-        _set(repo, name, ROUTE_KEY, route, timeout),
+        _set(
+            repo,
+            name,
+            key,
+            value,
+            git_timeout,
+            lock_wait=Timeout.GIT_CONFIG_LOCK_WAIT,
+            lock_ceiling=Timeout.GIT_CREATOR_LOCK_WAIT_MAX,
+        )
+        for key, value in ((CREATOR_KEY, creator), (CREATED_KEY, created), (ROUTE_KEY, route))
     ]
     return all(results)
 
@@ -206,11 +252,11 @@ def record_touch(
         )
         return False
     if who not in touched and not _set(
-        repo, branch, TOUCHED_KEY, who, Timeout.GIT_CONTEXT, add=True
+        repo, branch, TOUCHED_KEY, who, Timeout.GIT_CONTEXT, add=True, **_TOUCH_LOCK
     ):
         return False
     if creators == [identity(session_id, None)]:
-        _set(repo, branch, CREATOR_KEY, who, Timeout.GIT_CONTEXT)
+        _set(repo, branch, CREATOR_KEY, who, Timeout.GIT_CONTEXT, **_TOUCH_LOCK)
     write_state(path, {**state, _SEEN: [*seen_list, marker]})
     return True
 

@@ -17,6 +17,7 @@ import os
 from dataclasses import dataclass
 from typing import Final
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
@@ -107,3 +108,12 @@ def describe_load(
     cpus = cpu_count if cpu_count is not None else os.cpu_count()
     one, five, fifteen = averages
     return f"load average {one:.1f} {five:.1f} {fifteen:.1f} on {cpus or 1} CPUs"
+
+
+def branch_metadata_timeout() -> float:
+    """The budget of one branch-metadata git call inside the WorktreeCreate event.
+
+    The ``GIT_CONTEXT`` base scaled by host load, bounded by the ceiling the
+    event budget (``Timeout.EVENT_HANDLER_BUDGET``) is sized for.
+    """
+    return scaled_timeout(Timeout.GIT_CONTEXT, Timeout.GIT_BRANCH_METADATA_MAX)

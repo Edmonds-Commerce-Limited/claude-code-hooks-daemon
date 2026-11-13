@@ -205,6 +205,18 @@ class Timeout:
     # Plan 00558 Task 4.2: the creator record after the add -- three git config
     # writes (creator, created, route).
     GIT_BRANCH_RECORD_CALLS = 3
+    # Plan 00474 N623/N624: the branch-cap verdict's git calls and the creator
+    # record's config writes run inside the WorktreeCreate event. Each is the
+    # GIT_CONTEXT base scaled by host load (utils/load_scaling.py), bounded by
+    # this ceiling, which the event budget below is sized for. A creator-record
+    # key write also waits for `config.lock` up to GIT_CREATOR_LOCK_WAIT_MAX
+    # (from the GIT_CONFIG_LOCK_WAIT base), and its last attempt may then run
+    # to the metadata ceiling.
+    GIT_BRANCH_METADATA_MAX = 10
+    GIT_CREATOR_LOCK_WAIT_MAX = 10
+    # The touch record runs on the guard path (20 s chain deadline), so its lock
+    # wait is a fixed 2 s rather than load scaled.
+    GIT_TOUCH_LOCK_WAIT = 2
     # Plan 00474 N621: git never retries `.git/config.lock`, and every checkout
     # of a repository (parallel agents) shares the one config file. A config
     # write waits for the lock for a base scaled by host load
@@ -240,8 +252,8 @@ class Timeout:
         # creator-record calls.
         EventType.WORKTREE_CREATE: GIT_WORKTREE_ADD_ATTEMPTS * GIT_WORKTREE_ADD_MAX
         + GIT_WORKTREE_CLEANUP_MAX * GIT_WORKTREE_CLEANUP_CALLS
-        + GIT_CONTEXT * GIT_BRANCH_CREATION_CALLS
-        + GIT_WORKTREE_CLEANUP * GIT_BRANCH_RECORD_CALLS,
+        + GIT_BRANCH_METADATA_MAX * GIT_BRANCH_CREATION_CALLS
+        + (GIT_CREATOR_LOCK_WAIT_MAX + GIT_BRANCH_METADATA_MAX) * GIT_BRANCH_RECORD_CALLS,
         # `worktree remove --force` and then `worktree prune`.
         EventType.WORKTREE_REMOVE: 2 * GIT_WORKTREE,
     }
