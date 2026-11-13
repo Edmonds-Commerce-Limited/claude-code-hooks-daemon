@@ -1,6 +1,7 @@
 # Plan 00599: claude md ownership statement and hint drops
 
-**Status**: In Progress
+**Status**: Complete
+**Completed**: 2026-11-13
 **Created**: 2026-11-11
 **Owner**: joseph
 **Priority**: Medium
@@ -59,7 +60,7 @@ the user owns the code and wants minimal change; `ownership: off` is that.
 
 - [x] ✅ **Task 3.1**: release note 055 with the measured costs
 - [x] ✅ **Task 3.2**: regenerate this repository's `CLAUDE.md` block on the home branch after merge (`bin/hooks-daemon regenerate-docs`; a worktree never writes it)
-- [ ] ⬜ **Task 3.3**: independent review and merge
+- [x] ✅ **Task 3.3**: independent review and merge
 
 ## Success Criteria
 
@@ -68,9 +69,10 @@ the user owns the code and wants minimal change; `ownership: off` is that.
 - [x] Every hint is silent when the mode is `off`, and speaks at most once per session
 - [x] The measured-cost caveats are in `docs/guides/CONFIGURATION.md` and the release note
 - [x] Release-bound consequences are in the holding area: release note 055 in
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
-- [ ] Reviewed and merged
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/` and the config-changes manifest
+  `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.75.0.yaml`
+- [x] Reviewed and merged
 
 ## Delivery & Milestones
 
-- Built on branch `plan-00599-ownership` and merged; the review's findings are fixed on a follow-up branch awaiting its own merge (Task 3.3).
+- Built on branch `plan-00599-ownership` and merged to main at `b0bff26d8`; the independent review's findings were fixed and merged at `7e534918e` (targeted QA 43 of 43 passed, wider unit directories passed).
