@@ -1590,6 +1590,8 @@ plugins:
 branches:
   cleanup_after_merge:
     mode: act
+  parked:
+    cap: 1  # Owner ruling: parked work is WIP; one parked branch blocks new branches
   stop_guard:
     unpushed_subagent: block  # Owner ruling on Plan 00558 Q5: sub-agents push their work branch before stopping
 
