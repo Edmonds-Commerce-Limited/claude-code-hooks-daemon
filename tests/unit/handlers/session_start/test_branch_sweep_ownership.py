@@ -105,9 +105,7 @@ class TestOwnedBranchHintOnce:
         assert "merged branch is not deleted" in text
         assert text.count(_HINT) == 1
 
-    def test_a_second_session_start_in_the_same_session_prints_none(
-        self, busy_repo: Path
-    ) -> None:
+    def test_a_second_session_start_in_the_same_session_prints_none(self, busy_repo: Path) -> None:
         ownership.configure(ClaudeMdConfig())
         handler = _handler()
         assert _text(handler, busy_repo, "s1").count(_HINT) == 1
