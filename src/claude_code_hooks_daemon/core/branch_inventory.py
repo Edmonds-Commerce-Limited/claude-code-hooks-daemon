@@ -42,6 +42,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 from collections.abc import Iterable, Mapping
@@ -103,8 +104,14 @@ _PLAN_IN_SUBJECT = re.compile(r"\bPlan (\d{2,5})\b")
 _PLAN_WIDTH = 5
 _SHORTSTAT_COUNT = re.compile(r"(\d+) (?:insertion|deletion)")
 
-_UNMEASURED_REASON = (
-    "the sweep budget ran out, or git failed, before this tip was measured against every target"
+#: Why a tip is UNCLASSIFIED: the run's time budget (``branches.sweep.budget_ms``) was spent.
+BUDGET_REASON = (
+    "the sweep budget ran out before this tip was measured against every target; "
+    "raise branches.sweep.budget_ms, or run branch-sweep --budget-ms N"
+)
+#: Why a tip is UNCLASSIFIED when git itself failed on it; ``{target}`` names the target.
+_GIT_FAILED_REASON = (
+    "git failed measuring this tip against {target}; a larger time limit will not help"
 )
 
 
@@ -524,11 +531,33 @@ def _park_shas(log_output: str) -> _Walk | None:
     )
 
 
-def _lines(repo: Path, target: str, tip: str) -> int | None:
-    result = run_git(repo, "diff", "--shortstat", f"{target}...{tip}", timeout=_GIT_TIMEOUT)
+def _shortstat_lines(repo: Path, *diff_args: str) -> int | None:
+    result = run_git(repo, "diff", "--shortstat", *diff_args, timeout=_GIT_TIMEOUT)
     if result.returncode != 0:
         return None
     return sum(int(count) for count in _SHORTSTAT_COUNT.findall(result.stdout))
+
+
+def _has_no_merge_base(repo: Path, target: str, tip: str) -> bool:
+    """True only when git positively reports no common ancestor (exit 1, no output)."""
+    result = run_git(repo, "merge-base", target, tip, timeout=_GIT_TIMEOUT)
+    return result.returncode == 1 and not result.stdout.strip()
+
+
+def _lines(repo: Path, target: str, tip: str) -> int | None:
+    """Lines the tip adds beyond the merge base; None when git cannot say.
+
+    With no merge base the three-dot diff errors. The tip then shares nothing
+    with the target, so everything in it is its own work: the diff from the
+    empty tree.
+    """
+    lines = _shortstat_lines(repo, f"{target}...{tip}")
+    if lines is not None or not _has_no_merge_base(repo, target, tip):
+        return lines
+    empty = run_git(repo, "hash-object", "-t", "tree", os.devnull, timeout=_GIT_TIMEOUT)
+    if empty.returncode != 0 or not empty.stdout.strip():
+        return None
+    return _shortstat_lines(repo, empty.stdout.strip(), tip)
 
 
 def _pair_facts(repo: Path, tip: str, target: str, *, want_lines: bool) -> _PairFacts | None:
@@ -827,6 +856,8 @@ class _Pass:
         self.cache = cache
         self.remote_refs = remote_refs
         self.deadline = time.monotonic() + config.sweep.budget_ms / 1000
+        #: Why a (tip, target sha) pair went unmeasured this pass: the budget, or a git failure.
+        self.unmeasured: dict[tuple[str, str], str] = {}
 
     def within_budget(self) -> bool:
         """Whether the sweep's time budget (``sweep.budget_ms``) has not yet run out."""
@@ -854,9 +885,12 @@ class _Pass:
         if cached is not None:
             return cached
         if not self.within_budget():
+            self.unmeasured[(tip, target.sha)] = BUDGET_REASON
             return None
         computed = _pair_facts(self.repo, tip, target.sha, want_lines=want_lines)
-        if computed is not None:
+        if computed is None:
+            self.unmeasured[(tip, target.sha)] = _GIT_FAILED_REASON.format(target=target.name)
+        else:
             self.cache.pairs[key] = {
                 "ahead": computed.ahead,
                 "unique": computed.unique,
@@ -1190,7 +1224,10 @@ def _tip_verdict(run: _Pass, context: _Context, row: _RefRow) -> _Verdict:
     for target in context.targets:
         found = run.facts(row.sha, target)
         if found is None:
-            return _Verdict(BranchState.UNCLASSIFIED, reason=_UNMEASURED_REASON)
+            return _Verdict(
+                BranchState.UNCLASSIFIED,
+                reason=run.unmeasured[(row.sha, target.sha)],
+            )
         facts.append((target, found))
         if target.is_default and found.ahead == 0:
             break

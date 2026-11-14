@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.core.branch_cleanup import CleanupReport
-from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError
+from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
 from claude_code_hooks_daemon.core.branch_sweep import JSON_RECORD_KEYS
 from claude_code_hooks_daemon.daemon.cli import build_parser, cmd_branch_sweep
 
@@ -74,8 +74,10 @@ def _args(
     dry_run: bool = False,
     remote: bool = False,
     apply: bool = False,
+    budget_ms: int | None = None,
 ) -> argparse.Namespace:
     return argparse.Namespace(
+        budget_ms=budget_ms,
         project_root=project,
         json=as_json,
         all=show_all,
@@ -193,6 +195,16 @@ class TestParser:
         assert plain.apply is False
         assert build_parser().parse_args(["branch-sweep", "--clean", "--apply"]).apply is True
 
+    def test_budget_ms_parses_and_defaults_to_none(self) -> None:
+        assert build_parser().parse_args(["branch-sweep"]).budget_ms is None
+        parsed = build_parser().parse_args(["branch-sweep", "--budget-ms", "9000"])
+        assert parsed.budget_ms == 9000
+
+    @pytest.mark.parametrize("value", ["0", "-5", "abc", "1.5"])
+    def test_budget_ms_rejects_non_positive_integers(self, value: str) -> None:
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["branch-sweep", "--budget-ms", value])
+
     def test_help_documents_the_json_keys(self) -> None:
         parser = build_parser()
         sub = next(
@@ -201,6 +213,25 @@ class TestParser:
         epilog = sub.choices["branch-sweep"].epilog or ""
         for key in JSON_RECORD_KEYS:
             assert key in epilog
+
+
+class TestBudgetOverride:
+    def test_budget_ms_overrides_the_configured_budget_for_this_run(self, project: Path) -> None:
+        _config(project, "branches:\n  sweep:\n    budget_ms: 1234\n")
+        with patch(_BUILD, wraps=build_inventory) as build:
+            assert cmd_branch_sweep(_args(project, budget_ms=77)) == 0
+        assert build.call_args.args[1].sweep.budget_ms == 77
+
+    def test_without_the_flag_the_configured_budget_is_used(self, project: Path) -> None:
+        _config(project, "branches:\n  sweep:\n    budget_ms: 1234\n")
+        with patch(_BUILD, wraps=build_inventory) as build:
+            assert cmd_branch_sweep(_args(project)) == 0
+        assert build.call_args.args[1].sweep.budget_ms == 1234
+
+    def test_budget_ms_reaches_the_clean_path(self, project: Path) -> None:
+        with patch(_CLEAN, return_value=CleanupReport()) as clean:
+            assert cmd_branch_sweep(_args(project, clean=True, budget_ms=55)) == 0
+        assert clean.call_args.args[1].sweep.budget_ms == 55
 
 
 class TestReport:

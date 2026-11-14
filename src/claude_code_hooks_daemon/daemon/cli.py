@@ -6696,6 +6696,12 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     repo = get_project_path(getattr(args, "project_root", None))
     config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
     branches = config.branches
+    budget_ms = getattr(args, "budget_ms", None)
+    if budget_ms is not None:
+        # This run only: the configured value and the SessionStart handler are untouched.
+        branches = branches.model_copy(
+            update={"sweep": branches.sweep.model_copy(update={"budget_ms": budget_ms})}
+        )
     if (
         args.clean
         or args.dry_run
@@ -13620,6 +13626,14 @@ def build_parser() -> argparse.ArgumentParser:
         "proof the remote-delete guard uses (ancestor of the default or an integration line, "
         "live tip confirmed with ls-remote), each under a lease on its proven tip and bundled "
         "first. Contacts the remote",
+    )
+    parser_branch_sweep.add_argument(
+        "--budget-ms",
+        type=_positive_int,
+        default=None,
+        metavar="N",
+        help="Time budget in milliseconds for this run only, overriding branches.sweep.budget_ms "
+        "(a positive integer); branches not measured in time stay unclassified",
     )
     parser_branch_sweep.set_defaults(func=cmd_branch_sweep)
 
