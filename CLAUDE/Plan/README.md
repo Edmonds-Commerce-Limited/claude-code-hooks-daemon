@@ -8,6 +8,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00605: branch sweep classifies no merge base branches](00605-branch-sweep-classifies-no-merge-base-branches/PLAN.md) - Not Started (GitHub #203: a branch with no merge base against the default branch is measured instead of left UNCLASSIFIED with a reason blaming the budget; the reason names the real cause; one-off `branch-sweep --budget-ms`)
+
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
 - [00603: supervisor idle compact at 30 percent](00603-supervisor-idle-compact-at-30-percent/PLAN.md) - In Progress (built, dry-run first: verify Claude Code's idleCompaction, and add a supervisor compaction at true idle once context reaches 30%)
@@ -303,11 +305,11 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Plan Statistics
 
-- **Total Plans Created**: 602 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 605 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 508 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 73 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 74 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
