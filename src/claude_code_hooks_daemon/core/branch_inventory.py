@@ -111,8 +111,19 @@ BUDGET_REASON = (
 )
 #: Why a tip is UNCLASSIFIED when git itself failed on it; ``{target}`` names the target.
 _GIT_FAILED_REASON = (
-    "git failed measuring this tip against {target}; a larger time limit will not help"
+    "git failed measuring this tip against {target}; "
+    "raising branches.sweep.budget_ms will not help"
 )
+#: Why a tip is UNCLASSIFIED in a shallow clone whose fork point was not fetched.
+_SHALLOW_REASON = (
+    "history not fetched: this is a shallow clone and no merge base with {target} "
+    "is present; deepen the clone (git fetch --unshallow)"
+)
+
+
+@dataclass(frozen=True)
+class HistoryNotFetched:
+    """A shallow clone lacks the history needed to find the tip's merge base."""
 
 
 def _lines_of(output: str) -> list[str]:
@@ -554,14 +565,30 @@ def _lines(repo: Path, target: str, tip: str) -> int | None:
     lines = _shortstat_lines(repo, f"{target}...{tip}")
     if lines is not None or not _has_no_merge_base(repo, target, tip):
         return lines
+    return _empty_tree_lines(repo, tip)
+
+
+def _empty_tree_lines(repo: Path, tip: str) -> int | None:
+    """Lines in the whole tip: its diff from the empty tree; None when git cannot say."""
     empty = run_git(repo, "hash-object", "-t", "tree", os.devnull, timeout=_GIT_TIMEOUT)
     if empty.returncode != 0 or not empty.stdout.strip():
         return None
     return _shortstat_lines(repo, empty.stdout.strip(), tip)
 
 
-def _pair_facts(repo: Path, tip: str, target: str, *, want_lines: bool) -> _PairFacts | None:
-    """Ahead and unique patches (parks excluded), merges and lines; None on any failure."""
+def _is_shallow(repo: Path) -> bool:
+    """True when git positively reports a shallow repository."""
+    result = run_git(repo, "rev-parse", "--is-shallow-repository", timeout=_GIT_TIMEOUT)
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+def _pair_facts(
+    repo: Path, tip: str, target: str, *, want_lines: bool
+) -> _PairFacts | HistoryNotFetched | None:
+    """Ahead and unique patches (parks excluded), merges and lines.
+
+    None on any git failure; :class:`HistoryNotFetched` when a shallow clone lacks the fork point.
+    """
     keys = ",".join(f"key={key}" for key in _PARK_TRAILER_KEYS)
     log = run_git(
         repo,
@@ -579,6 +606,16 @@ def _pair_facts(repo: Path, tip: str, target: str, *, want_lines: bool) -> _Pair
     ahead = len(walked.commits) - len(walked.parks)
     if ahead == 0:
         return _PairFacts(ahead=0, unique=0, merges=0, lines=0 if want_lines else None)
+    if _has_no_merge_base(repo, target, tip):
+        # Nothing is shared with the target, so nothing in the tip can be a patch the
+        # target already holds: git cherry would compare against the target's whole
+        # history and could call a rewritten-history branch equivalent. All of it is work.
+        if _is_shallow(repo):
+            return HistoryNotFetched()
+        lines = _empty_tree_lines(repo, tip) if want_lines else None
+        if want_lines and lines is None:
+            return None
+        return _PairFacts(ahead=ahead, unique=ahead, merges=walked.merges, lines=lines)
     unique = branch_safety.cherry_unique_shas(repo, target, tip, timeout=_GIT_TIMEOUT)
     if unique is None:
         return None
@@ -888,6 +925,9 @@ class _Pass:
             self.unmeasured[(tip, target.sha)] = BUDGET_REASON
             return None
         computed = _pair_facts(self.repo, tip, target.sha, want_lines=want_lines)
+        if isinstance(computed, HistoryNotFetched):
+            self.unmeasured[(tip, target.sha)] = _SHALLOW_REASON.format(target=target.name)
+            return None
         if computed is None:
             self.unmeasured[(tip, target.sha)] = _GIT_FAILED_REASON.format(target=target.name)
         else:

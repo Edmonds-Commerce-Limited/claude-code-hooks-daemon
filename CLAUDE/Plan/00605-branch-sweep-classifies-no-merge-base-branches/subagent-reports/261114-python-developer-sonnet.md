@@ -48,3 +48,27 @@ Release note `073-branch-sweep-classifies-branches-with-no-merge-base.md`; `swee
 - `/workspace/.venv` is broken here (its interpreter points at Python 3.13 while the packages are for 3.11), so I ran
   tests from a throwaway venv at `untracked/scratch/venv` (gitignored).
 - No disagreement with the brief.
+
+## Review fixes
+
+All five review findings were accepted; no disagreement.
+
+1. Critical: `_pair_facts` now asks `_has_no_merge_base` once, before the cherry step. With no merge base it skips
+   `git cherry` and sets `unique = ahead`, so the branch is always unmerged (LIVE). Lines for the default target come
+   from the new `_empty_tree_lines`. Regression tests: matching-root-patch orphan (default branch and, via
+   `_pair_facts` with `want_lines=False`, an integration line) and the metadata-only `filter-branch` rewrite (both
+   targets).
+2. Release note 073 now states these branches are never merged, contained or patch-equivalent.
+3. Git-failure reason now reads "raising branches.sweep.budget_ms will not help" (covers the exit-124 case); tested.
+   The cherry-failure and failing-diff tests assert "git failed" and the target name. The cherry-failure tests now use
+   a shared-history branch, since orphans no longer reach cherry.
+4. Shallow clones: `_is_shallow` (`git rev-parse --is-shallow-repository`) turns a no-merge-base pair in a shallow
+   repository into a returned `HistoryNotFetched` value (not an exception: the error_hiding checker rejects a
+   `return None` or fallback assignment inside an `except`); `_Pass.facts` records a "history not fetched" reason and the tip stays
+   UNCLASSIFIED. Tested with `clone --depth 1 --no-single-branch`.
+5. `BUDGET_REASON` pyright error: the attribute exists (`branch_inventory.py:108`); it appears to be a stale editor
+   diagnostic; QA pyright reports 0 errors.
+
+Final targeted QA: `QA: 43/43 PASSED`.
+
+Process note: the source change was written before the new tests, so no separate red run was recorded for them.
