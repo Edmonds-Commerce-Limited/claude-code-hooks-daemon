@@ -67,7 +67,8 @@ An unclassified branch still counts toward the open-work pool, so a repository f
 
 ## Delivery & Milestones
 
-- Implementation `ad489f6a8`, review fixes `c482d3d83`, merged to main at `3b39560f9`.
+- Implementation `ad489f6a8`, review fixes `c482d3d83`. `3b39560f9` merges `origin/main` into the branch, and main
+  was fast-forwarded to it.
 - Reports: `subagent-reports/261114-python-developer-sonnet.md` and `subagent-reports/261114-code-reviewer-opus.md`.
 
 ## Follow-ups
@@ -79,5 +80,5 @@ An unclassified branch still counts toward the open-work pool, so a repository f
   passed. Fix: let discovery also try the daemon's own resolver (`get_socket_path`). This needs its own branch, which
   waits for the parked-branch slot to free.
 - **The branch-creation guard does not see a worktree branch created by a script.** `branch_creation_guard` matches
-  `checkout -b`, `branch <name>`, `worktree add` and Agent worktree isolation. `scripts/setup_worktree.sh` runs
+  `checkout -b`, `switch -c`, `branch <name>`, `worktree add` and Agent worktree isolation. `scripts/setup_worktree.sh` runs
   `git worktree add` itself, so it created this plan's branch while `branch-preflight` reported creation blocked.
