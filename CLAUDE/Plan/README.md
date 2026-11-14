@@ -8,8 +8,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00605: branch sweep classifies no merge base branches](00605-branch-sweep-classifies-no-merge-base-branches/PLAN.md) - Not Started (GitHub #203: a branch with no merge base against the default branch is measured instead of left UNCLASSIFIED with a reason blaming the budget; the reason names the real cause; one-off `branch-sweep --budget-ms`)
-
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
 - [00603: supervisor idle compact at 30 percent](00603-supervisor-idle-compact-at-30-percent/PLAN.md) - In Progress (built, dry-run first: verify Claude Code's idleCompaction, and add a supervisor compaction at true idle once context reaches 30%)
@@ -194,6 +192,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00605: branch sweep classifies no merge base branches](Completed/00605-branch-sweep-classifies-no-merge-base-branches/PLAN.md) - Complete at merge `3b39560f9` (main CI run 43620790845 green on attempt 2) + the archiving commit (GitHub #203, closed: a no-merge-base branch is measured as unmerged work, never patch-equivalent; reasons name the real cause; `branch-sweep --budget-ms`; release note 073)
+
 - [00599: claude md ownership statement and hint drops](Completed/00599-claude-md-ownership-statement-and-hint-drops/PLAN.md) - Complete at merges `b0bff26d8` + `7e534918e` (review fixes) + the archiving commit (a `claude_md.ownership` toggle, on by default, leads the injected CLAUDE.md block with the ownership sentence and drives once-per-session hint drops; `off` silences all; release note 055 and config-changes manifest v3.75.0.yaml)
 
 - [00601: session state contract and schemas](Completed/00601-session-state-contract-and-schemas/PLAN.md) - Complete at `896c8806b` + the archiving commit (niggle N616: `session-state --json` and `--watch`, versioned JSON Schemas shipped in the package, `schema_version` on `mode-history --json`, contract guide; release note 056; unreleased)
@@ -252,8 +252,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00562: cross clone plan number allocation](Completed/00562-cross-clone-plan-number-allocation/PLAN.md) - Complete at merge `5289e8fad` + `9b21e9c5c` + the archiving commit (GitHub #154: `mkplan.bash` fetches with a time limit and reads the plan folders on every remote branch before allocating; hooks read already-fetched refs only; release note 033; the not-yet-pushed race is Plan 00564)
 
-- [00558: branch WIP limit and hygiene](Completed/00558-git-branch-hygiene-sweep/PLAN.md) - Complete at the Plan 00558 merges + `0c75cfa0b`, `42502078a`, `bce4f829c` + the archiving commit (GitHub #152: a blocking WIP cap of 10 over every branch, dormancy limits, park and lossless delete, a Stop/SubagentStop guard against abandoned branches, lossless cleanup after merge and worktree removal; release notes 023-032)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -307,9 +305,9 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - **Total Plans Created**: 605 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 508 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 509 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 74 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 73 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
