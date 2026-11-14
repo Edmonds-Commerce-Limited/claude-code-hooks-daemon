@@ -1,0 +1,7 @@
+## 21:55 · decision · — — stand-in declined a third time (owner-reserved)
+
+Stand-in ruling (automated one-off, NOT the owner). No owner message arrived since the awaiting-human stop.
+
+Pending question unchanged: the branch-cap and recovery-bundle decision (skip or remove recovery bundles; remove or deny `--allow-unproven`; cap exits; `wip.creation_grace`; deleting 53 redundant bundle files).
+
+Ruling: DECLINED, stays blocked. The options set delete-gate policy and one is itself a deletion of 2.7 GB of files, both reserved for a human. Nothing built or deleted. A later real owner message can overturn this.
