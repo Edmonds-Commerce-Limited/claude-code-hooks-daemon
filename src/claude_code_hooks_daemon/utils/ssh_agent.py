@@ -29,6 +29,7 @@ from pathlib import Path, PurePath
 from typing import Final, TypeVar
 
 from claude_code_hooks_daemon.utils.cron_hosts import process_environ
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 T = TypeVar("T")
 
@@ -73,8 +74,9 @@ def validated_agent_socket(value: str, uid: int | None = None) -> str:
         raise AgentSocketRejected("not absolute")
     try:
         info = Path(candidate).stat()
-    except (OSError, ValueError) as error:
-        raise AgentSocketRejected("unreadable") from error
+    except (OSError, ValueError):
+        # The OSError text names the path, so the cause is deliberately not chained.
+        raise AgentSocketRejected("unreadable") from None
     if not stat.S_ISSOCK(info.st_mode):
         raise AgentSocketRejected("not a socket")
     owner = os.getuid() if uid is None else uid
@@ -116,5 +118,10 @@ def forwarded_agent_socket() -> str | None:
     try:
         return validated_agent_socket(value)
     except AgentSocketRejected as rejected:
-        logger.debug("peer SSH_AUTH_SOCK ignored: %s", rejected.reason)
+        log_and_continue(
+            logger,
+            rejected,
+            reason="the peer's SSH_AUTH_SOCK failed validation, so the daemon's own "
+            "environment applies; the exception carries a fixed reason, never the value",
+        )
         return None
