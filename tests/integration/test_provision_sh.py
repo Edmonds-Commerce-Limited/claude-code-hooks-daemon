@@ -1684,7 +1684,10 @@ class TestTheRelayStepReportsTruthfully:
         before = len(_provisioning_calls(fresh))
 
         result = fresh.provision(
-            extra_env={"SANDBOX_RELAY_CHECK_EXIT": "1", "SANDBOX_RELAY_CHECK_STDERR": "Traceback boom"}
+            extra_env={
+                "SANDBOX_RELAY_CHECK_EXIT": "1",
+                "SANDBOX_RELAY_CHECK_STDERR": "Traceback boom",
+            }
         )
 
         assert result.returncode == 0, _out(result)
