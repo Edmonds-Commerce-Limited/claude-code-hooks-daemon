@@ -6945,16 +6945,10 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     # the protected names, the resolved default and every exempt glob, matched by
     # `branch_safety.matches_any_glob`. An integration line is not among them: it is
     # deletable once `protected_ref` (the default) holds every commit, and refused
-    # otherwise. With no resolvable default there
-    # is nothing to prove a line against, so every line is refused.
-    protected_names = (*branches.protected_names, *branches.exempt, protected_ref)
-    if resolved_default is not None:
-        protected_names = (*protected_names, resolved_default)
-    line_targets = (
-        branch_cleanup.default_targets(repo, branches, resolved_default)
-        if resolved_default is not None
-        else []
-    )
+    # otherwise. The default is resolved by here (an unresolvable one returned
+    # above), so there is always something to prove a line against.
+    protected_names = (*branches.protected_names, *branches.exempt, protected_ref, resolved_default)
+    line_targets = branch_cleanup.default_targets(repo, branches, resolved_default)
 
     try:
         report = delete_branches(

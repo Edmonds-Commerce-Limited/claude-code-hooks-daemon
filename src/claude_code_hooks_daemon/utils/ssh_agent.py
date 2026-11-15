@@ -21,6 +21,7 @@ the first four run an arbitrary command in the daemon's context.
 from __future__ import annotations
 
 import contextvars
+import logging
 import os
 import stat
 from collections.abc import Callable
@@ -31,6 +32,8 @@ from claude_code_hooks_daemon.utils.cron_hosts import process_environ
 
 T = TypeVar("T")
 
+logger = logging.getLogger(__name__)
+
 #: The one variable taken from a peer's environment.
 ENV_SSH_AUTH_SOCK: Final = "SSH_AUTH_SOCK"
 
@@ -40,23 +43,43 @@ _request_peer_pid: contextvars.ContextVar[int | None] = contextvars.ContextVar(
 )
 
 
-def validated_agent_socket(value: str | None, uid: int | None = None) -> str | None:
-    """``value`` when it is an absolute path to a socket owned by ``uid``, else None.
+class AgentSocketRejected(ValueError):
+    """A candidate ``SSH_AUTH_SOCK`` value that may not be used.
+
+    Carries only a fixed ``reason``; the rejected value is never held, so the
+    exception can be logged without writing the socket path down.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def validated_agent_socket(value: str, uid: int | None = None) -> str:
+    """``value`` (stripped) when it is an absolute path to a socket owned by ``uid``.
 
     Args:
         value: A candidate ``SSH_AUTH_SOCK`` value.
         uid: The owner required; the daemon's own uid when omitted.
+
+    Raises:
+        AgentSocketRejected: The value is empty, not absolute, unreadable, not a
+            socket, or not owned by ``uid``. The exception names the reason only.
     """
-    candidate = (value or "").strip()
-    if not candidate or not PurePath(candidate).is_absolute():
-        return None
+    candidate = value.strip()
+    if not candidate:
+        raise AgentSocketRejected("empty")
+    if not PurePath(candidate).is_absolute():
+        raise AgentSocketRejected("not absolute")
     try:
         info = Path(candidate).stat()
-    except (OSError, ValueError):
-        return None
+    except (OSError, ValueError) as error:
+        raise AgentSocketRejected("unreadable") from error
+    if not stat.S_ISSOCK(info.st_mode):
+        raise AgentSocketRejected("not a socket")
     owner = os.getuid() if uid is None else uid
-    if not stat.S_ISSOCK(info.st_mode) or info.st_uid != owner:
-        return None
+    if info.st_uid != owner:
+        raise AgentSocketRejected("not owned by the daemon user")
     return candidate
 
 
@@ -78,7 +101,8 @@ def forwarded_agent_socket() -> str | None:
 
     None means the daemon's own environment applies: no request is bound, the
     peer's environment is unreadable, it names no agent, or the value fails
-    :func:`validated_agent_socket`. None of those is an error, and none logs.
+    :func:`validated_agent_socket`. None of those is an error. A rejected value
+    is recorded at debug level by reason only, never by value.
     """
     pid = _request_peer_pid.get()
     if pid is None:
@@ -86,4 +110,11 @@ def forwarded_agent_socket() -> str | None:
     environ, _reason = process_environ(pid)
     if environ is None:
         return None
-    return validated_agent_socket(environ.get(ENV_SSH_AUTH_SOCK))
+    value = (environ.get(ENV_SSH_AUTH_SOCK) or "").strip()
+    if not value:
+        return None
+    try:
+        return validated_agent_socket(value)
+    except AgentSocketRejected as rejected:
+        logger.debug("peer SSH_AUTH_SOCK ignored: %s", rejected.reason)
+        return None
