@@ -246,6 +246,9 @@ class Sandbox:
                     && [ "${{2:-}}" = "claude_code_hooks_daemon.install.relay_deploy" ]; then
                 echo "relay_deploy uvcalls=$(wc -l < "{self.uv_log}") $*" >> "{self.relay_log}"
                 if [[ " $* " == *" --check "* ]]; then
+                    if [ -n "${{SANDBOX_RELAY_CHECK_STDERR:-}}" ]; then
+                        echo "$SANDBOX_RELAY_CHECK_STDERR" >&2
+                    fi
                     echo "${{SANDBOX_RELAY_CHECK_OUTPUT:-relay check ok}}"
                     exit "${{SANDBOX_RELAY_CHECK_EXIT:-0}}"
                 fi

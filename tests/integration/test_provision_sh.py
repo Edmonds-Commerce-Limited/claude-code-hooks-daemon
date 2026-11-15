@@ -1641,7 +1641,8 @@ class TestAnExistingCloneProvisionsAMissingRelay:
 
         assert result.returncode == 0, _out(result)
         assert "transport on" in _out(result)
-        assert "relay" in _out(result).lower()
+        assert "relay is missing" in _out(result)
+        assert "A background run does not build or download it" in _out(result)
         assert len(_provisioning_calls(fresh)) == before
         assert len(fresh.box.uv_calls()) == builds
 
@@ -1654,6 +1655,72 @@ class TestAnExistingCloneProvisionsAMissingRelay:
 
         assert result.returncode == 0, _out(result)
         assert "transport on" not in _out(result)
+
+
+class TestTheRelayStepReportsTruthfully:
+    """Plan 00608 review: the closing lines say what the run did, and why it failed."""
+
+    def test_a_forwarder_already_modified_and_rewritten_is_reported(
+        self, fresh: Provisioning
+    ) -> None:
+        hook = fresh.project / ".claude" / "hooks" / "pre-tool-use"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("#!/bin/bash\n")
+        hook.chmod(0o755)
+        _git(fresh.project, "add", "-A")
+        _git(fresh.project, "commit", "-q", "-m", "a tracked forwarder")
+        hook.write_text("#!/bin/bash\n# edited by hand\n")
+
+        result = fresh.provision(extra_env={"SANDBOX_REGEN_APPEND": str(hook)})
+
+        assert result.returncode == 0, _out(result)
+        assert "regenerated tracked forwarders" in _out(result)
+        assert "No tracked file was changed" not in _out(result)
+
+    def test_a_crashing_check_is_a_failure_and_provisions_nothing(
+        self, fresh: Provisioning
+    ) -> None:
+        assert fresh.provision().returncode == 0
+        before = len(_provisioning_calls(fresh))
+
+        result = fresh.provision(
+            extra_env={"SANDBOX_RELAY_CHECK_EXIT": "1", "SANDBOX_RELAY_CHECK_STDERR": "Traceback boom"}
+        )
+
+        assert result.returncode == 0, _out(result)
+        assert len(_provisioning_calls(fresh)) == before
+        assert "relay check failed" in _out(result)
+        assert "Traceback boom" in _out(result)
+        assert "NOT provisioned" in _out(result)
+
+    def test_an_old_cli_usage_error_is_hidden(self, fresh: Provisioning) -> None:
+        assert fresh.provision().returncode == 0
+        before = len(_provisioning_calls(fresh))
+
+        result = fresh.provision(
+            extra_env={
+                "SANDBOX_RELAY_CHECK_EXIT": "2",
+                "SANDBOX_RELAY_CHECK_STDERR": "usage: argparse noise",
+            }
+        )
+
+        assert result.returncode == 0, _out(result)
+        assert len(_provisioning_calls(fresh)) == before + 1
+        assert "argparse noise" not in _out(result)
+
+    def test_a_helper_that_fails_to_source_prints_a_banner_naming_it(
+        self, fresh: Provisioning
+    ) -> None:
+        assert fresh.provision().returncode == 0
+        helper = fresh.clone / "scripts" / "install" / "relay_provision.sh"
+        helper.write_text("return 1\n")
+
+        result = fresh.provision(extra_env=RELAY_MISSING)
+
+        assert result.returncode == 0, _out(result)
+        assert "could not source" in _out(result)
+        assert "relay_provision.sh" in _out(result)
+        assert "NOT provisioned" in _out(result)
 
 
 class TestASyncProvisionsTheRelay:
@@ -1691,4 +1758,8 @@ class TestASyncProvisionsTheRelay:
 
         assert result.returncode == 0, _out(result)
         assert len(_provisioning_calls(fresh)) == before
-        assert _state(fresh, MAIN_VERSION)["status"] == "synced"
+        state = _outcome(fresh, MAIN_VERSION)
+        log = (_sync_dir(fresh) / f"v{MAIN_VERSION}.log").read_text()
+        assert state["status"] == "synced", log
+        assert "A background run does not build or download it" in log
+        assert len(_provisioning_calls(fresh)) == before
