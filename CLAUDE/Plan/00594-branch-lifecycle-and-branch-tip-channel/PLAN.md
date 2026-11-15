@@ -82,7 +82,8 @@ names, people or hashes appear here.
 - "Merged" means the work is in the default branch, not that the branch name
   is an ancestor. Squash merges, renamed-PR merges and patch-equivalent
   branches are proven merged and are deletable by an agent, local and remote,
-  behind the recovery bundle (class 3).
+  on that machine proof; each delete prints a restore line instead of writing
+  a bundle (class 3).
 - Pressure moves to where work ends: stop, session start and merge. Creation
   remains a backstop and never forces a destructive workaround (class 2).
 - One preflight command lists every blocker with its exact fix. The creation
@@ -99,8 +100,9 @@ names, people or hashes appear here.
 
 ## Non-Goals
 
-- Changing the no-loss guarantee. Nothing is deleted without proof plus a
-  recovery bundle.
+- Changing the no-loss guarantee. Nothing is deleted without machine proof
+  (or a human's confirmation); the deleting agent's own assertion never counts, and
+  no recovery bundle is written (a restore line is printed instead).
 - Dropping the three-pool model or its caps.
 - Shipping any change to guard behaviour before the design is reviewed with
   the client test seat.
@@ -167,7 +169,8 @@ names, people or hashes appear here.
 - [x] ✅ **Task 3.1**: (release note 040) Proof of merge covers squash merges, renamed-PR merges
   and patch-equivalent branches, with tests for each shape.
 - [x] ✅ **Task 3.2**: (release note 040) Remote delete of a proven-merged branch is allowed for
-  an agent; `branch-sweep --clean --remote` keeps its recovery bundle.
+  an agent; `branch-sweep --clean --remote` prints a restore line per branch
+  (the recovery bundle was removed in Task 3.7).
 - [x] ✅ **Task 3.3**: (on main, release note 034) An ignored directory that
   a committed manifest and lock file let a package manager rebuild counts as
   regenerable, unless it holds a nested git clone or contains the scratch
@@ -175,8 +178,18 @@ names, people or hashes appear here.
   configurable through `branches.cleanup_after_merge.regenerable`.
 - [x] ✅ **Task 3.4**: (on main, release note 047, report `task-3-4-report.md`)
   Bulk cleanup is batched, resumable and dry-run first,
-  and is tested against a fixture with hundreds of branches. `branch-sweep --clean` previews; `--apply` deletes in batches of 50 with a bundle per
-  batch; an interrupted run resumes by running the same command again.
+  and is tested against a fixture with hundreds of branches. `branch-sweep --clean` previews; `--apply` deletes in batches of 50, printing a restore line per branch; an interrupted run resumes by running the same command again.
+- [x] ✅ **Task 3.7**: (release note 075; commits 64a74a1f1, 0949616e2, 7df818c71)
+  Delete gate tightened. `delete-branch` has no `--allow-unproven`, `--reason` or
+  bundle option: it deletes only on machine proof or after a human confirmed it, and
+  prints a restore line (`git branch <name> <sha>`, or the `git push` for a remote
+  copy). The recovery-bundle writers are gone from `delete-branch`,
+  `branch-sweep --clean` and `worktree-reap`. Proof targets are validated
+  (`worktree-reap --base-branch` must be the default or a declared integration
+  line). Every cap exit text (WIP cap, dormancy, parked pool, merged pool,
+  stop guard, `BRANCH_LIMIT_PRINCIPLE`) says: finish (merge), or delete only on
+  machine proof or human confirmation; parking is a short bounded pause. A test
+  pins that `branches.wip.creation_grace` never lifts a full parked pool.
 - [x] ✅ **Task 3.5**: (RC feedback; done, release note 038) When the
   worktree-removal guard names ignored blocking paths, its deny says to keep
   what matters and delete what is disposable in a separate command first. A
@@ -239,7 +252,7 @@ names, people or hashes appear here.
   `CLAUDE/core/Worktree.core.md`, and `branch_creation_guard` advises on a
   recovery-shaped branch name and on a worktree created inside a worktree)
   Write the branch practice down
-  for clients: recovery copies go to a bundle or `refs/archive/<name>`
+  for clients: recovery copies go to `refs/archive/<name>`
   (pools count only branches), never to a branch; worktrees are created
   from the main checkout, never nested; agents' worktrees are reaped after
   each agent. Prefer a daemon advisory where the practice can be detected
