@@ -1048,14 +1048,20 @@ _provision_venv_is_current() {
 _PROVISION_RELAY_FAILED=false
 _PROVISION_FORWARDERS_CHANGED=false
 readonly RELAY_CHECK_MISSING_EXIT_CODE=3
+readonly RELAY_CHECK_OLD_CLI_EXIT_CODE=2
 
 # The tracked forwarders' state, to tell whether the relay step rewrote them.
 _provision_hooks_state() {
-    local state=""
+    local state="" content=""
     if ! state="$(git -C "$PROJECT_PATH" status --porcelain -- .claude/hooks 2> /dev/null)"; then
         state=""
     fi
-    printf '%s' "$state"
+    # The status lines alone cannot tell a rewrite of an already-modified
+    # forwarder (its line is the same before and after); its content can.
+    if ! content="$(git -C "$PROJECT_PATH" diff HEAD -- .claude/hooks 2> /dev/null)"; then
+        content=""
+    fi
+    printf '%s\n%s' "$state" "$content"
 }
 
 # Provision the relay binary and regenerate the forwarders. $1 is the venv
@@ -1071,7 +1077,8 @@ _provision_relay_provision() {
     local before after rc=0
     before="$(_provision_hooks_state)"
     _provision_say "Provisioning the relay binary (daemon.transport) ..."
-    bash -c 'source "$1" && provision_relay_binary "$2" "$3" "$4" "$5"; exit "${RELAY_PROVISION_FAILED:-2}"' \
+    bash -c 'source "$1" || { echo "The relay step could not source its helper: $1"; exit 2; }
+        provision_relay_binary "$2" "$3" "$4" "$5"; exit "${RELAY_PROVISION_FAILED:-2}"' \
         _ "$helper" "$python_cmd" "$DAEMON_DIR" "$PROJECT_PATH" "$TAG" || rc=$?
     if ((rc != 0)); then
         _PROVISION_RELAY_FAILED=true
@@ -1084,16 +1091,18 @@ _provision_relay_provision() {
 }
 
 # Is the relay binary missing or defective? $1 is the venv interpreter. Prints
-# the CLI's answer. Returns 0 when it is, 1 when it is not, and 2 when the
-# clone's CLI cannot say (a release before --check): the caller then provisions.
+# the CLI's answer. Returns 0 when it is, 1 when it is not, 2 when the clone's
+# CLI cannot say (argparse rejects --check on a release before it: the caller then
+# provisions), and 3 when the check itself failed (the output says why).
 _provision_relay_needed() {
     local python_cmd="$1" rc=0
     "$python_cmd" -m claude_code_hooks_daemon.install.relay_deploy --check \
-        --daemon-dir "$DAEMON_DIR" --project-root "$PROJECT_PATH" || rc=$?
+        --daemon-dir "$DAEMON_DIR" --project-root "$PROJECT_PATH" 2>&1 || rc=$?
     case "$rc" in
         0) return 1 ;;
         "$RELAY_CHECK_MISSING_EXIT_CODE") return 0 ;;
-        *) return 2 ;;
+        "$RELAY_CHECK_OLD_CLI_EXIT_CODE") return 2 ;;
+        *) return 3 ;;
     esac
 }
 
@@ -1103,6 +1112,11 @@ _provision_relay_ensure() {
     local python_cmd="$1" needed=0 answer
     answer="$(_provision_relay_needed "$python_cmd")" || needed=$?
     if ((needed == 1)); then
+        return 0
+    fi
+    if ((needed == 3)); then
+        _provision_say "The relay check failed, so the relay binary was not provisioned: $answer"
+        _PROVISION_RELAY_FAILED=true
         return 0
     fi
     if [[ "$BACKGROUND" == true ]]; then
