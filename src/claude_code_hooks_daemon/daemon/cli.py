@@ -6954,20 +6954,10 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         return 2
     protected_ref: str = resolved_default
     if args.protected_ref is not None:
-        # The proof target is the config's, never the caller's: a caller that may
-        # name any ref (its own tip, a sha, a sibling holding it) chooses its own
-        # proof. Only the default and the declared integration lines qualify.
-        allowed = {
-            ref if ref.startswith("refs/") else branch_ref(ref)
-            for ref in branch_cleanup.cleanup_targets(repo, branches, resolved_default)
-        }
         requested = args.protected_ref
-        candidates = (
-            [requested]
-            if requested.startswith("refs/")
-            else [branch_ref(requested), f"refs/remotes/{requested}"]
+        matched = branch_cleanup.validated_proof_target(
+            repo, branches, resolved_default, requested
         )
-        matched = next((ref for ref in candidates if ref in allowed), None)
         if matched is None:
             print(
                 f"ERROR: --protected-ref {requested} is not the default branch or a "
@@ -9934,13 +9924,25 @@ def cmd_worktree_reap(
     )
 
     repo_root = Path(getattr(args, "project_root", None) or get_project_path(None))
-    base_branch = getattr(args, "base_branch", None) or git_sync.resolve_default_branch(
-        _branches_config(repo_root), repo_root
-    )
-    if base_branch is None:
+    reap_config = _branches_config(repo_root)
+    resolved_default = git_sync.resolve_default_branch(reap_config, repo_root)
+    base_branch = getattr(args, "base_branch", None) or resolved_default
+    if base_branch is None or resolved_default is None:
         print(
             "ERROR: cannot determine the default branch (branches.default is 'auto' and "
-            "git names none); pass --base-branch <branch> or set branches.default",
+            "git names none); set branches.default",
+            file=sys.stderr,
+        )
+        return 2
+    # The base is the proof a deletion is measured against, so the caller does not
+    # choose it: only the default or a declared integration line may be named.
+    if base_branch != resolved_default and (
+        branch_cleanup.validated_proof_target(repo_root, reap_config, resolved_default, base_branch)
+        is None
+    ):
+        print(
+            f"ERROR: --base-branch {base_branch} is not the default branch or a "
+            "declared integration line, so it cannot prove a deletion safe",
             file=sys.stderr,
         )
         return 2
@@ -13102,7 +13104,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--base-branch",
         dest="base_branch",
         default=None,
-        help="Branch a worktree's commits must already be on (default: branches.default)",
+        help=(
+            "Branch a worktree's commits must already be on (default: branches.default). "
+            "Only the default or a declared integration line is accepted: this is the "
+            "proof a deletion is measured against"
+        ),
     )
     parser_worktree_reap.add_argument(
         "--reap",

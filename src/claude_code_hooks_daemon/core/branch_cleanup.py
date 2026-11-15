@@ -227,6 +227,27 @@ def cleanup_targets(repo: Path, config: BranchesConfig, default: str) -> list[st
     return targets
 
 
+def validated_proof_target(
+    repo: Path, config: BranchesConfig, default: str, requested: str
+) -> str | None:
+    """The full ref ``requested`` names, if it may prove a deletion safe, else ``None``.
+
+    The proof target is the config's, never the caller's: a caller that may name any
+    ref (its own tip, a sha, a sibling holding it) chooses its own proof. Only the
+    default and the declared integration lines (local or remote) qualify.
+    """
+    allowed = {
+        ref if ref.startswith("refs/") else branch_ref(ref)
+        for ref in cleanup_targets(repo, config, default)
+    }
+    candidates = (
+        [requested]
+        if requested.startswith("refs/")
+        else [branch_ref(requested), f"refs/remotes/{requested}"]
+    )
+    return next((ref for ref in candidates if ref in allowed), None)
+
+
 def linked_worktree_records(repo: Path) -> dict[str, WorktreeRecord]:
     """Branch name to porcelain record for every LINKED worktree (never the main one)."""
     listing = run_git(repo, "worktree", "list", "--porcelain")

@@ -258,15 +258,25 @@ class TestWorktreeReap:
         assert cmd_worktree_reap(self._args(repo, None)) == 0
         assert captured_base == ["trunk", "trunk"]
 
-    def test_explicit_flag_wins(self, tmp_path: Path, captured_base: list[str]) -> None:
+    def test_explicit_flag_naming_the_default_is_accepted(
+        self, tmp_path: Path, captured_base: list[str]
+    ) -> None:
         repo = _project(tmp_path, "  default: trunk\n")
-        assert cmd_worktree_reap(self._args(repo, "develop")) == 0
-        assert captured_base == ["develop", "develop"]
+        assert cmd_worktree_reap(self._args(repo, "trunk")) == 0
+        assert captured_base == ["trunk", "trunk"]
+
+    def test_explicit_flag_naming_anything_else_is_refused(
+        self, tmp_path: Path, captured_base: list[str], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        repo = _project(tmp_path, "  default: trunk\n")
+        assert cmd_worktree_reap(self._args(repo, "develop")) == _EXIT_USAGE
+        assert "cannot prove a deletion safe" in capsys.readouterr().err
+        assert captured_base == []
 
     def test_unresolvable_default_is_a_usage_error(
         self, tmp_path: Path, captured_base: list[str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         repo = _project(tmp_path, None)
         assert cmd_worktree_reap(self._args(repo, None)) == _EXIT_USAGE
-        assert "--base-branch" in capsys.readouterr().err
+        assert "branches.default" in capsys.readouterr().err
         assert captured_base == []

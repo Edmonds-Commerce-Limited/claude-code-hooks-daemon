@@ -21,6 +21,8 @@ from claude_code_hooks_daemon.core.worktree_reaping import RunGit
 from claude_code_hooks_daemon.daemon.branch_safety import DeletionReport
 from claude_code_hooks_daemon.daemon.cli import cmd_worktree_reap
 
+pytestmark = pytest.mark.usefixtures("default_branch_is_main")
+
 _LISTING = """worktree /repo
 HEAD aaa
 branch refs/heads/main

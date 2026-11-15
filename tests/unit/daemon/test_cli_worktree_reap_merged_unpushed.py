@@ -19,6 +19,8 @@ from claude_code_hooks_daemon.core import worktree_reaping
 from claude_code_hooks_daemon.daemon.branch_safety import DeletionReport
 from claude_code_hooks_daemon.daemon.cli import cmd_worktree_reap
 
+pytestmark = pytest.mark.usefixtures("default_branch_is_main")
+
 _BRANCH = "agent-merged-ahead"
 
 

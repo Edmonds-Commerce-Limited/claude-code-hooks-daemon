@@ -16,6 +16,8 @@ import pytest
 
 from claude_code_hooks_daemon.core.worktree_reaping import RunGit
 from claude_code_hooks_daemon.daemon.cli import cmd_worktree_reap
+
+pytestmark = pytest.mark.usefixtures("default_branch_is_main")
 from claude_code_hooks_daemon.utils.git_repo import GIT_TIMED_OUT
 
 _LISTING = """worktree /repo
