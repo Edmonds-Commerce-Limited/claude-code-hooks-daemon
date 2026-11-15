@@ -57,7 +57,7 @@ import pytest
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.cli import send_daemon_request
 from claude_code_hooks_daemon.daemon.install_layout import is_self_install_mode
-from claude_code_hooks_daemon.daemon.paths import socket_path_diagnosis
+from claude_code_hooks_daemon.daemon.paths import get_socket_path, socket_path_diagnosis
 from claude_code_hooks_daemon.daemon.source_fingerprint import (
     compute_current_project_fingerprints,
     describe_daemon_staleness,
@@ -97,11 +97,19 @@ def _socket_is_alive(sock_path: Path) -> bool:
 
 
 def _discover_socket() -> Path | None:
-    """Locate the running daemon's Unix socket via env or glob."""
+    """Locate the running daemon's Unix socket.
+
+    Order: the env override, the glob under ``untracked/``, then the daemon's own
+    resolver. The resolver is what places the socket under ``/tmp`` when the
+    natural path would exceed the AF_UNIX length limit, so asking it matches the
+    daemon by construction whatever the runner's hostname.
+    """
     env_path = os.environ.get("CLAUDE_HOOKS_SOCKET_PATH")
     if env_path and Path(env_path).is_socket() and _socket_is_alive(Path(env_path)):
         return Path(env_path)
-    for candidate in sorted((REPO_ROOT / "untracked").glob(SOCKET_GLOB)):
+    candidates = sorted((REPO_ROOT / "untracked").glob(SOCKET_GLOB))
+    candidates.append(get_socket_path(REPO_ROOT))
+    for candidate in candidates:
         if candidate.is_socket() and _socket_is_alive(candidate):
             return candidate
     return None

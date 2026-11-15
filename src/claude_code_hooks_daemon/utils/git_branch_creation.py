@@ -18,15 +18,25 @@ from pathlib import PurePosixPath
 from typing import Final
 
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
+    _ASSIGNMENT_WORD,
     GitInvocation,
-    git_invocations,
+    SimpleCommand,
     is_shell_resolved,
+    simple_commands,
 )
 
 ROUTE_SWITCH: Final[str] = "switch"
 ROUTE_CHECKOUT: Final[str] = "checkout"
 ROUTE_BRANCH: Final[str] = "branch"
 ROUTE_WORKTREE: Final[str] = "worktree"
+#: ``scripts/setup_worktree.sh <name>``, which runs ``git worktree add -b`` itself.
+ROUTE_SETUP_WORKTREE: Final[str] = "setup-worktree"
+
+_SETUP_SCRIPT_TAIL: Final[tuple[str, ...]] = ("scripts", "setup_worktree.sh")
+_SHELL_INTERPRETERS: Final[frozenset[str]] = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
+#: Interpreter option letters that stop the script from running: ``-n`` only parses
+#: it and ``-c`` takes the next word as the program text.
+_NON_RUNNING_SHELL_LETTERS: Final[frozenset[str]] = frozenset({"n", "c"})
 
 _SWITCH_CREATE: Final[frozenset[str]] = frozenset(
     {"-c", "-C", "--create", "--force-create", "--orphan"}
@@ -133,9 +143,77 @@ def _creation(run: GitInvocation) -> Creation | None:
     return Creation(name=name, route=run.subcommand, dwim=dwim, invocation=run)
 
 
+def _is_setup_script(word: str) -> bool:
+    """True when ``word`` is a path to the repository's ``scripts/setup_worktree.sh``."""
+    return PurePosixPath(word).parts[-2:] == _SETUP_SCRIPT_TAIL
+
+
+def _script_and_arguments(words: tuple[str, ...]) -> tuple[str, tuple[str, ...]] | None:
+    """The setup script a simple command runs and its arguments, or ``None``.
+
+    The script is the command itself or the first non-option word after a shell
+    interpreter. ``cat``, ``echo`` and ``grep`` naming the path run nothing, and
+    neither does ``bash -n``.
+    """
+    rest = [word for index, word in enumerate(words) if not _is_leading_assignment(words, index)]
+    if not rest:
+        return None
+    if _is_setup_script(rest[0]):
+        return rest[0], tuple(rest[1:])
+    if PurePosixPath(rest[0]).name not in _SHELL_INTERPRETERS:
+        return None
+    for index, word in enumerate(rest[1:], start=1):
+        if word.startswith("-"):
+            if _NON_RUNNING_SHELL_LETTERS & set(word.lstrip("-")):
+                return None
+            continue
+        return (word, tuple(rest[index + 1 :])) if _is_setup_script(word) else None
+    return None
+
+
+def _is_leading_assignment(words: tuple[str, ...], index: int) -> bool:
+    """True for a ``NAME=value`` word before the command word."""
+    return all(_ASSIGNMENT_WORD.match(word) for word in words[: index + 1])
+
+
+def _setup_script_creation(step: SimpleCommand) -> Creation | None:
+    """The branch a ``scripts/setup_worktree.sh <name>`` run creates, or ``None``.
+
+    The script resolves its repository from its own location, so the run acts in
+    the repository two levels above the script path rather than in the working
+    directory.
+    """
+    found = _script_and_arguments(step.words)
+    if found is None:
+        return None
+    script, arguments = found
+    name = arguments[0] if arguments else ""
+    if not name or name.startswith("-") or is_shell_resolved(name):
+        return None
+    root = str(PurePosixPath(script).parent.parent)
+    run = GitInvocation(
+        subcommand=ROUTE_SETUP_WORKTREE,
+        global_options=(),
+        arguments=arguments,
+        assignments=tuple(word for word in step.words if _ASSIGNMENT_WORD.match(word)),
+        directory=(*step.directory, root),
+        moves_certain=step.moves_certain,
+        position=step.position,
+    )
+    return Creation(name=name, route=ROUTE_SETUP_WORKTREE, dwim=False, invocation=run)
+
+
 def created_branches(command: str) -> list[Creation]:
-    """Every branch ``command`` would create, in the order its git runs appear."""
-    return [c for c in (_creation(run) for run in git_invocations(command)) if c is not None]
+    """Every branch ``command`` would create, in the order its runs appear.
+
+    A run is a git command or a ``scripts/setup_worktree.sh`` invocation.
+    """
+    creations: list[Creation] = []
+    for step in simple_commands(command):
+        found = _creation(step.git) if step.git is not None else _setup_script_creation(step)
+        if found is not None:
+            creations.append(found)
+    return creations
 
 
 def worktree_add_path(arguments: tuple[str, ...]) -> str | None:

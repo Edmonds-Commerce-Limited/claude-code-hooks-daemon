@@ -39,4 +39,3 @@ def assert_forwarded(seen: list[Mapping[str, str] | None], expected_calls: int =
         assert env["SSH_AUTH_SOCK"] == FORWARDED
         assert env["GIT_TERMINAL_PROMPT"] == "0"
         assert not any(name in env for name in NEVER_TAKEN)
-

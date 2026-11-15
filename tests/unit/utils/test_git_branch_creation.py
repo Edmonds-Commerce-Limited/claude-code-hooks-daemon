@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from claude_code_hooks_daemon.utils.git_branch_creation import (
+    ROUTE_SETUP_WORKTREE,
     created_branches,
     worktree_add_path,
 )
@@ -104,3 +105,49 @@ def test_worktree_add_path_reads_the_target_directory(
     arguments: tuple[str, ...], expected: str | None
 ) -> None:
     assert worktree_add_path(arguments) == expected
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "scripts/setup_worktree.sh worktree-feat",
+        "./scripts/setup_worktree.sh worktree-feat",
+        "bash scripts/setup_worktree.sh worktree-feat",
+        "bash ./scripts/setup_worktree.sh worktree-feat main",
+        "sh /workspace/scripts/setup_worktree.sh worktree-feat",
+        "/workspace/scripts/setup_worktree.sh worktree-feat",
+        "FOO=1 ./scripts/setup_worktree.sh worktree-feat",
+        "cd /repo && ./scripts/setup_worktree.sh worktree-feat",
+    ],
+)
+def test_setup_worktree_script_creates_the_named_branch(command: str) -> None:
+    (creation,) = created_branches(command)
+    assert (creation.name, creation.route, creation.dwim) == (
+        "worktree-feat",
+        ROUTE_SETUP_WORKTREE,
+        False,
+    )
+
+
+def test_setup_worktree_script_acts_in_the_repository_that_holds_it() -> None:
+    (creation,) = created_branches("cd /a && /workspace/scripts/setup_worktree.sh worktree-x")
+    assert creation.invocation.directory == ("/a", "/workspace")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat scripts/setup_worktree.sh",
+        "echo scripts/setup_worktree.sh worktree-feat",
+        'echo "run ./scripts/setup_worktree.sh worktree-feat"',
+        "grep -n branch scripts/setup_worktree.sh",
+        "bash -n scripts/setup_worktree.sh",
+        "bash scripts/other.sh worktree-feat",
+        "scripts/setup_worktree.sh",
+        "./setup_worktree.sh worktree-feat",
+        "scripts/setup_worktree.sh $NAME",
+        "scripts/setup_worktree.sh --help",
+    ],
+)
+def test_setup_worktree_script_mentions_that_create_nothing(command: str) -> None:
+    assert created_branches(command) == []

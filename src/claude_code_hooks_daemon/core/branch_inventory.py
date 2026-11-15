@@ -837,6 +837,12 @@ def _facts_from_cache(entry: dict[str, Any] | None) -> _PairFacts | None:
 # --- links ----------------------------------------------------------------------------
 
 
+def issue_number_in_name(name: str) -> int | None:
+    """The issue number a branch or agent name carries (``worktree-issue-203-x`` -> 203), if any."""
+    match = _ISSUE_IN_NAME.search(name)
+    return int(match.group(1)) if match else None
+
+
 def _links(name: str, subject: str) -> tuple[str | None, int | None]:
     """Plan and issue from the branch name first, then from the tip subject."""
     issue: int | None = None
