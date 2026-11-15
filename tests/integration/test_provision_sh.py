@@ -1484,9 +1484,7 @@ RELAY_MISSING = {"SANDBOX_RELAY_CHECK_EXIT": "3", "SANDBOX_RELAY_CHECK_OUTPUT": 
 
 def _provisioning_calls(p: Provisioning) -> list[str]:
     """The relay_deploy calls that provision (everything but ``--check``)."""
-    return [
-        c for c in p.box.relay_calls() if c.startswith("relay_deploy") and "--check" not in c
-    ]
+    return [c for c in p.box.relay_calls() if c.startswith("relay_deploy") and "--check" not in c]
 
 
 def _check_calls(p: Provisioning) -> list[str]:
