@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 from tests.load_scaling import scaled_seconds
+from tests.support import forwarded_socket
 from tests.support.git_fixtures import git_setup_timeout
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -141,6 +142,14 @@ class TestSecondCloneSeesPushedPlans:
         assert remote_highest_plan_number(clone_b, _PLAN_SUBDIR, fetch=True).highest == 40
         assert _scaffold(clone_b, "after-archive").returncode == 0
         assert (clone_b / _PLAN_SUBDIR / "00041-after-archive").is_dir()
+
+    def test_the_fetch_carries_the_forwarded_socket(
+        self, remote_and_clones: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, _, clone_b = remote_and_clones
+        seen = forwarded_socket.spy_remote_env(monkeypatch, plan_numbering, "fetch")
+        remote_highest_plan_number(clone_b, _PLAN_SUBDIR, fetch=True)
+        forwarded_socket.assert_forwarded(seen)
 
     def test_a_plan_only_on_a_feature_branch_counts(
         self, remote_and_clones: tuple[Path, Path, Path]

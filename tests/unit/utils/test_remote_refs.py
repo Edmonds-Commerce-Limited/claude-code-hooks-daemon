@@ -99,6 +99,68 @@ class TestListRemoteRefs:
         assert remote_refs.parse_listing(text) == (("refs/tags/v1", "b" * 40),)
 
 
+class TestRemoteGitEnv:
+    def test_no_forwarded_socket_gives_only_the_no_prompt_variable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(remote_refs, "forwarded_agent_socket", lambda: None)
+        assert remote_refs.remote_git_env() == {"GIT_TERMINAL_PROMPT": "0"}
+
+    def test_forwarded_socket_is_added_and_extra_is_kept(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(remote_refs, "forwarded_agent_socket", lambda: "/run/s.sock")
+        env = remote_refs.remote_git_env({"LC_ALL": "C"})
+        assert env == {
+            "GIT_TERMINAL_PROMPT": "0",
+            "LC_ALL": "C",
+            "SSH_AUTH_SOCK": "/run/s.sock",
+        }
+
+    def test_list_remote_refs_passes_the_forwarded_socket(
+        self, scratch: archive_remote.ArchiveRepo, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(remote_refs, "forwarded_agent_socket", lambda: "/run/s.sock")
+        with patch.object(remote_refs, "run_git", wraps=run_git) as spy:
+            remote_refs.list_remote_refs(scratch.clone, "origin")
+        assert spy.call_args.kwargs["env"]["SSH_AUTH_SOCK"] == "/run/s.sock"
+
+    def test_hint_is_silent_when_a_socket_was_forwarded(
+        self, scratch: archive_remote.ArchiveRepo, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
+        monkeypatch.setattr(remote_refs, "forwarded_agent_socket", lambda: "/run/s.sock")
+        base = run_git(scratch.clone, "--version")
+        denied = type(base)(base.args, 128, "", "git@host: Permission denied (publickey).")
+        with patch.object(remote_refs, "run_git", return_value=denied):
+            listing = remote_refs.list_remote_refs(scratch.clone, "origin")
+        assert listing.failure == "git@host: Permission denied (publickey)."
+
+    def test_peer_environ_never_adds_command_running_variables(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.utils import ssh_agent
+
+        monkeypatch.setattr(
+            ssh_agent,
+            "process_environ",
+            lambda pid: (
+                {
+                    "SSH_AUTH_SOCK": "/nonexistent",
+                    "GIT_SSH_COMMAND": "evil",
+                    "GIT_SSH": "evil",
+                    "GIT_ASKPASS": "evil",
+                    "SSH_ASKPASS": "evil",
+                    "SSH_AGENT_PID": "1",
+                },
+                None,
+            ),
+        )
+        monkeypatch.setattr(ssh_agent, "validated_agent_socket", lambda value: value)
+        env = ssh_agent.call_bound_to_peer(4242, remote_refs.remote_git_env)
+        assert env == {"GIT_TERMINAL_PROMPT": "0", "SSH_AUTH_SOCK": "/nonexistent"}
+
+
 class TestHolderOf:
     def test_equal_sha_is_held(self, scratch: archive_remote.ArchiveRepo) -> None:
         listing = remote_refs.list_remote_refs(scratch.clone, "origin")
