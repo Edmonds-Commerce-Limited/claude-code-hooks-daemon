@@ -17,6 +17,10 @@ from typing import Any
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.branch_guard import (
+    POOL_DELETE_CONDITION,
+    POOL_PARK_CLAUSE,
+)
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import SUBAGENT_DISPATCH_TOOL_NAMES
 from claude_code_hooks_daemon.core import GatingResult
@@ -71,8 +75,8 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             blocked="creating a branch while the open work branches are at `branches.wip.cap`",
             why="Work that is started and never finished piles up as branches nobody "
             "returns to; the cap makes an agent finish before it starts",
-            fix="Finish (merge) one of the listed branches, briefly park it with a reason, or "
-            "delete it only when the guard proves nothing is lost; only then start new work",
+            fix=f"Finish (merge) one of the listed branches, {POOL_PARK_CLAUSE}, or delete it "
+            f"({POOL_DELETE_CONDITION}); only then start new work",
             verbose=(
                 "WHY:\n"
                 "  Every open branch is work someone must finish, park or delete.\n"
@@ -86,8 +90,8 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             "`branches.dormancy` block stage",
             why="A branch nobody has touched for weeks is work that is being forgotten; "
             "new work waits until each one is finished, parked or deleted",
-            fix="Merge it, briefly park it (`hooks-daemon branch-park <name> --reason ...`), or "
-            "`delete-branch` it only when the guard proves nothing is lost",
+            fix=f"Merge it, {POOL_PARK_CLAUSE} (`hooks-daemon branch-park <name> --reason ...`), "
+            f"or `delete-branch` it ({POOL_DELETE_CONDITION})",
             verbose=(
                 "WHY:\n"
                 "  Dormancy ages a branch from its tip's commit date. Parked and merged\n"
@@ -100,8 +104,8 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             "or holds a branch parked past `branches.parked.max_age_days`",
             why="Parking is a pause, not a place to leave work for ever; an un-cleared "
             "park is dormant work with a reason attached",
-            fix="Merge it, `branch-park <name> --clear`, delete it only when the guard proves "
-            "nothing is lost, or re-park it with a NEW reason (a same-reason re-park is refused)",
+            fix=f"Merge it, `branch-park <name> --clear`, delete it ({POOL_DELETE_CONDITION}), "
+            "or re-park it with a NEW reason (a same-reason re-park is refused)",
             verbose=(
                 "WHY:\n"
                 "  A park commit ages the branch from the day it was written. The list\n"
@@ -114,8 +118,9 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             "or holds an unkept merged branch",
             why="A merged branch is finished work: it is deleted, or kept on purpose with a "
             "reason, so merged branches never pile up unexplained",
-            fix="Run the `branch-sweep --clean` line below, or keep a branch with "
-            "`branch-keep <name> --reason ...`",
+            fix="Run the `branch-sweep --clean` line below (it deletes only what its proof shows "
+            "loses nothing; or the human deletes them themselves; your own assertion never "
+            "counts), or keep a branch with `branch-keep <name> --reason ...`",
             verbose=(
                 "WHY:\n"
                 "  An unkept merged branch is stale from day 0; a keep lapses after\n"

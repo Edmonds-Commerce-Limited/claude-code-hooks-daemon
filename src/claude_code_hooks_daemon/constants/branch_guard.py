@@ -17,6 +17,16 @@ BRANCH_LIMIT_PRINCIPLE: Final[str] = (
     "force a choice between losing work and exceeding it, stop and ask a human."
 )
 
+#: The one condition every per-pool text puts on a delete, matching the principle above.
+#: ``delete-branch`` has no confirmation flag, so the human route is the human deleting.
+POOL_DELETE_CONDITION: Final[str] = (
+    "only when the guard proves nothing is lost, or the human deletes it themselves; "
+    "your own assertion never counts"
+)
+
+#: What every per-pool text says about parking, matching the principle above.
+POOL_PARK_CLAUSE: Final[str] = "park it only as a short, bounded pause, with a reason"
+
 #: Branch-name globs that read as a recovery copy. Pools count only branches, so a
 #: recovery copy kept as a branch is counted as open work; it belongs under
 #: ``refs/archive/<name>``. Not configurable: a named constant.

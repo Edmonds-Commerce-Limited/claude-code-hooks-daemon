@@ -1,6 +1,10 @@
 """The shared principle text every branch-limit deny carries (Plan 00558 DESIGN section 12)."""
 
-from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
+from claude_code_hooks_daemon.constants.branch_guard import (
+    BRANCH_LIMIT_PRINCIPLE,
+    POOL_DELETE_CONDITION,
+    POOL_PARK_CLAUSE,
+)
 
 
 def test_the_principle_says_the_limit_exists_so_work_finishes() -> None:
@@ -23,6 +27,17 @@ def test_the_principle_accepts_only_machine_proof_or_a_human_for_a_delete() -> N
     assert "the guard proves by machine that nothing is lost" in BRANCH_LIMIT_PRINCIPLE
     assert "a human confirmed it" in BRANCH_LIMIT_PRINCIPLE
     assert "never counts" in BRANCH_LIMIT_PRINCIPLE
+
+
+def test_the_pool_delete_condition_is_machine_proof_or_the_human_deleting() -> None:
+    assert "the guard proves nothing is lost" in POOL_DELETE_CONDITION
+    assert "the human deletes it themselves" in POOL_DELETE_CONDITION
+    assert "your own assertion never counts" in POOL_DELETE_CONDITION
+    assert "\n" not in POOL_DELETE_CONDITION
+
+
+def test_the_pool_park_clause_says_a_short_bounded_pause() -> None:
+    assert "short, bounded pause" in POOL_PARK_CLAUSE
 
 
 def test_the_principle_names_no_bypass_flag() -> None:
