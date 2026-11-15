@@ -156,7 +156,7 @@ HOUSEKEEPING_STEPS: Final[tuple[HousekeepingStep, ...]] = (
     ),
     _mutating(
         "branch-sweep-clean",
-        "Delete the branches branch-sweep proved merged or patch-equivalent, with a recovery bundle",
+        "Delete the branches branch-sweep proved merged or patch-equivalent, printing a restore line each",
         "branch-sweep",
         "--clean",
         "--apply",

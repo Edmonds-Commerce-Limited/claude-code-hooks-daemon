@@ -2,7 +2,7 @@
 
 A branch merged into the default but ahead of its own upstream is refused by
 ``git branch -d``; ``delete-branch`` classifies it ``merged-unpushed`` and deletes it
-losslessly behind a recovery bundle. The reaper used to print it, keep it, and exit 0
+losslessly, printing a restore line. The reaper used to print it, keep it, and exit 0
 (ledger N585). These tests use a real repository and a real remote because the
 condition under test is one git evaluates against ``refs/remotes/origin/<name>``.
 """
@@ -84,15 +84,16 @@ def test_git_alone_refuses_the_fixture_branch(repo: Path) -> None:
     assert result.returncode != 0
 
 
-def test_a_merged_unpushed_branch_is_deleted_and_bundled(
+def test_a_merged_unpushed_branch_is_deleted_and_its_restore_line_printed(
     repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    tip = _git(repo, "rev-parse", f"refs/heads/{_BRANCH}").strip()
     rc = cmd_worktree_reap(_args(repo))
     out = capsys.readouterr().out
     assert rc == 0, out
     assert _BRANCH not in _branches(repo)
     assert "PRUNED" in out
-    assert list((repo / "untracked" / "deleted-branches").glob("*.bundle"))
+    assert f"git branch {_BRANCH} {tip}" in out
 
 
 def test_a_kept_merged_branch_is_reported_as_kept_and_fails_the_run(

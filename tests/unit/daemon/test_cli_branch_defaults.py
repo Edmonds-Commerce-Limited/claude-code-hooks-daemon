@@ -67,8 +67,6 @@ def _delete_args(repo: Path, protected_ref: str | None) -> argparse.Namespace:
         project_root=repo,
         branches=["doomed"],
         protected_ref=protected_ref,
-        bundle=str(repo / "b.bundle"),
-        no_bundle=True,
         dry_run=True,
         format="text",
     )

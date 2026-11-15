@@ -399,7 +399,6 @@ class TestCleanupAfterMerge:
         assert report.deleted == ("feat",)
         assert "feat" not in _branches(repo)
         assert f"git branch feat {tip}" in report.commands
-        assert report.bundle is None
 
     def test_advise_deletes_nothing_and_names_the_command(self, repo: Path) -> None:
         _merged(repo, "feat")
@@ -483,27 +482,28 @@ class TestCleanupAfterMerge:
 class TestCleanSweep:
     def test_dry_run_touches_nothing(self, repo: Path, tmp_path: Path) -> None:
         _merged(repo, "feat")
-        report = clean_sweep(repo, _CONFIG, dry_run=True, bundle_dir=tmp_path / "b")
+        report = clean_sweep(repo, _CONFIG, dry_run=True)
         assert report.deleted == ()
         assert "feat" in _branches(repo)
         assert any("feat" in line for line in report.commands)
 
-    def test_deletes_merged_and_patch_equivalent_with_a_bundle(
+    def test_deletes_merged_and_patch_equivalent_and_prints_a_restore_line_each(
         self, repo: Path, tmp_path: Path
     ) -> None:
-        _merged(repo, "feat")
+        feat_tip = _merged(repo, "feat")
         _patch_equivalent(repo, "picked")
+        picked_tip = _git(repo, "rev-parse", "refs/heads/picked").strip()
         _unproven(repo, "novel")
-        report = clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b")
+        report = clean_sweep(repo, _CONFIG, dry_run=False)
         assert set(report.deleted) == {"feat", "picked"}
         assert "novel" in _branches(repo)
-        assert report.bundle is not None
-        assert report.bundle.is_file()
+        assert f"git branch feat {feat_tip}" in report.commands
+        assert f"git branch picked {picked_tip}" in report.commands
 
     def test_the_sweep_never_offers_an_integration_line(self, repo: Path, tmp_path: Path) -> None:
         _merged(repo, "release/1")
         _unproven(repo, "release/2")
-        report = clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b")
+        report = clean_sweep(repo, _CONFIG, dry_run=False)
         assert report.deleted == ()
         assert {"release/1", "release/2"} <= _branches(repo)
 
@@ -514,7 +514,7 @@ class TestCleanSweep:
         path = _worktree(repo, "feat")
         (path / "__pycache__").mkdir()
         (path / "__pycache__" / "x.pyc").write_bytes(b"x")
-        report = clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b")
+        report = clean_sweep(repo, _CONFIG, dry_run=False)
         assert report.removed_worktrees == (path,)
         assert not path.exists()
         assert report.deleted == ("feat",)
@@ -524,7 +524,7 @@ class TestCleanSweep:
         path = _worktree(repo, "feat")
         (path / "untracked").mkdir()
         (path / "untracked" / "notes.md").write_text("keep\n", encoding="utf-8")
-        report = clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b")
+        report = clean_sweep(repo, _CONFIG, dry_run=False)
         assert report.removed_worktrees == ()
         assert report.deleted == ()
         assert (path / "untracked" / "notes.md").is_file()
@@ -535,7 +535,7 @@ class TestCleanSweep:
         path = _worktree(repo, "feat")
         for index in range(13):
             (path / f"loose-{index:02d}.txt").write_text("x\n", encoding="utf-8")
-        report = clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b")
+        report = clean_sweep(repo, _CONFIG, dry_run=False)
         line = next(line for line in report.skipped if line.startswith("feat"))
         assert "and 3 more" in line
 
@@ -550,10 +550,9 @@ class TestRender:
             removed_worktrees=(tmp_path,),
             skipped=("b: why",),
             commands=("git branch a 123",),
-            bundle=tmp_path / "x.bundle",
         )
         text = "\n".join(render(report))
-        for part in ("a", str(tmp_path), "b: why", "git branch a 123", "x.bundle"):
+        for part in ("a", str(tmp_path), "b: why", "git branch a 123"):
             assert part in text
 
 
@@ -632,7 +631,7 @@ class TestFailuresAndEdges:
         _git(path, "init", "-b", "work")
         _commit(path, "a.txt", "a\n", "A")
         with pytest.raises(ValueError, match="default branch"):
-            clean_sweep(path, BranchesConfig(), dry_run=True, bundle_dir=tmp_path)
+            clean_sweep(path, BranchesConfig(), dry_run=True)
 
     def test_an_unproven_candidate_is_skipped(
         self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -643,14 +642,14 @@ class TestFailuresAndEdges:
             return BranchClassification(name=name, tier=TIER_UNPROVEN, detail="nope")
 
         monkeypatch.setattr(branch_cleanup, "classify_branch", unproven)
-        report = clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b")
+        report = clean_sweep(repo, _CONFIG, dry_run=False)
         assert report.deleted == ()
         assert report.skipped == ("feat: nope",)
 
     def test_dry_run_names_the_worktree_it_would_remove(self, repo: Path, tmp_path: Path) -> None:
         _merged(repo, "feat")
         path = _worktree(repo, "feat")
-        report = clean_sweep(repo, _CONFIG, dry_run=True, bundle_dir=tmp_path / "b")
+        report = clean_sweep(repo, _CONFIG, dry_run=True)
         assert f"would remove the worktree {path}" in report.commands
         assert path.is_dir()
 
@@ -660,7 +659,7 @@ class TestFailuresAndEdges:
         _merged(repo, "feat")
         path = _worktree(repo, "feat")
         _git(repo, "worktree", "lock", str(path))
-        report = clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b")
+        report = clean_sweep(repo, _CONFIG, dry_run=False)
         assert report.deleted == ()
         assert path.is_dir()
         assert any("locked by git" in line for line in report.skipped)
@@ -671,7 +670,7 @@ class TestFailuresAndEdges:
         _git(repo, "remote", "add", "origin", str(bare))
         _merged(repo, "feat")
         _git(repo, "push", "--quiet", "origin", "feat")
-        report = clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b")
+        report = clean_sweep(repo, _CONFIG, dry_run=False)
         assert "git push origin --delete feat" in report.commands
 
 

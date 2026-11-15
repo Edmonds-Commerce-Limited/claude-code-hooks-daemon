@@ -284,11 +284,6 @@ class Timeout:
     # Bounded rather than unbounded, so a wedged git still cannot hang the CLI
     # forever, but generous enough that repository size alone never trips it.
     GIT_BRANCH_SAFETY = 120
-    # 300 seconds (`git bundle create` for the recovery bundle). The heaviest
-    # call in the proof engine — it PACKS the objects — and the one that must
-    # never be killed part-way: it is written before any ref is removed, so a
-    # truncated bundle is a lost recovery rather than a slow one.
-    GIT_BUNDLE_CREATE = 300
     # 30 seconds (the one `git ls-remote <remote>` that `branch-sweep` and
     # `delete-branch` make to learn what the remote holds outside the refs the
     # clone fetches). A NETWORK call, so the hook-path GIT_CONTEXT five seconds

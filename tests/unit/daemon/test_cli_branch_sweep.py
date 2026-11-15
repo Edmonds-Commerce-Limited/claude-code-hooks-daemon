@@ -122,14 +122,15 @@ class TestClean:
             cmd_branch_sweep(_args(project, clean=True, apply=True))
             assert clean.call_args.kwargs["dry_run"] is False
 
-    def test_clean_deletes_behind_a_bundle(
+    def test_clean_deletes_and_prints_a_restore_line(
         self, project: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         assert cmd_branch_sweep(_args(project, clean=True, apply=True)) == 0
         out = capsys.readouterr().out
         assert "done" not in _heads(project)
         assert "work" in _heads(project)
-        assert str(project / "untracked" / "branch-cleanup") in out
+        assert "git branch done " in out
+        assert "bundle" not in out
 
     def test_nothing_to_clean_says_so(
         self, project: Path, capsys: pytest.CaptureFixture[str]

@@ -68,8 +68,6 @@ def _args(repo: Path, **overrides: Any) -> argparse.Namespace:
         "project_root": repo,
         "branches": ["doomed"],
         "protected_ref": None,
-        "bundle": None,
-        "no_bundle": True,
         "dry_run": False,
         "format": "text",
     }

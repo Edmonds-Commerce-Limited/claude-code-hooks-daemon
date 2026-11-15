@@ -50,7 +50,7 @@ from claude_code_hooks_daemon.core.branch_cleanup import policy_refusal
 from claude_code_hooks_daemon.core.branch_records import WORKTREE_CREATE_ROUTE, creator_route
 from claude_code_hooks_daemon.core.worktree_naming import is_worktree_create_name
 from claude_code_hooks_daemon.core.worktree_paths import WORKTREE_DIR_PATTERNS
-from claude_code_hooks_daemon.daemon.branch_safety import delete_branches, new_bundle_path
+from claude_code_hooks_daemon.daemon.branch_safety import delete_branches
 from claude_code_hooks_daemon.utils.git_repo import (
     AGENT_BRANCH_PREFIX,
     GIT_TIMED_OUT,
@@ -736,7 +736,6 @@ def prune_branch(
     branch: OrphanedBranch,
     *,
     base_branch: str,
-    bundle_dir: Path | None = None,
     dry_run: bool = False,
 ) -> PruneOutcome:
     """Delete one orphaned branch, if it is fully merged into the base.
@@ -745,7 +744,7 @@ def prune_branch(
     ``delete-branch``, so the two commands agree on every branch: containment is
     proved against ``base_branch`` (which also covers a branch merged but ahead of
     its upstream, where ``git branch -d`` refuses), git's own delete check still
-    runs, and a recovery bundle is written under ``bundle_dir`` when given. A
+    runs. A
     refusal is REPORTED as ``kept``, never retried with force. A git failure the engine
     cannot classify (an expired budget) propagates as ``CalledProcessError``; the caller
     reports it as kept.
@@ -772,9 +771,6 @@ def prune_branch(
         [branch.name],
         protected_ref=base_branch,
         protected_names=(base_branch,),
-        bundle_path=(
-            new_bundle_path(bundle_dir, "worktree-reap") if bundle_dir is not None else None
-        ),
         content_tier=False,
     )
     if branch.name not in report.deleted:
@@ -784,5 +780,6 @@ def prune_branch(
             kept=True,
             detail=f"kept the branch {branch.name}: {'; '.join(report.blockers) or 'not deleted'}",
         )
-    suffix = f" (recovery bundle {report.bundle})" if report.bundle is not None else ""
+    restore = "; ".join(report.restore_commands)
+    suffix = f" (restore: {restore})" if restore else ""
     return PruneOutcome(branch.name, deleted=True, detail=f"deleted branch {branch.name}{suffix}")

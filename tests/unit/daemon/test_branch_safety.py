@@ -46,7 +46,6 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     classify_branch,
     delete_argv_for_tier,
     delete_branches,
-    write_recovery_bundle,
 )
 
 _ENV = {
@@ -300,7 +299,7 @@ class TestContentPreservedTier:
 
     def test_content_preserved_branch_deletes_without_flags(self, repo: Path) -> None:
         self._branch_duplicating_main_content(repo, "dup")
-        report = delete_branches(repo, ["dup"], bundle_path=None)
+        report = delete_branches(repo, ["dup"])
         assert report.refused is False
         assert report.deleted == ("dup",)
 
@@ -327,10 +326,23 @@ class TestDeletion:
 
     def test_provably_safe_branch_is_deleted(self, repo: Path) -> None:
         _merged_branch(repo, "done")
-        report = delete_branches(repo, ["done"], bundle_path=repo.parent / "b.bundle")
+        tip = _git(repo, "rev-parse", "refs/heads/done").strip()
+        report = delete_branches(repo, ["done"])
         assert report.refused is False
         assert report.deleted == ("done",)
         assert "done" not in _local_branches(repo)
+        assert report.restore_commands == (f"git branch done {tip}",)
+
+    def test_the_restore_line_really_restores_the_branch(self, repo: Path) -> None:
+        _merged_branch(repo, "done")
+        tip = _git(repo, "rev-parse", "refs/heads/done").strip()
+        delete_branches(repo, ["done"])
+        _git(repo, "branch", "done", tip)
+        assert _git(repo, "rev-parse", "refs/heads/done").strip() == tip
+
+    def test_a_dry_run_reports_no_restore_command(self, repo: Path) -> None:
+        _merged_branch(repo, "done")
+        assert delete_branches(repo, ["done"], dry_run=True).restore_commands == ()
 
     def test_one_unproven_branch_blocks_the_whole_batch(self, repo: Path) -> None:
         _merged_branch(repo, "safe-one")
@@ -364,26 +376,6 @@ class TestDeletion:
         assert "done" in _local_branches(repo)
         assert report.classifications[0].tier == TIER_MERGED
 
-    def test_dry_run_writes_no_bundle(self, repo: Path) -> None:
-        _merged_branch(repo, "done")
-        bundle = repo.parent / "unwanted.bundle"
-        delete_branches(repo, ["done"], dry_run=True, bundle_path=bundle)
-        assert bundle.exists() is False
-
-    def test_recovery_bundle_restores_a_deleted_branch(self, repo: Path) -> None:
-        _merged_branch(repo, "done")
-        bundle = repo.parent / "recovery.bundle"
-        delete_branches(repo, ["done"], bundle_path=bundle)
-        assert bundle.is_file()
-
-        _git(repo, "fetch", str(bundle), "done:restored")
-        assert "restored" in _local_branches(repo)
-
-    def test_no_bundle_skips_the_bundle(self, repo: Path) -> None:
-        _merged_branch(repo, "done")
-        report = delete_branches(repo, ["done"], bundle_path=None)
-        assert report.bundle is None
-        assert report.deleted == ("done",)
 
 
 class TestPrefersGitsOwnCheck:
@@ -403,32 +395,9 @@ class TestPrefersGitsOwnCheck:
         """End-to-end: if our ancestry proof were wrong, git would refuse and
         this would raise rather than silently destroying the branch."""
         _merged_branch(repo, "done")
-        report = delete_branches(repo, ["done"], bundle_path=None)
+        report = delete_branches(repo, ["done"])
         assert report.deleted == ("done",)
         assert "done" not in _local_branches(repo)
-
-
-class TestRecoveryBundle:
-    """The bundle is written BEFORE any ref is removed."""
-
-    def test_bundle_contains_every_requested_branch(self, repo: Path) -> None:
-        for name in ("one", "two"):
-            _git(repo, "checkout", "main")
-            _git(repo, "checkout", "-b", name)
-            _commit(repo, f"{name}.txt", f"{name}\n", f"Add {name}")
-        _git(repo, "checkout", "main")
-
-        bundle = repo.parent / "multi.bundle"
-        write_recovery_bundle(repo, ["one", "two"], bundle)
-
-        listing = subprocess.run(
-            ["git", "bundle", "list-heads", str(bundle)],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        assert "one" in listing
-        assert "two" in listing
 
 
 class TestMergedButAheadOfItsOwnUpstream:
@@ -505,7 +474,7 @@ class TestMergedButAheadOfItsOwnUpstream:
         """The bug the report opened with: the real run must not fail."""
         _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
 
-        report = delete_branches(repo, ["shipped"], bundle_path=None)
+        report = delete_branches(repo, ["shipped"])
 
         assert report.refused is False, report.blockers
         assert report.deleted == ("shipped",)
@@ -548,8 +517,8 @@ class TestARefusalCarriesItsDiagnosis:
 
     The concurrent case is REPRODUCED here rather than reasoned about, and it
     revealed why the advice must be "re-run", never "force": git's refusal is the
-    only thing protecting the peer's commit, because the recovery bundle was
-    written before that commit existed.
+    only thing protecting the peer's commit, because the proof was made before
+    that commit existed.
     """
 
     def test_a_concurrent_commit_makes_git_refuse_and_the_report_says_so(self, repo: Path) -> None:
@@ -569,9 +538,8 @@ class TestARefusalCarriesItsDiagnosis:
                 _git(repo, "checkout", "main")
             return real_argv(tier)
 
-        bundle = repo.parent / "concurrent.bundle"
         with patch.object(branch_safety, "delete_argv_for_tier", advance_victim_once):
-            report = delete_branches(repo, ["first", "victim"], bundle_path=bundle)
+            report = delete_branches(repo, ["first", "victim"])
 
         assert report.deleted == ("first",), "the untouched branch must still go"
         assert report.refused is True
@@ -579,38 +547,6 @@ class TestARefusalCarriesItsDiagnosis:
         assert "victim" in _local_branches(repo), (
             "git's own re-check must have saved the peer's commit — this is the "
             "case where deferring to `-d` is not redundant"
-        )
-
-    def test_the_bundle_predates_the_concurrent_commit(self, repo: Path) -> None:
-        """Why the advice is re-run, not force.
-
-        The bundle is written before the loop, so a commit that arrives DURING the
-        loop is not in it. Forcing past the refusal would therefore destroy work
-        that the recovery route does not cover — the one situation in this module
-        where the bundle is not a complete safety net.
-        """
-        _merged_branch(repo, "victim")
-        bundle = repo.parent / "stale.bundle"
-        write_recovery_bundle(repo, ["victim"], bundle)
-        bundled_tip = _git(repo, "rev-parse", "victim").strip()
-
-        _git(repo, "checkout", "victim")
-        _commit(repo, "peer.txt", "peer work\n", "A peer's unmerged commit")
-        _git(repo, "checkout", "main")
-        new_tip = _git(repo, "rev-parse", "victim").strip()
-
-        listing = subprocess.run(
-            ["git", "bundle", "list-heads", str(bundle)],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-
-        assert new_tip != bundled_tip, "precondition: the peer moved the branch"
-        assert bundled_tip in listing
-        assert new_tip not in listing, (
-            "the bundle must NOT contain the later commit — this is the fact the "
-            "refusal diagnosis warns the reader about"
         )
 
     def test_the_diagnosis_appears_only_where_git_was_actually_asked(self, repo: Path) -> None:
@@ -624,8 +560,8 @@ class TestARefusalCarriesItsDiagnosis:
         """
         _unproven_branch(repo, "doomed")
 
-        unproven = delete_branches(repo, ["doomed"], bundle_path=None)
-        precondition = delete_branches(repo, ["main"], bundle_path=None)
+        unproven = delete_branches(repo, ["doomed"])
+        precondition = delete_branches(repo, ["main"])
 
         assert unproven.refused is True
         assert precondition.refused is True
@@ -642,7 +578,7 @@ class TestARefusalCarriesItsDiagnosis:
         assert "concurrent" in text, "cause 1: something moved mid-run"
         assert "re-run" in text, "and how to distinguish it"
         assert "gap" in text, "cause 2: a predicate gap worth reporting"
-        assert "bundle" in text, "and that the bundle may not cover the change"
+        assert "bundle" not in text, "no recovery copy exists to lean on"
         assert "do not force" in text
 
 
@@ -770,7 +706,7 @@ class TestMergedWhileHeadIsElsewhere:
         """The dry run and the real run must now agree."""
         _merged_but_head_is_elsewhere(repo, "done")
 
-        report = delete_branches(repo, ["done"], bundle_path=None)
+        report = delete_branches(repo, ["done"])
 
         assert report.refused is False, report.blockers
         assert report.deleted == ("done",)
@@ -879,7 +815,7 @@ class TestAGitRefusalMidBatchIsReportedNotRaised:
         _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
 
         with self._force_the_safe_delete():
-            report = delete_branches(repo, ["shipped"], bundle_path=None)
+            report = delete_branches(repo, ["shipped"])
 
         assert report.refused is True
         assert report.deleted == ()
@@ -891,7 +827,7 @@ class TestAGitRefusalMidBatchIsReportedNotRaised:
         _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
 
         with self._force_the_safe_delete():
-            report = delete_branches(repo, ["shipped"], bundle_path=None)
+            report = delete_branches(repo, ["shipped"])
 
         assert any(TIER_MERGED_UNPUSHED in blocker for blocker in report.blockers), report.blockers
 
@@ -905,73 +841,19 @@ class TestAGitRefusalMidBatchIsReportedNotRaised:
         _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
 
         with self._force_the_safe_delete():
-            report = delete_branches(repo, ["ordinary", "shipped"], bundle_path=None)
+            report = delete_branches(repo, ["ordinary", "shipped"])
 
         assert report.deleted == ("ordinary",)
         assert report.refused is True
         assert "ordinary" not in _local_branches(repo)
         assert "shipped" in _local_branches(repo)
 
-    def test_a_bundle_is_removed_when_nothing_was_deleted(self, repo: Path, remote: Path) -> None:
-        """An orphaned bundle reads as evidence a branch is gone.
-
-        The field report found a real 1.9 MB one left behind by the crash.
-        """
-        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
-        bundle_path = repo.parent / "recovery.bundle"
-
-        with self._force_the_safe_delete():
-            report = delete_branches(repo, ["shipped"], bundle_path=bundle_path)
-
-        assert report.refused is True
-        assert not bundle_path.exists(), "a run that deleted nothing must leave no bundle"
-        assert report.bundle is None, "the report must not name a bundle that is gone"
-
-    def test_a_bundle_that_cannot_be_removed_is_reported_not_swallowed(
-        self, repo: Path, remote: Path
-    ) -> None:
-        """A failed tidy-up must reach the person running the command.
-
-        Logging it and continuing would hide it in a log nobody opens — and the
-        stale file is exactly the thing the field report says a later reader
-        misinterprets. This module reports outcomes through ``blockers``, so that
-        is where it goes.
-        """
-        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
-        bundle_path = repo.parent / "recovery.bundle"
-
-        with self._force_the_safe_delete():
-            with patch.object(Path, "unlink", side_effect=OSError("read-only file system")):
-                report = delete_branches(repo, ["shipped"], bundle_path=bundle_path)
-
-        assert report.refused is True
-        assert any(
-            "read-only file system" in blocker for blocker in report.blockers
-        ), report.blockers
-        assert any(
-            "NOT evidence of a deletion" in blocker for blocker in report.blockers
-        ), report.blockers
-        assert report.bundle == bundle_path, "the bundle is still there, so still report it"
-
-    def test_a_bundle_is_KEPT_when_something_was_deleted(self, repo: Path, remote: Path) -> None:
-        """A partial deletion is exactly when the recovery route matters."""
-        _merged_branch(repo, "ordinary")
-        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
-        bundle_path = repo.parent / "recovery.bundle"
-
-        with self._force_the_safe_delete():
-            report = delete_branches(repo, ["ordinary", "shipped"], bundle_path=bundle_path)
-
-        assert report.deleted == ("ordinary",)
-        assert bundle_path.exists(), "the deleted branch's only recovery route was removed"
-        assert report.bundle == bundle_path
-
 
 class TestBudgetsSuitTheWorkNotTheHookContext:
     """Plan 00248 F1: this module must not run on a hook-context budget.
 
     Its runner passed NO timeout before the Plan 00246 migration, deliberately:
-    ``bundle create`` packs objects, ``cherry`` computes a patch-id per commit,
+    ``cherry`` computes a patch-id per commit,
     and ``rev-list --objects`` walks every tree and blob in a ref. Migrating it
     to the central runner silently imposed the CENTRE's default —
     ``GIT_CONTEXT``, five seconds, a budget named for gathering context during a
@@ -1003,70 +885,6 @@ class TestBudgetsSuitTheWorkNotTheHookContext:
         )
         assert budget >= Timeout.GIT_BRANCH_SAFETY
 
-    def test_the_bundle_call_actually_receives_the_larger_budget(self, repo: Path) -> None:
-        """The bundle is the heaviest call AND the one that must not be killed.
-
-        It is written before any ref is removed, so it is the only copy of the
-        work if the delete proceeds. A budget that kills it mid-pack leaves a
-        truncated bundle where a recovery is supposed to be.
-
-        This SPIES ON THE CALL rather than comparing the two constants. The
-        original asserted only ``GIT_BUNDLE_CREATE > GIT_BRANCH_SAFETY``, which
-        held no matter what the call site passed — verified by execution:
-        downgrading the ``timeout=`` at the bundle call left 64 tests passing while
-        the docstring there called it the one call "that must not be killed
-        part-way" (Plan 00253 finding C). Same spy shape as
-        ``tests/unit/core/test_claude_md_injector.py``.
-        """
-        _merged_branch(repo, "spent")
-        real = branch_safety.run_git
-        timeouts: dict[str, float] = {}
-
-        def spy(
-            cwd: Path, *args: str, timeout: float = Timeout.GIT_BRANCH_SAFETY
-        ) -> subprocess.CompletedProcess[str]:
-            if args:
-                timeouts[args[0]] = timeout
-            return real(cwd, *args, timeout=timeout)
-
-        with patch.object(branch_safety, "run_git", spy):
-            write_recovery_bundle(repo, ["spent"], repo.parent / "budget.bundle")
-
-        assert "bundle" in timeouts, (
-            "precondition: the bundle call must reach run_git, or this test "
-            "proves nothing: " + repr(timeouts)
-        )
-        assert timeouts["bundle"] == Timeout.GIT_BUNDLE_CREATE, (
-            "the bundle PACKS objects and is the only copy of the work once the "
-            "delete proceeds, so it must not inherit the read budget: " + repr(timeouts)
-        )
-        assert (
-            Timeout.GIT_BUNDLE_CREATE > Timeout.GIT_BRANCH_SAFETY
-        ), "and that budget must actually be the larger of the two"
-
-    def test_a_timed_out_bundle_raises_for_the_cli_to_convert(self, repo: Path) -> None:
-        """A budget overrun must reach the CLI as an exception it can catch.
-
-        Renamed from "...is_reported_as_a_refusal", which described something this
-        test does not assert (Plan 00253 finding D): the refusal conversion lives at
-        the CLI boundary, and deleting that ``except`` clause left this test green.
-        What it does assert — and what the CLI's contract depends on — is that
-        ``run_git``'s returncode 127 arrives here as ``CalledProcessError`` rather
-        than as a silent success. The conversion itself is covered by
-        ``tests/unit/daemon/test_cli_delete_branch.py``'s
-        ``TestAGitFailureIsARefusalNotATraceback``.
-        """
-        _merged_branch(repo, "spent")
-        timed_out = subprocess.CompletedProcess(["git"], 127, "", "timed out")
-
-        with patch(
-            "claude_code_hooks_daemon.daemon.branch_safety.run_git",
-            return_value=timed_out,
-        ):
-            with pytest.raises(subprocess.CalledProcessError):
-                write_recovery_bundle(repo, ["spent"], repo.parent / "x.bundle")
-
-
 def _peer_advances(repo: Path, name: str, workspace: Path) -> str:
     """A concurrent agent adds a commit to ``name``, as a peer in this repo would.
 
@@ -1083,14 +901,30 @@ def _peer_advances(repo: Path, name: str, workspace: Path) -> str:
     return tip
 
 
+def _peer_lands_before_the_tip_recheck(
+    monkeypatch: pytest.MonkeyPatch,
+    repo: Path,
+    name: str,
+    workspace: Path,
+    moved: dict[str, str],
+) -> None:
+    """Make a peer advance ``name`` after it is classified and before its tip is re-read."""
+    real_check = branch_safety.tip_moved_since_proof
+
+    def peer_then_check(repo_arg: Path, classification: Any) -> Any:
+        if classification.name == name and "tip" not in moved:
+            moved["tip"] = _peer_advances(repo, name, workspace)
+        return real_check(repo_arg, classification)
+
+    monkeypatch.setattr(branch_safety, "tip_moved_since_proof", peer_then_check)
+
+
 class TestABranchThatMovedAfterItsProofIsNotDeleted:
     """A proof is about a SHA, so it expires the moment the branch moves.
 
-    The recovery bundle is written for the whole batch BEFORE the delete loop, and
-    `git bundle create` packs objects — the reason that call carries a 300 s budget
-    — so on a large repository the window between proof and delete is the length of
-    a pack, not an instant. A commit arriving inside it is covered by neither the
-    proof nor the bundle (Plan 00254).
+    The window between the proof and the delete is the length of the batch's
+    classification, so a commit arriving inside it is covered by no proof
+    (Plan 00254).
     """
 
     def _delete_while_a_peer_commits(
@@ -1100,24 +934,13 @@ class TestABranchThatMovedAfterItsProofIsNotDeleted:
         workspace: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> tuple[Any, str]:
-        """Run a real delete with a peer commit landing during the bundle write.
-
-        The bundle write IS the window's widest point, so interposing there models
-        the realistic case rather than a contrived one.
-        """
-        real_bundle = branch_safety.write_recovery_bundle
+        """Run a real delete with a peer commit landing between the proof and the delete."""
         moved: dict[str, str] = {}
-
-        def bundle_then_a_peer_commits(*args: Any, **kwargs: Any) -> Any:
-            written = real_bundle(*args, **kwargs)
-            moved["tip"] = _peer_advances(repo, name, workspace)
-            return written
-
-        monkeypatch.setattr(branch_safety, "write_recovery_bundle", bundle_then_a_peer_commits)
-        report = delete_branches(repo, [name], bundle_path=workspace / "recovery.bundle")
+        _peer_lands_before_the_tip_recheck(monkeypatch, repo, name, workspace, moved)
+        report = delete_branches(repo, [name])
         return report, moved["tip"]
 
-    def test_a_peer_commit_during_the_bundle_write_is_not_silently_deleted(
+    def test_a_peer_commit_after_the_proof_is_not_silently_deleted(
         self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The shipped failure: exit clean, branch gone, peer's work unrecoverable."""
@@ -1127,7 +950,7 @@ class TestABranchThatMovedAfterItsProofIsNotDeleted:
 
         assert "done" in _local_branches(repo), (
             "a branch whose tip moved after its proof must survive: the proof was "
-            "made against a different commit and the bundle predates the new one"
+            "made against a different commit"
         )
         assert report.refused is True
         assert report.deleted == ()
@@ -1192,15 +1015,8 @@ class TestABranchThatMovedAfterItsProofIsNotDeleted:
         """
         _merged_branch(repo, "quiet")
         _merged_but_head_is_elsewhere(repo, "done")
-        real_bundle = branch_safety.write_recovery_bundle
-
-        def bundle_then_a_peer_commits(*args: Any, **kwargs: Any) -> Any:
-            written = real_bundle(*args, **kwargs)
-            _peer_advances(repo, "done", tmp_path)
-            return written
-
-        monkeypatch.setattr(branch_safety, "write_recovery_bundle", bundle_then_a_peer_commits)
-        report = delete_branches(repo, ["quiet", "done"], bundle_path=tmp_path / "recovery.bundle")
+        _peer_lands_before_the_tip_recheck(monkeypatch, repo, "done", tmp_path, {})
+        report = delete_branches(repo, ["quiet", "done"])
 
         assert "quiet" not in _local_branches(repo), "the untouched branch should go"
         assert "done" in _local_branches(repo), "the moved branch should stay"
@@ -1286,7 +1102,7 @@ class TestASameNamedTagCannotHijackTheProtectedRef:
         """The end-to-end consequence: this is the command that destroys work."""
         self._tag_shadows_the_base(repo, "feat")
 
-        report = delete_branches(repo, ["feat"], bundle_path=None)
+        report = delete_branches(repo, ["feat"])
 
         assert report.deleted == (), "a force delete ran on an unproved branch"
         assert "feat" in _local_branches(repo)
@@ -1361,30 +1177,22 @@ class TestASameNamedTagCannotHijackTheProof:
         """The end-to-end consequence, which is what actually matters."""
         self._tag_hijacks(repo, "doomed")
 
-        report = delete_branches(repo, ["doomed"], bundle_path=None)
+        report = delete_branches(repo, ["doomed"])
 
         assert report.refused is True
         assert report.deleted == ()
         assert "doomed" in _local_branches(repo)
         assert _git(repo, "cat-file", "-t", "refs/heads/doomed:only-here.txt").strip() == "blob"
 
-    def test_the_recovery_bundle_bundles_the_branch_not_the_tag(
-        self, repo: Path, tmp_path: Path
-    ) -> None:
-        """A bundle of the tag would be a recovery route that recovers nothing."""
-        self._tag_hijacks(repo, "kept")
-        bundle = tmp_path / "recovery.bundle"
-
-        write_recovery_bundle(repo, ["kept"], bundle)
-
-        listing = subprocess.run(
-            ["git", "-C", str(repo), "bundle", "list-heads", str(bundle)],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
+    def test_the_restore_line_names_the_branch_tip_not_the_tag(self, repo: Path) -> None:
+        """A restore line for the tag's sha would recreate the wrong commit."""
+        _merged_branch(repo, "kept")
         branch_tip = _git(repo, "rev-parse", "refs/heads/kept").strip()
-        assert branch_tip in listing, f"the BRANCH tip must be bundled: {listing}"
+        _git(repo, "tag", "kept", "main")
+
+        report = delete_branches(repo, ["kept"])
+
+        assert report.restore_commands == (f"git branch kept {branch_tip}",)
 
     def test_a_peer_that_deletes_the_branch_is_handled_too(
         self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1399,15 +1207,14 @@ class TestASameNamedTagCannotHijackTheProof:
         rather than "advanced" (Plan 00254).
         """
         _merged_branch(repo, "vanish")
-        real_bundle = branch_safety.write_recovery_bundle
+        real_check = branch_safety.tip_moved_since_proof
 
-        def bundle_then_a_peer_deletes_it(*args: Any, **kwargs: Any) -> Any:
-            written = real_bundle(*args, **kwargs)
+        def peer_deletes_then_check(repo_arg: Path, classification: Any) -> Any:
             _git(repo, "update-ref", "-d", "refs/heads/vanish")
-            return written
+            return real_check(repo_arg, classification)
 
-        monkeypatch.setattr(branch_safety, "write_recovery_bundle", bundle_then_a_peer_deletes_it)
-        report = delete_branches(repo, ["vanish"], bundle_path=tmp_path / "recovery.bundle")
+        monkeypatch.setattr(branch_safety, "tip_moved_since_proof", peer_deletes_then_check)
+        report = delete_branches(repo, ["vanish"])
 
         assert report.refused is True
         assert report.deleted == ()
@@ -1484,7 +1291,7 @@ class TestPatchEquivalenceFailsClosed:
 
     def test_an_evil_merge_branch_is_never_deleted(self, repo: Path) -> None:
         _evil_merge_branch(repo, "evil", evil=True)
-        report = delete_branches(repo, ["evil"], bundle_path=None)
+        report = delete_branches(repo, ["evil"])
         assert report.refused is True
         assert "evil" in _local_branches(repo)
 
@@ -1531,7 +1338,7 @@ class TestIntegrationLineTargets:
 
     def test_delete_branches_accepts_targets(self, repo: Path) -> None:
         self._line_with(repo, "feat")
-        report = delete_branches(repo, ["feat"], targets=("main", "release/x"), bundle_path=None)
+        report = delete_branches(repo, ["feat"], targets=("main", "release/x"))
         assert report.deleted == ("feat",)
 
     def test_targets_default_to_the_protected_ref(self, repo: Path) -> None:

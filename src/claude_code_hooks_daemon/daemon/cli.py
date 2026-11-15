@@ -177,7 +177,6 @@ from claude_code_hooks_daemon.utils.cli_command import (
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
-    branch_ref,
     git_visible_ancestor_dirs,
     git_visible_paths,
     parse_worktree_porcelain,
@@ -6862,15 +6861,11 @@ def cmd_branch_keep(args: argparse.Namespace) -> int:
     return 0
 
 
-#: Where ``branch-sweep --clean`` writes its recovery bundle, relative to the project.
-_BRANCH_CLEANUP_BUNDLE_DIR = Path("untracked") / "branch-cleanup"
-
-
 def _branch_sweep_clean(args: argparse.Namespace, repo: Path, branches: BranchesConfig) -> int:
     """``branch-sweep --clean [--remote] [--apply]``: preview, or delete, merged branches.
 
     ``--clean`` alone is the dry run: it prints the whole plan and deletes nothing.
-    ``--apply`` deletes, in batches, each behind its own recovery bundle.
+    ``--apply`` deletes, in batches, printing a restore line per branch.
 
     Returns:
         0 when the sweep ran, 1 when it could not, 2 on a usage error.
@@ -6893,7 +6888,6 @@ def _branch_sweep_clean(args: argparse.Namespace, repo: Path, branches: Branches
             repo,
             branches,
             dry_run=not apply,
-            bundle_dir=repo / _BRANCH_CLEANUP_BUNDLE_DIR,
             remote=remote,
         )
     except (branch_inventory.BranchInventoryError, ValueError) as e:
@@ -6911,7 +6905,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     The sanctioned alternative to the force branch delete that
     ``destructive_git`` blocks. It performs strictly MORE verification than that
     flag: blocking preconditions first, then a tiered proof, then an
-    all-or-nothing deletion behind a recovery bundle.
+    all-or-nothing deletion that prints a restore line per branch.
 
     Returns:
         0 if the requested branches were deleted (or dry-run classified), 1 if
@@ -6921,26 +6915,9 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.daemon.branch_safety import (
         TIER_UNPROVEN,
         delete_branches,
-        new_bundle_path,
     )
 
     repo = get_project_path(getattr(args, "project_root", None))
-    bundle_path: Path | None = None
-    if not args.no_bundle:
-        if args.bundle is None:
-            bundle_path = new_bundle_path(repo / _DELETE_BRANCH_BUNDLE_DIR, "delete-branch")
-        else:
-            bundle_path = Path(args.bundle)
-            if bundle_path.exists():
-                # Overwriting would destroy an earlier recovery (Plan 00571), and the
-                # "nothing deleted" cleanup below removes the file it wrote.
-                print(
-                    f"ERROR: --bundle {bundle_path} already exists; name a new file, or "
-                    "omit --bundle for a fresh timestamped one",
-                    file=sys.stderr,
-                )
-                return 2
-
     branches = _branches_config(repo)
     # The default is resolved independently of `--protected-ref`: an integration
     # line is proved against the default alone, whatever ref the caller names.
@@ -6987,7 +6964,6 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
             args.branches,
             protected_ref=protected_ref,
             protected_names=protected_names,
-            bundle_path=bundle_path,
             dry_run=args.dry_run,
             line_names=branches.integration_lines,
             line_targets=line_targets,
@@ -7018,7 +6994,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
                 {
                     "refused": report.refused,
                     "deleted": list(report.deleted),
-                    "bundle": str(report.bundle) if report.bundle else None,
+                    "restore": list(report.restore_commands),
                     "blockers": list(report.blockers),
                     "classifications": [
                         {
@@ -7055,11 +7031,8 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     if report.refused:
         # `refused` does NOT imply nothing happened. Plan 00249 made a partial
         # batch a real outcome — git can decline one branch after others are
-        # already gone — and deliberately KEEPS the bundle in that case because it
-        # is then the recovery route. This branch printed a hard-coded "nothing was
-        # deleted" and returned before the bundle disclosure below, so it could
-        # assert three untruths at once: that a deleted branch survived, that no
-        # bundle existed (Plan 00253).
+        # already gone. A hard-coded "nothing was deleted" here would claim that a
+        # deleted branch survived (Plan 00253).
         if report.deleted:
             print(
                 f"\nPARTIALLY REFUSED — {len(report.deleted)} branch(es) were "
@@ -7071,15 +7044,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         print("Blockers:", file=sys.stderr)
         for blocker in report.blockers:
             print(f"  - {blocker}", file=sys.stderr)
-        if report.bundle:
-            # The ONLY recovery route for whatever was deleted above. Printed to
-            # stderr so it travels with the refusal a human is reading.
-            _print_restore_lines(report.bundle, report.deleted, file=sys.stderr)
-        elif bundle_path is not None and not report.deleted and not args.dry_run:
-            print(
-                "No recovery bundle was kept: nothing was deleted, so nothing needs recovering.",
-                file=sys.stderr,
-            )
+        _print_restore_lines(report.restore_commands, file=sys.stderr)
         if any(c.tier == TIER_UNPROVEN for c in report.classifications):
             print(
                 "\nA branch whose content cannot be proven recoverable is never "
@@ -7093,27 +7058,21 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         print("\nDry run — nothing was deleted.")
         return 0
 
-    if report.bundle:
-        _print_restore_lines(report.bundle, report.deleted, file=sys.stdout)
+    _print_restore_lines(report.restore_commands, file=sys.stdout)
     print(f"Deleted {len(report.deleted)} branch(es).")
     return 0
 
 
-#: Where ``delete-branch`` writes one recovery bundle per call, relative to the project.
-_DELETE_BRANCH_BUNDLE_DIR = Path("untracked") / "deleted-branches"
+def _print_restore_lines(commands: Sequence[str], *, file: TextIO) -> None:
+    """One exact ``git branch <name> <sha>`` restore line per deleted branch.
 
-
-def _print_restore_lines(bundle: Path, deleted: Sequence[str], *, file: TextIO) -> None:
-    """The bundle path, then one exact restore command per deleted branch.
-
-    Full ``refs/heads/...`` refspecs, so a tag sharing the name can never be
-    fetched instead (the Plan 00254 ambiguity).
+    The machine-written record of what the delete removed; the commit stays in
+    git's object store until it is collected.
     """
-    from claude_code_hooks_daemon.daemon.branch_safety import bundle_restore_command
-
-    print(f"\nRecovery bundle: {bundle}", file=file)
-    for name in deleted:
-        print(f"  restore {name}: {bundle_restore_command(bundle, branch_ref(name))}", file=file)
+    if commands:
+        print("\nRestore (while git still holds the commit):", file=file)
+        for command in commands:
+            print(f"  {command}", file=file)
 
 
 def cmd_release_notes(args: argparse.Namespace) -> int:
@@ -10055,7 +10014,6 @@ def cmd_worktree_reap(
                 repo_root,
                 branch,
                 base_branch=base_branch,
-                bundle_dir=repo_root / _DELETE_BRANCH_BUNDLE_DIR,
                 dry_run=not reap_branches,
             )
         except subprocess.CalledProcessError as exc:
@@ -13487,20 +13445,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Classify and report without deleting anything",
     )
     parser_delete_branch.add_argument(
-        "--bundle",
-        default=None,
-        metavar="PATH",
-        help="Recovery bundle written before deletion. Default: a new file per call, "
-        "untracked/deleted-branches/delete-branch-<UTC stamp>-<hex>.bundle. An explicit "
-        "PATH must not exist yet: an existing file is refused, never overwritten",
-    )
-    parser_delete_branch.add_argument(
-        "--no-bundle",
-        dest="no_bundle",
-        action="store_true",
-        help="Skip the recovery bundle — use when the content must NOT survive",
-    )
-    parser_delete_branch.add_argument(
         "--format",
         choices=["text", "json"],
         default="text",
@@ -13546,8 +13490,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser_branch_sweep.add_argument(
         "--apply",
         action="store_true",
-        help="With --clean: delete, in batches of 50, one recovery bundle per batch "
-        "(untracked/branch-cleanup/) and one remote push per batch, removing a linked worktree "
+        help="With --clean: delete, in batches of 50, printing a restore line per branch "
+        "and making one remote push per batch, removing a linked worktree "
         "only when it holds nothing outside branches.cleanup_after_merge.regenerable. An "
         "interrupted run is resumed by running the same command again",
     )
@@ -13561,8 +13505,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="With --clean: also delete every merged branch on branches.remote, by the same "
         "proof the remote-delete guard uses (ancestor of the default or an integration line, "
-        "live tip confirmed with ls-remote), each under a lease on its proven tip and bundled "
-        "first. Contacts the remote",
+        "live tip confirmed with ls-remote), each under a lease on its proven tip. "
+        "Contacts the remote",
     )
     parser_branch_sweep.add_argument(
         "--budget-ms",

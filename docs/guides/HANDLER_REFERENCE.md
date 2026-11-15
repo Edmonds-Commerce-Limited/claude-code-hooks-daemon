@@ -351,10 +351,9 @@ worktree, a protected branch name -- refuse absolutely; nothing overrides them.
 Nothing is deleted until every branch has been classified and every blocker
 resolved, so one unsafe branch in a batch removes none of the others. Git can
 still refuse an individual branch on grounds this engine does not model; the run
-then reports `refused` with git's own words, lists exactly what was deleted, and
-keeps the recovery bundle. A run that deleted nothing removes its bundle, so an
-orphaned bundle cannot be mistaken for evidence of a deletion. A bundle is
-written first unless `--no-bundle` is passed. The proof is blob
+then reports `refused` with git's own words and lists exactly what was deleted,
+with a `git branch <name> <sha>` restore line for each. No recovery copy is
+written and none is relied on: the proof is what permits a delete. The proof is blob
 identity, never path presence: a path existing upstream says nothing about the
 content at that path.
 

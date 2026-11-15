@@ -4,13 +4,12 @@ Plan 00558 Task 3.1 (DESIGN.md section 7). Two callers share this module so they
 cannot disagree about what is safe:
 
 - the ``cleanup_after_merge`` PostToolUse handler deletes ONLY the merged tier
-  (every commit reachable from the merge target), without a recovery bundle, and
-  prints the ``git branch <name> <sha>`` restore line instead. A bundle of one
-  branch here took 8.2 s and 51 MB, which no hook budget absorbs. It never
+  (every commit reachable from the merge target) and prints the
+  ``git branch <name> <sha>`` restore line. It never
   removes a worktree: ``git worktree remove`` deletes ignored files, and that loss
   is issue #155. It advises instead.
-- ``branch-sweep --clean`` deletes the merged AND patch-equivalent tiers behind a
-  recovery bundle, and removes a linked worktree only when it is clean and every
+- ``branch-sweep --clean`` deletes the merged AND patch-equivalent tiers, printing
+  the same restore lines, and removes a linked worktree only when it is clean and every
   ignored file in it lies under a regenerable store
   (``branches.cleanup_after_merge.regenerable``).
 
@@ -38,7 +37,6 @@ from claude_code_hooks_daemon.core.agent_ownership import (
 from claude_code_hooks_daemon.core.branch_inventory import BranchRecord, BranchState
 from claude_code_hooks_daemon.core.branch_park import clear_park_record
 from claude_code_hooks_daemon.core.remote_branch_proof import (
-    REMOTES_PREFIX,
     named_ref_problem,
     prove_remote_merged,
 )
@@ -48,12 +46,9 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_MERGED_UNPUSHED,
     TIER_PATCH_EQUIVALENT,
     BranchClassification,
-    bundle_restore_command,
     classify_branch,
     delete_branches,
     matches_any_glob,
-    new_bundle_path,
-    write_recovery_bundle,
 )
 from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
@@ -80,7 +75,7 @@ logger = logging.getLogger(__name__)
 
 CleanupMode = Literal["act", "advise", "off"]
 
-#: Tiers whose every commit is reachable from the target: deletable with no bundle.
+#: Tiers whose every commit is reachable from the target: deletable on the ancestry proof alone.
 MERGED_TIERS = frozenset({TIER_MERGED, TIER_MERGED_UNPUSHED, TIER_MERGED_NOT_IN_HEAD})
 
 #: Inventory states ``branch-sweep --clean`` considers.
@@ -97,8 +92,8 @@ BLOCKER_PREVIEW = 10
 _STATUS_PREFIX = 3
 
 
-#: Branches (local and remote together) one ``--clean --apply`` batch deletes: one recovery
-#: bundle and one ``git push --delete`` per batch, so an interruption loses at most one.
+#: Branches (local and remote together) one ``--clean --apply`` batch deletes: one
+#: ``git push --delete`` per batch, so an interruption loses at most one.
 BULK_BATCH_SIZE: Final = 50
 
 
@@ -122,7 +117,7 @@ def sweep_clean_command(*, remote: bool = False, apply: bool = True) -> str:
 def sweep_clean_line(*, remote: bool) -> str:
     """The one-step fix line every merged-branch listing carries (Plan 00571 Task 2.3)."""
     return (
-        f"Delete every provably merged branch in one step, behind a recovery bundle: "
+        f"Delete every provably merged branch in one step: "
         f"`{sweep_clean_command(remote=remote)}`"
     )
 
@@ -136,9 +131,7 @@ class CleanupReport:
         removed_worktrees: Linked worktrees removed before their branch.
         skipped: ``"<name>: <reason>"`` for every branch left alone.
         commands: Commands to run by hand (advice, restore lines, remote deletes).
-        bundle: The recovery bundle written, if any.
         deleted_remote: Remote branches removed, as ``<remote>/<name>``.
-        bundles: Every recovery bundle written, one per batch (``bundle`` is the last).
         remaining: Branches proven for deletion that this run did not delete
             (``<name>``, or ``<remote>/<name>`` for a remote copy).
         stopped: Why a bulk run ended early (interrupt or failed batch), else None.
@@ -149,10 +142,8 @@ class CleanupReport:
     removed_worktrees: tuple[Path, ...] = ()
     skipped: tuple[str, ...] = ()
     commands: tuple[str, ...] = ()
-    bundle: Path | None = None
     deleted_remote: tuple[str, ...] = ()
     park_cleared: tuple[str, ...] = ()
-    bundles: tuple[Path, ...] = ()
     remaining: tuple[str, ...] = ()
     stopped: str | None = None
     next_command: str | None = None
@@ -624,8 +615,7 @@ def cleanup_after_merge(
 ) -> CleanupReport:
     """Delete (``act``) or advise deleting the branches just merged into ``target``.
 
-    Only the merged tiers are deleted, with no bundle: the restore line is printed
-    instead. A worktree holding the branch, and a patch-equivalent branch, are
+    Only the merged tiers are deleted: the restore line is printed. A worktree holding the branch, and a patch-equivalent branch, are
     only ever advised.
 
     ``default`` is the resolved default branch. It is never deleted, even when
@@ -685,8 +675,7 @@ def cleanup_after_merge(
                 [name],
                 protected_names=never_work,
                 targets=targets,
-                bundle_path=None,
-                content_tier=False,
+                        content_tier=False,
                 line_names=lines,
                 line_targets=targets,
             )
@@ -731,7 +720,7 @@ def delete_if_merged(
     another line is left alone.
 
     The WorktreeRemove cleanup (DESIGN.md section 8). Only the merged tiers are
-    deleted, with no bundle (the restore line is printed instead); anything else
+    deleted (the restore line is printed); anything else
     is left for ``branch-sweep --clean``.
 
     Raises:
@@ -761,7 +750,6 @@ def delete_if_merged(
         [name],
         protected_names=never_work,
         targets=targets,
-        bundle_path=None,
         content_tier=False,
         line_names=config.integration_lines,
         line_targets=line_targets,
@@ -796,15 +784,13 @@ def clean_sweep(
     config: BranchesConfig,
     *,
     dry_run: bool,
-    bundle_dir: Path,
     remote: bool = False,
     untracked: Path | None = None,
 ) -> CleanupReport:
-    """Delete every merged and patch-equivalent local branch, behind a bundle.
+    """Delete every merged and patch-equivalent local branch.
 
     With ``remote`` (``--clean --remote``) every merged branch the remote holds is
-    deleted there too, by the remote-delete guard's proof, its tip in the same
-    bundle. That path contacts the remote (``ls-remote``, ``push``).
+    deleted there too, by the remote-delete guard's proof. That path contacts the remote (``ls-remote``, ``push``).
 
     Each candidate is classified on its own first, because ``delete_branches`` is
     all-or-nothing: only the proven ones are batched. A linked worktree is removed
@@ -931,7 +917,6 @@ def clean_sweep(
         repo=repo,
         config=config,
         default=default,
-        bundle_dir=bundle_dir,
         targets=targets,
         line_targets=line_targets,
         never_work=never_work,
@@ -953,7 +938,6 @@ class _BulkPlan:
     repo: Path
     config: BranchesConfig
     default: str
-    bundle_dir: Path
     targets: Sequence[str]
     line_targets: Sequence[str]
     never_work: Sequence[str]
@@ -970,7 +954,6 @@ class _Outcome:
     removed: list[Path] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     commands: list[str] = field(default_factory=list)
-    bundles: list[Path] = field(default_factory=list)
     deleted_remote: list[str] = field(default_factory=list)
     park_cleared: list[str] = field(default_factory=list)
     remaining: list[str] = field(default_factory=list)
@@ -982,8 +965,7 @@ def _apply_in_batches(
     """Delete ``units`` ``BULK_BATCH_SIZE`` at a time, stopping cleanly on an interrupt.
 
     The only state is the repository: a deleted branch is no longer a candidate, so
-    running the same command again continues where this one stopped, and a bundle is
-    written before each batch's deletions. A SIGINT or a failed batch ends the loop;
+    running the same command again continues where this one stopped. A SIGINT or a failed batch ends the loop;
     the units not yet handled are reported with the command that resumes.
     """
     outcome = _Outcome(skipped=skipped)
@@ -1012,8 +994,6 @@ def _apply_in_batches(
         removed_worktrees=tuple(outcome.removed),
         skipped=tuple(outcome.skipped),
         commands=tuple(outcome.commands),
-        bundle=outcome.bundles[-1] if outcome.bundles else None,
-        bundles=tuple(outcome.bundles),
         deleted_remote=tuple(outcome.deleted_remote),
         park_cleared=tuple(outcome.park_cleared),
         remaining=tuple(dict.fromkeys(outcome.remaining)),
@@ -1023,7 +1003,7 @@ def _apply_in_batches(
 
 
 def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None:
-    """One batch: worktrees, bundle, local deletes, then one push for the remote copies.
+    """One batch: worktrees, local deletes, then one push for the remote copies.
 
     An already-deleted local branch is skipped, never an error. A batch whose delete
     is refused, or whose remote push is refused, adds what is left to ``remaining``
@@ -1046,10 +1026,7 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             outcome.removed.append(held_by)
         local.append(name)
     tips = {name: plan.remote_tips[name] for name in batch if name in plan.remote_tips}
-    tracking = {name: f"{REMOTES_PREFIX}{config.remote}/{name}" for name in tips}
     outcome.park_cleared += _clear_parks(repo, local)
-    bundle: Path | None = None
-    bundle_path = new_bundle_path(plan.bundle_dir, "branch-cleanup")
     deleted: tuple[str, ...] = ()
     if local:
         report = delete_branches(
@@ -1057,33 +1034,23 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             local,
             protected_names=plan.never_work,
             targets=plan.targets,
-            bundle_path=bundle_path,
             content_tier=False,
             line_names=config.integration_lines,
             line_targets=plan.line_targets,
-            extra_bundle_refs=list(tracking.values()),
         )
-        deleted, bundle = report.deleted, report.bundle
+        deleted = report.deleted
         outcome.skipped += report.blockers
-    elif tracking:
-        bundle = write_recovery_bundle(repo, [], bundle_path, extra_refs=list(tracking.values()))
-    if bundle is not None:
-        outcome.bundles.append(bundle)
-        outcome.commands += [bundle_restore_command(bundle, branch_ref(name)) for name in deleted]
+        outcome.commands += report.restore_commands
     outcome.deleted += deleted
     outcome.remaining += [name for name in local if name not in deleted]
-    if bundle is not None and tips:
+    if tips:
         gone, push_refusals = _push_deletes(repo, config.remote, tips)
         outcome.skipped += push_refusals
         outcome.deleted_remote += [f"{config.remote}/{name}" for name in gone]
         outcome.remaining += [name for name in tips if name not in gone]
         outcome.commands += [
-            f"{bundle_restore_command(bundle, tracking[name])} && "
-            f"git push {config.remote} {tracking[name]}:{branch_ref(name)}"
-            for name in gone
+            f"git push {config.remote} {tips[name]}:{branch_ref(name)}" for name in gone
         ]
-    elif tips:
-        outcome.remaining += list(tips)
     for name in deleted:
         advice = remote_delete_advice(repo, config, plan.default, name)
         if advice is not None and name not in tips:
@@ -1119,7 +1086,7 @@ def _proven_remote(
     copy, past the cleanup policy; each is then judged by the remote-delete guard's
     own proof (:func:`prove_remote_merged`), so this deletes nothing the guard would
     refuse an agent. That proof accepts ancestry, patch-id and tree containment, so a
-    patch-equivalent remote branch is deleted too (behind the same bundle).
+    patch-equivalent remote branch is deleted too.
     """
     names: list[str] = []
     problems: dict[str, str] = {}
@@ -1212,10 +1179,6 @@ def render(report: CleanupReport) -> list[str]:
         lines.append(f"Park cleared: {name} ({reason})")
     if report.deleted_remote:
         lines.append(f"Deleted remote branch(es): {', '.join(report.deleted_remote)}")
-    if len(report.bundles) > 1:
-        lines.append(f"Recovery bundles ({len(report.bundles)}): {report.bundles[0].parent}")
-    elif report.bundle is not None:
-        lines.append(f"Recovery bundle: {report.bundle}")
     lines += [f"Skipped {line}" for line in report.skipped]
     if report.commands:
         lines.append("Commands:")

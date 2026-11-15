@@ -101,7 +101,7 @@ def _printed_deletes(repo: Path, tmp_path: Path) -> tuple[list[str], str]:
     proven = branch_cleanup.proven_remote_only(repo, _CONFIG, inventory)
     report = "\n".join(branch_sweep.render_report(inventory, _CONFIG, cap=10, remote_proven=proven))
     cleaned = branch_cleanup.clean_sweep(
-        repo, _CONFIG, dry_run=True, bundle_dir=tmp_path / "b", remote=False
+        repo, _CONFIG, dry_run=True, remote=False
     )
     text = report + "\n" + "\n".join(branch_cleanup.render(cleaned))
     return _DELETE_LINE.findall(text), text

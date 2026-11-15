@@ -206,18 +206,10 @@ class TestPruning:
         assert delete.kwargs[0]["protected_ref"] == "main"
         assert not delete.kwargs[0].get("allow_unproven")
 
-    def test_a_bundle_dir_makes_the_delete_write_a_recovery_bundle(
-        self, delete: _FakeDelete, tmp_path: Path
-    ) -> None:
+    def test_the_delete_leans_on_no_recovery_copy(self, delete: _FakeDelete) -> None:
         git = _FakeGit()
-        prune_branch(
-            Path("/repo"),
-            self._orphans(git)["agent-orphan-2"],
-            base_branch="main",
-            bundle_dir=tmp_path,
-        )
-        bundle = delete.kwargs[0]["bundle_path"]
-        assert isinstance(bundle, Path) and bundle.parent == tmp_path
+        prune_branch(Path("/repo"), self._orphans(git)["agent-orphan-2"], base_branch="main")
+        assert not any("bundle" in key for key in delete.kwargs[0])
 
     def test_an_unmerged_branch_gets_no_delete_at_all(self, delete: _FakeDelete) -> None:
         git = _FakeGit()

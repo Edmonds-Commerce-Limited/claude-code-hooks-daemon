@@ -42,14 +42,11 @@ the two makes an alarming path count look like data loss when it is not.
 
 from __future__ import annotations
 
-import secrets
 import subprocess  # nosec B404 - trusted system tool (git), list form, no shell
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Final
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -132,8 +129,7 @@ _SHA_DISPLAY_LEN = 7
 #: exercising that branch of the guard rather than by reading it.
 _MOVED_TIP_DIAGNOSIS = (
     "Another process changed this branch after it was proved safe, so the proof no "
-    "longer describes it and the recovery bundle — written before the delete loop — "
-    "does NOT cover the change. Nothing was deleted for this branch. Re-run to "
+    "longer describes it. Nothing was deleted for this branch. Re-run to "
     "reclassify against the current tip; do not force the delete to get past it."
 )
 
@@ -146,8 +142,8 @@ _MOVED_TIP_DIAGNOSIS = (
 #
 # The concurrent case is REPRODUCED, not theorised: advancing a branch with an
 # unmerged commit between `classify_branch` and the delete makes git refuse, and
-# the bundle was written before that commit existed, so its head predates the
-# peer's work. That is why the advice is to re-run rather than to force.
+# the proof describes the tip before that commit existed. That is why the advice
+# is to re-run rather than to force.
 #
 # Plan 00254 narrowed which causes can still reach here. `tip_moved_since_proof`
 # now checks the BRANCH's own sha before git is asked, so a moved branch is
@@ -159,8 +155,7 @@ _REFUSAL_DIAGNOSIS = (
     "This means our model of git's delete rule disagreed with git. Either its "
     "UPSTREAM moved since this branch was classified — or the branch itself did, in "
     "the moment between the tip re-check and this delete — which means a concurrent "
-    "agent in this checkout, so re-run; note the recovery bundle predates that "
-    "change, so it does NOT cover work added since. Otherwise this is a gap in the "
+    "agent in this checkout, so re-run. Otherwise this is a gap in the "
     "daemon's predicate and is worth reporting upstream. Do not force the delete to "
     "get past it."
 )
@@ -170,12 +165,9 @@ def tip_moved_since_proof(repo: Path, classification: BranchClassification) -> s
     """A blocker if the branch no longer points where its proof was made, else None.
 
     A tier is a statement about a COMMIT, not about a name, so it expires the
-    instant the branch moves. Between the two there is a real window: one recovery
-    bundle is written for the whole batch before the delete loop, and
-    ``git bundle create`` PACKS objects — the reason that call carries a 300 s
-    budget — so on a large repository the exposure is the length of a pack. A
-    commit arriving inside it is covered by neither the proof nor the bundle, and
-    on the four tiers that force the delete git checks nothing, so the loss is
+    instant the branch moves. Between the proof and the delete there is a real
+    window: a commit arriving inside it is not covered by the proof, and on the
+    four tiers that force the delete git checks nothing, so the loss is
     silent (Plan 00254).
 
     Applied to EVERY tier rather than only the forcing ones. "Never delete a ref
@@ -312,9 +304,20 @@ class DeletionReport:
 
     classifications: tuple[BranchClassification, ...] = ()
     deleted: tuple[str, ...] = ()
-    bundle: Path | None = None
     refused: bool = False
     blockers: tuple[str, ...] = field(default_factory=tuple)
+
+    @property
+    def restore_commands(self) -> tuple[str, ...]:
+        """One ``git branch <name> <sha>`` per deleted branch, from the tip the proof named.
+
+        The machine-written record of what each delete removed. A proven delete
+        keeps the branch's content on the protected ref, a remote or as identical
+        files, so this is a pointer back to the exact tip, valid while git still
+        holds the commit, and not a recovery copy a delete may lean on.
+        """
+        tips = {c.name: c.tip for c in self.classifications}
+        return tuple(f"git branch {name} {tips[name]}" for name in self.deleted if tips.get(name))
 
 
 def _git(
@@ -334,7 +337,7 @@ def _git(
     ``ls-tree -r`` enumerate every tree and blob in a ref — so the cost scales
     with the repository, and a five-second hook-context budget turns a large repo
     into a ``CalledProcessError`` (Plan 00248 F1). ``timeout`` is overridable per
-    call so the bundle, which packs rather than reads, can have more still.
+    call so a heavier call can have more.
     """
     result = run_git(repo, *args, timeout=timeout)
     if check and result.returncode != 0:
@@ -794,95 +797,18 @@ def classify_branch(
     )
 
 
-#: UTC stamp in every recovery bundle name; sorts in time order.
-BUNDLE_STAMP: Final[str] = "%Y%m%dT%H%M%SZ"
-
-#: Random bytes after the stamp: the stamp has one-second resolution, so two
-#: runs in one second would otherwise name, and overwrite, the same file.
-_BUNDLE_SUFFIX_BYTES: Final[int] = 3
-
-
-def new_bundle_path(bundle_dir: Path, prefix: str) -> Path:
-    """A recovery bundle path in ``bundle_dir`` that no file holds yet.
-
-    ``<prefix>-<UTC stamp>-<6 hex>.bundle``: one file per run, so a later run
-    never overwrites the only copy of an earlier run's branches (Plan 00571).
-    Shared by ``delete-branch`` and ``branch-sweep --clean``.
-    """
-    stamp = datetime.now(UTC).strftime(BUNDLE_STAMP)
-    while True:
-        suffix = secrets.token_hex(_BUNDLE_SUFFIX_BYTES)
-        path = bundle_dir / f"{prefix}-{stamp}-{suffix}.bundle"
-        if not path.exists():
-            return path
-
-
-def bundle_restore_command(bundle: Path, ref: str) -> str:
-    """The fetch that restores ``ref`` (a full ref name) from ``bundle`` under the same name."""
-    return f"git fetch {bundle} {ref}:{ref}"
-
-
-def write_recovery_bundle(
-    repo: Path, names: Sequence[str], bundle_path: Path, *, extra_refs: Sequence[str] = ()
-) -> Path:
-    """Bundle every named branch, plus ``extra_refs`` (full ref names), so a deletion can be undone.
-
-    Written BEFORE any ref is removed, so a failure here aborts the deletion
-    rather than leaving branches gone and no way back.
-
-    Gets the largest budget of anything here: it PACKS objects rather than
-    reading them, and a bundle killed part-way is a lost recovery, not a slow
-    one.
-    """
-    bundle_path.parent.mkdir(parents=True, exist_ok=True)
-    _git(
-        repo,
-        "bundle",
-        "create",
-        str(bundle_path),
-        *(branch_ref(n) for n in names),
-        *extra_refs,
-        timeout=Timeout.GIT_BUNDLE_CREATE,
-    )
-    return bundle_path
-
-
-def _discard_unused_bundle(bundle: Path) -> str | None:
-    """Remove a recovery bundle for a run that deleted nothing.
-
-    Returns ``None`` when it is gone, or a message describing why it could not be
-    removed. The failure is RETURNED rather than logged: this module reports
-    outcomes through ``DeletionReport.blockers``, so surfacing it there puts it in
-    front of the person running the command instead of in a log they have no
-    reason to open. Raising instead would be worse — it runs on a path that is
-    already reporting a refusal, and a failure to tidy up a scratch file must not
-    bury the refusal the user actually needs to read.
-    """
-    try:
-        bundle.unlink()
-    except OSError as exc:
-        return (
-            f"could not remove the unused recovery bundle at {bundle}: {exc} — "
-            f"nothing was deleted, so this bundle is NOT evidence of a deletion "
-            f"and is safe to remove by hand"
-        )
-    return None
-
-
 def delete_branches(
     repo: Path,
     names: Sequence[str],
     *,
     protected_ref: str = DEFAULT_PROTECTED_REF,
     protected_names: Sequence[str] = DEFAULT_PROTECTED_NAMES,
-    bundle_path: Path | None = None,
     dry_run: bool = False,
     targets: Sequence[str] | None = None,
     content_tier: bool = True,
     line_names: Sequence[str] = (),
     line_targets: Sequence[str] | None = None,
     remote: str | None = None,
-    extra_bundle_refs: Sequence[str] = (),
 ) -> DeletionReport:
     """Classify every branch, then delete the batch.
 
@@ -897,7 +823,7 @@ def delete_branches(
     report says so — ``refused`` is set, ``deleted`` lists exactly the branches
     that went, and ``blockers`` carries git's own words for each that did not
     (Plan 00249). A docstring promising more than the code delivers is worse than
-    an honest one, and the recovery bundle exists precisely for this case.
+    an honest one.
 
     An ``unproven`` branch is never deleted: only a machine-checked tier deletes,
     and the caller's own assertion is not a tier.
@@ -910,9 +836,6 @@ def delete_branches(
         line_targets: Passed to :func:`classify_branch`; the default ref(s) only.
         remote: Name of the remote to ask, ONCE for the whole batch, what it holds
             outside the fetched refs. None makes no network call.
-        extra_bundle_refs: Further full ref names the caller will delete itself
-            (``branch-sweep --clean --remote``'s remote-tracking refs), bundled with
-            the branches. The bundle is then kept even when no branch is deleted.
     """
     listing = LazyRemoteRefs(repo, remote) if remote is not None else None
     classifications = tuple(
@@ -941,21 +864,11 @@ def delete_branches(
     if dry_run:
         return DeletionReport(classifications=classifications)
 
-    bundle: Path | None = None
-    if bundle_path is not None:
-        bundle = write_recovery_bundle(
-            repo,
-            [c.name for c in classifications],
-            bundle_path,
-            extra_refs=extra_bundle_refs,
-        )
-
     deleted: list[str] = []
     failures: list[str] = []
     for classification in classifications:
         # Re-read the tip BEFORE the delete: the proof above was made against a
-        # sha, and the bundle was written against the same one, so a branch that
-        # moved since is covered by neither (Plan 00254).
+        # sha, so a branch that moved since is no longer covered by it (Plan 00254).
         moved = tip_moved_since_proof(repo, classification)
         if moved is not None:
             failures.append(moved)
@@ -985,22 +898,9 @@ def delete_branches(
         # classifying everything before touching anything, but git can still
         # refuse a single branch mid-loop, and claiming a clean batch then would
         # be a lie about the repository's state.
-        #
-        # A bundle for a run that deleted NOTHING is worse than no bundle: the
-        # field report found a 1.9 MB one left behind by this crash, and anyone
-        # finding it later would reasonably read it as evidence the branch was
-        # gone. Where something WAS deleted the bundle is the recovery route, so
-        # it stays.
-        if bundle is not None and not deleted and not extra_bundle_refs:
-            problem = _discard_unused_bundle(bundle)
-            if problem is None:
-                bundle = None
-            else:
-                failures.append(problem)
         return DeletionReport(
             classifications=classifications,
             deleted=tuple(deleted),
-            bundle=bundle,
             refused=True,
             blockers=tuple(failures),
         )
@@ -1008,5 +908,4 @@ def delete_branches(
     return DeletionReport(
         classifications=classifications,
         deleted=tuple(deleted),
-        bundle=bundle,
     )

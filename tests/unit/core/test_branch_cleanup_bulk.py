@@ -7,6 +7,7 @@ final state of the refs, never a mock's call list.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import time
@@ -131,20 +132,18 @@ def _heads(repo: Path) -> set[str]:
 
 
 def _sweep(repo: Path, tmp_path: Path, *, dry_run: bool = False) -> CleanupReport:
-    return clean_sweep(repo, _CONFIG, dry_run=dry_run, bundle_dir=tmp_path / "bundles", remote=True)
+    return clean_sweep(repo, _CONFIG, dry_run=dry_run, remote=True)
 
 
-def _bundled(bundles: tuple[Path, ...]) -> set[str]:
-    heads: set[str] = set()
-    for bundle in bundles:
-        out = subprocess.run(
-            ["git", "bundle", "list-heads", str(bundle)],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout
-        heads |= {line.split()[1].removeprefix("refs/heads/") for line in out.splitlines()}
-    return heads
+def _restorable(*reports: CleanupReport) -> set[str]:
+    """Branch names the reports print a ``git branch <name> <sha>`` restore line for."""
+    found: set[str] = set()
+    for report in reports:
+        for line in report.commands:
+            match = re.fullmatch(r"git branch (\S+) [0-9a-f]{40}", line)
+            if match:
+                found.add(match.group(1))
+    return found
 
 
 def _expected_deleted() -> set[str]:
@@ -176,7 +175,6 @@ class TestDryRun:
         before = (_heads(repo), _heads(bare))
         report = _sweep(repo, tmp_path, dry_run=True)
         assert (_heads(repo), _heads(bare)) == before
-        assert not (tmp_path / "bundles").exists()
         lines = "\n".join(report.commands)
         for name in sorted(_expected_deleted()):
             assert f"would delete {name} (" in lines
@@ -220,18 +218,18 @@ class TestFullRun:
         assert set(_KEPT) <= full_run.after and set(_PARKED) <= full_run.after
         assert {f"wip/{n:03d}" for n in range(1, _UNMERGED + 1)} <= full_run.after
 
-    def test_runs_in_bounded_batches_with_a_bundle_each(self, full_run: _FullRun) -> None:
+    def test_runs_in_bounded_batches(self, full_run: _FullRun) -> None:
         total = len(_expected_deleted())
-        assert len(full_run.report.bundles) == -(-total // BULK_BATCH_SIZE) == _BATCHES
+        assert -(-total // BULK_BATCH_SIZE) == _BATCHES
         assert full_run.report.remaining == ()
         assert full_run.report.next_command is None
 
-    def test_every_deleted_branch_is_recoverable_from_a_bundle(self, full_run: _FullRun) -> None:
-        assert _bundled(full_run.report.bundles) >= set(full_run.report.deleted)
+    def test_every_deleted_branch_has_a_restore_line(self, full_run: _FullRun) -> None:
+        assert _restorable(full_run.report) >= set(full_run.report.deleted)
 
     def test_a_second_run_has_nothing_left_to_do(self, full_run: _FullRun) -> None:
         again = full_run.again
-        assert again.deleted == () and again.bundles == () and again.remaining == ()
+        assert again.deleted == () and again.remaining == ()
 
 
 class TestResume:
@@ -240,7 +238,7 @@ class TestResume:
     ) -> None:
         repo, _ = world
         before = _heads(repo)
-        _fail_nth_batch(monkeypatch, 2, subprocess.CalledProcessError(1, "git bundle", "", "full"))
+        _fail_nth_batch(monkeypatch, 2, subprocess.CalledProcessError(1, "git branch", "", "full"))
         report = _sweep(repo, tmp_path)
         assert report.stopped is not None and "batch 2 of 2 failed" in report.stopped
         assert before - _heads(repo) == set(report.deleted)
@@ -267,7 +265,7 @@ class TestResume:
         assert set(first.deleted).isdisjoint(second.deleted)
         assert _heads(repo) == everything - _expected_deleted()
         assert _heads(bare) == everything - _expected_deleted()
-        assert _bundled(first.bundles + second.bundles) >= _expected_deleted()
+        assert _restorable(first, second) >= _expected_deleted()
 
     def test_a_refused_push_and_a_branch_deleted_meanwhile_resume_cleanly(
         self, world: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -300,4 +298,4 @@ class TestResume:
         assert _heads(bare) == everything - _expected_deleted()
         assert _heads(repo) == everything - _expected_deleted()
         assert second.remaining == ()
-        assert _bundled(first.bundles + second.bundles) >= _expected_deleted() - {victim}
+        assert _restorable(first, second) >= _expected_deleted() - {victim}

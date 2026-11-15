@@ -198,13 +198,13 @@ class TestCleaningForeign:
         self._merged_foreign(repo)
         inventory = build_inventory(repo, _config())
         assert inventory.records["done"].state == BranchState.FOREIGN
-        clean_sweep(repo, _config(), dry_run=False, bundle_dir=tmp_path / "b", remote=True)
+        clean_sweep(repo, _config(), dry_run=False, remote=True)
         listing = _git(repo, "ls-remote", "--heads", "origin", "done")
         assert listing == ""
 
     def test_unmerged_foreign_is_never_deleted(self, repo: Path, tmp_path: Path) -> None:
         _push_only(repo, "theirs", author=THEM)
-        clean_sweep(repo, _config(), dry_run=False, bundle_dir=tmp_path / "b", remote=True)
+        clean_sweep(repo, _config(), dry_run=False, remote=True)
         assert _git(repo, "ls-remote", "--heads", "origin", "theirs") != ""
 
     def test_foreign_merged_is_not_in_the_merged_pool(self, repo: Path) -> None:

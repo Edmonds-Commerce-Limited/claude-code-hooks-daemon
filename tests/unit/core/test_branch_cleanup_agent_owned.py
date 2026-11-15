@@ -83,7 +83,6 @@ def _sweep(repo: Path, tmp_path: Path, *, dry_run: bool = False) -> branch_clean
         repo,
         _CONFIG,
         dry_run=dry_run,
-        bundle_dir=tmp_path / "bundles",
         untracked=tmp_path / "untracked",
     )
 
@@ -150,7 +149,6 @@ class TestRunningAgentsAreLeftAlone:
             repo,
             _CONFIG,
             dry_run=False,
-            bundle_dir=tmp_path / "bundles",
             remote=True,
             untracked=tmp_path / "untracked",
         )

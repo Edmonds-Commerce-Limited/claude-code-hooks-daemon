@@ -43,6 +43,7 @@ _ENV = {
 }
 
 _EXIT_REFUSED = 1
+_TIP = "a" * 40
 _EXIT_USAGE = 2
 
 
@@ -84,8 +85,6 @@ def _args(repo: Path, **overrides: Any) -> argparse.Namespace:
         "project_root": repo,
         "branches": ["doomed"],
         "protected_ref": "main",
-        "bundle": str(repo / "bundle.bundle"),
-        "no_bundle": True,
         "dry_run": False,
         "format": "text",
     }
@@ -260,7 +259,7 @@ class TestAGitFailureIsARefusalNotATraceback:
 
         def explode(*_args: Any, **_kwargs: Any) -> None:
             raise subprocess.CalledProcessError(
-                127, ["git", "bundle", "create"], "", "timed out after 300s"
+                127, ["git", "cherry"], "", "timed out after 300s"
             )
 
         monkeypatch.setattr(
@@ -300,11 +299,10 @@ class TestAPartialBatchIsReportedHonestly:
     """Plan 00253: ``refused`` does NOT mean nothing happened.
 
     Plan 00249 made a partial batch a real outcome — git can decline one branch
-    after others are already gone — and deliberately KEEPS the recovery bundle in
-    that case, because it is then the only route back to what WAS deleted. The CLI
-    was never updated for either, so one hard-coded line could assert three
-    untruths at once: that a deleted branch survived, that no bundle existed, and
-    that ``--allow-unproven`` was the remedy when nothing was unproven.
+    after others are already gone. The CLI was never updated for that, so one
+    hard-coded line could assert untruths at once: that a deleted branch survived,
+    that no restore line was owed, and that ``--allow-unproven`` was the remedy
+    when nothing was unproven.
 
     The report shape asserted here is not invented — it is the shape
     ``delete_branches`` really produces, and
@@ -313,15 +311,14 @@ class TestAPartialBatchIsReportedHonestly:
     """
 
     @staticmethod
-    def _partial(bundle: Path | None) -> DeletionReport:
-        """The real shape: one branch gone, one refused by git, bundle retained."""
+    def _partial() -> DeletionReport:
+        """The real shape: one branch gone, one refused by git."""
         return DeletionReport(
             classifications=(
-                BranchClassification(name="shipped", tier=TIER_MERGED_UNPUSHED),
+                BranchClassification(name="shipped", tier=TIER_MERGED_UNPUSHED, tip=_TIP),
                 BranchClassification(name="stuck", tier=TIER_MERGED),
             ),
             deleted=("shipped",),
-            bundle=bundle,
             refused=True,
             blockers=("stuck: git refused the delete (proven merged) — not fully merged.",),
         )
@@ -345,7 +342,7 @@ class TestAPartialBatchIsReportedHonestly:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """The sentence that was false: a branch HAD been deleted."""
-        self._run(monkeypatch, repo_with_abandoned_branch, self._partial(None))
+        self._run(monkeypatch, repo_with_abandoned_branch, self._partial())
 
         assert "nothing was deleted" not in capsys.readouterr().err
 
@@ -355,30 +352,24 @@ class TestAPartialBatchIsReportedHonestly:
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        self._run(monkeypatch, repo_with_abandoned_branch, self._partial(None))
+        self._run(monkeypatch, repo_with_abandoned_branch, self._partial())
 
         err = capsys.readouterr().err
         assert "shipped" in err
         assert "PARTIALLY REFUSED" in err
 
-    def test_it_discloses_the_surviving_bundle(
+    def test_it_prints_the_restore_line_for_the_branch_that_went(
         self,
         repo_with_abandoned_branch: Path,
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """The only recovery route for the branch that WAS deleted.
-
-        Withholding it is the most expensive of the three untruths: the branch is
-        gone and the bundle is on disk, so a reader told "nothing was deleted" has
-        no reason to look for it.
-        """
-        bundle = repo_with_abandoned_branch / "recovery.bundle"
-        self._run(monkeypatch, repo_with_abandoned_branch, self._partial(bundle))
+        """The exact line that puts back the branch that WAS deleted."""
+        self._run(monkeypatch, repo_with_abandoned_branch, self._partial())
 
         err = capsys.readouterr().err
-        assert str(bundle) in err
-        assert "git fetch" in err
+        assert f"git branch shipped {_TIP}" in err
+        assert "git branch stuck" not in err
 
     def test_it_names_no_unproven_route_for_a_git_refusal(
         self,
@@ -386,7 +377,7 @@ class TestAPartialBatchIsReportedHonestly:
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        self._run(monkeypatch, repo_with_abandoned_branch, self._partial(None))
+        self._run(monkeypatch, repo_with_abandoned_branch, self._partial())
 
         assert "--allow-unproven" not in capsys.readouterr().err
 
@@ -399,7 +390,6 @@ class TestAPartialBatchIsReportedHonestly:
         report = DeletionReport(
             classifications=(BranchClassification(name="doomed", tier=TIER_UNPROVEN),),
             deleted=(),
-            bundle=None,
             refused=True,
             blockers=("doomed: content found only here",),
         )
@@ -421,7 +411,7 @@ class TestAPartialBatchIsReportedHonestly:
         The defect was the message, not the status. A zero exit would hide the
         refusal from any script wrapping this command.
         """
-        self._run(monkeypatch, repo_with_abandoned_branch, self._partial(None))
+        self._run(monkeypatch, repo_with_abandoned_branch, self._partial())
         capsys.readouterr()
 
         assert self.exit_code == _EXIT_REFUSED
@@ -471,13 +461,12 @@ class TestAPartialBatchIsReportedHonestly:
                 return ("branch", "--delete")
             return real_argv(tier)
 
-        bundle = tmp_path / "real.bundle"
         with patch.object(
             branch_safety, "delete_argv_for_tier", safe_delete_for_the_head_tier_only
         ):
-            report = branch_safety.delete_branches(repo, ["shipped", "stuck"], bundle_path=bundle)
+            report = branch_safety.delete_branches(repo, ["shipped", "stuck"])
 
         assert report.refused is True, "the forced argv must make git decline `stuck`"
         assert report.deleted == ("shipped",), "and the other branch must be gone"
-        assert report.bundle == bundle, "a bundle must survive when something went"
-        assert bundle.exists()
+        assert len(report.restore_commands) == 1, "a restore line is owed for what went"
+        assert report.restore_commands[0].startswith("git branch shipped ")

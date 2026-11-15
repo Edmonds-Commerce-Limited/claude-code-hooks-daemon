@@ -182,7 +182,7 @@ class CleanupAfterMergeHandler(PostToolUseHandlerBase):
             if section.rule_id == RuleID.BRANCH_MERGED_POOL and section.fixes:
                 return [
                     "The merged-branch pool is full; clear it with one command "
-                    f"(behind a recovery bundle): `{section.fixes[0]}`"
+                    f"(each delete is machine-proven merged): `{section.fixes[0]}`"
                 ]
         return []
 

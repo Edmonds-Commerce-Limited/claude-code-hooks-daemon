@@ -139,5 +139,5 @@ class TestClearing:
     def test_clean_sweep_says_the_park_is_cleared(self, repo: Path, tmp_path: Path) -> None:
         park_branch(repo, "work", reason=_REASON, remote="origin")
         _merge_work(repo)
-        report = clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b")
+        report = clean_sweep(repo, _CONFIG, dry_run=False)
         assert f"Park cleared: work ({_REASON})" in render(report)

@@ -91,7 +91,7 @@ def _keep(repo: Path, tip: str, *, age_days: int = 0) -> None:
 
 
 def _sweep(repo: Path, tmp_path: Path, *, remote: bool) -> CleanupReport:
-    return clean_sweep(repo, _CONFIG, dry_run=False, bundle_dir=tmp_path / "b", remote=remote)
+    return clean_sweep(repo, _CONFIG, dry_run=False, remote=remote)
 
 
 def _remote_heads(bare: Path) -> set[str]:
@@ -114,7 +114,7 @@ class TestLocalKeeps:
         # clean is not a hook, so it must not run on that budget and delete a kept branch.
         _keep(repo, _merged(repo, "kept"))
         starved = _CONFIG.model_copy(update={"sweep": BranchSweepConfig(budget_ms=0)})
-        report = clean_sweep(repo, starved, dry_run=False, bundle_dir=tmp_path / "b", remote=False)
+        report = clean_sweep(repo, starved, dry_run=False, remote=False)
         assert report.deleted == ()
         assert _git(repo, "branch", "--list", "kept")
 
