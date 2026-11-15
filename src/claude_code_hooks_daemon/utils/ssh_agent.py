@@ -104,7 +104,7 @@ def forwarded_agent_socket() -> str | None:
     None means the daemon's own environment applies: no request is bound, the
     peer's environment is unreadable, it names no agent, or the value fails
     :func:`validated_agent_socket`. None of those is an error. A rejected value
-    is recorded at debug level by reason only, never by value.
+    is recorded through ``log_and_continue`` by reason only, never by value.
     """
     pid = _request_peer_pid.get()
     if pid is None:
@@ -115,8 +115,9 @@ def forwarded_agent_socket() -> str | None:
     value = (environ.get(ENV_SSH_AUTH_SOCK) or "").strip()
     if not value:
         return None
+    accepted: str | None = None
     try:
-        return validated_agent_socket(value)
+        accepted = validated_agent_socket(value)
     except AgentSocketRejected as rejected:
         log_and_continue(
             logger,
@@ -124,4 +125,4 @@ def forwarded_agent_socket() -> str | None:
             reason="the peer's SSH_AUTH_SOCK failed validation, so the daemon's own "
             "environment applies; the exception carries a fixed reason, never the value",
         )
-        return None
+    return accepted
