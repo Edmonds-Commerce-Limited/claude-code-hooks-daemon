@@ -143,6 +143,13 @@ class TestProveRemoteMerged:
         assert proof.tips == {}
         assert "could not be confirmed" in proof.problems["feat"]
 
+    def test_a_failed_listing_names_its_real_cause(self, repo: Path) -> None:
+        _pushed_branch(repo, "feat", merge=True)
+        failed = remote_refs.RemoteRefs("origin", failure="Permission denied (publickey)")
+        with patch.object(remote_branch_proof, "list_remote_refs", return_value=failed):
+            proof = prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
+        assert "Permission denied (publickey)" in proof.problems["feat"]
+
     def test_a_tag_of_the_same_name_is_ambiguous(self, repo: Path) -> None:
         _pushed_branch(repo, "feat", merge=True)
         _git(repo, "tag", "feat")

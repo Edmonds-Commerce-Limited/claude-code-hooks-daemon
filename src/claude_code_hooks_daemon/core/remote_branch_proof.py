@@ -505,7 +505,15 @@ def live_remote_tips(directory: Path, remote: str, names: list[str]) -> dict[str
     also matches a longer name (``feat`` and ``feat-2``) or a foreign ref ending in
     the name never lends its tip to another branch.
     """
+    return live_remote_listing(directory, remote, names)[0]
+
+
+def live_remote_listing(
+    directory: Path, remote: str, names: list[str]
+) -> tuple[dict[str, str], list[str]]:
+    """:func:`live_remote_tips` plus the reason of each listing that failed."""
     tips: dict[str, str] = {}
+    failures: list[str] = []
     for start in range(0, len(names), LS_REMOTE_CHUNK):
         chunk = names[start : start + LS_REMOTE_CHUNK]
         listing = list_remote_refs(
@@ -515,11 +523,12 @@ def live_remote_tips(directory: Path, remote: str, names: list[str]) -> dict[str
             timeout=Timeout.GIT_CONTEXT,
         )
         if listing.failure is not None:
+            failures.append(listing.failure)
             continue
         for listed, tip in listing.refs:
             if listed.startswith(HEADS_PREFIX):
                 tips[listed.removeprefix(HEADS_PREFIX)] = tip
-    return tips
+    return tips, failures
 
 
 def _live_tip_problems(directory: Path, remote: str, local_tips: dict[str, str]) -> dict[str, str]:
@@ -531,12 +540,13 @@ def _live_tip_problems(directory: Path, remote: str, local_tips: dict[str, str])
     """
     if not local_tips:
         return {}
-    live = live_remote_tips(directory, remote, list(local_tips))
+    live, failures = live_remote_listing(directory, remote, list(local_tips))
+    cause = f" (git ls-remote said: {'; '.join(failures)})" if failures else ""
     return {
         name: (
             f"the remote tip of `{name}` could not be confirmed as merged (it differs from "
-            f"`{REMOTES_PREFIX}{remote}/{name}`, is gone, or `git ls-remote {remote}` failed); "
-            "run `git fetch` and retry"
+            f"`{REMOTES_PREFIX}{remote}/{name}`, is gone, or `git ls-remote {remote}` failed)"
+            f"{cause}; run `git fetch` and retry"
         )
         for name, tip in local_tips.items()
         if live.get(name) != tip
@@ -579,6 +589,7 @@ __all__ = [
     "TAGS_PREFIX",
     "RemoteProof",
     "branch_name",
+    "live_remote_listing",
     "live_remote_tips",
     "named_ref_problem",
     "prove_remote_merged",

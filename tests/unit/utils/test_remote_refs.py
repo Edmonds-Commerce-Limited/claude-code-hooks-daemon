@@ -57,6 +57,43 @@ class TestListRemoteRefs:
         assert listing.failure is not None
         assert listing.refs == ()
 
+    def test_ssh_auth_failure_without_agent_socket_names_the_missing_variable(
+        self, scratch: archive_remote.ArchiveRepo, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A daemon restarted from a shell-less context has HOME but no SSH_AUTH_SOCK,
+        # so ssh cannot authenticate; the reason must say so, not just "failed".
+        monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
+        denied = run_git(scratch.clone, "--version")
+        denied = type(denied)(
+            denied.args, 128, "", "git@host: Permission denied (publickey).\nfatal: Could not read"
+        )
+        with patch.object(remote_refs, "run_git", return_value=denied):
+            listing = remote_refs.list_remote_refs(scratch.clone, "origin")
+        assert listing.failure is not None
+        assert "Permission denied (publickey)" in listing.failure
+        assert "SSH_AUTH_SOCK" in listing.failure
+
+    def test_ssh_auth_failure_with_agent_socket_adds_no_hint(
+        self, scratch: archive_remote.ArchiveRepo, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SSH_AUTH_SOCK", "/run/agent.sock")
+        base = run_git(scratch.clone, "--version")
+        denied = type(base)(base.args, 128, "", "git@host: Permission denied (publickey).")
+        with patch.object(remote_refs, "run_git", return_value=denied):
+            listing = remote_refs.list_remote_refs(scratch.clone, "origin")
+        assert listing.failure == "git@host: Permission denied (publickey)."
+
+    def test_non_auth_failure_without_agent_socket_adds_no_hint(
+        self, scratch: archive_remote.ArchiveRepo, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
+        base = run_git(scratch.clone, "--version")
+        failed = type(base)(base.args, 128, "", "fatal: 'nowhere' does not appear to be a repo")
+        with patch.object(remote_refs, "run_git", return_value=failed):
+            listing = remote_refs.list_remote_refs(scratch.clone, "origin")
+        assert listing.failure is not None
+        assert "SSH_AUTH_SOCK" not in listing.failure
+
     def test_peeled_and_head_lines_are_dropped(self) -> None:
         text = f"{'a' * 40}\tHEAD\n{'b' * 40}\trefs/tags/v1\n{'c' * 40}\trefs/tags/v1^{{}}\n"
         assert remote_refs.parse_listing(text) == (("refs/tags/v1", "b" * 40),)

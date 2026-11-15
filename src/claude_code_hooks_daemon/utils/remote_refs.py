@@ -15,6 +15,7 @@ proof.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +25,12 @@ from claude_code_hooks_daemon.utils.git_repo import run_git
 _HEAD_LINE = "HEAD"
 _PEELED_SUFFIX = "^{}"
 _NO_PROMPT_ENV = {"GIT_TERMINAL_PROMPT": "0"}
+_SSH_AUTH_SOCK = "SSH_AUTH_SOCK"
+_SSH_AUTH_FAILURE_MARKERS = (
+    "Permission denied",
+    "Could not read from remote repository",
+    "Host key verification failed",
+)
 
 
 @dataclass(frozen=True)
@@ -33,6 +40,23 @@ class RemoteRefs:
     remote: str
     refs: tuple[tuple[str, str], ...] = ()
     failure: str | None = None
+
+
+def _missing_agent_hint(reason: str) -> str:
+    """Name the daemon's missing ``SSH_AUTH_SOCK`` when an ssh auth failure may be caused by it.
+
+    A daemon restarted outside the session shell can lack the agent socket the
+    session has, so ssh cannot authenticate. Only the variable's NAME is reported,
+    never a value. The daemon does not forward the session's environment on its own.
+    """
+    if _SSH_AUTH_SOCK in os.environ:
+        return ""
+    if not any(marker in reason for marker in _SSH_AUTH_FAILURE_MARKERS):
+        return ""
+    return (
+        f" [the daemon process has no {_SSH_AUTH_SOCK}, so ssh cannot reach the session's "
+        "agent; restart the daemon from a shell that has it]"
+    )
 
 
 def parse_listing(stdout: str) -> tuple[tuple[str, str], ...]:
@@ -68,7 +92,7 @@ def list_remote_refs(
     )
     if result.returncode != 0:
         reason = result.stderr.strip() or f"git ls-remote exited {result.returncode}"
-        return RemoteRefs(remote, failure=reason)
+        return RemoteRefs(remote, failure=reason + _missing_agent_hint(reason))
     return RemoteRefs(remote, refs=parse_listing(result.stdout))
 
 
