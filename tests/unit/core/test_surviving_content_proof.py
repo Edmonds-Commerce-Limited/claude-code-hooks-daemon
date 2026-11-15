@@ -256,9 +256,7 @@ class TestTierB:
     def test_more_changed_paths_than_the_ceiling_is_refused(
         self, repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(
-            "claude_code_hooks_daemon.core.remote_branch_proof.MAX_PROOF_PATHS", 1
-        )
+        monkeypatch.setattr("claude_code_hooks_daemon.core.remote_branch_proof.MAX_PROOF_PATHS", 1)
         assert MAX_PROOF_PATHS > 1
         _branch_from_main(repo, "wide")
         _write(repo, "a.txt", "a\n")

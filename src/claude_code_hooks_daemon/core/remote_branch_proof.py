@@ -558,7 +558,9 @@ def _merged_tracking_tips(
         # against surviving refs only, so a ref deleted with it cannot vouch for it.
         doomed = {f"{REMOTES_PREFIX}{remote}/{n}" for n in (*names, *also_deleting)}
         surviving = [
-            target for target in _proof_targets(remote, default, branches, refs) if target not in doomed
+            target
+            for target in _proof_targets(remote, default, branches, refs)
+            if target not in doomed
         ]
         for name in sorted(feature_names):
             if tracking[name] in proven or not default_targets:
