@@ -8,6 +8,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00608: provision sh provisions the relay binary](00608-provision-sh-provisions-the-relay-binary/PLAN.md) - Not Started on main (the work is built on branch `agent-a85cf266bd3c1c30d-57f43a44`, awaiting merge; see its JOURNAL)
+
 - [00607: unblock the Dependabot-held packages](00607-dependabot-held-packages-unblock/PLAN.md) - In Progress (19 open alerts are all held by dev-tool pins: drop the unused `safety` so `filelock` reaches 4.x, and run semgrep from an isolated pinned tool environment so `mcp` and OpenTelemetry leave `uv.lock`)
 
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
@@ -305,11 +307,11 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Plan Statistics
 
-- **Total Plans Created**: 607 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 608 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 510 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 74 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 75 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
