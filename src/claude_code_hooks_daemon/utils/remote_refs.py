@@ -16,11 +16,13 @@ proof.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.ssh_agent import forwarded_agent_socket
 
 _HEAD_LINE = "HEAD"
 _PEELED_SUFFIX = "^{}"
@@ -42,6 +44,20 @@ class RemoteRefs:
     failure: str | None = None
 
 
+def remote_git_env(extra: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment for a git call that touches a remote.
+
+    Never prompts, carries ``extra``, and adds ``SSH_AUTH_SOCK`` only when the
+    request being served forwarded a validated agent socket. Nothing else is ever
+    taken from the peer, and the socket value is never logged.
+    """
+    env = {**_NO_PROMPT_ENV, **(extra or {})}
+    socket = forwarded_agent_socket()
+    if socket is not None:
+        env[_SSH_AUTH_SOCK] = socket
+    return env
+
+
 def _missing_agent_hint(reason: str) -> str:
     """Name the daemon's missing ``SSH_AUTH_SOCK`` when an ssh auth failure may be caused by it.
 
@@ -49,7 +65,7 @@ def _missing_agent_hint(reason: str) -> str:
     session has, so ssh cannot authenticate. Only the variable's NAME is reported,
     never a value. The daemon does not forward the session's environment on its own.
     """
-    if _SSH_AUTH_SOCK in os.environ:
+    if _SSH_AUTH_SOCK in os.environ or forwarded_agent_socket() is not None:
         return ""
     if not any(marker in reason for marker in _SSH_AUTH_FAILURE_MARKERS):
         return ""
@@ -88,7 +104,7 @@ def list_remote_refs(
         remote,
         *patterns,
         timeout=timeout,
-        env=_NO_PROMPT_ENV,
+        env=remote_git_env(),
     )
     if result.returncode != 0:
         reason = result.stderr.strip() or f"git ls-remote exited {result.returncode}"
