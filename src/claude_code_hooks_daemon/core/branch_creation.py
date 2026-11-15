@@ -25,7 +25,11 @@ from pathlib import Path
 from typing import Final, Literal
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
-from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
+from claude_code_hooks_daemon.constants.branch_guard import (
+    BRANCH_LIMIT_PRINCIPLE,
+    POOL_DELETE_CONDITION,
+    POOL_PARK_CLAUSE,
+)
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command, sweep_clean_line
@@ -595,8 +599,8 @@ def _cap_lines(
     ordered = sorted(groups, key=lambda work: (_rank(work), work.committed, work.name))
     lines = [
         f"Open work branches: {len(groups)} (cap {config.effective_wip_cap()}). "
-        "Finish (merge) one, briefly park it with a reason, or delete it only when the "
-        "guard proves nothing is lost, before starting another:"
+        f"Finish (merge) one, {POOL_PARK_CLAUSE}, or delete it ({POOL_DELETE_CONDITION}), "
+        "before starting another:"
     ]
     park = daemon_cli_command_for_docs("branch-park")
     fixes: list[str] = []
@@ -649,9 +653,9 @@ def _dormancy_deny_lines(
 ) -> tuple[list[str], list[str]]:
     """``(lines, fixes)`` for the dormant branches at the block stage."""
     lines = [
-        "Dormant branches are blocking new work. Finish and merge each one, briefly park "
-        "it (`hooks-daemon branch-park <name> --reason ...`), or delete it (`delete-branch`, "
-        "only when the guard proves nothing is lost):"
+        f"Dormant branches are blocking new work. Finish and merge each one, {POOL_PARK_CLAUSE} "
+        f"(`hooks-daemon branch-park <name> --reason ...`), or delete it (`delete-branch`, "
+        f"{POOL_DELETE_CONDITION}):"
     ]
     park = daemon_cli_command_for_docs("branch-park")
     delete = daemon_cli_command_for_docs("delete-branch")
@@ -677,9 +681,10 @@ def _dormancy_context_lines(
     ordered = sorted(noisy, key=lambda work: (work.committed, work.name))
     details = ", ".join(_detail(work, now, worktrees) for work in ordered[:DUPLICATE_LIST_LIMIT])
     return [
-        f"Dormant branches need attention: {details}. Finish, briefly park "
-        "(`hooks-daemon branch-park <name> --reason ...`) or delete them only when the "
-        "guard proves nothing is lost."
+        f"Dormant branches need attention: {details}. Finish them, or {POOL_PARK_CLAUSE} "
+        "(`hooks-daemon branch-park <name> --reason ...`), or delete them (only when the "
+        "guard proves nothing is lost, or the human deletes them themselves; your own "
+        "assertion never counts)."
     ]
 
 
@@ -707,7 +712,10 @@ def _parked_pool_lines(
             f"; {len(stale)} stale (past branches.parked.max_age_days "
             f"{config.effective_pool_max_age(Pool.PARKED)})"
         )
-    lines = [f"{head}. Clear or merge one before starting another:"]
+    lines = [
+        f"{head}. Clear or merge one before starting another, or delete it "
+        f"({POOL_DELETE_CONDITION}); {POOL_PARK_CLAUSE} if it must be re-parked:"
+    ]
     park = daemon_cli_command_for_docs("branch-park")
     delete = daemon_cli_command_for_docs("delete-branch")
     ordered = sorted(
@@ -758,7 +766,9 @@ def _merged_pool_lines(
     keep = daemon_cli_command_for_docs("branch-keep")
     remote = any(work.on_remote for work in merged)
     lines = [
-        f"{head}. Delete the merged branches, or keep one with a reason:",
+        f"{head}. Delete the merged branches (branch-sweep deletes only what its proof shows "
+        "loses nothing; or the human deletes them themselves; your own assertion never "
+        "counts), or keep one with a reason:",
         sweep_clean_line(remote=remote),
     ]
     fixes = [sweep_clean_command(remote=remote)]

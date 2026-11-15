@@ -158,9 +158,7 @@ class TestIntegrationLines:
         monkeypatch.setattr("sys.stdin", io.StringIO())
         repo = _line_repo(tmp_path, merged=False)
         own_sha = _git(repo, "rev-parse", "release/1").strip()
-        exit_code = cmd_delete_branch(
-            _args(repo, branches=["release/1"], protected_ref=own_sha)
-        )
+        exit_code = cmd_delete_branch(_args(repo, branches=["release/1"], protected_ref=own_sha))
         assert exit_code == _EXIT_USAGE
         assert "release/1" in _git(repo, "branch", "--list")
 
@@ -173,9 +171,7 @@ class TestIntegrationLines:
             "claude_code_hooks_daemon.daemon.cli.git_sync.resolve_default_branch",
             lambda *_a, **_k: None,
         )
-        exit_code = cmd_delete_branch(
-            _args(repo, branches=["release/1"], protected_ref="main")
-        )
+        exit_code = cmd_delete_branch(_args(repo, branches=["release/1"], protected_ref="main"))
         assert exit_code == _EXIT_USAGE
         assert "release/1" in _git(repo, "branch", "--list")
 
@@ -258,9 +254,7 @@ class TestAGitFailureIsARefusalNotATraceback:
         monkeypatch.setattr("sys.stdin", io.StringIO())
 
         def explode(*_args: Any, **_kwargs: Any) -> None:
-            raise subprocess.CalledProcessError(
-                127, ["git", "cherry"], "", "timed out after 300s"
-            )
+            raise subprocess.CalledProcessError(127, ["git", "cherry"], "", "timed out after 300s")
 
         monkeypatch.setattr(
             "claude_code_hooks_daemon.daemon.branch_safety.delete_branches", explode

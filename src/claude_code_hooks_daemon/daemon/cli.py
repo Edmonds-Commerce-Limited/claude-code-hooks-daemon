@@ -6932,9 +6932,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     protected_ref: str = resolved_default
     if args.protected_ref is not None:
         requested = args.protected_ref
-        matched = branch_cleanup.validated_proof_target(
-            repo, branches, resolved_default, requested
-        )
+        matched = branch_cleanup.validated_proof_target(repo, branches, resolved_default, requested)
         if matched is None:
             print(
                 f"ERROR: --protected-ref {requested} is not the default branch or a "

@@ -14,7 +14,10 @@ from claude_code_hooks_daemon.config.models import (
     BranchParkedConfig,
     BranchWipConfig,
 )
-from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
+from claude_code_hooks_daemon.constants.branch_guard import (
+    BRANCH_LIMIT_PRINCIPLE,
+    POOL_DELETE_CONDITION,
+)
 from claude_code_hooks_daemon.core.branch_creation import LABELS_RELATIVE_PATH, write_labels
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.branch_creation_guard import (
@@ -298,7 +301,9 @@ def test_rule_fixes_and_guidance_never_offer_an_unproven_delete(
         assert word not in joined
     by_id = {rule.rule_id: rule for rule in handler.get_rules()}
     for rule_id in ("R-BRANCH-WIP-CAP", "R-BRANCH-DORMANT", "R-BRANCH-PARKED-POOL"):
-        assert "proves nothing is lost" in by_id[rule_id].fix
+        assert POOL_DELETE_CONDITION in by_id[rule_id].fix
+    assert "the human deletes them themselves" in by_id["R-BRANCH-MERGED-POOL"].fix
+    assert "your own assertion never counts" in by_id["R-BRANCH-MERGED-POOL"].fix
     assert "short, bounded" in guidance
 
 

@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.config.models import (
     BranchWipConfig,
     Config,
 )
+from claude_code_hooks_daemon.constants.branch_guard import POOL_DELETE_CONDITION
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import branch_inventory
 from claude_code_hooks_daemon.core.branch_creation import (
@@ -366,6 +367,7 @@ class TestParkedPool:
         assert "held0" in text and "held1" in text
         assert "branch-park held0 --clear" in text
         assert "delete-branch" in text
+        assert POOL_DELETE_CONDITION in text
 
     def test_unset_parked_cap_follows_the_wip_cap(self, repo: Path) -> None:
         _parked_repo(repo, 2)
@@ -511,6 +513,9 @@ class TestMergedPool:
         assert "Merged branches: 2 (cap 2, branches.merged.cap)" in text
         assert "branch-sweep --clean" in text
         assert "branch-keep a --reason" in text
+        assert "branch-sweep deletes only what its proof shows loses nothing" in text
+        assert "the human deletes them themselves" in text
+        assert "your own assertion never counts" in text
 
     def test_clean_line_names_remote_when_a_remote_copy_exists(self, repo: Path) -> None:
         sha = _merged_distinct(repo, "a")

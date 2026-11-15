@@ -675,7 +675,7 @@ def cleanup_after_merge(
                 [name],
                 protected_names=never_work,
                 targets=targets,
-                        content_tier=False,
+                content_tier=False,
                 line_names=lines,
                 line_targets=targets,
             )

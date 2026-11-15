@@ -18,7 +18,11 @@ from claude_code_hooks_daemon.config.models import (
     Config,
     handler_options,
 )
-from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
+from claude_code_hooks_daemon.constants.branch_guard import (
+    BRANCH_LIMIT_PRINCIPLE,
+    POOL_DELETE_CONDITION,
+    POOL_PARK_CLAUSE,
+)
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command
 from claude_code_hooks_daemon.core.branch_creation import (
@@ -85,6 +89,8 @@ class TestCap:
         text = "\n".join(verdict.lines)
         assert "one" in text and "two" in text
         assert "2" in text
+        assert POOL_DELETE_CONDITION in text
+        assert POOL_PARK_CLAUSE in text
         assert verdict.lines[-1] == BRANCH_LIMIT_PRINCIPLE
 
     def test_warn_mode_warns(self, repo: Path) -> None:
@@ -289,7 +295,8 @@ class TestDormancy:
         text = "\n".join(verdict.lines)
         assert "stale" in text
         assert "branch-park" in text and "delete-branch" in text
-        assert "only when the guard proves nothing is lost" in text
+        assert POOL_DELETE_CONDITION in text
+        assert POOL_PARK_CLAUSE in text
         assert verdict.lines[-1] == BRANCH_LIMIT_PRINCIPLE
 
     def test_warn_mode_stops_at_noisy(self, repo: Path) -> None:
