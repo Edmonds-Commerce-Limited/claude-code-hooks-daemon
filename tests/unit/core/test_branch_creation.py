@@ -13,6 +13,7 @@ from claude_code_hooks_daemon.config.models import (
     BranchDormancyConfig,
     BranchDuplicatesConfig,
     BranchesConfig,
+    BranchParkedConfig,
     BranchWipConfig,
     Config,
     handler_options,
@@ -317,6 +318,22 @@ class TestDormancy:
         verdict = creation_verdict(repo, _dormancy_config(), "fresh", labels=labels)
         assert verdict.decision == "allow"
         assert verdict.lines == ()
+
+    def test_wip_creation_grace_never_lifts_a_full_parked_pool(self, repo: Path) -> None:
+        tree = _git(repo, "rev-parse", "main^{tree}").strip()
+        for name in ("park-a", "park-b"):
+            message = f"{name}\n\nParked-Reason: waiting\nParked-By: t"
+            sha = _git(repo, "commit-tree", tree, "-p", "main", "-m", message).strip()
+            _git(repo, "update-ref", f"refs/heads/{name}", sha)
+        config = BranchesConfig(
+            default="main",
+            wip=BranchWipConfig(cap=5, mode="block", count_remote=True, creation_grace=2),
+            duplicates=BranchDuplicatesConfig(mode="off"),
+            parked=BranchParkedConfig(cap=2),
+        )
+        verdict = creation_verdict(repo, config, "fresh")
+        assert verdict.decision == "deny"
+        assert verdict.rule_id == RuleID.BRANCH_PARKED_POOL
 
     def test_off_mode_ignores_stages(self, repo: Path) -> None:
         _branch(repo, "stale")
