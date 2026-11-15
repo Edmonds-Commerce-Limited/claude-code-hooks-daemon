@@ -14,7 +14,7 @@ Each waited for a branch while the parked-branch slot was full.
 
 1. `work-queue done` caches the issue it has just finished as the next workable one. The issue-sdlc runbook runs
    `done` before it closes the issue, and `done` refreshes the workable-issues cache while the issue is still open.
-   Only `issue_validity_cli` ever calls `remove_workable`, so the stale entry stays until someone runs
+   Before this plan only `issue_validity_cli` called `remove_workable`, so the stale entry stayed until someone runs
    `issue-validity --list-eligible`. Meanwhile R-STOP-IDLE-WITH-WORKABLE-ISSUE names a closed issue as workable.
 2. Acceptance socket discovery depends on the runner's hostname. `tests/acceptance/conftest.py` `_discover_socket`
    checks only `CLAUDE_HOOKS_SOCKET_PATH` and a glob of `untracked/`. When the natural socket path would exceed 104

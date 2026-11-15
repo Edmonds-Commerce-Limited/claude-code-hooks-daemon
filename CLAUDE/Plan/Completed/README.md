@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00563: optimise suggests claudemd excludes](00563-optimise-suggests-claudemd-excludes/PLAN.md) - Complete at merge `d95c988f1` + `3f5a5dff3` + the archiving commit (owner ruling on Plan 00561 Q1: `/hooks-daemon optimise` lists an unscored `claudeMdExcludes` suggestion for worktree roots under the project that no glob covers; never writes it; release note 001)
+
 - [00561: worktree sub-agents load the root CLAUDE.md twice](00561-worktree-claudemd-duplicate-load/PLAN.md) - Complete at merge `3d50b7077` + the archiving commit (#156: `claudeMdExcludes` skips the worktree-root `CLAUDE.md` copies, so a worktree agent loads the root file once; a test derives every worktree root from the code; no release-bound consequence; owner question Q1, whether to recommend or install it for clients, stays open)
 
 - [00558: branch WIP limit and hygiene](00558-git-branch-hygiene-sweep/PLAN.md) - Complete at the Plan 00558 merges + `0c75cfa0b`, `42502078a`, `bce4f829c` + the archiving commit (GitHub #152: a blocking WIP cap of 10 over every branch, dormancy limits, park and lossless delete, a Stop/SubagentStop guard against abandoned branches, lossless cleanup after merge and worktree removal; release notes 023-032)
