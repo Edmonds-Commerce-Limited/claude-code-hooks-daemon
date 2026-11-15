@@ -63,6 +63,7 @@ from claude_code_hooks_daemon.utils.secret_redaction import (
     get_active_secret_terms,
     redact_text,
 )
+from claude_code_hooks_daemon.utils.ssh_agent import call_bound_to_peer
 
 # Global memory log handler - accessible for log queries
 _memory_log_handler: MemoryLogHandler | None = None
@@ -2578,6 +2579,7 @@ class HooksDaemon:
 
         # Process with appropriate controller
         loop = asyncio.get_running_loop()
+        peer_pid = hook_input.get(HookInputField.PEER_PID) if isinstance(hook_input, dict) else None
 
         if self._is_new_controller and isinstance(self.controller, Controller):
             # New DaemonController - use process_request directly. `partial`
@@ -2585,14 +2587,25 @@ class HooksDaemon:
             # positional args for the target callable (Plan 00466 N40 M1).
             result: dict[str, Any] = await loop.run_in_executor(
                 None,
-                partial(self.controller.process_request, request, arrival_time=arrival_time),
+                partial(
+                    call_bound_to_peer,
+                    peer_pid,
+                    partial(self.controller.process_request, request, arrival_time=arrival_time),
+                ),
             )
             if request_id:
                 result["request_id"] = request_id
             return result
         elif isinstance(self.controller, LegacyController):
             # Legacy FrontController - dispatch and convert result
-            hook_result = await loop.run_in_executor(None, self.controller.dispatch, hook_input)
+            hook_result = await loop.run_in_executor(
+                None,
+                partial(
+                    call_bound_to_peer,
+                    peer_pid,
+                    partial(self.controller.dispatch, hook_input),
+                ),
+            )
 
             # Build response (don't wrap in "result" - to_json already returns correct format)
             stop_hook_active = bool(
