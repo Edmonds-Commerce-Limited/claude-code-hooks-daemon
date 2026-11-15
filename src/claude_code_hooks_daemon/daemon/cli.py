@@ -6929,6 +6929,8 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    if getattr(args, "remote_only", False):
+        return _delete_remote_branches(repo, branches, resolved_default, args)
     protected_ref: str = resolved_default
     if args.protected_ref is not None:
         requested = args.protected_ref
@@ -7052,6 +7054,41 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
 
     _print_restore_lines(report.restore_commands, file=sys.stdout)
     print(f"Deleted {len(report.deleted)} branch(es).")
+    return 0
+
+
+def _delete_remote_branches(
+    repo: Path, branches: BranchesConfig, default: str, args: argparse.Namespace
+) -> int:
+    """``delete-branch --remote-only``: the leased route to a proven remote delete.
+
+    The proof target is always the default and the declared integration lines, and
+    the proof is judged afresh, so ``--protected-ref`` and ``--dry-run`` (which would
+    skip the lease) have no meaning here and are a usage error.
+
+    Returns:
+        0 when every named branch was deleted, 1 when any was refused, 2 on a usage error.
+    """
+    from claude_code_hooks_daemon.core import branch_cleanup
+
+    if args.protected_ref is not None or args.dry_run:
+        print(
+            "ERROR: --remote-only judges against the default branch and declared "
+            "integration lines only; --protected-ref and --dry-run do not apply",
+            file=sys.stderr,
+        )
+        return 2
+    report = branch_cleanup.delete_remote_branches(repo, branches, default, args.branches)
+    for line in branch_cleanup.render(report):
+        print(line)
+    if report.skipped:
+        print(
+            "\nA remote branch the proof does not accept is never deleted by this "
+            "command. Finish the work (merge it) or ask the human who owns the branch "
+            "to decide.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
@@ -13441,6 +13478,14 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["text", "json"],
         default="text",
         help="Output format: text (default) or json",
+    )
+    parser_delete_branch.add_argument(
+        "--remote-only",
+        dest="remote_only",
+        action="store_true",
+        help="Delete the named REMOTE branch(es) instead of local ones, each only when "
+        "the remote-delete proof accepts it (merged into the default or an integration "
+        "line, or holding no file found nowhere else), under a lease on the proven tip",
     )
     parser_delete_branch.set_defaults(func=cmd_delete_branch)
 

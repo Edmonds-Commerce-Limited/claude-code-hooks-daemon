@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.core.agent_ownership import (
 from claude_code_hooks_daemon.core.branch_inventory import BranchRecord, BranchState
 from claude_code_hooks_daemon.core.branch_park import clear_park_record
 from claude_code_hooks_daemon.core.remote_branch_proof import (
+    branch_name,
     named_ref_problem,
     prove_remote_merged,
 )
@@ -553,9 +554,10 @@ def preview_paths(paths: Sequence[str]) -> str:
 def remote_delete_advice(repo: Path, config: BranchesConfig, default: str, name: str) -> str | None:
     """What to tell a person about the remote copy of ``name``, when the remote holds one.
 
-    The runnable delete line only when the remote-delete guard's own proof
-    (:func:`prove_remote_merged`) accepts the branch, so a printed command is one the
-    guard allows. Otherwise owner-only wording, which is advice and not a command.
+    The runnable line is the leased route (``delete-branch --remote-only``, which holds
+    a lease on the proven tip and prints the restore line), and only when the
+    remote-delete guard's own proof (:func:`prove_remote_merged`) accepts the branch.
+    Otherwise owner-only wording, which is advice and not a command.
     """
     remote = config.remote
     if not _ref_exists(repo, f"refs/remotes/{remote}/{name}"):
@@ -565,7 +567,7 @@ def remote_delete_advice(repo: Path, config: BranchesConfig, default: str, name:
         proof = prove_remote_merged(repo, remote, [name], default, config)
         problem = proof.problems.get(name)
         if problem is None and name in proof.tips:
-            return f"git push {remote} --delete {name}"
+            return daemon_cli_command_for_docs("delete-branch", "--remote-only", name)
         problem = problem or "the proof did not accept it"
     return f"remote delete of {remote}/{name} is for the owner: {problem}"
 
@@ -1133,6 +1135,51 @@ def proven_remote_only(
     return frozenset(tips)
 
 
+def delete_remote_branches(
+    repo: Path, config: BranchesConfig, default: str, names: Sequence[str]
+) -> CleanupReport:
+    """The agent's leased route to delete remote branches, each only when the proof accepts it.
+
+    Every name is judged by the remote-delete guard's own proof
+    (:func:`prove_remote_merged`, including the surviving-content tier), with the whole
+    batch as ``also_deleting`` so no branch vouches for another. An accepted branch is
+    deleted under a lease on its proven tip (:func:`_push_deletes`) and reported with
+    the ``git push <remote> <sha>:refs/heads/<name>`` line that restores it. A refused
+    name is reported in ``skipped`` with the reason and nothing is pushed for it.
+    """
+    unique = list(dict.fromkeys(branch_name(name) for name in names))
+    refused: list[str] = []
+    judged: list[str] = []
+    for name in unique:
+        problem = named_ref_problem(config.remote, name, default, config)
+        if problem is None:
+            judged.append(name)
+        else:
+            refused.append(f"{config.remote}/{name}: {problem}")
+    tips: dict[str, str] = {}
+    if judged:
+        proof = prove_remote_merged(
+            repo, config.remote, judged, default, config, also_deleting=unique
+        )
+        tips = proof.tips
+        refused += [
+            f"{config.remote}/{name}: {proof.problems.get(name, 'the proof did not accept it')}"
+            for name in judged
+            if name not in tips
+        ]
+    gone: list[str] = []
+    if tips:
+        gone, push_refusals = _push_deletes(repo, config.remote, tips)
+        refused += push_refusals
+    return CleanupReport(
+        skipped=tuple(refused),
+        commands=tuple(
+            f"git push {config.remote} {tips[name]}:{branch_ref(name)}" for name in gone
+        ),
+        deleted_remote=tuple(f"{config.remote}/{name}" for name in gone),
+    )
+
+
 def _push_deletes(repo: Path, remote: str, tips: Mapping[str, str]) -> tuple[list[str], list[str]]:
     """Delete each remote branch under a lease on its proven tip: ``(deleted, refusals)``.
 
@@ -1208,6 +1255,7 @@ __all__ = [
     "cleanup_after_merge",
     "cleanup_targets",
     "delete_if_merged",
+    "delete_remote_branches",
     "linked_worktrees",
     "merge_target_qualifies",
     "policy_refusal",

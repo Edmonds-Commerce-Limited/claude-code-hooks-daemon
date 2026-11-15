@@ -374,6 +374,7 @@ would always refuse regardless.
 git branch -d <name>                          # ALWAYS TRY THIS FIRST
 hooks-daemon delete-branch --dry-run <name>   # only if -d refused
 hooks-daemon delete-branch <name>             # deletes only if provably safe
+hooks-daemon delete-branch --remote-only <name>  # the REMOTE copy, under a lease on the proven tip
 ```
 
 **Example trigger:**

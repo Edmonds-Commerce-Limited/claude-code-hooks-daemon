@@ -439,7 +439,9 @@ class TestCleanupAfterMerge:
         _merged(repo, "feat")
         _git(repo, "push", "--quiet", "origin", "feat")
         report = cleanup_after_merge(repo, ["feat"], config=_CONFIG, target="main", mode="act")
-        assert "git push origin --delete feat" in report.commands
+        assert f"{daemon_cli_command_for_docs('delete-branch', '--remote-only')} feat" in (
+            report.commands
+        )
         assert "feat" in _git(bare, "branch")
 
     def test_a_line_merged_into_another_line_is_refused(self, repo: Path) -> None:
@@ -671,7 +673,9 @@ class TestFailuresAndEdges:
         _merged(repo, "feat")
         _git(repo, "push", "--quiet", "origin", "feat")
         report = clean_sweep(repo, _CONFIG, dry_run=False)
-        assert "git push origin --delete feat" in report.commands
+        assert f"{daemon_cli_command_for_docs('delete-branch', '--remote-only')} feat" in (
+            report.commands
+        )
 
 
 class TestDeleteIfMerged:

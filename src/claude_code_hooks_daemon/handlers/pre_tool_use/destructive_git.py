@@ -907,7 +907,8 @@ def _remote_delete_note(command: str, cwd: Path, branches: BranchesConfig) -> st
         "Not deleted: " + "; ".join(problems) + ". A remote branch that is already merged into "
         "the default branch or an integration line, or whose every added or changed file "
         "already has the same content at the same path on the default or an integration line, "
-        "may be deleted by an agent; a branch holding content found nowhere else, an "
+        "may be deleted by an agent (`delete-branch --remote-only <name>` is the leased route: "
+        "it holds a lease on the proven tip and prints the restore line); a branch holding content found nowhere else, an "
         "integration line not yet merged into the default, the default, an exempt "
         "or protected name (or any tag) is human-only, so ask the human to run it."
     )
@@ -1006,7 +1007,9 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
         "`git push --delete <name>` / `git push <remote> :<name>` of a branch not merged "
         "into the default branch, or of a tag; `git push --mirror` / `--prune` always",
         "Deletes a branch or tag in the shared remote repository, beyond any local recovery",
-        "A branch already merged into the default branch is deleted freely; otherwise do not "
+        "A branch merged into the default branch or an integration line, or holding no file "
+        "found nowhere else, is deleted freely: prefer `delete-branch --remote-only <name>`, "
+        "which holds a lease on the proven tip and prints the restore line; otherwise do not "
         "run it, stop and ask the human to run it themselves",
     ),
     (
