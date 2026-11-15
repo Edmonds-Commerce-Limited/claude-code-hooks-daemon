@@ -64,6 +64,12 @@ TIER_MERGED = "merged"
 TIER_PATCH_EQUIVALENT = "patch-equivalent"
 TIER_CONTENT_PRESERVED = "content-preserved"
 TIER_UNPROVEN = "unproven"
+#: REMOTE-delete evidence only (``core/remote_branch_proof``): an unmerged branch whose
+#: every added or changed file already has the same mode and blob at the SAME path on
+#: the default's tip or a declared integration line's remote tip, so deleting it loses
+#: no file content. Never cached and never a local-delete tier; the deleting agent's
+#: own claim is not an input to it.
+TIER_SURVIVING_CONTENT = "surviving-content"
 #: The remote holds the tip, or a descendant of it, under a ref this clone does not
 #: fetch (an archive namespace). Proved by ONE ``ls-remote`` the explicit command
 #: makes; never reached from a hook path (issue #166).

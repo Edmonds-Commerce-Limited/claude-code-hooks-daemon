@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -43,6 +44,7 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_CONTENT_PRESERVED,
     TIER_MERGED,
     TIER_PATCH_EQUIVALENT,
+    TIER_SURVIVING_CONTENT,
     TIER_UNPROVEN,
     matches_any_glob,
     patch_equivalent,
@@ -351,6 +353,65 @@ def _holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
     return any(_tree_holds(directory, commit, changes) for commit in candidates)
 
 
+def _surviving_content_gaps(
+    directory: Path, tracking_ref: str, targets: list[str]
+) -> list[str] | None:
+    """Paths the branch adds or changes whose content is on none of ``targets``' tips.
+
+    ``[]`` is the proof: every such path has the same mode and blob at the same path
+    on at least one target tip, wherever the targets differ. A path the branch
+    DELETES is not content and is ignored, so a branch of only deletions (or of no
+    change at all) has nothing to find elsewhere and is ``None``, as is a branch
+    with no merge base against the first target that has one or more changed paths
+    than ``MAX_PROOF_PATHS``. ``targets`` are the default refs first, then integration
+    lines, and never a ref this command deletes (the caller's filter).
+
+    Raises:
+        ProofUnavailableError: git failed, so there is no answer.
+    """
+    merge_base = None
+    for target in targets:
+        base = run_git(directory, "merge-base", target, tracking_ref, timeout=Timeout.GIT_CONTEXT)
+        if base.returncode == 0:
+            merge_base = base.stdout.strip()
+            break
+        if base.returncode != _NO_MERGE_BASE:
+            raise ProofUnavailableError(f"git merge-base failed for {tracking_ref}")
+    if merge_base is None:
+        return None
+    changes = _net_change(directory, merge_base, tracking_ref)
+    content = [change for change in changes if not change.deleted]
+    if not content or len(changes) > MAX_PROOF_PATHS:
+        return None
+    paths = [change.path for change in content]
+    held = [_tree_entries(directory, target, paths) for target in targets]
+    return sorted(
+        change.path
+        for change in content
+        if not any(entries.get(change.path) == (change.mode, change.blob) for entries in held)
+    )
+
+
+#: Paths named in a refusal before the rest are counted.
+_GAP_PREVIEW: Final[int] = 5
+
+
+def _content_gap_note(gaps: list[str] | None) -> str:
+    """The sentence saying why the surviving-content proof did not accept a branch."""
+    if gaps is None:
+        return (
+            "; nor can its content be shown to exist elsewhere (it adds or changes no file, "
+            f"has no merge base with the default, or changes more than {MAX_PROOF_PATHS} paths)"
+        )
+    shown = ", ".join(f"`{path}`" for path in gaps[:_GAP_PREVIEW])
+    rest = len(gaps) - _GAP_PREVIEW
+    more = f" and {rest} more" if rest > 0 else ""
+    return (
+        f"; and {len(gaps)} file(s) it holds exist with that content on no surviving ref "
+        f"(the default or an integration line): {shown}{more}"
+    )
+
+
 def _judge_offline(directory: Path, tracking_ref: str, targets: list[str]) -> str:
     """The tier that proves one tracking ref merged into a default ref, or ``unproven``.
 
@@ -410,9 +471,17 @@ def _offline_evidence(
 
 
 def _merged_tracking_tips(
-    directory: Path, remote: str, names: list[str], default: str, branches: BranchesConfig
+    directory: Path,
+    remote: str,
+    names: list[str],
+    default: str,
+    branches: BranchesConfig,
+    also_deleting: Collection[str] = (),
 ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     """``(name -> tracking tip of each proven name, name -> problem, name -> evidence)``.
+
+    ``also_deleting`` names other branches the same command removes: neither they nor
+    ``names`` may vouch for a branch's content (:func:`_surviving_content_gaps`).
 
     One listing call, then one ``for-each-ref --merged`` per target over all the named
     refs; only a branch ancestry did not settle pays the patch-id and tree checks. Judged from local git
@@ -448,6 +517,7 @@ def _merged_tracking_tips(
             tips[name] = listed[0]
     proven: set[str] = set()
     evidence: dict[str, str] = {}
+    content_gaps: dict[str, list[str] | None] = {}
     if tips:
         default_targets = _default_proof_targets(remote, default, refs)
         # An integration line is proved against the default branch ONLY: being merged
@@ -483,6 +553,30 @@ def _merged_tracking_tips(
                 if tracking[name] in found:
                     proven.add(tracking[name])
                     evidence[name] = found[tracking[name]]
+        # Not merged by any history evidence: is anything in it unique? Judged afresh
+        # every time (a cached answer would not see a line or default moving), and
+        # against surviving refs only, so a ref deleted with it cannot vouch for it.
+        doomed = {f"{REMOTES_PREFIX}{remote}/{n}" for n in (*names, *also_deleting)}
+        surviving = [
+            target for target in _proof_targets(remote, default, branches, refs) if target not in doomed
+        ]
+        for name in sorted(feature_names):
+            if tracking[name] in proven or not default_targets:
+                continue
+            try:
+                gaps = _surviving_content_gaps(directory, tracking[name], surviving)
+            except ProofUnavailableError as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="an unanswered content proof leaves the branch unproven, which refuses its delete",
+                )
+                gaps = None
+            if gaps == []:
+                proven.add(tracking[name])
+                evidence[name] = TIER_SURVIVING_CONTENT
+            else:
+                content_gaps[name] = gaps
     lines = " or any integration line" if branches.integration_lines else ""
     for name in list(tips):
         if tracking[name] not in proven:
@@ -493,7 +587,8 @@ def _merged_tracking_tips(
                     f"branch `{default}` (another line does not count)"
                 )
             else:
-                problems[name] = f"`{name}` is not merged into `{default}`{lines}"
+                note = _content_gap_note(content_gaps[name]) if name in content_gaps else ""
+                problems[name] = f"`{name}` is not merged into `{default}`{lines}{note}"
     return tips, problems, {name: evidence[name] for name in tips}
 
 
@@ -554,9 +649,17 @@ def _live_tip_problems(directory: Path, remote: str, local_tips: dict[str, str])
 
 
 def prove_remote_merged(
-    directory: Path, remote: str, names: list[str], default: str, branches: BranchesConfig
+    directory: Path,
+    remote: str,
+    names: list[str],
+    default: str,
+    branches: BranchesConfig,
+    also_deleting: Collection[str] = (),
 ) -> RemoteProof:
     """Prove each of ``names`` (bare branch names, already past :func:`named_ref_problem`).
+
+    ``also_deleting`` is every other branch the same command deletes; none may vouch
+    for another's content (the surviving-content tier).
 
     Contacts the remote (``ls-remote``) only for the names the local proof accepted.
     Every git call of the proof runs from the repository top level, resolved once, so
@@ -573,7 +676,9 @@ def prove_remote_merged(
             evidence={},
         )
     directory = Path(top.stdout.strip())
-    tips, problems, evidence = _merged_tracking_tips(directory, remote, names, default, branches)
+    tips, problems, evidence = _merged_tracking_tips(
+        directory, remote, names, default, branches, also_deleting
+    )
     stale = _live_tip_problems(directory, remote, tips)
     return RemoteProof(
         tips={name: tip for name, tip in tips.items() if name not in stale},
