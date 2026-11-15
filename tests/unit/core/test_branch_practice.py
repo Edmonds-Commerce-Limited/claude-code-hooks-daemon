@@ -49,7 +49,7 @@ def test_recovery_shaped_names_draw_the_archive_advice(name: str) -> None:
     advice = recovery_copy_advisory(name)
     assert advice is not None
     assert name in advice
-    assert "refs/archive/" in advice and "bundle" in advice
+    assert "refs/archive/" in advice and "bundle" not in advice
 
 
 @pytest.mark.parametrize("name", ["feature/rescue-flow", "backups", "plan-12", "rescued"])

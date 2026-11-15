@@ -8,8 +8,10 @@ from typing import Final
 
 BRANCH_LIMIT_PRINCIPLE: Final[str] = (
     "The limit exists so work FINISHES, never so it disappears. "
-    "Finish a branch (merge it), park it with a reason, or delete it only when "
-    "the guard proves nothing is lost. Work that serves another lane goes on "
+    "Finish a branch (merge it), or delete it only when the guard proves by "
+    "machine that nothing is lost or a human confirmed it; your own assertion "
+    "that a branch is not needed never counts. Parking is a short, bounded "
+    "pause, not a place to leave work. Work that serves another lane goes on "
     "that lane's branch, not a new one. A patch or copy saved under an ignored "
     "or untracked directory is lost work, not compliance. If the limit seems to "
     "force a choice between losing work and exceeding it, stop and ask a human."
@@ -17,7 +19,7 @@ BRANCH_LIMIT_PRINCIPLE: Final[str] = (
 
 #: Branch-name globs that read as a recovery copy. Pools count only branches, so a
 #: recovery copy kept as a branch is counted as open work; it belongs under
-#: ``refs/archive/<name>`` or in a bundle. Not configurable: a named constant.
+#: ``refs/archive/<name>``. Not configurable: a named constant.
 RECOVERY_COPY_PATTERNS: Final[tuple[str, ...]] = (
     "rescue/*",
     "recovery/*",

@@ -595,8 +595,8 @@ def _cap_lines(
     ordered = sorted(groups, key=lambda work: (_rank(work), work.committed, work.name))
     lines = [
         f"Open work branches: {len(groups)} (cap {config.effective_wip_cap()}). "
-        "Finish (merge) one, park it with a reason, or delete it once the guard proves "
-        "nothing is lost, before starting another:"
+        "Finish (merge) one, briefly park it with a reason, or delete it only when the "
+        "guard proves nothing is lost, before starting another:"
     ]
     park = daemon_cli_command_for_docs("branch-park")
     fixes: list[str] = []
@@ -649,8 +649,9 @@ def _dormancy_deny_lines(
 ) -> tuple[list[str], list[str]]:
     """``(lines, fixes)`` for the dormant branches at the block stage."""
     lines = [
-        "Dormant branches are blocking new work. Finish and merge each one, park it "
-        "(`hooks-daemon branch-park <name> --reason ...`), or delete it (`delete-branch`):"
+        "Dormant branches are blocking new work. Finish and merge each one, briefly park "
+        "it (`hooks-daemon branch-park <name> --reason ...`), or delete it (`delete-branch`, "
+        "only when the guard proves nothing is lost):"
     ]
     park = daemon_cli_command_for_docs("branch-park")
     delete = daemon_cli_command_for_docs("delete-branch")
@@ -661,7 +662,9 @@ def _dormancy_deny_lines(
         delete_fix = f"{delete} {work.name}"
         fixes.extend((park_fix, delete_fix))
         lines.append(f"  - {_detail(work, now, worktrees)}")
-        lines.append(f"      -> {park_fix}; or {delete_fix}")
+        lines.append(
+            f"      -> {park_fix}; or {delete_fix} (only when the guard proves nothing is lost)"
+        )
     if len(ordered) > DENY_LIST_LIMIT:
         lines.append(f"  ... and {len(ordered) - DENY_LIST_LIMIT} more")
     lines.append(BRANCH_LIMIT_PRINCIPLE)
@@ -674,8 +677,9 @@ def _dormancy_context_lines(
     ordered = sorted(noisy, key=lambda work: (work.committed, work.name))
     details = ", ".join(_detail(work, now, worktrees) for work in ordered[:DUPLICATE_LIST_LIMIT])
     return [
-        f"Dormant branches need attention: {details}. Finish, park "
-        "(`hooks-daemon branch-park <name> --reason ...`) or delete them."
+        f"Dormant branches need attention: {details}. Finish, briefly park "
+        "(`hooks-daemon branch-park <name> --reason ...`) or delete them only when the "
+        "guard proves nothing is lost."
     ]
 
 
@@ -714,7 +718,7 @@ def _parked_pool_lines(
         flag = "  [STALE]" if work.name in stale_names else ""
         clear = f"{park} {work.name} --clear"
         remove = f"{delete} {work.name}"
-        action = f"{clear}, then merge it; or {remove}"
+        action = f"{clear}, then merge it; or {remove} (only when the guard proves nothing is lost)"
         fixes.extend((clear, remove))
         if work.name in stale_names:
             repark = f"{park} {work.name} --reason ..."

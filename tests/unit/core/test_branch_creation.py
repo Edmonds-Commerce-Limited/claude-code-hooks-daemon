@@ -288,6 +288,7 @@ class TestDormancy:
         text = "\n".join(verdict.lines)
         assert "stale" in text
         assert "branch-park" in text and "delete-branch" in text
+        assert "only when the guard proves nothing is lost" in text
         assert verdict.lines[-1] == BRANCH_LIMIT_PRINCIPLE
 
     def test_warn_mode_stops_at_noisy(self, repo: Path) -> None:

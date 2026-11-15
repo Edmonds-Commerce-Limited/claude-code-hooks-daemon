@@ -1,6 +1,6 @@
 """Advisories for two branch practices a command can be seen breaking.
 
-Recovery copies go to a bundle or ``refs/archive/<name>``, never to a branch (the
+Recovery copies go to ``refs/archive/<name>``, never to a branch (the
 pools count only branches), and a worktree is created from the main checkout,
 never inside another worktree. The practice itself is written once in
 ``CLAUDE/core/Worktree.core.md``; these lines only point the agent at it.
@@ -26,8 +26,8 @@ def recovery_copy_advisory(name: str) -> str | None:
         return None
     return (
         f"`{name}` looks like a recovery copy. Branches count against the work-branch "
-        f"cap, so keep a recovery copy as `git update-ref refs/archive/{name} <sha>` "
-        "or as a `git bundle create`, not as a branch."
+        f"cap, so keep a recovery copy as `git update-ref refs/archive/{name} <sha>`, "
+        "not as a branch."
     )
 
 

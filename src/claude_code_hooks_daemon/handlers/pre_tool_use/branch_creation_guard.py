@@ -71,8 +71,8 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             blocked="creating a branch while the open work branches are at `branches.wip.cap`",
             why="Work that is started and never finished piles up as branches nobody "
             "returns to; the cap makes an agent finish before it starts",
-            fix="Finish (merge) one of the listed branches, park it with a reason, or delete it "
-            "once the guard proves nothing is lost; only then start new work",
+            fix="Finish (merge) one of the listed branches, briefly park it with a reason, or "
+            "delete it only when the guard proves nothing is lost; only then start new work",
             verbose=(
                 "WHY:\n"
                 "  Every open branch is work someone must finish, park or delete.\n"
@@ -86,7 +86,8 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             "`branches.dormancy` block stage",
             why="A branch nobody has touched for weeks is work that is being forgotten; "
             "new work waits until each one is finished, parked or deleted",
-            fix="Merge it, `hooks-daemon branch-park <name> --reason ...`, or `delete-branch` it",
+            fix="Merge it, briefly park it (`hooks-daemon branch-park <name> --reason ...`), or "
+            "`delete-branch` it only when the guard proves nothing is lost",
             verbose=(
                 "WHY:\n"
                 "  Dormancy ages a branch from its tip's commit date. Parked and merged\n"
@@ -99,8 +100,8 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             "or holds a branch parked past `branches.parked.max_age_days`",
             why="Parking is a pause, not a place to leave work for ever; an un-cleared "
             "park is dormant work with a reason attached",
-            fix="Merge it, `branch-park <name> --clear`, delete it, or re-park it with a "
-            "NEW reason (a same-reason re-park is refused)",
+            fix="Merge it, `branch-park <name> --clear`, delete it only when the guard proves "
+            "nothing is lost, or re-park it with a NEW reason (a same-reason re-park is refused)",
             verbose=(
                 "WHY:\n"
                 "  A park commit ages the branch from the day it was written. The list\n"
@@ -235,8 +236,9 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             "branches at `branches.parked.cap` (or one parked past "
             "`branches.parked.max_age_days`), MERGED branches at `branches.merged.cap` "
             "(or one unkept or kept past `branches.merged.max_age_days`). Each pool "
-            "has `mode: block|warn|off`. Merge, park or delete an open branch; clear "
-            "a park with `branch-park <name> --clear` or re-park with a NEW reason; "
+            "has `mode: block|warn|off`. Merge an open branch, or delete it only when the guard proves "
+            "nothing is lost or a human confirmed it; parking is a short, bounded "
+            "pause. Clear a park with `branch-park <name> --clear` or re-park with a NEW reason; "
             "clear merged branches with `branch-sweep --clean` or keep one with "
             "`branch-keep <name> --reason ...`. `branch-preflight [name]` (read-only) lists "
             "every pool that blocks a creation right now with its exact fix; the deny "
@@ -245,7 +247,7 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
             "reset, never a creation. A name close to an existing branch's draws a "
             "duplicate warning naming it; that never blocks. Advisory only: a branch named "
             "like a recovery copy (`rescue/*`, `recovery/*`, `backup/*`, `*-rescue`, "
-            "`*-backup`) is told to archive under `refs/archive/<name>` or a bundle "
+            "`*-backup`) is told to archive under `refs/archive/<name>` "
             "instead, since pools count only branches; a worktree created inside "
             "another worktree is told the main checkout is where it is created, never "
             "nested."

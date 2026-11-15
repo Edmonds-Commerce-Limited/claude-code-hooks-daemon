@@ -285,6 +285,23 @@ class TestBranchPracticeAdvisories:
         assert "refs/archive" in guidance and "never nested" in guidance
 
 
+def test_rule_fixes_and_guidance_never_offer_an_unproven_delete(
+    handler: BranchCreationGuardHandler,
+) -> None:
+    guidance = handler.get_claude_md()
+    assert guidance is not None
+    texts = [guidance]
+    for rule in handler.get_rules():
+        texts.extend([rule.fix, rule.why])
+    joined = "\n".join(texts)
+    for word in ("allow-unproven", "bundle", "valueless"):
+        assert word not in joined
+    by_id = {rule.rule_id: rule for rule in handler.get_rules()}
+    for rule_id in ("R-BRANCH-WIP-CAP", "R-BRANCH-DORMANT", "R-BRANCH-PARKED-POOL"):
+        assert "proves nothing is lost" in by_id[rule_id].fix
+    assert "short, bounded" in guidance
+
+
 def test_rules_guidance_and_acceptance_tests(handler: BranchCreationGuardHandler) -> None:
     assert [rule.rule_id for rule in handler.get_rules()] == [
         "R-BRANCH-WIP-CAP",
