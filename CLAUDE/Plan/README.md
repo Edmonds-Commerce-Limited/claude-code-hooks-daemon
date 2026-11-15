@@ -10,8 +10,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00608: provision sh provisions the relay binary](00608-provision-sh-provisions-the-relay-binary/PLAN.md) - Not Started on main (the work is built on branch `agent-a85cf266bd3c1c30d-57f43a44`, awaiting merge; see its JOURNAL)
 
-- [00607: unblock the Dependabot-held packages](00607-dependabot-held-packages-unblock/PLAN.md) - In Progress (19 open alerts are all held by dev-tool pins: drop the unused `safety` so `filelock` reaches 4.x, and run semgrep from an isolated pinned tool environment so `mcp` and OpenTelemetry leave `uv.lock`)
-
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
 - [00603: supervisor idle compact at 30 percent](00603-supervisor-idle-compact-at-30-percent/PLAN.md) - In Progress (built, dry-run first: verify Claude Code's idleCompaction, and add a supervisor compaction at true idle once context reaches 30%)
@@ -196,6 +194,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00607: unblock the Dependabot-held packages](Completed/00607-dependabot-held-packages-unblock/PLAN.md) - Complete at `3076e216c` + fixes `8d82b3069` (anyio declared) and `55d78799c` (coverage held at 7.13.5) (main CI run 43766285856 green) + the archiving commit (open Dependabot alerts 19 to 0: the unused `safety` is dropped so `filelock` reaches 4.2.10; semgrep runs from a pinned `uv tool run` environment, so `mcp` and OpenTelemetry leave `uv.lock`; dev-only, no release note)
+
 - [00606: Plan 00605 follow-up daemon fixes](Completed/00606-plan-00605-follow-up-daemon-fixes/PLAN.md) - Complete at merge `0fb70b7c6` (main CI run 43752399610 green) + the archiving commit (`work-queue done` drops the issue it finished from the workable cache; acceptance socket discovery uses the daemon's resolver; the branch-creation guard sees `scripts/setup_worktree.sh` through wrappers; release note 077)
 
 - [00605: branch sweep classifies no merge base branches](Completed/00605-branch-sweep-classifies-no-merge-base-branches/PLAN.md) - Complete at merge `3b39560f9` (main CI run 43620790845 green on attempt 2) + the archiving commit (GitHub #203, closed: a no-merge-base branch is measured as unmerged work, never patch-equivalent; reasons name the real cause; `branch-sweep --budget-ms`; release note 073)
@@ -254,8 +254,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00565: gh view comments suggestion hides body](Completed/00565-gh-view-comments-suggestion-hides-body/PLAN.md) - Complete at merge `eed7fd934` + the archiving commit (GitHub #158: `gh_issue_comments` / `gh_pr_comments` suggest `--json title,body,state,comments` instead of `--comments`, which prints only comments without a TTY; release note 001)
 
-- [00562: cross clone plan number allocation](Completed/00562-cross-clone-plan-number-allocation/PLAN.md) - Complete at merge `5289e8fad` + `9b21e9c5c` + the archiving commit (GitHub #154: `mkplan.bash` fetches with a time limit and reads the plan folders on every remote branch before allocating; hooks read already-fetched refs only; release note 033; the not-yet-pushed race is Plan 00564)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -309,9 +307,9 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - **Total Plans Created**: 608 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 510 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 511 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 75 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 74 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
