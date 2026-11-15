@@ -80,6 +80,7 @@ def slow_target(tmp_path: Path) -> Path:
 
 
 _VERSION_FILE = _REPO_ROOT / "scripts" / "qa" / "semgrep-version.txt"
+_PYTHON_FILE = _REPO_ROOT / "scripts" / "qa" / "semgrep-python.txt"
 
 
 def _run_unobtainable(tmp_path: Path, **overrides: str) -> tuple[int, dict, str]:
@@ -135,6 +136,33 @@ class TestSemgrepResolution:
         assert output["summary"]["passed"] is False
         assert output["summary"]["error"].startswith("semgrep unavailable: ")
         assert fragment in output["summary"]["error"]
+
+    def test_the_python_pin_is_one_minor_version_in_one_file(self) -> None:
+        pin = _PYTHON_FILE.read_text(encoding="utf-8").strip()
+        assert re.fullmatch(r"\d+\.\d+", pin), pin
+
+    def test_a_missing_python_pin_fails_the_gate_closed(self, tmp_path: Path) -> None:
+        returncode, output, stderr = _run_unobtainable(
+            tmp_path, QA_SEMGREP_PYTHON_FILE="/nonexistent/python.txt"
+        )
+
+        assert returncode == 1
+        assert "no semgrep python pinned" in stderr
+        assert output["summary"]["passed"] is False
+        assert "no semgrep python pinned" in output["summary"]["error"]
+
+    def test_the_wrapper_passes_the_pinned_python_to_uv(self, tmp_path: Path) -> None:
+        record = tmp_path / "argv.txt"
+        fake_uv = tmp_path / "uv"
+        fake_uv.write_text(
+            f'#!/usr/bin/env bash\necho "$@" >> {record}\nexit 1\n', encoding="utf-8"
+        )
+        fake_uv.chmod(0o755)
+
+        _run_unobtainable(tmp_path, QA_SEMGREP_UV=str(fake_uv))
+
+        pin = _PYTHON_FILE.read_text(encoding="utf-8").strip()
+        assert f"--python {pin}" in record.read_text(encoding="utf-8")
 
     def test_a_pin_uv_cannot_satisfy_fails_the_gate_closed(self, tmp_path: Path) -> None:
         version_file = tmp_path / "version.txt"

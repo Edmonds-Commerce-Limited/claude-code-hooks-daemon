@@ -722,7 +722,11 @@ other checkers still take directories only.
   `opentelemetry-api` pins held the lock below patched versions, Plan 00607);
   the wrapper runs it with `uv tool run` at the exact version in
   `scripts/qa/semgrep-version.txt`, the one place to bump it. uv caches the
-  tool, so a warmed machine runs offline. The pin fixes semgrep itself, NOT
+  tool, so a warmed machine runs offline. The interpreter is pinned beside it
+  in `scripts/qa/semgrep-python.txt` (`3.13`) and passed as `--python`:
+  semgrep 1.185.0's `semgrep-core` does not install for Python 3.10-3.12 under
+  uv ("Failed to find semgrep-core"), so an unpinned run depends on which
+  interpreter uv picks. The pin fixes semgrep itself, NOT
   its transitive dependencies: `uv tool run` resolves those unlocked, and
   nothing in `uv.lock` covers them. If uv or that version cannot be
   obtained the check FAILS with the error JSON, it never skips.
