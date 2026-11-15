@@ -48,7 +48,9 @@ class _SocketProbe(Handler):
 
 @pytest.fixture
 def probe(monkeypatch: pytest.MonkeyPatch) -> _SocketProbe:
-    monkeypatch.setattr(ssh_agent, "process_environ", lambda pid: ({"SSH_AUTH_SOCK": _SOCKET}, None))
+    monkeypatch.setattr(
+        ssh_agent, "process_environ", lambda pid: ({"SSH_AUTH_SOCK": _SOCKET}, None)
+    )
     monkeypatch.setattr(ssh_agent, "validated_agent_socket", lambda value: value)
     return _SocketProbe()
 
