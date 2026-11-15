@@ -46,6 +46,7 @@ holds until it really finishes, so they cannot pile up as stragglers either.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import threading
 import time
@@ -339,8 +340,14 @@ class BoundedDispatcher(Generic[T]):
                     self._threads.discard(threading.current_thread())
                     self._stragglers.pop(threading.current_thread(), None)
 
+        # A fresh thread starts with an empty context; running in a copy of the caller's
+        # keeps what the request bound (the connecting hook process, utils.ssh_agent).
+        context = contextvars.copy_context()
         thread = threading.Thread(
-            target=_run_and_release, name=f"handler-dispatch:{label}", daemon=True
+            target=context.run,
+            args=(_run_and_release,),
+            name=f"handler-dispatch:{label}",
+            daemon=True,
         )
         try:
             with self._threads_lock:

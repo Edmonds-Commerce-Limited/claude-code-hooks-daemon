@@ -120,16 +120,29 @@ def hostname_override_of_process(pid: int) -> PeerHostname:
     Args:
         pid: The process id. A non-positive id (an unknown peer) is unreadable.
     """
+    environ, reason = process_environ(pid)
+    if environ is None:
+        return PeerHostname(unreadable_because=reason)
+    return PeerHostname(override=hostname_override(environ))
+
+
+def process_environ(pid: int) -> tuple[dict[str, str] | None, str | None]:
+    """Another process's environment as ``(environ, None)``, or ``(None, why)``.
+
+    Reads ``/proc/<pid>/environ``; see :func:`hostname_override_of_process` for
+    what that is the environment OF and when it cannot be read. The reason never
+    carries a value from the environment.
+    """
     if pid <= 0:
-        return PeerHostname(unreadable_because=f"no usable peer pid ({pid})")
+        return None, f"no usable peer pid ({pid})"
     try:
         with open(f"/proc/{pid}/environ", "rb") as handle:
             raw = handle.read()
     except OSError as exc:
-        return PeerHostname(unreadable_because=f"cannot read the environment of pid {pid}: {exc}")
+        return None, f"cannot read the environment of pid {pid}: {exc}"
     environ: dict[str, str] = {}
     for entry in raw.split(b"\0"):
         name, separator, value = entry.partition(b"=")
         if separator:
             environ[name.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
-    return PeerHostname(override=hostname_override(environ))
+    return environ, None
