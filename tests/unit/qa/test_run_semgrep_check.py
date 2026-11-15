@@ -133,7 +133,8 @@ class TestSemgrepResolution:
         assert returncode == 1
         assert fragment in stderr
         assert output["summary"]["passed"] is False
-        assert output["summary"]["error"] == "semgrep not installed"
+        assert output["summary"]["error"].startswith("semgrep unavailable: ")
+        assert fragment in output["summary"]["error"]
 
     def test_a_pin_uv_cannot_satisfy_fails_the_gate_closed(self, tmp_path: Path) -> None:
         version_file = tmp_path / "version.txt"

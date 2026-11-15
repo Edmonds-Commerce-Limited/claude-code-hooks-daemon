@@ -722,7 +722,9 @@ other checkers still take directories only.
   `opentelemetry-api` pins held the lock below patched versions, Plan 00607);
   the wrapper runs it with `uv tool run` at the exact version in
   `scripts/qa/semgrep-version.txt`, the one place to bump it. uv caches the
-  tool, so a warmed machine runs offline. If uv or that version cannot be
+  tool, so a warmed machine runs offline. The pin fixes semgrep itself, NOT
+  its transitive dependencies: `uv tool run` resolves those unlocked, and
+  nothing in `uv.lock` covers them. If uv or that version cannot be
   obtained the check FAILS with the error JSON, it never skips.
 - **Tests** (Pytest) — **95% coverage minimum**. **No test may skip, xfail or
   early-return because the process is root.** This container, and the

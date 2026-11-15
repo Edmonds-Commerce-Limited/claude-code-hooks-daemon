@@ -75,8 +75,11 @@ if [ -n "${SEMGREP_PROBE_ERROR}" ]; then
     # project's DBF standard exists to prevent.
     echo "ERROR: ${SEMGREP_PROBE_ERROR}" >&2
     echo "Install uv (https://docs.astral.sh/uv/) and run once with network access to warm its cache; the version is pinned in ${SEMGREP_VERSION_FILE}" >&2
-    printf '{"tool":"semgrep","summary":{"passed":false,"total_violations":0,"error":"semgrep not installed"},"violations":[]}\n' \
-        > "${OUTPUT_FILE}"
+    "${VENV_PYTHON}" -c '
+import json, sys
+error = "semgrep unavailable: " + sys.argv[1]
+print(json.dumps({"tool": "semgrep", "summary": {"passed": False, "total_violations": 0, "error": error}, "violations": []}))
+' "${SEMGREP_PROBE_ERROR}" > "${OUTPUT_FILE}"
     exit 1
 fi
 
