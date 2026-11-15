@@ -17,8 +17,8 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
-from claude_code_hooks_daemon.core.agent_ownership import canonical_path, running_holds
-from claude_code_hooks_daemon.core.branch_cleanup import linked_worktrees, sweep_clean_line
+from claude_code_hooks_daemon.core.agent_ownership import ownership_refusal, running_holds
+from claude_code_hooks_daemon.core.branch_cleanup import linked_worktree_records, sweep_clean_line
 from claude_code_hooks_daemon.core.branch_inventory import (
     BranchInventory,
     BranchInventoryError,
@@ -118,19 +118,19 @@ def _noisy_context(
     return (line,)
 
 
-def _running_queue_branches(repo: Path, untracked: Path) -> frozenset[str]:
-    """Branches a ``running`` work-queue record holds, by the sweep's own holds.
+def _owned_branches(repo: Path, untracked: Path) -> frozenset[str]:
+    """Branches a live agent owns, by :func:`agent_ownership.ownership_refusal`.
 
-    :func:`agent_ownership.running_holds` is the one reader of the queue: a branch is
-    held when a record names it, or when it is checked out in a worktree a record
-    names, in whatever spelling (relative, trailing separator, symlink). Empty when
-    the queue is unreadable, so every finding stands.
+    The coordinator cannot finish these. A branch is owned when a ``running``
+    work-queue record names it (or the worktree it is checked out in, in whatever
+    spelling), or when its linked worktree is locked by git or sits under the harness's
+    ``.claude/worktrees/`` directory, where a plain background sub-agent works with no
+    work-queue record. When the worktrees cannot be listed only the queue's branch names
+    apply; an unreadable queue contributes nothing, so every finding stands.
     """
     holds = running_holds(untracked, repo)
-    if not holds.worktrees:
-        return holds.branches
     try:
-        worktrees = linked_worktrees(repo)
+        records = linked_worktree_records(repo)
     except RuntimeError as exc:
         log_and_continue(
             logger,
@@ -139,10 +139,12 @@ def _running_queue_branches(repo: Path, untracked: Path) -> frozenset[str]:
             "running work-queue record names are handed over",
         )
         return holds.branches
-    by_worktree = {
-        name for name, path in worktrees.items() if canonical_path(path, repo) in holds.worktrees
+    owned = {
+        name
+        for name, record in records.items()
+        if ownership_refusal(name, record.path, locked=record.locked, holds=holds) is not None
     }
-    return holds.branches | by_worktree
+    return holds.branches | owned
 
 
 def decide_stop(
@@ -179,9 +181,10 @@ def decide_stop(
     )
     state_file = state_path(untracked, session_id, STATE_KIND, agent_id or _MAIN_KEY)
     state = read_state(state_file)
-    # N581: the coordinator cannot finish a branch a live work-queue agent owns, so it
-    # is handed over, not left behind. A sub-agent's own stop is still judged in full.
-    handed = _running_queue_branches(repo, untracked) if agent_id is None else frozenset()
+    # N581: the coordinator cannot finish a branch a live agent owns (a running queue
+    # record, or a locked or harness-directory worktree), so it is handed over, not left
+    # behind. A sub-agent's own stop is still judged in full.
+    handed = _owned_branches(repo, untracked) if agent_id is None else frozenset()
     findings = [f for f in judgement.findings if f.branch not in handed]
     blocking = [f for f in findings if not f.advisory]
     advisory = [f for f in findings if f.advisory]
@@ -190,9 +193,7 @@ def decide_stop(
     ]
     over = sorted({f.branch for f in judgement.findings if f.branch in handed})
     if over:
-        context.append(
-            "Branches handed over to running work-queue agents (not abandoned): " + ", ".join(over)
-        )
+        context.append("Branches handed over to running agents (not abandoned): " + ", ".join(over))
     reason: str | None = None
     if blocking and branches.stop_guard.mode == "warn":
         context.extend(f"Branch left behind: {f.branch}: {f.check.value}" for f in blocking)

@@ -318,3 +318,55 @@ class TestHandedOverToTheWorkQueue:
         _unpushed_branch(repo, "feat-a", agent="sub-1")
         (untracked / WORK_QUEUE_FILENAME).write_text("not json", encoding="utf-8")
         assert _decide(repo, untracked).reason is not None
+
+
+class TestHandedOverToHarnessWorktrees:
+    """A background sub-agent outside the work queue is told by its worktree.
+
+    The harness directory and git's lock are the signals ``agent_ownership`` already uses
+    to leave a live agent's worktree alone; the coordinator stop honours them too.
+    """
+
+    def _worktree(self, repo: Path, branch: str, where: Path, *, lock: bool = False) -> None:
+        _unpushed_branch(repo, branch, agent="sub-1")
+        where.parent.mkdir(parents=True, exist_ok=True)
+        _git(repo, "worktree", "add", "-q", str(where), branch)
+        if lock:
+            _git(repo, "worktree", "lock", "--reason", "claude agent", str(where))
+
+    def test_a_harness_worktree_branch_is_handed_over_not_abandoned(
+        self, repo: Path, untracked: Path
+    ) -> None:
+        self._worktree(repo, "agent-abc123", repo / ".claude" / "worktrees" / "agent-abc123")
+        decisions = [_decide(repo, untracked) for _ in range(MAX_STOP_BLOCKS + 1)]
+        for decision in decisions:
+            assert decision.reason is None
+            assert not any("abandoned at stop" in line for line in decision.context)
+        last = decisions[-1]
+        assert any("handed over" in line and "agent-abc123" in line for line in last.context)
+
+    def test_a_locked_worktree_branch_is_handed_over(self, repo: Path, untracked: Path) -> None:
+        self._worktree(repo, "feat-l", repo.parent / "wt-locked", lock=True)
+        decision = _decide(repo, untracked)
+        assert decision.reason is None
+        assert any("handed over" in line and "feat-l" in line for line in decision.context)
+
+    def test_an_ordinary_unlocked_worktree_is_still_held(self, repo: Path, untracked: Path) -> None:
+        self._worktree(repo, "feat-p", repo.parent / "wt-plain")
+        assert _decide(repo, untracked).reason is not None
+
+    def test_the_sub_agent_itself_is_still_judged(self, repo: Path, untracked: Path) -> None:
+        self._worktree(repo, "agent-def456", repo / ".claude" / "worktrees" / "agent-def456")
+        config = BranchesConfig.model_validate({"stop_guard": {"unpushed_subagent": "block"}})
+        assert _decide(repo, untracked, agent="sub-1", config=config).reason is not None
+
+    def test_an_unlistable_worktree_set_hands_nothing_over(
+        self, repo: Path, untracked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _unpushed_branch(repo, "feat-a", agent="sub-1")
+
+        def broken(_repo: Path) -> object:
+            raise RuntimeError("git worktree list failed")
+
+        monkeypatch.setattr(branch_stop_gate, "linked_worktree_records", broken)
+        assert _decide(repo, untracked).reason is not None
