@@ -666,3 +666,36 @@ class TestGoneBranchesDefensive:
 
         monkeypatch.setattr(git_sync, "_run_git", _fake)
         assert git_sync.gone_branches(tmp_path) == []
+
+
+class TestForwardedAgentSocket:
+    """fetch_all and pull_ff_only reach git with the forwarded socket and nothing else."""
+
+    _FORBIDDEN = ("GIT_ASKPASS", "SSH_ASKPASS", "GIT_SSH", "SSH_AGENT_PID")
+
+    @pytest.mark.parametrize("call", ["fetch_all", "pull_ff_only"])
+    def test_socket_reaches_git_and_command_variables_do_not(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, call: str
+    ) -> None:
+        from claude_code_hooks_daemon.utils import remote_refs
+
+        monkeypatch.setattr(remote_refs, "forwarded_agent_socket", lambda: "/run/fwd.sock")
+        for name in (*self._FORBIDDEN, "GIT_SSH_COMMAND", "SSH_AUTH_SOCK"):
+            monkeypatch.delenv(name, raising=False)
+        captured: dict[str, Any] = {}
+
+        class _Completed:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def _capture(_cmd: list[str], **kwargs: Any) -> _Completed:
+            captured["env"] = kwargs["env"]
+            return _Completed()
+
+        monkeypatch.setattr(subprocess, "run", _capture)
+        getattr(git_sync, call)(tmp_path)
+        env = captured["env"]
+        assert env["SSH_AUTH_SOCK"] == "/run/fwd.sock"
+        assert env["GIT_TERMINAL_PROMPT"] == "0"
+        assert not any(name in env for name in self._FORBIDDEN)

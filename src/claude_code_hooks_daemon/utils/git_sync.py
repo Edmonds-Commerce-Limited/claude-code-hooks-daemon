@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
+from claude_code_hooks_daemon.utils.remote_refs import remote_git_env
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import BranchesConfig
@@ -129,10 +130,10 @@ def _noninteractive_env() -> dict[str, str]:
     and a whole ``os.environ`` copy here would carry an inherited ``GIT_DIR``
     past its stripping of relocating variables.
     """
-    env = {_GIT_TERMINAL_PROMPT_ENV: _GIT_TERMINAL_PROMPT_DISABLED}
+    extra: dict[str, str] = {}
     if _GIT_SSH_COMMAND_ENV not in os.environ:
-        env[_GIT_SSH_COMMAND_ENV] = _GIT_SSH_BATCH_MODE
-    return env
+        extra[_GIT_SSH_COMMAND_ENV] = _GIT_SSH_BATCH_MODE
+    return remote_git_env(extra)
 
 
 def current_branch(cwd: Path) -> str | None:
