@@ -368,14 +368,12 @@ class TestDeletion:
             with pytest.raises(TypeError):
                 delete_branches(repo, ["risky"], **extra)
 
-
     def test_dry_run_classifies_but_deletes_nothing(self, repo: Path) -> None:
         _merged_branch(repo, "done")
         report = delete_branches(repo, ["done"], dry_run=True)
         assert report.deleted == ()
         assert "done" in _local_branches(repo)
         assert report.classifications[0].tier == TIER_MERGED
-
 
 
 class TestPrefersGitsOwnCheck:
@@ -884,6 +882,7 @@ class TestBudgetsSuitTheWorkNotTheHookContext:
             "that pack objects and walk every blob in a ref — see Plan 00248 F1"
         )
         assert budget >= Timeout.GIT_BRANCH_SAFETY
+
 
 def _peer_advances(repo: Path, name: str, workspace: Path) -> str:
     """A concurrent agent adds a commit to ``name``, as a peer in this repo would.
