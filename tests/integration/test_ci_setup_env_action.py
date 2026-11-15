@@ -44,7 +44,9 @@ def test_the_action_keys_its_uv_cache_on_uv_lock() -> None:
         s for s in action["runs"]["steps"] if str(s.get("uses", "")).startswith("actions/cache")
     ]
     assert cache_steps, "the action has no cache step"
-    assert "hashFiles('uv.lock')" in str(cache_steps[0]["with"]["key"])
+    key = str(cache_steps[0]["with"]["key"])
+    assert "hashFiles('uv.lock'" in key
+    assert "scripts/qa/semgrep-version.txt" in key, "the pinned semgrep tool lives in the uv cache"
 
 
 def test_no_job_carries_an_inline_copy_of_the_install_block() -> None:

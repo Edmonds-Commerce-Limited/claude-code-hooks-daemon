@@ -14,6 +14,7 @@ out, so the proof is the gate's own exit code, not a re-implementation of it.
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -78,13 +79,73 @@ def slow_target(tmp_path: Path) -> Path:
     return target
 
 
-class TestMissingSemgrepRemedyIsLockMatched:
-    """N367: the remedy for a missing dev tool must install from uv.lock, not pyproject."""
+_VERSION_FILE = _REPO_ROOT / "scripts" / "qa" / "semgrep-version.txt"
 
-    def test_the_remedy_syncs_from_the_lock(self) -> None:
+
+def _run_unobtainable(tmp_path: Path, **overrides: str) -> tuple[int, dict, str]:
+    """Run the wrapper with semgrep resolution broken by ``overrides``."""
+    output_dir = tmp_path / "qa"
+    env = {**os.environ, "QA_SEMGREP_OUTPUT_DIR": str(output_dir), **overrides}
+    completed = subprocess.run(
+        ["bash", str(_WRAPPER)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=_WRAPPER_TIMEOUT_SECONDS,
+        check=False,
+    )
+    output = json.loads((output_dir / "semgrep.json").read_text(encoding="utf-8"))
+    return completed.returncode, output, completed.stderr
+
+
+class TestSemgrepResolution:
+    """Plan 00607: semgrep runs from a pinned uv tool environment, never the project venv."""
+
+    def test_the_pin_is_one_exact_version_in_one_file(self) -> None:
+        pin = _VERSION_FILE.read_text(encoding="utf-8").strip()
+        assert re.fullmatch(r"\d+\.\d+\.\d+", pin), pin
+
+    def test_semgrep_is_not_a_project_dependency(self) -> None:
+        pyproject = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        assert not re.search(r'^\s*"(semgrep|safety)\b', pyproject, re.MULTILINE)
+
+    def test_the_wrapper_does_not_look_in_the_project_venv(self) -> None:
         text = _WRAPPER.read_text(encoding="utf-8")
-        assert "uv sync --frozen --all-extras" in text
-        assert "uv pip install -e '.[dev]'" not in text
+        assert 'dirname "${VENV_PYTHON}")/semgrep' not in text
+        assert "uv sync --frozen --all-extras" not in text
+
+    @pytest.mark.parametrize(
+        ("overrides", "fragment"),
+        [
+            pytest.param({"QA_SEMGREP_UV": "/nonexistent/uv"}, "uv not found", id="no-uv"),
+            pytest.param(
+                {"QA_SEMGREP_VERSION_FILE": "/nonexistent/version.txt"},
+                "no semgrep version pinned",
+                id="no-pin",
+            ),
+        ],
+    )
+    def test_an_unobtainable_semgrep_fails_the_gate_closed(
+        self, tmp_path: Path, overrides: dict[str, str], fragment: str
+    ) -> None:
+        returncode, output, stderr = _run_unobtainable(tmp_path, **overrides)
+
+        assert returncode == 1
+        assert fragment in stderr
+        assert output["summary"]["passed"] is False
+        assert output["summary"]["error"] == "semgrep not installed"
+
+    def test_a_pin_uv_cannot_satisfy_fails_the_gate_closed(self, tmp_path: Path) -> None:
+        version_file = tmp_path / "version.txt"
+        version_file.write_text("0.0.0.dev0\n", encoding="utf-8")
+
+        returncode, output, stderr = _run_unobtainable(
+            tmp_path, QA_SEMGREP_VERSION_FILE=str(version_file), UV_OFFLINE="1"
+        )
+
+        assert returncode == 1
+        assert "could not be obtained" in stderr
+        assert output["summary"]["passed"] is False
 
 
 class TestSemgrepGateFailsClosed:

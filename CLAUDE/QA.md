@@ -717,6 +717,13 @@ other checkers still take directories only.
   the check with the install line, it never skips. Never reach zero with a
   suppression comment or a rule downgrade — see
   [development/LSP.md](development/LSP.md)
+- **Semgrep** (`run_semgrep_check.sh`) — the custom rules in
+  `scripts/qa/semgrep/`. semgrep is not in the project venv (its `mcp` and
+  `opentelemetry-api` pins held the lock below patched versions, Plan 00607);
+  the wrapper runs it with `uv tool run` at the exact version in
+  `scripts/qa/semgrep-version.txt`, the one place to bump it. uv caches the
+  tool, so a warmed machine runs offline. If uv or that version cannot be
+  obtained the check FAILS with the error JSON, it never skips.
 - **Tests** (Pytest) — **95% coverage minimum**. **No test may skip, xfail or
   early-return because the process is root.** This container, and the
   dogfood server, run as root, so a root-conditioned skip is a test that

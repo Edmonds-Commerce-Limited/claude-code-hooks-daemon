@@ -11,8 +11,8 @@
 # Rules live in scripts/qa/semgrep/*.yaml. Add a rule file there and it is
 # picked up automatically — no wiring required.
 #
-# semgrep is a DEV dependency (pyproject [dev]); the client installer runs
-# `uv pip install -e <dir>` with no [dev] extra, so it never ships to a client.
+# semgrep is a dev-only tool run from uv's isolated tool environment (see the
+# resolution block below); the client installer never installs it.
 #
 # Runs fully offline: local --config, metrics disabled, no registry fetch.
 
@@ -37,18 +37,44 @@ RULE_TIMEOUT_SECONDS="${QA_SEMGREP_TIMEOUT:-30}"
 # shellcheck source=/dev/null
 source "${REPO_ROOT}/scripts/lib/resolve_venv.sh"
 VENV_PYTHON="$(resolve_venv_python "${REPO_ROOT}")"
-SEMGREP="$(dirname "${VENV_PYTHON}")/semgrep"
+# semgrep is NOT in the project venv: its mcp and opentelemetry pins held the
+# project lock below patched versions (Plan 00607). It runs from uv's isolated
+# tool environment at the one exact version in scripts/qa/semgrep-version.txt,
+# the single place to bump it. uv caches that environment, so a warmed machine
+# runs offline.
+SEMGREP_VERSION_FILE="${QA_SEMGREP_VERSION_FILE:-${SCRIPT_DIR}/semgrep-version.txt}"
+UV_BIN="${QA_SEMGREP_UV:-uv}"
+SEMGREP_VERSION=""
+if [ -f "${SEMGREP_VERSION_FILE}" ]; then
+    SEMGREP_VERSION="$(tr -d '[:space:]' < "${SEMGREP_VERSION_FILE}")"
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 
-if [ ! -x "${SEMGREP}" ]; then
+# Fail closed unless the pinned semgrep is obtained AND reports that version.
+SEMGREP_PROBE=""
+SEMGREP_PROBE_ERROR="semgrep not installed"
+if [ -z "${SEMGREP_VERSION}" ]; then
+    SEMGREP_PROBE_ERROR="no semgrep version pinned in ${SEMGREP_VERSION_FILE}"
+elif ! type -P "${UV_BIN}" > /dev/null; then
+    SEMGREP_PROBE_ERROR="uv not found, so the pinned semgrep cannot be obtained"
+else
+    SEMGREP=("${UV_BIN}" tool run --quiet --from "semgrep==${SEMGREP_VERSION}" semgrep)
+    PROBE_LOG="${OUTPUT_DIR}/semgrep-probe.log"
+    if SEMGREP_PROBE="$("${SEMGREP[@]}" --version 2> "${PROBE_LOG}")" \
+        && [ "$(printf '%s' "${SEMGREP_PROBE}" | tail -n 1)" = "${SEMGREP_VERSION}" ]; then
+        SEMGREP_PROBE_ERROR=""
+    else
+        SEMGREP_PROBE_ERROR="semgrep ${SEMGREP_VERSION} could not be obtained from uv (see ${PROBE_LOG})"
+    fi
+fi
+
+if [ -n "${SEMGREP_PROBE_ERROR}" ]; then
     # FAIL LOUD: a missing linter that silently passes is worse than no check.
     # It reports green while examining nothing, which is the exact failure this
     # project's DBF standard exists to prevent.
-    echo "ERROR: semgrep not found at ${SEMGREP}" >&2
-    # From the lock, never from pyproject: a bare resolve gives a newer pytest and
-    # ruff than uv.lock pins, and tests then fail for the toolchain, not the code.
-    echo "Install dev dependencies:  UV_PROJECT_ENVIRONMENT=\"\$(dirname \"\$(dirname \"${VENV_PYTHON}\")\")\" uv sync --frozen --all-extras" >&2
+    echo "ERROR: ${SEMGREP_PROBE_ERROR}" >&2
+    echo "Install uv (https://docs.astral.sh/uv/) and run once with network access to warm its cache; the version is pinned in ${SEMGREP_VERSION_FILE}" >&2
     printf '{"tool":"semgrep","summary":{"passed":false,"total_violations":0,"error":"semgrep not installed"},"violations":[]}\n' \
         > "${OUTPUT_FILE}"
     exit 1
@@ -68,7 +94,7 @@ RAW_OUTPUT="${OUTPUT_DIR}/semgrep-raw.json"
 # Removed first, so a run that writes nothing can never be graded on the
 # previous run's file.
 rm -f "${RAW_OUTPUT}"
-"${SEMGREP}" scan \
+"${SEMGREP[@]}" scan \
     --config "${RULES_DIR}" \
     --metrics=off \
     --disable-version-check \
@@ -99,7 +125,7 @@ if [ "${SEMGREP_EXIT}" -eq 0 ] && [ -n "${TEST_RULES_DIR}" ] && [ -d "${TEST_RUL
         TEST_FILES+=("${TEST_FILE}")
     done < <(find "${QA_SEMGREP_TEST_ROOT:-${REPO_ROOT}/tests}" -name 'test_*.py' -not -path '*/fixtures/*')
     if [ "${#TEST_FILES[@]}" -gt 0 ]; then
-        "${SEMGREP}" scan \
+        "${SEMGREP[@]}" scan \
             --config "${TEST_RULES_DIR}" \
             --metrics=off \
             --disable-version-check \
