@@ -1514,14 +1514,10 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             '"not fully merged" and suggests the force delete, which is blocked. '
             "`delete-branch` reports this as the `merged-not-in-head` tier and deletes "
             "it; checking out `main` first also resolves it.\n\n"
-            "**Abandoning unmerged work is human-gated and you cannot complete it.** "
-            "When no proof holds, the branch holds the only copy of real work, so "
-            "`--allow-unproven --reason` is not enough: the command also requires a "
-            "human to type a confirmation at an interactive terminal, which your "
-            "non-interactive shell does not have. Those flags declare intent; consent "
-            "is separate and cannot be self-granted. Report the named files to the user "
-            "and ask them to run the command themselves — do not hunt for a way "
-            "around it.\n\n"
+            "**Unmerged work is never deleted by this command.** When no proof holds, "
+            "the branch holds the only copy of real work, and nothing you declare "
+            "changes that. Finish the work (merge it), or report the named files to "
+            "the user and let the human decide — do not hunt for a way around it.\n\n"
             "**Safe alternatives**: `git stash` (recoverable), `git diff` / `git status` "
             "(inspect first), `git commit` (save changes permanently first)."
         )

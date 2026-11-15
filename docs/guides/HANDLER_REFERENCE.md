@@ -346,8 +346,7 @@ The tier is separate rather than folded into `merged` so that a reader can see
 which proof licensed the force flag.
 
 Blocking preconditions -- the current branch, a branch checked out in any
-worktree, a protected branch name -- refuse absolutely and `--allow-unproven`
-cannot override them.
+worktree, a protected branch name -- refuse absolutely; nothing overrides them.
 
 Nothing is deleted until every branch has been classified and every blocker
 resolved, so one unsafe branch in a batch removes none of the others. Git can
@@ -359,16 +358,12 @@ written first unless `--no-bundle` is passed. The proof is blob
 identity, never path presence: a path existing upstream says nothing about the
 content at that path.
 
-**Abandoning unproven work is human-gated.** When no tier holds, the branch is
-the only copy of real work, so deleting it is a judgement call rather than a
-provable fact. `--allow-unproven --reason "..."` is necessary but NOT
-sufficient: the command additionally requires a human to type `abandon` at an
-interactive terminal. The flags declare *intent*; the prompt asks for
-*consent*, and the party requesting a deletion cannot grant its own consent.
-An agent's shell has no TTY, so the command refuses there with a message
-telling it to hand the decision back — the only unattended route to abandoning
-work is for a human to run it themselves. Provably-safe tiers never prompt, so
-the safe path stays fully automatic.
+**Unproven work is never deleted by this command.** When no tier holds, the
+branch is the only copy of real work, so deleting it is a judgement call rather
+than a provable fact, and nothing the caller declares or confirms turns it into
+one. Finish the work (merge it) or let the human who owns the branch decide.
+`--protected-ref` may name only the default branch or a declared integration
+line, so the caller cannot choose its own proof.
 
 For a `merged` branch the command delegates to `git branch -d` rather than
 forcing, so git independently re-runs its own ancestry check. A bug in the

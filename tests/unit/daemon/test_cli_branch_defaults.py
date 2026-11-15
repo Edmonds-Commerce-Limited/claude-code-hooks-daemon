@@ -42,6 +42,16 @@ def _project(tmp_path: Path, branches_yaml: str | None) -> Path:
     return tmp_path
 
 
+def _empty_commit(repo: Path) -> None:
+    subprocess.run(
+        [
+            *["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"],
+            *["commit", "-q", "--allow-empty", "-m", "c"],
+        ],
+        check=True,
+    )
+
+
 class TestParserDefaults:
     def test_delete_branch_protected_ref_defaults_to_none(self) -> None:
         args = build_parser().parse_args(["delete-branch", "x"])
@@ -57,8 +67,6 @@ def _delete_args(repo: Path, protected_ref: str | None) -> argparse.Namespace:
         project_root=repo,
         branches=["doomed"],
         protected_ref=protected_ref,
-        allow_unproven=False,
-        reason=None,
         bundle=str(repo / "b.bundle"),
         no_bundle=True,
         dry_run=True,
@@ -87,10 +95,27 @@ class TestDeleteBranch:
         assert captured_delete["protected_ref"] == "trunk"
         assert set(captured_delete["protected_names"]) == {"keep", "trunk"}
 
-    def test_explicit_flag_wins(self, tmp_path: Path, captured_delete: dict[str, Any]) -> None:
-        repo = _project(tmp_path, "  default: trunk\n")
+    def test_an_integration_line_may_be_named_as_the_target(
+        self, tmp_path: Path, captured_delete: dict[str, Any]
+    ) -> None:
+        repo = _project(tmp_path, "  default: trunk\n  integration_lines: ['release']\n")
+        _empty_commit(repo)
+        subprocess.run(["git", "-C", str(repo), "branch", "release"], check=True)
         cmd_delete_branch(_delete_args(repo, "release"))
-        assert captured_delete["protected_ref"] == "release"
+        assert captured_delete["protected_ref"] == "refs/heads/release"
+
+    def test_an_arbitrary_ref_cannot_be_named_as_the_target(
+        self,
+        tmp_path: Path,
+        captured_delete: dict[str, Any],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        repo = _project(tmp_path, "  default: trunk\n")
+        _empty_commit(repo)
+        subprocess.run(["git", "-C", str(repo), "branch", "doomed"], check=True)
+        assert cmd_delete_branch(_delete_args(repo, "doomed")) == _EXIT_USAGE
+        assert "cannot prove a deletion safe" in capsys.readouterr().err
+        assert captured_delete == {}
 
     def test_model_default_protected_names_without_a_block(
         self, tmp_path: Path, captured_delete: dict[str, Any]
@@ -125,7 +150,7 @@ class TestDeleteBranch:
     ) -> None:
         repo = _project(tmp_path, None)
         assert cmd_delete_branch(_delete_args(repo, None)) == _EXIT_USAGE
-        assert "--protected-ref" in capsys.readouterr().err
+        assert "branches.default" in capsys.readouterr().err
         assert captured_delete == {}
 
 

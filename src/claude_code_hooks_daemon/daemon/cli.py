@@ -229,7 +229,6 @@ if TYPE_CHECKING:
         SlateReport,
     )
     from claude_code_hooks_daemon.core.worktree_reaping import ProcessCwdsFn, RunGit, WorktreeAgeFn
-    from claude_code_hooks_daemon.daemon.branch_safety import BranchClassification
     from claude_code_hooks_daemon.daemon.controller import DaemonController
     from claude_code_hooks_daemon.daemon.docs_generator import CollectedHandler, DocsGenerator
     from claude_code_hooks_daemon.daemon.project_handler_health import (
@@ -6603,71 +6602,6 @@ def cmd_verdicts(args: argparse.Namespace) -> int:
 # rest. The point is to make the risk legible, not to dump a whole tree.
 _UNPROVEN_PATH_PREVIEW = 10
 
-# The word a human must type to consent to abandoning unmerged work. A single
-# keystroke is too easy to fat-finger for a decision this size.
-_ABANDON_CONFIRMATION_WORD = "abandon"
-
-
-def _stdin_is_a_terminal() -> bool:
-    """True when a human could actually answer a prompt on this stdin.
-
-    An agent's Bash tool runs non-interactively, so this is False there — which
-    is the entire mechanism by which abandonment stays human-gated.
-    """
-    stdin = sys.stdin
-    if stdin is None:
-        return False
-    try:
-        return stdin.isatty()
-    except ValueError:
-        # A closed stdin cannot be asked anything. That is an ANSWER (there is
-        # no terminal), not a swallowed failure — the caller refuses on False.
-        return False
-
-
-def _confirm_abandonment_on_tty(
-    classifications: "Sequence[BranchClassification]", reason: str
-) -> bool:
-    """Ask the human at the terminal to consent to abandoning unmerged work.
-
-    Only ever reached when stdin is a real TTY. A declared ``--reason`` asserts
-    *intent*; this asks for *consent*, and consent cannot be self-granted by
-    the same party that wants the deletion.
-    """
-    from claude_code_hooks_daemon.daemon.branch_safety import TIER_UNPROVEN
-
-    print("\nHUMAN CONFIRMATION REQUIRED", file=sys.stderr)
-    print(
-        "These branches hold file content that exists nowhere else in the "
-        "repository. Deleting them abandons that work:",
-        file=sys.stderr,
-    )
-    for c in classifications:
-        if c.tier != TIER_UNPROVEN:
-            continue
-        print(
-            f"  {c.name} — {len(c.content_unique_paths)} file(s) whose content "
-            f"is found only on this branch",
-            file=sys.stderr,
-        )
-    if reason:
-        print(f"Declared reason: {reason}", file=sys.stderr)
-
-    # The prompt goes to STDERR, not via input()'s own prompt argument, which
-    # writes to stdout — that would inject prose into `--format json` output and
-    # break a caller piping this to a JSON parser. Piping stdout does not stop
-    # stdin being a terminal, so that combination is reachable, not theoretical.
-    print(f"Type '{_ABANDON_CONFIRMATION_WORD}' to proceed: ", file=sys.stderr, end="")
-    sys.stderr.flush()
-    try:
-        answer = input()
-    except EOFError:
-        # Ctrl-D is a person declining to answer. Treat it as a refusal rather
-        # than letting a traceback stand in for the decision.
-        print("\nNo answer given — treating as declined.", file=sys.stderr)
-        return False
-    return answer.strip().lower() == _ABANDON_CONFIRMATION_WORD
-
 
 def _branches_config(repo: Path) -> BranchesConfig:
     """The project's ``branches:`` block, at the model defaults when absent (Plan 00558)."""
@@ -7011,19 +6945,42 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     # The default is resolved independently of `--protected-ref`: an integration
     # line is proved against the default alone, whatever ref the caller names.
     resolved_default = git_sync.resolve_default_branch(branches, repo)
-    protected_ref = args.protected_ref or resolved_default
-    if protected_ref is None:
+    if resolved_default is None:
         print(
             "ERROR: cannot determine the default branch (branches.default is 'auto' and "
-            "git names none); pass --protected-ref <ref> or set branches.default",
+            "git names none); set branches.default",
             file=sys.stderr,
         )
         return 2
+    protected_ref: str = resolved_default
+    if args.protected_ref is not None:
+        # The proof target is the config's, never the caller's: a caller that may
+        # name any ref (its own tip, a sha, a sibling holding it) chooses its own
+        # proof. Only the default and the declared integration lines qualify.
+        allowed = {
+            ref if ref.startswith("refs/") else branch_ref(ref)
+            for ref in branch_cleanup.cleanup_targets(repo, branches, resolved_default)
+        }
+        requested = args.protected_ref
+        candidates = (
+            [requested]
+            if requested.startswith("refs/")
+            else [branch_ref(requested), f"refs/remotes/{requested}"]
+        )
+        matched = next((ref for ref in candidates if ref in allowed), None)
+        if matched is None:
+            print(
+                f"ERROR: --protected-ref {requested} is not the default branch or a "
+                "declared integration line, so it cannot prove a deletion safe",
+                file=sys.stderr,
+            )
+            return 2
+        protected_ref = matched
     # Never-work branches are refused whatever the proof says (DESIGN.md section 1):
     # the protected names, the resolved default and every exempt glob, matched by
     # `branch_safety.matches_any_glob`. An integration line is not among them: it is
     # deletable once `protected_ref` (the default) holds every commit, and refused
-    # otherwise, whatever `--allow-unproven` says. With no resolvable default there
+    # otherwise. With no resolvable default there
     # is nothing to prove a line against, so every line is refused.
     protected_names = (*branches.protected_names, *branches.exempt, protected_ref)
     if resolved_default is not None:
@@ -7034,23 +6991,14 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         else []
     )
 
-    # Pass a confirmer ONLY when a human can actually answer it. Passing one
-    # that always declines would report "a human declined" when in truth none
-    # was ever asked — so a missing terminal is signalled by its absence, and
-    # the engine says so precisely.
-    confirm = _confirm_abandonment_on_tty if _stdin_is_a_terminal() else None
-
     try:
         report = delete_branches(
             repo,
             args.branches,
             protected_ref=protected_ref,
             protected_names=protected_names,
-            allow_unproven=args.allow_unproven,
-            reason=args.reason,
             bundle_path=bundle_path,
             dry_run=args.dry_run,
-            confirm=confirm,
             line_names=branches.integration_lines,
             line_targets=line_targets,
             remote=branches.remote,
@@ -7121,8 +7069,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         # is then the recovery route. This branch printed a hard-coded "nothing was
         # deleted" and returned before the bundle disclosure below, so it could
         # assert three untruths at once: that a deleted branch survived, that no
-        # bundle existed, and that `--allow-unproven` was the remedy when nothing
-        # was unproven (Plan 00253).
+        # bundle existed (Plan 00253).
         if report.deleted:
             print(
                 f"\nPARTIALLY REFUSED — {len(report.deleted)} branch(es) were "
@@ -7144,14 +7091,10 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
         if any(c.tier == TIER_UNPROVEN for c in report.classifications):
-            # Only advise the escape hatch when it actually applies. Offering it
-            # for a git refusal sends the reader to flags that cannot help.
             print(
-                "\nA branch whose content cannot be proven recoverable is not "
-                "deleted by default. Read the unique paths above, then re-run with "
-                "--allow-unproven and --reason. Those flags declare intent; "
-                "abandoning unmerged work also needs a human to consent at an "
-                "interactive terminal, so an agent cannot complete this alone.",
+                "\nA branch whose content cannot be proven recoverable is never "
+                "deleted by this command. Finish the work (merge it) or ask the "
+                "human who owns the branch to decide.",
                 file=sys.stderr,
             )
         return 1
@@ -13536,18 +13479,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Classify and report without deleting anything",
-    )
-    parser_delete_branch.add_argument(
-        "--allow-unproven",
-        dest="allow_unproven",
-        action="store_true",
-        help="Permit branches whose safety cannot be proven. Requires --reason, "
-        "and additionally a human confirmation at an interactive terminal",
-    )
-    parser_delete_branch.add_argument(
-        "--reason",
-        default=None,
-        help="Why the unique content on an unproven branch may be destroyed",
     )
     parser_delete_branch.add_argument(
         "--bundle",

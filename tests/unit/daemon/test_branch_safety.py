@@ -23,7 +23,6 @@ pins the difference.
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -44,23 +43,11 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_MERGED_UNPUSHED,
     TIER_PATCH_EQUIVALENT,
     TIER_UNPROVEN,
-    BranchClassification,
     classify_branch,
     delete_argv_for_tier,
     delete_branches,
     write_recovery_bundle,
 )
-
-
-def _approve(_classifications: Sequence[BranchClassification], _reason: str) -> bool:
-    """Stand-in for a human who consented at the terminal."""
-    return True
-
-
-def _decline(_classifications: Sequence[BranchClassification], _reason: str) -> bool:
-    """Stand-in for a human who was asked and said no."""
-    return False
-
 
 _ENV = {
     "GIT_AUTHOR_NAME": "Test Author",
@@ -219,7 +206,7 @@ class TestBlockingPreconditions:
 
     def test_refusal_outranks_allow_unproven(self, repo: Path) -> None:
         """``--allow-unproven`` relaxes the TIER, never a blocking precondition."""
-        report = delete_branches(repo, ["main"], allow_unproven=True, reason="trying to force it")
+        report = delete_branches(repo, ["main"])
         assert report.refused is True
         assert report.deleted == ()
 
@@ -354,85 +341,21 @@ class TestDeletion:
         assert report.deleted == ()
         assert {"safe-one", "risky"} <= _local_branches(repo)
 
-    def test_allow_unproven_requires_a_reason(self, repo: Path) -> None:
+    def test_an_unproven_branch_is_never_deleted(self, repo: Path) -> None:
+        """No parameter, reason or confirmation turns an unproven verdict into a delete."""
         _unproven_branch(repo, "risky")
-        with pytest.raises(ValueError, match="reason"):
-            delete_branches(repo, ["risky"], allow_unproven=True, confirm=_approve)
-
-    def test_allow_unproven_with_a_reason_deletes(self, repo: Path) -> None:
-        _unproven_branch(repo, "risky")
-        report = delete_branches(
-            repo,
-            ["risky"],
-            allow_unproven=True,
-            reason="content is deliberately being destroyed",
-            bundle_path=repo.parent / "r.bundle",
-            confirm=_approve,
-        )
-        assert report.deleted == ("risky",)
-        assert "risky" not in _local_branches(repo)
-
-
-class TestAbandonmentIsHumanGated:
-    """Discarding unmerged work is a human's call, never an agent's.
-
-    Every other tier is a *proof* — checkable mechanically. ``unproven`` is the
-    one path where real work is knowingly destroyed, so it must not be reachable
-    by an agent that simply passes another flag. A declared reason is an
-    assertion of intent, not a gate; only a human is a gate.
-    """
-
-    def test_unproven_deletion_without_a_confirmer_is_refused(self, repo: Path) -> None:
-        _unproven_branch(repo, "risky")
-        report = delete_branches(repo, ["risky"], allow_unproven=True, reason="I would like to")
+        report = delete_branches(repo, ["risky"])
         assert report.refused is True
         assert report.deleted == ()
         assert "risky" in _local_branches(repo)
 
-    def test_a_declined_confirmation_deletes_nothing(self, repo: Path) -> None:
+    def test_the_declared_intent_parameters_do_not_exist(self, repo: Path) -> None:
         _unproven_branch(repo, "risky")
-        report = delete_branches(
-            repo,
-            ["risky"],
-            allow_unproven=True,
-            reason="asked but refused",
-            confirm=_decline,
-        )
-        assert report.refused is True
-        assert report.deleted == ()
-        assert "risky" in _local_branches(repo)
+        for kwarg in ("allow_unproven", "reason", "confirm"):
+            extra: dict[str, Any] = {kwarg: True}
+            with pytest.raises(TypeError):
+                delete_branches(repo, ["risky"], **extra)
 
-    def test_the_confirmer_receives_the_branches_and_the_reason(self, repo: Path) -> None:
-        """A human cannot consent to something they were not shown."""
-        _unproven_branch(repo, "risky")
-        shown: list[BranchClassification] = []
-        stated: list[str] = []
-
-        def _spy(classifications: Sequence[BranchClassification], reason: str) -> bool:
-            shown.extend(classifications)
-            stated.append(reason)
-            return True
-
-        delete_branches(
-            repo,
-            ["risky"],
-            allow_unproven=True,
-            reason="the stated rationale",
-            bundle_path=None,
-            confirm=_spy,
-        )
-        assert stated == ["the stated rationale"]
-        assert [c.name for c in shown] == ["risky"]
-
-    def test_provably_safe_branches_never_ask_for_confirmation(self, repo: Path) -> None:
-        """The gate exists for abandonment, not for proven-safe cleanup."""
-        _merged_branch(repo, "done")
-
-        def _explode(_classifications: Sequence[BranchClassification], _reason: str) -> bool:
-            raise AssertionError("a proven-safe deletion must not prompt a human")
-
-        report = delete_branches(repo, ["done"], bundle_path=None, confirm=_explode)
-        assert report.deleted == ("done",)
 
     def test_dry_run_classifies_but_deletes_nothing(self, repo: Path) -> None:
         _merged_branch(repo, "done")

@@ -8,8 +8,8 @@ content has left, deleting the artefact does not un-share a link somebody has
 already opened.
 
 This project consistently refuses to let an agent self-authorise disclosure --
-the secret word list, ``delete-branch --allow-unproven`` demanding an
-interactive human, and ``standing_authorisations`` shipping every entry disabled
+the secret word list, ``delete-branch`` accepting only a machine-checked
+proof (never the caller's own say-so), and ``standing_authorisations`` shipping every entry disabled
 are the same principle. Artefact publishing was the one disclosure path with no
 guard at all.
 
@@ -320,8 +320,8 @@ is the backstop until the current session ends."""
             "for an action whose consequences stay inside the repository; publishing "
             "leaves it. An agent that can type its own justification has self-authorised "
             "disclosure, which is the precise thing this guard exists to prevent — the "
-            "same reason `delete-branch --allow-unproven` still demands an interactive "
-            "human.\n\n"
+            "same reason `delete-branch` accepts only a machine-checked proof, "
+            "never the caller's own assertion.\n\n"
             f"**To lift it**, a HUMAN changes `{_CONFIG_KEY_PATH}` to `false`. Ask them; "
             "do not apply it yourself, and do not hunt for another way to publish.\n\n"
             "**Optional full disable at source** (Plan 00293): a project that never "

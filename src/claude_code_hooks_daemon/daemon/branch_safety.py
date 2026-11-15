@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import secrets
 import subprocess  # nosec B404 - trusted system tool (git), list form, no shell
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from fnmatch import fnmatchcase
@@ -61,11 +61,6 @@ from claude_code_hooks_daemon.utils.remote_refs import (
     holder_of,
     resolve_source,
 )
-
-# Human gate for an ``unproven`` deletion: given the classifications and the
-# stated reason, return whether a person consented. Injected rather than called
-# directly so the policy is testable without a terminal.
-ConfirmCallback = Callable[[Sequence["BranchClassification"], str], bool]
 
 # Proof tiers, strongest first.
 TIER_MERGED = "merged"
@@ -88,8 +83,7 @@ TIER_MERGED_UNPUSHED = "merged-unpushed"
 #: inaccurate label this tier exists to remove (Plan 00253).
 TIER_MERGED_NOT_IN_HEAD = "merged-not-in-head"
 
-# Blocking preconditions. A refusal is absolute — no tier is computed, and
-# ``allow_unproven`` cannot override it.
+# Blocking preconditions. A refusal is absolute — no tier is computed.
 REFUSAL_CURRENT_BRANCH = "current-branch"
 REFUSAL_WORKTREE = "checked-out-in-worktree"
 REFUSAL_PROTECTED = "protected-branch"
@@ -713,8 +707,7 @@ def classify_branch(
 
     if is_line:
         # An integration line is deletable only once the DEFAULT holds every commit.
-        # Not patch-equivalence, not content, and never an unproven-then-confirmed
-        # delete: `allow_unproven` cannot reach a REFUSAL.
+        # Not patch-equivalence, not content: nothing else proves a line.
         return BranchClassification(
             name=name,
             refusal=REFUSAL_UNMERGED_LINE,
@@ -882,11 +875,8 @@ def delete_branches(
     *,
     protected_ref: str = DEFAULT_PROTECTED_REF,
     protected_names: Sequence[str] = DEFAULT_PROTECTED_NAMES,
-    allow_unproven: bool = False,
-    reason: str | None = None,
     bundle_path: Path | None = None,
     dry_run: bool = False,
-    confirm: ConfirmCallback | None = None,
     targets: Sequence[str] | None = None,
     content_tier: bool = True,
     line_names: Sequence[str] = (),
@@ -909,18 +899,10 @@ def delete_branches(
     (Plan 00249). A docstring promising more than the code delivers is worse than
     an honest one, and the recovery bundle exists precisely for this case.
 
+    An ``unproven`` branch is never deleted: only a machine-checked tier deletes,
+    and the caller's own assertion is not a tier.
+
     Args:
-        allow_unproven: permit ``unproven`` branches. Never overrides a blocking
-            precondition — those refuse regardless.
-        reason: mandatory when ``allow_unproven`` is set, so an unproven
-            deletion always carries its rationale.
-        confirm: HUMAN gate, required before any ``unproven`` branch is deleted.
-            Receives the classifications and the stated reason, and returns
-            whether to proceed. Absent or returning False, the deletion is
-            refused. Every other tier is a proof that can be checked
-            mechanically; ``unproven`` is the one path that knowingly destroys
-            unmerged work, so it must not be reachable by an agent passing
-            another flag. A declared reason asserts intent — it does not gate.
         targets: Passed to :func:`classify_branch`; the default ref plus the
             integration-line refs. ``protected_ref`` alone when None.
         content_tier: Passed to :func:`classify_branch`.
@@ -931,16 +913,7 @@ def delete_branches(
         extra_bundle_refs: Further full ref names the caller will delete itself
             (``branch-sweep --clean --remote``'s remote-tracking refs), bundled with
             the branches. The bundle is then kept even when no branch is deleted.
-
-    Raises:
-        ValueError: if ``allow_unproven`` is set without a reason.
     """
-    if allow_unproven and not (reason or "").strip():
-        raise ValueError(
-            "allow_unproven requires a reason explaining why the unique content "
-            "on these branches may be destroyed"
-        )
-
     listing = LazyRemoteRefs(repo, remote) if remote is not None else None
     classifications = tuple(
         classify_branch(
@@ -960,34 +933,13 @@ def delete_branches(
     blockers = tuple(
         f"{c.name}: {c.detail}"
         for c in classifications
-        if c.refusal is not None or (c.tier == TIER_UNPROVEN and not allow_unproven)
+        if c.refusal is not None or c.tier == TIER_UNPROVEN
     )
     if blockers:
         return DeletionReport(classifications=classifications, refused=True, blockers=blockers)
 
     if dry_run:
         return DeletionReport(classifications=classifications)
-
-    # Abandonment is a human's call. Reaching here with an ``unproven`` branch
-    # means an agent asserted intent, and asserting intent is not consenting.
-    abandoning = [c for c in classifications if c.tier == TIER_UNPROVEN]
-    if abandoning:
-        if confirm is None:
-            return DeletionReport(
-                classifications=classifications,
-                refused=True,
-                blockers=(
-                    f"deleting unmerged work on {len(abandoning)} branch(es) needs a "
-                    "human, and no confirmation channel was available — ask the user "
-                    "to run this command themselves in a terminal",
-                ),
-            )
-        if not confirm(classifications, reason or ""):
-            return DeletionReport(
-                classifications=classifications,
-                refused=True,
-                blockers=("a human was asked and declined the deletion",),
-            )
 
     bundle: Path | None = None
     if bundle_path is not None:

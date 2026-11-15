@@ -73,8 +73,6 @@ def _args(repo: Path, branches: list[str], **overrides: Any) -> argparse.Namespa
         "project_root": repo,
         "branches": branches,
         "protected_ref": "main",
-        "allow_unproven": False,
-        "reason": None,
         "bundle": None,
         "no_bundle": False,
         "dry_run": False,
