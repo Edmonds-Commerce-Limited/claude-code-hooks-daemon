@@ -51,6 +51,11 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-mock>=3.11",
+    # The `anyio` pytest plugin runs every `@pytest.mark.anyio` test. It was only
+    # ever present as a transitive of semgrep (via mcp/httpx); when Plan 00607
+    # moved semgrep out of the lock the plugin vanished and the async daemon tests
+    # errored in CI. Declared directly so no tool move can drop it again.
+    "anyio>=4.16",
     "black>=23.0",
     "ruff>=0.1.0",
     "mypy>=1.0",
