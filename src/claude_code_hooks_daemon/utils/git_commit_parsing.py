@@ -916,6 +916,11 @@ _TRANSPARENT_PREFIXES: Final[frozenset[str]] = frozenset({_BUILTIN, _COMMAND_PRE
 _ASSIGNMENT_WORD: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 
 
+def is_assignment_word(word: str) -> bool:
+    """True for a ``NAME=value`` word, which sets a variable rather than naming a command."""
+    return _ASSIGNMENT_WORD.match(word) is not None
+
+
 @dataclass(frozen=True)
 class GitInvocation:
     """One ``git`` run found in a command, and where it runs.

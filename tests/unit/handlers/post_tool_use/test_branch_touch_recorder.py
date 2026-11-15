@@ -102,6 +102,18 @@ class TestRecords:
         assert _config(repo, "branch.feat.hooksDaemonRoute") == ["switch"]
         assert touched_branches(repo, "s1", "a1") == ["feat"]
 
+    def test_setup_worktree_script_records_creator_and_route_in_the_scripts_repository(
+        self, handler: BranchTouchRecorderHandler, repo: Path, tmp_path: Path
+    ) -> None:
+        _git(repo, "branch", "worktree-x")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        command = f"{repo}/scripts/setup_worktree.sh worktree-x"
+        result = handler.handle(_bash(elsewhere, command))
+        assert result.decision == Decision.ALLOW
+        assert _config(repo, "branch.worktree-x.hooksDaemonCreator") == ["s1:a1"]
+        assert _config(repo, "branch.worktree-x.hooksDaemonRoute") == ["setup-worktree"]
+
     def test_failed_creation_records_nothing(
         self, handler: BranchTouchRecorderHandler, repo: Path
     ) -> None:

@@ -13,17 +13,20 @@ command is allowed: guessing a name would deny on text the shell never runs.
 
 from __future__ import annotations
 
+import itertools
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Final
 
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
-    _ASSIGNMENT_WORD,
     GitInvocation,
     SimpleCommand,
+    is_assignment_word,
     is_shell_resolved,
     simple_commands,
 )
+from claude_code_hooks_daemon.utils.shell_segmentation import peel_command_wrappers
 
 ROUTE_SWITCH: Final[str] = "switch"
 ROUTE_CHECKOUT: Final[str] = "checkout"
@@ -32,11 +35,19 @@ ROUTE_WORKTREE: Final[str] = "worktree"
 #: ``scripts/setup_worktree.sh <name>``, which runs ``git worktree add -b`` itself.
 ROUTE_SETUP_WORKTREE: Final[str] = "setup-worktree"
 
-_SETUP_SCRIPT_TAIL: Final[tuple[str, ...]] = ("scripts", "setup_worktree.sh")
+_SETUP_SCRIPT_NAME: Final[str] = "setup_worktree.sh"
+_SETUP_SCRIPT_TAIL: Final[tuple[str, ...]] = ("scripts", _SETUP_SCRIPT_NAME)
+_SCRIPTS_DIRECTORY: Final[str] = "scripts"
+_PARENT: Final[str] = ".."
 _SHELL_INTERPRETERS: Final[frozenset[str]] = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
-#: Interpreter option letters that stop the script from running: ``-n`` only parses
+_OPTION_END: Final[str] = "--"
+#: Interpreter short-option letters that stop the script running: ``-n`` only parses
 #: it and ``-c`` takes the next word as the program text.
-_NON_RUNNING_SHELL_LETTERS: Final[frozenset[str]] = frozenset({"n", "c"})
+_NON_RUNNING_LETTERS: Final[frozenset[str]] = frozenset({"n", "c"})
+#: Short-option letters (``-o``, ``-O``, ``+o``, ``+O``) and long options that take the next word.
+_VALUE_LETTERS: Final[frozenset[str]] = frozenset({"o", "O"})
+_VALUE_LONG_OPTIONS: Final[frozenset[str]] = frozenset({"--rcfile", "--init-file"})
+_NON_RUNNING_LONG_OPTIONS: Final[frozenset[str]] = frozenset({"--noexec"})
 
 _SWITCH_CREATE: Final[frozenset[str]] = frozenset(
     {"-c", "-C", "--create", "--force-create", "--orphan"}
@@ -143,60 +154,110 @@ def _creation(run: GitInvocation) -> Creation | None:
     return Creation(name=name, route=run.subcommand, dwim=dwim, invocation=run)
 
 
-def _is_setup_script(word: str) -> bool:
-    """True when ``word`` is a path to the repository's ``scripts/setup_worktree.sh``."""
-    return PurePosixPath(word).parts[-2:] == _SETUP_SCRIPT_TAIL
+def _is_setup_script(word: str, directory: tuple[str | None, ...]) -> bool:
+    """True when ``word`` is the repository's ``setup_worktree.sh``.
 
-
-def _script_and_arguments(words: tuple[str, ...]) -> tuple[str, tuple[str, ...]] | None:
-    """The setup script a simple command runs and its arguments, or ``None``.
-
-    The script is the command itself or the first non-option word after a shell
-    interpreter. ``cat``, ``echo`` and ``grep`` naming the path run nothing, and
-    neither does ``bash -n``.
+    Either a path ending ``scripts/setup_worktree.sh``, or the bare script name
+    while the ``cd`` chain has ended in a ``scripts`` directory.
     """
-    rest = [word for index, word in enumerate(words) if not _is_leading_assignment(words, index)]
-    if not rest:
-        return None
-    if _is_setup_script(rest[0]):
-        return rest[0], tuple(rest[1:])
-    if PurePosixPath(rest[0]).name not in _SHELL_INTERPRETERS:
-        return None
-    for index, word in enumerate(rest[1:], start=1):
-        if word.startswith("-"):
-            if _NON_RUNNING_SHELL_LETTERS & set(word.lstrip("-")):
+    parts = PurePosixPath(word).parts
+    if parts[-2:] == _SETUP_SCRIPT_TAIL:
+        return True
+    last = directory[-1] if directory else None
+    return (
+        parts == (_SETUP_SCRIPT_NAME,)
+        and last is not None
+        and PurePosixPath(last).name == _SCRIPTS_DIRECTORY
+    )
+
+
+def _interpreter_script(rest: Sequence[str]) -> int | None:
+    """Index in ``rest`` of the script a shell interpreter runs, or ``None``.
+
+    ``rest`` starts after the interpreter. Short clusters (``-xe``), long
+    options (``--norc``) and the value taken by ``-o``/``-O``/``+o``/``--rcfile``
+    are told apart, so only ``-n``, ``-c`` and ``--noexec`` mean the script does
+    not run.
+    """
+    index = 0
+    while index < len(rest):
+        word = rest[index]
+        if word == _OPTION_END:
+            return index + 1 if index + 1 < len(rest) else None
+        if word.startswith("--"):
+            name = word.split("=", 1)[0]
+            if name in _NON_RUNNING_LONG_OPTIONS:
                 return None
-            continue
-        return (word, tuple(rest[index + 1 :])) if _is_setup_script(word) else None
+            index += 2 if name in _VALUE_LONG_OPTIONS and "=" not in word else 1
+        elif word.startswith(("-", "+")) and len(word) > 1:
+            letters = word[1:]
+            if word[0] == "-" and _NON_RUNNING_LETTERS & set(letters):
+                return None
+            index += 2 if letters[-1] in _VALUE_LETTERS else 1
+        else:
+            return index
     return None
 
 
-def _is_leading_assignment(words: tuple[str, ...], index: int) -> bool:
-    """True for a ``NAME=value`` word before the command word."""
-    return all(_ASSIGNMENT_WORD.match(word) for word in words[: index + 1])
+def _script_and_arguments(
+    step: SimpleCommand,
+) -> tuple[str, tuple[str, ...], tuple[str, ...]] | None:
+    """The setup script a simple command runs, its arguments and its leading assignments.
+
+    Wrappers (``timeout``, ``env``, ``nohup``, ``sudo``...) are peeled with the
+    grammar the git path uses. The script is then the command itself or the
+    script word of a shell interpreter. ``cat``, ``echo`` and ``grep`` naming
+    the path run nothing, and neither does ``bash -n``.
+    """
+    words = step.words
+    assignments = tuple(itertools.takewhile(is_assignment_word, words))
+    rest = words[len(assignments) :]
+    _, start = peel_command_wrappers(rest)
+    rest = rest[start:]
+    wrapped = tuple(itertools.takewhile(is_assignment_word, rest))
+    assignments += wrapped
+    rest = rest[len(wrapped) :]
+    if not rest:
+        return None
+    if _is_setup_script(rest[0], step.directory):
+        return rest[0], tuple(rest[1:]), assignments
+    if PurePosixPath(rest[0]).name not in _SHELL_INTERPRETERS:
+        return None
+    offset = _interpreter_script(rest[1:])
+    if offset is None:
+        return None
+    script = rest[1 + offset]
+    if not _is_setup_script(script, step.directory):
+        return None
+    return script, tuple(rest[2 + offset :]), assignments
+
+
+def _script_root(script: str) -> str:
+    """The repository root the script resolves, relative to the directory it is named from."""
+    path = PurePosixPath(script)
+    return _PARENT if path.parts == (_SETUP_SCRIPT_NAME,) else str(path.parent.parent)
 
 
 def _setup_script_creation(step: SimpleCommand) -> Creation | None:
     """The branch a ``scripts/setup_worktree.sh <name>`` run creates, or ``None``.
 
     The script resolves its repository from its own location, so the run acts in
-    the repository two levels above the script path rather than in the working
+    the repository above the ``scripts`` directory rather than in the working
     directory.
     """
-    found = _script_and_arguments(step.words)
+    found = _script_and_arguments(step)
     if found is None:
         return None
-    script, arguments = found
+    script, arguments, assignments = found
     name = arguments[0] if arguments else ""
     if not name or name.startswith("-") or is_shell_resolved(name):
         return None
-    root = str(PurePosixPath(script).parent.parent)
     run = GitInvocation(
         subcommand=ROUTE_SETUP_WORKTREE,
         global_options=(),
         arguments=arguments,
-        assignments=tuple(word for word in step.words if _ASSIGNMENT_WORD.match(word)),
-        directory=(*step.directory, root),
+        assignments=assignments,
+        directory=(*step.directory, _script_root(script)),
         moves_certain=step.moves_certain,
         position=step.position,
     )
