@@ -1,6 +1,6 @@
 # Plan 00606: Plan 00605 follow-up daemon fixes
 
-**Status**: In Progress
+**Status**: Complete (2026-11-15)
 **Created**: 2026-11-15
 **Owner**: dev
 **Priority**: Medium
@@ -41,21 +41,30 @@ Each waited for a branch while the parked-branch slot was full.
 
 ### Phase 1: TDD fixes
 
-- [ ] ⬜ **Task 1.1**: A failing test finishes a queue entry for an issue that is still open and asserts the cache does
-  not list it. Then fix `work-queue done` to exclude the queue entry's issue number.
-- [ ] ⬜ **Task 1.2**: A failing test puts the daemon's socket at the `/tmp` fallback path and asserts `_discover_socket`
-  finds it. Then make discovery also try the daemon's own socket resolver.
-- [ ] ⬜ **Task 1.3**: A failing test runs a `scripts/setup_worktree.sh` invocation through `branch_creation_guard` while
-  creation is blocked, and asserts it is denied. Then teach the guard to recognise the script.
-- [ ] ⬜ **Task 1.4**: Add a release note under `CLAUDE/UPGRADES/UNRELEASED/release-notes/` for the user-visible fixes (1.1
+- [x] ✅ **Task 1.1**: A failing test finishes a queue entry for an issue that is still open and asserts the cache does
+  not list it. Then fix `work-queue done` to exclude the queue entry's issue number. The number is parsed by
+  `issue_number_in_name` in `branch_inventory.py`, built on the existing `_ISSUE_IN_NAME` pattern. The issue is
+  removed even when the GitHub lookup fails.
+- [x] ✅ **Task 1.2**: A failing test puts the daemon's socket at the `/tmp` fallback path and asserts `_discover_socket`
+  finds it. Then make discovery also try the daemon's own socket resolver, `get_socket_path(REPO_ROOT)`.
+- [x] ✅ **Task 1.3**: A failing test runs a `scripts/setup_worktree.sh` invocation through `branch_creation_guard` while
+  creation is blocked, and asserts it is denied. Then teach the guard to recognise the script. Wrappers are removed
+  with `peel_command_wrappers`, interpreter options are parsed, and `branch_touch_recorder` records the route. The
+  review fixes are in `5b1ab6f22`.
+- [x] ✅ **Task 1.4**: Add a release note under `CLAUDE/UPGRADES/UNRELEASED/release-notes/` for the user-visible fixes (1.1
   and 1.3).
 
 ## Success Criteria
 
-- [ ] Each new test fails before its fix and passes after it.
-- [ ] Targeted QA passes on the branch and over the merged range on main.
-- [ ] The pending-release holding area carries a release note under `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] Each new test fails before its fix and passes after it: 14 review-fix tests and the first commit's tests,
+  recorded in `subagent-reports/261115-python-developer-sonnet.md`.
+- [x] Targeted QA passes on the branch: 40/43 at `5b1ab6f22`. The one failure was `ssh_agent.py`, which this plan does
+  not touch, and main had already fixed it in `98bfe657e`. After main was merged in, `error_hiding` passes. Over the
+  merged range on main (`1cabe4394..0fb70b7c6`) the result is `QA: 43/43 PASSED`. Main CI run 43752399610 is green.
+- [x] The pending-release holding area carries
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/077-work-queue-done-and-setup-worktree-guard.md`.
 
 ## Delivery & Milestones
 
-- Pending.
+- Implementation `d696d45cc`, review fixes `5b1ab6f22`. Merge `0fb70b7c6`, fast-forwarded to main.
+- Reports: `subagent-reports/261115-python-developer-sonnet.md` and `subagent-reports/261115-code-reviewer-opus.md`.

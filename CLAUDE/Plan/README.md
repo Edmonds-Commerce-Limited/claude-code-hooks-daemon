@@ -8,8 +8,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00606: Plan 00605 follow-up daemon fixes](00606-plan-00605-follow-up-daemon-fixes/PLAN.md) - In Progress (three defects found delivering #203: `work-queue done` caches the issue it finished as workable, acceptance socket discovery misses the `/tmp` fallback socket, and the branch-creation guard misses `scripts/setup_worktree.sh`)
-
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
 - [00603: supervisor idle compact at 30 percent](00603-supervisor-idle-compact-at-30-percent/PLAN.md) - In Progress (built, dry-run first: verify Claude Code's idleCompaction, and add a supervisor compaction at true idle once context reaches 30%)
@@ -194,6 +192,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00606: Plan 00605 follow-up daemon fixes](Completed/00606-plan-00605-follow-up-daemon-fixes/PLAN.md) - Complete at merge `0fb70b7c6` (main CI run 43752399610 green) + the archiving commit (`work-queue done` drops the issue it finished from the workable cache; acceptance socket discovery uses the daemon's resolver; the branch-creation guard sees `scripts/setup_worktree.sh` through wrappers; release note 077)
+
 - [00605: branch sweep classifies no merge base branches](Completed/00605-branch-sweep-classifies-no-merge-base-branches/PLAN.md) - Complete at merge `3b39560f9` (main CI run 43620790845 green on attempt 2) + the archiving commit (GitHub #203, closed: a no-merge-base branch is measured as unmerged work, never patch-equivalent; reasons name the real cause; `branch-sweep --budget-ms`; release note 073)
 
 - [00599: claude md ownership statement and hint drops](Completed/00599-claude-md-ownership-statement-and-hint-drops/PLAN.md) - Complete at merges `b0bff26d8` + `7e534918e` (review fixes) + the archiving commit (a `claude_md.ownership` toggle, on by default, leads the injected CLAUDE.md block with the ownership sentence and drives once-per-session hint drops; `off` silences all; release note 055 and config-changes manifest v3.75.0.yaml)
@@ -307,9 +307,9 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - **Total Plans Created**: 606 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 509 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 510 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 74 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 73 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
