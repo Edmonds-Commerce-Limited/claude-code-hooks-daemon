@@ -25,6 +25,7 @@ from pathlib import Path
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, read_blobs, run_git
+from claude_code_hooks_daemon.utils.remote_refs import remote_git_env
 
 # git config key holding the per-repo plan high-water mark (highest number
 # ever allocated). Section names are case-insensitive in git; stored lowercased.
@@ -215,7 +216,7 @@ def remote_highest_plan_number(
             "--no-tags",
             remote,
             timeout=Timeout.GIT_FETCH_SESSION,
-            env={"GIT_TERMINAL_PROMPT": "0"},
+            env=remote_git_env(),
         )
         if fetched.returncode != 0:
             return _unchecked(f"git fetch {remote} failed", fetched.stderr)

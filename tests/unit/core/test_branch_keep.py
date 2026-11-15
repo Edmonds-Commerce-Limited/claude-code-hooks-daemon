@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.core import branch_keep
 from claude_code_hooks_daemon.core.branch_keep import (
     KEEP_NOTES_REF,
     BranchKeepError,
@@ -18,6 +19,7 @@ from claude_code_hooks_daemon.core.branch_keep import (
     parse_keep_note,
     read_keeps,
 )
+from tests.support import forwarded_socket
 from tests.support.git_fixtures import git_setup_timeout
 
 
@@ -142,3 +144,20 @@ class TestFetch:
     def test_fetch_failure_returns_error_text(self, repo: Path) -> None:
         _git(repo, "remote", "set-url", "origin", str(repo / "missing.git"))
         assert fetch_keeps(repo, "origin")
+
+
+class TestForwardedAgentSocket:
+    def test_fetch_carries_the_forwarded_socket(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = forwarded_socket.spy_remote_env(monkeypatch, branch_keep, "fetch")
+        assert fetch_keeps(repo, "origin") is None
+        forwarded_socket.assert_forwarded(seen)
+
+    def test_push_carries_the_forwarded_socket(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = forwarded_socket.spy_remote_env(monkeypatch, branch_keep, "push")
+        tip = _git(repo, "rev-parse", "main")
+        keep_branch(repo, [tip], reason="r", remote="origin", user="Tess", now=1_800_000_000)
+        forwarded_socket.assert_forwarded(seen)

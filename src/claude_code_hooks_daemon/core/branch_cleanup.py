@@ -70,6 +70,7 @@ from claude_code_hooks_daemon.utils.regenerable_paths import (
     lock_regenerated_dirs,
     under_any,
 )
+from claude_code_hooks_daemon.utils.remote_refs import remote_git_env
 
 logger = logging.getLogger(__name__)
 
@@ -1149,7 +1150,7 @@ def _push_deletes(repo: Path, remote: str, tips: Mapping[str, str]) -> tuple[lis
         remote,
         *deletes,
         timeout=Timeout.GIT_FETCH_SESSION,
-        env={"GIT_TERMINAL_PROMPT": "0"},
+        env=remote_git_env(),
     )
     outcomes: dict[str, str] = {}
     for line in result.stdout.splitlines():

@@ -14,7 +14,9 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
+from claude_code_hooks_daemon.core import branch_cleanup
 from claude_code_hooks_daemon.core.branch_cleanup import CleanupReport, clean_sweep, render
+from tests.support import forwarded_socket
 
 _ENV = {
     "GIT_AUTHOR_NAME": "Test Author",
@@ -92,6 +94,14 @@ def _sweep(repo: Path, tmp_path: Path, **kwargs: bool) -> CleanupReport:
 
 
 class TestRemoteClean:
+    def test_the_remote_delete_push_carries_the_forwarded_socket(
+        self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _pushed(repo, "feat", merge=True)
+        seen = forwarded_socket.spy_remote_env(monkeypatch, branch_cleanup, "push")
+        _sweep(repo, tmp_path)
+        forwarded_socket.assert_forwarded(seen)
+
     def test_without_the_flag_no_remote_branch_is_touched(
         self, repo: Path, bare: Path, tmp_path: Path
     ) -> None:

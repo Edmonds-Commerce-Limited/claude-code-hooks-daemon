@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
+from claude_code_hooks_daemon.core import branch_park
 from claude_code_hooks_daemon.core.branch_creation import (
     clear_label_stage,
     read_labels,
@@ -20,6 +21,7 @@ from claude_code_hooks_daemon.core.branch_park import (
     park_branch,
 )
 from tests.conftest import HERMETIC_GIT_EMAIL
+from tests.support import forwarded_socket
 from tests.support.git_fixtures import git_setup_timeout
 
 
@@ -186,3 +188,20 @@ def test_clear_label_stage_removes_the_stage(tmp_path: Path) -> None:
 def test_clear_label_stage_without_snapshot_is_a_noop(tmp_path: Path) -> None:
     clear_label_stage(tmp_path / "none.json", "a")
     assert not (tmp_path / "none.json").exists()
+
+
+class TestForwardedAgentSocket:
+    def test_local_branch_push_carries_the_forwarded_socket(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = forwarded_socket.spy_remote_env(monkeypatch, branch_park, "push")
+        park_branch(repo, "work", reason="r", remote="origin")
+        forwarded_socket.assert_forwarded(seen)
+
+    def test_remote_only_push_carries_the_forwarded_socket(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _git(repo, "branch", "-D", "work")
+        seen = forwarded_socket.spy_remote_env(monkeypatch, branch_park, "push")
+        park_branch(repo, "work", reason="r", remote="origin")
+        forwarded_socket.assert_forwarded(seen)
