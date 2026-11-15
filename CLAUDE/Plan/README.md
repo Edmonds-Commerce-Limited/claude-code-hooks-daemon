@@ -8,6 +8,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00606: Plan 00605 follow-up daemon fixes](00606-plan-00605-follow-up-daemon-fixes/PLAN.md) - In Progress (three defects found delivering #203: `work-queue done` caches the issue it finished as workable, acceptance socket discovery misses the `/tmp` fallback socket, and the branch-creation guard misses `scripts/setup_worktree.sh`)
+
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
 - [00603: supervisor idle compact at 30 percent](00603-supervisor-idle-compact-at-30-percent/PLAN.md) - In Progress (built, dry-run first: verify Claude Code's idleCompaction, and add a supervisor compaction at true idle once context reaches 30%)
@@ -303,11 +305,11 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Plan Statistics
 
-- **Total Plans Created**: 605 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 606 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 509 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 73 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 74 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
