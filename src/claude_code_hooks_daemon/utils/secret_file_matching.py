@@ -2264,7 +2264,9 @@ def _searched_paths_hold_no_protected_file(
     if command is None:
         return False
     rest = segment_words[command + 1 :]
-    if any(word in _PATTERN_FILE_OPTIONS for word in rest):
+    if any(_names_no_pattern_operand(word) for word in rest):
+        # The pattern is an option's value (or there is none), so the first
+        # operand is a searched path too: never skip it, judge nothing clean.
         return False
     if any(_follows_links(word, names[command]) for word in rest):
         return False
@@ -2294,6 +2296,24 @@ def _searched_paths_hold_no_protected_file(
             if index.find_under(root) is not None:
                 return False
     return True
+
+
+#: Long spellings after which no operand is the pattern: the pattern is given by
+#: option or file, or (rg --files) there is none. ``--`` ends the options, so a
+#: dash-led path could follow it unseen by the operand filter.
+_NO_PATTERN_OPERAND_WORDS: Final = frozenset({"--", "--files", *_PATTERN_FILE_OPTIONS})
+_NO_PATTERN_OPERAND_PREFIXES: Final = ("--regexp=", "--file=")
+
+
+def _names_no_pattern_operand(word: str) -> bool:
+    """Whether a grep/rg word means the first operand is no pattern.
+
+    Fails closed on short clusters: any single-dash word holding ``e`` or ``f``
+    may be ``-ezz``/``-vezz``/``-fpats`` (an over-match only judges less clean).
+    """
+    if word in _NO_PATTERN_OPERAND_WORDS or word.startswith(_NO_PATTERN_OPERAND_PREFIXES):
+        return True
+    return word.startswith("-") and not word.startswith("--") and bool(set(word[1:]) & {"e", "f"})
 
 
 def _follows_links(word: str, tool: str) -> bool:
