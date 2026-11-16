@@ -3,30 +3,33 @@
 ## Findings
 
 - The brief was right. `glob_matches` normalised `*/` to `*` and matched it against protected files at the root.
-- None of the three callers in `secret_file_matching.py` touch the slash. The fix therefore lives in the index and in the recursive-search expander.
+- None of the three callers in `secret_file_matching.py` touch the slash.
 - A literal directory is judged two ways. A non-recursive command (`ls -d dir/`) is ALLOWED. A recursive reader (`grep -r x dir/`) is judged by `ProtectedFileIndex.find_under` through `recursive_search`.
-- Before the fix, `grep -r x */` was allowed even with a protected file at `dir/` (a false negative). `recursive_search` drops any root holding a glob character.
+- Before this work `grep -r x */` was allowed even with a protected file below a matching directory (a false allow), because `recursive_search` drops any root with a glob character.
 
-## Change
+## Final design (after the Opus review)
 
-- `src/claude_code_hooks_daemon/utils/protected_file_index.py`: `glob_matches` returns None for a token ending in `/`. Such a glob names directories only, so it never matches a file at its own level.
-- `src/claude_code_hooks_daemon/utils/recursive_search.py`: new `_expand_directory_glob`. A search root that ends in `/` and holds `*`, `?` or `[` is expanded with `glob.glob` to the directories it names. `_reads_of_roots` then reads each one, so `find_under` judges them as it does a literal directory. A root with `$`, a backtick or `{` is left unplaceable, as before. Git grep pathspecs are untouched.
-- Tests: `tests/unit/handlers/pre_tool_use/test_secret_file_guard_trailing_slash_glob.py` (12 tests: index level, `search_reads`, and handler verdicts).
-- Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/084-secret-guard-trailing-slash-glob.md`.
+The first attempt expanded the glob on the live filesystem (`glob.glob`, then pathlib). The review found it unbounded (`**/` 9 s, `/**/` 28 s) and a second glob engine. It is removed. There is no filesystem walk now.
 
-## Red (before the fix)
+- `protected_file_index.py`
+  - `glob_matches` returns None for a token ending in `/`: such a glob names directories only, never a file at its own level.
+  - New `ProtectedFileIndex.directories_matching(token, bases, *, default_expansion)`. It matches the glob's components against each indexed file's ANCESTOR-directory prefixes (never the file itself), with the existing `_segments_match`. Dot names and `**` follow the existing `default_expansion` rule through shared helpers `_absolute_tokens` and `_glob_parts`, which `glob_matches` now uses too.
+  - `_segments_match` reads a leading `[^` in a bracket class as `[!`, as bash does (fnmatch took it literally, a false allow for `[^x]*/`).
+- `recursive_search.py`
+  - A search root ending in `/` with `*`, `?` or `[` becomes one `Read(glob=True)` carrying its absolute pattern and the tool's rules. `search_reads` sets `default_expansion` once from `default_glob_semantics(command)`.
+  - `protected_reached` turns a glob read into one `Read` per directory from `directories_matching`, then calls `find_under` as for a literal directory (view, skip and ignore handling unchanged).
+  - `_place` takes an `unplaceable` pattern so a glob root can be placed; a root with `$`, a backtick or `{` stays unplaced.
+- Not covered: a symlinked directory is indexed under its real path, so `grep -r x l*/` through a link is not matched (the review's caveat; same as before the change).
+- An unmatched glob root yields no directory, as bash hands the literal to the tool and as main did.
 
-`9 failed, 2 passed`. Examples:
+## Tests
 
-- `ls -d */`, `ls -d ./*/` and `echo */` were DENIED where ALLOW was expected, with only a root-level protected file.
-- `grep -r x */` was ALLOWED where DENY was expected, with a protected file under `dir/`.
-- The `*/` index-level tests returned a match where None was expected.
+`tests/unit/handlers/pre_tool_use/test_secret_file_guard_trailing_slash_glob.py` (index level, `search_reads`, handler verdicts). The weak test that passed on main was replaced by one built on a root-level file. New: dot directories (`.*/`, `.h*/`, `*/`), `**/` with and without `default_expansion`, `[^x]`, `[!x]`, `[a-e]`, `?`, absolute `ROOT/*/`, `./*/`, `rg`, and `cd docs && grep -r x ../*/`.
 
-## Green (after the fix)
+Red (before the rework, against the pathlib version): `19 failed, 20 passed`. Examples: `AttributeError: 'ProtectedFileIndex' object has no attribute 'directories_matching'`, `grep -r x [^d]*/` wrongly denied, `grep -r x [^x]*/` wrongly allowed.
 
-- New file: `12 passed`.
-- Together with `test_protected_file_index.py`, `test_recursive_search.py` and `test_secret_file_guard_glob_operands.py`, the earlier 231 existing tests passed. The only failures were two of my own tests, which built the index through `index_for`. I switched them to a directly built `ProtectedFileIndex`.
+Green: `909 passed` over the new file, `test_recursive_search.py`, `test_protected_file_index.py`, `test_secret_file_guard_glob_operands.py` and `test_secret_file_guard.py`.
 
 ## QA
 
-See the final reply for the `llm_qa.py changed` verdict.
+See the final reply for the `llm_qa.py changed --allow-unmapped` verdict.

@@ -27,7 +27,7 @@ import os
 import posixpath
 import re
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final
 
@@ -44,6 +44,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     split_unquoted_spans,
 )
+from claude_code_hooks_daemon.utils.shell_snapshot import default_glob_semantics
 
 TOOL_GREP: Final[str] = "grep"
 TOOL_RG: Final[str] = "rg"
@@ -108,7 +109,7 @@ _PATHSPEC_MAGIC_PREFIX: Final[str] = ":"
 _ASSIGNMENT: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 # A root carrying any of these is not one directory the command line names.
 _UNPLACEABLE_ROOT: Final[re.Pattern[str]] = re.compile(r"[$`*?\[{]")
-# Of those, the ones that are not a glob: a trailing-slash glob carrying one is not expanded.
+# Of those, the ones that are not a glob: a trailing-slash glob carrying one is not judged.
 _EXPANSION_ROOT: Final[re.Pattern[str]] = re.compile(r"[$`{]")
 _DIRECTORY_GLOB: Final[re.Pattern[str]] = re.compile(r"[*?\[]")
 
@@ -324,12 +325,18 @@ class Read:
 
     ``view`` is ``TRACKED`` for ``git grep`` (the index), ``UNIGNORED`` for a
     tool that honours ignore files and ``ALL`` for one that reads everything;
-    ``skip`` is the hook for hidden and excluded entries.
+    ``skip`` is the hook for hidden and excluded entries. A ``glob`` read is a glob
+    ending in ``/``: ``root`` is the absolute pattern, and the directories it names
+    are found in the protected-file index (:func:`protected_reached`), with the
+    tool's ``rules`` deciding what each of them skips.
     """
 
     root: str
     view: TreeView = TreeView.ALL
     skip: Callable[[str, bool], bool] | None = None
+    glob: bool = False
+    rules: _Rules = field(default_factory=_Rules)
+    default_expansion: bool = False
 
 
 def search_reads(command: str, cwd: str | None) -> list[Read]:
@@ -339,7 +346,13 @@ def search_reads(command: str, cwd: str | None) -> list[Read]:
     precedes the search; with no absolute directory to place them from they are
     left out, because a guess at where a search reads is worse than no answer.
     """
-    return list(_reads(command, cwd, 0))
+    reads = list(_reads(command, cwd, 0))
+    if not any(read.glob for read in reads):
+        return reads
+    default_expansion = default_glob_semantics(command)
+    return [
+        replace(read, default_expansion=default_expansion) if read.glob else read for read in reads
+    ]
 
 
 def protected_reached(
@@ -350,10 +363,29 @@ def protected_reached(
     ``is_exempt`` skips a protected file the caller confirmed safe to read.
     """
     for read in reads:
-        hit = index.find_under(read.root, view=read.view, skip=read.skip, is_exempt=is_exempt)
-        if hit is not None:
-            return hit, read.root
+        for searched in _directories_read(read, index):
+            hit = index.find_under(
+                searched.root, view=searched.view, skip=searched.skip, is_exempt=is_exempt
+            )
+            if hit is not None:
+                return hit, searched.root
     return None
+
+
+def _directories_read(read: Read, index: ProtectedFileIndex) -> list[Read]:
+    """``read`` itself, or for a ``glob`` read the directories of ``index`` it names.
+
+    The shell expands a glob ending in ``/`` to directories only, so each one is
+    searched as a literal directory is; only those holding a protected file matter.
+    """
+    if not read.glob:
+        return [read]
+    return [
+        Read(directory, view=read.view, skip=read.rules.predicate(directory))
+        for directory in index.directories_matching(
+            read.root, default_expansion=read.default_expansion
+        )
+    ]
 
 
 # Nested wrappers (`bash -c "bash -c ..."`) end here rather than recursing for ever.
@@ -507,9 +539,11 @@ def _xargs_command(words: list[str]) -> list[str]:
     return words[index:]
 
 
-def _place(root: str, cwd: str | None) -> str | None:
+def _place(
+    root: str, cwd: str | None, *, unplaceable: re.Pattern[str] = _UNPLACEABLE_ROOT
+) -> str | None:
     """The absolute, normalised form of ``root``, or None when it cannot be placed."""
-    if _UNPLACEABLE_ROOT.search(root):
+    if unplaceable.search(root):
         return None
     expanded = str(Path(root).expanduser())
     if not posixpath.isabs(expanded):
@@ -529,41 +563,29 @@ def _placed(roots: tuple[str, ...], cwd: str | None) -> list[str]:
     return placed
 
 
-def _expand_directory_glob(root: str, cwd: str | None) -> list[str]:
-    """The directories a glob ending in ``/`` expands to, or ``[root]`` for any other root.
+def _place_directory_glob(root: str, cwd: str | None) -> str | None:
+    """The absolute form of a glob ending in ``/``, or None when ``root`` is not one.
 
-    The shell expands such a glob to directories only, so a search of it reads
-    each of them exactly as it reads a directory named literally. Only
-    ``*``, ``?`` and ``[`` are expanded; a root with a variable, substitution
-    or brace is left for ``_place`` to refuse.
+    The result keeps its trailing ``/``. A glob carrying a variable, a substitution or a
+    brace is not placed, as for any other root.
     """
-    if not root.endswith("/") or _EXPANSION_ROOT.search(root) or not _DIRECTORY_GLOB.search(root):
-        return [root]
-    placed = Path(root).expanduser()
-    if not placed.is_absolute():
-        if cwd is None or not posixpath.isabs(cwd):
-            return [root]
-        placed = Path(cwd) / placed
-    anchor = Path(placed.anchor)
-    # A trailing "/" makes pathlib return directories only. pathlib lets ``*`` match a
-    # dot name, which bash does not, so those are dropped; a ``**`` pattern keeps them.
-    matches = anchor.glob(placed.relative_to(anchor).as_posix() + "/")
-    if "**" in placed.parts:
-        return [str(match) for match in matches]
-    return [
-        str(match)
-        for match in matches
-        if not any(
-            name.startswith(".") and not part.startswith(".")
-            for name, part in zip(match.parts, placed.parts, strict=True)
-        )
-    ]
+    if not root.endswith("/") or not _DIRECTORY_GLOB.search(root) or _EXPANSION_ROOT.search(root):
+        return None
+    placed = _place(root, cwd, unplaceable=_EXPANSION_ROOT)
+    return None if placed is None else placed.rstrip("/") + "/"
+
+
+def _view_for(rules: _Rules) -> TreeView:
+    return TreeView.UNIGNORED if rules.honour_ignore else TreeView.ALL
 
 
 def _reads_of_roots(
     roots: tuple[str, ...], cwd: str | None, rules: _Rules = _NO_RULES
 ) -> Iterator[Read]:
-    expanded = tuple(directory for root in roots for directory in _expand_directory_glob(root, cwd))
-    for root in _placed(expanded, cwd):
-        view = TreeView.UNIGNORED if rules.honour_ignore else TreeView.ALL
-        yield Read(root, view=view, skip=rules.predicate(root))
+    for root in roots:
+        glob_root = _place_directory_glob(root, cwd)
+        if glob_root is not None:
+            # Answered from the index when judged: no directory is listed here.
+            yield Read(glob_root, view=_view_for(rules), glob=True, rules=rules)
+    for root in _placed(roots, cwd):
+        yield Read(root, view=_view_for(rules), skip=rules.predicate(root))

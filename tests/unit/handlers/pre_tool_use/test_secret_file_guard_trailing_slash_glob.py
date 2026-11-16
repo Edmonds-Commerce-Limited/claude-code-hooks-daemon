@@ -87,18 +87,61 @@ class TestIndexLevel:
         assert index.glob_matches("*/", (str(top_level_only),)) is None
         assert index.glob_matches("*", (str(top_level_only),)) is not None
 
-    def test_a_trailing_slash_glob_names_directories_only_so_matches_no_file(
-        self, nested: Path
+    def test_a_root_level_file_is_in_no_directory_a_trailing_slash_glob_names(
+        self, tmp_path: Path
     ) -> None:
-        index = _index(nested, _NESTED)
-        for token in ("*/", "d*/", str(nested / "*") + "/"):
-            assert index.glob_matches(token, (str(nested),)) is None
+        index = _index(tmp_path, _TOP_LEVEL)
+        assert index.directories_matching("*/", (str(tmp_path),)) == ()
 
-    def test_the_directories_a_search_reads_are_the_ones_the_glob_expands_to(
+    @pytest.mark.parametrize(
+        "token", ["*/", "d*/", "d?r/", "[a-e]*/", "[!x]*/", "[^x]*/", "*/*/", "ROOT/*/"]
+    )
+    def test_the_ancestor_directories_of_a_protected_file_are_matched(
+        self, tmp_path: Path, token: str
+    ) -> None:
+        index = _index(tmp_path, _NESTED)
+        glob = token.replace("ROOT", str(tmp_path))
+        found = index.directories_matching(glob, (str(tmp_path),))
+        if token == "*/*/":
+            assert found == ()
+        else:
+            assert found == (f"{tmp_path}/dir",)
+
+    @pytest.mark.parametrize("token", ["[!d]*/", "[^d]*/", "x*/", "dir/*/"])
+    def test_a_glob_that_names_no_ancestor_directory_matches_none(
+        self, tmp_path: Path, token: str
+    ) -> None:
+        index = _index(tmp_path, _NESTED)
+        assert index.directories_matching(token, (str(tmp_path),)) == ()
+
+    def test_a_dot_directory_is_reached_only_by_a_glob_that_starts_with_a_dot(
+        self, tmp_path: Path
+    ) -> None:
+        index = _index(tmp_path, f".hidden/key.{_SUFFIX}")
+        assert index.directories_matching("*/", (str(tmp_path),)) == ()
+        assert index.directories_matching(".*/", (str(tmp_path),)) == (f"{tmp_path}/.hidden",)
+        assert index.directories_matching(".h*/", (str(tmp_path),)) == (f"{tmp_path}/.hidden",)
+
+    def test_a_double_star_follows_the_default_expansion_flag(self, tmp_path: Path) -> None:
+        index = _index(tmp_path, f"a/b/key.{_SUFFIX}")
+        bases = (str(tmp_path),)
+        spanning = index.directories_matching("**/", bases)
+        # globstar also matches zero directories: the base itself.
+        assert set(spanning) == {str(tmp_path), f"{tmp_path}/a", f"{tmp_path}/a/b"}
+        one_level = index.directories_matching("**/", bases, default_expansion=True)
+        assert one_level == (f"{tmp_path}/a",)
+
+    def test_a_bracket_negation_with_a_caret_reads_like_the_shell(self, tmp_path: Path) -> None:
+        index = _index(tmp_path, f"xa/key.{_SUFFIX}")
+        assert index.directories_matching("[^x]*/", (str(tmp_path),)) == ()
+        assert index.directories_matching("[!x]*/", (str(tmp_path),)) == ()
+        assert index.directories_matching("[^y]*/", (str(tmp_path),)) == (f"{tmp_path}/xa",)
+
+    def test_a_search_read_of_a_trailing_slash_glob_is_not_expanded_on_disk(
         self, nested: Path
     ) -> None:
-        roots = {read.root for read in search_reads("grep -r x */", str(nested))}
-        assert roots == {str(nested / "dir"), str(nested / "docs")}
+        reads = search_reads("grep -r x */", str(nested))
+        assert [(read.root, read.glob) for read in reads] == [(f"{nested}/*/", True)]
 
 
 class TestCommandLevel:
@@ -114,6 +157,41 @@ class TestCommandLevel:
     def test_a_recursive_reader_of_the_matching_glob_is_denied_too(self, nested: Path) -> None:
         assert _verdict(nested, "grep -r x */") == Decision.DENY
         assert _verdict(nested, "grep -r x d*/") == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -r x [^x]*/",
+            "grep -r x [!x]*/",
+            "grep -r x d?r/",
+            "grep -r x di[r]/",
+            "grep -r x ./*/",
+            "rg x */",
+            "cd docs && grep -r x ../*/",
+        ],
+    )
+    def test_other_trailing_slash_shapes_are_denied_through_a_matching_directory(
+        self, nested: Path, command: str
+    ) -> None:
+        assert _verdict(nested, command) == Decision.DENY
+
+    def test_an_absolute_trailing_slash_glob_is_denied_too(self, nested: Path) -> None:
+        assert _verdict(nested, f"grep -r x {nested}/*/") == Decision.DENY
+
+    def test_a_dot_directory_is_reached_only_by_a_dot_glob(self, tmp_path: Path) -> None:
+        root = _make_project(tmp_path, f".hidden/key.{_SUFFIX}")
+        protected_file_index.reset_index_cache()
+        with patch.object(guard_module, "resolve_project_root", return_value=str(root)):
+            index_project(root, SecretFileGuardHandler()._patterns())
+            assert _verdict(root, "grep -r x */") == Decision.ALLOW
+            assert _verdict(root, "grep -r x .*/") == Decision.DENY
+        protected_file_index.reset_index_cache()
+
+    @pytest.mark.parametrize("command", ["grep -r x [^d]*/", "grep -r x [!d]*/", "grep -r x x*/"])
+    def test_a_glob_that_misses_the_protected_directory_is_allowed(
+        self, nested: Path, command: str
+    ) -> None:
+        assert _verdict(nested, command) == Decision.ALLOW
 
     def test_a_recursive_reader_of_directories_without_a_protected_file_is_allowed(
         self, top_level_only: Path
