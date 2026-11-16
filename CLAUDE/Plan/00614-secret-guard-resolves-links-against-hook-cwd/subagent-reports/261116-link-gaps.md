@@ -126,3 +126,48 @@ particular file matched. The release note says so.
 - `dlink/../*` is placed lexically.
 - The unreadable-target arm of `find_under` has no test, because the tests run as
   root.
+
+## Independent review follow-up (review-614): design handed over, F1/F2/F4/F5 still open
+
+The review found no loosening and no fail-open. It did find four in-scope items:
+
+- **F1:** a `cd` inside `( )`, `{ }`, `if`, `$( )`, `bash -c` or `env -C` is not tracked.
+- **F2:** a wildcard inside a link's own name (`dl*/*`) escapes the check.
+- **F4:** a link-out deny message never names the link.
+- **F5:** cost grows with the number of `cd` targets times the number of words.
+
+None of these is fixed yet. The agent that produced the design reached its context
+budget before writing any code. The design and the list of tests to write first are
+in the handoff (untracked, `untracked/scratch/261116-a70d6790445dbefba-handoff.md`).
+The design has three main points:
+
+- `recursive_search._reads` has its own sequential `cd` tracking, and that tracking
+  needs the F1 fix too.
+- A `cd` seen inside a group must add a directory, not replace the current one.
+  Otherwise `(cd clean && true); cd inner && cat ilink` becomes a loosening.
+- An overflow past the cap must return a positive finding, not raise. Every exception
+  ends up as the advisory ALLOW.
+
+### F3 (pre-existing, not fixed here; for separate filing)
+
+These commands read every file under ROOT, protected ones included:
+
+- `find ROOT ... -exec cat {} +`
+- `find ROOT -exec head {} +`
+- `find ROOT -type f | xargs cat`
+
+All three are ALLOWED on origin/main and on this branch. That holds for a link out of
+the project (`find -L dlink`, `find dlink/`) and for an in-project protected file
+(`find own -type f -exec cat {} +`).
+
+`recursive_search` treats `find` only as a feeder for a grep-family `-exec` or `xargs`.
+A reader that is not grep therefore never reaches `find_under`.
+
+Proposed fix: treat `find ROOT ... -exec|-execdir|-ok <reader>` and
+`find ROOT ... | xargs <reader>` as a recursive read of ROOT, judged by `find_under`.
+The cost is the false denies `grep -r` already pays. For example,
+`find . -name '*.py' -exec wc -l {} +` would be denied in a tree that holds a
+protected file.
+
+`scripts/qa/dangerous-invocation-corpus.yaml` has no row for this. File it as F-BYPS
+or as UNCOVERED-accepted.
