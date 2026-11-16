@@ -1071,16 +1071,24 @@ _hooks_daemon_event_takes_context() {
 #
 # _hooks_daemon_last_build_note() - Name the last venv build and its log.
 #
-# Reads untracked/.venv-bootstrap.result (venv.sh venv_write_build_result) with
+# Reads the newest untracked/.venv-bootstrap-<fingerprint>.result (venv.sh venv_write_build_result) with
 # plain bash: no subprocess, so the stop hook's hot path stays cheap. Prints
 # nothing when no build has recorded a result.
 #
 # Args:
 #   $1 - the daemon directory
 _hooks_daemon_last_build_note() {
-    local record="$1/untracked/.venv-bootstrap.result" key value
+    # One record per view (keyed by the venv fingerprint, like the build log);
+    # the stop hook cannot tell which view it is cheaply: the newest wins.
+    local record="" candidate key value
     local result="" finished="" log=""
-    [[ -f "$record" ]] || return 0
+    for candidate in "$1/untracked"/.venv-bootstrap-*.result; do
+        [[ -f "$candidate" ]] || continue
+        if [[ -z "$record" || "$candidate" -nt "$record" ]]; then
+            record="$candidate"
+        fi
+    done
+    [[ -n "$record" ]] || return 0
     while IFS='=' read -r key value; do
         case "$key" in
             result) result="$value" ;;
@@ -3885,12 +3893,17 @@ daemon_root = sys.argv[5] if len(sys.argv) > 5 else ''
 def _last_build_note(root):
     '''Name the last venv build and its log: one small file read, no subprocess.'''
     fields = {}
+    # One record per view (keyed by the venv fingerprint, like the build log);
+    # the newest of any view is named.
+    untracked = os.path.join(root, 'untracked')
     try:
-        with open(os.path.join(root, 'untracked', '.venv-bootstrap.result')) as handle:
+        records = [os.path.join(untracked, name) for name in os.listdir(untracked)
+                   if name.startswith('.venv-bootstrap-') and name.endswith('.result')]
+        with open(max(records, key=os.path.getmtime)) as handle:
             for line in handle:
                 key, _, value = line.rstrip('\n').partition('=')
                 fields[key] = value
-    except OSError:
+    except (OSError, ValueError):
         return ''
     if not fields.get('result'):
         return ''

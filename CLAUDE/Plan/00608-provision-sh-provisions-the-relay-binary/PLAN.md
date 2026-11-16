@@ -46,7 +46,7 @@ A second question rode along: on that box the session-start relay repair left no
 - [x] ✅ **Task 3.1**: The relay repair also starts where the daemon starts (deferred startup step), once per cause, detached, failures logged; tests first; release note 080.
 - [x] ✅ **Task 3.2**: Log the silent mkdir/open failure branch in `relay_repair.py`; release note 079.
 - [x] ✅ **Task 3.3**: `hooks-daemon status` prints the relay repair state (status, detail, log path) beside its relay WARNING; release note 081.
-- [ ] **Task 3.4**: `.venv-bootstrap.result` is written per view (keyed like the venv bootstrap logs), readers updated; release note 082.
+- [x] ✅ **Task 3.4**: `.venv-bootstrap.result` is written per view (keyed like the venv bootstrap logs), readers updated; release note 082.
 
 ## Success Criteria
 

@@ -123,7 +123,7 @@ _vb_log_path() { venv_build_log_path "$1" "$2"; }
 # diagnostic; when it cannot be written the writer has said why.
 #
 _vb_record_result() {
-    if ! venv_write_build_result "$1" "$3" "$4" "$(_vb_log_path "$1" "$2")"; then
+    if ! venv_write_build_result "$1" "$2" "$3" "$4" "$(_vb_log_path "$1" "$2")"; then
         print_warning "venv bootstrap: the last-result record was not written"
     fi
     return 0

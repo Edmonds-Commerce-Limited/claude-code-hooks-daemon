@@ -3034,15 +3034,16 @@ def _repair_venv_locked(daemon_dir: Path, venv_path: Path, env: dict[str, str]) 
     record every build path writes, and starts the fingerprint's build log the
     bash drivers also write.
     """
-    log = build_log_path(daemon_dir, _fingerprint_of(venv_path))
+    fingerprint = _fingerprint_of(venv_path)
+    log = build_log_path(daemon_dir, fingerprint)
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(f"venv repair started in {daemon_dir}\n")
     try:
         rc = _sync_and_verify_venv(daemon_dir, venv_path, env, log)
     except Exception:
-        write_build_result(daemon_dir, "failed", 1, log)
+        write_build_result(daemon_dir, fingerprint, "failed", 1, log)
         raise
-    write_build_result(daemon_dir, "succeeded" if rc == 0 else "failed", rc, log)
+    write_build_result(daemon_dir, fingerprint, "succeeded" if rc == 0 else "failed", rc, log)
     return rc
 
 
