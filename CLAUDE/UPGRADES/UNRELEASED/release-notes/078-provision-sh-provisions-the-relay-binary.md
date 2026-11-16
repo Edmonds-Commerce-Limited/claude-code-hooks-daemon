@@ -1,0 +1,6 @@
+# Callout: provision.sh puts the relay binary in place, as install and upgrade do
+
+**Plan**: 00608
+**Audience**: operators
+
+A checkout provisioned with `bash .claude/provision.sh` now gets the relay binary, not only the venv and the daemon. Until now only install and upgrade ran that step, so a freshly provisioned clone had the relay switched on by default but no binary, and ran every hook on the slower fallback transport. The foreground run now builds or downloads the binary for the tag after the venv is built, through the same `scripts/install/relay_provision.sh` step install and upgrade use, and regenerates the forwarders for the transport. A clone already at the expected version gets it only when its binary is missing or defective (`relay_deploy --check`), and a synced clone gets it for the new tag. A failure prints the banner and the provision still succeeds, because the bash transport enforces every rule; `daemon.transport.relay_enabled: false` does nothing. A `--background` run never builds or downloads: it reports a missing relay and names `hooks-daemon transport on`. The regenerated forwarders under `.claude/hooks/` are tracked files, so the closing lines say so instead of claiming nothing tracked changed when the step rewrote them.

@@ -142,6 +142,7 @@ class Sandbox:
         self.clone = self.project / ".claude" / "hooks-daemon"
         self.uv_log = tmp_path / "uv-calls.log"
         self.start_log = tmp_path / "daemon-starts.log"
+        self.relay_log = tmp_path / "relay-calls.log"
         # AF_UNIX paths are capped near 108 bytes and pytest's tmp paths are
         # long, so the socket and PID live in a short directory of their own.
         self.runtime = Path(tempfile.mkdtemp(prefix="hd456-", dir="/tmp"))
@@ -237,6 +238,30 @@ class Sandbox:
                 fi
                 rm -f "$CLAUDE_HOOKS_PID_PATH" "$CLAUDE_HOOKS_SOCKET_PATH"
                 exit 0
+            fi
+            # The relay steps provision.sh runs (Plan 00608) must not build or
+            # download anything here: both modules are answered by a stand-in
+            # that logs the call, and whose outcome the test sets.
+            if [ "${{1:-}}" = "-m" ] \\
+                    && [ "${{2:-}}" = "claude_code_hooks_daemon.install.relay_deploy" ]; then
+                echo "relay_deploy uvcalls=$(wc -l < "{self.uv_log}") $*" >> "{self.relay_log}"
+                if [[ " $* " == *" --check "* ]]; then
+                    if [ -n "${{SANDBOX_RELAY_CHECK_STDERR:-}}" ]; then
+                        echo "$SANDBOX_RELAY_CHECK_STDERR" >&2
+                    fi
+                    echo "${{SANDBOX_RELAY_CHECK_OUTPUT:-relay check ok}}"
+                    exit "${{SANDBOX_RELAY_CHECK_EXIT:-0}}"
+                fi
+                echo "${{SANDBOX_RELAY_OUTPUT:-relay provisioned}}"
+                exit "${{SANDBOX_RELAY_EXIT:-0}}"
+            fi
+            if [ "${{1:-}}" = "-m" ] \\
+                    && [ "${{2:-}}" = "claude_code_hooks_daemon.install.forwarder_generator" ]; then
+                echo "forwarder_generator $*" >> "{self.relay_log}"
+                if [ -n "${{SANDBOX_REGEN_APPEND:-}}" ]; then
+                    echo "# relay guard" >> "$SANDBOX_REGEN_APPEND"
+                fi
+                exit "${{SANDBOX_REGEN_EXIT:-0}}"
             fi
             # An editable install's .pth, as Python reads it: a directory it
             # names that does not exist leaves the package unimportable (and
@@ -353,6 +378,10 @@ class Sandbox:
             timeout=TIMEOUT_SECONDS,
             check=False,
         )
+
+    def relay_calls(self) -> list[str]:
+        """Every relay_deploy / forwarder_generator call the stub venv python answered."""
+        return self.relay_log.read_text().splitlines() if self.relay_log.exists() else []
 
     def uv_calls(self) -> list[str]:
         return self.uv_log.read_text().splitlines() if self.uv_log.exists() else []
