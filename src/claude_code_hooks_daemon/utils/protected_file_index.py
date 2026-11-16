@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
+from claude_code_hooks_daemon.utils.resolution_failure import fails_closed
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.utils.git_file_states import GitFileStates
@@ -175,7 +176,8 @@ class ProtectedFileIndex:
             return []
         # Resolved as :func:`_glob_parts` resolves the literal prefix.
         parent = os.path.realpath("/" + "/".join(parts[:first]))
-        if not Path(parent).is_dir():
+        # One the shell cannot stat it cannot list either, so it expands no link.
+        if not path_is_dir(parent, unreadable_means=False):
             return []
         try:
             with os.scandir(parent) as listing:
@@ -194,7 +196,8 @@ class ProtectedFileIndex:
                 continue
             link = f"{parent.rstrip('/')}/{name}"
             real = os.path.realpath(link)
-            if not Path(real).is_dir():
+            # A target that cannot be stat-ed may be a directory: judged as one.
+            if not path_is_dir(real, unreadable_means=True):
                 continue
             through = "/".join(
                 [*(_escape_glob(part) for part in _components(real)), *parts[first + 1 :]]
@@ -210,6 +213,7 @@ class ProtectedFileIndex:
         hits = self._wildcard_links(token, absolute_token, include_last=include_last)
         return next((link for link, _through, leads_out in hits if leads_out), None)
 
+    @fails_closed
     def link_out_of(self, token: str, bases: Sequence[str] = ()) -> str | None:
         """The link to a directory outside the project that reading ``token`` goes through, else None.
 
@@ -226,7 +230,7 @@ class ProtectedFileIndex:
                     return found
                 continue
             real = os.path.realpath(absolute_token)
-            if self._leads_out(absolute_token, real) and Path(real).is_dir():
+            if self._leads_out(absolute_token, real) and path_is_dir(real, unreadable_means=True):
                 return absolute_token
         return None
 
@@ -249,7 +253,8 @@ class ProtectedFileIndex:
         files this index never listed (another checkout, Plan 00614), so the search
         is not vouched for: the first pattern is answered, as for a protected file.
         """
-        lexical, real = os.path.normpath(root), os.path.realpath(root)
+        lexical = os.path.normpath(root)
+        real = _realpath_or_lexical(root)
         # An unreadable target is not vouched for either: it fails closed.
         if self._leads_out(lexical, real) and path_is_dir(real, unreadable_means=True):
             return self.patterns[0] if self.patterns else None
@@ -277,6 +282,7 @@ class ProtectedFileIndex:
             return entry.pattern
         return None
 
+    @fails_closed
     def glob_matches(
         self, token: str, bases: Sequence[str] = (), *, default_expansion: bool = False
     ) -> str | None:
@@ -321,6 +327,7 @@ class ProtectedFileIndex:
                             return entry.pattern
         return None
 
+    @fails_closed
     def directories_matching(
         self, token: str, bases: Sequence[str] = (), *, default_expansion: bool = False
     ) -> tuple[str, ...]:
@@ -395,7 +402,9 @@ class ProtectedFileIndex:
                 continue
             link = f"{parent.rstrip('/')}/{name}"
             target = os.path.realpath(link)
-            if Path(target).is_dir() and any(_is_under(path, target) for path in real_files):
+            if path_is_dir(target, unreadable_means=True) and any(
+                _is_under(path, target) for path in real_files
+            ):
                 links.append(link)
         return links
 
@@ -422,6 +431,20 @@ class ProtectedFileIndex:
             return True
         result = run_git(Path(self.project_root), "check-ignore", "-q", "--", base)
         return result.returncode == 0
+
+
+def _realpath_or_lexical(path: str) -> str:
+    """``realpath(path)``; a path the filesystem cannot encode cannot exist, and is its own."""
+    try:
+        return os.path.realpath(path)
+    except ValueError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="a path that cannot be encoded for the filesystem names nothing on disk, so no link moves it",
+            level=logging.DEBUG,
+        )
+        return os.path.normpath(path)
 
 
 def _components(path: str) -> list[str]:

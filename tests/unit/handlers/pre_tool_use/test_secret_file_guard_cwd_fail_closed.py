@@ -264,6 +264,67 @@ class TestAResolutionFailureIsAFinding:
         assert sfm.find_protected_mention_strict(command, patterns, str(tree.worktree))
 
 
+#: ``{d}`` is a directory and ``{r}`` a read of a link in it: a file link, or a search of a directory link.
+_CD_READS = [("inner", "cat ilink"), ("deep", "grep -r x idlink"), ("deep", "cat idlink/*")]
+
+
+class TestDirectoryChangeSpellings:
+    """R3: every spelling of a move the shell runs places the reads after it."""
+
+    @pytest.mark.parametrize(
+        "form",
+        [
+            "builtin cd {d} && {r}",
+            "command cd {d} && {r}",
+            "command -p cd {d} && {r}",
+            "builtin pushd {d} && {r}",
+            "cd >/dev/null {d} && {r}",
+            "cd 2>/dev/null {d} && {r}",
+            "cd 2> /dev/null {d} && {r}",
+            ">/dev/null cd {d} && {r}",
+            "2>/dev/null cd {d} && {r}",
+            "cd {d} 2>/dev/null && {r}",
+            "pushd {d} >/dev/null; {r}",
+            "sudo -D {d} {r}",
+            "sudo --chdir={d} {r}",
+            "sudo --chdir {d} {r}",
+            "sudo -u root -D {d} {r}",
+        ],
+    )
+    @pytest.mark.parametrize(("directory", "read"), _CD_READS)
+    def test_read_after_the_move_denied(
+        self, tree: Tree, form: str, directory: str, read: str
+    ) -> None:
+        assert _decision(tree, form.format(d=directory, r=read)) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "tar -C inner -chf - ilink",
+            "tar --directory=inner -chf - ilink",
+            "tar --directory inner -chf - ilink",
+            "tar -chf - -C inner ilink",
+            "tar -C deep -chf - idlink",
+        ],
+    )
+    def test_a_tool_chdir_option_places_its_operands(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "builtin cd clean && cat plain.txt",
+            "command cd clean && cat plain.txt",
+            "cd 2>/dev/null clean && cat plain.txt",
+            "sudo -D clean cat plain.txt",
+            "tar -C clean -cf - plain.txt",
+            "cd clean && grep -r hello .",
+        ],
+    )
+    def test_an_ordinary_move_allowed(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.ALLOW
+
+
 #: Names a filesystem call may refuse, or that Python may refuse to encode.
 _ODD_NAMES = [
     _LONG,
@@ -274,7 +335,7 @@ _ODD_NAMES = [
     "~nosuchuser-614",
     "~nosuchuser-614/x",
     "~+",
-    "~+/inner",
+    "~+/nowhere",
     "~-",
     "\ud800",
     f"x\ud800/{_LONG}",

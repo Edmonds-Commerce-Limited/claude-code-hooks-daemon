@@ -70,6 +70,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 )
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.protected_file_index import ProtectedFileIndex, TreeView
+from claude_code_hooks_daemon.utils.resolution_failure import ResolutionFailedError
 from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
 
 logger = logging.getLogger(__name__)
@@ -156,6 +157,14 @@ _SEARCH_REMEDY: Final[str] = (
 # told, loudly, that this call got no protection from the guard.
 _ADVISORY_ROUTE: Final[str] = "advisory"
 _NOT_JUDGED_PATTERN: Final[str] = "<not-judged>"
+#: The token of a finding whose words could not be placed (review 614b).
+_UNRESOLVED_TOKEN: Final[str] = "<unresolved>"
+_UNRESOLVED_CAUSE: Final[str] = (
+    "Denied because where this command's paths lead could not be worked out: placing "
+    "a directory it moves to, a link or a glob raised an error. A read that cannot be "
+    "checked is denied rather than allowed. Rewrite the command with plain paths, or "
+    "split it into smaller commands."
+)
 _NO_INDEX_REASON: Final[str] = (
     "a recursive search, directory read or wildcard path was not checked, because the "
     "index of protected files is not available yet (the daemon has just started, or the "
@@ -1346,6 +1355,9 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         """
         try:
             return self._evaluate(hook_input)
+        except ResolutionFailedError:
+            logger.exception("secret_file_guard: placing the command's words raised; denying")
+            return self._unresolved_finding(hook_input)
         except shell_expansion.UnresolvableBraceQuotingError as exc:
             logger.info("secret_file_guard: command not fully readable (%s)", type(exc).__name__)
             return self._literal_finding_or_advisory(hook_input, "the command could not be parsed")
@@ -1373,6 +1385,9 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 literal = sfm.find_protected_mention_strict(
                     command, self._patterns(), raw_cwd if isinstance(raw_cwd, str) else None
                 )
+            except ResolutionFailedError:
+                logger.exception("secret_file_guard: the literal re-check could not place a word")
+                return self._unresolved_finding(hook_input)
             except Exception as exc:
                 log_and_continue(
                     logger,
@@ -1384,6 +1399,18 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             if literal is not None:
                 return (literal, literal, "bash")
         return (_NOT_JUDGED_PATTERN, reason, _ADVISORY_ROUTE)
+
+    def _unresolved_finding(self, hook_input: dict[str, Any]) -> tuple[str, str, str]:
+        """A finding for a call whose words could not be placed (review 614b): it is denied."""
+        patterns = self._patterns()
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name == ToolName.BASH:
+            route = "bash"
+        elif tool_name in (ToolName.WRITE, ToolName.EDIT):
+            route = "script"
+        else:
+            route = "read"
+        return (patterns[0] if patterns else _NOT_JUDGED_PATTERN, _UNRESOLVED_TOKEN, route)
 
     def prewarm_index(self) -> None:
         """Start building the protected-file index now; never waits for it."""
@@ -1741,6 +1768,12 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         rule_route = "read" if route == _SEARCH_ROUTE else route
         rule = _rules_by_route()[rule_route]
         message = self._disclosed(hook_input, rule)
+        if token == _UNRESOLVED_TOKEN:
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=f"{message}\n\n{_UNRESOLVED_CAUSE}",
+                rule=rule.rule_id,
+            )
         cause = self._link_cause(hook_input, token)
         if cause is not None:
             message += f"\n\n{cause}"

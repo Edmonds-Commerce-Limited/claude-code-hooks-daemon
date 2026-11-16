@@ -55,7 +55,9 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     literal_screen,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.realpath import resolve_checking_loop
+from claude_code_hooks_daemon.utils.resolution_failure import fails_closed
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     UnplaceableSubstitutionError,
     mask_quoted,
@@ -470,7 +472,8 @@ def _list_directory(
             if above is not None and above.is_symlink.get(name) is False:
                 real = f"{above.real.rstrip('/')}/{name}"
     result: _ListedDirectory | None = None
-    if real is not None or Path(directory or "/").is_dir():
+    # One that cannot be stat-ed is not listed: its files are judged one by one.
+    if real is not None or path_is_dir(directory or "/", unreadable_means=False):
         # `is_dir` is true only for a directory that resolves, so the strict
         # and non-strict `realpath` agree here.
         result = _scan_directory(real or os.path.realpath(directory or "/"))
@@ -3184,15 +3187,20 @@ def find_protected_mention_strict(
     if not command or not patterns:
         return None
     project_root = resolve_project_root()
-    unquoted = mask_quoted(command, keep_double=False)
-    bases = effective_cwds(command, cwd)
-    default_globs = _default_globs_for(command)
-    for token, start in _tokenise_with_offsets(command):
-        globbed = any(char in _GLOB_CHARACTERS for char in unquoted[start : start + len(token)])
+    tokens = _tokenise_with_offsets(command)
+    # Spelling first, over every word: this is the second opinion on a scan that
+    # gave up, so no filesystem failure it shares may hide a name (review 614b).
+    for token, _start in tokens:
         for form in _normalised_token_forms(token):
             matched = first_matching_glob(form, patterns, project_root=project_root)
             if matched is not None:
                 return matched
+    unquoted = mask_quoted(command, keep_double=False)
+    bases = effective_cwds(command, cwd)
+    default_globs = _default_globs_for(command)
+    for token, start in tokens:
+        globbed = any(char in _GLOB_CHARACTERS for char in unquoted[start : start + len(token)])
+        for form in _normalised_token_forms(token):
             if index is not None and globbed and _is_glob_shaped(form):
                 match = index.glob_matches(form, bases, default_expansion=default_globs())
                 if match is not None:
@@ -3287,6 +3295,7 @@ class CwdSet(tuple[str, ...]):
                 self._listings[directory] = None
         return self._listings[directory]
 
+    @fails_closed
     def could_be_link(self, token: str) -> bool:
         """Could relative ``token`` pass through a link in some existing directory?
 
@@ -3334,7 +3343,9 @@ class _DirectoryWalk:
         self.directories.append(directory)
         if directory in self.existing:
             return
-        if exists if exists is not None else Path(directory).is_dir():
+        # A directory that cannot be stat-ed (over-long, unreadable) may still
+        # be one: it is kept, and nothing read through it is resolved (review 614b).
+        if exists if exists is not None else path_is_dir(directory, unreadable_means=True):
             self.existing[directory] = None
 
     def indeterminate(self) -> None:
@@ -3361,7 +3372,7 @@ class _DirectoryWalk:
         # which bounds the set by what exists rather than by the number of cds.
         for base in list(self.existing)[: LINK_DIRECTORY_CAP + 1]:
             joined = os.path.normpath(str(Path(base) / target))
-            if joined not in self.existing and Path(joined).is_dir():
+            if joined not in self.existing and path_is_dir(joined, unreadable_means=True):
                 self._add(joined, exists=True)
 
     def result(self) -> CwdSet:
@@ -3438,6 +3449,7 @@ def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bo
             at_start = opened and not head
 
 
+@fails_closed
 def effective_cwds(command: str, cwd: str | None) -> CwdSet:
     """The directories ``command`` may run in: the hook's ``cwd``, then each literal move.
 
@@ -3502,6 +3514,7 @@ def _realpath_if_resolvable(token: str) -> str | None:
     return real if real != os.path.normpath(placed) else None
 
 
+@fails_closed
 def _link_targets(token: str, cwds: tuple[str, ...]) -> tuple[str, ...]:
     """Where ``token`` really leads, read from each of ``cwds`` and from the process cwd.
 

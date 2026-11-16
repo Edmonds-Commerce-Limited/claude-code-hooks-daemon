@@ -23,6 +23,7 @@ and a producer other than ``find`` feeding ``xargs`` names no root.
 """
 
 import fnmatch
+import logging
 import os
 import posixpath
 import re
@@ -34,18 +35,27 @@ from typing import Final
 from claude_code_hooks_daemon.utils import linear_shlex, path_exclusion
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_position import SHELL_NAMES
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.find_expression import FIND_EXEC_ACTIONS, find_exec_end
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.protected_file_index import (
     ExemptHook,
     ProtectedFileIndex,
     TreeView,
 )
+from claude_code_hooks_daemon.utils.resolution_failure import fails_closed
 from claude_code_hooks_daemon.utils.secret_file_matching import chdir_wrapper_targets
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     split_unquoted_spans,
 )
 from claude_code_hooks_daemon.utils.shell_snapshot import default_glob_semantics
+
+logger = logging.getLogger(__name__)
+
+#: bash's tilde prefixes for the current and the previous directory.
+_TILDE_PWD: Final[str] = "~+"
+_TILDE_OLDPWD: Final[str] = "~-"
 
 TOOL_GREP: Final[str] = "grep"
 TOOL_RG: Final[str] = "rg"
@@ -340,6 +350,7 @@ class Read:
     default_expansion: bool = False
 
 
+@fails_closed
 def search_reads(command: str, cwd: str | None) -> list[Read]:
     """Every tree a recursive search anywhere in ``command`` reads.
 
@@ -469,12 +480,20 @@ class _SearchCwds:
         return tuple(dict.fromkeys(path for path in found if path and posixpath.isabs(path)))
 
     def moved(self, target: str, current: tuple[str, ...]) -> tuple[str, ...]:
-        placed = [_place(target, base) for base in current] if current else [_place(target, None)]
-        result = tuple(dict.fromkeys(path for path in placed if path is not None))
+        bases: tuple[str | None, ...] = current or (None,)
+        placed = [(base, _place(target, base)) for base in bases]
+        result = tuple(dict.fromkeys(path for _base, path in placed if path is not None))
         if not result:
             return self.indeterminate()
         self.targets.extend(result)
-        return result
+        # A cd to what is not a directory fails, and a command after `;` or `||`
+        # then runs where the shell already was (review 614b): that place stays.
+        stayed = [
+            base
+            for base, path in placed
+            if base is not None and (path is None or not path_is_dir(path, unreadable_means=False))
+        ]
+        return tuple(dict.fromkeys((*result, *stayed)))
 
 
 def _reads(command: str, cwds: tuple[str, ...], depth: int, tracker: _SearchCwds) -> Iterator[Read]:
@@ -677,12 +696,40 @@ def _place(
     """The absolute, normalised form of ``root``, or None when it cannot be placed."""
     if unplaceable.search(root):
         return None
-    expanded = str(Path(root).expanduser())
+    expanded = _expand_tilde(root, cwd)
+    if expanded is None:
+        return None
     if not posixpath.isabs(expanded):
         if cwd is None or not posixpath.isabs(cwd):
             return None
         expanded = posixpath.join(cwd, expanded)
     return posixpath.normpath(expanded)
+
+
+def _expand_tilde(root: str, cwd: str | None) -> str | None:
+    """``root`` with a leading tilde expanded as bash does; None when bash's answer is unknown.
+
+    ``~+`` is the directory the command is in, and ``~-`` the previous one, which
+    is not known here. A ``~user`` naming no user is left as written, as bash
+    leaves it: ``Path.expanduser`` raises for one (review 614b P1).
+    """
+    head, separator, rest = root.partition("/")
+    if head == _TILDE_PWD:
+        if cwd is None or not posixpath.isabs(cwd):
+            return None
+        return posixpath.join(cwd, rest) if separator else cwd
+    if head == _TILDE_OLDPWD:
+        return None
+    try:
+        return str(Path(root).expanduser())
+    except RuntimeError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="bash leaves a tilde naming no user as written, so the word is placed as the relative path it then is",
+            level=logging.DEBUG,
+        )
+        return root
 
 
 def _placed(roots: tuple[str, ...], cwd: str | None) -> list[str]:
