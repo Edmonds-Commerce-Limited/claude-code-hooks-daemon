@@ -23,7 +23,6 @@ and a producer other than ``find`` feeding ``xargs`` names no root.
 """
 
 import fnmatch
-import itertools
 import logging
 import os
 import posixpath
@@ -47,6 +46,7 @@ from claude_code_hooks_daemon.utils.protected_file_index import (
 from claude_code_hooks_daemon.utils.resolution_failure import fails_closed
 from claude_code_hooks_daemon.utils.secret_file_matching import (
     chdir_wrapper_targets,
+    expand_directory_glob,
     link_holding_directories,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
@@ -518,11 +518,11 @@ class _SearchCwds:
             placed = _place(target, base)
             if placed is None:
                 continue
-            anchor = Path("/")
-            pattern = placed.lstrip("/")
-            for match in itertools.islice(anchor.glob(pattern), _GLOB_CD_MATCH_CAP):
-                if path_is_dir(match, unreadable_means=True):
-                    matched.append(str(match))
+            found = expand_directory_glob("/", placed)
+            if found is None:
+                # Too wide to follow (review 614b): judged as a computed move.
+                return self.indeterminate()
+            matched.extend(found[:_GLOB_CD_MATCH_CAP])
         if not matched:
             return self.indeterminate()
         self.targets.extend(matched)

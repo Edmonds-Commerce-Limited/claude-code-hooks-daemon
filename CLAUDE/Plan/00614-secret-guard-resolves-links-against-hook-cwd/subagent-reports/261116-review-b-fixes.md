@@ -10,6 +10,21 @@ Branch `agent-a13d7c8504105d4c9-aeae03b4`. It started at 62629e103. Every commit
 | 4714f6631 | RED: R4, R5                                               |
 | 7d0c8499f | R5 fix                                                    |
 | 2b53259f0 | R4 fix, release note 089                                  |
+| 6dcbe439f | RED: R4 follow-up                                         |
+| (next)    | R4 follow-up fix                                          |
+
+R4 follow-up came from a self-review of 2b53259f0. That commit had two fail-open paths and one unbounded cost:
+
+- An assignment segment skipped the walk of its value. `x="$(env -C inner cat ilink)"` was allowed, where 62629e103 denied it.
+- A literal substitution replaced the fail-closed path. A reassignment the walk cannot read (`export D=$(...)`, `declare -x`, `read`, `for D in`, `A=1 D=x`) left the stale value in place.
+- Glob expansion used `Path.glob`, which treats `**` as recursive and has no work bound.
+
+The fixes:
+
+- The value is now walked.
+- Substitution is additive: `indeterminate()` is still applied.
+- Glob expansion is component-wise (`expand_directory_glob`). `**` is read as `*`, and every listing or probe counts toward a 512 cap. Past the cap the target is judged like a computed one. Measured on `/workspace`: `cd */*/*/*/nope` costs 11 ms, `cd /*/*/*/nope` 17 ms.
+- A wrapper before a chdir command (`sudo tar -C`, `nice git -C`, `timeout 5 git -C`, `nohup env -C`) is now walked.
 
 The tests are in `tests/unit/handlers/pre_tool_use/test_secret_file_guard_cwd_fail_closed.py` and `tests/unit/utils/test_resolution_failure.py`. The fixture is synthetic: it has directory links only, plus one in-project dummy.
 
@@ -42,6 +57,8 @@ The tests are in `tests/unit/handlers/pre_tool_use/test_secret_file_guard_cwd_fa
 
 ## Residuals (not fixed)
 
+- A failed `cd` keeps the base after `&&` too. So `mkdir -p b && cd b && grep -r x .` is judged over the starting directory as well. This can over-deny; narrowing it to `;`/`||` needs the separator, which the search tracker does not carry.
+- A wrapper before `env -C` in the recursive-search tracker (`nice env -C d grep -r x l`) is not peeled; only the word walker handles it.
 - `tar -chf - <dirlink>` (with or without `-C`) is allowed. tar is not a recursive reader to the guard: a separate class, which predates this plan.
 - From a computed `cd`, a link deeper than the 512-directory scan is not judged. The scan logs at INFO when it stops early, the project root is still read, and nothing is loosened.
 - Overflow mode now applies to a computed `cd` too. When a computed `cd` makes more than 16 link-holding directories exist, a relative word that names a link in any of them is denied. Example: `.venv/bin/python3` beside `cd "$(...)"` in a tree with many venvs. That is a possible false positive.

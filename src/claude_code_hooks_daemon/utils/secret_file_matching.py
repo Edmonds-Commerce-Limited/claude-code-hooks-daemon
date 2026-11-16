@@ -59,8 +59,10 @@ from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.realpath import resolve_checking_loop
 from claude_code_hooks_daemon.utils.resolution_failure import fails_closed
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    COMMAND_WRAPPERS,
     UnplaceableSubstitutionError,
     mask_quoted,
+    peel_command_wrappers,
     segment_command_chain,
     segment_command_word,
     shell_word_spans,
@@ -3253,11 +3255,60 @@ _ASSIGNMENT_SEGMENT: Final[re.Pattern[str]] = re.compile(
     r"([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|[^\s\"']*)\s*"
 )
 #: The project directories a computed ``cd`` is judged from are found by a scan this wide.
-_LINK_SCAN_DIRECTORY_CAP: Final[int] = 512
+LINK_SCAN_DIRECTORY_CAP: Final[int] = 512
 #: A scan is reused this long: one command can hold many computed moves.
 _LINK_SCAN_REUSE_SECONDS: Final[float] = 5.0
 _GIT_DIRECTORY: Final[str] = ".git"
 _link_scans: dict[str, tuple[float, tuple[str, ...]]] = {}
+
+
+def expand_directory_glob(base: str, pattern: str) -> list[str] | None:
+    """The directories ``pattern`` matches from ``base``, component by component; None past the cap.
+
+    Read as bash reads it by default: ``**`` is ``*``, and a wildcard skips dot
+    names unless the component starts with a dot. At most
+    :data:`LINK_SCAN_DIRECTORY_CAP` directories are listed, so a glob that
+    matches nothing is never followed through the whole tree.
+    """
+    current = ["/"] if pattern.startswith("/") else [base]
+    listed = 0
+    for component in (part for part in pattern.split("/") if part not in ("", ".")):
+        if component == "**":
+            component = "*"
+        following: list[str] = []
+        for directory in current:
+            # Every listing and every probe counts, so the walk is bounded however deep.
+            listed += 1
+            if listed > LINK_SCAN_DIRECTORY_CAP:
+                return None
+            if not any(char in _GLOB_CHARACTERS for char in component):
+                joined = f"{directory.rstrip('/')}/{component}"
+                if path_is_dir(joined, unreadable_means=True):
+                    following.append(os.path.normpath(joined))
+                continue
+            try:
+                with os.scandir(directory) as entries:
+                    # The listing's own type answers, so a match costs no further stat.
+                    names = [
+                        entry.name
+                        for entry in entries
+                        if (not entry.name.startswith(".") or component.startswith("."))
+                        and fnmatch.fnmatchcase(entry.name, component)
+                        and entry.is_dir()
+                    ]
+            except OSError as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="a directory the shell cannot list expands no glob in it",
+                    level=logging.DEBUG,
+                )
+                continue
+            following.extend(os.path.normpath(f"{directory.rstrip('/')}/{name}") for name in names)
+        current = following
+        if not current:
+            return []
+    return current
 
 
 def link_holding_directories(root: str) -> tuple[str, ...]:
@@ -3267,7 +3318,7 @@ def link_holding_directories(root: str) -> tuple[str, ...]:
     so these are where a computed ``cd`` could make a relative word dangerous.
     ``.git`` is not entered and links are not followed. A directory that cannot
     be listed is counted (fail closed). The scan stops after
-    :data:`_LINK_SCAN_DIRECTORY_CAP` directories: a link deeper than that, in a
+    :data:`LINK_SCAN_DIRECTORY_CAP` directories: a link deeper than that, in a
     larger tree, is not found here -- a residual recorded in the plan, never an
     error -- and the project root is still read as before.
     """
@@ -3278,7 +3329,7 @@ def link_holding_directories(root: str) -> tuple[str, ...]:
     holding: list[str] = []
     queue = [os.path.normpath(root)]
     visited = 0
-    while queue and visited < _LINK_SCAN_DIRECTORY_CAP:
+    while queue and visited < LINK_SCAN_DIRECTORY_CAP:
         directory = queue.pop(0)
         visited += 1
         try:
@@ -3453,21 +3504,20 @@ class _DirectoryWalk:
         """A globbed move: each directory it matches from where the command may be (review 614b R4)."""
         if Path(target).is_absolute():
             bases: list[str] = ["/"]
-            target = target.lstrip("/")
         elif self.directories:
             bases = list(dict.fromkeys([self.directories[-1], *self.existing]))
         else:
             bases = []
         found = 0
         for base in bases[: LINK_DIRECTORY_CAP + 1]:
-            if not target:
-                break
-            # pathlib's glob also matches dot names, which only adds directories.
-            for match in itertools.islice(Path(base).glob(target), LINK_DIRECTORY_CAP + 1):
-                joined = os.path.normpath(str(match))
-                if path_is_dir(joined, unreadable_means=True):
-                    self._add(joined, exists=True)
-                    found += 1
+            matches = expand_directory_glob(base, target)
+            if matches is None:
+                # Too wide to follow: judged as a computed move instead.
+                self.indeterminate()
+                return
+            for match in matches:
+                self._add(match, exists=True)
+                found += 1
         if not found:
             # No match leaves the word as written, which then names no directory.
             self.indeterminate()
@@ -3475,7 +3525,13 @@ class _DirectoryWalk:
     def change(self, target: str | None) -> None:
         """Record a ``cd``-like move to ``target`` (None: no literal operand)."""
         if target is not None:
-            target = self._substituted(target.rstrip("`)"))
+            target = target.rstrip("`)")
+            substituted = self._substituted(target)
+            if substituted != target:
+                # The literal value is the likely target, not a certain one: a
+                # reassignment this walk cannot read may have changed it.
+                self.indeterminate()
+                target = substituted
         if not target or target == "-" or any(c in _COMPUTED_CHARACTERS for c in target):
             self.indeterminate()
             return
@@ -3567,7 +3623,7 @@ def _walk_directory_changes(text: str, walk: _DirectoryWalk, depth: int) -> None
             if value[:1] in ("'", '"'):
                 value = value[1:-1]
             walk.assign(assignment.group(1), value)
-            continue
+            # The value is still walked: `x="$(env -C d cat l)"` moves inside it.
         if not _may_change_directory(segment):
             continue
         words = _shell_words(segment)
@@ -3583,6 +3639,7 @@ def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bo
     at_start = True
     prefixed = False
     redirect_file = False
+    wrapped_at = -1
     for index, word in enumerate(words):
         if depth < _MAX_DIRECTORY_CHANGE_DEPTH and " " in word and _may_change_directory(word):
             _walk_directory_changes(word, walk, depth + 1)
@@ -3605,6 +3662,8 @@ def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bo
         for opener in _SUBSTITUTION_OPENERS:
             if opener in head:
                 head, opened = head.rsplit(opener, 1)[1], True
+        if index == wrapped_at:
+            at_start = True
         if at_start or opened or loose:
             moves: list[str | None] = []
             if head in _DIRECTORY_CHANGE_COMMANDS:
@@ -3615,6 +3674,15 @@ def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bo
                 walk.change(move)
                 if loose:
                     walk.indeterminate()
+            if head in COMMAND_WRAPPERS:
+                # `sudo tar -C d`, `nice git -C d`: the wrapped command is at start too.
+                _names, offset = peel_command_wrappers([head, *words[index + 1 :]])
+                wrapped_at = index + offset
+                # A chdir wrapper inside the chain (`nohup env -C d`) moves too.
+                for inner in range(index + 1, wrapped_at):
+                    if words[inner] in _CHDIR_OPTIONS and words[inner] in COMMAND_WRAPPERS:
+                        for move in chdir_wrapper_targets(words[inner], words, inner + 1):
+                            walk.change(move)
         if not (word in _COMMAND_START_WORDS or (at_start and _ASSIGNMENT_WORD.match(word))):
             at_start = opened and not head
 
