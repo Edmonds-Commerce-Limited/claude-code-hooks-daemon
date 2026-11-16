@@ -338,6 +338,40 @@ class TestGlobMatches:
         assert index.glob_matches(str(repo / "keys\0/*")) is None
 
 
+class TestDirectoriesOnlyGlob:
+    """A trailing slash makes a glob directories-only, so it never names a file (#204)."""
+
+    @pytest.fixture()
+    def root_level(self, repo: Path) -> ProtectedFileIndex:
+        """The fixture repository plus a protected file directly at its top level."""
+        _touch(repo, KEY)
+        _git(repo, "add", "-A")
+        built = build_index(repo, PATTERNS)
+        assert built is not None
+        return built
+
+    @pytest.mark.parametrize("glob", ("*/", "*" + KEY[1:] + "/", "?" + KEY[1:] + "/", "**/"))
+    def test_a_directories_only_glob_does_not_name_a_protected_file(
+        self, root_level: ProtectedFileIndex, repo: Path, glob: str
+    ) -> None:
+        assert root_level.glob_matches(glob, (str(repo),)) is None
+        # Path division would drop the slash, so the token is built as a string.
+        assert root_level.glob_matches(f"{repo}/{glob}") is None
+
+    @pytest.mark.parametrize("glob", ("*", "?" + KEY[1:], KEY))
+    def test_the_same_glob_without_the_slash_is_still_denied(
+        self, root_level: ProtectedFileIndex, repo: Path, glob: str
+    ) -> None:
+        assert root_level.glob_matches(glob, (str(repo),)) == KEY
+        assert root_level.glob_matches(str(repo / glob)) == KEY
+
+    @pytest.mark.parametrize("glob", ("keys/*", "keys/" + KEY, "*/" + KEY, "**/" + KEY))
+    def test_a_glob_reaching_a_file_below_a_directory_is_judged_as_before(
+        self, root_level: ProtectedFileIndex, repo: Path, glob: str
+    ) -> None:
+        assert root_level.glob_matches(glob, (str(repo),)) == KEY
+
+
 class TestTheCache:
     def test_a_remembered_index_is_served_without_building(self, repo: Path) -> None:
         index = ProtectedFileIndex(

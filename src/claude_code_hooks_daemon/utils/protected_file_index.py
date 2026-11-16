@@ -161,9 +161,14 @@ class ProtectedFileIndex:
         sits that deep is not reading a protected file, and judging it would deny
         ``ls */*/*`` in every tree that has one visible protected file. A glob
         anchored by a literal directory (``dir/*``, ``dir/**/*``) or ending in one
-        wildcard (``*``) names a place and is judged.
+        wildcard (``*``) names a place and is judged. A trailing slash (``*/``) makes the
+        glob match directories only, so it never names an indexed file and is not judged
+        (``os.path.normpath`` would drop the slash and judge it as ``*``); a file below a
+        directory is still judged by the deeper globs that reach it.
         """
         if not token or "\0" in token:
+            return None
+        if _is_directories_only(token):
             return None
         absolute_tokens = (
             [os.path.normpath(token)]
@@ -205,6 +210,11 @@ class ProtectedFileIndex:
             return True
         result = run_git(Path(self.project_root), "check-ignore", "-q", "--", base)
         return result.returncode == 0
+
+
+def _is_directories_only(token: str) -> bool:
+    """Does a trailing slash restrict the glob ``token`` to directories?"""
+    return token.endswith("/") and bool(token.strip("/"))
 
 
 def _components(path: str) -> list[str]:
