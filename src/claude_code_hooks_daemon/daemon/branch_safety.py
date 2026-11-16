@@ -626,8 +626,9 @@ def _net_change_held(repo: Path, bases: Sequence[str], tip_ref: str) -> tuple[bo
 
     The proof is ``remote_branch_proof.holds_net_change``, the one every remote delete
     rests on. Imported here, not at module level, because that module imports this one.
-    It reads root-relative paths, so it runs from the repository top level. Every
-    failure (no top level, a git error or timeout) is a reason, never a pass.
+    It reads root-relative paths, so it runs from the repository top level, on the
+    same load-scaled git budget as :func:`_git`. Every failure (no top level, a git
+    error or timeout) is a reason, never a pass.
     """
     from claude_code_hooks_daemon.core import remote_branch_proof
 
@@ -635,9 +636,10 @@ def _net_change_held(repo: Path, bases: Sequence[str], tip_ref: str) -> tuple[bo
     top_level = top.stdout.strip() if top.returncode == 0 else ""
     if not top_level:
         return False, "the repository top level could not be read, so the net change is unchecked"
+    budget = scaled_timeout(Timeout.GIT_BRANCH_SAFETY, Timeout.GIT_BRANCH_SAFETY_MAX)
     try:
         for base in bases:
-            if remote_branch_proof.holds_net_change(Path(top_level), base, tip_ref):
+            if remote_branch_proof.holds_net_change(Path(top_level), base, tip_ref, timeout=budget):
                 return True, ""
     except remote_branch_proof.ProofUnavailableError as exc:
         return False, f"the net change could not be checked ({exc})"
