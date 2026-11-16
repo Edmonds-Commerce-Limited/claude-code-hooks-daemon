@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.utils.git_file_states import GitFileStates
@@ -58,6 +59,8 @@ MAX_CACHED_INDEXES: Final[int] = 8
 _HIDDEN_PREFIX: Final[str] = "."
 _RECURSIVE_COMPONENT: Final[str] = "**"
 _WILDCARD_ONLY: Final[re.Pattern[str]] = re.compile(r"[*?]+")
+#: The characters that make a path component a glob (as in ``secret_file_matching``).
+_GLOB_CHARACTERS: Final[frozenset[str]] = frozenset("*?[")
 # fnmatch reads ``[^x]`` as a class holding ``^`` and ``x``; bash negates it like ``[!x]``.
 _BRACKET_CARET: Final[re.Pattern[str]] = re.compile(r"\[\^")
 
@@ -110,6 +113,34 @@ class ProtectedFileIndex:
     def _roots(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys((self.project_root, os.path.realpath(self.project_root))))
 
+    def _leads_out(self, lexical: str, real: str) -> bool:
+        """Does a link turn ``lexical``, a path in the project, into ``real``, one outside it?
+
+        A path outside the project as spelled is judged as before: the index never
+        claimed to cover it, and denying every such path would deny ordinary reads.
+        """
+        if real == lexical or not any(_is_under(lexical, root) for root in self._roots()):
+            return False
+        return not _is_under(real, os.path.realpath(self.project_root))
+
+    def _through_links(self, token: str, absolute_token: str) -> tuple[str, ...] | None:
+        """``absolute_token`` with its literal directory resolved, or None when that leads out.
+
+        Plan 00614: ``dlink/*`` reads what ``dlink`` points at, but is spelled under
+        the link, so it is also matched with the link resolved. Only a glob whose
+        own text names a directory before its first wildcard costs a filesystem
+        call; ``*.py`` costs none. ``()`` is a glob with no link to resolve.
+        """
+        directory = _literal_directory(token, absolute_token)
+        if directory is None or not os.path.lexists(directory):
+            return ()
+        real = os.path.realpath(directory)
+        if real == directory:
+            return ()
+        if self._leads_out(directory, real):
+            return None
+        return (real.rstrip("/") + absolute_token[len(directory) :],)
+
     def find_under(
         self,
         root: str,
@@ -124,8 +155,16 @@ class ProtectedFileIndex:
         drops an entry it would not read, such as a hidden or an excluded directory;
         ``is_exempt`` skips a file the caller confirmed safe (encrypted at rest). A file
         the tool is handed by name is read whatever it skips and ignores.
+
+        A ``root`` inside the project that is a link to a directory outside it holds
+        files this index never listed (another checkout, Plan 00614), so the search
+        is not vouched for: the first pattern is answered, as for a protected file.
         """
-        bases = tuple(dict.fromkeys((os.path.normpath(root), os.path.realpath(root))))
+        lexical, real = os.path.normpath(root), os.path.realpath(root)
+        # An unreadable target is not vouched for either: it fails closed.
+        if self._leads_out(lexical, real) and path_is_dir(real, unreadable_means=True):
+            return self.patterns[0] if self.patterns else None
+        bases = tuple(dict.fromkeys((lexical, real)))
         # Whether naming a base defeats git's ignore depends on the base alone, so
         # each is asked of git at most once however many ignored files lie below it.
         defeats_ignore: dict[str, bool] = {}
@@ -173,14 +212,18 @@ class ProtectedFileIndex:
         """
         if not token or "\0" in token or token.endswith("/"):
             return None
-        for absolute_token in _absolute_tokens(token, bases):
-            if self._names_no_place(token, absolute_token):
-                continue
-            glob_parts = _glob_parts(absolute_token, default_expansion)
-            for entry in self.files:
-                for root in self._roots():
-                    if _segments_match(_components(f"{root}/{entry.relpath}"), glob_parts):
-                        return entry.pattern
+        for spelled in _absolute_tokens(token, bases):
+            linked = self._through_links(token, spelled)
+            if linked is None:
+                return self.patterns[0] if self.patterns else None
+            for absolute_token in (spelled, *linked):
+                if self._names_no_place(token, absolute_token):
+                    continue
+                glob_parts = _glob_parts(absolute_token, default_expansion)
+                for entry in self.files:
+                    for root in self._roots():
+                        if _segments_match(_components(f"{root}/{entry.relpath}"), glob_parts):
+                            return entry.pattern
         return None
 
     def directories_matching(
@@ -199,14 +242,21 @@ class ProtectedFileIndex:
         if not token.endswith("/") or "\0" in token:
             return ()
         found: dict[str, None] = {}
-        for absolute_token in _absolute_tokens(token, bases):
-            glob_parts = _glob_parts(absolute_token, default_expansion)
-            for entry in self.files:
-                for root in self._roots():
-                    parts = _components(f"{root}/{entry.relpath}")
-                    for depth in range(1, len(parts)):
-                        if _segments_match(parts[:depth], glob_parts):
-                            found["/" + "/".join(parts[:depth])] = None
+        for spelled in _absolute_tokens(token, bases):
+            linked = self._through_links(token, spelled)
+            if linked is None:
+                # The link's own directory: searching it is judged by find_under,
+                # which does not vouch for a link out of the project.
+                found[_literal_directory(token, spelled) or spelled] = None
+                continue
+            for absolute_token in (spelled, *linked):
+                glob_parts = _glob_parts(absolute_token, default_expansion)
+                for entry in self.files:
+                    for root in self._roots():
+                        parts = _components(f"{root}/{entry.relpath}")
+                        for depth in range(1, len(parts)):
+                            if _segments_match(parts[:depth], glob_parts):
+                                found["/" + "/".join(parts[:depth])] = None
         return tuple(found)
 
     def _names_no_place(self, token: str, absolute_token: str) -> bool:
@@ -236,6 +286,24 @@ class ProtectedFileIndex:
 
 def _components(path: str) -> list[str]:
     return [part for part in path.split("/") if part]
+
+
+def _literal_directory(token: str, absolute_token: str) -> str | None:
+    """The directory ``absolute_token`` spells before its first glob component.
+
+    None unless ``token`` itself names a directory before its first wildcard
+    (``dlink/*``, ``/abs/*``): a bare ``*.py`` is read from a cwd that the
+    caller placed, not one the glob spells.
+    """
+    wildcards = [token.find(char) for char in _GLOB_CHARACTERS if char in token]
+    if not wildcards or "/" not in token[: min(wildcards)]:
+        return None
+    parts = absolute_token.split("/")
+    literal = next(
+        (depth for depth, part in enumerate(parts) if any(c in part for c in _GLOB_CHARACTERS)),
+        len(parts),
+    )
+    return "/".join(parts[:literal]) or "/"
 
 
 def _absolute_tokens(token: str, bases: Sequence[str]) -> list[str]:

@@ -51,17 +51,17 @@ project whose worktrees carry seeded links to protected files.
 
 - [x] ✅ **Task 2.1**: Join a relative token to the hook `cwd` before the
   `is_symlink` check and `realpath`, and resolve when any path component is a link.
-- [ ] ⬜ **Task 2.2**: Add the realpath of a directory link's target to the
+- [x] ✅ **Task 2.2**: Add the realpath of a directory link's target to the
   index bases, or deny by default when it lies outside the indexed project.
-- [ ] ⬜ **Task 2.3**: Expand glob tokens and realpath each match.
-- [ ] ⬜ **Task 2.4**: Release note.
+- [x] ✅ **Task 2.3**: Expand glob tokens and realpath each match.
+- [x] ✅ **Task 2.4**: Release note.
 
 ## Success Criteria
 
-- [ ] Each gap has a test that failed before its fix.
-- [ ] Every pre-existing deny still holds (the existing secret-guard suite is green).
-- [ ] Release-bound consequences recorded in the pending release notes.
+- [x] Each gap has a test that failed before its fix.
+- [x] Every pre-existing deny still holds (the existing secret-guard suite is green).
+- [x] Release-bound consequences recorded in the pending release notes.
 
 ## Delivery & Milestones
 
-- Found by the 00613 Task 1.1 probe; no delivery yet.
+- Found by the 00613 Task 1.1 probe. Fixed on branch `agent-a13d7c8504105d4c9-aeae03b4`, not yet merged; release note `089-secret-guard-judges-links-from-the-hook-cwd.md`. Report: `subagent-reports/261116-link-gaps.md`.
