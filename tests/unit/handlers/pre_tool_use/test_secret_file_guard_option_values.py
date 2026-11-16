@@ -131,7 +131,7 @@ class TestGitSearchExemptionIsScopedToSubcommand:
     def test_same_letters_as_search_value_still_allowed(self, project: Path, template: str) -> None:
         assert _verdict(project, template.format(p=_ABSENT)) is Decision.ALLOW
 
-    @pytest.mark.parametrize("name", [_ABSENT, _PROTECTED])
+    @pytest.mark.parametrize("name", [_ABSENT, _PROTECTED, f"sub/{_ABSENT}"])
     @pytest.mark.parametrize(
         "template",
         [
@@ -209,6 +209,11 @@ class TestGrepPatternOptionSearchesEveryOperand:
             ["grep", "-r", "--regexp=zz", "deep", "sub", "--include=*"],
             ["grep", "-r", "-ezz", "deep", "sub", "--include=*"],
             ["rg", "--regexp=zz", "deep", "sub", "--glob=*"],
+            # GNU grep accepts any unambiguous abbreviation of a long option.
+            ["grep", "-r", "--reg=zz", "deep", "sub", "--include=*"],
+            ["grep", "-r", "--rege=zz", "deep", "sub", "--include=*"],
+            ["grep", "-r", "--regex=zz", "deep", "sub", "--include=*"],
+            ["grep", "-r", "--fil=pats", "deep", "sub", "--include=*"],
         ],
     )
     def test_function_never_judges_attached_pattern_clean(
