@@ -70,8 +70,9 @@ Non-blocking findings from the Opus re-review, not started:
 
 - With `globstar` on, `**/` also matches the base directory, so
   `grep -r x **/` is denied when the only protected file is at the top level.
-  The test at `test_secret_file_guard_trailing_slash_glob.py:128-135` asserts
-  this behaviour. This is a false deny, on the safe side.
+  The test `test_a_double_star_follows_the_default_expansion_flag`
+  (`test_secret_file_guard_trailing_slash_glob.py:125-132`) asserts this
+  behaviour. This is a false deny, on the safe side.
 - POSIX bracket classes such as `[[:alpha:]]*/` are not translated before
   fnmatch, so they are allowed. Main does the same.
 - A symlinked directory that holds a protected file (`grep -r x l*/`) is not
