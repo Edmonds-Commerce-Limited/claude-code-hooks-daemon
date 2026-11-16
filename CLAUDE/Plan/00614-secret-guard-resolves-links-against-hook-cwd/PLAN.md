@@ -1,6 +1,6 @@
 # Plan 00614: secret guard resolves links against hook cwd
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-16
 **Owner**: joseph
 **Priority**: High
@@ -43,7 +43,7 @@ project whose worktrees carry seeded links to protected files.
 
 ### Phase 1: Defence
 
-- [ ] ⬜ **Task 1.1**: Failing tests for gaps 1, 2 and 3 on synthetic fixtures
+- [x] ✅ **Task 1.1**: Failing tests for gaps 1, 2 and 3 on synthetic fixtures
   (dummy protected file, relative and directory links, hook `cwd` set to the
   worktree while the process cwd is `/`).
 
