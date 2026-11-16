@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.75.0] - 2026-11-16
+
+_Branch-pool work (Plan 00594): a proof that counts squash-merged and cherry-picked branches as merged, pools counted per owner, pressure moved to session start and stop, `branch-preflight`, previewed batched `branch-sweep --clean`, signed park commits, and the removal of recovery bundles and of the unproven-delete flags. Also a model ownership statement in the CLAUDE.md block (on by default), `session-state` with versioned JSON Schemas, an opt-in long-running-command guard, supervisor idle compaction (dry-run by default), wrappers with no machine-specific path, relay repair at daemon start, and many secret-guard, `destructive_git` and `pipe_blocker` fixes. New config keys: `claude_md.ownership`, `claude_md.ownership_text`, `daemon.omit_permission_surface`, `branches.wip.creation_grace`, `branches.park.commit`, `branches.park.push`, and two `worktree_create` budget options. Operator-facing CLI changes need a script update: see Changed (**BREAKING**) and Removed._
+
+### Added
+
+- `claude_md.ownership` (`own` default, `off`, `custom`) and `claude_md.ownership_text`: the injected CLAUDE.md block leads with a sentence saying the codebase is the model's own, and handlers drop one-line ownership hints. On by default and it lengthens output; set `off` to restore the old block (Plan 00599).
+- `hooks-daemon session-state --json|--watch --session ID`, and versioned JSON Schemas (`claude_code_hooks_daemon/schemas/`) with `schema_version` on every `--json` document including `mode-history`; contract in `docs/guides/SESSION_STATE_CONTRACT.md` (Plan 00601).
+- `long_running_command_guard` PreToolUse handler (ships off): denies long foreground commands and gives the `run_in_background` form (Plan 00602).
+- Supervisor idle compaction at a context percentage (default 30), dry-run by default; `CCY_IDLE_COMPACT=on` arms it (Plan 00603).
+- `hooks-daemon branch-preflight [name]`: lists every blocker to creating a branch with its fix command; the creation deny renders the same report (Plan 00594).
+- Remote-delete proof for squash-merged, renamed-PR and cherry-picked branches (net-change check, offline), shared by the `git push --delete` guard, `branch-sweep --clean --remote` and the branch cap (Plan 00594 Tasks 3.1, 3.2).
+- Branch-tip channel: a guarded branch install records its tracked ref, session start reports when the ref moves, and `upgrade.sh --release` returns to the release installed before it (Plan 00594 Task 5.1).
+- `branch-park --no-commit` and `--no-push`, with `branches.park.commit` and `branches.park.push`; stop guards honour a standing park (Plan 00594).
+- `branches.wip.creation_grace` (default 2): the open-work cap denies a creation only at `cap + creation_grace` (Plan 00594 Task 4.2).
+- Branch pools counted per owner, with a `Foreign` group in `branch-sweep` (Plan 00594 Task 4.4); `park-carried` status for a park marker over work the default holds.
+- `branch_creation_guard` advisories for recovery-copy branch names and nested worktrees, and a "Branch Practice" section in the worktree core doc (Plan 00594 Task 4.8).
+- `daemon.omit_permission_surface` and `hooks-daemon permission-surface`, to keep Claude Code's critical-path removal prompt off in bypass sessions (Plan 00474).
+- `worktree_create` options `add_base_seconds` and `add_ceiling_seconds`; a timed-out `git worktree add` is retried once (Plan 00474).
+- `hooks-daemon branch-sweep --budget-ms N`; branches with no merge base are measured and classified (Plan 00605, GitHub #203).
+- Stop guards check the stopping session's own branches for dormancy and an over-cap pool, and hand over branches of locked or harness-directory worktrees at a coordinator stop.
+- The daemon's remote git calls use the session's `SSH_AUTH_SOCK`, read from the hook process (Plan 00594).
+- `provision.sh` provisions the relay binary; the relay repair also starts at daemon start and is stopped with the daemon; `hooks-daemon status` shows the relay repair state (Plan 00608).
+- QA: `fixed_worktree_budget` check, a semgrep gate run from a pinned uv tool environment, a test that no two release-note callouts share an ordinal, and an end-to-end test that park commits are really signed.
+- Vendored the Claude Code permission-modes page into remote docs.
+
+### Changed
+
+- **BREAKING (scripts):** `hooks-daemon branch-sweep --clean` is now a dry run that prints the plan; add `--apply` to delete, in resumable batches of 50. Scripts that ran `--clean` must add `--apply` (Plan 00594 Task 3.4).
+- **BREAKING (scripts):** `delete-branch` no longer accepts `--allow-unproven`, `--reason`, `--bundle` or `--no-bundle`; `--protected-ref` accepts only the default branch or a declared integration line. `worktree-reap --base-branch` has the same rule (Plan 00594).
+- Branch-pool pressure lands at session start and stop; creation is a backstop (Plan 00594 Task 4.2). Branch cap exits: delete only on machine proof, parking is a bounded pause.
+- `branch-sweep` prints a remote delete only where the guard's proof would allow it (Plan 00594 Task 4.7); `branches.parked.cap` is 1 in this project's own config.
+- `branch-park` reports a refused push (`WARNING: parked locally, not pushed`, exit 3), keeps a remote-only park locally, and announces an ended park; the park commit is signed when `commit.gpgsign` is true (Plan 00594).
+- The generated `.claude/hooks/*` wrappers are byte-identical on every machine: the checkout root is derived at run time, and a fallback events directory is published in `untracked/events<suffix>.location` (Plan 00609). The next converge rewrites each wrapper once.
+- Hard-failing git calls (WorktreeRemove, worktree add, CLAUDE.md auto-commit, branch-park/keep/sweep fetches and pushes, proof walks, index build) are scaled to host load; WorktreeCreate and WorktreeRemove event budgets and the `init.sh` waits were raised (Plan 00474 N621, N622, N623, N624).
+- `jsonschema>=4.18`, `referencing>=0.28.4` and `pydantic-core>=2.14` declared; anyio declared as a dev dependency; semgrep runs from a pinned uv tool environment and leaves the lock; coverage held at 7.13.5; dependency alerts cleared (Plan 00607).
+- `resolve_venv` probes this path's own venv first and stays quiet about a sibling view's (Plan 00598, GitHub #199).
+- The last venv build result is recorded per view, `untracked/.venv-bootstrap-<fingerprint>.result` (Plan 00608).
+- `long_running_command_guard` treats `mkplan.bash` and `pingbus` as known-fast (Plan 00474 N620).
+- `secret_file_guard` judges a trailing-slash glob as directories (Plan 00610, GitHub #204).
+- QA scanners never walk a gitignored tree; test-suite semgrep rules scan test files.
+- Plan indexes and statistics maintained; completed plans archived.
+
+### Fixed
+
+- `pipe_blocker` reads heredoc bodies and `py.test`, and the shared shell word reader reads `${x:-a}` operator forms as one word (Plan 00478).
+- `secret_file_guard` no longer denies a git search string, a grep filter value or bold markdown (Plan 00595, GitHub #200), and no longer misses POSIX classes or symlinked directories in a glob (Plan 00612); `find -exec` and `xargs` reads are judged (Plan 00615).
+- `destructive_git` no longer denies printed git text that is captured or reformatted; it denies a written script fed to a shell and `printf -v` assignments later run (Plan 00596, GitHub #197).
+- `plan_number_helper` no longer denies a content search inside an echo's substitution (Plan 00597, GitHub #198).
+- Removing a worktree no longer blocks on a symlink seed pointing into the main checkout (Plan 00474).
+- A branch left with only empty park commits stays deletable, and a park marker over merged work is in no pool (Plan 00617, Plan 00594).
+- `lsp_enforcement` ignores grep option values; the merged-pool message names the real trigger; a finished agent quoting a usage limit is not reported killed; an unproven venv skip no longer warns on every run (Plan 00474 N612-N615).
+- Git config writes (park record, plan counter, creator record) wait for `config.lock` and name a stale lock (Plan 00474 N621, N623, N624).
+- The ccy supervisor no longer disables a plugin because the host was busy, and names the cause when it does (Plan 00603).
+- `work-queue done` no longer lists the finished issue; `setup_worktree.sh` obeys the branch pools; acceptance socket discovery uses the daemon resolver (Plan 00606).
+- The venv start diagnosis ignores an ambient `PYTHONPATH` (Plan 00609).
+- A relay repair that cannot create its state file is logged (Plan 00608).
+- CI fixes: the relay build's redundant strip (N625), semgrep findings in `forwarder_generator` and `utils/git_repo`, pyright and bandit findings, caplog assertions scoped to the logger under test (N618), a timing test scaled to host load.
+
+### Removed
+
+- Recovery bundles under `untracked/deleted-branches/` and `untracked/branch-cleanup/`: delete commands print a `git branch <name> <sha>` restore line instead (Plan 00594).
+- `delete-branch --allow-unproven`, `--reason`, `--bundle` and `--no-bundle`.
+
 ## [3.74.0] - 2026-11-10
 
 _The CLAUDE.md block is written and committed only on a home branch, a run of fixes from release-candidate field use (Plan 00594), and refreshed vendored remote docs. Two new config keys, `branches.home` and `branches.home_commit`, both optional. One recommended post-upgrade task. No breaking change._
