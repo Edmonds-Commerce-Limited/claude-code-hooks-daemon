@@ -326,3 +326,84 @@ class TestCommandLevel:
     ) -> None:
         literal = _verdict(nested, "ls -d dir/")
         assert _verdict(nested, command) == literal
+
+
+class TestReviewFindings:
+    """Opus review of Plan 00612: backtracking, symlinked literal parents, bare globs."""
+
+    @pytest.mark.parametrize(
+        ("glob", "name"),
+        [
+            ("*a*a*a*a*b", "a" * 255),
+            ("*-*-*-*-*.json", "-" * 244),
+            ("*a*a*a*a*[b]", "a" * 255),
+        ],
+    )
+    def test_a_many_star_glob_does_not_backtrack_polynomially(self, glob: str, name: str) -> None:
+        import time
+
+        from claude_code_hooks_daemon.utils.protected_file_index import _segments_match
+
+        started = time.perf_counter()
+        assert _segments_match([name], [glob]) is False
+        assert time.perf_counter() - started < 0.1
+
+    @pytest.mark.parametrize(
+        ("glob", "name", "expected"),
+        [
+            ("*a", "aa", True),
+            ("*[ab]c", "xbac", True),
+            ("a*b*c", "aXbYbc", True),
+            ("a*b*c", "aXbYb", False),
+            ("*", "anything", True),
+            ("**", "anything", True),
+            ("a*", "a", True),
+            ("*a*", "xax", True),
+            ("x*?y", "xaay", True),
+        ],
+    )
+    def test_atomic_stars_keep_the_same_answers(
+        self, glob: str, name: str, expected: bool
+    ) -> None:
+        from claude_code_hooks_daemon.utils.protected_file_index import _segments_match
+
+        assert _segments_match([name], [glob]) is expected
+
+    def test_a_glob_under_a_symlinked_literal_parent_is_judged(self, tmp_path: Path) -> None:
+        (tmp_path / "up").symlink_to(tmp_path)
+        index = _index(tmp_path, _NESTED)
+        assert index.directories_matching("up/di?/", (str(tmp_path),)) == (f"{tmp_path}/dir",)
+        assert index.glob_matches(f"up/dir/ke?.{_SUFFIX}", (str(tmp_path),)) is not None
+
+    def test_the_symlink_scan_runs_under_a_symlinked_literal_parent(self, tmp_path: Path) -> None:
+        (tmp_path / "dir").mkdir()
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "l").symlink_to(tmp_path / "dir")
+        (tmp_path / "up").symlink_to(tmp_path / "sub")
+        index = _index(tmp_path, _NESTED)
+        assert index.directories_matching("up/l*/", (str(tmp_path),)) == (f"{tmp_path}/sub/l",)
+
+    def test_a_real_directory_named_with_a_glob_character_stays_literal(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "a*b").mkdir()
+        (tmp_path / "a*b" / "dir").mkdir()
+        (tmp_path / "up").symlink_to(tmp_path / "a*b")
+        index = _index(tmp_path, f"a*b/dir/key.{_SUFFIX}", f"axb/dir/key.{_SUFFIX}")
+        found = index.directories_matching("up/d*/", (str(tmp_path),))
+        assert found == (f"{tmp_path}/a*b/dir",)
+
+    def test_a_symlinked_parent_is_denied_at_the_handler(self, nested: Path) -> None:
+        (nested / "up").symlink_to(nested)
+        assert _verdict(nested, "grep -r x up/dir/") == Decision.DENY
+        assert _verdict(nested, "grep -r x up/di?/") == Decision.DENY
+
+    @pytest.mark.parametrize("command", ["grep -r x d*", "grep -r x di?", "rg x d*"])
+    def test_a_recursive_reader_of_a_glob_without_a_slash_is_judged(
+        self, nested: Path, command: str
+    ) -> None:
+        assert _verdict(nested, command) == Decision.DENY
+
+    @pytest.mark.parametrize("command", ["grep -r x x*", "grep -r x [!de]?", "ls d*", "grep x d*"])
+    def test_other_bare_globs_are_unchanged(self, nested: Path, command: str) -> None:
+        assert _verdict(nested, command) == Decision.ALLOW

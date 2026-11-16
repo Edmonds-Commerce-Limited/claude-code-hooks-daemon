@@ -55,3 +55,35 @@ existing `[^x]`/`[!x]` tests still pass.
 Release note `CLAUDE/UPGRADES/UNRELEASED/release-notes/088-secret-guard-dir-glob-false-allows.md`.
 Out of scope items (`**/` base directory, bash older than 5.2, Plan 00611)
 untouched.
+
+## Review round (Opus)
+
+Red, before the fix (`TestReviewFindings`): `11 failed, 12 passed`. The
+pathological `*a*a*a*a*b` against a 255-char name took 24.9 s here; a
+symlinked literal parent (`up/di?/`) returned `()` and `grep -r x up/di?/` was
+allowed; `grep -r x d*` was allowed.
+
+1. Backtracking. `_component_pattern` now splits on `*` and emits each interior
+   star with the fixed-length run after it as an atomic group `(?>.*?run)`, as
+   CPython's `fnmatch` does; only the final star is a plain `.*`. The run is
+   everything up to the next star (not just literals), because a class after a
+   star must be matched leftmost together with what follows it. The
+   "cannot blow up" claim is replaced by this reasoning. A timing test asserts
+   under 100 ms for three pathological shapes; answer tests keep `*a` on `aa`,
+   `*[ab]c` on `xbac`, `a*b*c` and others unchanged. Needs Python 3.11 atomic
+   groups (the project floor).
+2. Symlinked literal parent. `_glob_parts` now realpaths the leading literal
+   components (glob characters in a resolved name are backslash-escaped, so a
+   real directory called `a*b` stays literal) and returns how many components
+   that prefix holds. Both `glob_matches` and `directories_matching` use it, so
+   file globs under a symlinked parent are judged too. The symlink scan runs
+   only when exactly the last component is a glob, on the resolved parent.
+3. Bare globs (done, same mechanism, no walk). `directories_matching` no
+   longer requires a trailing `/`, and `_place_directory_glob` places any glob
+   root, so a recursive reader of `d*` or `di?` is judged over the ancestor
+   directories the glob names, as `d*/` is. Non-recursive readers and globs that
+   match no protected directory are unchanged (tests). Consequence: a recursive
+   reader of a nameless bare `*` is now denied when a protected file is below
+   any directory, as `grep -r x .` already was.
+
+Green: see the commit message / final reply for the run.

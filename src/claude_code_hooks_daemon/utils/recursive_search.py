@@ -564,12 +564,14 @@ def _placed(roots: tuple[str, ...], cwd: str | None) -> list[str]:
 
 
 def _place_directory_glob(root: str, cwd: str | None) -> str | None:
-    """The absolute form of a glob ending in ``/``, or None when ``root`` is not one.
+    """The absolute form of a glob root, or None when ``root`` is not one.
 
-    The result keeps its trailing ``/``. A glob carrying a variable, a substitution or a
-    brace is not placed, as for any other root.
+    A glob ending in ``/`` expands to directories only. One without it can expand to a
+    directory too, and a recursive reader follows that, so both are placed the same way.
+    A glob carrying a variable, a substitution or a brace is not placed, as for any
+    other root.
     """
-    if not root.endswith("/") or not _DIRECTORY_GLOB.search(root) or _EXPANSION_ROOT.search(root):
+    if not _DIRECTORY_GLOB.search(root) or _EXPANSION_ROOT.search(root):
         return None
     placed = _place(root, cwd, unplaceable=_EXPANSION_ROOT)
     return None if placed is None else placed.rstrip("/") + "/"
