@@ -429,6 +429,127 @@ class TestComputedDirectoryChange:
         assert spy.call_count <= 3 * sfm.LINK_SCAN_DIRECTORY_CAP
 
 
+def _grow(top: Path, width: int, depth: int) -> None:
+    """``depth`` levels of ``width`` empty directories each under ``top``."""
+    level = [top]
+    top.mkdir()
+    for _ in range(depth):
+        following: list[Path] = []
+        for directory in level:
+            for number in range(width):
+                child = directory / f"d{number:02d}"
+                child.mkdir()
+                following.append(child)
+        level = following
+
+
+class TestAWideGlobbedDirectoryChange:
+    """Review 614c X1: a globbed cd matching many directories is judged as a computed move.
+
+    Bash refuses a cd with more than one match, so following every match only
+    cost time: one command over a 22x22x22 tree took longer than the scan
+    deadline, and a recursive search beside it was then allowed.
+    """
+
+    @pytest.fixture()
+    def wide(self, tree: Tree) -> Tree:
+        _grow(tree.worktree / "t", 22, 3)
+        return tree
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -r DUMMY own; cd t/*/*/*",
+            "grep -r DUMMY own; (cd t/*/*/*)",
+            "(cd t/*/*/*); grep -r DUMMY own",
+            "echo $(cd t/*/*/*); grep -r DUMMY own",
+            "bash -c 'cd t/*/*/*'; grep -r DUMMY own",
+            "grep -r DUMMY own && echo 'cd t/*/*/*'",
+        ],
+    )
+    def test_a_search_beside_a_wide_cd_is_denied_by_the_search_check(
+        self, wide: Tree, command: str
+    ) -> None:
+        decision, text = _result(wide, command)
+        assert decision is Decision.DENY, text
+        # The search check itself, not a fallback after the scan gave up.
+        assert "could NOT fully judge" not in text
+        assert "could not be worked out" not in text
+        assert "stopped before" not in text
+
+    def test_the_walk_keeps_no_match_of_a_wide_cd(self, wide: Tree) -> None:
+        cwds = sfm.effective_cwds("cd t/*/*/*; ls", str(wide.worktree))
+        assert len(cwds) <= 2 * sfm.LINK_DIRECTORY_CAP
+        assert not any("/t/" in directory for directory in cwds)
+
+    def test_the_search_walk_keeps_no_match_of_a_wide_cd(self, wide: Tree) -> None:
+        from claude_code_hooks_daemon.utils import recursive_search
+
+        reads = recursive_search.search_reads("cd t/*/*/*; grep -r x .", str(wide.worktree))
+        assert len(reads) <= 2 * sfm.LINK_DIRECTORY_CAP
+        assert not any("/t/" in read.root for read in reads)
+
+    def test_a_wide_cd_costs_a_bounded_walk(self, wide: Tree) -> None:
+        """The work is counted, not timed: listings and cwds stay within the caps."""
+        command = "cd t/*; cd */*/*; cd t/*/*/*; grep -r DUMMY own"
+        with patch.object(sfm.os, "scandir", wraps=os.scandir) as spy:
+            assert _decision(wide, command) is Decision.DENY
+        assert spy.call_count <= 6 * sfm.LINK_SCAN_DIRECTORY_CAP
+        assert len(sfm.effective_cwds(command, str(wide.worktree))) <= 2 * sfm.LINK_DIRECTORY_CAP
+
+    def test_a_flat_directory_of_many_matches_is_capped(self, tree: Tree) -> None:
+        _grow(tree.worktree / "t", 40, 1)
+        cwds = sfm.effective_cwds("cd t/*; ls", str(tree.worktree))
+        assert not any("/t/" in directory for directory in cwds)
+        assert sfm.expand_directory_glob(str(tree.worktree), "t/*") is None
+        from claude_code_hooks_daemon.utils import recursive_search
+
+        reads = recursive_search.search_reads("cd t/*; grep -r x .", str(tree.worktree))
+        assert not any("/t/" in read.root for read in reads)
+        # Bash refuses the cd, so the search runs where the command already was.
+        assert str(tree.worktree) in {read.root for read in reads}
+
+    def test_a_narrow_globbed_cd_is_still_followed(self, tree: Tree) -> None:
+        _grow(tree.worktree / "t", 3, 1)
+        cwds = sfm.effective_cwds("cd t/d0[01]; ls", str(tree.worktree))
+        assert str(tree.worktree / "t" / "d00") in cwds
+        assert str(tree.worktree / "t" / "d01") in cwds
+
+
+class TestAWideCdInAProjectWithNoLinkOut:
+    """Review 614c X1b: a harmless wide cd is not denied for the number of directories."""
+
+    @pytest.fixture()
+    def plain(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+        project = tmp_path.resolve() / "project"
+        project.mkdir()
+        _git("init", "-q", "-b", "main", cwd=project)
+        _grow(project / "t", 20, 3)
+        monkeypatch.chdir("/")
+        protected_file_index.reset_index_cache()
+        root = str(project)
+        with (
+            patch.object(guard_module, "resolve_project_root", return_value=root),
+            patch.object(sfm, "resolve_project_root", return_value=root),
+            patch.object(path_exclusion, "resolve_project_root", return_value=root),
+        ):
+            index_project(project, SecretFileGuardHandler()._patterns())
+            yield project
+        protected_file_index.reset_index_cache()
+
+    @pytest.mark.parametrize("command", ["cd t/*/*/*; ls", "cd t && cd */*/*; ls"])
+    def test_a_wide_cd_then_ls_allowed(self, plain: Path, command: str) -> None:
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(plain),
+        }
+        handler = SecretFileGuardHandler()
+        assert not handler.matches(hook_input) or (
+            handler.handle(hook_input).decision is Decision.ALLOW
+        )
+
+
 class TestWrappedChdirCommand:
     """A wrapper before a command with a chdir option does not hide the option."""
 
