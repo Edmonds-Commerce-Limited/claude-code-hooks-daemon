@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.utils import protected_file_index
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
 _SATURATED = (700.0, 700.0, 700.0)
+_EXPLICIT_TIMEOUT = 7.0
 _IDLE = (0.0, 0.0, 0.0)
 _LOAD_PATH = "claude_code_hooks_daemon.utils.load_scaling.os.getloadavg"
 
@@ -156,8 +157,8 @@ class TestBranchSafetyWalks:
             patch.object(branch_safety, "run_git", _recorder(seen)),
             patch(_LOAD_PATH, return_value=_SATURATED),
         ):
-            branch_safety._git(tmp_path, "rev-list", "x", timeout=7)
-        assert seen == {"rev-list": 7}
+            branch_safety._git(tmp_path, "rev-list", "x", timeout=_EXPLICIT_TIMEOUT)
+        assert seen == {"rev-list": _EXPLICIT_TIMEOUT}
 
 
 class TestProtectedIndexBuild:
