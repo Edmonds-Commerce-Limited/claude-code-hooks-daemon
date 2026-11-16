@@ -180,8 +180,152 @@ def _git_out(repo: Path, *args: str) -> str:
 
 def _message(reason: str | None, user: str, *, clear: bool) -> str:
     if clear:
-        return f"Unpark branch\n\nUnparked: {user}\n"
-    return f"Park branch: {reason}\n\nParked-Reason: {reason}\nParked-By: {user}\n"
+        return f"{_UNPARK_SUBJECT}\n\n{_UNPARKED_BY}{user}\n"
+    return f"{_PARK_SUBJECT}{reason}\n\nParked-Reason: {reason}\n{_PARKED_BY}{user}\n"
+
+
+_PARK_SUBJECT = "Park branch: "
+_UNPARK_SUBJECT = "Unpark branch"
+_PARKED_BY = "Parked-By: "
+_UNPARKED_BY = "Unparked: "
+
+
+def is_park_message(message: str) -> bool:
+    """Whether ``message`` is exactly what :func:`_message` writes for a park or an unpark.
+
+    The reason and user are read back out of the message and the writer's own text is
+    rebuilt from them, so any other wording, line or trailer is not a park message.
+    """
+    text = message.strip()
+    lines = text.split("\n")
+    if lines[0].startswith(_PARK_SUBJECT) and lines[-1].startswith(_PARKED_BY):
+        reason = lines[0].removeprefix(_PARK_SUBJECT)
+        user = lines[-1].removeprefix(_PARKED_BY)
+        return text == _message(reason, user, clear=False).strip()
+    if lines[0] == _UNPARK_SUBJECT and lines[-1].startswith(_UNPARKED_BY):
+        user = lines[-1].removeprefix(_UNPARKED_BY)
+        return text == _message(None, user, clear=True).strip()
+    return False
+
+
+# --- the park-commit classifier (Plan 00617) ------------------------------------------
+
+_WALK_UNIT = "\x1f"
+_WALK_FIELDS = 4
+_BOUNDARY_MARK = "-"
+_WALK_FORMAT = "--format=%m%x1f%H%x1f%T%x1f%P"
+#: Tip trailers that can mark a park commit; only a ref carrying one can be residue.
+_TIP_MARK_FORMAT = (
+    "--format=%(refname)%00%(trailers:key=Parked-Reason,valueonly,unfold)"
+    "%(trailers:key=Unparked,valueonly,unfold)"
+)
+
+
+@dataclass(frozen=True)
+class ParkWalk:
+    """The commits of ``target..tip``, which of them are park commits, and the merge count."""
+
+    commits: tuple[str, ...]
+    parks: frozenset[str]
+    merges: int
+
+
+def _park_bodies_match(repo: Path, shas: list[str], timeout: float) -> set[str] | None:
+    """Which of ``shas`` carry exactly the park writer's message; None when git cannot say.
+
+    One ``git log --no-walk=unsorted -z`` call. Each NUL-separated record must start
+    with the sha asked for, in order, and the count must match, so a message holding a
+    NUL (or anything else) can never pass itself off as another commit's record.
+    """
+    if not shas:
+        return set()
+    log = run_git(
+        repo, "log", "--no-walk=unsorted", "-z", "--format=%H%n%B", *shas, timeout=timeout
+    )
+    if log.returncode != 0:
+        return None
+    records = log.stdout.removesuffix("\0").split("\0")
+    if len(records) != len(shas):
+        return None
+    matched: set[str] = set()
+    for sha, record in zip(shas, records, strict=True):
+        head, _, body = record.partition("\n")
+        if head != sha:
+            return None
+        if is_park_message(body):
+            matched.add(sha)
+    return matched
+
+
+def walk_park_range(repo: Path, target: str, tip: str, *, timeout: float) -> ParkWalk | None:
+    """Walk ``target..tip`` and name its park commits; None on any git failure.
+
+    A park commit is one the park writer wrote: its message is exactly the writer's
+    (:func:`is_park_message`), it has ONE parent, and its tree is that parent's tree,
+    so it changes nothing. The structural walk carries no free text (shas only); the
+    messages of the few tree-identical candidates are then read in one framed call.
+    """
+    log = run_git(repo, "log", "--boundary", _WALK_FORMAT, f"{target}..{tip}", timeout=timeout)
+    if log.returncode != 0:
+        return None
+    trees: dict[str, str] = {}
+    in_range: list[tuple[str, str, list[str]]] = []
+    for line in log.stdout.split("\n"):
+        if not line:
+            continue
+        parts = line.split(_WALK_UNIT)
+        if len(parts) != _WALK_FIELDS:
+            return None
+        mark, sha, tree, parents = parts
+        trees[sha] = tree
+        if mark != _BOUNDARY_MARK:
+            in_range.append((sha, tree, parents.split()))
+    empty = [
+        sha
+        for sha, tree, parents in in_range
+        if len(parents) == 1 and parents[0] in trees and trees[parents[0]] == tree
+    ]
+    parks = _park_bodies_match(repo, empty, timeout)
+    if parks is None:
+        return None
+    return ParkWalk(
+        commits=tuple(sha for sha, _tree, _parents in in_range),
+        parks=frozenset(parks),
+        merges=sum(1 for _sha, _tree, parents in in_range if len(parents) > 1),
+    )
+
+
+def is_park_residue(
+    repo: Path, tip: str, target: str, *, timeout: float = Timeout.GIT_CONTEXT
+) -> bool:
+    """Whether ``tip`` differs from ``target`` ONLY by park commits (at least one).
+
+    The one test every branch consumer asks: then the work is in ``target`` and a
+    delete loses nothing but the park markers. False on any git failure (fail closed),
+    for a tip with no park commit, and when any commit beyond ``target`` is not a
+    park commit (:func:`walk_park_range`).
+    """
+    walked = walk_park_range(repo, target, tip, timeout=timeout)
+    return walked is not None and bool(walked.parks) and len(walked.commits) == len(walked.parks)
+
+
+def park_marked_refs(repo: Path, refnames: list[str], *, timeout: float) -> set[str]:
+    """Which of ``refnames`` have a tip carrying a park or unpark trailer: one call.
+
+    Only those can be park residue, so the walk is paid for no other ref. A failed
+    listing marks nothing, which leaves the ref to the other proofs: the safe direction.
+    """
+    if not refnames:
+        return set()
+    listing = run_git(repo, "for-each-ref", _TIP_MARK_FORMAT, *refnames, timeout=timeout)
+    if listing.returncode != 0:
+        return set()
+    marked: set[str] = set()
+    for line in listing.stdout.split("\n"):
+        refname, _, trailers = line.partition("\0")
+        if refname and trailers.strip():
+            marked.add(refname)
+    return marked
 
 
 def _refuse_same_reason(repo: Path, tip: str, name: str, reason: str) -> None:

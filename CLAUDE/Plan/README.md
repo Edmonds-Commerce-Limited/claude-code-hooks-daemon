@@ -8,7 +8,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00617: park commit keeps merged branch deletable](00617-park-commit-keeps-merged-branch-deletable/PLAN.md) - Not Started (peer report: a merged branch carrying only empty park commits is counted unmerged, so no agent may delete it and the merged pool blocks new branches; fix test-first, fail closed, one shared classifier)
+- [00617: park commit keeps merged branch deletable](00617-park-commit-keeps-merged-branch-deletable/PLAN.md) - In Progress (peer report: a merged branch carrying only empty park commits is counted unmerged, so no agent may delete it and the merged pool blocks new branches; fix test-first, fail closed, one shared classifier)
 
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
 

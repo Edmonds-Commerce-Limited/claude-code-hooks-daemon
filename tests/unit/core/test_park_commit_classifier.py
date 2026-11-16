@@ -11,12 +11,19 @@ commit, stays refused. Synthetic repositories with a bare remote throughout.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
-from claude_code_hooks_daemon.core import branch_cleanup, branch_creation, branch_inventory
+from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core import (
+    branch_cleanup,
+    branch_creation,
+    branch_inventory,
+    branch_park,
+)
 from claude_code_hooks_daemon.core.branch_inventory import BranchState, Pool
 from claude_code_hooks_daemon.core.branch_park import is_park_residue, park_branch
 from claude_code_hooks_daemon.core.remote_branch_proof import prove_remote_merged
@@ -119,6 +126,115 @@ def _creation_pool(repo: Path, name: str) -> Pool | None:
         if any(name in work.names for work in works):
             return pool
     return None
+
+
+# --- the writer's message and the walk's failure modes ---------------------------------
+
+
+class TestParkMessage:
+    @pytest.mark.parametrize(
+        "message",
+        [
+            _WRITER_MESSAGE,
+            "Unpark branch\n\nUnparked: t\n",
+            "Park branch: a: b\n\nParked-Reason: a: b\nParked-By: some one\n",
+        ],
+    )
+    def test_the_writers_own_text_is_a_park_message(self, message: str) -> None:
+        assert branch_park.is_park_message(message)
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "Park\n\nParked-Reason: waiting\nParked-By: t\n",
+            "Park branch: waiting\n\nParked-Reason: other\nParked-By: t\n",
+            "Park branch: waiting\n\nParked-Reason: waiting\nExtra: x\nParked-By: t\n",
+            "Park branch: waiting\nParked-Reason: waiting\nParked-By: t\n",
+            "Unpark branch\n\nsomething else\nUnparked: t\n",
+            "Unrelated\n\nParked-Reason: waiting\nParked-By: t\n",
+            "",
+        ],
+    )
+    def test_any_other_text_is_not(self, message: str) -> None:
+        assert not branch_park.is_park_message(message)
+
+
+class TestWalkFailsClosed:
+    def _fail(self, monkeypatch: pytest.MonkeyPatch, *, on: str, stdout: str, code: int) -> None:
+        real = branch_park.run_git
+
+        def fake(
+            repo: Path,
+            *args: str,
+            timeout: float = Timeout.GIT_CONTEXT,
+            env: Mapping[str, str] | None = None,
+        ) -> subprocess.CompletedProcess[str]:
+            if on in args:
+                return subprocess.CompletedProcess(list(args), code, stdout, "")
+            return real(repo, *args, timeout=timeout, env=env)
+
+        monkeypatch.setattr(branch_park, "run_git", fake)
+
+    @pytest.fixture
+    def parked(self, repo: Path) -> Path:
+        _work(repo, "feat")
+        _merge(repo, "feat")
+        _park(repo, "feat")
+        return repo
+
+    def test_a_failed_walk_is_none(self, parked: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._fail(monkeypatch, on="--boundary", stdout="", code=128)
+        assert (
+            branch_park.walk_park_range(parked, "main", "feat", timeout=Timeout.GIT_CONTEXT) is None
+        )
+        assert not is_park_residue(parked, "feat", "main")
+
+    def test_a_malformed_walk_line_is_none(
+        self, parked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._fail(monkeypatch, on="--boundary", stdout="only\x1ftwo\n", code=0)
+        assert (
+            branch_park.walk_park_range(parked, "main", "feat", timeout=Timeout.GIT_CONTEXT) is None
+        )
+
+    def test_a_failed_message_read_is_none(
+        self, parked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._fail(monkeypatch, on="--no-walk=unsorted", stdout="", code=128)
+        assert (
+            branch_park.walk_park_range(parked, "main", "feat", timeout=Timeout.GIT_CONTEXT) is None
+        )
+
+    def test_a_message_record_for_another_sha_is_none(
+        self, parked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        forged = f"{'0' * 40}\n{_WRITER_MESSAGE}\0"
+        self._fail(monkeypatch, on="--no-walk=unsorted", stdout=forged, code=0)
+        assert (
+            branch_park.walk_park_range(parked, "main", "feat", timeout=Timeout.GIT_CONTEXT) is None
+        )
+
+    def test_an_extra_message_record_is_none(
+        self, parked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tip = _git(parked, "rev-parse", "feat")
+        extra = f"{tip}\n{_WRITER_MESSAGE}\0{tip}\n{_WRITER_MESSAGE}\0"
+        self._fail(monkeypatch, on="--no-walk=unsorted", stdout=extra, code=0)
+        assert (
+            branch_park.walk_park_range(parked, "main", "feat", timeout=Timeout.GIT_CONTEXT) is None
+        )
+
+    def test_a_failed_tip_listing_marks_nothing(
+        self, parked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._fail(monkeypatch, on="for-each-ref", stdout="", code=128)
+        marked = branch_park.park_marked_refs(
+            parked, ["refs/heads/feat"], timeout=Timeout.GIT_CONTEXT
+        )
+        assert marked == set()
+
+    def test_no_refs_marks_nothing(self, parked: Path) -> None:
+        assert branch_park.park_marked_refs(parked, [], timeout=Timeout.GIT_CONTEXT) == set()
 
 
 # --- the deletable shapes ---------------------------------------------------------------

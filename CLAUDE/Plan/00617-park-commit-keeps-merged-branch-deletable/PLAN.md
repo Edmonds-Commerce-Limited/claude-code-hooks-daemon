@@ -1,6 +1,6 @@
 # Plan 00617: park commit keeps merged branch deletable
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-16
 **Owner**: joseph
 **Priority**: High
@@ -46,18 +46,18 @@ the default branch lacks is provably content-free.
 
 ### Phase 1: Reproduce and decide
 
-- [ ] ⬜ **Task 1.1**: Reproduce on a synthetic repository: merge a branch, park it, add the empty park commit, then run `branch-sweep --clean --remote` and the remote-delete guard; record each verdict.
-- [ ] ⬜ **Task 1.2**: Write the decision: classify park-only branches as merged, or move the park record off the branch, or both. Record the trade-offs (existing parked branches already carry park commits, so the classifier is needed either way).
+- [x] ✅ **Task 1.1**: Reproduce on a synthetic repository: merge a branch, park it, add the empty park commit, then run `branch-sweep --clean --remote` and the remote-delete guard; record each verdict. (The remote case is fixed by Plan 00594 in rc/3.75.0; four further gaps found. See the JOURNAL finding.)
+- [x] ✅ **Task 1.2**: Write the decision: classify park-only branches as merged, or move the park record off the branch, or both. Record the trade-offs (existing parked branches already carry park commits, so the classifier is needed either way). (Decision: classify; the record stays on the branch. See the JOURNAL decision.)
 
 ### Phase 2: Fix, test first
 
-- [ ] ⬜ **Task 2.1**: RED tests for the classifier: park-only branch is merged; a park commit that changes a file is unmerged; a branch with one real commit under park commits is unmerged; a forged park-looking message on a non-empty commit is unmerged.
-- [ ] ⬜ **Task 2.2**: Implement the shared classifier once and use it in `branch-sweep`, the delete-branch guard and `R-GIT-PUSH-DELETE-REMOTE`, so the three cannot disagree.
-- [ ] ⬜ **Task 2.3**: If Task 1.2 moves the record off the branch, migrate existing park records and keep reading the old form.
+- [x] ✅ **Task 2.1**: RED tests for the classifier: park-only branch is merged; a park commit that changes a file is unmerged; a branch with one real commit under park commits is unmerged; a forged park-looking message on a non-empty commit is unmerged. (`tests/unit/core/test_park_commit_classifier.py`)
+- [x] ✅ **Task 2.2**: Implement the shared classifier once and use it in `branch-sweep`, the delete-branch guard and `R-GIT-PUSH-DELETE-REMOTE`, so the three cannot disagree. (`branch_park.is_park_residue`)
+- [x] ✅ **Task 2.3**: If Task 1.2 moves the record off the branch, migrate existing park records and keep reading the old form. (Not applicable: the record stays on the branch.)
 
 ### Phase 3: Release hand-off
 
-- [ ] ⬜ **Task 3.1**: Add a release note and tell the requesting peer team the plan number and, once landed, the release.
+- [ ] 🔄 **Task 3.1**: Add a release note and tell the requesting peer team the plan number and, once landed, the release. (Release note 089 is added. The peer team is told after the merge.)
 
 ## Success Criteria
 

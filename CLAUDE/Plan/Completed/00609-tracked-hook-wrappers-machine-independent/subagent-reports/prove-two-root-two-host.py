@@ -112,7 +112,17 @@ def run_worker(root: Path, host: str, outdir: Path, uid_tag: str, unshare: bool)
     cmd = [sys.executable, "-I", str(HERE / "prove.py"), "--worker", str(root), str(outdir)]
     if unshare:
         # a real UTS-namespace hostname change, so socket.gethostname() differs too
-        cmd = ["unshare", "-Ur", "--uts", "sh", "-c", 'hostname "$1"; shift; exec "$@"', "sh", host, *cmd]
+        cmd = [
+            "unshare",
+            "-Ur",
+            "--uts",
+            "sh",
+            "-c",
+            'hostname "$1"; shift; exec "$@"',
+            "sh",
+            host,
+            *cmd,
+        ]
     r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=300)
     if r.returncode != 0:
         print(r.stdout, r.stderr)
@@ -166,7 +176,9 @@ def main() -> int:
         ["git", "rev-parse", "origin/main"], cwd=REPO, text=True, capture_output=True
     ).stdout.strip()
     is_anc = (
-        subprocess.run(["git", "merge-base", "--is-ancestor", "HEAD", "origin/main"], cwd=REPO).returncode
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", "HEAD", "origin/main"], cwd=REPO
+        ).returncode
         == 0
     )
     print(f"HEAD          {head}")
@@ -207,25 +219,37 @@ def main() -> int:
                 f"        untracked dir {i['get_untracked_dir']}\n"
                 f"        daemon events dir (what used to be baked on overflow): {i['daemon_events_dir']}"
             )
-    check(all(int(str(infos[("short", h)]["overflow_bytes"])) == 0 for h in HOSTS), "short roots fit AF_UNIX")
+    check(
+        all(int(str(infos[("short", h)]["overflow_bytes"])) == 0 for h in HOSTS),
+        "short roots fit AF_UNIX",
+    )
     check(
         all(int(str(infos[("long", h)]["overflow_bytes"])) > 0 for h in HOSTS),
         "long roots OVERFLOW AF_UNIX (fallback layout in play)",
     )
     check(
         all(
-            not str(infos[("long", h)]["daemon_events_dir"]).startswith(str(infos[("long", h)]["get_untracked_dir"]))
+            not str(infos[("long", h)]["daemon_events_dir"]).startswith(
+                str(infos[("long", h)]["get_untracked_dir"])
+            )
             for h in HOSTS
         ),
         "long roots: the daemon's real events dir is OUTSIDE the untracked dir (old code baked it)",
     )
     check(
-        all(str(infos[(k, h)]["get_untracked_dir"]).endswith("/untracked") and "hooks-daemon" not in str(infos[(k, h)]["get_untracked_dir"]) for k in ("short", "long") for h in HOSTS),
+        all(
+            str(infos[(k, h)]["get_untracked_dir"]).endswith("/untracked")
+            and "hooks-daemon" not in str(infos[(k, h)]["get_untracked_dir"])
+            for k in ("short", "long")
+            for h in HOSTS
+        ),
         "all roots resolve to the self-install layout <root>/untracked (same layout as /workspace)",
     )
 
     print("\n== 3. byte equality: sha256 across the 4 combinations, and vs tracked wrappers ==")
-    tracked = {p.name: p.read_text() for p in sorted((REPO / ".claude/hooks").iterdir()) if p.is_file()}
+    tracked = {
+        p.name: p.read_text() for p in sorted((REPO / ".claude/hooks").iterdir()) if p.is_file()
+    }
     print(f"wrappers in /workspace/.claude/hooks (top level files): {len(tracked)}")
     combos = list(results)
     shas: dict[str, dict[str, str]] = {}
@@ -237,23 +261,36 @@ def main() -> int:
             if len(row) != 1:
                 mismatched.append(name)
             shas[variant][name] = next(iter(row))
-        check(not mismatched, f"[{variant}] all {len(tracked)} wrappers byte-identical across 4 combinations {mismatched}")
+        check(
+            not mismatched,
+            f"[{variant}] all {len(tracked)} wrappers byte-identical across 4 combinations {mismatched}",
+        )
         bad = 0
         for c in combos[1:]:
             bad += subprocess.run(
                 ["diff", "-rq", str(results[combos[0]] / variant), str(results[c] / variant)],
                 capture_output=True,
             ).returncode
-        check(bad == 0, f"[{variant}] `diff -rq` (byte compare) vs the other 3 combinations is clean")
+        check(
+            bad == 0, f"[{variant}] `diff -rq` (byte compare) vs the other 3 combinations is clean"
+        )
     for variant in ("relay", "regen"):
         differ = [n_ for n_ in tracked if shas[variant][n_] != sha(tracked[n_])]
-        check(not differ, f"[{variant}] equals tracked /workspace/.claude/hooks/*; differing: {differ}")
+        check(
+            not differ,
+            f"[{variant}] equals tracked /workspace/.claude/hooks/*; differing: {differ}",
+        )
     rew = [json.loads((results[c] / "regen_rewritten.json").read_text()) for c in combos]
-    check(all(r == [] for r in rew), f"regenerate_deployed_hooks over the tracked wrappers rewrote nothing: {rew}")
+    check(
+        all(r == [] for r in rew),
+        f"regenerate_deployed_hooks over the tracked wrappers rewrote nothing: {rew}",
+    )
     guarded = [n_ for n_, t in tracked.items() if "relay hot path" in t]
     print(f"wrappers carrying the relay hot-path block: {len(guarded)} of {len(tracked)}")
     check(len(guarded) > 0, "non-vacuous: relay guard blocks are present")
-    print("\nsha256 of each wrapper (relay variant; same in all 4 combinations; '=' = equals tracked):")
+    print(
+        "\nsha256 of each wrapper (relay variant; same in all 4 combinations; '=' = equals tracked):"
+    )
     for name in tracked:
         mark = "=" if shas["relay"][name] == sha(tracked[name]) else "!"
         print(f"  {shas['relay'][name]} {mark} {name}")
@@ -263,19 +300,29 @@ def main() -> int:
     for c in combos:
         for variant in ("relay", "nc", "both", "regen"):
             for name in tracked:
-                corpus[f"{c[0]}/{c[1]}/{variant}/{name}"] = (results[c] / variant / name).read_text()
+                corpus[f"{c[0]}/{c[1]}/{variant}/{name}"] = (
+                    results[c] / variant / name
+                ).read_text()
     forbidden = ["/workspace", "/home/", "/root/", "/run/user", "/tmp/", str(base), *roots, *HOSTS]
     forbidden += [h.lower() for h in HOSTS] + [str(1000 + k) for k in range(1, 5)]
     hits = {k: [f for f in forbidden if f in v] for k, v in corpus.items()}
     hits = {k: v for k, v in hits.items() if v}
-    check(not hits, f"none of: temp roots, /workspace, /home/, /root/, /run/user, /tmp/, uids, hostnames; hits={list(hits.items())[:3]}")
-    hexhits = {k: re.findall(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])[0-9a-f]{6,}\b", v) for k, v in corpus.items()}
+    check(
+        not hits,
+        f"none of: temp roots, /workspace, /home/, /root/, /run/user, /tmp/, uids, hostnames; hits={list(hits.items())[:3]}",
+    )
+    hexhits = {
+        k: re.findall(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])[0-9a-f]{6,}\b", v)
+        for k, v in corpus.items()
+    }
     hexhits = {k: v for k, v in hexhits.items() if v}
     check(not hexhits, f"no hex-hash token (>=6 hex chars); hits={list(hexhits.items())[:3]}")
     seen: dict[tuple[str, str], set[str]] = defaultdict(set)
     for k, v in corpus.items():
         for tok, before in scan_tokens(v):
-            seen[(tok, before if re.fullmatch(r"[A-Za-z0-9_}]", before) else "")].add(k.rsplit("/", 1)[1])
+            seen[(tok, before if re.fullmatch(r"[A-Za-z0-9_}]", before) else "")].add(
+                k.rsplit("/", 1)[1]
+            )
     print(f"distinct '/'-rooted tokens across all generated files: {len(seen)}")
     unjustified = []
     for key in sorted(seen):
@@ -290,16 +337,24 @@ def main() -> int:
     from claude_code_hooks_daemon.install import forwarder_generator as fg
 
     leaks = {
-        k: [p for p in fg.surviving_absolute_paths(v) if p != "/.claude/hooks"] for k, v in corpus.items()
+        k: [p for p in fg.surviving_absolute_paths(v) if p != "/.claude/hooks"]
+        for k, v in corpus.items()
     }
     leaks = {k: v for k, v in leaks.items() if v}
-    check(not leaks, f"generator's own surviving_absolute_paths() is empty bar the layout segment; {list(leaks.items())[:3]}")
+    check(
+        not leaks,
+        f"generator's own surviving_absolute_paths() is empty bar the layout segment; {list(leaks.items())[:3]}",
+    )
 
     print("\n== 5. converge/upgrade path using the PRE-00609 generator ==")
     old_path = HERE / "old_forwarder_generator.py"
     old_path.write_text(
         subprocess.check_output(
-            ["git", "show", f"{OLD_COMMIT}:src/claude_code_hooks_daemon/install/forwarder_generator.py"],
+            [
+                "git",
+                "show",
+                f"{OLD_COMMIT}:src/claude_code_hooks_daemon/install/forwarder_generator.py",
+            ],
             cwd=REPO,
             text=True,
         )
@@ -324,7 +379,9 @@ def main() -> int:
         t = TransportConfig(relay_enabled=True)
         for name, text in tracked.items():
             bare = fg.strip_status_fast_path_block(fg.strip_relay_guard_block(text))
-            (hooks / name).write_text(old.generate_forwarder_content(bare, name, t, proj / "untracked", proj))
+            (hooks / name).write_text(
+                old.generate_forwarder_content(bare, name, t, proj / "untracked", proj)
+            )
         baked = [
             n_
             for n_ in tracked
@@ -334,14 +391,24 @@ def main() -> int:
 
         fallback = str(_paths.get_event_socket_dir_from_untracked(proj / "untracked"))
         runtime = [n_ for n_ in tracked if fallback in (hooks / n_).read_text()]
-        print(f"  [{kind}] pre-00609 output: {len(baked)} wrappers bake a path, {len(runtime)} bake {fallback}")
+        print(
+            f"  [{kind}] pre-00609 output: {len(baked)} wrappers bake a path, {len(runtime)} bake {fallback}"
+        )
         check(len(baked) > 0, f"[{kind}] old output really embeds machine paths (non-vacuous)")
         if kind == "long":
-            check(len(runtime) > 0, "[long] old output bakes the machine-specific AF_UNIX fallback events dir (the overflow case)")
+            check(
+                len(runtime) > 0,
+                "[long] old output bakes the machine-specific AF_UNIX fallback events dir (the overflow case)",
+            )
         first = fg.regenerate_deployed_hooks(proj, hooks)
         second = fg.regenerate_deployed_hooks(proj, hooks)
-        print(f"  [{kind}] first pass rewrote {len(first)} wrappers, second pass rewrote {len(second)}")
-        check(len(first) > 0 and set(first) <= set(tracked), f"[{kind}] first pass rewrites the old-form wrappers")
+        print(
+            f"  [{kind}] first pass rewrote {len(first)} wrappers, second pass rewrote {len(second)}"
+        )
+        check(
+            len(first) > 0 and set(first) <= set(tracked),
+            f"[{kind}] first pass rewrites the old-form wrappers",
+        )
         check(second == [], f"[{kind}] second pass rewrites nothing")
         check(
             all((hooks / n_).read_text() == tracked[n_] for n_ in tracked),
