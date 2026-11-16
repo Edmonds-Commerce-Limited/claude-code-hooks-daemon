@@ -39,10 +39,12 @@ RESEARCH-read-routes.md for the class-(b)/(c)/(d) route classification.
 
 import ast
 import logging
+import os
 import re
 import textwrap
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -1739,8 +1741,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         rule_route = "read" if route == _SEARCH_ROUTE else route
         rule = _rules_by_route()[rule_route]
         message = self._disclosed(hook_input, rule)
+        cause = self._link_cause(hook_input, token)
+        if cause is not None:
+            message += f"\n\n{cause}"
         message += f"\n\nMatched protected glob: `{pattern}`"
-        if route == _SEARCH_ROUTE:
+        if route == _SEARCH_ROUTE and cause is None:
             message += f"\n{_SEARCH_REMEDY}"
         # Naming the TOKEN turns a bisection hunt into a read (Plan 00356):
         # the glob alone does not say which of a command's -- or a whole
@@ -1755,6 +1760,46 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             message += f"\nMatched on this token from your input: `{token}`"
 
         return GatingResult(decision=Decision.DENY, reason=message, rule=rule.rule_id)
+
+    def _link_cause(self, hook_input: dict[str, Any], token: str) -> str | None:
+        """Why a deny that no protected NAME caused was given: a link out, or too many cds.
+
+        Review F4, message only: the decision was already taken. A token that
+        spells a protected path needs no other cause. The link is found by the
+        same index test the decision used (:meth:`ProtectedFileIndex.link_out_of`).
+        The way out offered is the checkout that holds the target, never the real
+        path: a path outside the project is judged by its name alone.
+        """
+        patterns = self._patterns()
+        if not token or sfm.protecting_pattern(token, patterns) is not None:
+            return None
+        index = self._index(patterns)
+        if index is None:
+            return None
+        cwd = hook_input.get(HookInputField.CWD)
+        cwd = cwd if isinstance(cwd, str) and Path(cwd).is_absolute() else None
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT) or {}
+        command = tool_input.get("command") if isinstance(tool_input, dict) else None
+        bases = sfm.effective_cwds(command, cwd) if isinstance(command, str) else (cwd or "",)
+        link = index.link_out_of(token, [base for base in bases if base])
+        if link is not None:
+            shown = link
+            if command is not None and cwd is not None and link.startswith(cwd.rstrip("/") + "/"):
+                shown = os.path.relpath(link, cwd)
+            return (
+                f"Denied because `{shown}` is a link to a directory outside the project "
+                f"(`{os.path.realpath(link)}`). The protected-file index lists only this "
+                "project, so a glob or search through that link cannot be checked, and it is "
+                "denied whether or not the target holds a protected file. To read it, run the "
+                "command from the checkout that holds the target."
+            )
+        if isinstance(bases, sfm.CwdSet) and bases.overflowed and not token.startswith("/"):
+            return (
+                f"Denied because the command moves into more than {sfm.LINK_DIRECTORY_CAP} "
+                "existing directories, so a relative word that could pass through a link is "
+                "denied rather than resolved from each. Split the command into smaller ones."
+            )
+        return None
 
     @staticmethod
     def _disclosed(hook_input: dict[str, Any], rule: Rule) -> str:

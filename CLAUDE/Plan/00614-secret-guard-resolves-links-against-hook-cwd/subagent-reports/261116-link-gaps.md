@@ -170,4 +170,75 @@ The cost is the false denies `grep -r` already pays. For example,
 protected file.
 
 `scripts/qa/dangerous-invocation-corpus.yaml` has no row for this. File it as F-BYPS
-or as UNCOVERED-accepted.
+or as UNCOVERED-accepted. It is now Plan 00615.
+
+## Review follow-up implemented: F1, F2, F4, F5 closed
+
+The tests came first (commit f0592eb94, 63 RED). Each fix was then committed green. The
+shapes in the handoff's test list all have tests in
+`test_secret_file_guard_link_resolution.py`, run with both the worktree and the primary
+as the project.
+
+- **F1 (commit 50e598630).** Both cwd trackers changed.
+  - `effective_cwds` walks the shell words of each segment and finds a move after
+    `( { ! if then else elif do while until time`, after an assignment, or glued to `$(`
+    or a backtick. It also walks a quoted `bash -c` or `"$( )"` body (to depth 4) and
+    reads `env -C`/`--chdir` and `git -C`.
+  - A quoted body that the separator split leaves unbalanced is read without quotes,
+    and the project root is added.
+  - A relative step is joined to the last directory in the chain. It is also joined to
+    every directory already known to exist, and each such join is kept only if it is a
+    real directory. That keeps `(cd clean && true); cd inner && cat ilink` and
+    `cd clean && (cd x); cd ../inner && cat ilink` denied.
+  - In `recursive_search._reads`, a `cd` inside a subshell replaces the directories, as
+    it does at the top level. When the subshell closes, its directories are added to
+    the outer set rather than dropped. So `(cd clean && grep -r hello .)` and
+    `cd clean && grep -r hello .` read `clean` only, and are allowed in a tree whose
+    hook cwd would be denied.
+  - **Verdict change:** an unplaceable cd (`cd "$D"`, `cd $(pwd)/x`, `cd -`, a bare `cd`)
+    now reads from the project root, every named target and the hook cwd. Before, it
+    dropped relative roots. Three `test_recursive_search` tests and one anchoring test
+    were updated to the fail-closed behaviour. The N465 prefilter test now runs the real
+    walker with the gate forced open, so it still pins gate soundness. The gate is
+    widened only to `env`+`-C`/`chdir` and `git`+`-C`, which keeps
+    `make -C src/module` untokenised.
+- **F5 (commit 50e598630).**
+  - `effective_cwds` returns a `CwdSet` (a tuple subclass). `link_dirs` holds the first
+    16 directories that exist, and only those are resolved word by word.
+  - Past 16, `CwdSet.could_be_link` lists each directory once. A relative word whose
+    first component is `..`, or is or glob-matches a link, is a positive finding. So is
+    a deeper word whose real path differs from its spelling. The finding is returned,
+    never raised.
+  - **Measured by call count, not time:** 200 absent `cd` targets × 3000 words cost no
+    more than 3× the lexists calls of a single `cd`. The 3× allows for the scan's own
+    deadline fallback, which also runs on main. On the tip it was about 201 calls per
+    word.
+- **F2 (commit ce62a08db).**
+  - `ProtectedFileIndex._wildcard_links` lists the resolved literal parent of the first
+    wildcard component once.
+  - A matching link that leads out of the project denies.
+  - Any other matching link is read again with its real directory substituted, which
+    covers the case where the project is the primary and the link sits outside it. A
+    search reports that directory as the link spells it.
+  - `*/*` stays allowed: a wildcard-only first component is not expanded.
+- **F4 (commit after ce62a08db).**
+  - `_build_deny_result` gets the cause from `ProtectedFileIndex.link_out_of`, the same
+    test the decision uses. It applies only when the matched token does not spell a
+    protected path.
+  - The cause names the link and its target, says the index lists only this project,
+    and says to run the command from the checkout that holds the target. On the search
+    route it replaces `_SEARCH_REMEDY`.
+  - It does not suggest the real path: a path outside the project is judged by name
+    only, which is the weaker check.
+  - A deny caused by the F5 overflow gets its own sentence.
+  - The decision is unchanged.
+
+Residue, not fixed:
+
+- `git -C X grep` is still treated as relocated and unjudged by the search route. It
+  was the same on main.
+- `make -C` is not tracked.
+- In overflow, `glob_matches` still scans every lexical base. This is main's baseline
+  cost, plus one scandir per existing base for F2.
+- A `case` arm `pat)` is stripped like a subshell closer. That can add, but never drop,
+  a directory.
