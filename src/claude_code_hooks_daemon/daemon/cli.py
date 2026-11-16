@@ -161,8 +161,10 @@ from claude_code_hooks_daemon.install.forwarder_generator import REPAIR_INSTALL_
 from claude_code_hooks_daemon.install.install_stamp import read_install_stamp
 from claude_code_hooks_daemon.install.relay_deploy import (
     missing_configured_relay_binary,
+    relay_binary_defect,
     relay_binary_missing_warning,
 )
+from claude_code_hooks_daemon.install.relay_repair import relay_repair_status_lines
 from claude_code_hooks_daemon.install.release_notes import load_release_notes_between
 from claude_code_hooks_daemon.install.repair_install import repair_install, settings_path
 from claude_code_hooks_daemon.issue_report.build import build_report
@@ -1614,6 +1616,18 @@ def _print_transport_status_warnings(project_path: Path, transport: _StatusTrans
     if binary is not None:
         fix = daemon_cli_command("transport", relay_fix_subcommand())
         print(f"WARNING: {relay_binary_missing_warning(binary, fix)}")
+        from claude_code_hooks_daemon.version import __version__
+
+        defect = relay_binary_defect(binary)
+        # None means the binary was repaired between the two checks: no repair to show.
+        if defect is not None:
+            for line in relay_repair_status_lines(
+                binary,
+                defect,
+                untracked_dir=_daemon_untracked_dir(project_path),
+                version=__version__,
+            ):
+                print(line)
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -3020,15 +3034,16 @@ def _repair_venv_locked(daemon_dir: Path, venv_path: Path, env: dict[str, str]) 
     record every build path writes, and starts the fingerprint's build log the
     bash drivers also write.
     """
-    log = build_log_path(daemon_dir, _fingerprint_of(venv_path))
+    fingerprint = _fingerprint_of(venv_path)
+    log = build_log_path(daemon_dir, fingerprint)
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(f"venv repair started in {daemon_dir}\n")
     try:
         rc = _sync_and_verify_venv(daemon_dir, venv_path, env, log)
     except Exception:
-        write_build_result(daemon_dir, "failed", 1, log)
+        write_build_result(daemon_dir, fingerprint, "failed", 1, log)
         raise
-    write_build_result(daemon_dir, "succeeded" if rc == 0 else "failed", rc, log)
+    write_build_result(daemon_dir, fingerprint, "succeeded" if rc == 0 else "failed", rc, log)
     return rc
 
 

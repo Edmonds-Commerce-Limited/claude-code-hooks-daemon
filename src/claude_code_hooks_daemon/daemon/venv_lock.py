@@ -190,11 +190,15 @@ def _mkdir_lock(
         _remove_lock(lock_dir)
 
 
-#: The holder record and the last-result record, beside the lock. Same names
+#: The holder record and the last-result records, beside the lock. Same names
 #: and key=value format as scripts/install/venv.sh (VENV_BUILD_RECORD_NAME,
-#: VENV_BUILD_RESULT_NAME), which writes them for the bash build paths.
+#: venv_build_result_path), which writes them for the bash build paths.
+#: A result is kept PER VIEW, keyed by the venv's fingerprint exactly as the
+#: build log is, so two views of one checkout (host and container) never
+#: overwrite each other's record.
 VENV_BUILD_RECORD_NAME = ".venv-bootstrap.current"
-VENV_BUILD_RESULT_NAME = ".venv-bootstrap.result"
+_RESULT_SUFFIX = ".result"
+_RESULT_GLOB = f".venv-bootstrap-*{_RESULT_SUFFIX}"
 _RESULT_KEYS = ("result", "finished_at", "exit", "log")
 
 
@@ -213,6 +217,23 @@ def build_log_path(project_root: Path, fingerprint: str) -> Path:
     return project_root / "untracked" / f".venv-bootstrap-{fingerprint}.log"
 
 
+def build_result_path(project_root: Path, fingerprint: str) -> Path:
+    """The last-result record of the build of this fingerprint (beside its log)."""
+    return project_root / "untracked" / f".venv-bootstrap-{fingerprint}{_RESULT_SUFFIX}"
+
+
+def _latest_result_path(project_root: Path) -> Path | None:
+    """The most recently written result record of any view, or ``None``.
+
+    The readers (``status``, the stop hook) cannot cheaply tell which view they
+    are, so they show the newest record; its ``log=`` names the fingerprint.
+    """
+    records = list((project_root / "untracked").glob(_RESULT_GLOB))
+    if not records:
+        return None
+    return max(records, key=lambda record: record.stat().st_mtime)
+
+
 def _write_kv_file(path: Path, lines: list[str]) -> None:
     """Write key=value lines atomically: write a sibling, then rename."""
     tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
@@ -220,11 +241,13 @@ def _write_kv_file(path: Path, lines: list[str]) -> None:
     tmp.replace(path)
 
 
-def write_build_result(project_root: Path, result: str, exit_code: int, log: Path) -> None:
-    """Record how a build ended, and end the named log with the same verdict."""
+def write_build_result(
+    project_root: Path, fingerprint: str, result: str, exit_code: int, log: Path
+) -> None:
+    """Record how a build of ``fingerprint`` ended, and end the named log with the verdict."""
     finished_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     _write_kv_file(
-        project_root / "untracked" / VENV_BUILD_RESULT_NAME,
+        build_result_path(project_root, fingerprint),
         [
             f"result={result}",
             f"finished_at={finished_at}",
@@ -237,13 +260,13 @@ def write_build_result(project_root: Path, result: str, exit_code: int, log: Pat
 
 
 def read_build_result(project_root: Path) -> BuildResult | None:
-    """The last build's result record, or ``None`` when no build recorded one.
+    """The newest result record of any view, or ``None`` when no build recorded one.
 
     Raises:
         ValueError: the record exists but lacks a key or has a non-numeric exit.
     """
-    path = project_root / "untracked" / VENV_BUILD_RESULT_NAME
-    if not path.is_file():
+    path = _latest_result_path(project_root)
+    if path is None:
         return None
     fields: dict[str, str] = {}
     for line in path.read_text().splitlines():

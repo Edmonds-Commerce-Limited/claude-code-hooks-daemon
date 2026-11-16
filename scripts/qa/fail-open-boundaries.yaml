@@ -342,6 +342,19 @@ boundaries:
     trace: "logger.error; nothing in-band. Same contract as _sync_agent_assets."
 
   - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: _start_relay_repair
+    construct: "except (OSError, ValueError, TypeError)"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "an unreadable transport config, or a state directory that cannot be created, at startup"
+    caller_controlled: false
+    trace: >-
+      logger.error; nothing in-band. The relay repair is not started, so a
+      missing relay binary stays missing and hooks keep running on the fallback
+      transport, which enforces every rule. The SessionStart checker reports
+      the unusable binary at the next session start.
+
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
     scope: _persist_project_handler_health
     construct: "except RuntimeError"
     ordinal: 0

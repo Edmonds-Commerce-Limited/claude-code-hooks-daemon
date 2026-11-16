@@ -14,6 +14,13 @@ from pydantic import ValidationError as PydanticValidationError
 from claude_code_hooks_daemon.config.models import Config, TransportConfig
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import cmd_status
+from claude_code_hooks_daemon.daemon.paths import get_untracked_dir
+from claude_code_hooks_daemon.install.relay_repair import (
+    cause_key,
+    repair_log_path,
+    repair_state_path,
+)
+from claude_code_hooks_daemon.version import __version__
 
 
 @pytest.fixture(autouse=True)
@@ -151,3 +158,66 @@ class TestStatusUnreadableTransportConfig:
         assert result == 0
         assert "transport config unreadable" not in out
         assert "relay is enabled but" not in out
+
+
+def _record_repair(
+    project: Path, binary: Path, *, status: str, detail: str, defect: str = "missing"
+) -> Path:
+    """Write the state file the repair of this cause would have written; return its log path."""
+    untracked = get_untracked_dir(project)
+    key = cause_key(binary, defect, __version__)
+    state = repair_state_path(untracked, key)
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(f"status={status}\ndetail={detail}\n")
+    return repair_log_path(untracked, key)
+
+
+class TestStatusRelayRepairState:
+    """The repair state sits next to the WARNING, read from the repair's own state file."""
+
+    @pytest.mark.parametrize("pid", [12345, None])
+    def test_a_failed_repair_shows_status_detail_and_log(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], pid: int | None
+    ) -> None:
+        binary = tmp_path / "hooks-relay"
+        socket_path = _make_project(tmp_path, binary)
+        log = _record_repair(tmp_path, binary, status="failed", detail="the build broke")
+
+        _run(tmp_path, socket_path, pid)
+
+        out = capsys.readouterr().out
+        assert "Relay repair: failed - the build broke" in out
+        assert f"Relay repair log: {log}" in out
+        assert out.index("WARNING: relay is enabled") < out.index("Relay repair:")
+
+    def test_a_synced_repair_is_shown_with_its_detail(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        binary = tmp_path / "hooks-relay"
+        socket_path = _make_project(tmp_path, binary)
+        _record_repair(tmp_path, binary, status="synced", detail="provisioned")
+
+        _run(tmp_path, socket_path, 12345)
+
+        assert "Relay repair: synced - provisioned" in capsys.readouterr().out
+
+    def test_no_attempt_is_said_so_and_names_the_state_file(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        binary = tmp_path / "hooks-relay"
+        socket_path = _make_project(tmp_path, binary)
+
+        _run(tmp_path, socket_path, 12345)
+
+        out = capsys.readouterr().out
+        assert "Relay repair: no attempt recorded for this cause" in out
+        assert str(get_untracked_dir(tmp_path) / "relay-repair") in out
+
+    def test_nothing_is_shown_without_the_warning(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        socket_path = _make_project(tmp_path, tmp_path / "hooks-relay", relay_enabled=False)
+
+        _run(tmp_path, socket_path, 12345)
+
+        assert "Relay repair" not in capsys.readouterr().out

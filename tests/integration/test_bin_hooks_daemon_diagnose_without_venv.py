@@ -62,7 +62,7 @@ class TestDriftedVenv:
 
     def test_reports_the_last_build_and_its_log(self, sandbox: Sandbox) -> None:
         _venv(sandbox.clone / "untracked" / "venv-drifted", _OTHER)
-        (sandbox.clone / "untracked" / ".venv-bootstrap.result").write_text(
+        (sandbox.clone / "untracked" / ".venv-bootstrap-fp1.result").write_text(
             "result=failed\nfinished_at=2026-10-31T01:02:03Z\nlog=/tmp/build-xyz.log\n"
         )
 
@@ -76,7 +76,7 @@ class TestBuildLogTail:
     def test_prints_the_last_20_lines_of_the_recorded_log(self, sandbox: Sandbox) -> None:
         log = sandbox.clone / "untracked" / "build.log"
         log.write_text("".join(f"line {n}\n" for n in range(1, 31)))
-        (sandbox.clone / "untracked" / ".venv-bootstrap.result").write_text(
+        (sandbox.clone / "untracked" / ".venv-bootstrap-fp1.result").write_text(
             f"result=failed\nfinished_at=2026-10-31T01:02:03Z\nlog={log}\n"
         )
 
@@ -88,7 +88,7 @@ class TestBuildLogTail:
         assert "line 10\n" not in output
 
     def test_says_so_when_the_log_is_absent(self, sandbox: Sandbox) -> None:
-        (sandbox.clone / "untracked" / ".venv-bootstrap.result").write_text(
+        (sandbox.clone / "untracked" / ".venv-bootstrap-fp1.result").write_text(
             "result=failed\nfinished_at=2026-10-31T01:02:03Z\nlog=/nonexistent/build.log\n"
         )
 
@@ -119,7 +119,7 @@ class TestHealthyVenv:
 
 class TestNoVenv:
     def test_prints_the_build_record_and_the_fix(self, sandbox: Sandbox) -> None:
-        (sandbox.clone / "untracked" / ".venv-bootstrap.result").write_text(
+        (sandbox.clone / "untracked" / ".venv-bootstrap-fp1.result").write_text(
             "result=failed\nfinished_at=2026-10-31T01:02:03Z\nlog=/tmp/build-xyz.log\n"
         )
 

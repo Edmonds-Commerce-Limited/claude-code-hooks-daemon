@@ -400,9 +400,17 @@ _print_daemon_state() {
 # key=value file (scripts/install/venv.sh venv_write_build_result). Silent when
 # no build has recorded a result.
 _print_last_build() {
-    local record="$DAEMON_DIR/untracked/.venv-bootstrap.result" key value
+    # One record per view (keyed by the venv fingerprint, like the build log);
+    # this runs without a venv so it cannot tell which view it is: newest wins.
+    local record="" candidate key value
     local result="" finished="" log=""
-    [ -f "$record" ] || return 0
+    for candidate in "$DAEMON_DIR/untracked"/.venv-bootstrap-*.result; do
+        [ -f "$candidate" ] || continue
+        if [ -z "$record" ] || [ "$candidate" -nt "$record" ]; then
+            record="$candidate"
+        fi
+    done
+    [ -n "$record" ] || return 0
     while IFS='=' read -r key value || [ -n "$key" ]; do
         case "$key" in
             result) result="$value" ;;

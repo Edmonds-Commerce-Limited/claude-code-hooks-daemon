@@ -441,9 +441,11 @@ VENV_LOCK_HEARTBEAT_SECONDS_DEFAULT=60
 # the child runs, pid=. A waiter behind that build waits out the build's own
 # bound rather than the generic lock bound (Plan 00456 review I4).
 VENV_BUILD_RECORD_NAME=".venv-bootstrap.current"
-# How the LAST build ended, whichever path ran it: result=, finished_at=, exit=,
-# log= (venv_write_build_result).
-VENV_BUILD_RESULT_NAME=".venv-bootstrap.result"
+# How the LAST build of one view ended, whichever path ran it: result=,
+# finished_at=, exit=, log= (venv_write_build_result). One file PER VIEW, keyed
+# by the venv fingerprint exactly as the build log is (venv_build_result_path),
+# so two views of one checkout never overwrite each other's record.
+VENV_BUILD_RESULT_GLOB=".venv-bootstrap-*.result"
 # Set by _venv_write_holder_record: the daemon dir whose record this process wrote.
 _VENV_HOLDER_RECORD_DIR=""
 VENV_BUILD_TIMEOUT_DEFAULT=900
@@ -522,10 +524,40 @@ _venv_kv_field() {
 }
 
 #
-# venv_build_result_field() - One key of the last build's result record.
+# venv_build_result_path() - The result record of the build of this fingerprint.
+#
+# Args: $1 daemon_dir, $2 fingerprint. Beside the build log of the same key.
+#
+venv_build_result_path() {
+    echo "$1/untracked/.venv-bootstrap-$2.result"
+}
+
+#
+# venv_latest_build_result() - The newest result record of any view.
+#
+# Args: $1 daemon_dir. Echoes the path; returns 1 when no build recorded one.
+# The readers that run without a venv cannot tell which view they are, so they
+# show the newest record; its log= names the fingerprint.
+#
+venv_latest_build_result() {
+    local candidate newest=""
+    for candidate in "$1/untracked"/$VENV_BUILD_RESULT_GLOB; do
+        [ -f "$candidate" ] || continue
+        if [ -z "$newest" ] || [ "$candidate" -nt "$newest" ]; then
+            newest="$candidate"
+        fi
+    done
+    [ -n "$newest" ] || return 1
+    echo "$newest"
+}
+
+#
+# venv_build_result_field() - One key of the newest build result record.
 #
 venv_build_result_field() {
-    _venv_kv_field "$1/untracked/$VENV_BUILD_RESULT_NAME" "$2"
+    local record
+    record="$(venv_latest_build_result "$1")" || return 1
+    _venv_kv_field "$record" "$2"
 }
 
 #
@@ -550,14 +582,15 @@ _venv_write_kv_file() {
 #
 # venv_write_build_result() - Record how the last build ended.
 #
-# Args: $1 daemon_dir, $2 result (succeeded|failed|timed-out), $3 exit code,
-# $4 log path. One file for every build path, so a reader that knows nothing
-# of the fingerprint (the stop hook, `status`) finds it. The timestamp is the
-# portable UTC one; with no time source the record is not written and the
-# reason is reported, never a record with an empty time.
+# Args: $1 daemon_dir, $2 fingerprint, $3 result (succeeded|failed|timed-out),
+# $4 exit code, $5 log path. One file per fingerprint (view), for every build
+# path; a reader that knows nothing of the fingerprint (the stop hook, `status`)
+# takes the newest (venv_latest_build_result). The timestamp is the portable UTC
+# one; with no time source the record is not written and the reason is
+# reported, never a record with an empty time.
 #
 venv_write_build_result() {
-    local daemon_dir="$1" result="$2" exit_code="$3" log="$4" finished_at
+    local daemon_dir="$1" fingerprint="$2" result="$3" exit_code="$4" log="$5" finished_at
     if ! command -v _hp_timestamp > /dev/null; then
         local _vwbr_lib
         _vwbr_lib="$(dirname "${BASH_SOURCE[0]}")"
@@ -571,7 +604,7 @@ venv_write_build_result() {
         print_error "venv build result: cannot determine the current time; no result recorded"
         return 1
     fi
-    _venv_write_kv_file "$daemon_dir/untracked/$VENV_BUILD_RESULT_NAME" \
+    _venv_write_kv_file "$(venv_build_result_path "$daemon_dir" "$fingerprint")" \
         "result=$result" "finished_at=$finished_at" "exit=$exit_code" "log=$log" || return 1
     # The named log must exist and end with the verdict, even for a path whose
     # output goes to the caller's terminal (an upgrade).
@@ -581,14 +614,14 @@ venv_write_build_result() {
 #
 # venv_record_build_outcome() - venv_write_build_result for a plain exit code.
 #
-# Args: $1 daemon_dir, $2 exit code (0 = succeeded), $3 log path. The record is
-# a diagnostic: when it cannot be written the writer has said why, and the
-# build's own verdict stands.
+# Args: $1 daemon_dir, $2 fingerprint, $3 exit code (0 = succeeded), $4 log
+# path. The record is a diagnostic: when it cannot be written the writer has
+# said why, and the build's own verdict stands.
 #
 venv_record_build_outcome() {
     local result="succeeded"
-    [ "$2" -eq 0 ] || result="failed"
-    if ! venv_write_build_result "$1" "$result" "$2" "$3"; then
+    [ "$3" -eq 0 ] || result="failed"
+    if ! venv_write_build_result "$1" "$2" "$result" "$3" "$4"; then
         print_warning "venv build: the last-result record was not written"
     fi
     return 0
@@ -1349,7 +1382,7 @@ ensure_venv() {
     local build_rc=0
     _ensure_venv_build "$daemon_dir" "$venv_path" "$target_version" "$python_bin" "$fingerprint" || build_rc=$?
     release_venv_lock
-    venv_record_build_outcome "$daemon_dir" "$build_rc" "$log"
+    venv_record_build_outcome "$daemon_dir" "$fingerprint" "$build_rc" "$log"
     return "$build_rc"
 }
 

@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.core.pseudo_event import (
 )
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.core.usage_snapshot import resolve_usage_state_file
+from claude_code_hooks_daemon.daemon.paths import get_untracked_dir
 from claude_code_hooks_daemon.daemon.relay_unused_warning import (
     add_relay_unused_warning,
     is_relay_eligible_event,
@@ -46,9 +47,15 @@ from claude_code_hooks_daemon.daemon.source_fingerprint import (
 )
 from claude_code_hooks_daemon.daemon.verdict_log import append_verdicts
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+from claude_code_hooks_daemon.install.relay_repair import (
+    RepairNotice,
+    repair_unusable_relay,
+    spawn_owned,
+)
 from claude_code_hooks_daemon.utils.cli_command import is_recovery_command
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.protected_file_index import IndexPrewarmer
+from claude_code_hooks_daemon.version import __version__
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import (
@@ -473,6 +480,12 @@ class DaemonController:
         def sync_directory_role_rules() -> None:
             self._sync_directory_role_rules(workspace_root, config_path, reusable_config)
 
+        # Repair an unusable relay binary where the daemon starts, not only at
+        # SessionStart (Plan 00608). Deferred only: it can spawn a build, and
+        # building a controller (the docs CLI, every test) must not.
+        def start_relay_repair() -> None:
+            self._start_relay_repair(workspace_root, config_path, reusable_config)
+
         # Validate configuration at startup (fail-open: degraded mode on errors).
         # Never deferred: degraded mode changes how requests are answered.
         if defer_nonessential_startup:
@@ -482,6 +495,7 @@ class DaemonController:
                 ("CLAUDE.md guidance injection", inject_claude_md),
                 ("agent-asset sync", sync_agent_assets),
                 ("directory-role-rules sync", sync_directory_role_rules),
+                ("relay repair", start_relay_repair),
             ]
         else:
             inject_claude_md()
@@ -600,6 +614,57 @@ class DaemonController:
                 level=logging.ERROR,
             )
             return None
+
+    def _start_relay_repair(
+        self, workspace_root: Path, config_path: Path, config: Config | None = None
+    ) -> None:
+        """Start the detached relay repair when the configured binary is unusable.
+
+        The SessionStart checker starts the same repair, but a clone provisioned
+        after its session began never gets a SessionStart that reaches this
+        daemon, so the daemon's own start-up starts it too. Once per cause (the
+        repair's ``O_EXCL`` claim) and detached, so a double trigger is harmless
+        and nothing waits for a build. Never fatal: a failure is logged at ERROR,
+        and the next daemon start retries only causes that were never claimed.
+
+        ``config`` is the already-loaded config for ``config_path``, when the
+        caller has one; without it the file is loaded here.
+        """
+        try:
+            transport = (config or Config.load_or_default(config_path)).daemon.transport
+            outcome = repair_unusable_relay(
+                workspace_root,
+                transport,
+                untracked_dir=get_untracked_dir(workspace_root),
+                version=__version__,
+                # Owned, not detached: the daemon's stop ends it (Plan 00608).
+                spawn_fn=spawn_owned,
+            )
+            if outcome is not None:
+                self._log_relay_repair_outcome(*outcome)
+        except (OSError, ValueError, TypeError) as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a relay repair that could not be judged or started leaves the relay on the fallback transport, which still enforces every rule; the daemon must keep serving hooks (fail-open startup contract) and the SessionStart checker reports the unusable binary",
+                level=logging.ERROR,
+            )
+
+    @staticmethod
+    def _log_relay_repair_outcome(binary: Path, notice: RepairNotice) -> None:
+        """Say in the daemon log what the start-up relay repair did about ``binary``."""
+        if notice.failure is not None:
+            logger.error("relay repair of %s: %s", binary, notice.failure)
+        elif notice.started:
+            logger.info(
+                "relay repair of %s started in the background (log: %s)", binary, notice.log_path
+            )
+        else:
+            logger.info(
+                "relay repair of %s already attempted for this cause (state: %s)",
+                binary,
+                notice.state_path,
+            )
 
     def _sync_agent_assets(
         self, workspace_root: Path, config_path: Path, config: Config | None = None

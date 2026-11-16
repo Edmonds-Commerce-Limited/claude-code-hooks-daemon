@@ -3,7 +3,7 @@
 Before this, only the hook-started detached build recorded who held the venv
 lock, and a successful build left no machine-readable trace at all. The
 records reuse the existing files: ``untracked/.venv-bootstrap.current`` (the
-holder record) and a sibling ``untracked/.venv-bootstrap.result`` in the same
+holder record) and a sibling ``untracked/.venv-bootstrap-<fingerprint>.result`` in the same
 key=value format.
 """
 
@@ -29,7 +29,8 @@ from tests.integration.test_venv_bootstrap_driver import (
     _wait_for_lock_release,
 )
 
-_RESULT_NAME: Final[str] = ".venv-bootstrap.result"
+_RESULT_NAME: Final[str] = ".venv-bootstrap-fp1.result"
+_RESULT_GLOB: Final[str] = ".venv-bootstrap-*.result"
 _RECORD_NAME: Final[str] = ".venv-bootstrap.current"
 _WAIT_SECONDS: Final[float] = 30.0
 
@@ -40,6 +41,12 @@ def _kv(path: Path) -> dict[str, str]:
         key, _, value = line.partition("=")
         out[key] = value
     return out
+
+
+def _only_result(daemon_dir: Path) -> Path:
+    """The single per-view result record a build left (one view built here)."""
+    (record,) = (daemon_dir / "untracked").glob(_RESULT_GLOB)
+    return record
 
 
 def _wait_for(path: Path) -> None:
@@ -105,7 +112,7 @@ class TestSuccessLeavesALastResult:
         result = _run("repair", daemon_dir, env)
 
         assert result.returncode == 0, result.stderr
-        record = _kv(daemon_dir / "untracked" / _RESULT_NAME)
+        record = _kv(_only_result(daemon_dir))
         assert record["result"] == "succeeded"
         log = Path(record["log"])
         assert log.parent == daemon_dir / "untracked"
@@ -121,7 +128,7 @@ class TestSuccessLeavesALastResult:
         )
         assert _source_venv_sh(script, env).returncode == 0
 
-        assert _kv(daemon_dir / "untracked" / _RESULT_NAME)["result"] == "succeeded"
+        assert _kv(_only_result(daemon_dir))["result"] == "succeeded"
 
 
 class TestEveryLockHolderIsRecorded:
@@ -215,3 +222,27 @@ class TestTheDaemonDownStopMessageNamesTheLastBuild:
     def test_no_record_leaves_the_message_unchanged(self, tmp_path: Path) -> None:
         reason = self._reason(tmp_path, with_result=False, with_jq=True)
         assert reason == "Hooks daemon not running - protection not active"
+
+
+class TestEachViewKeepsItsOwnResult:
+    """Host and container views of one checkout must not overwrite one record."""
+
+    def test_two_views_write_two_records_and_the_newest_is_read(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path))
+        script = (
+            f'd="{daemon_dir}"\n'
+            'venv_write_build_result "$d" host-py312-aaaa1111 failed 2 "$d/untracked/host.log"\n'
+            "sleep 1\n"
+            'venv_write_build_result "$d" box-py311-bbbb2222 succeeded 0 "$d/untracked/box.log"\n'
+            'echo "latest=$(venv_build_result_field "$d" result)"\n'
+        )
+
+        result = _source_venv_sh(script, env)
+
+        assert result.returncode == 0, result.stderr
+        assert "latest=succeeded" in result.stdout
+        untracked = daemon_dir / "untracked"
+        assert _kv(untracked / ".venv-bootstrap-host-py312-aaaa1111.result")["result"] == "failed"
+        assert _kv(untracked / ".venv-bootstrap-box-py311-bbbb2222.result")["result"] == "succeeded"
+        assert not (untracked / ".venv-bootstrap.result").exists()

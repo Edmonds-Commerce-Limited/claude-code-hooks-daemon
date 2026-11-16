@@ -18,9 +18,11 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import TransportConfig
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.install import relay_repair
 from claude_code_hooks_daemon.install.background_sync import (
@@ -36,6 +38,7 @@ from claude_code_hooks_daemon.install.relay_repair import (
     repair_lock_path,
     repair_log_path,
     repair_state_path,
+    repair_unusable_relay,
     run_relay_repair,
     spawn_detached,
     start_relay_repair,
@@ -265,6 +268,27 @@ class TestStartRelayRepair:
         assert notice.started is False
         assert notice.failure is not None
         assert spawner.calls == []
+
+    def test_an_uncreatable_state_dir_is_logged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        untracked = tmp_path / "untracked"
+        untracked.write_text("a file where the directory should be")
+
+        with caplog.at_level("ERROR", logger=relay_repair.logger.name):
+            start_relay_repair(
+                tmp_path,
+                tmp_path / "hooks-relay",
+                _DEFECT,
+                untracked_dir=untracked,
+                version=_VERSION,
+                spawn_fn=_Spawner(),
+            )
+
+        assert any(
+            "relay repair" in r.getMessage() and "cannot be created" in r.getMessage()
+            for r in caplog.records
+        )
 
 
 class _Repair:
@@ -496,3 +520,59 @@ class TestMain:
         assert seen["state"] == state
         assert seen["lock"] == repair_lock_path(tmp_path)
         assert seen["steps"] == ["defect_fn", "provision_fn", "regenerate_fn"]
+
+
+class TestRepairUnusableRelay:
+    """The one decision both the session-start checker and the daemon start use."""
+
+    def _transport(self, tmp_path: Path, *, enabled: bool = True) -> TransportConfig:
+        return TransportConfig(
+            relay_enabled=enabled, relay_binary=str(tmp_path / "bin" / "hooks-relay")
+        )
+
+    def _run(
+        self, tmp_path: Path, transport: TransportConfig, spawner: SpawnFn
+    ) -> tuple[Path, RepairNotice] | None:
+        return repair_unusable_relay(
+            tmp_path / "project",
+            transport,
+            untracked_dir=tmp_path / "untracked",
+            version=_VERSION,
+            spawn_fn=spawner,
+        )
+
+    def test_a_missing_binary_starts_the_repair(self, tmp_path: Path) -> None:
+        spawner = _Spawner()
+
+        outcome = self._run(tmp_path, self._transport(tmp_path), spawner)
+
+        assert outcome is not None
+        binary, notice = outcome
+        assert binary == tmp_path / "bin" / "hooks-relay"
+        assert notice.started is True
+        assert len(spawner.calls) == 1
+
+    def test_a_disabled_relay_is_left_alone(self, tmp_path: Path) -> None:
+        spawner = _Spawner()
+
+        assert self._run(tmp_path, self._transport(tmp_path, enabled=False), spawner) is None
+        assert spawner.calls == []
+
+    def test_a_usable_binary_is_left_alone(self, tmp_path: Path) -> None:
+        spawner = _Spawner()
+        with patch("claude_code_hooks_daemon.install.relay_repair.relay_binary_defect") as defect:
+            defect.return_value = None
+            assert self._run(tmp_path, self._transport(tmp_path), spawner) is None
+        assert spawner.calls == []
+
+    def test_a_second_trigger_for_the_same_cause_does_not_spawn_again(self, tmp_path: Path) -> None:
+        spawner = _Spawner()
+        transport = self._transport(tmp_path)
+
+        self._run(tmp_path, transport, spawner)
+        second = self._run(tmp_path, transport, spawner)
+
+        assert len(spawner.calls) == 1
+        assert second is not None
+        assert second[1].started is False
+        assert second[1].record is not None

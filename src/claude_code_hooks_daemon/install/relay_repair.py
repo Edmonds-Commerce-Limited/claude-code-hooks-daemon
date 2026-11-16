@@ -28,6 +28,7 @@ import fcntl
 import hashlib
 import logging
 import os
+import signal
 import subprocess  # nosec B404 - argv list, no shell
 import sys
 import threading
@@ -37,14 +38,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.install.background_sync import (
     SyncRecord,
     SyncStatus,
     read_state_file,
 )
+from claude_code_hooks_daemon.install.relay_deploy import (
+    missing_configured_relay_binary,
+    relay_binary_defect,
+)
+from claude_code_hooks_daemon.utils.safe_signal import signal_own_session_child
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 if TYPE_CHECKING:
+    from claude_code_hooks_daemon.config.models import TransportConfig
     from claude_code_hooks_daemon.install.transport_toggle import RelayProvision
 
 logger = logging.getLogger(__name__)
@@ -181,6 +189,96 @@ def spawn_detached(argv: list[str], log: Path) -> int:
     return child.pid
 
 
+@dataclass(frozen=True)
+class _OwnedRepair:
+    child: subprocess.Popen[bytes]
+    state: Path
+
+
+_owned_lock = threading.Lock()
+#: Repairs this process started with :func:`spawn_owned` and has not yet stopped.
+_owned: list[_OwnedRepair] = []
+
+
+def _state_of(argv: list[str]) -> Path:
+    """The state file the repair argv names (``--state``), built by start_relay_repair."""
+    return Path(argv[argv.index("--state") + 1])
+
+
+def spawn_owned(argv: list[str], log: Path) -> int:
+    """Start the repair like :func:`spawn_detached`, and keep it for :func:`stop_owned_repairs`.
+
+    For a caller that outlives the repair and must not leave it writing after
+    it stops: the daemon. The SessionStart hook keeps :func:`spawn_detached`,
+    since its process exits at once and the repair is meant to outlive it.
+    """
+    log_fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, _FILE_MODE)
+    try:
+        child = subprocess.Popen(  # nosec B603 - argv list, no shell
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=log_fd,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    finally:
+        os.close(log_fd)
+    with _owned_lock:
+        _owned.append(_OwnedRepair(child, _state_of(argv)))
+    return child.pid
+
+
+def owned_repair_pids() -> list[int]:
+    """The pids of owned repairs still running."""
+    with _owned_lock:
+        return [owned.child.pid for owned in _owned if owned.child.poll() is None]
+
+
+def _end_group(child: subprocess.Popen[bytes], sig: int, grace: float) -> bool:
+    """Signal the child's whole process group; True when the child exited within ``grace``."""
+    try:
+        signal_own_session_child(child, sig)
+    except ProcessLookupError:
+        return child.poll() is not None
+    try:
+        child.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        return False
+    return True
+
+
+def _withdraw_unfinished_claim(state: Path) -> None:
+    """Remove a claim that still says running: the repair was interrupted, not failed.
+
+    Without this the once-per-cause claim would stand for a repair that never
+    finished, and no later start would retry it. A recorded result is kept.
+    """
+    record = read_state_file(state, state)
+    if record is not None and record.status is SyncStatus.RUNNING:
+        state.unlink(missing_ok=True)
+
+
+def stop_owned_repairs(grace: float = float(Timeout.DAEMON_REPAIR_STOP_GRACE)) -> list[int]:
+    """End every owned repair, and its processes, and wait: nothing writes after this returns.
+
+    SIGTERM to the process group, SIGKILL after ``grace`` seconds, ``grace``
+    more to reap. Returns the pids of the repairs that were still running.
+    """
+    with _owned_lock:
+        owned, _owned[:] = list(_owned), []
+    stopped: list[int] = []
+    for repair in owned:
+        child = repair.child
+        if child.poll() is None:
+            stopped.append(child.pid)
+            if not _end_group(child, signal.SIGTERM, grace):
+                if not _end_group(child, signal.SIGKILL, grace):
+                    logger.error("relay repair %d survived SIGKILL", child.pid)
+                    continue
+        _withdraw_unfinished_claim(repair.state)
+    return stopped
+
+
 def start_relay_repair(
     project_root: Path,
     binary: Path,
@@ -210,7 +308,9 @@ def start_relay_repair(
     except FileExistsError:
         return notice(record=read_state_file(state, log))
     except OSError as exc:
-        return notice(failure=f"the repair state file {state} cannot be created ({exc})")
+        failure = f"the repair state file {state} cannot be created ({exc})"
+        logger.error("relay repair of %s not started: %s", binary, failure)
+        return notice(failure=failure)
     detail = f"repairing {binary} ({defect}), starting"
     claim = _state_text(SyncStatus.RUNNING, detail=detail)
     with os.fdopen(fd, "w") as handle:
@@ -247,6 +347,65 @@ def start_relay_repair(
             ),
         )
     return notice(started=True)
+
+
+def repair_unusable_relay(
+    project_root: Path,
+    transport: TransportConfig,
+    *,
+    untracked_dir: Path,
+    version: str,
+    spawn_fn: SpawnFn = spawn_detached,
+) -> tuple[Path, RepairNotice] | None:
+    """Start the repair when the configured relay binary is unusable.
+
+    The one decision every trigger shares (the SessionStart checker and the
+    daemon's start-up), so a cause is judged and claimed the same way from
+    either, and the once-per-cause claim makes a double trigger harmless.
+    Returns None when the relay is disabled or its binary can run; else the
+    binary path and what :func:`start_relay_repair` did about it.
+    """
+    binary = missing_configured_relay_binary(project_root, transport)
+    if binary is None:
+        return None
+    defect = relay_binary_defect(binary)
+    if defect is None:
+        # Repaired between the two checks: nothing to do.
+        return None
+    notice = start_relay_repair(
+        project_root,
+        binary,
+        defect,
+        untracked_dir=untracked_dir,
+        version=version,
+        spawn_fn=spawn_fn,
+    )
+    return binary, notice
+
+
+def relay_repair_status_lines(
+    binary: Path, defect: str, *, untracked_dir: Path, version: str
+) -> list[str]:
+    """What the repair of this cause recorded, as lines for ``hooks-daemon status``.
+
+    Read from the repair's own state file (the claim :func:`start_relay_repair`
+    makes), so "warned but never attempted" reads differently from "attempted
+    and failed". Reads only; never starts anything.
+    """
+    key = cause_key(binary, defect, version)
+    state = repair_state_path(untracked_dir, key)
+    log = repair_log_path(untracked_dir, key)
+    record = read_state_file(state, log)
+    if record is None:
+        return [
+            "Relay repair: no attempt recorded for this cause "
+            f"(state file {state} is absent; the daemon start or the next session start "
+            "begins one)"
+        ]
+    return [
+        f"Relay repair: {record.status.value} - {record.detail}",
+        f"Relay repair log: {record.log_path}",
+    ]
 
 
 @contextmanager
@@ -326,7 +485,6 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     from claude_code_hooks_daemon.install.forwarder_generator import regenerate_deployed_hooks
-    from claude_code_hooks_daemon.install.relay_deploy import relay_binary_defect
     from claude_code_hooks_daemon.install.transport_toggle import ensure_relay_binary
 
     root: Path = args.project_root
