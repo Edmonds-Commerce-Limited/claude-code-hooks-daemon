@@ -8,6 +8,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00610: secret guard trailing slash glob](00610-secret-guard-trailing-slash-glob/PLAN.md) - In Progress (#204: `ls -d */` is denied because `glob_matches` drops the trailing `/` and judges the glob against protected files; judge a directories-only glob as the directories it can expand to)
+
 - [00609: tracked hook wrappers machine independent](00609-tracked-hook-wrappers-machine-independent/PLAN.md) - Not Started (peer report: the generated relay block in the tracked `.claude/hooks/*` wrappers embeds the checkout path, so regenerating on another machine dirties a project that tracks them; resolve at run time, test-first with a two-root regeneration fixture)
 
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
@@ -305,11 +307,11 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Plan Statistics
 
-- **Total Plans Created**: 609 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 610 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 512 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 74 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 75 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
