@@ -415,3 +415,66 @@ class TestRgValueTakingOptions:
         (read,) = rs.search_reads("grep -rE x sub", str(tree))
 
         assert read.root == str(tree / "sub")
+
+
+class TestScanOptionsFailsClosed:
+    """What the option grammar cannot place keeps every operand and the default root."""
+
+    def test_certain_scan_drops_the_pattern_operand(self) -> None:
+        scan = rs.scan_options(["-r", "zz", "sub"], tool=rs.TOOL_GREP, command="grep")
+
+        assert scan.operands == ["sub"]
+        assert not scan.default_root_possible
+
+    def test_certain_scan_with_only_a_pattern_reads_the_default_root(self) -> None:
+        scan = rs.scan_options(["-r", "zz"], tool=rs.TOOL_GREP, command="grep")
+
+        assert scan.operands == []
+        assert scan.default_root_possible
+
+    def test_abbreviated_pattern_option_keeps_every_operand(self) -> None:
+        scan = rs.scan_options(["-r", "--reg=zz", "deep", "sub"], tool=rs.TOOL_GREP, command="grep")
+
+        assert scan.operands == ["deep", "sub"]
+
+    def test_valueless_color_word_does_not_eat_the_pattern(self) -> None:
+        scan = rs.scan_options(["-r", "--color", "x", "deep"], tool=rs.TOOL_GREP, command="grep")
+
+        assert scan.operands == ["deep"]
+
+    def test_unknown_option_keeps_all_operands_and_drops_exclusions(self) -> None:
+        scan = rs.scan_options(
+            ["-r", "--exclude-dir=deep", "--no-such-option", "x", "deep"],
+            tool=rs.TOOL_GREP,
+            command="grep",
+        )
+
+        assert scan.uncertain
+        assert scan.operands == ["x", "deep"]
+        assert scan.exclude_dirs == []
+        assert scan.default_root_possible
+
+    def test_unknown_option_with_enough_operands_has_no_default_root(self) -> None:
+        scan = rs.scan_options(
+            ["-r", "--no-such-option=1", "x", "deep"], tool=rs.TOOL_GREP, command="grep"
+        )
+
+        assert scan.uncertain
+        assert not scan.default_root_possible
+
+    def test_ug_is_recursive_and_uncertain(self) -> None:
+        scan = rs.scan_options(["x"], tool=rs.TOOL_GREP, command="ug")
+
+        assert scan.recursive
+        assert scan.uncertain
+        assert scan.default_root_possible
+
+    def test_rg_files_has_no_pattern_operand(self) -> None:
+        scan = rs.scan_options(["--files", "deep", "sub"], tool=rs.TOOL_RG, command="rg")
+
+        assert scan.operands == ["deep", "sub"]
+
+    def test_ug_is_a_search_command_that_reads_the_default_root(self, tree: Path) -> None:
+        roots = [read.root for read in rs.search_reads("ug x", str(tree))]
+
+        assert str(tree) in roots
