@@ -31,16 +31,12 @@ from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.paths import get_untracked_dir
 from claude_code_hooks_daemon.install.background_sync import SyncStatus
-from claude_code_hooks_daemon.install.relay_deploy import (
-    missing_configured_relay_binary,
-    relay_binary_defect,
-    relay_binary_missing_warning,
-)
+from claude_code_hooks_daemon.install.relay_deploy import relay_binary_missing_warning
 from claude_code_hooks_daemon.install.relay_repair import (
     RepairNotice,
     SpawnFn,
+    repair_unusable_relay,
     spawn_detached,
-    start_relay_repair,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.relay_host import relay_fix_subcommand
@@ -134,23 +130,18 @@ class RelayBinaryCheckerHandler(SessionStartHandlerBase):
                     "is unknown."
                 ],
             )
-        binary = missing_configured_relay_binary(root, transport)
-        if binary is None:
-            return AdvisoryResult(decision=Decision.ALLOW, context=[])
-        fix = daemon_cli_command("transport", relay_fix_subcommand())
-        defect = relay_binary_defect(binary)
-        if defect is None:
-            # Repaired between the two checks: nothing to report.
-            return AdvisoryResult(decision=Decision.ALLOW, context=[])
-        warning = relay_binary_missing_warning(binary, fix)
-        notice = start_relay_repair(
+        outcome = repair_unusable_relay(
             root,
-            binary,
-            defect,
+            transport,
             untracked_dir=get_untracked_dir(root),
             version=__version__,
             spawn_fn=self.spawn_repair,
         )
+        if outcome is None:
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
+        binary, notice = outcome
+        fix = daemon_cli_command("transport", relay_fix_subcommand())
+        warning = relay_binary_missing_warning(binary, fix)
         return AdvisoryResult(
             decision=Decision.ALLOW,
             context=[f"WARNING: {warning}", _repair_line(notice, fix)],

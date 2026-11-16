@@ -42,9 +42,14 @@ from claude_code_hooks_daemon.install.background_sync import (
     SyncStatus,
     read_state_file,
 )
+from claude_code_hooks_daemon.install.relay_deploy import (
+    missing_configured_relay_binary,
+    relay_binary_defect,
+)
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 if TYPE_CHECKING:
+    from claude_code_hooks_daemon.config.models import TransportConfig
     from claude_code_hooks_daemon.install.transport_toggle import RelayProvision
 
 logger = logging.getLogger(__name__)
@@ -251,6 +256,40 @@ def start_relay_repair(
     return notice(started=True)
 
 
+def repair_unusable_relay(
+    project_root: Path,
+    transport: TransportConfig,
+    *,
+    untracked_dir: Path,
+    version: str,
+    spawn_fn: SpawnFn = spawn_detached,
+) -> tuple[Path, RepairNotice] | None:
+    """Start the repair when the configured relay binary is unusable.
+
+    The one decision every trigger shares (the SessionStart checker and the
+    daemon's start-up), so a cause is judged and claimed the same way from
+    either, and the once-per-cause claim makes a double trigger harmless.
+    Returns None when the relay is disabled or its binary can run; else the
+    binary path and what :func:`start_relay_repair` did about it.
+    """
+    binary = missing_configured_relay_binary(project_root, transport)
+    if binary is None:
+        return None
+    defect = relay_binary_defect(binary)
+    if defect is None:
+        # Repaired between the two checks: nothing to do.
+        return None
+    notice = start_relay_repair(
+        project_root,
+        binary,
+        defect,
+        untracked_dir=untracked_dir,
+        version=version,
+        spawn_fn=spawn_fn,
+    )
+    return binary, notice
+
+
 @contextmanager
 def _exclusive(lock: Path) -> Iterator[None]:
     lock.parent.mkdir(parents=True, exist_ok=True)
@@ -328,7 +367,6 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     from claude_code_hooks_daemon.install.forwarder_generator import regenerate_deployed_hooks
-    from claude_code_hooks_daemon.install.relay_deploy import relay_binary_defect
     from claude_code_hooks_daemon.install.transport_toggle import ensure_relay_binary
 
     root: Path = args.project_root
