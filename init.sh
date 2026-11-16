@@ -3719,7 +3719,7 @@ send_request_stdin() {
     local _event_socket_wait
     case "$event_name" in
         WorktreeCreate) _event_socket_wait=510;;
-        WorktreeRemove) _event_socket_wait=70;;
+        WorktreeRemove) _event_socket_wait=180;;
         *) _event_socket_wait=30;;
     esac
 

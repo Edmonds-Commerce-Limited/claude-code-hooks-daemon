@@ -7510,8 +7510,7 @@ which `init.sh` mirrors as a 70 s client wait, so scaling the call alone would c
 killed at 30 s leaves a half-deleted `prunable` worktree, the N464 shape. `check_fixed_worktree_budget.py`
 lists the function in its allowlist against this entry.
 
-**Status**: ⬜ Open. Give the event the same treatment as WorktreeCreate: a load-scaled ceiling for the
-removal, the event tables and `init.sh` re-derived from it, and the allowlist row deleted.
+**Status**: ✅ Fixed. Class: a hard failure gated on a fixed wall-clock budget for a git call whose duration follows host load, inside an event whose total budget is pinned (same class as N623). `worktree remove` now runs on `scaled_timeout(Timeout.GIT_WORKTREE, Timeout.GIT_WORKTREE_REMOVE_EVENT_MAX)` (30 s base, 120 s ceiling) and the handler's other git calls (worktree list, containment, creator record, merge probe, prune) on `load_scaling.branch_metadata_timeout()`. `EVENT_HANDLER_BUDGET[WORKTREE_REMOVE]` is re-derived as the removal ceiling plus `GIT_WORKTREE_REMOVE_METADATA_CALLS` metadata ceilings (60 s to 170 s, `init.sh` client wait 70 s to 180 s), and the `check_fixed_worktree_budget.py` allowlist row is deleted. Defence: `tests/unit/handlers/worktree_remove/test_worktree_remove_load_scaling.py` (the removal and metadata calls are scaled under a saturated host, and the budget arithmetic is pinned) and the detector itself, which now passes with an empty allowlist. Release note 087.
 
 ### N622 — git calls that gate a hard failure on a fixed budget that scales with host load
 

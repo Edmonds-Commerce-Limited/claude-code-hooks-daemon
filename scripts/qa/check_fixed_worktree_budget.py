@@ -55,19 +55,11 @@ _SCALING_VERB: Final[str] = "worktree"
 _SCALING_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"add", "remove"})
 _SCALER: Final[str] = "scaled_timeout"
 #: ``scaled_timeout`` and the handler's own one-line wrapper over it.
-_SCALERS: Final[frozenset[str]] = frozenset({_SCALER, "_cleanup_budget"})
+_SCALERS: Final[frozenset[str]] = frozenset({_SCALER, "_cleanup_budget", "branch_metadata_timeout"})
 _TIMEOUT_KEYWORD: Final[str] = "timeout"
 
 #: (path relative to the scan root, function name) -> why it is allowed.
-_ALLOWED: Final[dict[tuple[str, str], str]] = {
-    (
-        "handlers/worktree_remove/worktree_remove_handler.py",
-        "_remove",
-    ): (
-        "WorktreeRemove's budget is the event's static handler budget, which the "
-        "client wait mirrors; scaling it means moving that table (ledger N621)"
-    ),
-}
+_ALLOWED: Final[dict[tuple[str, str], str]] = {}
 
 _REMEDIATION: Final[str] = (
     "Each site above runs a tree-sized git mutation on a fixed budget. Under\n"
