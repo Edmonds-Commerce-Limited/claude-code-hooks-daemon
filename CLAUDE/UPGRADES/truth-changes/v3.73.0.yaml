@@ -15,6 +15,7 @@ truth_changes:
       IF YOUR PROJECT'S DOCS TELL AN AGENT TO USE `--comments` TO READ AN
       ISSUE OR PULL REQUEST, UPDATE THEM TO THE `--json` FORM.
   - topic: git-safety
+    id: branch-delete-recovery
     was: >
       `delete-branch` and `branch-sweep --clean` save deleted branches to
       `untracked/deleted-branches.bundle`, which is overwritten on every call.

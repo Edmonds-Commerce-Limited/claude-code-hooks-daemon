@@ -16,6 +16,7 @@ truth_changes:
       `--dry-run`. Re-running the same command resumes an interrupted run.
 
   - topic: git-safety
+    id: branch-delete-recovery
     was: >
       `hooks-daemon delete-branch` writes a recovery bundle under
       `untracked/deleted-branches/` (or `--bundle PATH`, skipped with

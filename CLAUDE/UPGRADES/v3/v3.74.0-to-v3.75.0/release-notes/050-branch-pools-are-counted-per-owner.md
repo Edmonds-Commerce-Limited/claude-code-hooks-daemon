@@ -14,7 +14,7 @@ Anything else is **foreign**. A foreign branch:
 
 - is listed in a new `Foreign` group of `branch-sweep` (and `group: "foreign"` in `--json`, with new `author` and `author_email` keys), with its age and author;
 - is counted in no pool (open, parked, merged, dormant), so it never fills a cap, never blocks a creation, and is never judged at stop;
-- is never cleaned automatically. `branch-sweep --clean --remote` still deletes a foreign branch whose merge is PROVEN, because proof matters more than ownership;
+- is never cleaned automatically. `branch-sweep --clean --remote --apply` still deletes a foreign branch whose merge is PROVEN, because proof matters more than ownership;
 - is never offered as something to rename or delete by any deny or report.
 
 The email check is weak evidence when several seats share one identity, so such seats see each other's pushed branches as mine. `branches.bot_owned` is unchanged; foreign is the general case of it. With no `user.email` set, a remote-only branch without a creator record is foreign.
