@@ -8,6 +8,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00609: tracked hook wrappers machine independent](00609-tracked-hook-wrappers-machine-independent/PLAN.md) - Not Started (peer report: the generated relay block in the tracked `.claude/hooks/*` wrappers embeds the checkout path, so regenerating on another machine dirties a project that tracks them; resolve at run time, test-first with a two-root regeneration fixture)
+
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
 - [00603: supervisor idle compact at 30 percent](00603-supervisor-idle-compact-at-30-percent/PLAN.md) - In Progress (built, dry-run first: verify Claude Code's idleCompaction, and add a supervisor compaction at true idle once context reaches 30%)
