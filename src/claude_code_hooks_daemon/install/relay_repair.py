@@ -290,6 +290,31 @@ def repair_unusable_relay(
     return binary, notice
 
 
+def relay_repair_status_lines(
+    binary: Path, defect: str, *, untracked_dir: Path, version: str
+) -> list[str]:
+    """What the repair of this cause recorded, as lines for ``hooks-daemon status``.
+
+    Read from the repair's own state file (the claim :func:`start_relay_repair`
+    makes), so "warned but never attempted" reads differently from "attempted
+    and failed". Reads only; never starts anything.
+    """
+    key = cause_key(binary, defect, version)
+    state = repair_state_path(untracked_dir, key)
+    log = repair_log_path(untracked_dir, key)
+    record = read_state_file(state, log)
+    if record is None:
+        return [
+            "Relay repair: no attempt recorded for this cause "
+            f"(state file {state} is absent; the daemon start or the next session start "
+            "begins one)"
+        ]
+    return [
+        f"Relay repair: {record.status.value} - {record.detail}",
+        f"Relay repair log: {record.log_path}",
+    ]
+
+
 @contextmanager
 def _exclusive(lock: Path) -> Iterator[None]:
     lock.parent.mkdir(parents=True, exist_ok=True)
