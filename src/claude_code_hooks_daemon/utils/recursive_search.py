@@ -22,6 +22,7 @@ command word (``g\\rep``, ``"grep"``, ``$G``) is dismissed (ledger 00474 N152),
 and a producer other than ``find`` feeding ``xargs`` names no root.
 """
 
+import contextvars
 import fnmatch
 import os
 import posixpath
@@ -36,7 +37,7 @@ from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_sta
 from claude_code_hooks_daemon.utils.command_position import SHELL_NAMES
 from claude_code_hooks_daemon.utils.find_expression import FIND_EXEC_ACTIONS, find_exec_end
 from claude_code_hooks_daemon.utils.grep_option_grammar import (
-    ToolGrammar,
+    RG_CONFIG_ENV,
     grammar_for,
     parse_arguments,
 )
@@ -50,6 +51,12 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted_spans,
 )
 from claude_code_hooks_daemon.utils.shell_snapshot import default_glob_semantics
+
+# Whether the command being read names the ripgrep config variable; set by
+# :func:`search_reads` for the duration of one read, so the nested readers see it.
+_rg_config_named: Final[contextvars.ContextVar[bool]] = contextvars.ContextVar(
+    "rg_config_named", default=False
+)
 
 TOOL_GREP: Final[str] = "grep"
 TOOL_RG: Final[str] = "rg"
@@ -163,7 +170,7 @@ def search_command(words: list[str]) -> tuple[str, int, bool] | None:
 
 
 def scan_options(
-    arguments: list[str], *, tool: str, command: str = "", grammar: ToolGrammar | None = None
+    arguments: list[str], *, tool: str, command: str = "", rg_config: bool = False
 ) -> SearchArguments:
     """Read options and operands of a grep-family invocation's arguments.
 
@@ -175,9 +182,10 @@ def scan_options(
     leaves the default root possible whenever the unplaced options could have
     eaten all the operands: skipping a word on a guess hides a searched path.
 
-    ``grammar`` overrides the one chosen from ``command``.
+    ``rg_config`` says the command names ``RIPGREP_CONFIG_PATH``: an ``rg`` then
+    reads further options (a pattern among them) from a file, so it is uncertain.
     """
-    chosen = grammar or grammar_for(command, git_grep=tool == TOOL_GIT)
+    chosen = grammar_for(command, git_grep=tool == TOOL_GIT, rg_config=rg_config)
     parsed = parse_arguments(chosen, arguments)
     scan = SearchArguments(recursive=tool != TOOL_GREP or parsed.recursive)
     scan.pattern_given = parsed.pattern_supplied
@@ -311,7 +319,11 @@ def search_reads(command: str, cwd: str | None) -> list[Read]:
     precedes the search; with no absolute directory to place them from they are
     left out, because a guess at where a search reads is worse than no answer.
     """
-    reads = list(_reads(command, cwd, 0))
+    reset = _rg_config_named.set(RG_CONFIG_ENV in command)
+    try:
+        reads = list(_reads(command, cwd, 0))
+    finally:
+        _rg_config_named.reset(reset)
     if not any(read.glob for read in reads):
         return reads
     default_expansion = default_glob_semantics(command)
@@ -410,10 +422,14 @@ def _command_words(segment: str) -> list[str]:
         words = linear_shlex.split(segment)
     except ValueError:
         return []
-    while words and _ASSIGNMENT.match(words[0]):
-        words = words[1:]
-    _names, start = peel_command_wrappers(words)
-    return words[start:]
+    while True:
+        while words and _ASSIGNMENT.match(words[0]):
+            words = words[1:]
+        _names, start = peel_command_wrappers(words)
+        if start == 0:
+            return words
+        # ``env VAR=x rg ...``: assignments can follow a wrapper too.
+        words = words[start:]
 
 
 def _is_search(words: list[str]) -> bool:
@@ -430,7 +446,9 @@ def _search_reads(words: list[str], cwd: str | None, *, piped_in: bool) -> Itera
     tool, start, relocated = found
     if relocated:
         return
-    scan = scan_options(words[start:], tool=tool, command=words[start - 1])
+    scan = scan_options(
+        words[start:], tool=tool, command=words[start - 1], rg_config=_rg_config_named.get()
+    )
     if not scan.recursive:
         return
     if tool == TOOL_GIT:

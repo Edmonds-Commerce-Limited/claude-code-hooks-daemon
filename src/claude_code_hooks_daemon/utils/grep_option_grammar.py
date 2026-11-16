@@ -320,15 +320,23 @@ _GRAMMARS["ack"] = _GRAMMARS["ag"]
 _GIT_GREP_KEY: Final = "git"
 
 
-def grammar_for(command: str, *, git_grep: bool = False) -> ToolGrammar:
+#: ripgrep reads extra arguments, patterns included, from the file this variable names.
+RG_CONFIG_ENV: Final = "RIPGREP_CONFIG_PATH"
+_RG_NAME: Final = "rg"
+
+
+def grammar_for(command: str, *, git_grep: bool = False, rg_config: bool = False) -> ToolGrammar:
     """The grammar of the search command word ``command`` (``rg``, ``/usr/bin/grep``).
 
     An empty or unrecognised word is read as ``grep``, which is judged against
-    both binaries it can be.
+    both binaries it can be. ``rg_config`` says the command line names
+    :data:`RG_CONFIG_ENV`, so what ``rg`` is given cannot be told from its words.
     """
     if git_grep:
         return _GRAMMARS[_GIT_GREP_KEY]
-    return _GRAMMARS.get(command.rsplit("/", 1)[-1], _GRAMMARS["grep"])
+    name = command.rsplit("/", 1)[-1]
+    grammar = _GRAMMARS.get(name, _GRAMMARS["grep"])
+    return replace(grammar, always_uncertain=True) if rg_config and name == _RG_NAME else grammar
 
 
 @dataclass
@@ -411,8 +419,3 @@ def _read_cluster(grammar: ToolGrammar, cluster: str, parsed: ParsedArguments) -
             # ugrep reads the rest of the cluster as the value, GNU grep as more flags.
             parsed.uncertain = True
     return None
-
-
-def with_always_uncertain(grammar: ToolGrammar) -> ToolGrammar:
-    """``grammar`` with every parse of it uncertain (an ambient config may add options)."""
-    return replace(grammar, always_uncertain=True)

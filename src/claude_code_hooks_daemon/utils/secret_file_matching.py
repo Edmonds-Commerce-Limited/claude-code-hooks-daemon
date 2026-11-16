@@ -51,7 +51,11 @@ from claude_code_hooks_daemon.utils.command_evasion import (
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.find_expression import find_regex_operand_indexes
-from claude_code_hooks_daemon.utils.grep_option_grammar import grammar_for, parse_arguments
+from claude_code_hooks_daemon.utils.grep_option_grammar import (
+    RG_CONFIG_ENV,
+    grammar_for,
+    parse_arguments,
+)
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
     literal_screen,
@@ -2260,7 +2264,11 @@ _SEARCH_PATH_COMMANDS: Final = frozenset({"grep", "egrep", "fgrep", "rg"})
 
 
 def _searched_paths_hold_no_protected_file(
-    segment_words: list[str], index: "ProtectedFileIndex", cwds: tuple[str, ...]
+    segment_words: list[str],
+    index: "ProtectedFileIndex",
+    cwds: tuple[str, ...],
+    *,
+    rg_config: bool = False,
 ) -> bool:
     """Whether a grep/rg segment names searched paths and none holds a protected file.
 
@@ -2272,7 +2280,7 @@ def _searched_paths_hold_no_protected_file(
     if command is None:
         return False
     rest = segment_words[command + 1 :]
-    parsed = parse_arguments(grammar_for(names[command]), rest)
+    parsed = parse_arguments(grammar_for(names[command], rg_config=rg_config), rest)
     if parsed.uncertain or parsed.pattern_supplied or _END_OF_OPTIONS in rest:
         # An option the grammar cannot place, a pattern given by option (or none at
         # all), or ``--`` (a dash-led path after it): the first operand may be a
@@ -2415,12 +2423,14 @@ def _is_scoped_filter_value(
             words = linear_shlex.split(segment)
         except ValueError:
             return False
-        if not _searched_paths_hold_no_protected_file(words, index, cwds):
+        if not _searched_paths_hold_no_protected_file(
+            words, index, cwds, rg_config=RG_CONFIG_ENV in command
+        ):
             return False
     return True
 
 
-def _opens_files(segment: str, tail: str) -> bool:
+def _opens_files(segment: str, tail: str, *, rg_config: bool = False) -> bool:
     """Whether the command in ``segment`` may open the bare name that follows it.
 
     ``segment`` is the command text before the name and ``tail`` the rest of its
@@ -2449,7 +2459,7 @@ def _opens_files(segment: str, tail: str) -> bool:
                 after = linear_shlex.split(tail)
             except ValueError:
                 return True
-            if _token_is_pattern_operand(name, before, after):
+            if _token_is_pattern_operand(name, before, after, rg_config=rg_config):
                 continue
             return True
         elif name in _FILE_OPENING_COMMANDS or name.startswith(_FILE_OPENING_PREFIXES):
@@ -2457,7 +2467,9 @@ def _opens_files(segment: str, tail: str) -> bool:
     return False
 
 
-def _token_is_pattern_operand(command: str, before: list[str], after: list[str]) -> bool:
+def _token_is_pattern_operand(
+    command: str, before: list[str], after: list[str], *, rg_config: bool = False
+) -> bool:
     """Whether a bare name between ``before`` and ``after`` is, provably, the pattern operand.
 
     The words of the whole command line are read with the option grammar. Only
@@ -2465,7 +2477,8 @@ def _token_is_pattern_operand(command: str, before: list[str], after: list[str])
     supplies the pattern, and the name is the first operand, is the name the
     pattern grep searches for rather than a file it opens.
     """
-    parsed = parse_arguments(grammar_for(command), [*before, _TOKEN_WORD, *after])
+    grammar = grammar_for(command, rg_config=rg_config)
+    parsed = parse_arguments(grammar, [*before, _TOKEN_WORD, *after])
     return (
         not parsed.uncertain
         and not parsed.pattern_supplied
@@ -2502,7 +2515,9 @@ def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
     segment = command[segment_start:word_start]
     if _REDIRECT_TAIL.search(segment):
         return True
-    return _opens_files(segment, _segment_tail(command, word_end))
+    return _opens_files(
+        segment, _segment_tail(command, word_end), rg_config=RG_CONFIG_ENV in command
+    )
 
 
 def _segment_tail(command: str, word_end: int) -> str:
