@@ -12,7 +12,7 @@ import pytest
 
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.daemon.controller import DaemonController
-from claude_code_hooks_daemon.install.relay_repair import RepairNotice
+from claude_code_hooks_daemon.install.relay_repair import RepairNotice, spawn_owned
 from claude_code_hooks_daemon.version import __version__
 
 _MODULE = "claude_code_hooks_daemon.daemon.controller"
@@ -45,6 +45,8 @@ class TestStartRelayRepair:
         (call,) = repair.call_args_list
         assert call.args == (tmp_path, config.daemon.transport)
         assert call.kwargs["version"] == __version__
+        # The daemon owns the repair it starts, so a stop can end it.
+        assert call.kwargs["spawn_fn"] is spawn_owned
         assert any("started" in r.getMessage() for r in caplog.records)
 
     def test_loads_the_config_when_none_is_given(self, tmp_path: Path, config_path: Path) -> None:

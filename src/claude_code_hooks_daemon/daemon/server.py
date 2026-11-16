@@ -1560,6 +1560,10 @@ class HooksDaemon:
     def _run_deferred_steps(self) -> None:
         """Run each deferred step, logging one that fails and carrying on with the rest."""
         for description, step in self._deferred_startup:
+            if self._shutdown_requested:
+                # A step started now could spawn work the stop has already ended.
+                logger.info("Skipping deferred start-up step '%s': shutting down", description)
+                continue
             try:
                 step()
             except Exception as exc:
@@ -2250,6 +2254,16 @@ class HooksDaemon:
         # Pending debounced triggers are dropped, not flushed: they live in
         # memory only and the next event for each key re-triggers it.
         shutdown_debouncer()
+
+        # The relay repair this daemon started is its child: end it and its
+        # processes and wait, so nothing writes under the project once stop
+        # returns (Plan 00608). Blocking (bounded), so off the event loop.
+        # Imported here: the install package imports this module at load time.
+        from claude_code_hooks_daemon.install.relay_repair import stop_owned_repairs
+
+        stopped = await asyncio.get_running_loop().run_in_executor(None, stop_owned_repairs)
+        if stopped:
+            logger.info("Stopped relay repair process(es) %s", stopped)
 
         # Close server
         if self.server:

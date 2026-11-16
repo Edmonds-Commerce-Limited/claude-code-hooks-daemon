@@ -28,6 +28,7 @@ import fcntl
 import hashlib
 import logging
 import os
+import signal
 import subprocess  # nosec B404 - argv list, no shell
 import sys
 import threading
@@ -37,6 +38,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.install.background_sync import (
     SyncRecord,
     SyncStatus,
@@ -184,6 +186,96 @@ def spawn_detached(argv: list[str], log: Path) -> int:
         target=_reap, args=(child,), name=f"relay-repair-reap-{child.pid}", daemon=True
     ).start()
     return child.pid
+
+
+@dataclass(frozen=True)
+class _OwnedRepair:
+    child: subprocess.Popen[bytes]
+    state: Path
+
+
+_owned_lock = threading.Lock()
+#: Repairs this process started with :func:`spawn_owned` and has not yet stopped.
+_owned: list[_OwnedRepair] = []
+
+
+def _state_of(argv: list[str]) -> Path:
+    """The state file the repair argv names (``--state``), built by start_relay_repair."""
+    return Path(argv[argv.index("--state") + 1])
+
+
+def spawn_owned(argv: list[str], log: Path) -> int:
+    """Start the repair like :func:`spawn_detached`, and keep it for :func:`stop_owned_repairs`.
+
+    For a caller that outlives the repair and must not leave it writing after
+    it stops: the daemon. The SessionStart hook keeps :func:`spawn_detached`,
+    since its process exits at once and the repair is meant to outlive it.
+    """
+    log_fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, _FILE_MODE)
+    try:
+        child = subprocess.Popen(  # nosec B603 - argv list, no shell
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=log_fd,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    finally:
+        os.close(log_fd)
+    with _owned_lock:
+        _owned.append(_OwnedRepair(child, _state_of(argv)))
+    return child.pid
+
+
+def owned_repair_pids() -> list[int]:
+    """The pids of owned repairs still running."""
+    with _owned_lock:
+        return [owned.child.pid for owned in _owned if owned.child.poll() is None]
+
+
+def _end_group(child: subprocess.Popen[bytes], sig: int, grace: float) -> bool:
+    """Signal the child's whole process group; True when the child exited within ``grace``."""
+    try:
+        os.killpg(child.pid, sig)
+    except ProcessLookupError:
+        return child.poll() is not None
+    try:
+        child.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        return False
+    return True
+
+
+def _withdraw_unfinished_claim(state: Path) -> None:
+    """Remove a claim that still says running: the repair was interrupted, not failed.
+
+    Without this the once-per-cause claim would stand for a repair that never
+    finished, and no later start would retry it. A recorded result is kept.
+    """
+    record = read_state_file(state, state)
+    if record is not None and record.status is SyncStatus.RUNNING:
+        state.unlink(missing_ok=True)
+
+
+def stop_owned_repairs(grace: float = float(Timeout.DAEMON_REPAIR_STOP_GRACE)) -> list[int]:
+    """End every owned repair, and its processes, and wait: nothing writes after this returns.
+
+    SIGTERM to the process group, SIGKILL after ``grace`` seconds, ``grace``
+    more to reap. Returns the pids of the repairs that were still running.
+    """
+    with _owned_lock:
+        owned, _owned[:] = list(_owned), []
+    stopped: list[int] = []
+    for repair in owned:
+        child = repair.child
+        if child.poll() is None:
+            stopped.append(child.pid)
+            if not _end_group(child, signal.SIGTERM, grace):
+                if not _end_group(child, signal.SIGKILL, grace):
+                    logger.error("relay repair %d survived SIGKILL", child.pid)
+                    continue
+        _withdraw_unfinished_claim(repair.state)
+    return stopped
 
 
 def start_relay_repair(

@@ -53,6 +53,10 @@ class Timeout:
     # process cannot catch, block or ignore -- this second, shorter budget is
     # only for the OS to actually reap it afterward.
     DAEMON_SIGKILL_GRACE = 2  # 2 seconds (wait after SIGKILL for the OS to reap)
+    # A stopping daemon ends the relay repair it started: this long after
+    # SIGTERM, then this long after SIGKILL. Twice this stays inside
+    # DAEMON_SHUTDOWN_AFTER_DRAIN_MARGIN, so the stop's own grace still holds.
+    DAEMON_REPAIR_STOP_GRACE = 1  # seconds per phase
     # A restart is a shutdown FOLLOWED BY a startup, so its budget is the sum.
     # Giving it DAEMON_SHUTDOWN alone asserts that stop-and-start fits inside
     # the stop budget -- structurally impossible whenever startup is the slower

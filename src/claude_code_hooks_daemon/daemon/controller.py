@@ -47,7 +47,11 @@ from claude_code_hooks_daemon.daemon.source_fingerprint import (
 )
 from claude_code_hooks_daemon.daemon.verdict_log import append_verdicts
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
-from claude_code_hooks_daemon.install.relay_repair import RepairNotice, repair_unusable_relay
+from claude_code_hooks_daemon.install.relay_repair import (
+    RepairNotice,
+    repair_unusable_relay,
+    spawn_owned,
+)
 from claude_code_hooks_daemon.utils.cli_command import is_recovery_command
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.protected_file_index import IndexPrewarmer
@@ -633,6 +637,8 @@ class DaemonController:
                 transport,
                 untracked_dir=get_untracked_dir(workspace_root),
                 version=__version__,
+                # Owned, not detached: the daemon's stop ends it (Plan 00608).
+                spawn_fn=spawn_owned,
             )
             if outcome is not None:
                 self._log_relay_repair_outcome(*outcome)

@@ -641,3 +641,41 @@ class TestShutdownDropsDebouncedTriggers:
             assert fired == []
         finally:
             reset_debouncer()
+
+
+class TestShutdownStopsTheRepairItStarted:
+    """A stop ends the relay repair the daemon started, before it returns (Plan 00608)."""
+
+    @pytest.mark.anyio
+    async def test_shutdown_stops_the_owned_repairs(self) -> None:
+        daemon = HooksDaemon(config=_make_config(), controller=FakeController())
+
+        with patch("claude_code_hooks_daemon.install.relay_repair.stop_owned_repairs") as stop:
+            stop.return_value = []
+            await daemon.shutdown()
+
+        stop.assert_called_once_with()
+
+    @pytest.mark.anyio
+    async def test_a_second_shutdown_does_not_stop_them_again(self) -> None:
+        daemon = HooksDaemon(config=_make_config(), controller=FakeController())
+
+        with patch("claude_code_hooks_daemon.install.relay_repair.stop_owned_repairs") as stop:
+            stop.return_value = []
+            await daemon.shutdown()
+            await daemon.shutdown()
+
+        stop.assert_called_once_with()
+
+    def test_a_step_that_has_not_started_is_skipped_once_shutdown_began(self) -> None:
+        ran: list[str] = []
+        daemon = HooksDaemon(
+            config=_make_config(),
+            controller=FakeController(),
+            deferred_startup=[("late", lambda: ran.append("late"))],
+        )
+        daemon._shutdown_requested = True
+
+        daemon._run_deferred_steps()
+
+        assert ran == []
