@@ -8,8 +8,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00610: secret guard trailing slash glob](00610-secret-guard-trailing-slash-glob/PLAN.md) - In Progress (#204: `ls -d */` is denied because `glob_matches` drops the trailing `/` and judges the glob against protected files; judge a directories-only glob as the directories it can expand to)
-
 - [00609: tracked hook wrappers machine independent](00609-tracked-hook-wrappers-machine-independent/PLAN.md) - Not Started (peer report: the generated relay block in the tracked `.claude/hooks/*` wrappers embeds the checkout path, so regenerating on another machine dirties a project that tracks them; resolve at run time, test-first with a two-root regeneration fixture)
 
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
@@ -196,6 +194,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00610: secret guard trailing slash glob](Completed/00610-secret-guard-trailing-slash-glob/PLAN.md) - Complete at merge `31a2cce4f` (main CI 43816232915 green) + the archiving commit (GitHub #204: a glob ending in `/` is judged as the directories it expands to, so `ls -d */` is allowed and `grep -r x */` still denied; release note 084; follow-ups in PLAN.md)
+
 - [00608: provision sh provisions the relay binary](Completed/00608-provision-sh-provisions-the-relay-binary/PLAN.md) - Complete at merge `71bc70cfd` (main CI run 43780371862 green) + the archiving commit (a foreground `provision.sh` provisions the relay binary through `relay_deploy --check`, a background run reports it; review fixes `a3707d629`; release note 078; follow-ups: repair at daemon startup, log the silent branch, repair state in `status`)
 
 - [00607: unblock the Dependabot-held packages](Completed/00607-dependabot-held-packages-unblock/PLAN.md) - Complete at `3076e216c` + fixes `8d82b3069` (anyio declared) and `55d78799c` (coverage held at 7.13.5) (main CI run 43766285856 green) + the archiving commit (open Dependabot alerts 19 to 0: the unused `safety` is dropped so `filelock` reaches 4.2.10; semgrep runs from a pinned `uv tool run` environment, so `mcp` and OpenTelemetry leave `uv.lock`; dev-only, no release note)
@@ -253,9 +253,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 - [00569: hooks screen target by host arch](Completed/00569-hooks-screen-target-by-host-arch/PLAN.md) - Complete at merge `ae0af5761` (green CI run 42404687976) + the archiving commit (GitHub #174: the ccy supervisor and `screen/build.sh` choose the hooks-screen musl target triple from the host architecture, x86_64 or aarch64, and the failure note names the architecture; release note 003)
 
 - [00567: lsp coverage extensionless file targets](Completed/00567-lsp-coverage-extensionless-file-targets/PLAN.md) - Complete at merge `6ab6b7bfb` + the archiving commit (GitHub #162: named file targets are judged by their own suffix, an extensionless file counts as unserved, so a grep over extensionless scripts gets the same advisory as a search of their directory; release note 002)
-
-- [00566: nested worktree create root anchoring](Completed/00566-nested-worktree-create-root-anchoring/PLAN.md) - Complete, already delivered (GitHub #161: Plan 00474 N563 `dc45486fa` had anchored `worktree_create` on the main checkout in v3.72.0; this plan adds regression tests only, merged via `82673feec`; no release-bound consequence)
-
   Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -309,9 +306,9 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - **Total Plans Created**: 610 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 512 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 513 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 75 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 74 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
