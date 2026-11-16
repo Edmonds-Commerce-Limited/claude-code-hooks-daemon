@@ -1,6 +1,6 @@
 # Plan 00609: tracked hook wrappers machine independent
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-11-16
 **Owner**: joseph
 **Priority**: High
@@ -62,15 +62,17 @@ written into the file.
 ### Phase 3: Release bound
 
 - [x] ✅ **Task 3.1**: Release note under `CLAUDE/UPGRADES` pending area;
-  holding-area artefact: `CLAUDE/UPGRADES/UNRELEASED/release-notes/084-hook-wrappers-name-no-machine-specific-path.md`.
+  holding-area artefact: `CLAUDE/UPGRADES/UNRELEASED/release-notes/085-hook-wrappers-name-no-machine-specific-path.md`.
 
 ## Success Criteria
 
-- [ ] Two-root regeneration test passes and fails on the old generator.
-- [ ] No embedded absolute path, uid or hash in any generated wrapper.
-- [ ] Relay hot path tests and full QA green in CI.
-- [ ] Release-bound consequences recorded in the pending release notes.
+- [x] Two-root regeneration test passes and fails on the old generator.
+- [x] No embedded absolute path, uid or hash in any generated wrapper.
+- [x] Relay hot path tests and full QA green in CI (run 43822592185).
+- [x] Release-bound consequences recorded in the pending release notes (085).
 
 ## Delivery & Milestones
 
-- Filed from a peer report; delivery commits are recorded here when merged.
+- Merged to main as `8ea7c03c6` (CI run 43822592185 green on tip `aee151bc2`).
+- CI first caught an older `init.sh` defect on the 104-character PID-path
+  boundary; fixed in the same merge, test-first.

@@ -8,8 +8,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00609: tracked hook wrappers machine independent](00609-tracked-hook-wrappers-machine-independent/PLAN.md) - Not Started (peer report: the generated relay block in the tracked `.claude/hooks/*` wrappers embeds the checkout path, so regenerating on another machine dirties a project that tracks them; resolve at run time, test-first with a two-root regeneration fixture)
-
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
 - [00603: supervisor idle compact at 30 percent](00603-supervisor-idle-compact-at-30-percent/PLAN.md) - In Progress (built, dry-run first: verify Claude Code's idleCompaction, and add a supervisor compaction at true idle once context reaches 30%)
@@ -194,6 +192,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00609: tracked hook wrappers machine independent](Completed/00609-tracked-hook-wrappers-machine-independent/PLAN.md) - Complete at merge `8ea7c03c6` (CI run 43822592185 green) + the archiving commit (generated wrappers resolve the checkout root at run time and carry no machine-specific path; the daemon publishes an overflowing socket location in a file the wrapper trusts only for its own checkout; an older `init.sh` PID-path boundary defect fixed in the same merge; release note 085)
+
 - [00610: secret guard trailing slash glob](Completed/00610-secret-guard-trailing-slash-glob/PLAN.md) - Complete at merge `31a2cce4f` (main CI 43816232915 green) + the archiving commit (GitHub #204: a glob ending in `/` is judged as the directories it expands to, so `ls -d */` is allowed and `grep -r x */` still denied; release note 084; follow-ups in PLAN.md)
 
 - [00608: provision sh provisions the relay binary](Completed/00608-provision-sh-provisions-the-relay-binary/PLAN.md) - Complete at merge `71bc70cfd` (main CI run 43780371862 green) + the archiving commit (a foreground `provision.sh` provisions the relay binary through `relay_deploy --check`, a background run reports it; review fixes `a3707d629`; release note 078; follow-ups: repair at daemon startup, log the silent branch, repair state in `status`)
@@ -306,9 +306,9 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - **Total Plans Created**: 610 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 513 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 514 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 74 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 73 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
