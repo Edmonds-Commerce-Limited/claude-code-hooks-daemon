@@ -29,3 +29,7 @@ The symlinked-project test file is unchanged (relay on, no binary): 14 passed th
 ## Other temp-project daemon test families
 
 Each writes its own config (no shared helper): test_a_retried_hook_never_restarts_a_slow_start, test_config_integration, test_init_sh_daemon_down_read_only, test_init_sh_daemon_down_stop_bound, test_init_sh_pretooluse_fail_closed, test_relay_provision_sh, test_upgrade_sh_effective_handler_report, test_upgrade_sh_tmp_self_contained. The product fix covers all; none was changed.
+
+## QA
+
+ruff, black and mypy clean on every touched file; targeted pytest (owned-repair, relay_repair, controller, server, deferred-startup: 90 tests) and the symlinked-project integration file (14, x3) pass. `llm_qa.py changed` hit its 580 s limit in this worktree without output, so it was not completed here.
