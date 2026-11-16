@@ -266,6 +266,27 @@ class TestStartRelayRepair:
         assert notice.failure is not None
         assert spawner.calls == []
 
+    def test_an_uncreatable_state_dir_is_logged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        untracked = tmp_path / "untracked"
+        untracked.write_text("a file where the directory should be")
+
+        with caplog.at_level("ERROR", logger=relay_repair.logger.name):
+            start_relay_repair(
+                tmp_path,
+                tmp_path / "hooks-relay",
+                _DEFECT,
+                untracked_dir=untracked,
+                version=_VERSION,
+                spawn_fn=_Spawner(),
+            )
+
+        assert any(
+            "relay repair" in r.getMessage() and "cannot be created" in r.getMessage()
+            for r in caplog.records
+        )
+
 
 class _Repair:
     """Injected provisioning steps that record what ran."""

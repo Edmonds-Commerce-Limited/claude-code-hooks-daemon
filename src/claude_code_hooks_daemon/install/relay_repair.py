@@ -210,7 +210,9 @@ def start_relay_repair(
     except FileExistsError:
         return notice(record=read_state_file(state, log))
     except OSError as exc:
-        return notice(failure=f"the repair state file {state} cannot be created ({exc})")
+        failure = f"the repair state file {state} cannot be created ({exc})"
+        logger.error("relay repair of %s not started: %s", binary, failure)
+        return notice(failure=failure)
     detail = f"repairing {binary} ({defect}), starting"
     claim = _state_text(SyncStatus.RUNNING, detail=detail)
     with os.fdopen(fd, "w") as handle:
