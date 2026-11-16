@@ -161,3 +161,38 @@ class TestUnit2BareNameAsPatternOrFile:
         self, project: Path, template: str
     ) -> None:
         assert _verdict(project, template.format(A=_ABSENT)) is Decision.ALLOW
+
+
+class TestUnit3RipgrepConfigPath:
+    """RIPGREP_CONFIG_PATH names a file that may hold ``--regexp=...``: no rg operand is the pattern."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "RIPGREP_CONFIG_PATH=cfg rg deep sub -g '*'",
+            "export RIPGREP_CONFIG_PATH=cfg; rg deep sub -g '*'",
+            "export RIPGREP_CONFIG_PATH=cfg && rg deep sub",
+            "RIPGREP_CONFIG_PATH=cfg rg deep sub",
+            "env RIPGREP_CONFIG_PATH=cfg rg deep sub",
+            f"env RIPGREP_CONFIG_PATH=cfg rg zz {_ABSENT}",
+            f"RIPGREP_CONFIG_PATH=cfg rg {_ABSENT}",
+            "declare -x RIPGREP_CONFIG_PATH=cfg; rg deep sub",
+            "RIPGREP_CONFIG_PATH=cfg; rg deep sub",
+        ],
+    )
+    def test_first_operand_is_judged_as_a_path(self, project: Path, command: str) -> None:
+        assert _verdict(project, command) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rg zz sub",
+            "rg deep sub -g '*'",
+            "RIPGREP_CONFIG_PATH=cfg rg zz sub",
+            "RIPGREP_CONFIG_PATH=cfg grep -r zz sub",
+            "RIPGREP_CONFIG_PATH=cfg rg -n zz sub",
+            f"rg {_ABSENT} sub",
+        ],
+    )
+    def test_twin_over_clean_paths_stays_allowed(self, project: Path, command: str) -> None:
+        assert _verdict(project, command) is Decision.ALLOW
