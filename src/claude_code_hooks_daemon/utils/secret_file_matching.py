@@ -2928,7 +2928,7 @@ def _token_mention(
     project_root: str | None,
     *,
     context: MentionContext = "bash",
-    realpath_cache: dict[str, str | None] | None = None,
+    realpath_cache: dict[str, tuple[str, ...]] | None = None,
     expands_globs: Callable[[], bool] = lambda: True,
     effective_cwds: tuple[str, ...] = (),
     is_quoted_literal: Callable[[], bool] = lambda: False,
@@ -3113,13 +3113,15 @@ def _token_mention(
     # syscall per token for no security benefit).
     if not _is_glob_shaped(token):
         if realpath_cache is not None and token in realpath_cache:
-            real = realpath_cache[token]
+            reals = realpath_cache[token]
         else:
-            real = _realpath_if_resolvable(token)
+            reals = _link_targets(token, effective_cwds)
             if realpath_cache is not None:
-                realpath_cache[token] = real
-        if real is not None:
-            return first_matching_glob(real, patterns, project_root=project_root)
+                realpath_cache[token] = reals
+        for real in reals:
+            matched = first_matching_glob(real, patterns, project_root=project_root)
+            if matched is not None:
+                return matched
     return None
 
 
@@ -3184,7 +3186,7 @@ def find_protected_mention_strict(
         return None
     project_root = resolve_project_root()
     unquoted = mask_quoted(command, keep_double=False)
-    bases = effective_cwds(command, cwd) if index is not None else ()
+    bases = effective_cwds(command, cwd)
     default_globs = _default_globs_for(command)
     for token, start in _tokenise_with_offsets(command):
         globbed = any(char in _GLOB_CHARACTERS for char in unquoted[start : start + len(token)])
@@ -3196,8 +3198,7 @@ def find_protected_mention_strict(
                 match = index.glob_matches(form, bases, default_expansion=default_globs())
                 if match is not None:
                     return match
-        real = _realpath_if_resolvable(token)
-        if real is not None:
+        for real in _link_targets(token, bases):
             matched = first_matching_glob(real, patterns, project_root=project_root)
             if matched is not None:
                 return matched
@@ -3283,17 +3284,39 @@ def _anchored_spellings(form: str, cwds: tuple[str, ...]) -> list[str]:
 
 
 def _realpath_if_resolvable(token: str) -> str | None:
-    """Realpath of ``token`` when it names an existing symlink, else None."""
-    try:
-        is_symlink = Path(token).is_symlink()
-    except OSError:
-        # A token that cannot be stat-ed (over-long path from prose text) is
-        # not a symlink to resolve; matching proceeds on the raw token, so
-        # nothing is hidden. Registered in error_hiding_exclusions.json.
-        is_symlink = False
-    if is_symlink:
-        return os.path.realpath(token)
-    return None
+    """Realpath of ``token`` when a link on its path leads elsewhere, else None.
+
+    Any component counts, not only the last: ``dlink/innocuous`` reaches what
+    ``dlink`` points at. A relative ``token`` is placed from the PROCESS cwd;
+    a caller holding the hook's cwd uses :func:`_link_targets` instead.
+    ``os.path.lexists`` answers False for a word that is no path (NUL-bearing
+    or over-long prose), so such a word costs one call and nothing raises;
+    a dangling final link still exists and is resolved.
+    """
+    if not token or not os.path.lexists(token):
+        return None
+    placed = Path.cwd() / token
+    # `..` after a link climbs from where the link LEADS, so the physical
+    # resolution starts from the path as spelled, never its normpath.
+    real = os.path.realpath(placed)
+    return real if real != os.path.normpath(placed) else None
+
+
+def _link_targets(token: str, cwds: tuple[str, ...]) -> tuple[str, ...]:
+    """Where ``token`` really leads, read from each of ``cwds`` and from the process cwd.
+
+    Plan 00614: the daemon runs from ``/``, so a relative word resolved only
+    against the process cwd judged ``cat link`` from the wrong directory. The
+    hook's cwds (:func:`effective_cwds`) are tried first; the process cwd is
+    kept, so nothing judged before is judged less.
+    """
+    if not token or "\0" in token:
+        return ()
+    candidates = [token]
+    if not token.startswith(("/", "~")):
+        candidates = [str(Path(cwd) / token) for cwd in cwds if cwd] + candidates
+    found = (_realpath_if_resolvable(candidate) for candidate in dict.fromkeys(candidates))
+    return tuple(dict.fromkeys(real for real in found if real is not None))
 
 
 _CD_EXECUTABLE: Final[str] = "cd"
@@ -3962,6 +3985,7 @@ def is_grep_pattern_only_mention(
     patterns: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS,
     *,
     deadline: float | None = None,
+    cwd: str | None = None,
 ) -> bool:
     """True when EVERY protected mention in ``command`` sits only in a
     grep-family command's PATTERN argument, never in a FILE-TARGET argument
@@ -4006,7 +4030,8 @@ def is_grep_pattern_only_mention(
     id_rsa`` (the second, file-target occurrence) from slipping through.
 
     ``deadline`` (Plan 00466 review 8 L1) is forwarded to
-    :func:`iter_protected_mentions`.
+    :func:`iter_protected_mentions`. ``cwd`` is the hook's: a relative
+    file-target link is resolved from it (Plan 00614), not from the daemon's.
     """
     normalised = _newlines_as_statement_separators(command)
     if normalised is None:
@@ -4017,9 +4042,10 @@ def is_grep_pattern_only_mention(
     if statements is None:
         return False
 
-    mentions = list(iter_protected_mentions(normalised, patterns, deadline=deadline))
+    mentions = list(iter_protected_mentions(normalised, patterns, deadline=deadline, cwd=cwd))
     if not mentions:
         return False
+    cwds = effective_cwds(normalised, cwd)
 
     project_root = resolve_project_root()
     stem_pairs = _pattern_literal_stems(patterns)
@@ -4028,7 +4054,7 @@ def is_grep_pattern_only_mention(
     # `mention_cache`, so a file-target word repeated across several
     # arguments would otherwise pay for a fresh `os.path.realpath` syscall
     # every occurrence. LOCAL to this one call, never module-level (N23).
-    realpath_cache: dict[str, str | None] = {}
+    realpath_cache: dict[str, tuple[str, ...]] = {}
     for text, words in statements:
         if words[0] in _GREP_FAMILY_COMMANDS:
             targets = _grep_file_target_words(words)
@@ -4036,13 +4062,21 @@ def is_grep_pattern_only_mention(
                 return False
             if any(
                 _token_mention(
-                    target, patterns, stem_pairs, project_root, realpath_cache=realpath_cache
+                    target,
+                    patterns,
+                    stem_pairs,
+                    project_root,
+                    realpath_cache=realpath_cache,
+                    effective_cwds=cwds,
                 )
                 is not None
                 for target in targets
             ):
                 return False
-        elif next(iter_protected_mentions(text, patterns, deadline=deadline), None) is not None:
+        elif (
+            next(iter_protected_mentions(text, patterns, deadline=deadline, cwds=cwds), None)
+            is not None
+        ):
             return False
     return True
 

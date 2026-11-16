@@ -1493,7 +1493,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # -- only a FILE-TARGET argument is (see the function's own
             # docstring for the position-based distinction and every shape
             # this must NOT unlock).
-            if sfm.is_grep_pattern_only_mention(command, patterns, deadline=deadline):
+            if sfm.is_grep_pattern_only_mention(command, patterns, deadline=deadline, cwd=cwd):
                 return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
             return (mention[0], mention[1], "bash")
 
@@ -1501,7 +1501,12 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         if path_field is None:
             return None
         path = str(tool_input.get(path_field, ""))
+        # A relative path is judged from the hook's cwd too: the daemon's own
+        # cwd is `/`, so a link resolved only from there leads nowhere (Plan 00614).
+        placed = sfm.resolve_against_cwd(path, cwd) if path else None
         protecting = sfm.protecting_pattern(path, patterns)
+        if protecting is None and placed is not None and placed != path:
+            protecting = sfm.protecting_pattern(placed, patterns)
         if protecting is not None:
             # Ciphertext is not the secret (Plan 00459). Checked on EVERY
             # call, so a file decrypted in place is denied at the next one.
@@ -1513,7 +1518,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # A Grep rooted at an ancestor of a protected file reads its
             # content without naming it. Every indexed file under the root
             # counts (the Grep tool's own ignore handling is not relied on).
-            return self._directory_reach(path, patterns)
+            return self._directory_reach(placed or path, patterns)
 
         if tool_name in (ToolName.WRITE, ToolName.EDIT):
             script_mention = self._script_content_mention(path, tool_input, patterns, cwd)

@@ -49,7 +49,7 @@ project whose worktrees carry seeded links to protected files.
 
 ### Phase 2: Fix
 
-- [ ] ⬜ **Task 2.1**: Join a relative token to the hook `cwd` before the
+- [x] ✅ **Task 2.1**: Join a relative token to the hook `cwd` before the
   `is_symlink` check and `realpath`, and resolve when any path component is a link.
 - [ ] ⬜ **Task 2.2**: Add the realpath of a directory link's target to the
   index bases, or deny by default when it lies outside the indexed project.
