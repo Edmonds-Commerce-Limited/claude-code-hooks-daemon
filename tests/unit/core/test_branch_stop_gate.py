@@ -801,9 +801,7 @@ class TestRefusalSequenceMatrix:
     @pytest.mark.parametrize(
         ("touch", "place", "lock", "queued", "dirty"),
         list(
-            itertools.product(
-                _TOUCHES, _MATRIX_PLACES, (False, True), (False, True), (False, True)
-            )
+            itertools.product(_TOUCHES, _MATRIX_PLACES, (False, True), (False, True), (False, True))
         ),
     )
     def test_no_stop_origin_main_refuses_is_allowed(
