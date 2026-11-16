@@ -23,7 +23,6 @@ and a producer other than ``find`` feeding ``xargs`` names no root.
 """
 
 import fnmatch
-import glob
 import os
 import posixpath
 import re
@@ -545,8 +544,20 @@ def _expand_directory_glob(root: str, cwd: str | None) -> list[str]:
         if cwd is None or not posixpath.isabs(cwd):
             return [root]
         placed = Path(cwd) / placed
-    pattern = str(placed) + "/"
-    return glob.glob(pattern, recursive="**" in pattern)
+    anchor = Path(placed.anchor)
+    # A trailing "/" makes pathlib return directories only. pathlib lets ``*`` match a
+    # dot name, which bash does not, so those are dropped; a ``**`` pattern keeps them.
+    matches = anchor.glob(placed.relative_to(anchor).as_posix() + "/")
+    if "**" in placed.parts:
+        return [str(match) for match in matches]
+    return [
+        str(match)
+        for match in matches
+        if not any(
+            name.startswith(".") and not part.startswith(".")
+            for name, part in zip(match.parts, placed.parts, strict=True)
+        )
+    ]
 
 
 def _reads_of_roots(
