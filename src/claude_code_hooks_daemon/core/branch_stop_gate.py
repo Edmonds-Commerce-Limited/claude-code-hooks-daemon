@@ -119,14 +119,15 @@ def _noisy_context(
 
 
 def _owned_branches(repo: Path, untracked: Path, *, own: frozenset[str]) -> frozenset[str]:
-    """Branches another live agent owns, so the coordinator hands them over.
+    """Branches a live agent owns, by :func:`agent_ownership.ownership_refusal`.
 
-    Never a branch in ``own``: the stopping thread touched it, so it is judged in full
-    whatever owns its worktree (Plan 00618 B-2). Of the rest, a branch is owned on the
-    holds ``worktree-reap`` honours: a ``running`` work-queue record names it (or the
-    worktree it is checked out in, in whatever spelling), or git reports its worktree
-    locked. A worktree merely sitting under the harness's ``.claude/worktrees/``
-    directory says only that an agent once worked there, so it hands nothing over.
+    The coordinator cannot finish these. A branch is owned when a ``running``
+    work-queue record names it (or the worktree it is checked out in, in whatever
+    spelling), or when its linked worktree is locked by git or sits under the harness's
+    ``.claude/worktrees/`` directory, where a plain background sub-agent works with no
+    work-queue record. The harness-directory signal is not honoured for a branch in
+    ``own`` (the stopping thread touched it itself): that branch is handed over only on
+    the holds ``worktree-reap`` honours, a queue record or a git lock (Plan 00618 B-2).
     When the worktrees cannot be listed only the queue's branch names apply; an
     unreadable queue contributes nothing, so every finding stands.
     """
@@ -140,16 +141,20 @@ def _owned_branches(repo: Path, untracked: Path, *, own: frozenset[str]) -> froz
             reason="branch_stop_guard: the worktrees cannot be listed, so only branches a "
             "running work-queue record names are handed over",
         )
-        return holds.branches - own
-    owned = holds.branches | {
+        return holds.branches
+    owned = {
         name
         for name, record in records.items()
         if ownership_refusal(
-            name, record.path, locked=record.locked, holds=holds, harness_directory=False
+            name,
+            record.path,
+            locked=record.locked,
+            holds=holds,
+            harness_directory=name not in own,
         )
         is not None
     }
-    return owned - own
+    return holds.branches | owned
 
 
 def decide_stop(
@@ -186,10 +191,10 @@ def decide_stop(
     )
     state_file = state_path(untracked, session_id, STATE_KIND, agent_id or _MAIN_KEY)
     state = read_state(state_file)
-    # N581: the coordinator cannot finish a branch another live agent owns (a running
-    # queue record, or a git-locked worktree: the holds worktree-reap honours),
-    # so it is handed over, not left behind. Its own branches and a sub-agent's own stop
-    # are still judged in full.
+    # N581: the coordinator cannot finish a branch a live agent owns (a running queue
+    # record, or a locked or harness-directory worktree), so it is handed over, not left
+    # behind. A branch it touched itself needs a queue record or a lock (Plan 00618 B-2).
+    # A sub-agent's own stop is still judged in full.
     handed = (
         _owned_branches(repo, untracked, own=judgement.own) if agent_id is None else frozenset()
     )

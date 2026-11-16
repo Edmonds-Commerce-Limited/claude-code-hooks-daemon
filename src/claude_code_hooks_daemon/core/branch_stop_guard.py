@@ -82,7 +82,7 @@ class StopJudgement:
     tips: dict[str, str]
     incomplete: bool = False
     #: The branches judged in full: those the stopping thread itself touched. Carried
-    #: so the gate never hands one over on a second, possibly different, read.
+    #: so the gate hands one over only on a queue record or a git lock, from this read.
     own: frozenset[str] = frozenset()
 
 
