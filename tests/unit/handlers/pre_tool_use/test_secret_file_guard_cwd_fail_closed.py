@@ -550,6 +550,89 @@ class TestAWideCdInAProjectWithNoLinkOut:
         )
 
 
+#: Brace expansions past the enumeration cap: the full scan gives up on them.
+_OVER_THE_CAP = ["echo {a..z}{a..z}{a..z}", "echo {1..300000}"]
+
+
+class TestAScanThatGivesUpBesideASearchOrGlob:
+    """Review 614c P2: a cap or deadline hit never lets a search or a glob read through.
+
+    The literal fallback judges names only. A recursive search or a glob in the
+    same command reads what only the full scan could judge, so it is denied.
+    """
+
+    _GAVE_UP = "stopped before"
+
+    @pytest.mark.parametrize("prefix", _OVER_THE_CAP)
+    @pytest.mark.parametrize(
+        "read",
+        ["grep -r DUMMY own", "rg DUMMY own", "grep -R DUMMY .", "cat o*/*", "head -n1 own/*"],
+    )
+    def test_a_cap_hit_denies_a_search_or_glob(self, tree: Tree, prefix: str, read: str) -> None:
+        decision, text = _result(tree, f"{prefix}; {read}")
+        assert decision is Decision.DENY, text
+        assert self._GAVE_UP in text
+
+    @pytest.mark.parametrize(
+        "command", ["grep -r DUMMY own", "cat o*/*", "cd clean && grep -r hello ."]
+    )
+    def test_a_deadline_hit_denies_a_search_or_glob(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch, command: str
+    ) -> None:
+        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", -1.0)
+        decision, text = _result(tree, command)
+        assert decision is Decision.DENY, text
+        assert self._GAVE_UP in text
+
+    def test_a_deadline_hit_with_no_cwd_still_denies_a_search(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", -1.0)
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "grep -r DUMMY ."},
+        }
+        handler = SecretFileGuardHandler()
+        assert handler.matches(hook_input)
+        assert handler.handle(hook_input).decision is Decision.DENY
+
+    def test_a_raise_judging_the_search_denies(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.utils import recursive_search
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic search failure")
+
+        monkeypatch.setattr(recursive_search, "search_reads", boom)
+        decision, text = _result(tree, f"{_OVER_THE_CAP[0]}; ls")
+        assert decision is Decision.DENY, text
+
+    @pytest.mark.parametrize("prefix", _OVER_THE_CAP)
+    def test_a_cap_hit_with_no_search_or_glob_stays_an_advisory(
+        self, tree: Tree, prefix: str
+    ) -> None:
+        decision, text = _result(tree, f"{prefix}; ls clean")
+        assert decision is Decision.ALLOW
+        assert "could NOT fully judge" in text
+
+    def test_a_deadline_hit_with_no_search_or_glob_stays_an_advisory(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", -1.0)
+        decision, text = _result(tree, "cat clean/plain.txt")
+        assert decision is Decision.ALLOW
+        assert "could NOT fully judge" in text
+
+    def test_a_literal_protected_path_still_names_its_pattern(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", -1.0)
+        decision, text = _result(tree, f"grep -r x own; cat own/{_PROTECTED}")
+        assert decision is Decision.DENY
+        assert self._GAVE_UP not in text
+
+
 class TestWrappedChdirCommand:
     """A wrapper before a command with a chdir option does not hide the option."""
 
