@@ -81,6 +81,9 @@ class StopJudgement:
     findings: tuple[StopFinding, ...]
     tips: dict[str, str]
     incomplete: bool = False
+    #: The branches judged in full: those the stopping thread itself touched. Carried
+    #: so the gate never hands one over on a second, possibly different, read.
+    own: frozenset[str] = frozenset()
 
 
 class _GitResult(Protocol):
@@ -271,7 +274,7 @@ def judge_stop(
         )
         findings.extend(found)
         incomplete = incomplete or not finished
-    return StopJudgement(tuple(findings), tips, incomplete)
+    return StopJudgement(tuple(findings), tips, incomplete, own=frozenset(own))
 
 
 #: Reflog subjects that move a branch without adding work of its own: its

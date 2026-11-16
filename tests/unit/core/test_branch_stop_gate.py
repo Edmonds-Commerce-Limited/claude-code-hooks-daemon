@@ -323,7 +323,7 @@ class TestHandedOverToTheWorkQueue:
 def _live_in(monkeypatch: pytest.MonkeyPatch, *worktrees: Path) -> None:
     """Make the process scan report one live process inside each of ``worktrees``."""
     cwds = {1000 + index: path.resolve() for index, path in enumerate(worktrees)}
-    monkeypatch.setattr(branch_stop_gate, "default_process_cwds", lambda: cwds, raising=False)
+    monkeypatch.setattr(branch_stop_gate, "default_process_cwds", lambda: cwds)
 
 
 @pytest.fixture
@@ -520,8 +520,7 @@ class TestHandOverOnlyNarrows:
         old = holds.branches | {
             branch
             for branch, record in records.items()
-            if ownership_refusal(branch, record.path, locked=record.locked, holds=holds)
-            is not None
+            if ownership_refusal(branch, record.path, locked=record.locked, holds=holds) is not None
         }
         own = frozenset({name}) if touch == "" else frozenset()
         new = branch_stop_gate._owned_branches(repo, untracked, own=own)
