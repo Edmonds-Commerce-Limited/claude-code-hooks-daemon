@@ -8,6 +8,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00611: secret guard directories only globs](00611-secret-guard-directories-only-globs/PLAN.md) - In Progress (issue #204: a trailing-slash glob such as `ls -d */` is directories-only and names no protected file; fix and tests done, release note 085, awaiting CI and merge)
+
 - [00609: tracked hook wrappers machine independent](00609-tracked-hook-wrappers-machine-independent/PLAN.md) - Not Started (peer report: the generated relay block in the tracked `.claude/hooks/*` wrappers embeds the checkout path, so regenerating on another machine dirties a project that tracks them; resolve at run time, test-first with a two-root regeneration fixture)
 
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
