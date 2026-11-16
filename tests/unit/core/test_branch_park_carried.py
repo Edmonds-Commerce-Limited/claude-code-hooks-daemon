@@ -193,11 +193,11 @@ class TestAcceptance:
             branch_sweep.render_report(inventory, _config(), cap=10, remote_proven=proven)
         )
         assert "git push origin --delete carried-0" in text
-        assert "park-carried" in text
+        assert "Park-carried" in text
 
     def test_clean_remote_deletes_the_carried_refs_only(self, cloned: Path) -> None:
         report = branch_cleanup.clean_sweep(cloned, _config(), dry_run=False, remote=True)
-        assert sorted(report.deleted_remote) == [f"carried-{i}" for i in range(6)]
+        assert sorted(report.deleted_remote) == [f"origin/carried-{i}" for i in range(6)]
         remaining = _git(cloned, "ls-remote", "--heads", "origin")
         assert "real-park-0" in remaining and "carried-0" not in remaining
 
@@ -239,7 +239,13 @@ class TestOneClassifier:
 
     @staticmethod
     def _fixtures() -> dict[str, Any]:
+        def live_branch(repo: Path) -> None:
+            _git(repo, "checkout", "-q", "-b", "live-1", "main")
+            _commit(repo, "live.txt", "live\n")
+            _git(repo, "checkout", "-q", "main")
+
         def carried_only(repo: Path) -> None:
+            live_branch(repo)
             _parked_over_merged(repo, "c1")
             _parked_over_merged(repo, "c2", keep_local=True)
 
@@ -260,6 +266,7 @@ class TestOneClassifier:
             _git(repo, "push", "-q", "origin", "done-1")
 
         def repark(repo: Path) -> None:
+            live_branch(repo)
             _parked_over_merged(repo, "c1", keep_local=True)
             _git(repo, "checkout", "-q", "c1")
             _park(repo, "parked again")

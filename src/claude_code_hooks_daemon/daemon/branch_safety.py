@@ -64,6 +64,9 @@ TIER_MERGED = "merged"
 TIER_PATCH_EQUIVALENT = "patch-equivalent"
 TIER_CONTENT_PRESERVED = "content-preserved"
 TIER_UNPROVEN = "unproven"
+#: Only park markers (empty ``Parked-*`` commits) are ahead of the default: the work is in
+#: the default and the remote ref holds nothing else. Decided by ``branch_inventory.is_park_residue``.
+TIER_PARK_CARRIED = "park-carried"
 #: The remote holds the tip, or a descendant of it, under a ref this clone does not
 #: fetch (an archive namespace). Proved by ONE ``ls-remote`` the explicit command
 #: makes; never reached from a hook path (issue #166).

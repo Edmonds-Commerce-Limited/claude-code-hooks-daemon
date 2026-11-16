@@ -37,7 +37,9 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     DormancyStage,
     OwnerRule,
     Pool,
+    is_park_residue,
     is_work_branch,
+    pool_for_ref,
     merge_proof_key,
     read_merge_proofs,
     worktrees_by_branch,
@@ -194,7 +196,8 @@ class _Work:
     #: A remote ref is among the refs that join this work.
     on_remote: bool = False
     #: OPEN if any ref is open work, else PARKED if any is parked, else MERGED.
-    pool: Pool = Pool.OPEN
+    #: None: a park marker over work the default holds, in no pool.
+    pool: Pool | None = Pool.OPEN
     #: A ref still at its labelled tip carries the snapshot's stale mark.
     stale: bool = False
     #: The display label of the ref named ``name`` (see ``_display_label``).
@@ -466,6 +469,37 @@ def _merged_refnames(
     return merged | _proven_refnames(repo, config, refs, targets, merged)
 
 
+def _carried_refnames(
+    repo: Path,
+    config: BranchesConfig,
+    work_refs: list[_Ref],
+    refs: list[_Ref],
+    default: str | None,
+    merged: set[str],
+) -> set[str]:
+    """Park-marked refs whose only unique commits are park markers over the default's work.
+
+    The inventory's own rule (:func:`is_park_residue`), run only for a ref that carries
+    a park trailer and is not already an ancestor of the default, so a clone with no
+    park commit pays no git call here.
+    """
+    if default is None:
+        return set()
+    listed = {ref.refname for ref in refs}
+    targets = [
+        ref
+        for ref in (f"{_REMOTES}{config.remote}/{default}", f"{_HEADS}{default}")
+        if ref in listed
+    ]
+    return {
+        ref.refname
+        for ref in work_refs
+        if ref.parked
+        and ref.refname not in merged
+        and any(is_park_residue(repo, ref.tip, target) for target in targets)
+    }
+
+
 def _proven_refnames(
     repo: Path, config: BranchesConfig, refs: list[_Ref], targets: list[str], merged: set[str]
 ) -> set[str]:
@@ -518,25 +552,33 @@ def _display_label(ref: _Ref, labels: Labels) -> Mapping[str, str | None]:
     return {} if recorded and recorded != ref.tip else label
 
 
-def _ref_pool(ref: _Ref, merged: set[str], labels: Labels) -> Pool:
-    """One ref's pool: in the default (or labelled done) is MERGED, a park trailer PARKED."""
-    if ref.refname in merged or _tip_label(ref, labels).get("group") in _CLEANABLE:
-        return Pool.MERGED
-    if ref.parked:
-        return Pool.PARKED
-    return Pool.OPEN
+def _ref_pool(ref: _Ref, merged: set[str], carried: set[str], labels: Labels) -> Pool | None:
+    """One ref's pool, by the rule the sweep shares (:func:`pool_for_ref`); None when carried."""
+    return pool_for_ref(
+        merged=ref.refname in merged or _tip_label(ref, labels).get("group") in _CLEANABLE,
+        park_carried=ref.refname in carried,
+        parked=ref.parked,
+    )
 
 
-def _group_pool(pools: list[Pool]) -> Pool:
+def _group_pool(pools: list[Pool | None]) -> Pool | None:
+    """A work group's pool; None (no pool) when it is done and carried only by a park marker.
+
+    The inventory's weakest-proof rule: open beats parked, and a done group with any
+    park-carried copy is park-carried as a whole.
+    """
     if Pool.OPEN in pools:
         return Pool.OPEN
     if Pool.PARKED in pools:
         return Pool.PARKED
-    return Pool.MERGED
+    return None if None in pools else Pool.MERGED
 
 
 def _work_groups(
-    refs: list[_Ref], merged: set[str] | None = None, labels: Labels | None = None
+    refs: list[_Ref],
+    merged: set[str] | None = None,
+    labels: Labels | None = None,
+    carried: set[str] | None = None,
 ) -> list[_Work]:
     """Union-find over names and tips: one entry per connected piece of work."""
     parent: dict[str, str] = {}
@@ -563,7 +605,12 @@ def _work_groups(
                 names=frozenset(ref.name for ref in group),
                 committed=max(ref.committed for ref in group),
                 on_remote=any(not ref.local for ref in group),
-                pool=_group_pool([_ref_pool(ref, merged or set(), labels or {}) for ref in group]),
+                pool=_group_pool(
+                    [
+                        _ref_pool(ref, merged or set(), carried or set(), labels or {})
+                        for ref in group
+                    ]
+                ),
                 stale=any(_tip_label(ref, labels or {}).get("stale") for ref in group),
                 label=next(
                     (_display_label(ref, labels or {}) for ref in group if ref.name == name),
@@ -803,6 +850,42 @@ def _duplicates(new_name: str, groups: list[_Work], remote: str) -> list[_Work]:
 # --- the verdict ----------------------------------------------------------------------
 
 
+def _pool_groups(
+    repo: Path, config: BranchesConfig, refs: list[_Ref], default: str | None, labels: Labels
+) -> list[_Work]:
+    """Every connected piece of work with its pool: the one builder verdict and report use."""
+    work_refs = _with_standing_parks(
+        repo,
+        _owned_refs(repo, [ref for ref in refs if is_work_branch(ref.name, config, default)]),
+    )
+    merged = _merged_refnames(repo, config, refs, default)
+    carried = _carried_refnames(repo, config, work_refs, refs, default, merged)
+    return _work_groups(work_refs, merged, labels, carried)
+
+
+def work_pools(
+    repo: Path, config: BranchesConfig, *, labels: Labels | None = None
+) -> dict[Pool, list[_Work]]:
+    """The work groups of each pool as the creation guard counts them.
+
+    The sweep's pools are :func:`branch_inventory.pool_of` over the inventory; both
+    reach their answer through :func:`pool_for_ref`, and a test asserts the two
+    memberships are equal over varied repositories.
+
+    Raises:
+        RuntimeError: git could not list the refs.
+    """
+    read = _read_refs(repo, config)
+    if isinstance(read, str):
+        raise RuntimeError(f"git for-each-ref failed: {read}")
+    refs, default = read
+    found: dict[Pool, list[_Work]] = {pool: [] for pool in Pool}
+    for work in _pool_groups(repo, config, refs, default, labels or {}):
+        if work.pool is not None:
+            found[work.pool].append(work)
+    return found
+
+
 def creation_report(
     repo: Path,
     config: BranchesConfig,
@@ -844,12 +927,8 @@ def creation_report(
         # cannot raise the count the cap and dormancy judge.
         if not is_work_branch(new_name, config, default):
             return CreationReport()
-    work_refs = _with_standing_parks(
-        repo,
-        _owned_refs(repo, [ref for ref in refs if is_work_branch(ref.name, config, default)]),
-    )
     labels = labels or {}
-    all_groups = _work_groups(work_refs, _merged_refnames(repo, config, refs, default), labels)
+    all_groups = _pool_groups(repo, config, refs, default, labels)
     groups = [work for work in all_groups if work.pool == Pool.OPEN]
     moment = time.time() if now is None else now
     over_cap = config.wip.mode != "off" and len(groups) >= config.effective_wip_cap()
