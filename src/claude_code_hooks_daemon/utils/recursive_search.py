@@ -405,7 +405,12 @@ def _directories_read(read: Read, index: ProtectedFileIndex) -> list[Read]:
 # Nested wrappers (`bash -c "bash -c ..."`) end here rather than recursing for ever.
 _MAX_WRAPPER_DEPTH: Final[int] = 4
 _DIRECTORY_CHANGERS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
-_ENV: Final[str] = "env"
+#: Wrappers with an option that runs the wrapped command elsewhere.
+_CHDIR_WRAPPERS: Final[frozenset[str]] = frozenset({"env", "sudo"})
+_BUILTIN: Final[str] = "builtin"
+#: A redirection with its file glued on (``>/dev/null``, ``2>&1``), and one without (``2>``).
+_REDIRECTION_WORD: Final[re.Pattern[str]] = re.compile(r"\d*(?:&>>?|>>?|<>?|>&|<&)\S+")
+_BARE_REDIRECTION: Final[re.Pattern[str]] = re.compile(r"\d*(?:&>>?|>>?|<>?|>&|<&)")
 
 
 #: A segment head that opens a subshell: a ``cd`` behind it ADDS a directory.
@@ -460,7 +465,7 @@ def _directory_change(
     words: list[str], start: int, current: tuple[str, ...], cwds: "_SearchCwds"
 ) -> tuple[str, ...]:
     """Where a ``cd``/``pushd`` at ``words[start - 1]`` leaves the search, from each of ``current``."""
-    operands = [word for word in words[start:] if not word.startswith("-") or word == "-"]
+    operands = _operands(words[start:])
     if not operands or operands[0] == "-":
         return cwds.indeterminate()
     return cwds.moved(operands[0], current)
@@ -556,9 +561,10 @@ def _segment_reads(
     here = current
     # `env -C dir cmd` runs cmd in dir; the wrapper is peeled from `words`. The
     # segment already split cleanly into `words`, so this split cannot raise.
-    raw_words = linear_shlex.split(segment)
-    if posixpath.basename(raw_words[0]) == _ENV:
-        for target in chdir_wrapper_targets(_ENV, raw_words, 1):
+    raw_words = _past_command_prefix(linear_shlex.split(segment))
+    wrapper = posixpath.basename(raw_words[0]) if raw_words else ""
+    if wrapper in _CHDIR_WRAPPERS:
+        for target in chdir_wrapper_targets(wrapper, raw_words, 1):
             here = tracker.moved(target, here)
     head = posixpath.basename(words[0])
     if head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
@@ -595,10 +601,40 @@ def _command_words(segment: str) -> list[str]:
         words = linear_shlex.split(segment)
     except ValueError:
         return []
-    while words and _ASSIGNMENT.match(words[0]):
-        words = words[1:]
+    words = _past_command_prefix(words)
     _names, start = peel_command_wrappers(words)
-    return words[start:]
+    return _past_command_prefix(words[start:])
+
+
+def _past_command_prefix(words: list[str]) -> list[str]:
+    """``words`` from the command name: past assignments, redirections and ``builtin``.
+
+    Review 614b R3: ``>/dev/null cd x`` and ``builtin cd x`` run ``cd``.
+    """
+    while words:
+        head = words[0]
+        if _ASSIGNMENT.match(head) or head == _BUILTIN or _REDIRECTION_WORD.fullmatch(head):
+            words = words[1:]
+        elif _BARE_REDIRECTION.fullmatch(words[0]):
+            words = words[2:]
+        else:
+            break
+    return words
+
+
+def _operands(words: list[str]) -> list[str]:
+    """The words of ``words`` that are operands: not options, redirections or their files."""
+    operands: list[str] = []
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if _BARE_REDIRECTION.fullmatch(word):
+            index += 2
+            continue
+        if not _REDIRECTION_WORD.fullmatch(word) and (not word.startswith("-") or word == "-"):
+            operands.append(word)
+        index += 1
+    return operands
 
 
 def _is_search(words: list[str]) -> bool:

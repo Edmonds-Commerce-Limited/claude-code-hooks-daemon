@@ -3220,10 +3220,16 @@ _COMMAND_SEGMENT_SEPARATORS: Final[re.Pattern[str]] = re.compile(r"&&|\|\||[;|&\
 _SHLEX_REMOVED_CHARS: Final[dict[int, int | None]] = str.maketrans("", "", "'\"\\")
 
 
-#: Wrappers whose option moves the directory the rest of the command runs in.
-_ENV_EXECUTABLE: Final[str] = "env"
-_ENV_CHDIR_SHORT: Final[str] = "-C"
-_ENV_CHDIR_LONG: Final[str] = "--chdir"
+#: Commands with an option that moves where they, or the command they run, work:
+#: ``name -> (short option, long option)``. Review 614b R3 added tar and sudo.
+_CHDIR_OPTIONS: Final[dict[str, tuple[str, str | None]]] = {
+    "env": ("-C", "--chdir"),
+    "git": ("-C", None),
+    "tar": ("-C", "--directory"),
+    "sudo": ("-D", "--chdir"),
+}
+#: Words bash reads past to a builtin such as ``cd``; ``command`` may carry options.
+_BUILTIN_PREFIXES: Final[frozenset[str]] = frozenset({"builtin", "command"})
 #: Words after which bash reads the next word as a command name.
 _COMMAND_START_WORDS: Final[frozenset[str]] = frozenset(
     {"(", "{", "}", "!", "if", "then", "else", "elif", "do", "while", "until", "time"}
@@ -3238,7 +3244,7 @@ LINK_DIRECTORY_CAP: Final[int] = 16
 
 
 def _may_change_directory(segment: str) -> bool:
-    """Could ``segment`` change directory: ``cd``/``pushd``, ``env -C``/``--chdir``, ``git -C``?
+    """Could ``segment`` change directory: ``cd``/``pushd``, or a :data:`_CHDIR_OPTIONS` option?
 
     The cheap, sound gate in front of :func:`_shell_words`: a False here is
     a segment the walker would also have found no directory change in.
@@ -3246,11 +3252,11 @@ def _may_change_directory(segment: str) -> bool:
     unquoted = segment.translate(_SHLEX_REMOVED_CHARS)
     if any(name in unquoted for name in _DIRECTORY_CHANGE_COMMANDS):
         return True
-    if _ENV_EXECUTABLE in unquoted and (
-        _ENV_CHDIR_SHORT in unquoted or _ENV_CHDIR_LONG.removeprefix("--") in unquoted
-    ):
-        return True
-    return _GIT_EXECUTABLE in unquoted and _GIT_CHDIR_FLAG in unquoted
+    return any(
+        name in unquoted
+        and (short in unquoted or (long is not None and long.removeprefix("--") in unquoted))
+        for name, (short, long) in _CHDIR_OPTIONS.items()
+    )
 
 
 class CwdSet(tuple[str, ...]):
@@ -3379,32 +3385,59 @@ class _DirectoryWalk:
         return CwdSet(self.directories, list(self.existing))
 
 
-def _change_target(words: list[str], start: int) -> str | None:
-    """The first operand of a ``cd``/``pushd`` whose name is ``words[start - 1]``."""
-    for word in words[start:]:
+def _is_redirection(words: list[str], index: int) -> bool:
+    """Is ``words[index]`` a redirection operator, or the file descriptor glued before one?"""
+    word = words[index]
+    if word in _REDIRECTION_OPERATORS:
+        return True
+    return word.isdigit() and index + 1 < len(words) and words[index + 1] in _REDIRECTION_OPERATORS
+
+
+def _change_targets(words: list[str], start: int) -> list[str | None]:
+    """The operand of a ``cd``/``pushd`` whose name is ``words[start - 1]`` ([None]: none).
+
+    A redirection and its file are passed over wherever they sit (review 614b R3).
+    The split words cannot tell ``cd 2>f x`` from ``cd 2 >f x``, so a number before
+    a redirection is a candidate as well as the operand after it.
+    """
+    candidates: list[str | None] = []
+    index = start
+    while index < len(words):
+        word = words[index]
+        if word.isdigit() and _is_redirection(words, index):
+            candidates.append(word)
+            index += 1
+            continue
+        if word in _REDIRECTION_OPERATORS:
+            index += 2
+            continue
         if word and all(char in _SHELL_OPERATOR_CHARS for char in word):
-            return None
+            break
         if word == "-" or not word.startswith("-"):
-            return word
-    return None
+            candidates.append(word)
+            return candidates
+        index += 1
+    return candidates or [None]
 
 
 def chdir_wrapper_targets(name: str, words: list[str], start: int) -> list[str]:
-    """The directories an ``env -C`` / ``git -C`` at ``words[start - 1]`` moves to."""
+    """The directories a :data:`_CHDIR_OPTIONS` command at ``words[start - 1]`` moves to."""
     # Scanned to the next operator, not to the first operand: an option before
     # `-C` takes a value (`env -u HOME -C x`, `git -c k=v -C x`). A later `-C`
     # of the wrapped command is read as a move too, which only adds a directory.
+    short, long = _CHDIR_OPTIONS[name]
+    glued = name != _GIT_EXECUTABLE
     targets: list[str] = []
     index = start
     while index < len(words) and not all(char in _SHELL_OPERATOR_CHARS for char in words[index]):
         word = words[index]
-        if name == _ENV_EXECUTABLE and word.startswith(_ENV_CHDIR_LONG + "="):
+        if long is not None and word.startswith(long + "="):
             targets.append(word.partition("=")[2])
-        elif word in (_ENV_CHDIR_SHORT, _ENV_CHDIR_LONG) and index + 1 < len(words):
+        elif word in (short, long) and index + 1 < len(words):
             targets.append(words[index + 1])
             index += 1
-        elif name == _ENV_EXECUTABLE and word.startswith(_ENV_CHDIR_SHORT) and word != "-C":
-            targets.append(word[len(_ENV_CHDIR_SHORT) :])
+        elif glued and word.startswith(short) and word != short:
+            targets.append(word[len(short) :])
         index += 1
     return targets
 
@@ -3425,12 +3458,26 @@ def _walk_directory_changes(text: str, walk: _DirectoryWalk, depth: int) -> None
 
 def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bool) -> None:
     at_start = True
+    prefixed = False
+    redirect_file = False
     for index, word in enumerate(words):
         if depth < _MAX_DIRECTORY_CHANGE_DEPTH and " " in word and _may_change_directory(word):
             _walk_directory_changes(word, walk, depth + 1)
-        if word and all(char in _SHELL_OPERATOR_CHARS for char in word):
-            at_start = True
+        # A redirection, its descriptor and its file leave the command position
+        # as it was: `>/dev/null cd x` still runs cd (review 614b R3).
+        if redirect_file:
+            redirect_file = False
             continue
+        if _is_redirection(words, index):
+            redirect_file = word in _REDIRECTION_OPERATORS
+            continue
+        if word and all(char in _SHELL_OPERATOR_CHARS for char in word):
+            at_start, prefixed = True, False
+            continue
+        if at_start and (word in _BUILTIN_PREFIXES or (prefixed and word.startswith("-"))):
+            prefixed = True
+            continue
+        prefixed = False
         head, opened = word, False
         for opener in _SUBSTITUTION_OPENERS:
             if opener in head:
@@ -3438,8 +3485,8 @@ def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bo
         if at_start or opened or loose:
             moves: list[str | None] = []
             if head in _DIRECTORY_CHANGE_COMMANDS:
-                moves.append(_change_target(words, index + 1))
-            elif head in (_ENV_EXECUTABLE, _GIT_EXECUTABLE):
+                moves.extend(_change_targets(words, index + 1))
+            elif head in _CHDIR_OPTIONS:
                 moves.extend(chdir_wrapper_targets(head, words, index + 1))
             for move in moves:
                 walk.change(move)

@@ -304,7 +304,7 @@ class TestDirectoryChangeSpellings:
             "tar --directory=inner -chf - ilink",
             "tar --directory inner -chf - ilink",
             "tar -chf - -C inner ilink",
-            "tar -C deep -chf - idlink",
+            "tar -Cinner -chf - ilink",
         ],
     )
     def test_a_tool_chdir_option_places_its_operands(self, tree: Tree, command: str) -> None:
