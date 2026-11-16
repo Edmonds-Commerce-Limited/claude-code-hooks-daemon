@@ -26,13 +26,20 @@ the MAIN-scoped ``auto_continue_stop`` still judges the Stop probes.
 """
 
 import json
+import os
 import re
 import socket
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
+from claude_code_hooks_daemon.daemon.paths import (
+    diagnose_venv_start,
+    resolve_existing_venv_python_with_diagnostics,
+)
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PROBE_AS_FIELD,
     SOCKET_STDIN_TEST,
@@ -173,6 +180,82 @@ def _env_file_pins_another_checkout() -> str | None:
     return None if pinned == REPO_ROOT.resolve() else str(pinned)
 
 
+def _own_venv_not_ready() -> str | None:
+    """Why this checkout's OWN venv cannot run the daemon yet, or None when it can.
+
+    A git worktree has no venv until its first hook builds one in the
+    background; until that finishes the wrapper correctly answers with a
+    fail-closed "venv missing" block, which says nothing about the transport
+    under test. The venv is judged the way init.sh does: per checkout, without
+    the ``HOOKS_DAEMON_VENV_PATH`` override a test runner may carry.
+    """
+    saved = os.environ.pop("HOOKS_DAEMON_VENV_PATH", None)
+    try:
+        python, _steps = resolve_existing_venv_python_with_diagnostics(REPO_ROOT)
+    finally:
+        if saved is not None:
+            os.environ["HOOKS_DAEMON_VENV_PATH"] = saved
+    if python is None:
+        return "this checkout has no venv yet (a worktree builds its own on first hook)"
+    diagnosis = diagnose_venv_start(python.parent.parent, REPO_ROOT)
+    if not diagnosis.healthy:
+        return "this checkout's venv is not usable yet: " + "; ".join(diagnosis.lines)
+    return None
+
+
+_CI_ENV_VARS = ("CI", "GITHUB_ACTIONS")
+
+
+def _venv_gate(not_ready: str | None, env: Mapping[str, str]) -> Literal["run", "skip", "fail"]:
+    """Decide what a test needing this checkout's own venv does.
+
+    A venv that is ready runs the test. One that is not skips it on a
+    developer worktree (the first hook builds it in the background) but FAILS
+    under CI, where a missing or broken venv is a real defect a skip would hide.
+    """
+    if not_ready is None:
+        return "run"
+    in_ci = any(
+        env.get(name, "").strip().lower() not in ("", "0", "false") for name in _CI_ENV_VARS
+    )
+    return "fail" if in_ci else "skip"
+
+
+@pytest.fixture
+def own_venv() -> None:
+    """Skip (locally) or fail (in CI) while this checkout's own venv is not ready."""
+    not_ready = _own_venv_not_ready()
+    decision = _venv_gate(not_ready, os.environ)
+    if decision == "run":
+        return
+    message = f"{not_ready} - re-run once the background venv build finishes"
+    if decision == "fail":
+        pytest.fail(message)
+    pytest.skip(message)
+
+
+_NEEDS_OWN_VENV = pytest.mark.usefixtures("own_venv")
+
+
+class TestVenvGate:
+    """The skip/fail decision, judged on explicit env values."""
+
+    _MISSING = "this checkout has no venv yet"
+
+    def test_ready_venv_runs_everywhere(self) -> None:
+        assert _venv_gate(None, {}) == "run"
+        assert _venv_gate(None, {"CI": "true"}) == "run"
+
+    def test_missing_venv_skips_outside_ci(self) -> None:
+        assert _venv_gate(self._MISSING, {}) == "skip"
+        assert _venv_gate(self._MISSING, {"CI": "", "GITHUB_ACTIONS": "false"}) == "skip"
+
+    @pytest.mark.parametrize("name", ["CI", "GITHUB_ACTIONS"])
+    def test_missing_venv_fails_in_ci(self, name: str) -> None:
+        assert _venv_gate(self._MISSING, {name: "true"}) == "fail"
+
+
+@_NEEDS_OWN_VENV
 @pytest.mark.skipif(
     _env_file_pins_another_checkout() is not None,
     reason=(
@@ -261,6 +344,7 @@ def test_stop_forwarder_exits_0_when_not_blocked_with_socket_stdin(tmp_path: Pat
 # ---------------------------------------------------------------------------
 
 
+@_NEEDS_OWN_VENV
 def test_worktree_create_forwarder_fails_cleanly_with_no_json_on_stdout(tmp_path: Path) -> None:
     forwarder = HOOKS_DIR / "worktree-create"
     assert forwarder.is_file(), f"deployed forwarder missing: {forwarder}"
