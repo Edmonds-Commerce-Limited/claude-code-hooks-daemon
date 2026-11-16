@@ -327,13 +327,13 @@ affected branch even though nothing would be lost. `delete-branch` fills that
 gap, refusing by default and deleting only what it can prove is recoverable,
 across these tiers, evaluated cheapest-first:
 
-| Tier                | Proof                                                                                 |
-| ------------------- | ------------------------------------------------------------------------------------- |
-| `merged`            | Tip is an ancestor of the protected ref (what `git branch -d` proves)                 |
-| `merged-unpushed`   | The same ancestry proof, but the branch is ahead of its OWN upstream                  |
-| `patch-equivalent`  | Every commit is already upstream by patch-id -- the shape a history rewrite produces  |
-| `content-preserved` | Every file version is byte-identical to a blob still reachable from the protected ref |
-| `unproven`          | Everything else -- refused, naming the files whose content exists nowhere else        |
+| Tier                | Proof                                                                                                                                                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `merged`            | Tip is an ancestor of the protected ref (what `git branch -d` proves)                                                                                                                          |
+| `merged-unpushed`   | The same ancestry proof, but the branch is ahead of its OWN upstream                                                                                                                           |
+| `patch-equivalent`  | Every commit is already upstream by patch-id -- the shape a history rewrite produces                                                                                                           |
+| `content-preserved` | Every file version is byte-identical to a blob still reachable from the protected ref, and a commit on the protected ref holds the branch's whole net change (the shape a squash merge leaves) |
+| `unproven`          | Everything else -- refused, naming the files whose content exists nowhere else                                                                                                                 |
 
 `merged-unpushed` exists because `git branch -d` enforces a **different
 predicate** from the `merged` proof: *merged into its upstream if it has one*,

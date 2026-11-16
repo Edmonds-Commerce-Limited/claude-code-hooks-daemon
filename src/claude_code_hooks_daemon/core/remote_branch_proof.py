@@ -320,8 +320,11 @@ def _touching_commits(directory: Path, base: str, target: str, paths: list[str])
     return list(commits)
 
 
-def _holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
+def holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
     """Whether the default's first-parent history holds the whole net change of the branch.
+
+    Shared with ``branch_safety``'s local ``content-preserved`` tier, so a local and a
+    remote delete rest on the same per-path proof (Plan 00618 B-1).
 
     The net change is the branch's diff against ``merge-base(target, tip)``. It is
     held by a commit whose tree has every added or modified path at the same blob
@@ -358,18 +361,18 @@ def _holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
 def _judge_offline(directory: Path, tracking_ref: str, targets: list[str]) -> str:
     """The tier that proves one tracking ref merged into a default ref, or ``unproven``.
 
-    The default's history must hold the branch's net change (:func:`_holds_net_change`):
+    The default's history must hold the branch's net change (:func:`holds_net_change`):
     that check comes FIRST and alone decides, so neither patch-id evidence nor an
     empty commit on main can prove a branch.
     The tier only names how the change got there: ``patch-equivalent`` when every
     commit has its patch in the default, else ``content-preserved`` (a squash). It is
-    not ``branch_safety``'s local-delete tier, which proves only recoverability.
+    the same proof ``branch_safety``'s local ``content-preserved`` tier requires.
 
     Raises:
         ProofUnavailableError: git failed, so there is no answer to cache.
     """
     for target in targets:
-        if not _holds_net_change(directory, target, tracking_ref):
+        if not holds_net_change(directory, target, tracking_ref):
             continue
         equivalent, count = patch_equivalent(directory, target, tracking_ref)
         if count is None:
