@@ -117,7 +117,8 @@ class TestHandle:
     ) -> None:
         tree = _git(repo, "rev-parse", "main^{tree}").strip()
         message = "park\n\nParked-Reason: waiting\nParked-By: t\n"
-        sha = _git(repo, "commit-tree", tree, "-p", "main", "-m", message).strip()
+        work = _git(repo, "commit-tree", tree, "-p", "main", "-m", "unmerged work").strip()
+        sha = _git(repo, "commit-tree", tree, "-p", work, "-m", message).strip()
         _git(repo, "update-ref", "refs/heads/held", sha)
         handler._branches = handler._branches.model_copy(
             update={

@@ -330,7 +330,8 @@ class TestDormancy:
         tree = _git(repo, "rev-parse", "main^{tree}").strip()
         for name in ("park-a", "park-b"):
             message = f"{name}\n\nParked-Reason: waiting\nParked-By: t"
-            sha = _git(repo, "commit-tree", tree, "-p", "main", "-m", message).strip()
+            work = _git(repo, "commit-tree", tree, "-p", "main", "-m", f"{name} work").strip()
+            sha = _git(repo, "commit-tree", tree, "-p", work, "-m", message).strip()
             _git(repo, "update-ref", f"refs/heads/{name}", sha)
         config = BranchesConfig(
             default="main",

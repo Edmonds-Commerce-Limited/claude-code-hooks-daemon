@@ -39,8 +39,8 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     Pool,
     is_park_residue,
     is_work_branch,
-    pool_for_ref,
     merge_proof_key,
+    pool_for_ref,
     read_merge_proofs,
     worktrees_by_branch,
 )
@@ -807,8 +807,10 @@ def _merged_pool_lines(
         head += " are at the cap"
     if stale:
         head += (
-            f"; {len(stale)} stale (neither deleted nor kept, or kept and the keep lapsed "
-            f"past branches.merged.max_age_days {config.effective_pool_max_age(Pool.MERGED)})"
+            f"; {len(stale)} stale (neither deleted nor kept: stale from day 0 whatever its "
+            "age, since the age is the tip commit's and only a keep is aged; or kept and the "
+            "keep lapsed past branches.merged.max_age_days "
+            f"{config.effective_pool_max_age(Pool.MERGED)})"
         )
     keep = daemon_cli_command_for_docs("branch-keep")
     remote = any(work.on_remote for work in merged)

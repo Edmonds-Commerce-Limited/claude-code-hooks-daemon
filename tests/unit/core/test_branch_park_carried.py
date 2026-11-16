@@ -223,8 +223,29 @@ class TestAge:
 class TestOneClassifier:
     """The guard's pool membership equals the sweep's, over varied fixtures."""
 
+    @pytest.mark.parametrize("state", list(BranchState))
+    def test_the_state_mapping_is_the_shared_rule(self, state: BranchState) -> None:
+        by_rule = {
+            BranchState.PARK_CARRIED: branch_inventory.pool_for_ref(
+                merged=True, park_carried=True, parked=True
+            ),
+            BranchState.MERGED_DEFAULT: branch_inventory.pool_for_ref(
+                merged=True, park_carried=False, parked=False
+            ),
+            BranchState.PARKED: branch_inventory.pool_for_ref(
+                merged=False, park_carried=False, parked=True
+            ),
+            BranchState.LIVE: branch_inventory.pool_for_ref(
+                merged=False, park_carried=False, parked=False
+            ),
+        }
+        if state in by_rule:
+            assert branch_inventory.pool_of(state) == by_rule[state]
+
     @staticmethod
-    def _sweep_pools(inventory: branch_inventory.BranchInventory) -> dict[Pool, set[frozenset[str]]]:
+    def _sweep_pools(
+        inventory: branch_inventory.BranchInventory,
+    ) -> dict[Pool, set[frozenset[str]]]:
         pools: dict[Pool, set[frozenset[str]]] = {p: set() for p in Pool}
         for name, record in inventory.records.items():
             pool = branch_inventory.pool_of(record.state)
@@ -233,7 +254,9 @@ class TestOneClassifier:
         return pools
 
     @staticmethod
-    def _guard_pools(repo: Path, config: BranchesConfig, labels: Any) -> dict[Pool, set[frozenset[str]]]:
+    def _guard_pools(
+        repo: Path, config: BranchesConfig, labels: Any
+    ) -> dict[Pool, set[frozenset[str]]]:
         found = branch_creation.work_pools(repo, config, labels=labels)
         return {pool: {work.names for work in works} for pool, works in found.items()}
 

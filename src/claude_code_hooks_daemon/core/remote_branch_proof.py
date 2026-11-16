@@ -413,6 +413,32 @@ def _offline_evidence(
     return found
 
 
+def _park_marked(directory: Path, refnames: list[str]) -> set[str]:
+    """Which of ``refnames`` have a tip carrying a ``Parked-Reason`` trailer: one call.
+
+    Only those can be a park marker, so the walk of :func:`is_park_residue` is paid
+    for no other branch. A failed listing marks nothing, which leaves the branch to
+    the net-change proof (unproven when empty): the safe direction.
+    """
+    if not refnames:
+        return set()
+    listing = run_git(
+        directory,
+        "for-each-ref",
+        "--format=%(refname)%00%(trailers:key=Parked-Reason,valueonly,unfold)",
+        *refnames,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if listing.returncode != 0:
+        return set()
+    marked: set[str] = set()
+    for line in listing.stdout.split("\n"):
+        refname, _, trailer = line.partition("\0")
+        if refname and trailer.strip():
+            marked.add(refname)
+    return marked
+
+
 def _merged_tracking_tips(
     directory: Path, remote: str, names: list[str], default: str, branches: BranchesConfig
 ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
@@ -483,7 +509,11 @@ def _merged_tracking_tips(
         }
         # A park marker over work the default holds: decided by the inventory's rule,
         # before the (cached) net-change proof, which reads an empty change as unproven.
-        for name in [n for n in tips if n in feature_names and tracking[n] not in proven]:
+        undecided = [n for n in tips if n in feature_names and tracking[n] not in proven]
+        marked = (
+            _park_marked(directory, [tracking[n] for n in undecided]) if default_targets else set()
+        )
+        for name in [n for n in undecided if tracking[n] in marked]:
             if any(is_park_residue(directory, tips[name], target) for target in default_targets):
                 proven.add(tracking[name])
                 evidence[name] = TIER_PARK_CARRIED
