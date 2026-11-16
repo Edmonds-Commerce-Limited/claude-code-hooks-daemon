@@ -14,8 +14,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00613: worktree link secret verb](00613-worktree-link-secret-verb/PLAN.md) - Not Started (peer report: the secret guard denies a relative symlink to a protected file made inside a worktree, which a peer workflow needs; design first, because a link is itself a route to the content and the owner instruction is unverified)
 
-- [00612: secret guard dir glob false allows](00612-secret-guard-dir-glob-false-allows/PLAN.md) - In Progress (Plan 00610 follow-ups: POSIX bracket classes and symlinked directories let a recursive reader past `secret_file_guard`; chosen by the stand-in)
-
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
 - [00603: supervisor idle compact at 30 percent](00603-supervisor-idle-compact-at-30-percent/PLAN.md) - In Progress (built, dry-run first: verify Claude Code's idleCompaction, and add a supervisor compaction at true idle once context reaches 30%)
@@ -200,6 +198,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00612: secret guard dir glob false allows](Completed/00612-secret-guard-dir-glob-false-allows/PLAN.md) - Complete at merge `245b6d98f` + `fbbf9ca5f` (main CI 43862059384 green) + the archiving commit (POSIX bracket classes, symlinked directories and bare globs no longer let a recursive reader past `secret_file_guard`; release note 088)
+
 - [00609: tracked hook wrappers machine independent](Completed/00609-tracked-hook-wrappers-machine-independent/PLAN.md) - Complete at merge `8ea7c03c6` (CI run 43822592185 green) + the archiving commit (generated wrappers resolve the checkout root at run time and carry no machine-specific path; the daemon publishes an overflowing socket location in a file the wrapper trusts only for its own checkout; an older `init.sh` PID-path boundary defect fixed in the same merge; release note 085)
 
 - [00610: secret guard trailing slash glob](Completed/00610-secret-guard-trailing-slash-glob/PLAN.md) - Complete at merge `31a2cce4f` (main CI 43816232915 green) + the archiving commit (GitHub #204: a glob ending in `/` is judged as the directories it expands to, so `ls -d */` is allowed and `grep -r x */` still denied; release note 084; follow-ups in PLAN.md)
@@ -258,8 +258,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00570: branch containment remote archive refs](Completed/00570-branch-containment-remote-archive-refs/PLAN.md) - Complete at merge `df4a928e9` (green CI run 42404687976) + the archiving commit (GitHub #166: branch-sweep and delete-branch accept a remote ref outside `refs/remotes`, such as an archive namespace, as proof of containment via one bounded `ls-remote`; the offline wording says only what it checked; release note 004)
 
-- [00569: hooks screen target by host arch](Completed/00569-hooks-screen-target-by-host-arch/PLAN.md) - Complete at merge `ae0af5761` (green CI run 42404687976) + the archiving commit (GitHub #174: the ccy supervisor and `screen/build.sh` choose the hooks-screen musl target triple from the host architecture, x86_64 or aarch64, and the failure note names the architecture; release note 003)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -311,11 +309,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 612 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 615 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 514 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 515 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 74 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 76 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

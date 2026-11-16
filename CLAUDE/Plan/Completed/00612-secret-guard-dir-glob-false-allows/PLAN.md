@@ -1,6 +1,6 @@
 # Plan 00612: secret guard dir glob false allows
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-16
 **Owner**: dev
 **Priority**: Medium
@@ -43,24 +43,39 @@ owner.
 
 ### Phase 1: test-first fixes
 
-- [ ] ⬜ **Task 1.1**: Write failing tests for POSIX bracket classes in
+- [x] ✅ **Task 1.1**: Write failing tests for POSIX bracket classes in
   trailing-slash globs, and in the shared matcher if file globs are affected
   too.
-- [ ] ⬜ **Task 1.2**: Translate POSIX classes in the shared segment matcher.
-- [ ] ⬜ **Task 1.3**: Write failing tests for a symlinked directory matched by
+- [x] ✅ **Task 1.2**: Translate POSIX classes in the shared segment matcher.
+  `fnmatch` is replaced by a bounded regex translator: interior stars are
+  atomic groups, as in CPython's `fnmatch`, and `[^x]` negates.
+- [x] ✅ **Task 1.3**: Write failing tests for a symlinked directory matched by
   a trailing-slash glob in a recursive reader, then fix it without walking
-  the whole filesystem.
-- [ ] ⬜ **Task 1.4**: Add a release note under
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+  the whole filesystem. The fix scans the glob's literal parent once and
+  realpaths the literal prefix. The review also widened the work to bare
+  globs (`d*`, `*`) given to a recursive reader, judged the same way.
+- [x] ✅ **Task 1.4**: Release note
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/088-secret-guard-dir-glob-false-allows.md`.
 
 ## Success Criteria
 
-- [ ] Both false allows are reproduced by failing tests and fixed, and
-  targeted QA passes.
-- [ ] The release-bound consequence is recorded in the holding area: a release
-  note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
-- [ ] Merged to main with CI green.
+- [x] Both false allows are reproduced by failing tests and fixed. Before the
+  rework, 11 of 23 new tests failed. Targeted QA at `3bbb97361` passed 40/43:
+  the one failure was main's own semgrep finding (fixed in `56cbc8f37`), and
+  the other two were marked not meaningful because of it.
+- [x] The release-bound consequence is recorded in the holding area: release
+  note 088 in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
+- [x] Merged to main with CI green.
 
 ## Delivery & Milestones
 
-- <!-- merge commit hash -->
+- Merged at `245b6d98f`. Main CI on that merge went red on one bare
+  wall-clock bound in the new timing test, fixed forward in `fbbf9ca5f`. Main
+  CI run 43862059384 is green.
+
+## Follow-ups
+
+- A symlink matched only below a wildcard parent (`*/l*/`) is still not
+  judged; covering it would need a walk.
+- The Plan 00610 follow-ups are left for the owner: the globstar `**/`
+  base-directory false deny, and the bash older than 5.2 `.*/` behaviour.
