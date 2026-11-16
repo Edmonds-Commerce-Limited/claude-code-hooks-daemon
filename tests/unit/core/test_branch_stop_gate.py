@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -23,7 +25,7 @@ from claude_code_hooks_daemon.core.branch_stop_gate import (
     _deny_reason,
     decide_stop,
 )
-from claude_code_hooks_daemon.core.branch_stop_guard import StopCheck, StopFinding
+from claude_code_hooks_daemon.core.branch_stop_guard import StopCheck, StopFinding, StopJudgement
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path
 from claude_code_hooks_daemon.utils.work_queue import (
     WORK_QUEUE_FILENAME,
@@ -498,9 +500,20 @@ def _first_stop(repo: Path, untracked: Path) -> StopDecision:
 
 
 def _baseline_stop(repo: Path, untracked: Path, monkeypatch: pytest.MonkeyPatch) -> StopDecision:
-    """The same stop as origin/main's gate would decide it."""
+    """The same stop as origin/main's gate would decide it.
+
+    origin/main is this gate with no branch counted as the stopping thread's own for
+    the hand-over: every harness-directory worktree is handed over, so nothing is
+    newly judged and every refusal draws on the one main counter. ``_origin_main_owned``
+    cross-checks the hand-over set this seam produces.
+    """
+    real = branch_stop_gate.judge_stop
+
+    def legacy(*args: Any, **kwargs: Any) -> StopJudgement:
+        return dataclasses.replace(real(*args, **kwargs), own=frozenset())
+
     with monkeypatch.context() as patch:
-        patch.setattr(branch_stop_gate, "_owned_branches", _origin_main_owned)
+        patch.setattr(branch_stop_gate, "judge_stop", legacy)
         return _decide(repo, untracked)
 
 
@@ -554,6 +567,8 @@ class TestDifferentialAgainstOriginMain:
         state_path(untracked, SESSION, STATE_KIND, "main").unlink(missing_ok=True)
         baseline = _baseline_stop(repo, untracked, monkeypatch)
 
+        # The baseline seam hands over exactly origin/main's formula, read independently.
+        assert (name in _handed(baseline)) == (name in _origin_main_owned(repo, untracked))
         if baseline.reason is not None:
             assert current.reason is not None
         own_touched = "" in _TOUCHES[touch]
@@ -592,3 +607,241 @@ class TestReviewScenarioOne:
             assert "agent-x" not in decision.reason
             assert f"Block {number} of {MAX_STOP_BLOCKS}" in decision.reason
         assert all(_handed(decision) == {"agent-x"} for decision in current)
+
+
+def _blocks(untracked: Path) -> int:
+    """The main counter: the refusals origin/main's gate would also have counted."""
+    value = read_state(state_path(untracked, SESSION, STATE_KIND, "main")).get("blocks", 0)
+    assert isinstance(value, int)
+    return value
+
+
+def _harness_worktree(repo: Path, name: str, touches: tuple[str, ...]) -> Path:
+    """An unlocked, unqueued ``.claude/worktrees/`` worktree, unpushed and dirty."""
+    _unpushed_branch(repo, name, agent=touches[0])
+    for agent in touches[1:]:
+        _git(repo, "config", "--add", f"branch.{name}.{TOUCHED_KEY}", f"{SESSION}:{agent}")
+    where = repo / ".claude" / "worktrees" / name
+    where.parent.mkdir(parents=True, exist_ok=True)
+    _git(repo, "worktree", "add", "-q", str(where), name)
+    (where / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+    return where
+
+
+def _plain_own_worktree(repo: Path, name: str = "own-b") -> Path:
+    """The coordinator's own branch in an ordinary worktree, unpushed and dirty."""
+    _unpushed_branch(repo, name)
+    where = repo.parent / f"wt-{name}"
+    _git(repo, "worktree", "add", "-q", str(where), name)
+    (where / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+    return where
+
+
+@pytest.fixture
+def baseline_untracked(tmp_path: Path) -> Path:
+    path = tmp_path / "untracked-baseline"
+    path.mkdir()
+    return path
+
+
+class TestTheMainCounterMatchesOriginMain:
+    """Plan 00618 B-2 (re-review residual R): a newly judged own harness branch draws on
+    its own capped counter, so the session's other branches keep origin/main's budget."""
+
+    def _pair(
+        self,
+        repo: Path,
+        untracked: Path,
+        baseline_untracked: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> tuple[StopDecision, StopDecision]:
+        current = _decide(repo, untracked)
+        baseline = _baseline_stop(repo, baseline_untracked, monkeypatch)
+        assert _blocks(untracked) == _blocks(baseline_untracked)
+        if baseline.reason is not None:
+            assert current.reason is not None
+        return current, baseline
+
+    def test_the_reviewers_reproduction_still_refuses_the_other_own_branch(
+        self,
+        repo: Path,
+        untracked: Path,
+        baseline_untracked: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _harness_worktree(repo, "agent-x", ("sub-1", ""))
+        for number in range(1, MAX_STOP_BLOCKS + 1):
+            current, baseline = self._pair(repo, untracked, baseline_untracked, monkeypatch)
+            assert baseline.reason is None
+            assert current.reason is not None
+            assert "agent-x: dirty worktree" in current.reason
+            assert f"Block {number} of {MAX_STOP_BLOCKS}" in current.reason
+        _plain_own_worktree(repo)
+        for number in range(1, MAX_STOP_BLOCKS + 1):
+            current, baseline = self._pair(repo, untracked, baseline_untracked, monkeypatch)
+            assert baseline.reason is not None
+            assert current.reason is not None
+            assert "own-b: dirty worktree" in current.reason
+            assert f"Block {number} of {MAX_STOP_BLOCKS}" in current.reason
+        current, baseline = self._pair(repo, untracked, baseline_untracked, monkeypatch)
+        assert current.reason is None
+        assert baseline.reason is None
+
+    def test_locking_after_a_refusal_leaves_the_main_counter_whole(
+        self,
+        repo: Path,
+        untracked: Path,
+        baseline_untracked: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        where = _harness_worktree(repo, "agent-x", ("sub-1", ""))
+        current, _ = self._pair(repo, untracked, baseline_untracked, monkeypatch)
+        assert current.reason is not None
+        _git(repo, "worktree", "lock", str(where))
+        _plain_own_worktree(repo)
+        for number in range(1, MAX_STOP_BLOCKS + 1):
+            current, baseline = self._pair(repo, untracked, baseline_untracked, monkeypatch)
+            assert baseline.reason is not None
+            assert current.reason is not None
+            assert f"Block {number} of {MAX_STOP_BLOCKS}" in current.reason
+            assert _handed(current) == {"agent-x"}
+
+    @pytest.mark.parametrize("touches", [("",), ("sub-1", "")])
+    def test_a_never_resolved_own_harness_branch_gives_way_after_its_own_cap(
+        self,
+        repo: Path,
+        untracked: Path,
+        baseline_untracked: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        touches: tuple[str, ...],
+    ) -> None:
+        _harness_worktree(repo, "own-h", touches)
+        refusals = [
+            self._pair(repo, untracked, baseline_untracked, monkeypatch)[0].reason is not None
+            for _ in range(MAX_STOP_BLOCKS + 3)
+        ]
+        assert refusals == [True] * MAX_STOP_BLOCKS + [False] * 3
+        assert _blocks(untracked) == 0
+
+    def test_a_session_draws_at_most_two_caps_of_refusals(
+        self,
+        repo: Path,
+        untracked: Path,
+        baseline_untracked: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _harness_worktree(repo, "own-h", ("",))
+        refusals = 0
+        for stop in range(4 * MAX_STOP_BLOCKS):
+            if stop == MAX_STOP_BLOCKS:
+                _plain_own_worktree(repo)
+            current, _ = self._pair(repo, untracked, baseline_untracked, monkeypatch)
+            refusals += current.reason is not None
+        assert refusals == 2 * MAX_STOP_BLOCKS
+
+    def test_both_hand_over_sets_come_from_one_read(
+        self, repo: Path, untracked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _harness_worktree(repo, "agent-x", ("sub-1", ""))
+        _plain_own_worktree(repo)
+        calls = {"worktrees": 0, "holds": 0}
+        real_records = branch_stop_gate.linked_worktree_records
+        real_holds = branch_stop_gate.running_holds
+
+        def records(path: Path) -> Any:
+            calls["worktrees"] += 1
+            return real_records(path)
+
+        def holds(path: Path, root: Path) -> RunningHolds:
+            calls["holds"] += 1
+            return real_holds(path, root)
+
+        monkeypatch.setattr(branch_stop_gate, "linked_worktree_records", records)
+        monkeypatch.setattr(branch_stop_gate, "running_holds", holds)
+        _decide(repo, untracked)
+        assert calls == {"worktrees": 1, "holds": 1}
+
+
+class TestTheNewlyJudgedBranchNamesTheHoldRemedies:
+    """The deny text never tells the coordinator to commit inside a live agent's worktree."""
+
+    def test_a_harness_only_stop_names_the_lock_and_the_queue_record(
+        self, repo: Path, untracked: Path
+    ) -> None:
+        where = _harness_worktree(repo, "agent-x", ("sub-1", ""))
+        reason = _decide(repo, untracked).reason
+        assert reason is not None
+        assert "add -A" not in reason
+        assert f"git -C {where} commit" not in reason
+        assert f"git worktree lock {where}" in reason
+        assert "work-queue add" in reason
+        assert f"--worktree {where}" in reason
+        assert "--branch agent-x" in reason
+
+    def test_a_mixed_stop_keeps_the_commit_remedy_only_for_the_ordinary_branch(
+        self, repo: Path, untracked: Path
+    ) -> None:
+        agent = _harness_worktree(repo, "agent-x", ("sub-1", ""))
+        own = _plain_own_worktree(repo)
+        reason = _decide(repo, untracked).reason
+        assert reason is not None
+        assert f"git -C {own} add -A" in reason
+        assert f"git -C {agent} add -A" not in reason
+        assert f"git worktree lock {agent}" in reason
+
+
+_MATRIX_PLACES = ("harness", "plain")
+
+
+class TestRefusalSequenceMatrix:
+    """The re-review's 48-row matrix: branch ``b1`` of every shape is outstanding for
+    stops 1-3, the coordinator's own dirty ``own-b`` joins at stop 4; no stop origin/main
+    refuses is allowed here, and the main counter equals origin/main's after every stop."""
+
+    @pytest.mark.parametrize(
+        ("touch", "place", "lock", "queued", "dirty"),
+        list(
+            itertools.product(
+                _TOUCHES, _MATRIX_PLACES, (False, True), (False, True), (False, True)
+            )
+        ),
+    )
+    def test_no_stop_origin_main_refuses_is_allowed(
+        self,
+        repo: Path,
+        untracked: Path,
+        baseline_untracked: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        touch: str,
+        place: str,
+        lock: bool,
+        queued: bool,
+        dirty: bool,
+    ) -> None:
+        _unpushed_branch(repo, "b1", agent=_TOUCHES[touch][0])
+        for agent in _TOUCHES[touch][1:]:
+            _git(repo, "config", "--add", f"branch.b1.{TOUCHED_KEY}", f"{SESSION}:{agent}")
+        parent = repo / ".claude" / "worktrees" if place == "harness" else repo.parent
+        where = parent / "wt-b1"
+        where.parent.mkdir(parents=True, exist_ok=True)
+        _git(repo, "worktree", "add", "-q", str(where), "b1")
+        if lock:
+            _git(repo, "worktree", "lock", str(where))
+        if dirty:
+            (where / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+        if queued:
+            _queue(untracked, "b1")
+            _queue(baseline_untracked, "b1")
+        current: list[bool] = []
+        baseline: list[bool] = []
+        for stop in range(2 * MAX_STOP_BLOCKS):
+            if stop == MAX_STOP_BLOCKS:
+                _plain_own_worktree(repo)
+            current.append(_decide(repo, untracked).reason is not None)
+            baseline.append(
+                _baseline_stop(repo, baseline_untracked, monkeypatch).reason is not None
+            )
+            assert _blocks(untracked) == _blocks(baseline_untracked)
+        assert [b and not c for c, b in zip(current, baseline, strict=True)] == [False] * len(
+            current
+        )
