@@ -170,7 +170,12 @@ narrowed rule requires. The inventory's malformed-log test now patches
   - `tests/integration/test_branch_park_signed_commits_e2e.py`
 - The whole suite was not run.
 
-Result on the final tree: 2609 passed, 0 failed.
+Result on the final tree: 2609 passed, 0 failed. After the follow-up commit,
+`tests/unit/core/test_park_commit_classifier.py` passed 33 of 33.
+
+`./scripts/qa/llm_qa.py changed` was tried once. It hit its 600-second timeout
+(rc 124) before writing any output, so its doc and plan checks are NOT
+verified. The coordinator's gate should run them.
 
 ## Other
 
