@@ -23,16 +23,17 @@ git worktree is a separate repository's business.
 
 from __future__ import annotations
 
-import fnmatch
 import logging
 import os
 import re
+import string
 import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 
@@ -58,8 +59,25 @@ MAX_CACHED_INDEXES: Final[int] = 8
 _HIDDEN_PREFIX: Final[str] = "."
 _RECURSIVE_COMPONENT: Final[str] = "**"
 _WILDCARD_ONLY: Final[re.Pattern[str]] = re.compile(r"[*?]+")
-# fnmatch reads ``[^x]`` as a class holding ``^`` and ``x``; bash negates it like ``[!x]``.
-_BRACKET_CARET: Final[re.Pattern[str]] = re.compile(r"\[\^")
+
+#: POSIX bracket classes (``[[:alpha:]]``) as the characters they hold in the C locale.
+_POSIX_CLASSES: Final[dict[str, str]] = {
+    "alpha": string.ascii_letters,
+    "digit": string.digits,
+    "alnum": string.ascii_letters + string.digits,
+    "upper": string.ascii_uppercase,
+    "lower": string.ascii_lowercase,
+    "space": " \t\n\r\f\v",
+    "blank": " \t",
+    "punct": string.punctuation,
+    "print": " " + string.ascii_letters + string.digits + string.punctuation,
+    "graph": string.ascii_letters + string.digits + string.punctuation,
+    "cntrl": "".join(chr(code) for code in (*range(32), 127)),
+    "xdigit": string.hexdigits,
+}
+# bash negates a bracket expression with ``!`` or ``^``; fnmatch knows only ``!``.
+_BRACKET_NEGATIONS: Final[str] = "!^"
+_GLOB_CHARACTERS: Final[str] = "*?[\\"
 
 #: A glob with this many wildcard-only components names no particular place.
 _NAMELESS_DEPTH: Final[int] = 2
@@ -176,7 +194,7 @@ class ProtectedFileIndex:
         for absolute_token in _absolute_tokens(token, bases):
             if self._names_no_place(token, absolute_token):
                 continue
-            glob_parts = _glob_parts(absolute_token, default_expansion)
+            glob_parts, _ = _glob_parts(absolute_token, default_expansion)
             for entry in self.files:
                 for root in self._roots():
                     if _segments_match(_components(f"{root}/{entry.relpath}"), glob_parts):
@@ -188,26 +206,61 @@ class ProtectedFileIndex:
     ) -> tuple[str, ...]:
         """The directories holding a protected file that the shell glob ``token`` names.
 
-        ``token`` ends in ``/``, so the shell expands it to directories only. Each
-        is an ancestor directory of an indexed file, matched component by component
+        ``token`` is a glob a recursive reader searches, with or without a trailing
+        ``/``. Each directory returned is an ancestor directory of an indexed file, matched component by component
         with the matcher :meth:`glob_matches` uses (so ``*`` skips dot names and
         ``default_expansion`` reads ``**`` like ``*``), but never against the file
         itself. A search that recurses into those directories reads the file, exactly
         as it does for a directory named literally. A glob that names no place
         (``*/``) is still resolved: the tool reads whatever lies below.
         """
-        if not token.endswith("/") or "\0" in token:
+        if not token or "\0" in token:
             return ()
         found: dict[str, None] = {}
         for absolute_token in _absolute_tokens(token, bases):
-            glob_parts = _glob_parts(absolute_token, default_expansion)
+            glob_parts, literal = _glob_parts(absolute_token, default_expansion)
             for entry in self.files:
                 for root in self._roots():
                     parts = _components(f"{root}/{entry.relpath}")
                     for depth in range(1, len(parts)):
                         if _segments_match(parts[:depth], glob_parts):
                             found["/" + "/".join(parts[:depth])] = None
+            if literal == len(glob_parts) - 1:
+                for link in self._matching_symlinked_directories(glob_parts):
+                    found[link] = None
         return tuple(found)
+
+    def _matching_symlinked_directories(self, glob_parts: Sequence[str]) -> list[str]:
+        """Symlinks to a directory holding a protected file that the glob's last component names.
+
+        The index holds real paths, so a symlink to a protected directory is no
+        ancestor of any indexed file. The shell still expands the glob to it, and a
+        recursive reader follows it as it does a literal ``link/``. Only the one
+        directory the glob's literal parent names is listed (``os.scandir``, a single
+        level): a parent that is itself a glob is not expanded, so a symlink matched
+        only below a wildcard directory stays unjudged, which keeps the cost of a
+        call independent of the size of the tree.
+        """
+        last = glob_parts[-1]
+        if last == _RECURSIVE_COMPONENT:
+            return []
+        # The literal parent is already a real path (:func:`_glob_parts`), its glob characters escaped.
+        parent = re.sub(r"\\(.)", r"\1", "/" + "/".join(glob_parts[:-1]))
+        real_files = [f"{root}/{entry.relpath}" for entry in self.files for root in self._roots()]
+        try:
+            with os.scandir(parent) as listing:
+                names = [item.name for item in listing if item.is_symlink()]
+        except OSError:
+            return []
+        links: list[str] = []
+        for name in names:
+            if not _segments_match([name], [last]):
+                continue
+            link = f"{parent.rstrip('/')}/{name}"
+            target = os.path.realpath(link)
+            if Path(target).is_dir() and any(_is_under(path, target) for path in real_files):
+                links.append(link)
+        return links
 
     def _names_no_place(self, token: str, absolute_token: str) -> bool:
         """Is the glob, read relative to the project, wildcard-only from its first component?"""
@@ -245,12 +298,34 @@ def _absolute_tokens(token: str, bases: Sequence[str]) -> list[str]:
     return [os.path.normpath(Path(base) / token) for base in dict.fromkeys(bases)]
 
 
-def _glob_parts(absolute_token: str, default_expansion: bool) -> list[str]:
-    """The glob's components; under bash's defaults a ``**`` component is read like ``*``."""
+def _glob_parts(absolute_token: str, default_expansion: bool) -> tuple[list[str], int]:
+    """The glob's components and how many leading ones are the resolved literal prefix.
+
+    The index holds real paths, so the literal directories before the first wildcard
+    component are replaced by their ``realpath`` (a symlinked parent such as
+    ``up/di?/`` is then matched where the shell actually reads). A resolved name that
+    itself holds glob characters is escaped to stay literal. Under bash's defaults a
+    ``**`` component is read like ``*``.
+    """
     parts = _components(absolute_token)
+    literal = 0
+    while literal < len(parts) and not _has_glob_syntax(parts[literal]):
+        literal += 1
+    if literal:
+        resolved = _components(os.path.realpath("/" + "/".join(parts[:literal])))
+        parts = [_escape_glob(part) for part in resolved] + parts[literal:]
+        literal = len(resolved)
     if default_expansion:
-        return ["*" if part == _RECURSIVE_COMPONENT else part for part in parts]
-    return parts
+        parts = ["*" if part == _RECURSIVE_COMPONENT else part for part in parts]
+    return parts, literal
+
+
+def _escape_glob(component: str) -> str:
+    return "".join(f"\\{char}" if char in _GLOB_CHARACTERS else char for char in component)
+
+
+def _has_glob_syntax(component: str) -> bool:
+    return any(char in component for char in _GLOB_CHARACTERS)
 
 
 def _is_under(path: str, base: str) -> bool:
@@ -288,9 +363,93 @@ def _segments_match(path: Sequence[str], glob: Sequence[str]) -> bool:
     name = path[0]
     if name.startswith(_HIDDEN_PREFIX) and not head.startswith(_HIDDEN_PREFIX):
         return False
-    return fnmatch.fnmatchcase(name, _BRACKET_CARET.sub("[!", head)) and _segments_match(
-        path[1:], rest
-    )
+    return _component_pattern(head).fullmatch(name) is not None and _segments_match(path[1:], rest)
+
+
+@lru_cache(maxsize=1024)
+def _component_pattern(glob: str) -> re.Pattern[str]:
+    """One glob component as a regex, read as bash reads it.
+
+    ``*`` and ``?`` match within the component, ``[!x]`` and ``[^x]`` both negate,
+    and ``[[:alpha:]]`` and the other POSIX classes hold their characters, which
+    ``fnmatch`` does not know. A ``[`` with no closing ``]`` is a literal.
+
+    Like CPython's ``fnmatch``, each ``*`` that has another ``*`` after it is
+    emitted with the fixed-length run that follows it as one atomic group
+    (``(?>.*?run)``): the leftmost match of a fixed-length run leaves the most
+    input for the rest, so nothing needs to backtrack into it. Only the final
+    ``*`` stays a plain ``.*``, so matching is linear in the number of stars.
+    """
+    segments: list[list[str]] = [[]]
+    position = 0
+    while position < len(glob):
+        char = glob[position]
+        position += 1
+        if char == "*":
+            segments.append([])
+        elif char == "?":
+            segments[-1].append(".")
+        elif char == "\\" and position < len(glob):
+            segments[-1].append(re.escape(glob[position]))
+            position += 1
+        elif char == "[":
+            parsed = _bracket_expression(glob, position)
+            if parsed is None:
+                segments[-1].append(re.escape(char))
+            else:
+                segments[-1].append(parsed[0])
+                position = parsed[1]
+        else:
+            segments[-1].append(re.escape(char))
+    out = ["".join(segments[0])]
+    for run in segments[1:-1]:
+        if run:
+            out.append(f"(?>.*?{''.join(run)})")
+    if len(segments) > 1:
+        out.append(".*" + "".join(segments[-1]))
+    return re.compile("".join(out), re.DOTALL)
+
+
+def _bracket_expression(glob: str, start: int) -> tuple[str, int] | None:
+    """The regex class for the bracket expression opened just before ``start``.
+
+    Returns it with the position after its ``]``, or None when it never closes.
+    """
+    position = start
+    negate = position < len(glob) and glob[position] in _BRACKET_NEGATIONS
+    if negate:
+        position += 1
+    members: list[str] = []
+    first = True
+    while position < len(glob):
+        char = glob[position]
+        if char == "]" and not first:
+            if not members:  # only reversed ranges: the set holds nothing (or, negated, anything)
+                return ("." if negate else "(?!)"), position + 1
+            return f"[{'^' if negate else ''}{''.join(members)}]", position + 1
+        first = False
+        if glob.startswith("[:", position):
+            close = glob.find(":]", position + 2)
+            name = glob[position + 2 : close] if close != -1 else ""
+            if name in _POSIX_CLASSES:
+                members.append(re.escape(_POSIX_CLASSES[name]))
+                position = close + 2
+                continue
+        if char == "\\" and position + 1 < len(glob):
+            position += 1
+            char = glob[position]
+        if glob.startswith("-", position + 1) and glob[position + 2 : position + 3] not in (
+            "",
+            "]",
+        ):
+            high = glob[position + 2]
+            if char <= high:  # a reversed range holds nothing, as in bash
+                members.append(f"{re.escape(char)}-{re.escape(high)}")
+            position += 3
+            continue
+        members.append(re.escape(char))
+        position += 1
+    return None
 
 
 # ── Build and cache ─────────────────────────────────────────────────────────
