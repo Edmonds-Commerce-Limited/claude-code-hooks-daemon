@@ -7,4 +7,4 @@ Claude Code keeps its critical-path removal prompt on, even with `CLAUDE_CODE_EV
 
 `hooks-daemon permission-surface` prints those entries as JSON for a user-level `settings.json`, and writes nothing.
 
-Separately, a settings merge with the switch off now appends any missing daemon deny rules to an existing `permissions.deny`, where before they returned only when the whole `permissions` key was absent. Your own rules are kept.
+Separately, in a project that sets `daemon.omit_permission_surface: false` explicitly, a settings merge now appends any missing daemon deny rules to an existing `permissions.deny`, where before they returned only when the whole `permissions` key was absent. A config without the key merges exactly as before. Your own rules are kept.

@@ -19,7 +19,7 @@ _Branch-pool work (Plan 00594): a proof that counts squash-merged and cherry-pic
 - Remote-delete proof for squash-merged, renamed-PR and cherry-picked branches (net-change check, offline), shared by the `git push --delete` guard, `branch-sweep --clean --remote` and the branch cap (Plan 00594 Tasks 3.1, 3.2).
 - Branch-tip channel: a guarded branch install records its tracked ref, session start reports when the ref moves, and `upgrade.sh --release` returns to the release installed before it (Plan 00594 Task 5.1).
 - `branch-park --no-commit` and `--no-push`, with `branches.park.commit` and `branches.park.push`; stop guards honour a standing park (Plan 00594).
-- `branches.wip.creation_grace` (default 2): the open-work cap denies a creation only at `cap + creation_grace` (Plan 00594 Task 4.2).
+- `branches.wip.creation_grace` (default 2): the open-work cap denies a creation only at `cap + creation_grace` and warns from `cap`. This changes behaviour on upgrade; set `0` to keep the deny at the cap (Plan 00594 Task 4.2).
 - Branch pools counted per owner, with a `Foreign` group in `branch-sweep` (Plan 00594 Task 4.4); `park-carried` status for a park marker over work the default holds.
 - `branch_creation_guard` advisories for recovery-copy branch names and nested worktrees, and a "Branch Practice" section in the worktree core doc (Plan 00594 Task 4.8).
 - `daemon.omit_permission_surface` and `hooks-daemon permission-surface`, to keep Claude Code's critical-path removal prompt off in bypass sessions (Plan 00474).
@@ -51,11 +51,11 @@ _Branch-pool work (Plan 00594): a proof that counts squash-merged and cherry-pic
 ### Fixed
 
 - `pipe_blocker` reads heredoc bodies and `py.test`, and the shared shell word reader reads `${x:-a}` operator forms as one word (Plan 00478).
-- `secret_file_guard` no longer denies a git search string, a grep filter value or bold markdown (Plan 00595, GitHub #200), and no longer misses POSIX classes or symlinked directories in a glob (Plan 00612); `find -exec` and `xargs` reads are judged (Plan 00615).
+- `secret_file_guard` no longer denies a git search string, a grep filter value or bold markdown (Plan 00595, GitHub #200).
 - `destructive_git` no longer denies printed git text that is captured or reformatted; it denies a written script fed to a shell and `printf -v` assignments later run (Plan 00596, GitHub #197).
 - `plan_number_helper` no longer denies a content search inside an echo's substitution (Plan 00597, GitHub #198).
 - Removing a worktree no longer blocks on a symlink seed pointing into the main checkout (Plan 00474).
-- A branch left with only empty park commits stays deletable, and a park marker over merged work is in no pool (Plan 00617, Plan 00594).
+- A park marker over work the default branch already holds is in no pool, and its remote delete is proven (Plan 00594).
 - `lsp_enforcement` ignores grep option values; the merged-pool message names the real trigger; a finished agent quoting a usage limit is not reported killed; an unproven venv skip no longer warns on every run (Plan 00474 N612-N615).
 - Git config writes (park record, plan counter, creator record) wait for `config.lock` and name a stale lock (Plan 00474 N621, N623, N624).
 - The ccy supervisor no longer disables a plugin because the host was busy, and names the cause when it does (Plan 00603).
@@ -68,6 +68,13 @@ _Branch-pool work (Plan 00594): a proof that counts squash-merged and cherry-pic
 
 - Recovery bundles under `untracked/deleted-branches/` and `untracked/branch-cleanup/`: delete commands print a `git branch <name> <sha>` restore line instead (Plan 00594).
 - `delete-branch --allow-unproven`, `--reason`, `--bundle` and `--no-bundle`.
+
+### Security
+
+- `secret_file_guard` no longer misses POSIX bracket classes or symlinked directories in a glob, two recursive reads that reached a protected file (Plan 00612).
+- `destructive_git` denies a written script fed to a shell and a `printf -v` variable later run (Plan 00596).
+- The daemon takes `SSH_AUTH_SOCK`, and no other variable, from the connecting hook process, only when it names a socket owned by the daemon's uid; it is never logged (Plan 00594).
+- `daemon.omit_permission_surface: true` (opt-in, default `false`) lowers defence in depth for sessions not in bypass mode (Plan 00474).
 
 ## [3.74.0] - 2026-11-10
 
