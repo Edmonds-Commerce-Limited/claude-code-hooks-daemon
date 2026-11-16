@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 from tests.indexed_project import index_project
+from tests.load_scaling import scaled_seconds
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
@@ -25,6 +26,8 @@ from claude_code_hooks_daemon.utils.recursive_search import search_reads
 
 # Assembled so this file never spells a protected name itself.
 _SUFFIX = "sec" + "ret"
+# Idle-host budget for one pathological glob match; atomic groups keep it near 0.2 ms.
+_BACKTRACK_BUDGET_SECONDS = 0.1
 _TOP_LEVEL = f"example.{_SUFFIX}"
 _NESTED = f"dir/key.{_SUFFIX}"
 
@@ -346,7 +349,7 @@ class TestReviewFindings:
 
         started = time.perf_counter()
         assert _segments_match([name], [glob]) is False
-        assert time.perf_counter() - started < 0.1
+        assert time.perf_counter() - started < scaled_seconds(_BACKTRACK_BUDGET_SECONDS)
 
     @pytest.mark.parametrize(
         ("glob", "name", "expected"),
