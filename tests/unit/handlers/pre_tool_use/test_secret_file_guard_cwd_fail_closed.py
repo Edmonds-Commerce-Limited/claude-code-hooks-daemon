@@ -325,6 +325,73 @@ class TestDirectoryChangeSpellings:
         assert _decision(tree, command) is Decision.ALLOW
 
 
+class TestGlobFromADirectoryThatIsALinkOut:
+    """R5: after a move into a link out of the project, a glob with no slash reads there too."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd dlink && cat *",
+            "cd dlink && cat i*",
+            "cd dlink && head -n 5 *",
+            "cd dlink && cat -- *",
+            "pushd dlink >/dev/null; cat i*",
+            "cd deep/idlink && cat *",
+            "cd deep && cd idlink && cat i*",
+            "cd plink && cat i*",
+            "cd plink && cat s*/*",
+            "cd plink && cat */*",
+            "cd plink && cat ?d_*",
+            "cd dlink && cat ./*",
+        ],
+    )
+    def test_glob_read_from_a_link_out_denied(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        ["cat *", "cat */*", "cd clean && cat *", "cd clean && cat */*", "cd inner && cat p*"],
+    )
+    def test_glob_read_from_the_project_allowed(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.ALLOW
+
+
+class TestComputedDirectoryChange:
+    """R4: a cd whose target is a glob or is computed is judged from where it can lead."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd inn?r && cat ilink",
+            "cd inne[r] && cat ilink",
+            "cd i* && cat ilink",
+            'D=inner; cd "$D" && cat ilink',
+            "D=inner && cd $D && cat ilink",
+            'export D=inner; cd "${D}" && cat ilink',
+            'cd "$(echo inner)" && cat ilink',
+            "cd `echo inner` && cat ilink",
+            'cd "$UNSET_DIRECTORY_614" && cat ilink',
+            "cd de?p && grep -r x idlink",
+            'cd "$(echo deep)" && grep -r x idlink',
+            'cd "$(echo deep)" && cat idlink/*',
+        ],
+    )
+    def test_read_after_a_computed_cd_denied(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cd "$(git rev-parse --show-toplevel)" && ls',
+            "cd cle?n && cat plain.txt",
+            'D=clean; cd "$D" && cat plain.txt',
+            'cd "$(echo clean)" && cat plain.txt',
+        ],
+    )
+    def test_an_ordinary_computed_cd_allowed(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.ALLOW
+
+
 #: Names a filesystem call may refuse, or that Python may refuse to encode.
 _ODD_NAMES = [
     _LONG,
