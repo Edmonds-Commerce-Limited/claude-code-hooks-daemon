@@ -161,8 +161,8 @@ class TestGitSearchExemptionIsScopedToSubcommand:
             "git show --until -S {p}",
             "git log -p -S -S {p}",
             "git log -p --grep -S {p}",
-            # git is not the command whose option this is.
-            "sudo -u git blame -S {p} f",
+            # A wrapper argument spelled git is not the git command word.
+            "sudo -u git git blame -S {p} f",
         ],
     )
     def test_option_that_is_no_search_value_denied(
