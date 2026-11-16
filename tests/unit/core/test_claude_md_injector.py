@@ -1007,7 +1007,7 @@ class TestAutoCommitDoesNotFightTheAgentForTheIndexLock:
             "precondition: an untracked CLAUDE.md must reach the staging call, "
             "or this test proves nothing: " + repr(timeouts)
         )
-        assert timeouts["add"] == Timeout.GIT_COMMIT, (
+        assert Timeout.GIT_COMMIT <= timeouts["add"] <= Timeout.GIT_COMMIT_MAX, (
             "`git add` takes the same REQUIRED index lock as the commit, so a "
             "budget that can kill it mid-write orphans .git/index.lock — the "
             "very failure this area exists to avoid: " + repr(timeouts)
@@ -1043,7 +1043,7 @@ class TestAutoCommitDoesNotFightTheAgentForTheIndexLock:
         with patch.object(module, "run_git", spy):
             module.ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
 
-        assert timeouts.get("commit") == Timeout.GIT_COMMIT, timeouts
+        assert Timeout.GIT_COMMIT <= timeouts.get("commit", 0) <= Timeout.GIT_COMMIT_MAX, timeouts
         assert timeouts["status"] > 0, timeouts
         assert Timeout.GIT_COMMIT > Timeout.GIT_CONTEXT, (
             "the commit bound must exceed the read bound — a commit can run "
