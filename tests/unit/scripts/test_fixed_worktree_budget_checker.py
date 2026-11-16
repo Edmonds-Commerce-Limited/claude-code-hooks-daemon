@@ -6,6 +6,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts" / "qa"))
 import check_fixed_worktree_budget as checker
 
@@ -90,6 +92,34 @@ class TestAcceptsTheFix:
             """
             def listing(cwd):
                 run_git(cwd, "worktree", "list", "--porcelain")
+            """,
+        )
+
+
+class TestSingleVerbCalls:
+    @pytest.mark.parametrize("verb", ["commit", "fetch", "push"])
+    def test_a_fixed_budget_on_a_hard_failing_verb_is_reported(
+        self, tmp_path: Path, verb: str
+    ) -> None:
+        found = _scan(
+            tmp_path,
+            f"""
+            def sync(cwd):
+                run_git(cwd, "status")
+                run_git(cwd, "{verb}", "x", timeout=Timeout.GIT_FETCH_SESSION)
+            """,
+        )
+        assert len(found) == 1
+
+    def test_a_scaled_verb_call_passes_and_its_neighbours_are_not_judged(
+        self, tmp_path: Path
+    ) -> None:
+        assert not _scan(
+            tmp_path,
+            """
+            def sync(cwd):
+                run_git(cwd, "status")
+                run_git(cwd, "push", "x", timeout=scaled_timeout(30, 120))
             """,
         )
 

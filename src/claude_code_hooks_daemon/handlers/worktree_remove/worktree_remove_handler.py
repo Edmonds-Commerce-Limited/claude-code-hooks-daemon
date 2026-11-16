@@ -54,6 +54,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
     run_git,
 )
 from claude_code_hooks_daemon.utils.git_sync import resolve_default_branch
+from claude_code_hooks_daemon.utils.load_scaling import branch_metadata_timeout, scaled_timeout
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ _PATH_KEYS = ("worktree_path", "path")
 
 #: Time the branch step needs left over before it starts (creator record read,
 #: probes plus delete).
-_BRANCH_STEP_RESERVE = 3 * Timeout.GIT_CONTEXT
+_BRANCH_STEP_RESERVE = 3 * Timeout.GIT_BRANCH_METADATA_MAX
 
 
 class _BudgetSpent(Exception):
@@ -110,7 +111,7 @@ def _contained_elsewhere(record: WorktreeRecord, clock: _Clock) -> bool:
         "--contains",
         "HEAD",
         "--format=%(refname)",
-        timeout=clock.timeout(Timeout.GIT_CONTEXT, "the containment check"),
+        timeout=clock.timeout(branch_metadata_timeout(), "the containment check"),
     )
     if listing.returncode != 0:
         return False
@@ -169,7 +170,7 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
             "worktree",
             "list",
             "--porcelain",
-            timeout=clock.timeout(Timeout.GIT_CONTEXT, "the worktree listing"),
+            timeout=clock.timeout(branch_metadata_timeout(), "the worktree listing"),
         )
         if listing.returncode != 0:
             logger.warning("worktree_remove: git worktree list failed: %s", listing.stderr.strip())
@@ -179,7 +180,7 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
         if record is None:
             logger.warning("worktree_remove: %s is not a linked worktree; it is left alone", path)
             return
-        clock.timeout(Timeout.GIT_CONTEXT, "the loss check")
+        clock.timeout(branch_metadata_timeout(), "the loss check")
         blockers = worktree_blockers(record.path, self._branches.cleanup_after_merge.regenerable)
         if blockers:
             logger.warning(
@@ -202,7 +203,13 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
         if contained:
             args.append("--force")
         removed = run_git(
-            cwd, *args, str(record.path), timeout=clock.timeout(Timeout.GIT_WORKTREE, "the removal")
+            cwd,
+            *args,
+            str(record.path),
+            timeout=clock.timeout(
+                scaled_timeout(Timeout.GIT_WORKTREE, Timeout.GIT_WORKTREE_REMOVE_EVENT_MAX),
+                "the removal",
+            ),
         )
         if removed.returncode != 0:
             logger.warning(
@@ -220,7 +227,7 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
         """
         if clock.left() < _BRANCH_STEP_RESERVE:
             raise _BudgetSpent(f"the branch check of {name}")
-        record_timeout = clock.timeout(Timeout.GIT_CONTEXT, f"the creator record of {name}")
+        record_timeout = clock.timeout(branch_metadata_timeout(), f"the creator record of {name}")
         if not worktree_branch_deletable(repo, name, timeout=record_timeout):
             logger.info("worktree_remove: %s was not made by WorktreeCreate; branch kept", name)
             return
@@ -234,7 +241,9 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
                     name,
                     config=self._branches,
                     default=default,
-                    probe_timeout=clock.timeout(Timeout.GIT_CONTEXT, f"the merge probe of {name}"),
+                    probe_timeout=clock.timeout(
+                        branch_metadata_timeout(), f"the merge probe of {name}"
+                    ),
                 )
             except RuntimeError as exc:
                 log_and_continue(
@@ -266,7 +275,7 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
         WorktreeRemove is non-blocking, so a git error (not a repo, worktree
         already gone) must not propagate; it is logged, never discarded.
         """
-        result = run_git(Path(cwd), *args, timeout=Timeout.GIT_CONTEXT)
+        result = run_git(Path(cwd), *args, timeout=branch_metadata_timeout())
         if result.returncode != 0:
             logger.warning(
                 "worktree_remove: git %s failed: %s", " ".join(args), result.stderr.strip()

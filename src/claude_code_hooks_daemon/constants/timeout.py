@@ -218,6 +218,13 @@ class Timeout:
     # to the metadata ceiling.
     GIT_BRANCH_METADATA_MAX = 10
     GIT_CREATOR_LOCK_WAIT_MAX = 10
+    # Plan 00474 N621: WorktreeRemove's `worktree remove` deletes a whole checkout
+    # on the GIT_WORKTREE base scaled by host load, bounded by this ceiling. Its
+    # other git calls (worktree list, containment, creator record, merge probe,
+    # prune) are metadata calls at GIT_BRANCH_METADATA_MAX. The event budget below
+    # is sized for the ceiling plus that many metadata calls.
+    GIT_WORKTREE_REMOVE_EVENT_MAX = 120
+    GIT_WORKTREE_REMOVE_METADATA_CALLS = 5
     # The touch record runs on the guard path (20 s chain deadline), so its lock
     # wait is a fixed 2 s rather than load scaled.
     GIT_TOUCH_LOCK_WAIT = 2
@@ -258,8 +265,9 @@ class Timeout:
         + GIT_WORKTREE_CLEANUP_MAX * GIT_WORKTREE_CLEANUP_CALLS
         + GIT_BRANCH_METADATA_MAX * GIT_BRANCH_CREATION_CALLS
         + (GIT_CREATOR_LOCK_WAIT_MAX + GIT_BRANCH_METADATA_MAX) * GIT_BRANCH_RECORD_CALLS,
-        # `worktree remove --force` and then `worktree prune`.
-        EventType.WORKTREE_REMOVE: 2 * GIT_WORKTREE,
+        # The removal at its load-scaled ceiling, then the metadata calls.
+        EventType.WORKTREE_REMOVE: GIT_WORKTREE_REMOVE_EVENT_MAX
+        + GIT_WORKTREE_REMOVE_METADATA_CALLS * GIT_BRANCH_METADATA_MAX,
     }
     EVENT_CHAIN_DEADLINE: ClassVar[dict[EventType, int]] = {
         EventType.WORKTREE_CREATE: EVENT_HANDLER_BUDGET[EventType.WORKTREE_CREATE]
@@ -322,6 +330,16 @@ class Timeout:
     # alone takes 3 to 7 seconds, and more while hooks run beside it. A build that
     # inherited GIT_CONTEXT timed out every time and the daemon never had an index.
     INDEX_BUILD_GIT = 120
+    # Plan 00474 N622: each of these calls treats a timeout as a hard failure with
+    # no retry, so it runs on its base above scaled by host load (or repository
+    # size) and bounded by a ceiling its own caller can afford. None runs inside a
+    # pinned event budget: the auto-commit is daemon startup, park/keep are CLI
+    # commands, the safety walks are CLI or daemon work, the index build is a
+    # background thread.
+    GIT_COMMIT_MAX = 120
+    GIT_FETCH_SESSION_MAX = 120
+    GIT_BRANCH_SAFETY_MAX = 480
+    INDEX_BUILD_GIT_MAX = 480
 
     # QA runner timeouts (seconds)
     QA_TEST_TIMEOUT = 120  # 2 minutes (mypy, individual tool checks)

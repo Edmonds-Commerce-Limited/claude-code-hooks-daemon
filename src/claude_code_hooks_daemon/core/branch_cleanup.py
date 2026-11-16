@@ -1153,7 +1153,7 @@ def _push_deletes(repo: Path, remote: str, tips: Mapping[str, str]) -> tuple[lis
         *leases,
         remote,
         *deletes,
-        timeout=Timeout.GIT_FETCH_SESSION,
+        timeout=scaled_timeout(Timeout.GIT_FETCH_SESSION, Timeout.GIT_FETCH_SESSION_MAX),
         env=remote_git_env(),
     )
     outcomes: dict[str, str] = {}

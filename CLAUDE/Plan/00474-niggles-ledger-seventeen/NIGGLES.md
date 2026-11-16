@@ -7510,8 +7510,7 @@ which `init.sh` mirrors as a 70 s client wait, so scaling the call alone would c
 killed at 30 s leaves a half-deleted `prunable` worktree, the N464 shape. `check_fixed_worktree_budget.py`
 lists the function in its allowlist against this entry.
 
-**Status**: ⬜ Open. Give the event the same treatment as WorktreeCreate: a load-scaled ceiling for the
-removal, the event tables and `init.sh` re-derived from it, and the allowlist row deleted.
+**Status**: ✅ Fixed. Class: a hard failure gated on a fixed wall-clock budget for a git call whose duration follows host load, inside an event whose total budget is pinned (same class as N623). `worktree remove` now runs on `scaled_timeout(Timeout.GIT_WORKTREE, Timeout.GIT_WORKTREE_REMOVE_EVENT_MAX)` (30 s base, 120 s ceiling) and the handler's other git calls (worktree list, containment, creator record, merge probe, prune) on `load_scaling.branch_metadata_timeout()`. `EVENT_HANDLER_BUDGET[WORKTREE_REMOVE]` is re-derived as the removal ceiling plus `GIT_WORKTREE_REMOVE_METADATA_CALLS` metadata ceilings (60 s to 170 s, `init.sh` client wait 70 s to 180 s), and the `check_fixed_worktree_budget.py` allowlist row is deleted. Defence: `tests/unit/handlers/worktree_remove/test_worktree_remove_load_scaling.py` (the removal and metadata calls are scaled under a saturated host, and the budget arithmetic is pinned) and the detector itself, which now passes with an empty allowlist. Release note 087.
 
 ### N622 — git calls that gate a hard failure on a fixed budget that scales with host load
 
@@ -7525,8 +7524,7 @@ and the proof walks on `GIT_BRANCH_SAFETY` (120 s), both of which scale with rep
 file index build uses `INDEX_BUILD_GIT` (120 s). The detector covers only `worktree add` and `remove`, so
 none of these is flagged.
 
-**Status**: ⬜ Open. Wrap each in `scaled_timeout` with a ceiling its own caller can afford, and widen the
-detector's verb list to match as each is fixed.
+**Status**: ✅ Fixed. Class: a hard failure gated on a fixed wall-clock budget for a git call whose duration follows host load or repository size, with no retry (same class as N621 and N623). Each site now runs on `scaled_timeout(<base>, <ceiling>)` with a ceiling its caller can afford, none of them inside a pinned event budget: the auto-commit `add` and `commit` (`GIT_COMMIT` to `GIT_COMMIT_MAX` 120 s), the park and keep fetches and pushes and the `branch-sweep` lease push (`GIT_FETCH_SESSION` to `GIT_FETCH_SESSION_MAX` 120 s), the branch-safety object walks (`_git` and `cherry_unique_shas` default to `GIT_BRANCH_SAFETY` scaled to `GIT_BRANCH_SAFETY_MAX` 480 s; an explicit `timeout=` is still honoured), and the protected-file index build (`INDEX_BUILD_GIT` to `INDEX_BUILD_GIT_MAX` 480 s). The entry's `GIT_BUNDLE_CREATE` recovery-bundle call does not exist in the tree, so there was nothing to wrap. The detector now also checks every `commit`, `fetch` and `push` runner call (per call, not per function); two reviewed exceptions are allowlisted with their reason, the status-line background fetch (a failure only leaves counts stale) and `plan_numbering.remote_highest_plan_number` (a failed fetch reports the remote unchecked, and its budget is pinned to `mkplan.bash`). Defence: `tests/unit/core/test_hard_failure_calls_load_scaling.py` (each call is scaled to its ceiling under a saturated host, keeps its base on an idle one) and the widened `scripts/qa/check_fixed_worktree_budget.py`. Release note 087.
 
 ### N623 — the branch-cap and creator-record calls around WorktreeCreate stay on the 5 s default
 

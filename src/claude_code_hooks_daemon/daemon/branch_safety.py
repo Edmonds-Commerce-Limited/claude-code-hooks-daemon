@@ -51,6 +51,7 @@ from pathlib import Path
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
+from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.remote_refs import (
     LazyRemoteRefs,
     RemoteRefs,
@@ -327,7 +328,7 @@ def _git(
     repo: Path,
     *args: str,
     check: bool = True,
-    timeout: float = Timeout.GIT_BRANCH_SAFETY,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run git in ``repo`` on a budget sized for object walks.
 
@@ -339,9 +340,12 @@ def _git(
     ``cherry`` computes a patch-id per commit, ``rev-list --objects`` and
     ``ls-tree -r`` enumerate every tree and blob in a ref — so the cost scales
     with the repository, and a five-second hook-context budget turns a large repo
-    into a ``CalledProcessError`` (Plan 00248 F1). ``timeout`` is overridable per
-    call so a heavier call can have more.
+    into a ``CalledProcessError`` (Plan 00248 F1). The default is the base scaled
+    by host load up to ``Timeout.GIT_BRANCH_SAFETY_MAX``, because a timeout is a
+    hard failure here (Plan 00474 N622). ``timeout`` is overridable per call.
     """
+    if timeout is None:
+        timeout = scaled_timeout(Timeout.GIT_BRANCH_SAFETY, Timeout.GIT_BRANCH_SAFETY_MAX)
     result = run_git(repo, *args, timeout=timeout)
     if check and result.returncode != 0:
         raise subprocess.CalledProcessError(
@@ -468,7 +472,7 @@ def matches_any_glob(name: str, patterns: Sequence[str]) -> bool:
 
 
 def cherry_unique_shas(
-    repo: Path, upstream: str, head: str, *, timeout: float = Timeout.GIT_BRANCH_SAFETY
+    repo: Path, upstream: str, head: str, *, timeout: float | None = None
 ) -> list[str] | None:
     """Commits on ``head`` whose patch-id is absent from ``upstream``; None when git fails.
 

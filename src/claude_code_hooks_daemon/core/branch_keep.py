@@ -22,6 +22,7 @@ from typing import Final
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.remote_refs import remote_git_env
 
 logger = logging.getLogger(__name__)
@@ -135,7 +136,7 @@ def fetch_keeps(repo: Path, remote: str) -> str | None:
         "fetch",
         remote,
         f"+refs/notes/hooks-daemon/*:{_TRACKING_ROOT}/{remote}/*",
-        timeout=Timeout.GIT_FETCH_SESSION,
+        timeout=scaled_timeout(Timeout.GIT_FETCH_SESSION, Timeout.GIT_FETCH_SESSION_MAX),
         env=remote_git_env(),
     )
     if result.returncode != 0:
@@ -149,7 +150,7 @@ def _push(repo: Path, remote: str) -> str | None:
         "push",
         remote,
         f"{KEEP_NOTES_REF}:{KEEP_NOTES_REF}",
-        timeout=Timeout.GIT_FETCH_SESSION,
+        timeout=scaled_timeout(Timeout.GIT_FETCH_SESSION, Timeout.GIT_FETCH_SESSION_MAX),
         env=remote_git_env(),
     )
     return None if result.returncode == 0 else (result.stderr.strip() or "git push failed")

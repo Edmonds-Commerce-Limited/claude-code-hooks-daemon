@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.utils.git_file_states import GitFileStates
@@ -324,7 +325,7 @@ def build_index(project_root: Path, patterns: tuple[str, ...]) -> ProtectedFileI
 
     states = scan_git_file_states(
         project_root,
-        timeout=Timeout.INDEX_BUILD_GIT,
+        timeout=scaled_timeout(Timeout.INDEX_BUILD_GIT, Timeout.INDEX_BUILD_GIT_MAX),
         pathspecs=git_pathspecs(patterns, project_root),
     )
     if states is None:

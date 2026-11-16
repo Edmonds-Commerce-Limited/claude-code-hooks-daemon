@@ -48,7 +48,7 @@ if [[ "${1:-}" != "--no-relay" && "$_rl_src" == /*/.claude/hooks/* ]]; then
             _rl_exec_relay() {
                 HOOKS_DAEMON_RELAY_DAEMON_ROOT="${_rl_dir%/*}" \
                     exec "$_rl_bin" "$_rl_sock" --fallback "$1" \
-                    --timeout-ms "70000"
+                    --timeout-ms "180000"
             }
             _rl_exec_relay "${BASH_SOURCE[0]}"
             shopt -u execfail
