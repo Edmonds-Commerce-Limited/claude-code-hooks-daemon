@@ -7570,3 +7570,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: reproduced on `main`: `bin/hooks-daemon --version` exits 2 with the whole usage text and an unrecognised-argument error. The usage lists many subcommands but the version is only readable by `git describe` in the checkout or from the status line, which a client seat or a sub-agent cannot always reach. Bug reports (BUG_REPORTING.md) and peers both need the installed version.
 
 **Status**: ⬜ Open. Accept `--version` (and a `version` subcommand if the CLI style prefers one) printing the same version string the status line and the unreleased-install marker use (`vA.B.C` or `vA.B.C+rc-X.Y.Z.<sha>`), exit 0, no daemon needed. Defence: a CLI test that runs it with no daemon and asserts exit 0 and the string, for a released and an unreleased install.
+
+### N628 — the bash safe-mode prelude rule denies a brace group whose steps are each already `&&`-gated
+
+**Source**: a peer report (a desktop seat in the lts-infra team, not a human, no authority), made against `v3.74.0` and met by a sub-agent. No file contents involved.
+
+**Evidence** (as reported, NOT yet reproduced here): R-BASH-SAFE-MODE-PRELUDE-MISSING denied a command holding a brace group `{ a && b && c; }` whose steps are all `&&`-gated, so the group cannot continue past a failure. Expected: an all-`&&`-gated group needs no prelude.
+
+**Status**: ⬜ Open. Reproduce first on `main` with a synthetic command; if it reproduces, fix test-first so an all-`&&`-gated group is allowed while a group with an ungated step (`;` or newline between steps) is still denied (the narrowing must be proven by a test for that ungated twin).
