@@ -1,68 +1,128 @@
 # Plan 00614: secret-guard link gaps, test-first fix
 
-Branch `agent-a13d7c8504105d4c9-aeae03b4`. No real protected file was read; every
-fixture is synthetic (a temp primary checkout with untracked dummy files named like
-a default protected name, assembled in code, content DUMMY; a registered
-`git worktree`; relative file and directory links; process cwd `/`; payload cwd the
-worktree; project root parametrised over worktree and primary).
+Branch `agent-a13d7c8504105d4c9-aeae03b4`. No real protected file was read. Every
+fixture is synthetic: a temp primary checkout holding untracked dummy files (content
+DUMMY) named like a default protected name, with the name assembled in code; a
+registered `git worktree`; relative file links and directory links. The process cwd
+is `/`, the payload cwd is the worktree, and the project root is parametrised over
+the worktree and the primary. The tests are in
+`tests/unit/handlers/pre_tool_use/test_secret_file_guard_link_resolution.py`.
 
 ## Commits
 
-1. `618cc3f21` Task 1.1 RED: `tests/unit/handlers/pre_tool_use/test_secret_file_guard_link_resolution.py`.
-   33 cases failed before any fix (17 closed by the gap 1 fix, including a relative
-   Grep `path`; 7 by gap 2; 9 by gap 3, including the fail-closed link-to-clean-outside
-   case); 34 controls passed before and after.
-2. `94a46e5b3` Task 2.1 (gap 1). Then gaps 2+3 and the release note in a third commit.
+- `618cc3f21` is Task 1.1, the RED proof. Before any fix 33 cases failed and 34
+  controls passed. The controls passed again after the fix.
+- `94a46e5b3` is Task 2.1, gap 1.
+- `3e83e7c22` is Tasks 2.2 to 2.4: gaps 2 and 3 and the release note.
+- `99d61ac98` merges origin/main, which brings in Plan 00612.
+- A follow-up commit adds the exemption fixes, the extra tests and this report.
+
+## Overlap with Plan 00612 (merged to main mid-task)
+
+00612 realpaths a glob's literal directory prefix in `_glob_parts` and lists
+symlinked directories for trailing-slash globs. On origin/main alone, the RED file
+fails 29 of its cases:
+
+- **gap 1** (16 cases) is fully open;
+- **gap 2** (8 cases) is open whenever a link leads out of the project, plus a
+  relative Grep `path`;
+- **gap 3** (5 cases) is open when the project root is the worktree, so the link
+  leads out. 00612 closed gap 3 when the target is inside the project, so
+  project = primary.
+
+I kept 00612's `_glob_parts` resolution and dropped my own duplicate in-project
+substitution. Only the "link leads out of the project" rule was added, as
+`_link_out_directory`, on top of 00612's loops.
 
 ## Fixes
 
-- **Gap 1** (`utils/secret_file_matching.py`): `_realpath_if_resolvable` resolves when
-  ANY component is a link (realpath of the spelled path vs its normpath), gated by
-  one `os.path.lexists` (prose / NUL / over-long words cost one call and never raise;
-  a dangling final link is still resolved). New `_link_targets(token, cwds)` places a
-  relative word under each `effective_cwds` entry and still the process cwd, so
-  nothing judged before is judged less. Both call sites (`_token_mention`,
-  `find_protected_mention_strict`) use it; the strict variant now computes cwds even
-  without an index. `is_grep_pattern_only_mention` takes `cwd` (else
-  `grep <protected-name> link` was exempted as a pattern-only mention). Handler
-  (`secret_file_guard.py`): a relative Read/Write/Edit/Grep path is also judged
-  placed under the hook cwd, and `_directory_reach` gets the placed path. The
-  error-hiding exclusion for the removed `except OSError` was deleted.
-- **Gap 2** (`utils/protected_file_index.py` `find_under`): a root lexically inside
-  the project whose realpath is a directory outside it answers `patterns[0]`
-  (precedent: `_is_wildcard_filter_over_foreign_cwd`). Unreadable target fails
-  closed (`path_is_dir(..., unreadable_means=True)`). A root outside the project as
-  spelled is unchanged (no new denial of `grep -r x /usr/...`).
-- **Gap 3** (`glob_matches`, `directories_matching`): when the glob's own text names
-  a directory before its first wildcard, that directory is realpath-ed; inside the
-  project the glob is also matched with the link resolved, outside it the glob is
-  not vouched for (deny; for a trailing-slash glob the link directory is handed to
-  `find_under`, which denies). No filesystem expansion (the index's "no walking"
-  rule); a glob with no literal directory (`*.py`) costs no syscall.
+### Gap 1: `secret_file_matching.py`
+
+- `_realpath_if_resolvable` now resolves when any component of the path is a link.
+  It compares the realpath of the path as spelled with its normpath.
+  - It is gated by one `os.path.lexists`, so a word that is not a path costs a
+    single call and never raises.
+  - A dangling final link is still resolved.
+- The new `_link_targets(token, cwds)` places a relative word under each effective
+  cwd and still under the process cwd.
+- Both callers use it: `_token_mention` and `find_protected_mention_strict`. The
+  strict variant now computes cwds even when it has no index.
+- The hook cwd is now passed to three exemptions:
+  - `is_grep_pattern_only_mention`, which previously exempted `grep <protected-name> link`.
+  - `is_exempt_invocation`, which previously let `ansible-playbook --vault-password-file <pw> link1.txt` through.
+  - The scan inside `is_encrypted_target_invocation`, which previously let `cat <encrypted-vault> link1.txt` through.
+  - Each of the three has a RED test that failed before its fix.
+- In `secret_file_guard.py`, a relative Read, Write, Edit or Grep path is also judged
+  as placed under the hook cwd.
+- The error-hiding exclusion for the removed `except OSError` is deleted.
+  `audit_error_hiding.py` passes.
+
+### Gap 2: `protected_file_index.py`, `find_under`
+
+- When a root is inside the project as spelled but its realpath is a directory
+  outside it, `find_under` returns `patterns[0]`. This follows the precedent of
+  `_is_wildcard_filter_over_foreign_cwd`.
+- An unreadable target fails closed.
+- A root that is outside the project as spelled is judged as before.
+
+### Gap 3: `glob_matches` and `directories_matching`
+
+- When the directory a glob spells before its first wildcard is a link out of the
+  project, `glob_matches` returns `patterns[0]`.
+- `directories_matching` hands that link directory to `find_under`, which denies it.
+- There is no filesystem expansion, and a glob with no literal directory costs no
+  syscall.
+
+### Deny message
+
+The fail-closed denials name `patterns[0]` as the "matched" glob, although no
+particular file matched. The release note says so.
+
+## Blast radius and consumers
+
+- The fail-closed rule also covers `quarantine_artefact_read_guard`, which shares
+  the index and `recursive_search`. Its suite is green.
+- No directory symlink exists in this worktree or in any other worktree up to
+  depth 4. `worktree_create` seeds file links only, such as `block-words.secret`
+  and `init.sh`, so worktree agents' ordinary `grep -r` and globs are unaffected.
+- `cat outlink/*` is denied when the outside directory holds nothing protected. A
+  test pins this: it is the intended trade-off.
 
 ## Verification
 
-Targeted pytest over every secret-guard unit suite (10 guard files, secret_file_matching
-x4, protected_file_index, recursive_search, exemptions_reserved_words) plus the 7
-integration files that mention the guard: 2856 passed, 3 skipped (the 3 are the
-new file's primary-root skips). ruff, black --check, mypy clean on the three touched source files.
+- Targeted pytest ran over:
+  - every secret-guard unit suite and the quarantine guard;
+  - `protected_file_index`, `recursive_search` and `secret_file_matching` (four files);
+  - `exemptions_reserved_words`;
+  - the release-note tests (`test_release_notes`, `test_unreleased_manifests`,
+    `test_pending_release_notes_holding_area`);
+  - the seven integration files that mention the guard.
+- The result is recorded in the follow-up commit message.
+- ruff, `black --check` and mypy are clean on the three source files and the test file.
+- The daemon was not restarted and no live check was run. The coordinator owns the
+  merge gate.
 
-## Detector (DBF step 2)
+## Defence Before Fix
 
-No practical code-reading detector: the class is "a filesystem query on a relative
-path while the process cwd is not the command's cwd", which depends on data flow
-(where a string came from) that a lexical rule cannot see. Recorded as a toolchain gap;
-fixed conventionally with the RED tests as the regression net.
+- **Class:** a filesystem query, or an exemption scan, on a relative path while the
+  process cwd is not the command's cwd.
+- **Sweep:** I read every realpath, is_symlink and lexists site, and every
+  mention-scan call that has no cwd, in the three modules. There are 6 instances,
+  all fixed here:
+  - the two `_realpath_if_resolvable` sites;
+  - the handler's relative path route;
+  - the three exemption scans.
+- **No detector:** whether a string is relative to the hook cwd is a data-flow
+  property, and a lexical rule cannot see it. This is recorded as a toolchain gap;
+  the RED tests are the net.
 
 ## Residuals (deliberately not fixed)
 
-- A plain absolute root in another checkout with no link (`grep -r x /path/to/primary`)
-  is judged against this project's index only, as before.
-- `grep -R` / `rg -L` over an in-project tree that CONTAINS a link out: the root is
-  in-project, so it is not caught here (the filter-relaxation path already denies
-  link-following flags for wildcard filters only).
-- No index yet (daemon just started): searches and globs are allowed with the
-  existing advisory.
-- A glob spelled `dlink/../*` is placed lexically (normpath), not physically.
-- The new fail-closed rule also denies `cat outlink/*` where the outside directory
-  holds nothing protected (pinned by a test; that is the intended trade-off).
+- A plain absolute root in another checkout, with no link involved, is still judged
+  against this project's index only.
+- `grep -R` or `rg -L` over an in-project tree that contains a link out is not
+  covered.
+- With no index yet, searches and globs are allowed with the existing advisory.
+- `dlink/../*` is placed lexically.
+- The unreadable-target arm of `find_under` has no test, because the tests run as
+  root.

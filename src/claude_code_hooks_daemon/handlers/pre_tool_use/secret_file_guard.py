@@ -1482,7 +1482,9 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # the flag-position check re-tests bare consumer arguments, and
             # testing the shipped defaults there would blind it to every
             # project-configured pattern — all of them under mode: replace.
-            if sfm.is_exempt_invocation(command, self._consumers(), patterns, deadline=deadline):
+            if sfm.is_exempt_invocation(
+                command, self._consumers(), patterns, deadline=deadline, cwd=cwd
+            ):
                 return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
             if sfm.is_encrypted_target_invocation(
                 command, patterns, cwd=cwd, is_encrypted=self._is_encrypted, deadline=deadline

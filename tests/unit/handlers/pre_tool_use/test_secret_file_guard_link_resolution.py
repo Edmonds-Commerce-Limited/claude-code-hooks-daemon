@@ -24,6 +24,7 @@ from unittest.mock import patch
 
 import pytest
 from tests.indexed_project import index_project
+from tests.vault_payloads import vault_file_bytes
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
@@ -163,6 +164,46 @@ class TestRelativeLinkTokenResolvedAgainstHookCwd:
         assert _bash(checkouts, command) is Decision.ALLOW
 
 
+def test_strict_variant_resolves_a_relative_link_from_the_hook_cwd(
+    checkouts: Checkouts, project: Path
+) -> None:
+    """``find_protected_mention_strict`` places a relative link under ``cwd``, index or not."""
+    patterns = SecretFileGuardHandler()._patterns()
+    cwd = str(checkouts.worktree)
+    assert sfm.find_protected_mention_strict("cat link1.txt", patterns, cwd=cwd) is not None
+    assert sfm.find_protected_mention_strict("cat readme.txt", patterns, cwd=cwd) is None
+
+
+class TestExemptionsJudgeRelativeLinksFromHookCwd:
+    """An exemption that clears a command must not clear a relative link beside it."""
+
+    # Assembled, like _PROTECTED, so this file never spells a protected name.
+    _VAULT_REL = "group_vars/all/" + "vault_" + "passwords.yml"
+    _PASSWORD_FILE = "." + "vault-" + "pass"
+
+    @pytest.fixture()
+    def encrypted(self, checkouts: Checkouts) -> Path:
+        target = checkouts.worktree / self._VAULT_REL
+        target.parent.mkdir(parents=True)
+        target.write_bytes(vault_file_bytes())
+        return target
+
+    def test_encrypted_target_exemption_does_not_clear_a_relative_link(
+        self, checkouts: Checkouts, project: Path, encrypted: Path
+    ) -> None:
+        if project == checkouts.primary:
+            pytest.skip("an encrypted file outside the project root is never exempt")
+        assert _bash(checkouts, f"git add {self._VAULT_REL}") is Decision.ALLOW
+        assert _bash(checkouts, f"cat {self._VAULT_REL} link1.txt") is Decision.DENY
+
+    def test_consumer_exemption_does_not_clear_a_relative_link(
+        self, checkouts: Checkouts, project: Path
+    ) -> None:
+        flags = f"ansible-playbook --vault-password-file {self._PASSWORD_FILE}"
+        assert _bash(checkouts, f"{flags} site.yml") is Decision.ALLOW
+        assert _bash(checkouts, f"{flags} link1.txt") is Decision.DENY
+
+
 class TestSearchRootedAtLinkLeadingOutOfProject:
     """Gap 2: a search rooted at a directory link out of the project is not vouched for."""
 
@@ -181,7 +222,15 @@ class TestSearchRootedAtLinkLeadingOutOfProject:
         assert decision is Decision.DENY
 
     @pytest.mark.parametrize(
-        "command", ["grep -r x dlink", "grep -r x plink/", "rg x dlink", "grep -rl x plink"]
+        "command",
+        [
+            "grep -r x dlink",
+            "grep -r x plink/",
+            "rg x dlink",
+            "grep -rl x plink",
+            "grep -r x plink/*/",
+            "grep -r x plink/s*",
+        ],
     )
     def test_recursive_bash_search_on_directory_link_denied(
         self, checkouts: Checkouts, project: Path, command: str

@@ -3390,6 +3390,7 @@ def is_exempt_invocation(
     patterns: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS,
     *,
     deadline: float | None = None,
+    cwd: str | None = None,
 ) -> bool:
     """True when ``command`` is one of the two sanctioned path-mention shapes.
 
@@ -3418,7 +3419,9 @@ def is_exempt_invocation(
     command is never judged as the single command this exemption requires.
 
     ``deadline`` (Plan 00466 review 8 L1) is forwarded to
-    :func:`_paths_only_in_flag_position`'s per-word mention checks.
+    :func:`_paths_only_in_flag_position`'s per-word mention checks. ``cwd`` is
+    the hook's: a positional word that is a relative link to a protected file
+    is resolved from it (Plan 00614) and voids the exemption.
     """
     stripped = command.strip()
     if not stripped:
@@ -3450,7 +3453,9 @@ def is_exempt_invocation(
             continue
         if _denied_subcommand_used(words, consumer):
             return False
-        return _paths_only_in_flag_position(words, consumer, patterns, deadline=deadline)
+        return _paths_only_in_flag_position(
+            words, consumer, patterns, deadline=deadline, cwds=effective_cwds(command, cwd)
+        )
     return False
 
 
@@ -3593,6 +3598,7 @@ def _paths_only_in_flag_position(
     patterns: tuple[str, ...],
     *,
     deadline: float | None = None,
+    cwds: tuple[str, ...] = (),
 ) -> bool:
     """True when no bare word other than a flag VALUE looks path-mention-risky.
 
@@ -3605,8 +3611,10 @@ def _paths_only_in_flag_position(
     ``deadline`` (Plan 00466 review 8 L1) is forwarded to
     :func:`find_protected_mention` per word -- this loop's own total cost
     across many words is otherwise unbounded the same way B1 found for
-    :func:`iter_protected_mentions`.
+    :func:`iter_protected_mentions`. ``cwds`` place a relative word that is a
+    link (:func:`_link_targets`), which the text check alone cannot see through.
     """
+    project_root = resolve_project_root()
     flag_value_positions: set[int] = set()
     for index, word in enumerate(words):
         bare = word.strip("\"'")
@@ -3630,7 +3638,14 @@ def _paths_only_in_flag_position(
             if not bare.startswith("--"):
                 candidates.append(bare[2:])
         if any(
-            candidate and find_protected_mention(candidate, patterns, deadline=deadline) is not None
+            candidate
+            and (
+                find_protected_mention(candidate, patterns, deadline=deadline) is not None
+                or any(
+                    first_matching_glob(real, patterns, project_root=project_root) is not None
+                    for real in _link_targets(candidate, cwds)
+                )
+            )
             for candidate in candidates
         ):
             return False
@@ -3797,7 +3812,7 @@ def is_encrypted_target_invocation(
         return False
     if not _is_encrypted_target_reader(words):
         return False
-    mentions = list(iter_protected_mentions(command, patterns, deadline=deadline))
+    mentions = list(iter_protected_mentions(command, patterns, deadline=deadline, cwd=cwd))
     if not mentions:
         return False
     literal_words = frozenset(words)
