@@ -51,9 +51,36 @@ def bound_socket() -> Iterator[Path]:
         shutil.rmtree(short_dir, ignore_errors=True)
 
 
+_AF_UNIX_LIMIT = 104  # daemon/paths.py:_UNIX_SOCKET_PATH_LIMIT
+_PID_TAIL = f"/.claude/hooks-daemon/untracked/daemon-{_HOSTNAME}.pid"
+
+
 @pytest.fixture
-def project(tmp_path: Path) -> Path:
-    root = tmp_path / "proj"
+def short_base() -> Iterator[Path]:
+    """A short directory, so a project path can be padded to an exact length under it."""
+    base = Path(tempfile.mkdtemp(prefix="pp-", dir="/tmp")).resolve()
+    try:
+        yield base
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def _project_with_pid_path_length(short_base: Path, pid_path_length: int) -> Path:
+    """A project whose natural PID path is exactly ``pid_path_length`` characters."""
+    base = short_base / "p"
+    pad = pid_path_length - len(str(base)) - len(_PID_TAIL)
+    assert pad >= 0, "short base too long for the requested PID path length"
+    root = Path(f"{base}{'x' * pad}")
+    return _make_project(root)
+
+
+@pytest.fixture
+def project(short_base: Path) -> Path:
+    """A project whose PID path overflows the AF_UNIX limit, as a long checkout path does."""
+    return _project_with_pid_path_length(short_base, _AF_UNIX_LIMIT + 1)
+
+
+def _make_project(root: Path) -> Path:
     (root / ".claude" / "hooks-daemon" / "untracked").mkdir(parents=True)
     shutil.copy(INIT_SH, root / ".claude" / "init.sh")
     subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
@@ -100,6 +127,27 @@ def test_pid_path_follows_the_discovered_socket(project: Path, bound_socket: Pat
         "long default, so the daemon that wrote the discovery file is invisible to "
         "is_daemon_running and every forwarder refuses to talk to it"
     )
+
+
+def test_pid_path_stays_natural_when_only_the_socket_overflows(
+    short_base: Path, bound_socket: Path
+) -> None:
+    """A PID path of exactly the limit fits while its one-character-longer socket does not.
+
+    The daemon then binds its socket in the runtime dir but leaves the PID file
+    in the untracked dir (paths.pid_path_for decides on the PID path's own
+    length). init.sh must look where the daemon wrote it: a CI checkout sat at
+    exactly this boundary, every forwarder judged the live daemon dead, and the
+    hooks silently passed everything through.
+    """
+    root = _project_with_pid_path_length(short_base, _AF_UNIX_LIMIT)
+    untracked = root / ".claude" / "hooks-daemon" / "untracked"
+    (untracked / f"daemon-{_HOSTNAME}.socket-path").write_text(f"{bound_socket}\n")
+
+    paths = _resolved_paths(root)
+
+    assert paths["SOCKET"] == str(bound_socket)
+    assert paths["PID"] == str(untracked / f"daemon-{_HOSTNAME}.pid")
 
 
 def test_pid_path_stays_default_without_a_discovery_file(project: Path) -> None:

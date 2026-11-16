@@ -1918,6 +1918,45 @@ def event_socket_dir_is_fallback(untracked_dir: Path) -> bool:
     return not _event_socket_dir_fits(natural)
 
 
+#: Suffix of the file naming where the per-event sockets really are, written
+#: beside the natural ``events{suffix}`` directory (Plan 00609). Twin of the
+#: bash in ``install/forwarder_generator.py`` and ``.claude/init.sh``.
+EVENTS_DIR_LOCATION_SUFFIX = ".location"
+
+
+def events_dir_location_file(untracked_dir: Path) -> Path:
+    """The file publishing the real per-event socket directory for ``untracked_dir``."""
+    return untracked_dir / f"events{_get_hostname_suffix()}{EVENTS_DIR_LOCATION_SUFFIX}"
+
+
+def publish_events_dir_location(untracked_dir: Path, events_dir: Path) -> None:
+    """Record where this checkout's per-event sockets are bound, when not the natural place.
+
+    Generated forwarders are machine independent (Plan 00609): they cannot carry
+    the short fallback path used when the natural events directory overflows the
+    AF_UNIX limit (it holds a runtime dir, a uid and hashes, none computable in
+    bash without a spawn). They read this file instead: two lines, the untracked
+    dir it was written for (so a copied checkout never trusts it) and the events
+    directory. Written atomically. A natural events directory needs no file, so a
+    stale one is removed.
+
+    Raises:
+        OSError: if the file cannot be written; the caller decides how loud that is.
+    """
+    location = events_dir_location_file(untracked_dir)
+    if not event_socket_dir_is_fallback(untracked_dir):
+        location.unlink(missing_ok=True)
+        return
+    # Imported here, not at module level: this file is also loaded by path with
+    # no package on sys.path (the bootstrap decision, the standalone resolver),
+    # and only the daemon itself ever publishes this file.
+    from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
+
+    scratch = unique_temp_path(location)
+    scratch.write_text(f"{untracked_dir}\n{events_dir}\n")
+    scratch.replace(location)
+
+
 def get_event_socket_dir(project_dir: Path | str) -> Path:
     """Return the sibling directory holding per-event Unix sockets (Plan 00290).
 
