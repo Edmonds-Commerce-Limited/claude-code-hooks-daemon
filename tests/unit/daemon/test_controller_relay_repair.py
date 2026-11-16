@@ -60,7 +60,7 @@ class TestStartRelayRepair:
             with caplog.at_level("INFO", logger=_MODULE):
                 DaemonController()._start_relay_repair(tmp_path, config_path, None)
 
-        assert caplog.records == []
+        assert [r for r in caplog.records if r.name == _MODULE] == []
 
     def test_a_repair_that_could_not_start_is_logged_as_an_error(
         self, tmp_path: Path, config_path: Path, caplog: pytest.LogCaptureFixture

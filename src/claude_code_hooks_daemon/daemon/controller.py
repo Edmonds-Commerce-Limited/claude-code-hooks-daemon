@@ -47,7 +47,7 @@ from claude_code_hooks_daemon.daemon.source_fingerprint import (
 )
 from claude_code_hooks_daemon.daemon.verdict_log import append_verdicts
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
-from claude_code_hooks_daemon.install.relay_repair import repair_unusable_relay
+from claude_code_hooks_daemon.install.relay_repair import RepairNotice, repair_unusable_relay
 from claude_code_hooks_daemon.utils.cli_command import is_recovery_command
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.protected_file_index import IndexPrewarmer
@@ -634,6 +634,8 @@ class DaemonController:
                 untracked_dir=get_untracked_dir(workspace_root),
                 version=__version__,
             )
+            if outcome is not None:
+                self._log_relay_repair_outcome(*outcome)
         except (OSError, ValueError, TypeError) as exc:
             log_and_continue(
                 logger,
@@ -641,10 +643,10 @@ class DaemonController:
                 reason="a relay repair that could not be judged or started leaves the relay on the fallback transport, which still enforces every rule; the daemon must keep serving hooks (fail-open startup contract) and the SessionStart checker reports the unusable binary",
                 level=logging.ERROR,
             )
-            return
-        if outcome is None:
-            return
-        binary, notice = outcome
+
+    @staticmethod
+    def _log_relay_repair_outcome(binary: Path, notice: RepairNotice) -> None:
+        """Say in the daemon log what the start-up relay repair did about ``binary``."""
         if notice.failure is not None:
             logger.error("relay repair of %s: %s", binary, notice.failure)
         elif notice.started:
