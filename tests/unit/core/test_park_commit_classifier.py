@@ -297,6 +297,16 @@ class TestLocalCopy:
         assert verdict.tier == branch_safety.TIER_PARK_CARRIED
         assert verdict.is_safe
 
+    def test_delete_branch_deletes_it_with_a_restore_line(self, repo: Path) -> None:
+        _work(repo, "feat")
+        _merge(repo, "feat")
+        _park(repo, "feat")
+        tip = _git(repo, "rev-parse", "feat")
+        report = branch_safety.delete_branches(repo, ["feat"], content_tier=False)
+        assert report.deleted == ("feat",), report.blockers
+        assert report.classifications[0].tier == branch_safety.TIER_PARK_CARRIED
+        assert report.restore_commands == (f"git branch feat {tip}",)
+
     def test_clean_deletes_the_local_and_remote_copy_with_restore_lines(self, repo: Path) -> None:
         _work(repo, "feat")
         _merge(repo, "feat")

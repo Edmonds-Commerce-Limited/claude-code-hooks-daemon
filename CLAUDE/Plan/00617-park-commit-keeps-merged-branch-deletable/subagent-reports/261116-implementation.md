@@ -4,6 +4,39 @@ Branch: `worktree-plan-00617-park-commit-merged` (worktree
 `untracked/worktrees/worktree-plan-00617-park-commit-merged`), from origin/main
 d9df3271c. Not merged.
 
+Commits:
+
+- `44aa49d2b` adds the RED tests. The file fails at import on main, because it
+  imports `is_park_residue` from its new home `branch_park`. With the import
+  pointed at the old location, 7 tests fail and 8 pass.
+- `3fc5060e5` is one fix commit bundling four fixes: unpark pre-filter,
+  local-copy tier and `--clean`, park-aware patch equivalence, and the
+  writer-only rule.
+- `3a6370d5e` reverts an unrelated file swept into `3fc5060e5`. Autofix had
+  reformatted the Plan 00609 report script
+  `Completed/00609-.../prove-two-root-two-host.py`, so that script still fails
+  black on main.
+- A follow-up commit adds:
+  - a `delete_branches` test;
+  - the reproduction scripts with before/after output, in this folder;
+  - release note 083 corrections;
+  - the Success Criteria ticks.
+
+Before/after reproduction output is in this folder:
+
+- before: `repro_00617.before.txt`, `repro2_00617.before.txt`;
+- after: `repro_00617.after.txt`, `repro2_00617.after.txt`.
+
+On the fixed tree, every shape is deletable by the guards with no human step.
+
+Other checks:
+
+- **Writer history.** `branch-park` was introduced in `52ac28797` with today's
+  exact `_message`. v3.72.0 and v3.74.0 carry the same text. No doc or template
+  tells anyone to park by hand.
+- **`branch-keep`.** `CLEAN_STATES` is shared with `branch-keep`, which now
+  also accepts a `park-carried` branch. A keep then spares it from `--clean`.
+
 ## Read this first: two mismatches with the brief
 
 1. **The headline failure is already fixed on main, but not in a release.** Plan

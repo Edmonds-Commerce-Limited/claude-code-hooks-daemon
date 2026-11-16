@@ -61,9 +61,9 @@ the default branch lacks is provably content-free.
 
 ## Success Criteria
 
-- [ ] The reproduction from Task 1.1 ends with the park-only branch deletable by the guards, with no human step.
-- [ ] Every unmerged twin from Task 2.1 is still refused.
-- [ ] A release note is added under `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (the holding-area artefact for this plan).
+- [x] The reproduction from Task 1.1 ends with the park-only branch deletable by the guards, with no human step.
+- [x] Every unmerged twin from Task 2.1 is still refused.
+- [x] A release note is added under `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (the holding-area artefact for this plan).
 
 ## Delivery & Milestones
 
