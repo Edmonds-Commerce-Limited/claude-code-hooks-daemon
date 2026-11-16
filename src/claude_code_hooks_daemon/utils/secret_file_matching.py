@@ -3241,6 +3241,73 @@ _ASSIGNMENT_WORD: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*="
 _MAX_DIRECTORY_CHANGE_DEPTH: Final[int] = 4
 #: How many existing directories a relative word is resolved from (review F5).
 LINK_DIRECTORY_CAP: Final[int] = 16
+#: Characters that make a ``cd`` target computed rather than literal or globbed.
+_COMPUTED_CHARACTERS: Final[frozenset[str]] = frozenset("$`{~")
+#: ``$NAME`` or ``${NAME}``, as a literal assignment in the command can supply.
+_VARIABLE_REFERENCE: Final[re.Pattern[str]] = re.compile(
+    r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))"
+)
+#: A segment that only assigns: ``D=x``, ``export D="x"`` (quotes kept, removed later).
+_ASSIGNMENT_SEGMENT: Final[re.Pattern[str]] = re.compile(
+    r"\s*(?:(?:export|local|declare|readonly|typeset)\s+)?"
+    r"([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|[^\s\"']*)\s*"
+)
+#: The project directories a computed ``cd`` is judged from are found by a scan this wide.
+_LINK_SCAN_DIRECTORY_CAP: Final[int] = 512
+#: A scan is reused this long: one command can hold many computed moves.
+_LINK_SCAN_REUSE_SECONDS: Final[float] = 5.0
+_GIT_DIRECTORY: Final[str] = ".git"
+_link_scans: dict[str, tuple[float, tuple[str, ...]]] = {}
+
+
+def link_holding_directories(root: str) -> tuple[str, ...]:
+    """The directories under ``root`` that hold a link, breadth first, from a bounded scan.
+
+    Review 614b R4. A link is read through only from the directory holding it,
+    so these are where a computed ``cd`` could make a relative word dangerous.
+    ``.git`` is not entered and links are not followed. A directory that cannot
+    be listed is counted (fail closed). The scan stops after
+    :data:`_LINK_SCAN_DIRECTORY_CAP` directories: a link deeper than that, in a
+    larger tree, is not found here -- a residual recorded in the plan, never an
+    error -- and the project root is still read as before.
+    """
+    now = time.monotonic()
+    held = _link_scans.get(root)
+    if held is not None and now - held[0] < _LINK_SCAN_REUSE_SECONDS:
+        return held[1]
+    holding: list[str] = []
+    queue = [os.path.normpath(root)]
+    visited = 0
+    while queue and visited < _LINK_SCAN_DIRECTORY_CAP:
+        directory = queue.pop(0)
+        visited += 1
+        try:
+            with os.scandir(directory) as entries:
+                has_link = False
+                for entry in entries:
+                    if entry.is_symlink():
+                        has_link = True
+                    elif entry.name != _GIT_DIRECTORY and entry.is_dir(follow_symlinks=False):
+                        queue.append(entry.path)
+        except OSError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a directory that cannot be listed may hold a link, so it is judged as one that does (fail closed)",
+                level=logging.DEBUG,
+            )
+            has_link = True
+        if has_link:
+            holding.append(directory)
+    if queue:
+        logger.info(
+            "link scan of %s stopped after %d directories; deeper links are not "
+            "judged from a computed cd",
+            root,
+            visited,
+        )
+    _link_scans[root] = (now, tuple(holding))
+    return tuple(holding)
 
 
 def _may_change_directory(segment: str) -> bool:
@@ -3342,6 +3409,7 @@ class _DirectoryWalk:
     def __init__(self, cwd: str | None) -> None:
         self.directories: list[str] = []
         self.existing: dict[str, None] = {}
+        self.assigned: dict[str, str] = {}
         if cwd is not None and Path(cwd).is_absolute():
             self._add(cwd)
 
@@ -3355,17 +3423,64 @@ class _DirectoryWalk:
             self.existing[directory] = None
 
     def indeterminate(self) -> None:
-        """A move bash computes or cannot be placed: the project root is read too (fail closed)."""
+        """A move bash computes: read from the project root and every project directory holding a link.
+
+        Review 614b R4: a link is read through only from the directory that holds
+        it, so those are the places a computed move can make a relative word
+        dangerous. Found by :func:`link_holding_directories`, a bounded scan.
+        """
         root = resolve_project_root()
         if root:
             self._add(os.path.normpath(root))
+            for directory in link_holding_directories(root):
+                self._add(directory, exists=True)
+
+    def assign(self, name: str, value: str) -> None:
+        """Record ``name=value``; a value bash would expand is not known, so it is forgotten."""
+        if any(char in _WORD_EXPANDING_CHARACTERS for char in value):
+            self.assigned.pop(name, None)
+        else:
+            self.assigned[name] = value
+
+    def _substituted(self, target: str) -> str:
+        """``target`` with each ``$NAME``/``${NAME}`` the command assigned literally put in."""
+        return _VARIABLE_REFERENCE.sub(
+            lambda found: self.assigned.get(found.group(1) or found.group(2), found.group(0)),
+            target,
+        )
+
+    def _expand(self, target: str) -> None:
+        """A globbed move: each directory it matches from where the command may be (review 614b R4)."""
+        if Path(target).is_absolute():
+            bases: list[str] = ["/"]
+            target = target.lstrip("/")
+        elif self.directories:
+            bases = list(dict.fromkeys([self.directories[-1], *self.existing]))
+        else:
+            bases = []
+        found = 0
+        for base in bases[: LINK_DIRECTORY_CAP + 1]:
+            if not target:
+                break
+            # pathlib's glob also matches dot names, which only adds directories.
+            for match in itertools.islice(Path(base).glob(target), LINK_DIRECTORY_CAP + 1):
+                joined = os.path.normpath(str(match))
+                if path_is_dir(joined, unreadable_means=True):
+                    self._add(joined, exists=True)
+                    found += 1
+        if not found:
+            # No match leaves the word as written, which then names no directory.
+            self.indeterminate()
 
     def change(self, target: str | None) -> None:
         """Record a ``cd``-like move to ``target`` (None: no literal operand)."""
         if target is not None:
-            target = target.rstrip("`)")
-        if not target or target == "-" or any(c in _WORD_EXPANDING_CHARACTERS for c in target):
+            target = self._substituted(target.rstrip("`)"))
+        if not target or target == "-" or any(c in _COMPUTED_CHARACTERS for c in target):
             self.indeterminate()
+            return
+        if any(char in _GLOB_CHARACTERS for char in target):
+            self._expand(target)
             return
         if Path(target).is_absolute():
             self._add(os.path.normpath(target))
@@ -3445,6 +3560,14 @@ def chdir_wrapper_targets(name: str, words: list[str], start: int) -> list[str]:
 def _walk_directory_changes(text: str, walk: _DirectoryWalk, depth: int) -> None:
     """Feed every directory change in ``text`` to ``walk``, wherever bash runs it."""
     for segment in _COMMAND_SEGMENT_SEPARATORS.split(text):
+        assignment = _ASSIGNMENT_SEGMENT.fullmatch(segment)
+        if assignment is not None:
+            # `D=inner; cd "$D"` moves to inner (review 614b R4).
+            value = assignment.group(2)
+            if value[:1] in ("'", '"'):
+                value = value[1:-1]
+            walk.assign(assignment.group(1), value)
+            continue
         if not _may_change_directory(segment):
             continue
         words = _shell_words(segment)
@@ -3507,9 +3630,13 @@ def effective_cwds(command: str, cwd: str | None) -> CwdSet:
     is judged against each: the over-approximation errs towards denying and
     needs no per-word ordering. Review F1: a move counts wherever bash runs it
     -- in a subshell, a brace group, after ``if``/``while``/``then``, in a
-    command substitution or a quoted ``bash -c`` body. A target bash computes
-    (a variable, substitution, glob, brace list, tilde, ``cd -``, no operand)
-    adds the project root instead (fail closed).
+    command substitution or a quoted ``bash -c`` body, behind ``builtin``,
+    ``command`` or a redirection. Review 614b R4: a globbed target adds each
+    directory it matches; a variable the command assigned literally is put in;
+    any other computed target (substitution, unknown variable, brace list,
+    tilde, ``cd -``, no operand) adds the project root and every project
+    directory holding a link (:func:`link_holding_directories`, a bounded scan
+    whose limit is a recorded residual).
 
     Only a segment that could make such a move is tokenised
     (:func:`_may_change_directory`), not every line of a large authored script

@@ -23,6 +23,7 @@ and a producer other than ``find`` feeding ``xargs`` names no root.
 """
 
 import fnmatch
+import itertools
 import logging
 import os
 import posixpath
@@ -44,7 +45,10 @@ from claude_code_hooks_daemon.utils.protected_file_index import (
     TreeView,
 )
 from claude_code_hooks_daemon.utils.resolution_failure import fails_closed
-from claude_code_hooks_daemon.utils.secret_file_matching import chdir_wrapper_targets
+from claude_code_hooks_daemon.utils.secret_file_matching import (
+    chdir_wrapper_targets,
+    link_holding_directories,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     split_unquoted_spans,
@@ -408,6 +412,9 @@ _DIRECTORY_CHANGERS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
 #: Wrappers with an option that runs the wrapped command elsewhere.
 _CHDIR_WRAPPERS: Final[frozenset[str]] = frozenset({"env", "sudo"})
 _BUILTIN: Final[str] = "builtin"
+_GLOB_CHARACTERS: Final[frozenset[str]] = frozenset("*?[")
+#: A globbed ``cd`` target is followed into at most this many matches per base.
+_GLOB_CD_MATCH_CAP: Final[int] = 17
 #: A redirection with its file glued on (``>/dev/null``, ``2>&1``), and one without (``2>``).
 _REDIRECTION_WORD: Final[re.Pattern[str]] = re.compile(r"\d*(?:&>>?|>>?|<>?|>&|<&)\S+")
 _BARE_REDIRECTION: Final[re.Pattern[str]] = re.compile(r"\d*(?:&>>?|>>?|<>?|>&|<&)")
@@ -481,11 +488,15 @@ class _SearchCwds:
     def indeterminate(self) -> tuple[str, ...]:
         """A move that cannot be placed: the project root, every named target and the hook cwd."""
         root = path_exclusion.resolve_project_root()
-        found = [root, *self.targets, self.hook_cwd]
+        # Review 614b R4: and every project directory holding a link it could read through.
+        linked = link_holding_directories(root) if root else ()
+        found = [root, *self.targets, self.hook_cwd, *linked]
         return tuple(dict.fromkeys(path for path in found if path and posixpath.isabs(path)))
 
     def moved(self, target: str, current: tuple[str, ...]) -> tuple[str, ...]:
         bases: tuple[str | None, ...] = current or (None,)
+        if any(char in _GLOB_CHARACTERS for char in target):
+            return self._globbed(target, bases)
         placed = [(base, _place(target, base)) for base in bases]
         result = tuple(dict.fromkeys(path for _base, path in placed if path is not None))
         if not result:
@@ -499,6 +510,24 @@ class _SearchCwds:
             if base is not None and (path is None or not path_is_dir(path, unreadable_means=False))
         ]
         return tuple(dict.fromkeys((*result, *stayed)))
+
+    def _globbed(self, target: str, bases: tuple[str | None, ...]) -> tuple[str, ...]:
+        """The directories a globbed ``cd`` target matches from each base, as bash expands it."""
+        matched: list[str] = []
+        for base in bases:
+            placed = _place(target, base)
+            if placed is None:
+                continue
+            anchor = Path("/")
+            pattern = placed.lstrip("/")
+            for match in itertools.islice(anchor.glob(pattern), _GLOB_CD_MATCH_CAP):
+                if path_is_dir(match, unreadable_means=True):
+                    matched.append(str(match))
+        if not matched:
+            return self.indeterminate()
+        self.targets.extend(matched)
+        # The cd may still fail (several matches are too many arguments): the base stays too.
+        return tuple(dict.fromkeys((*matched, *(base for base in bases if base is not None))))
 
 
 def _reads(command: str, cwds: tuple[str, ...], depth: int, tracker: _SearchCwds) -> Iterator[Read]:
