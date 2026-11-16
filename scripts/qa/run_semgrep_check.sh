@@ -41,12 +41,19 @@ VENV_PYTHON="$(resolve_venv_python "${REPO_ROOT}")"
 # project lock below patched versions (Plan 00607). It runs from uv's isolated
 # tool environment at the one exact version in scripts/qa/semgrep-version.txt,
 # the single place to bump it. uv caches that environment, so a warmed machine
-# runs offline.
+# runs offline. The interpreter is pinned beside it in semgrep-python.txt:
+# semgrep 1.185.0's semgrep-core is only installed for Python 3.13 under uv, so
+# an unpinned run fails on whichever other interpreter uv happens to pick.
 SEMGREP_VERSION_FILE="${QA_SEMGREP_VERSION_FILE:-${SCRIPT_DIR}/semgrep-version.txt}"
+SEMGREP_PYTHON_FILE="${QA_SEMGREP_PYTHON_FILE:-${SCRIPT_DIR}/semgrep-python.txt}"
 UV_BIN="${QA_SEMGREP_UV:-uv}"
 SEMGREP_VERSION=""
 if [ -f "${SEMGREP_VERSION_FILE}" ]; then
     SEMGREP_VERSION="$(tr -d '[:space:]' < "${SEMGREP_VERSION_FILE}")"
+fi
+SEMGREP_PYTHON=""
+if [ -f "${SEMGREP_PYTHON_FILE}" ]; then
+    SEMGREP_PYTHON="$(tr -d '[:space:]' < "${SEMGREP_PYTHON_FILE}")"
 fi
 
 mkdir -p "${OUTPUT_DIR}"
@@ -56,10 +63,12 @@ SEMGREP_PROBE=""
 SEMGREP_PROBE_ERROR="semgrep not installed"
 if [ -z "${SEMGREP_VERSION}" ]; then
     SEMGREP_PROBE_ERROR="no semgrep version pinned in ${SEMGREP_VERSION_FILE}"
+elif [ -z "${SEMGREP_PYTHON}" ]; then
+    SEMGREP_PROBE_ERROR="no semgrep python pinned in ${SEMGREP_PYTHON_FILE}"
 elif ! type -P "${UV_BIN}" > /dev/null; then
     SEMGREP_PROBE_ERROR="uv not found, so the pinned semgrep cannot be obtained"
 else
-    SEMGREP=("${UV_BIN}" tool run --quiet --from "semgrep==${SEMGREP_VERSION}" semgrep)
+    SEMGREP=("${UV_BIN}" tool run --quiet --python "${SEMGREP_PYTHON}" --from "semgrep==${SEMGREP_VERSION}" semgrep)
     PROBE_LOG="${OUTPUT_DIR}/semgrep-probe.log"
     if SEMGREP_PROBE="$("${SEMGREP[@]}" --version 2> "${PROBE_LOG}")" \
         && [ "$(printf '%s' "${SEMGREP_PROBE}" | tail -n 1)" = "${SEMGREP_VERSION}" ]; then

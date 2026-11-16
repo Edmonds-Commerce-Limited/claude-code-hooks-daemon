@@ -76,6 +76,9 @@ course. The fix is to stop these tools from pinning the project's lock:
 - Plan 00608's session recorded "Failed to find semgrep-core" from the pinned uv semgrep. It did not reproduce
   afterwards, with scans run alone or three at once. If it returns, capture `env`, `uv cache dir` and the stderr.
   Those details are recorded in Plan 00608's journal.
+- Cause found and fixed: semgrep 1.185.0's `semgrep-core` does not install under uv on Python 3.10-3.12; the
+  interpreter is now pinned to 3.13 in `scripts/qa/semgrep-python.txt` (fix commit: see branch
+  `worktree-semgrep-python-pin`, report `subagent-reports/261115-python-developer-sonnet-python-pin.md`).
 
 ## Delivery & Milestones
 
