@@ -1,0 +1,304 @@
+"""Working out where a command runs never ends in an allow (Plan 00614, review 614b).
+
+Review 614b found that a ``cd`` to a name the filesystem refuses to stat (one
+component over NAME_MAX) made ``Path.is_dir()`` raise inside the directory walk,
+and the raise ended in the guard's allow-with-advisory route: every protected
+read in the same command went unjudged. The same raise was reachable through a
+glob whose literal parent is over-long. A failure while placing a command's
+words is now a finding, never an allow.
+
+Every fixture is synthetic: a throwaway primary checkout holding untracked dummy
+files named like a protected one, a registered ``git worktree`` of it with
+directory links only (no file link at its root, so a glob read from the root
+matches nothing by accident), and one in-project dummy. The process cwd is ``/``
+throughout, as in the daemon.
+"""
+
+import os
+import subprocess
+from collections.abc import Iterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+from unittest.mock import patch
+
+import pytest
+from tests.indexed_project import index_project
+
+from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
+from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
+    SecretFileGuardHandler,
+)
+from claude_code_hooks_daemon.utils import path_exclusion, protected_file_index
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+
+# Assembled so this file never spells a protected name itself.
+_PROTECTED = "id_" + "rsa"
+_DUMMY = b"DUMMY\n"
+#: One path component longer than NAME_MAX (255 bytes on Linux).
+_LONG = "A" * 300
+#: A path longer than PATH_MAX (4096 bytes), every component within NAME_MAX.
+_LONGER_THAN_PATH_MAX = "/".join(["B" * 200] * 30)
+
+
+@dataclass(frozen=True)
+class Tree:
+    """The primary checkout and its worktree, the project the daemon serves."""
+
+    primary: Path
+    worktree: Path
+
+
+def _git(*args: str, cwd: Path) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+@pytest.fixture()
+def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Tree]:
+    """A worktree whose links lead to directories of the primary that hold dummies."""
+    base = tmp_path.resolve()
+    primary = base / "primary"
+    primary.mkdir()
+    _git("init", "-q", "-b", "main", cwd=primary)
+    _git("config", "user.email", "test@example.invalid", cwd=primary)
+    _git("config", "user.name", "test", cwd=primary)
+    (primary / "readme.txt").write_bytes(b"hello\n")
+    _git("add", "-A", cwd=primary)
+    _git("commit", "-qm", "init", cwd=primary)
+    (primary / _PROTECTED).write_bytes(_DUMMY)
+    (primary / "sub").mkdir()
+    (primary / "sub" / _PROTECTED).write_bytes(_DUMMY)
+
+    worktree = base / "wt"
+    _git("worktree", "add", "-q", "-b", "feat", str(worktree), cwd=primary)
+    (worktree / "dlink").symlink_to(os.path.relpath(primary / "sub", worktree))
+    (worktree / "plink").symlink_to(os.path.relpath(primary, worktree))
+    inner = worktree / "inner"
+    inner.mkdir()
+    (inner / "ilink").symlink_to(os.path.relpath(primary / _PROTECTED, inner))
+    (inner / "plain.txt").write_bytes(b"hello\n")
+    deep = worktree / "deep"
+    deep.mkdir()
+    (deep / "idlink").symlink_to(os.path.relpath(primary / "sub", deep))
+    (worktree / "clean").mkdir()
+    (worktree / "clean" / "plain.txt").write_bytes(b"hello\n")
+    # An in-project dummy, indexed: a read of it is a finding without any link.
+    (worktree / "own").mkdir()
+    (worktree / "own" / _PROTECTED).write_bytes(_DUMMY)
+
+    monkeypatch.chdir("/")
+    protected_file_index.reset_index_cache()
+    root = str(worktree)
+    with (
+        patch.object(guard_module, "resolve_project_root", return_value=root),
+        patch.object(sfm, "resolve_project_root", return_value=root),
+        patch.object(path_exclusion, "resolve_project_root", return_value=root),
+    ):
+        index_project(worktree, SecretFileGuardHandler()._patterns())
+        yield Tree(primary=primary, worktree=worktree)
+    protected_file_index.reset_index_cache()
+
+
+def _result(tree: Tree, command: str) -> tuple[Decision, str]:
+    """The decision on ``command`` run from the worktree, and its deny reason or advisory."""
+    hook_input: dict[str, Any] = {
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "cwd": str(tree.worktree),
+    }
+    handler = SecretFileGuardHandler()
+    if not handler.matches(hook_input):
+        return Decision.ALLOW, ""
+    result = handler.handle(hook_input)
+    return result.decision, str(result.reason or "") + " ".join(result.context or [])
+
+
+def _decision(tree: Tree, command: str) -> Decision:
+    return _result(tree, command)[0]
+
+
+class TestOverLongDirectoryChange:
+    """R1: a move to a name the filesystem cannot stat leaves every read judged."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"cd {_LONG}; cat ../primary/{_PROTECTED}",
+            f"cat ../primary/{_PROTECTED}; cd {_LONG}",
+            f"git -C {_LONG} status; cat ../primary/{_PROTECTED}",
+            f"cd {_LONG}; cat own/{_PROTECTED}",
+            f"pushd {_LONG}; head own/{_PROTECTED}",
+            f"cd /{_LONG} || cat own/{_PROTECTED}",
+            f"env -C {_LONG} cat own/{_PROTECTED}",
+            f"cd {_LONG}; cat inner/ilink",
+            f"cd {_LONG}/x; cat inner/ilink",
+        ],
+    )
+    def test_read_after_an_over_long_cd_denied(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+    def test_an_over_long_cd_alone_is_not_a_finding(self, tree: Tree) -> None:
+        """Failing closed on the READS, not on the move itself."""
+        assert _decision(tree, f"cd {_LONG}; cat clean/plain.txt") is Decision.ALLOW
+
+    def test_the_directory_walk_never_raises_on_an_over_long_name(self, tree: Tree) -> None:
+        cwds = sfm.effective_cwds(f"cd {_LONG} && cd x", str(tree.worktree))
+        assert str(tree.worktree) in cwds
+
+
+class TestOverLongGlobParent:
+    """R2: a glob whose literal parent cannot be stat-ed leaves the next glob judged."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"cat {_LONG}/d*/*; cat o*/*",
+            f"cat /{_LONG}/d*/*; cat o*/*",
+            f"cat {_LONG}/*/x; cat o*/*",
+            f"grep -r x {_LONG}/d*; cat o*/*",
+        ],
+    )
+    def test_glob_after_an_over_long_glob_parent_denied(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+    def test_the_index_never_raises_on_an_over_long_glob_parent(self, tree: Tree) -> None:
+        index = protected_file_index.cached_index(
+            str(tree.worktree), SecretFileGuardHandler()._patterns()
+        )
+        assert index is not None
+        bases = [str(tree.worktree)]
+        assert index.glob_matches(f"{_LONG}/d*/*", bases) is None
+        assert index.link_out_of(f"{_LONG}/d*/*", bases) is None
+        assert index.link_out_of(f"{_LONG}/x", bases) is None
+        assert index.directories_matching(f"{_LONG}/d*/", bases) == ()
+
+
+class TestUnreadableDirectoryChange:
+    """EACCES, simulated (the suite may run as root, which never sees it)."""
+
+    _MARKER = "eacces-marker"
+
+    @pytest.fixture()
+    def unreadable(self, tree: Tree) -> Iterator[None]:
+        real_stat = os.stat
+
+        def stat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+            spelled = "" if isinstance(path, int) else os.fsdecode(os.fspath(path))
+            if self._MARKER in spelled:
+                raise PermissionError(13, "Permission denied", path)
+            return real_stat(path, *args, **kwargs)
+
+        with patch.object(os, "stat", stat):
+            yield
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"cd {_MARKER}/x; cat own/{_PROTECTED}",
+            f"cd {_MARKER}/x; cat inner/ilink",
+            f"cat {_MARKER}/d*/*; cat o*/*",
+        ],
+    )
+    def test_read_after_an_unreadable_cd_denied(
+        self, tree: Tree, unreadable: None, command: str
+    ) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+
+class TestAResolutionFailureIsAFinding:
+    """A raise while placing a command's words denies; it never reaches the advisory."""
+
+    def test_a_raise_in_the_directory_walk_denies(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic walk failure")
+
+        monkeypatch.setattr(sfm._DirectoryWalk, "change", boom)
+        decision, text = _result(tree, "cd clean && cat plain.txt")
+        assert decision is Decision.DENY
+        assert "could NOT fully judge" not in text
+        assert "could not be worked out" in text
+
+    def test_a_raise_in_link_resolution_denies(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic link failure")
+
+        monkeypatch.setattr(sfm, "_realpath_if_resolvable", boom)
+        assert _decision(tree, "cat clean/plain.txt") is Decision.DENY
+
+    def test_a_raise_in_glob_resolution_denies(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic glob failure")
+
+        monkeypatch.setattr(protected_file_index.ProtectedFileIndex, "_wildcard_links", boom)
+        assert _decision(tree, "cat cl*/*") is Decision.DENY
+
+    def test_a_raise_in_the_search_cwd_tracker_denies(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.utils import recursive_search
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic search placement failure")
+
+        monkeypatch.setattr(recursive_search, "_place", boom)
+        assert _decision(tree, "cd clean && grep -r hello .") is Decision.DENY
+
+    def test_the_literal_fallback_judges_names_before_any_filesystem_call(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The second opinion must not share the first scan's filesystem failure."""
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic walk failure")
+
+        monkeypatch.setattr(sfm._DirectoryWalk, "change", boom)
+        patterns = SecretFileGuardHandler()._patterns()
+        command = f"cd x; cat {_PROTECTED}"
+        assert sfm.find_protected_mention_strict(command, patterns, str(tree.worktree))
+
+
+#: Names a filesystem call may refuse, or that Python may refuse to encode.
+_ODD_NAMES = [
+    _LONG,
+    f"/{_LONG}",
+    f"{_LONG}/{_LONG}",
+    _LONGER_THAN_PATH_MAX,
+    f"/{_LONGER_THAN_PATH_MAX}",
+    "~nosuchuser-614",
+    "~nosuchuser-614/x",
+    "~+",
+    "~+/inner",
+    "~-",
+    "\ud800",
+    f"x\ud800/{_LONG}",
+]
+
+#: Command shapes that move, or glob through, an odd name before a protected read.
+_SHAPES = [
+    "cd {name}; cat own/" + _PROTECTED,
+    "cd {name} 2>/dev/null; grep -r DUMMY own",
+    "pushd {name}; head own/" + _PROTECTED,
+    "git -C {name} status; cat own/" + _PROTECTED,
+    "env -C {name} cat own/" + _PROTECTED,
+    "(cd {name}); cat inner/ilink",
+    "cat {name}/d*/*; cat o*/*",
+    "grep -r x {name}/d*; cat o*/*",
+    "cd {name}; cd ..; cat o*/*",
+]
+
+
+@pytest.mark.parametrize("shape", _SHAPES)
+@pytest.mark.parametrize("name", _ODD_NAMES, ids=lambda name: repr(name)[:24])
+def test_no_odd_name_turns_a_protected_read_into_an_allow(
+    tree: Tree, shape: str, name: str
+) -> None:
+    """Property: whatever the name, the read beside it is judged and denied."""
+    decision, text = _result(tree, shape.format(name=name))
+    assert decision is Decision.DENY, text
