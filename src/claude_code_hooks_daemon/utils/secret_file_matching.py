@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.find_expression import find_regex_operand_indexes
+from claude_code_hooks_daemon.utils.grep_option_grammar import grammar_for, parse_arguments
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
     literal_screen,
@@ -2025,8 +2026,15 @@ _FILE_OPENING_COMMANDS: Final = frozenset(
     ]
 )
 _FILE_OPENING_PREFIXES: Final = ("python", "ansible")
-_PATTERN_FIRST_COMMANDS: Final = frozenset({"grep", "egrep", "fgrep", "rg", "ag", "ack"})
-_PATTERN_FILE_OPTIONS: Final = frozenset({"-f", "--file", "-e", "--regexp"})
+# ``ug`` reads a config of its own, so its grammar never proves a pattern operand.
+_PATTERN_FIRST_COMMANDS: Final = frozenset(
+    {"grep", "egrep", "fgrep", "zgrep", "ugrep", "ug", "rg", "ag", "ack"}
+)
+# Separators that end the segment a bare name sits in (``&`` stays inside it:
+# ``2>&1`` carries one, and reading on past it only judges more words).
+_SEGMENT_END_SEPARATORS: Final = ("||", "&&", ";", "|", "\n")
+# Stands for the bare name while the words around it are read as one command line.
+_TOKEN_WORD: Final = "token"
 # A module-name API whose first argument is a dotted module path, not a file.
 _MODULE_API_BEFORE_STRING: Final = re.compile(
     r"\b(?:import_module|find_spec|run_module|patch|getLogger)\(\s*$"
@@ -2264,17 +2272,15 @@ def _searched_paths_hold_no_protected_file(
     if command is None:
         return False
     rest = segment_words[command + 1 :]
-    if any(_names_no_pattern_operand(word) for word in rest):
-        # The pattern is an option's value (or there is none), so the first
-        # operand is a searched path too: never skip it, judge nothing clean.
+    parsed = parse_arguments(grammar_for(names[command]), rest)
+    if parsed.uncertain or parsed.pattern_supplied or _END_OF_OPTIONS in rest:
+        # An option the grammar cannot place, a pattern given by option (or none at
+        # all), or ``--`` (a dash-led path after it): the first operand may be a
+        # searched path too, so never skip it and judge nothing clean.
         return False
     if any(_follows_links(word, names[command]) for word in rest):
         return False
-    filter_values = {i + 1 for i, word in enumerate(rest) if word in _FILTER_SEPARATE_OPTIONS}
-    operands = [
-        word for i, word in enumerate(rest) if not word.startswith("-") and i not in filter_values
-    ]
-    paths = operands[1:]
+    paths = [rest[position] for position in parsed.operands[1:]]
     if not paths or any(char in _WORD_EXPANDING_CHARACTERS for p in paths for char in p):
         return False
     bases = [cwd for cwd in cwds if cwd]
@@ -2296,29 +2302,6 @@ def _searched_paths_hold_no_protected_file(
             if index.find_under(root) is not None:
                 return False
     return True
-
-
-#: Long spellings after which no operand is the pattern: the pattern is given by
-#: option or file, or (rg --files) there is none. ``--`` ends the options, so a
-#: dash-led path could follow it unseen by the operand filter.
-_NO_PATTERN_OPERAND_WORDS: Final = frozenset({"--", "--files", *_PATTERN_FILE_OPTIONS})
-_NO_PATTERN_OPERAND_PREFIXES: Final = ("--regexp=", "--file=")
-_PATTERN_LONG_OPTIONS: Final = ("--regexp", "--file")
-
-
-def _names_no_pattern_operand(word: str) -> bool:
-    """Whether a grep/rg word means the first operand is no pattern.
-
-    Fails closed on short clusters: any single-dash word holding ``e`` or ``f``
-    may be ``-ezz``/``-vezz``/``-fpats`` (an over-match only judges less clean).
-    """
-    if word in _NO_PATTERN_OPERAND_WORDS or word.startswith(_NO_PATTERN_OPERAND_PREFIXES):
-        return True
-    # GNU grep accepts any unambiguous abbreviation (--regex=zz is --regexp=zz).
-    name = word.split("=", 1)[0]
-    if len(name) > len("--") and name.startswith("--"):
-        return any(full.startswith(name) for full in _PATTERN_LONG_OPTIONS)
-    return word.startswith("-") and not word.startswith("--") and bool(set(word[1:]) & {"e", "f"})
 
 
 def _follows_links(word: str, tool: str) -> bool:
@@ -2437,11 +2420,13 @@ def _is_scoped_filter_value(
     return True
 
 
-def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
-    """Whether the command in ``segment`` may open an operand placed after it.
+def _opens_files(segment: str, tail: str) -> bool:
+    """Whether the command in ``segment`` may open the bare name that follows it.
 
-    Fails closed: an unreadable segment, or one with no command word (the token
-    IS the command), opens files.
+    ``segment`` is the command text before the name and ``tail`` the rest of its
+    segment after it: a pattern option can come after the name. Fails closed: an
+    unreadable segment, or one with no command word (the name IS the command),
+    opens files.
     """
     chain = segment_command_chain(segment)
     if not chain:
@@ -2459,8 +2444,12 @@ def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
                 continue
             return True
         elif name in _PATTERN_FIRST_COMMANDS:
-            rest = names[names.index(name) + 1 :] if name in names else []
-            if _grep_pattern_word_is_token(rest) and token_is_first_pattern_word:
+            before = words[names.index(name) + 1 :] if name in names else []
+            try:
+                after = linear_shlex.split(tail)
+            except ValueError:
+                return True
+            if _token_is_pattern_operand(name, before, after):
                 continue
             return True
         elif name in _FILE_OPENING_COMMANDS or name.startswith(_FILE_OPENING_PREFIXES):
@@ -2468,26 +2457,21 @@ def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
     return False
 
 
-def _grep_pattern_word_is_token(words_after_command: list[str]) -> bool:
-    """False when the grep-family words use an option that names files or patterns."""
-    return not any(word in _PATTERN_FILE_OPTIONS for word in words_after_command)
+def _token_is_pattern_operand(command: str, before: list[str], after: list[str]) -> bool:
+    """Whether a bare name between ``before`` and ``after`` is, provably, the pattern operand.
 
-
-def _first_positional_is_last(segment: str) -> bool:
-    """Whether the segment's last word is its command's first non-option operand."""
-    try:
-        words = linear_shlex.split(segment)
-    except ValueError:
-        return False
-    chain = segment_command_chain(segment)
-    if not chain or not words:
-        return False
-    command_name = chain[-1].rsplit("/", 1)[-1]
-    names = [word.rsplit("/", 1)[-1] for word in words]
-    if command_name not in names:
-        return False
-    operands = [w for w in words[names.index(command_name) + 1 :] if not w.startswith("-")]
-    return not operands
+    The words of the whole command line are read with the option grammar. Only
+    when it places every option (none unknown, none ambiguous), none of them
+    supplies the pattern, and the name is the first operand, is the name the
+    pattern grep searches for rather than a file it opens.
+    """
+    parsed = parse_arguments(grammar_for(command), [*before, _TOKEN_WORD, *after])
+    return (
+        not parsed.uncertain
+        and not parsed.pattern_supplied
+        and bool(parsed.operands)
+        and parsed.operands[0] == len(before)
+    )
 
 
 def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
@@ -2518,7 +2502,14 @@ def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
     segment = command[segment_start:word_start]
     if _REDIRECT_TAIL.search(segment):
         return True
-    return _opens_files(segment, _first_positional_is_last(segment))
+    return _opens_files(segment, _segment_tail(command, word_end))
+
+
+def _segment_tail(command: str, word_end: int) -> str:
+    """The text after ``word_end`` up to the next unquoted command separator."""
+    rest = command[word_end:]
+    spans = split_unquoted_spans(rest, _SEGMENT_END_SEPARATORS)
+    return rest[: spans[0][1]] if spans else ""
 
 
 def _is_quote(char: str) -> bool:
