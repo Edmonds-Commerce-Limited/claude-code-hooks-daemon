@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -143,8 +144,12 @@ class TestEffectiveCwds:
             str(tree / "vault"),
         )
 
-    def test_unbalanced_quote_is_skipped(self, tree: Path) -> None:
-        assert sfm.effective_cwds("cd 'vault && cat r.md", str(tree)) == (str(tree),)
+    def test_unbalanced_quote_is_read_loosely_and_from_the_root(self, tree: Path) -> None:
+        """Plan 00614 review F1: a quoted body split at an operator still moves, and fails closed."""
+        root = str(tree / "root")
+        with patch.object(sfm, "resolve_project_root", return_value=root):
+            cwds = sfm.effective_cwds("cd 'vault && cat r.md", str(tree))
+        assert cwds == (str(tree), str(tree / "vault"), root)
 
     def test_cd_without_operand_is_skipped(self, tree: Path) -> None:
         assert sfm.effective_cwds("cd && cat r.md", str(tree)) == (str(tree),)

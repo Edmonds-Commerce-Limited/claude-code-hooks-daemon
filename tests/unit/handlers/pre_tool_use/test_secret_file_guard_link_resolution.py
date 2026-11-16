@@ -459,13 +459,19 @@ class TestBoundedCostOfManyDirectoryChanges:
     def test_many_absent_directories_cost_about_one_call_per_word(
         self, checkouts: Checkouts, project: Path
     ) -> None:
+        """The calls a word costs do not grow with the number of ``cd`` targets that do not exist."""
+        with patch.object(sfm.os.path, "lexists", wraps=os.path.lexists) as spy:
+            assert _bash(checkouts, self._command(["/nonexistent-614/d0"])) is Decision.ALLOW
+        baseline = spy.call_count
         targets = [f"/nonexistent-614/d{n}" for n in range(self._CDS)]
         relative = [f"r{n}" for n in range(self._CDS)]
         for chosen in (targets, relative):
             command = self._command(chosen)
             with patch.object(sfm.os.path, "lexists", wraps=os.path.lexists) as spy:
                 assert _bash(checkouts, command) is Decision.ALLOW
-            assert spy.call_count <= 2 * self._WORDS + 4 * self._CDS
+            # A scan that outlives its deadline is followed by one strict re-scan, so
+            # the bound is a few scans' worth -- not one call per word per cd (main: 201).
+            assert spy.call_count <= 3 * baseline
 
     def test_many_real_directories_fail_closed_on_a_link_word(
         self, checkouts: Checkouts, project: Path, tmp_path: Path

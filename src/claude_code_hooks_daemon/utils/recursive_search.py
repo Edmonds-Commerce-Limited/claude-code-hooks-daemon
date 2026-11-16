@@ -31,7 +31,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final
 
-from claude_code_hooks_daemon.utils import linear_shlex
+from claude_code_hooks_daemon.utils import linear_shlex, path_exclusion
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_position import SHELL_NAMES
 from claude_code_hooks_daemon.utils.find_expression import FIND_EXEC_ACTIONS, find_exec_end
@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.utils.protected_file_index import (
     ProtectedFileIndex,
     TreeView,
 )
+from claude_code_hooks_daemon.utils.secret_file_matching import chdir_wrapper_targets
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     split_unquoted_spans,
@@ -346,7 +347,8 @@ def search_reads(command: str, cwd: str | None) -> list[Read]:
     precedes the search; with no absolute directory to place them from they are
     left out, because a guess at where a search reads is worse than no answer.
     """
-    reads = list(_reads(command, cwd, 0))
+    bases = (cwd,) if cwd is not None and posixpath.isabs(cwd) else ()
+    reads = list(dict.fromkeys(_reads(command, bases, 0, _SearchCwds(cwd))))
     if not any(read.glob for read in reads):
         return reads
     default_expansion = default_glob_semantics(command)
@@ -392,47 +394,172 @@ def _directories_read(read: Read, index: ProtectedFileIndex) -> list[Read]:
 # Nested wrappers (`bash -c "bash -c ..."`) end here rather than recursing for ever.
 _MAX_WRAPPER_DEPTH: Final[int] = 4
 _DIRECTORY_CHANGERS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
+_ENV: Final[str] = "env"
 
 
-def _after_directory_change(words: list[str], current: str | None) -> str | None:
-    """The directory a ``cd``/``pushd`` leaves the command in; None when it cannot be told."""
-    operands = [word for word in words[1:] if not word.startswith("-")]
+#: A segment head that opens a subshell: a ``cd`` behind it ADDS a directory.
+_SUBSHELL_HEAD: Final[re.Pattern[str]] = re.compile(r"\s*(?:[A-Za-z_][A-Za-z0-9_]*=)?(?:\$\(|`|\()")
+#: A segment head bash reads past to the command name, in the current shell.
+_RESERVED_HEAD: Final[re.Pattern[str]] = re.compile(
+    r"\s*(?:[{!]|if|then|else|elif|do|while|until|time)(?:\s+|$)"
+)
+_TRAILING_CLOSERS: Final[re.Pattern[str]] = re.compile(r"[\s)}`]+$")
+_QUOTED_SUBSTITUTION: Final[tuple[tuple[str, str], ...]] = (("$(", ")"), ("`", "`"))
+
+
+def _unwrapped(segment: str) -> tuple[str, int, int]:
+    """``segment`` without the group and keyword words around its command.
+
+    Also how many subshells (``(``, ``$(``, a backtick) open before it and close
+    after it. Review F1: ``(cd x``, ``{ cd x``, ``if cd x``, ``x=$(cd x`` and
+    ``grep -r . l)`` are how a list split on its operators hands a wrapped
+    command over.
+    """
+    opens = 0
+    while True:
+        opened = _SUBSHELL_HEAD.match(segment)
+        if opened:
+            segment, opens = segment[opened.end() :], opens + 1
+            continue
+        reserved = _RESERVED_HEAD.match(segment)
+        if not reserved:
+            break
+        segment = segment[reserved.end() :]
+    closers = _TRAILING_CLOSERS.search(segment)
+    if closers is None:
+        return segment, opens, 0
+    tail = closers.group(0)
+    return segment[: closers.start()], opens, tail.count(")") + tail.count("`")
+
+
+def _substitution_bodies(segment: str) -> list[str]:
+    """The command text inside a ``$( )`` or backtick pair a segment holds whole (quoted)."""
+    bodies: list[str] = []
+    for opener, closer in _QUOTED_SUBSTITUTION:
+        start = segment.find(opener)
+        end = segment.rfind(closer)
+        if start != -1 and end > start + len(opener):
+            body = segment[start + len(opener) : end]
+            if " " in body:
+                bodies.append(body)
+    return bodies
+
+
+def _directory_change(
+    words: list[str], start: int, current: tuple[str, ...], cwds: "_SearchCwds"
+) -> tuple[str, ...]:
+    """Where a ``cd``/``pushd`` at ``words[start - 1]`` leaves the search, from each of ``current``."""
+    operands = [word for word in words[start:] if not word.startswith("-") or word == "-"]
     if not operands or operands[0] == "-":
-        return None
-    return _place(operands[0], current)
+        return cwds.indeterminate()
+    return cwds.moved(operands[0], current)
 
 
-def _reads(command: str, cwd: str | None, depth: int) -> Iterator[Read]:
-    """Every tree a search anywhere in ``command`` reads."""
+@dataclass
+class _SearchCwds:
+    """The directories a search may run in, and every ``cd`` target the command named."""
+
+    hook_cwd: str | None
+    targets: list[str] = field(default_factory=list)
+
+    def indeterminate(self) -> tuple[str, ...]:
+        """A move that cannot be placed: the project root, every named target and the hook cwd."""
+        root = path_exclusion.resolve_project_root()
+        found = [root, *self.targets, self.hook_cwd]
+        return tuple(dict.fromkeys(path for path in found if path and posixpath.isabs(path)))
+
+    def moved(self, target: str, current: tuple[str, ...]) -> tuple[str, ...]:
+        placed = [_place(target, base) for base in current] if current else [_place(target, None)]
+        result = tuple(dict.fromkeys(path for path in placed if path is not None))
+        if not result:
+            return self.indeterminate()
+        self.targets.extend(result)
+        return result
+
+
+def _reads(command: str, cwds: tuple[str, ...], depth: int, tracker: _SearchCwds) -> Iterator[Read]:
+    """Every tree a search anywhere in ``command`` reads, from each of ``cwds``.
+
+    A ``cd`` REPLACES the directories, inside a subshell (``(``, ``$(``, a
+    backtick) as at the top level. When a subshell closes, the directories it
+    left are ADDED to those it started from rather than dropped: the list is
+    split on its operators, so which closer ends which group is a guess, and
+    a wrong guess must over-approximate (``(cd a && true); cd b && cat l``).
+    """
     if depth > _MAX_WRAPPER_DEPTH:
         return
     feeder: tuple[str, ...] | None = None
-    current = cwd
-    for segment, piped_in in command_segments(command):
-        words = _command_words(segment)
-        fed_by = feeder if piped_in else None
-        feeder = None
-        if not words:
-            continue
-        head = posixpath.basename(words[0])
-        if head in _DIRECTORY_CHANGERS:
-            current = _after_directory_change(words, current)
-        elif head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
-            inner = words[words.index(_SHELL_COMMAND_FLAG, 1) + 1]
-            yield from _reads(inner, current, depth + 1)
-        elif head == _EVAL:
-            yield from _reads(" ".join(words[1:]), current, depth + 1)
-        elif head == _FIND:
-            feeder = _find_roots(words)
-            if _find_execs_a_search(words):
-                yield from _reads_of_roots(feeder, current)
-        elif head == _XARGS:
-            inner_words = _xargs_command(words)
-            if inner_words and _is_search(inner_words):
-                yield from _search_reads(inner_words, current, piped_in=True)
-                yield from _reads_of_roots(fed_by or (), current)
-        elif _is_search(words):
-            yield from _search_reads(words, current, piped_in=piped_in)
+    current = cwds
+    saved: list[tuple[str, ...]] = []
+    for raw, piped_in in command_segments(command):
+        for body in _substitution_bodies(raw):
+            yield from _reads(body, current, depth + 1, tracker)
+        segment, opens, closes = _unwrapped(raw)
+        saved.extend([current] * opens)
+        yield from _segment_reads(segment, piped_in, feeder, current, depth, tracker)
+        feeder, current = _segment_state(segment, current, tracker)
+        for _ in range(min(closes, len(saved))):
+            current = tuple(dict.fromkeys((*saved.pop(), *current)))
+
+
+def _segment_state(
+    segment: str, current: tuple[str, ...], tracker: _SearchCwds
+) -> tuple[tuple[str, ...] | None, tuple[str, ...]]:
+    """The ``find`` roots a segment feeds the next one, and the directories it leaves the command in."""
+    words = _command_words(segment)
+    if not words:
+        return None, current
+    head = posixpath.basename(words[0])
+    if head in _DIRECTORY_CHANGERS:
+        return None, _directory_change(words, 1, current, tracker)
+    if head == _FIND:
+        return _find_roots(words), current
+    return None, current
+
+
+def _segment_reads(
+    segment: str,
+    piped_in: bool,
+    feeder: tuple[str, ...] | None,
+    current: tuple[str, ...],
+    depth: int,
+    tracker: _SearchCwds,
+) -> Iterator[Read]:
+    """The trees the one command of ``segment`` reads, from each of ``current``."""
+    words = _command_words(segment)
+    if not words:
+        return
+    fed_by = feeder if piped_in else None
+    here = current
+    # `env -C dir cmd` runs cmd in dir; the wrapper is peeled from `words`. The
+    # segment already split cleanly into `words`, so this split cannot raise.
+    raw_words = linear_shlex.split(segment)
+    if posixpath.basename(raw_words[0]) == _ENV:
+        for target in chdir_wrapper_targets(_ENV, raw_words, 1):
+            here = tracker.moved(target, here)
+    head = posixpath.basename(words[0])
+    if head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
+        inner = words[words.index(_SHELL_COMMAND_FLAG, 1) + 1]
+        yield from _reads(inner, here, depth + 1, tracker)
+    elif head == _EVAL:
+        yield from _reads(" ".join(words[1:]), here, depth + 1, tracker)
+    elif head == _FIND:
+        if _find_execs_a_search(words):
+            yield from _reads_from_each(_find_roots(words), here)
+    elif head == _XARGS:
+        inner_words = _xargs_command(words)
+        if inner_words and _is_search(inner_words):
+            for base in here or (None,):
+                yield from _search_reads(inner_words, base, piped_in=True)
+            yield from _reads_from_each(fed_by or (), here)
+    elif _is_search(words):
+        for base in here or (None,):
+            yield from _search_reads(words, base, piped_in=piped_in)
+
+
+def _reads_from_each(roots: tuple[str, ...], bases: tuple[str, ...]) -> Iterator[Read]:
+    for base in bases or (None,):
+        yield from _reads_of_roots(roots, base)
 
 
 def _command_words(segment: str) -> list[str]:

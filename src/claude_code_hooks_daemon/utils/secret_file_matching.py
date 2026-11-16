@@ -3118,10 +3118,9 @@ def _token_mention(
             reals = _link_targets(token, effective_cwds)
             if realpath_cache is not None:
                 realpath_cache[token] = reals
-        for real in reals:
-            matched = first_matching_glob(real, patterns, project_root=project_root)
-            if matched is not None:
-                return matched
+        return _link_mention(token, effective_cwds, patterns, project_root, reals)
+    if expands_globs():
+        return _overflow_mention(token, effective_cwds, patterns)
     return None
 
 
@@ -3198,10 +3197,9 @@ def find_protected_mention_strict(
                 match = index.glob_matches(form, bases, default_expansion=default_globs())
                 if match is not None:
                     return match
-        for real in _link_targets(token, bases):
-            matched = first_matching_glob(real, patterns, project_root=project_root)
-            if matched is not None:
-                return matched
+        matched = _link_mention(token, bases, patterns, project_root)
+        if matched is not None:
+            return matched
     return None
 
 
@@ -3214,51 +3212,250 @@ _COMMAND_SEGMENT_SEPARATORS: Final[re.Pattern[str]] = re.compile(r"&&|\|\||[;|&\
 _SHLEX_REMOVED_CHARS: Final[dict[int, int | None]] = str.maketrans("", "", "'\"\\")
 
 
+#: Wrappers whose option moves the directory the rest of the command runs in.
+_ENV_EXECUTABLE: Final[str] = "env"
+_ENV_CHDIR_SHORT: Final[str] = "-C"
+_ENV_CHDIR_LONG: Final[str] = "--chdir"
+#: Words after which bash reads the next word as a command name.
+_COMMAND_START_WORDS: Final[frozenset[str]] = frozenset(
+    {"(", "{", "}", "!", "if", "then", "else", "elif", "do", "while", "until", "time"}
+)
+#: A command substitution's opener, glued to the word that starts its body.
+_SUBSTITUTION_OPENERS: Final[tuple[str, ...]] = ("$(", "`")
+_ASSIGNMENT_WORD: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+#: Nested ``bash -c`` / quoted ``$( )`` bodies are walked this deep, no further.
+_MAX_DIRECTORY_CHANGE_DEPTH: Final[int] = 4
+#: How many existing directories a relative word is resolved from (review F5).
+LINK_DIRECTORY_CAP: Final[int] = 16
+
+
 def _may_change_directory(segment: str) -> bool:
-    """Could ``segment``'s first shell word be ``cd``/``pushd``?
+    """Could ``segment`` change directory: ``cd``/``pushd``, ``env -C``/``--chdir``, ``git -C``?
 
     The cheap, sound gate in front of :func:`_shell_words`: a False here is
-    a segment the tokeniser would also have found no directory change in.
+    a segment the walker would also have found no directory change in.
     """
     unquoted = segment.translate(_SHLEX_REMOVED_CHARS)
-    return any(name in unquoted for name in _DIRECTORY_CHANGE_COMMANDS)
+    if any(name in unquoted for name in _DIRECTORY_CHANGE_COMMANDS):
+        return True
+    if _ENV_EXECUTABLE in unquoted and (
+        _ENV_CHDIR_SHORT in unquoted or _ENV_CHDIR_LONG.removeprefix("--") in unquoted
+    ):
+        return True
+    return _GIT_EXECUTABLE in unquoted and _GIT_CHDIR_FLAG in unquoted
 
 
-def effective_cwds(command: str, cwd: str | None) -> tuple[str, ...]:
-    """The directories ``command`` may run in: the hook's ``cwd``, then each literal ``cd`` target.
+class CwdSet(tuple[str, ...]):
+    """The directories a command may run in, and which of them really exist.
 
-    Ledger 00474 N221. A relative path in a command is read from where the
-    command is, so ``cd vault && cat r.md`` reaches ``vault/r.md``. Every
-    ``cd``/``pushd`` is tracked cumulatively and ALL the resulting directories
-    are returned, because a word is judged against each: the over-approximation
-    errs towards denying and needs no per-word ordering. A target bash computes
-    (a variable, substitution, glob, brace list, tilde) or that cannot be
-    placed (``cd -``, a relative step with no absolute directory to start
-    from) is not tracked -- out of scope, as before.
-
-    Only a segment that could start with one of those commands is tokenised
-    (:func:`_may_change_directory`), not every line of a large authored script
-    (ledger 00474 N465).
+    The tuple itself is every directory, placed lexically (Ledger 00474 N221),
+    and is what a spelling or glob is matched from. ``link_dirs`` are the first
+    :data:`LINK_DIRECTORY_CAP` that exist: a link can only be met in a directory
+    that exists, so only these cost a filesystem call per word. ``overflowed``
+    says more existed than that; a relative word that :meth:`could_be_link`
+    in one of the rest is then a finding rather than an unchecked word.
     """
-    directories: list[str] = [cwd] if cwd is not None and Path(cwd).is_absolute() else []
-    for segment in _COMMAND_SEGMENT_SEPARATORS.split(command):
+
+    link_dirs: tuple[str, ...]
+    overflowed: bool
+    _existing: tuple[str, ...]
+    _listings: dict[str, dict[str, tuple[bool, bool]] | None]
+
+    def __new__(cls, lexical: Iterable[str], existing: Sequence[str]) -> "CwdSet":
+        instance = super().__new__(cls, tuple(dict.fromkeys(lexical)))
+        instance.link_dirs = tuple(existing[:LINK_DIRECTORY_CAP])
+        instance.overflowed = len(existing) > LINK_DIRECTORY_CAP
+        instance._existing = tuple(existing)
+        instance._listings = {}
+        return instance
+
+    def _listing(self, directory: str) -> dict[str, tuple[bool, bool]] | None:
+        """``name -> (is a link, is a directory)`` for ``directory``; None when it cannot be listed."""
+        if directory not in self._listings:
+            try:
+                with os.scandir(directory) as entries:
+                    self._listings[directory] = {
+                        entry.name: (entry.is_symlink(), entry.is_dir()) for entry in entries
+                    }
+            except OSError as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="a directory the command moves to that cannot be listed may hold a link, so a relative word read there is a finding (fail closed)",
+                    level=logging.DEBUG,
+                )
+                self._listings[directory] = None
+        return self._listings[directory]
+
+    def could_be_link(self, token: str) -> bool:
+        """Could relative ``token`` pass through a link in some existing directory?
+
+        One listing per directory, not one call per word per directory. A first
+        component that is ``..``, a link, or a glob matching a link counts; so does
+        a deeper path whose real location differs from its spelling. A directory
+        that cannot be listed counts for every word.
+        """
+        if not token or token.startswith(("/", "~", "-")) or "\0" in token or "$" in token:
+            return False
+        components = [part for part in token.split("/") if part not in ("", ".")]
+        if not components:
+            return False
+        first = components[0]
+        if first == "..":
+            return True
+        globbed = any(char in _GLOB_CHARACTERS for char in first)
+        for directory in self._existing:
+            listing = self._listing(directory)
+            if listing is None:
+                return True
+            if globbed:
+                hits = [kind for name, kind in listing.items() if fnmatch.fnmatchcase(name, first)]
+            else:
+                hits = [listing[first]] if first in listing else []
+            for is_link, is_dir in hits:
+                if is_link:
+                    return True
+                if is_dir and len(components) > 1:
+                    if globbed or _realpath_if_resolvable(f"{directory}/{token}") is not None:
+                        return True
+        return False
+
+
+class _DirectoryWalk:
+    """The directories a command moves through, gathered word by word (review F1)."""
+
+    def __init__(self, cwd: str | None) -> None:
+        self.directories: list[str] = []
+        self.existing: dict[str, None] = {}
+        if cwd is not None and Path(cwd).is_absolute():
+            self._add(cwd)
+
+    def _add(self, directory: str, *, exists: bool | None = None) -> None:
+        self.directories.append(directory)
+        if directory in self.existing:
+            return
+        if exists if exists is not None else Path(directory).is_dir():
+            self.existing[directory] = None
+
+    def indeterminate(self) -> None:
+        """A move bash computes or cannot be placed: the project root is read too (fail closed)."""
+        root = resolve_project_root()
+        if root:
+            self._add(os.path.normpath(root))
+
+    def change(self, target: str | None) -> None:
+        """Record a ``cd``-like move to ``target`` (None: no literal operand)."""
+        if target is not None:
+            target = target.rstrip("`)")
+        if not target or target == "-" or any(c in _WORD_EXPANDING_CHARACTERS for c in target):
+            self.indeterminate()
+            return
+        if Path(target).is_absolute():
+            self._add(os.path.normpath(target))
+            return
+        if not self.directories:
+            return
+        self._add(os.path.normpath(str(Path(self.directories[-1]) / target)))
+        # The chain's last directory is a guess once a group's cd is in it, so the
+        # step is joined to every existing directory too -- kept only where real,
+        # which bounds the set by what exists rather than by the number of cds.
+        for base in list(self.existing)[: LINK_DIRECTORY_CAP + 1]:
+            joined = os.path.normpath(str(Path(base) / target))
+            if joined not in self.existing and Path(joined).is_dir():
+                self._add(joined, exists=True)
+
+    def result(self) -> CwdSet:
+        return CwdSet(self.directories, list(self.existing))
+
+
+def _change_target(words: list[str], start: int) -> str | None:
+    """The first operand of a ``cd``/``pushd`` whose name is ``words[start - 1]``."""
+    for word in words[start:]:
+        if word and all(char in _SHELL_OPERATOR_CHARS for char in word):
+            return None
+        if word == "-" or not word.startswith("-"):
+            return word
+    return None
+
+
+def chdir_wrapper_targets(name: str, words: list[str], start: int) -> list[str]:
+    """The directories an ``env -C`` / ``git -C`` at ``words[start - 1]`` moves to."""
+    targets: list[str] = []
+    index = start
+    while index < len(words) and words[index].startswith("-"):
+        word = words[index]
+        if name == _ENV_EXECUTABLE and word.startswith(_ENV_CHDIR_LONG + "="):
+            targets.append(word.partition("=")[2])
+        elif word in (_ENV_CHDIR_SHORT, _ENV_CHDIR_LONG) and index + 1 < len(words):
+            targets.append(words[index + 1])
+            index += 1
+        elif name == _ENV_EXECUTABLE and word.startswith(_ENV_CHDIR_SHORT) and word != "-C":
+            targets.append(word[len(_ENV_CHDIR_SHORT) :])
+        index += 1
+    return targets
+
+
+def _walk_directory_changes(text: str, walk: _DirectoryWalk, depth: int) -> None:
+    """Feed every directory change in ``text`` to ``walk``, wherever bash runs it."""
+    for segment in _COMMAND_SEGMENT_SEPARATORS.split(text):
         if not _may_change_directory(segment):
             continue
         words = _shell_words(segment)
-        if words is None or len(words) < 2 or words[0] not in _DIRECTORY_CHANGE_COMMANDS:
+        loose = words is None
+        if words is None:
+            # Unbalanced here (a quoted body split at an operator): read without
+            # quotes, count a change anywhere in it, and read from the root too.
+            words = _shell_words(segment.translate(_SHLEX_REMOVED_CHARS)) or []
+        _walk_words(words, walk, depth, loose=loose)
+
+
+def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bool) -> None:
+    at_start = True
+    for index, word in enumerate(words):
+        if depth < _MAX_DIRECTORY_CHANGE_DEPTH and " " in word and _may_change_directory(word):
+            _walk_directory_changes(word, walk, depth + 1)
+        if word and all(char in _SHELL_OPERATOR_CHARS for char in word):
+            at_start = True
             continue
-        operands = [word for word in words[1:] if not word.startswith("-") or word == "-"]
-        if not operands:
-            continue
-        target = operands[0]
-        if target == "-" or any(char in _WORD_EXPANDING_CHARACTERS for char in target):
-            continue
-        if not Path(target).is_absolute():
-            if not directories:
-                continue
-            target = str(Path(directories[-1]) / target)
-        directories.append(os.path.normpath(target))
-    return tuple(dict.fromkeys(directories))
+        head, opened = word, False
+        for opener in _SUBSTITUTION_OPENERS:
+            if opener in head:
+                head, opened = head.rsplit(opener, 1)[1], True
+        if at_start or opened or loose:
+            moves: list[str | None] = []
+            if head in _DIRECTORY_CHANGE_COMMANDS:
+                moves.append(_change_target(words, index + 1))
+            elif head in (_ENV_EXECUTABLE, _GIT_EXECUTABLE):
+                moves.extend(chdir_wrapper_targets(head, words, index + 1))
+            for move in moves:
+                walk.change(move)
+                if loose:
+                    walk.indeterminate()
+        if not (word in _COMMAND_START_WORDS or (at_start and _ASSIGNMENT_WORD.match(word))):
+            at_start = opened and not head
+
+
+def effective_cwds(command: str, cwd: str | None) -> CwdSet:
+    """The directories ``command`` may run in: the hook's ``cwd``, then each literal move.
+
+    Ledger 00474 N221. A relative path in a command is read from where the
+    command is, so ``cd vault && cat r.md`` reaches ``vault/r.md``. Every
+    ``cd``/``pushd``, ``env -C``/``--chdir`` and ``git -C`` is tracked
+    cumulatively and ALL the resulting directories are returned, because a word
+    is judged against each: the over-approximation errs towards denying and
+    needs no per-word ordering. Review F1: a move counts wherever bash runs it
+    -- in a subshell, a brace group, after ``if``/``while``/``then``, in a
+    command substitution or a quoted ``bash -c`` body. A target bash computes
+    (a variable, substitution, glob, brace list, tilde, ``cd -``, no operand)
+    adds the project root instead (fail closed).
+
+    Only a segment that could make such a move is tokenised
+    (:func:`_may_change_directory`), not every line of a large authored script
+    (ledger 00474 N465).
+    """
+    walk = _DirectoryWalk(cwd)
+    _walk_directory_changes(command, walk, 0)
+    return walk.result()
 
 
 def _anchored_spellings(form: str, cwds: tuple[str, ...]) -> list[str]:
@@ -3314,9 +3511,42 @@ def _link_targets(token: str, cwds: tuple[str, ...]) -> tuple[str, ...]:
         return ()
     candidates = [token]
     if not token.startswith(("/", "~")):
-        candidates = [str(Path(cwd) / token) for cwd in cwds if cwd] + candidates
+        # Only a directory that exists can hold a link (review F5).
+        bases = cwds.link_dirs if isinstance(cwds, CwdSet) else cwds
+        candidates = [str(Path(cwd) / token) for cwd in bases if cwd] + candidates
     found = (_realpath_if_resolvable(candidate) for candidate in dict.fromkeys(candidates))
     return tuple(dict.fromkeys(real for real in found if real is not None))
+
+
+def _overflow_mention(token: str, cwds: tuple[str, ...], patterns: tuple[str, ...]) -> str | None:
+    """A finding for a relative word past the directory cap that could be a link (review F5).
+
+    Only :data:`LINK_DIRECTORY_CAP` directories are resolved word by word; beyond
+    that a word which could pass through a link in any of the rest is denied,
+    never left unchecked. A positive finding, not an exception: an exception
+    ends in the guard's allow-with-advisory path.
+    """
+    if not patterns or not isinstance(cwds, CwdSet) or not cwds.overflowed:
+        return None
+    return patterns[0] if cwds.could_be_link(token) else None
+
+
+def _link_mention(
+    token: str,
+    cwds: tuple[str, ...],
+    patterns: tuple[str, ...],
+    project_root: str | None,
+    reals: tuple[str, ...] | None = None,
+) -> str | None:
+    """The protected glob ``token`` reaches through a link from one of ``cwds``, else None."""
+    overflow = _overflow_mention(token, cwds, patterns)
+    if overflow is not None:
+        return overflow
+    for real in _link_targets(token, cwds) if reals is None else reals:
+        matched = first_matching_glob(real, patterns, project_root=project_root)
+        if matched is not None:
+            return matched
+    return None
 
 
 _CD_EXECUTABLE: Final[str] = "cd"
@@ -3641,10 +3871,7 @@ def _paths_only_in_flag_position(
             candidate
             and (
                 find_protected_mention(candidate, patterns, deadline=deadline) is not None
-                or any(
-                    first_matching_glob(real, patterns, project_root=project_root) is not None
-                    for real in _link_targets(candidate, cwds)
-                )
+                or _link_mention(candidate, cwds, patterns, project_root) is not None
             )
             for candidate in candidates
         ):
