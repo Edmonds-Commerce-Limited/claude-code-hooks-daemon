@@ -7586,3 +7586,35 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence** (as reported, NOT yet reproduced here): an `Edit` that changes one cell of a large markdown table, in a doc with many tables whose rows hold cells over 1500 characters, makes `markdown_table_formatter` re-pad every row of that table and of other tables in the same file. Harm: the diff no longer shows the change, and every re-padded row counts as an added line to commit-time scanners (the sensitive-content scan), so old content is re-flagged and re-reviewed as new. Expected: only rows the edit touched change, or a table is re-padded only when it was already canonically padded. The reporter's workaround is rebuilding the file by script at the original widths.
 
 **Status**: ⬜ Open. Reproduce first on `main` with a synthetic doc (two tables, long cells, an `Edit` of one cell). If it reproduces, fix test-first: the formatter must leave untouched rows byte-identical (or skip a table whose existing padding is not canonical), with a test that an already-canonical table is still aligned after an edit.
+
+### N630 — use `agent_id` and `agent_type` on compaction payloads (Claude Code 2.1.323)
+
+**Source**: the Claude Code changelog review for release 3.75.0 (`subagent-reports/261116-claude-code-review-v3.75.0.md`), an adopt row.
+
+**Evidence**: from 2.1.323, PreCompact, PostCompact and the post-compaction SessionStart hooks receive `agent_id` and `agent_type` when a subagent compacts. The compaction signal handler (`handlers/pre_compact/compaction_signal.py`) does not read them.
+
+**Status**: ⬜ Open. Decide whether the signal should say which agent compacted; if so, read both fields with a default for older Claude Code versions, test-first.
+
+### N631 — check PreToolUse allow does not rely on surviving a permission-check error (Claude Code 2.1.323)
+
+**Source**: the same review, a conflict row (a check, not a known break).
+
+**Evidence**: from 2.1.323 an allow from a PreToolUse hook no longer sticks when the permission check errors afterwards; Claude Code decides as if no hook had answered. Any daemon handler that answers allow to skip a prompt would then prompt again.
+
+**Status**: ⬜ Open. List the PreToolUse handlers that return allow, and confirm none depends on the allow surviving. The review found none on the PreToolUse side.
+
+### N632 — check the PermissionRequest auto-approve handler never rewrites tool input (Claude Code 2.1.323)
+
+**Source**: the same review, a conflict row (a check, not a known break).
+
+**Evidence**: from 2.1.323 a rewritten PermissionRequest input is re-asked or refused when the check fails afterwards. The overlap is `handlers/permission_request/auto_approve_reads.py`.
+
+**Status**: ⬜ Open. Confirm the handler returns decisions only and never an updated input; add a test that pins it.
+
+### N633 — check WorktreeCreate prints a real path, not one through a project symlink (Claude Code 2.1.325)
+
+**Source**: the same review, a conflict row (a check, not a known break).
+
+**Evidence**: from 2.1.325 EnterWorktree refuses a worktree path that goes through a symlink. The overlap is `handlers/worktree_create/worktree_create_handler.py`.
+
+**Status**: ⬜ Open. Confirm the printed path is the resolved real path, with a test whose project directory is reached through a link.

@@ -183,3 +183,17 @@ releases:
       apply to the file a cp or mv into a directory writes), filed as
       niggles N603 and N604. No conflict row and no instruction-loading
       change.
+  v3.75.0:
+    claude_code_version: unknown
+    evidence: ""
+    review_date: "2026-11-16"
+    reviewed_through: "2.1.325"
+    review_report: CLAUDE/Plan/00474-niggles-ledger-seventeen/subagent-reports/261116-claude-code-review-v3.75.0.md
+    note: >-
+      The release host ran Claude Code 2.1.325, but the hook contract
+      (contracts/claude-code-hooks/META.json) has not been re-audited at that
+      version, so 2.1.325 is not recorded as the tested version. The review
+      ran FROM 2.1.322 to 2.1.325; the vendored changelog has no 2.1.324
+      entry, so only 2.1.323 and 2.1.325 were reviewed. One adopt row and
+      three conflict rows (each a check, not a known break), filed as
+      niggles N630 to N633. No instruction-loading change.
