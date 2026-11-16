@@ -35,6 +35,11 @@ from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_position import SHELL_NAMES
 from claude_code_hooks_daemon.utils.find_expression import FIND_EXEC_ACTIONS, find_exec_end
+from claude_code_hooks_daemon.utils.grep_option_grammar import (
+    ToolGrammar,
+    grammar_for,
+    parse_arguments,
+)
 from claude_code_hooks_daemon.utils.protected_file_index import (
     ExemptHook,
     ProtectedFileIndex,
@@ -51,41 +56,15 @@ TOOL_RG: Final[str] = "rg"
 TOOL_GIT: Final[str] = "git"
 
 # grep-like: recursive only when asked (-r, -R, --recursive, -d recurse).
-_GREP_COMMANDS: Final[frozenset[str]] = frozenset({"grep", "egrep", "fgrep", "zgrep", "ugrep"})
+_GREP_COMMANDS: Final[frozenset[str]] = frozenset(
+    {"grep", "egrep", "fgrep", "zgrep", "ugrep", "ug"}
+)
 # rg-like: recursive by default, and read piped stdin instead when given no root.
 _RG_COMMANDS: Final[frozenset[str]] = frozenset({"rg", "ag", "ack"})
 # Global git options that move the search somewhere the payload cwd does not describe.
 _GIT_RELOCATING_OPTIONS: Final[frozenset[str]] = frozenset({"-C", "--git-dir", "--work-tree"})
 _GIT_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
     {"-c", "--namespace", "--exec-path"} | _GIT_RELOCATING_OPTIONS
-)
-_PATTERN_OPTIONS: Final[frozenset[str]] = frozenset({"-e", "-f", "--regexp", "--file"})
-# Options whose value is the next word; without this the value would be read
-# as the pattern or as a search root.
-_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
-    {
-        "-A", "-B", "-C", "-m", "-d", "-D", "-g", "-t", "-T", "-j", "-M",
-        "--after-context", "--before-context", "--context", "--max-count",
-        "--directories", "--devices", "--include", "--exclude", "--exclude-dir",
-        "--exclude-from", "--glob", "--iglob", "--type", "--type-not", "--color", "--label",
-    }
-)  # fmt: skip
-# Value-taking options only ``rg`` has. They cannot join the shared set: ``-r``
-# is grep's recursion flag and ``-E`` its extended-regexp flag, neither takes a value.
-_RG_ONLY_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
-    {
-        "-r", "-E",
-        "--replace", "--encoding", "--max-depth", "--max-filesize", "--max-columns",
-        "--threads", "--sort", "--sortr", "--pre", "--pre-glob", "--ignore-file",
-        "--type-add", "--type-clear", "--colors", "--context-separator",
-        "--field-context-separator", "--field-match-separator", "--path-separator",
-        "--regex-size-limit", "--dfa-size-limit", "--engine", "--hostname-bin",
-        "--hyperlink-format",
-    }
-)  # fmt: skip
-_RG_COMMAND: Final[str] = "rg"
-_RECURSIVE_LONG_OPTIONS: Final[frozenset[str]] = frozenset(
-    {"--recursive", "--dereference-recursive"}
 )
 _GLOB_OPTIONS: Final[frozenset[str]] = frozenset({"-g", "--glob", "--iglob"})
 _DIRECTORIES_OPTIONS: Final[frozenset[str]] = frozenset({"-d", "--directories"})
@@ -124,6 +103,9 @@ class SearchArguments:
     excludes: list[str] = field(default_factory=list)
     globs: list[str] = field(default_factory=list)
     pattern_given: bool = False
+    uncertain: bool = False
+    # Whether the tool may search its default root (the cwd) besides the operands.
+    default_root_possible: bool = False
 
     def take_value(self, option: str, value: str) -> None:
         """Record the value of an option that takes one."""
@@ -180,53 +162,36 @@ def search_command(words: list[str]) -> tuple[str, int, bool] | None:
     return None
 
 
-def scan_options(arguments: list[str], *, tool: str, command: str = "") -> SearchArguments:
+def scan_options(
+    arguments: list[str], *, tool: str, command: str = "", grammar: ToolGrammar | None = None
+) -> SearchArguments:
     """Read options and operands of a grep-family invocation's arguments.
 
-    ``command`` is the word that ran the search (``rg``, ``/usr/bin/rg``): ``rg``
-    alone takes a value after ``-r``/``--replace`` and its long options, so its
-    value is not read as the pattern or as a root.
+    ``command`` is the word that ran the search (``rg``, ``/usr/bin/rg``): the
+    option grammar differs per tool (:mod:`grep_option_grammar`). The pattern
+    operand is skipped only on positive proof. An option the grammar cannot
+    place (an unknown name, an ambiguous abbreviation, an ``ug`` that reads its
+    own config) keeps EVERY operand as a possible root, drops the exclusions, and
+    leaves the default root possible whenever the unplaced options could have
+    eaten all the operands: skipping a word on a guess hides a searched path.
+
+    ``grammar`` overrides the one chosen from ``command``.
     """
-    rg_style = posixpath.basename(command) == _RG_COMMAND
-    value_options = (
-        _OPTIONS_TAKING_VALUE | _RG_ONLY_OPTIONS_TAKING_VALUE if rg_style else _OPTIONS_TAKING_VALUE
-    )
-    scan = SearchArguments(recursive=tool != TOOL_GREP)
-    pending: str | None = None
-    options_ended = False
-    for word in arguments:
-        if pending is not None:
-            scan.take_value(pending, word)
-            pending = None
-        elif options_ended or not word.startswith("-") or word == "-":
-            scan.operands.append(word)
-        elif word == _END_OF_OPTIONS:
-            options_ended = True
-        elif word.startswith("--"):
-            name, has_value, value = word.partition("=")
-            scan.recursive = scan.recursive or name in _RECURSIVE_LONG_OPTIONS
-            scan.pattern_given = scan.pattern_given or name in _PATTERN_OPTIONS
-            if name in value_options or name in _PATTERN_OPTIONS:
-                if has_value:
-                    scan.take_value(name, value)
-                else:
-                    pending = name
-        else:
-            cluster = word[1:]
-            for offset, char in enumerate(cluster):
-                option = f"-{char}"
-                if char in "rR" and option not in value_options:
-                    scan.recursive = True
-                elif option in _PATTERN_OPTIONS or option in value_options:
-                    scan.pattern_given = scan.pattern_given or option in _PATTERN_OPTIONS
-                    attached = cluster[offset + 1 :]
-                    if attached:
-                        scan.take_value(option, attached)
-                    else:
-                        pending = option
-                    break
-    if not scan.pattern_given and scan.operands:
-        scan.operands = scan.operands[1:]
+    chosen = grammar or grammar_for(command, git_grep=tool == TOOL_GIT)
+    parsed = parse_arguments(chosen, arguments)
+    scan = SearchArguments(recursive=tool != TOOL_GREP or parsed.recursive)
+    scan.pattern_given = parsed.pattern_supplied
+    scan.uncertain = parsed.uncertain
+    for option, value in parsed.values:
+        scan.take_value(option, value)
+    operands = [arguments[position] for position in parsed.operands]
+    if parsed.uncertain:
+        scan.operands = operands
+        scan.exclude_dirs, scan.excludes, scan.globs = [], [], []
+        scan.default_root_possible = len(operands) <= 1 + parsed.maybe_consumed
+        return scan
+    scan.operands = operands if parsed.pattern_supplied else operands[1:]
+    scan.default_root_possible = not scan.operands
     return scan
 
 
@@ -472,11 +437,13 @@ def _search_reads(words: list[str], cwd: str | None, *, piped_in: bool) -> Itera
         yield from _git_grep_reads(words[start:], scan, cwd)
         return
     roots = tuple(scan.operands)
-    if not roots:
-        if tool == TOOL_RG and piped_in:
-            return
-        roots = (".",)
-    rules = _tool_rules(posixpath.basename(words[0]), words[start:], scan)
+    if scan.default_root_possible and not (tool == TOOL_RG and piped_in):
+        roots = (*roots, ".")
+    rules = (
+        _NO_RULES
+        if scan.uncertain
+        else _tool_rules(posixpath.basename(words[0]), words[start:], scan)
+    )
     yield from _reads_of_roots(roots, cwd, rules)
 
 
@@ -498,7 +465,9 @@ def _git_grep_reads(arguments: list[str], scan: SearchArguments, cwd: str | None
         candidates = arguments[arguments.index(_END_OF_OPTIONS) + 1 :]
     else:
         candidates = [operand for operand in scan.operands if _exists(operand, cwd)]
-    roots = tuple(c for c in candidates if not c.startswith(_PATHSPEC_MAGIC_PREFIX)) or (".",)
+    roots = tuple(c for c in candidates if not c.startswith(_PATHSPEC_MAGIC_PREFIX))
+    if not roots or scan.default_root_possible:
+        roots = (*roots, ".")
     for root in _placed(roots, cwd):
         yield Read(root, view=view)
 

@@ -75,7 +75,6 @@ class TestPatternSupplyingOptions:
             ("grep", ["--reg=zz", "d"]),
             ("egrep", ["--rege=zz", "d"]),
             ("grep", ["--file=p", "d"]),
-            ("grep", ["--fil=p", "d"]),
             ("grep", ["--and=zz", "d"]),
             ("ugrep", ["--and", "zz", "d"]),
             ("ugrep", ["--not=zz", "d"]),
