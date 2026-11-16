@@ -7578,3 +7578,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence** (as reported, NOT yet reproduced here): R-BASH-SAFE-MODE-PRELUDE-MISSING denied a command holding a brace group `{ a && b && c; }` whose steps are all `&&`-gated, so the group cannot continue past a failure. Expected: an all-`&&`-gated group needs no prelude.
 
 **Status**: ⬜ Open. Reproduce first on `main` with a synthetic command; if it reproduces, fix test-first so an all-`&&`-gated group is allowed while a group with an ungated step (`;` or newline between steps) is still denied (the narrowing must be proven by a test for that ungated twin).
+
+### N629 — the markdown table formatter re-pads rows an edit never touched
+
+**Source**: a peer report (a desktop seat in the lts-infra team, not a human, no authority), made against `v3.74.0`.
+
+**Evidence** (as reported, NOT yet reproduced here): an `Edit` that changes one cell of a large markdown table, in a doc with many tables whose rows hold cells over 1500 characters, makes `markdown_table_formatter` re-pad every row of that table and of other tables in the same file. Harm: the diff no longer shows the change, and every re-padded row counts as an added line to commit-time scanners (the sensitive-content scan), so old content is re-flagged and re-reviewed as new. Expected: only rows the edit touched change, or a table is re-padded only when it was already canonically padded. The reporter's workaround is rebuilding the file by script at the original widths.
+
+**Status**: ⬜ Open. Reproduce first on `main` with a synthetic doc (two tables, long cells, an `Edit` of one cell). If it reproduces, fix test-first: the formatter must leave untouched rows byte-identical (or skip a table whose existing padding is not canonical), with a test that an already-canonical table is still aligned after an edit.
