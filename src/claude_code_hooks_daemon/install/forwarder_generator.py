@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.constants.events import (
 from claude_code_hooks_daemon.constants.protocol import HookInputField, RawTextReply
 from claude_code_hooks_daemon.daemon.paths import EVENTS_DIR_LOCATION_SUFFIX, get_untracked_dir
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 #: The line every current forwarder sources init.sh through. The guard block
 #: is inserted directly above this line (DESIGN §6.1) — it is the anchor that
@@ -296,7 +297,7 @@ def _untracked_dir_below_root(untracked_dir: Path, project_root: Path) -> str:
             no root-relative spelling of such a layout.
     """
     try:
-        return untracked_dir.relative_to(project_root).as_posix()
+        return path_relative_to(untracked_dir, project_root).as_posix()
     except ValueError as exc:
         raise ValueError(
             f"untracked dir {untracked_dir} is not below project root {project_root}; "

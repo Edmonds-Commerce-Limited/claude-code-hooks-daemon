@@ -109,7 +109,7 @@ _PATHSPEC_MAGIC_PREFIX: Final[str] = ":"
 _ASSIGNMENT: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 # A root carrying any of these is not one directory the command line names.
 _UNPLACEABLE_ROOT: Final[re.Pattern[str]] = re.compile(r"[$`*?\[{]")
-# Of those, the ones that are not a glob: a trailing-slash glob carrying one is not judged.
+# Of those, the ones that are not a glob: a glob root carrying one is not judged.
 _EXPANSION_ROOT: Final[re.Pattern[str]] = re.compile(r"[$`{]")
 _DIRECTORY_GLOB: Final[re.Pattern[str]] = re.compile(r"[*?\[]")
 
@@ -375,8 +375,9 @@ def protected_reached(
 def _directories_read(read: Read, index: ProtectedFileIndex) -> list[Read]:
     """``read`` itself, or for a ``glob`` read the directories of ``index`` it names.
 
-    The shell expands a glob ending in ``/`` to directories only, so each one is
-    searched as a literal directory is; only those holding a protected file matter.
+    A recursive reader searches each directory the glob expands to as it searches a
+    literal directory, with or without a trailing ``/``; only those holding a
+    protected file matter.
     """
     if not read.glob:
         return [read]
@@ -564,12 +565,14 @@ def _placed(roots: tuple[str, ...], cwd: str | None) -> list[str]:
 
 
 def _place_directory_glob(root: str, cwd: str | None) -> str | None:
-    """The absolute form of a glob ending in ``/``, or None when ``root`` is not one.
+    """The absolute form of a glob root, or None when ``root`` is not one.
 
-    The result keeps its trailing ``/``. A glob carrying a variable, a substitution or a
-    brace is not placed, as for any other root.
+    A glob ending in ``/`` expands to directories only. One without it can expand to a
+    directory too, and a recursive reader follows that, so both are placed the same way.
+    A glob carrying a variable, a substitution or a brace is not placed, as for any
+    other root.
     """
-    if not root.endswith("/") or not _DIRECTORY_GLOB.search(root) or _EXPANSION_ROOT.search(root):
+    if not _DIRECTORY_GLOB.search(root) or _EXPANSION_ROOT.search(root):
         return None
     placed = _place(root, cwd, unplaceable=_EXPANSION_ROOT)
     return None if placed is None else placed.rstrip("/") + "/"
