@@ -30,7 +30,9 @@ import os
 import re
 import socket
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -201,10 +203,56 @@ def _own_venv_not_ready() -> str | None:
     return None
 
 
-_NEEDS_OWN_VENV = pytest.mark.skipif(
-    _own_venv_not_ready() is not None,
-    reason=f"{_own_venv_not_ready()} - re-run once the background venv build finishes",
-)
+_CI_ENV_VARS = ("CI", "GITHUB_ACTIONS")
+
+
+def _venv_gate(not_ready: str | None, env: Mapping[str, str]) -> Literal["run", "skip", "fail"]:
+    """Decide what a test needing this checkout's own venv does.
+
+    A venv that is ready runs the test. One that is not skips it on a
+    developer worktree (the first hook builds it in the background) but FAILS
+    under CI, where a missing or broken venv is a real defect a skip would hide.
+    """
+    if not_ready is None:
+        return "run"
+    in_ci = any(
+        env.get(name, "").strip().lower() not in ("", "0", "false") for name in _CI_ENV_VARS
+    )
+    return "fail" if in_ci else "skip"
+
+
+@pytest.fixture
+def own_venv() -> None:
+    """Skip (locally) or fail (in CI) while this checkout's own venv is not ready."""
+    not_ready = _own_venv_not_ready()
+    decision = _venv_gate(not_ready, os.environ)
+    if decision == "run":
+        return
+    message = f"{not_ready} - re-run once the background venv build finishes"
+    if decision == "fail":
+        pytest.fail(message)
+    pytest.skip(message)
+
+
+_NEEDS_OWN_VENV = pytest.mark.usefixtures("own_venv")
+
+
+class TestVenvGate:
+    """The skip/fail decision, judged on explicit env values."""
+
+    _MISSING = "this checkout has no venv yet"
+
+    def test_ready_venv_runs_everywhere(self) -> None:
+        assert _venv_gate(None, {}) == "run"
+        assert _venv_gate(None, {"CI": "true"}) == "run"
+
+    def test_missing_venv_skips_outside_ci(self) -> None:
+        assert _venv_gate(self._MISSING, {}) == "skip"
+        assert _venv_gate(self._MISSING, {"CI": "", "GITHUB_ACTIONS": "false"}) == "skip"
+
+    @pytest.mark.parametrize("name", ["CI", "GITHUB_ACTIONS"])
+    def test_missing_venv_fails_in_ci(self, name: str) -> None:
+        assert _venv_gate(self._MISSING, {name: "true"}) == "fail"
 
 
 @_NEEDS_OWN_VENV
