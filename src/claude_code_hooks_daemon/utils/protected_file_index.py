@@ -245,9 +245,7 @@ class ProtectedFileIndex:
         last = glob_parts[-1]
         if last == _RECURSIVE_COMPONENT:
             return []
-        real_files = [
-            f"{root}/{entry.relpath}" for entry in self.files for root in self._roots()
-        ]
+        real_files = [f"{root}/{entry.relpath}" for entry in self.files for root in self._roots()]
         try:
             with os.scandir(parent) as listing:
                 names = [item.name for item in listing if item.is_symlink()]
@@ -346,9 +344,7 @@ def _segments_match(path: Sequence[str], glob: Sequence[str]) -> bool:
     name = path[0]
     if name.startswith(_HIDDEN_PREFIX) and not head.startswith(_HIDDEN_PREFIX):
         return False
-    return _component_pattern(head).fullmatch(name) is not None and _segments_match(
-        path[1:], rest
-    )
+    return _component_pattern(head).fullmatch(name) is not None and _segments_match(path[1:], rest)
 
 
 @lru_cache(maxsize=1024)
@@ -414,7 +410,10 @@ def _bracket_expression(glob: str, start: int) -> tuple[str, int] | None:
         if char == "\\" and position + 1 < len(glob):
             position += 1
             char = glob[position]
-        if glob.startswith("-", position + 1) and glob[position + 2 : position + 3] not in ("", "]"):
+        if glob.startswith("-", position + 1) and glob[position + 2 : position + 3] not in (
+            "",
+            "]",
+        ):
             high = glob[position + 2]
             if char <= high:  # a reversed range holds nothing, as in bash
                 members.append(f"{re.escape(char)}-{re.escape(high)}")
