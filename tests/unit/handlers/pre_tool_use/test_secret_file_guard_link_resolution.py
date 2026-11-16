@@ -31,7 +31,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as 
 from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
     SecretFileGuardHandler,
 )
-from claude_code_hooks_daemon.utils import protected_file_index
+from claude_code_hooks_daemon.utils import path_exclusion, protected_file_index
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 
 # Assembled so this file never spells a protected name itself.
@@ -84,6 +84,11 @@ def checkouts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Check
     outside.mkdir()
     (outside / "plain.txt").write_bytes(b"hello\n")
     (worktree / "outlink").symlink_to(os.path.relpath(outside, worktree))
+    # One level down, for a `cd` the command makes before naming a link.
+    inner = worktree / "inner"
+    inner.mkdir()
+    (inner / "ilink").symlink_to(os.path.relpath(primary / _PROTECTED, inner))
+    (inner / "idlink").symlink_to(os.path.relpath(primary / "sub", inner))
 
     monkeypatch.chdir("/")
     protected_file_index.reset_index_cache()
@@ -98,6 +103,7 @@ def project(request: pytest.FixtureRequest, checkouts: Checkouts) -> Iterator[Pa
     with (
         patch.object(guard_module, "resolve_project_root", return_value=str(root)),
         patch.object(sfm, "resolve_project_root", return_value=str(root)),
+        patch.object(path_exclusion, "resolve_project_root", return_value=str(root)),
     ):
         index_project(root, SecretFileGuardHandler()._patterns())
         yield root
@@ -113,6 +119,16 @@ def _verdict(cwd: Path, tool: str, tool_input: dict[str, Any]) -> Decision:
 
 def _bash(checkouts: Checkouts, command: str) -> Decision:
     return _verdict(checkouts.worktree, "Bash", {"command": command})
+
+
+def _reason(cwd: Path, tool: str, tool_input: dict[str, Any]) -> str:
+    """The deny reason of a call that must be denied."""
+    hook_input: dict[str, Any] = {"tool_name": tool, "tool_input": tool_input, "cwd": str(cwd)}
+    handler = SecretFileGuardHandler()
+    assert handler.matches(hook_input)
+    result = handler.handle(hook_input)
+    assert result.decision is Decision.DENY
+    return str(result.reason)
 
 
 class TestRelativeLinkTokenResolvedAgainstHookCwd:
@@ -279,3 +295,191 @@ class TestGlobUnderDirectoryLink:
         if project == checkouts.primary:
             pytest.skip("the link sits outside the primary, which judges it as before")
         assert _bash(checkouts, "cat outlink/*") is Decision.DENY
+
+
+class TestDirectoryChangeTheCommandMakes:
+    """Review F1: a ``cd`` anywhere bash runs it moves where a relative word is read."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "(cd inner && cat ilink)",
+            "( cd inner ; cat ilink )",
+            "{ cd inner; cat ilink; }",
+            "if cd inner; then cat ilink; fi",
+            'x=$(cd inner && cat ilink); echo "$x"',
+            'x="$(cd inner && cat ilink)"',
+            "x=`cd inner && cat ilink`",
+            "bash -c 'cd inner && cat ilink'",
+            'sh -c "cd inner; cat ilink"',
+            "env -C inner cat ilink",
+            "env --chdir=inner cat ilink",
+            "git -C inner diff --no-index ilink /dev/null",
+            "while cd inner; do cat ilink; break; done",
+            "(cd inner && cat idlink/*)",
+            "(cd inner && grep -r . idlink)",
+            "(cd inner && cat ../link1.txt)",
+            "{ cd inner; grep -r x idlink; }",
+            'x="$(cd inner && grep -r x idlink)"',
+            "bash -c 'cd inner && grep -r x idlink'",
+            "env -C inner grep -r x idlink",
+            # A group's cd ADDS a directory: the later top-level cd is still placed
+            # from the hook cwd, so it must not be read from inside the group's.
+            "(cd clean && true); cd inner && cat ilink",
+            "cd clean && (cd x); cd ../inner && cat ilink",
+            "(cd clean && true); grep -r x inner/idlink",
+        ],
+    )
+    def test_link_read_after_a_wrapped_cd_denied(
+        self, checkouts: Checkouts, project: Path, command: str
+    ) -> None:
+        assert _bash(checkouts, command) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "(cd clean && cat plain.txt)",
+            "env -C clean cat plain.txt",
+            "{ cd clean; cat plain.txt; }",
+            "bash -c 'cd clean && cat plain.txt'",
+            # A plain top-level cd REPLACES the directory a search is read from.
+            "cd clean && grep -r hello .",
+            "(cd clean && grep -r hello .)",
+        ],
+    )
+    def test_ordinary_wrapped_cd_allowed(
+        self, checkouts: Checkouts, project: Path, command: str
+    ) -> None:
+        assert _bash(checkouts, command) is Decision.ALLOW
+
+    def test_top_level_cd_replaces_the_search_directory(
+        self, checkouts: Checkouts, project: Path
+    ) -> None:
+        """``cd clean && grep -r x .`` reads clean only, never the hook cwd as well."""
+        reads = sfm_reads("cd clean && grep -r hello .", checkouts.worktree)
+        assert reads == [str(checkouts.worktree / "clean")]
+
+    def test_indeterminate_cd_reads_from_the_project_root(
+        self, checkouts: Checkouts, project: Path
+    ) -> None:
+        if project == checkouts.primary:
+            pytest.skip("the links sit in the worktree, not under the primary's root")
+        clean = checkouts.worktree / "clean"
+        assert _verdict(clean, "Bash", {"command": "cat inner/ilink"}) is Decision.ALLOW
+        command = 'cd "$D" && cat inner/ilink'
+        assert _verdict(clean, "Bash", {"command": command}) is Decision.DENY
+        command = 'cd "$D" && grep -r x dlink'
+        assert _verdict(clean, "Bash", {"command": command}) is Decision.DENY
+
+
+def sfm_reads(command: str, cwd: Path) -> list[str]:
+    """The roots ``recursive_search`` places for ``command`` run from ``cwd``."""
+    from claude_code_hooks_daemon.utils import recursive_search
+
+    return [read.root for read in recursive_search.search_reads(command, str(cwd))]
+
+
+class TestGlobWildcardOnTheLinkComponent:
+    """Review F2: a wildcard in the component that matches a directory link."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat dl*/*",
+            "cat d*/*",
+            "cat dlin?/*",
+            "cat dlink*/*",
+            "cat pl*/*",
+            "cat pl*/sub/*",
+            "grep -r x dl*",
+            "grep -r x pl*/sub",
+            "(cd inner && cat idl*/*)",
+        ],
+    )
+    def test_wildcard_link_component_denied(
+        self, checkouts: Checkouts, project: Path, command: str
+    ) -> None:
+        assert _bash(checkouts, command) is Decision.DENY
+
+    @pytest.mark.parametrize("command", ["cat */*", "cat cle*/*", "ls cle*/*.txt"])
+    def test_wildcard_over_clean_or_nameless_allowed(
+        self, checkouts: Checkouts, project: Path, command: str
+    ) -> None:
+        assert _bash(checkouts, command) is Decision.ALLOW
+
+
+class TestLinkOutDenyExplainsTheLink:
+    """Review F4: a deny caused by a link out of the project says so."""
+
+    @pytest.fixture(autouse=True)
+    def _worktree_only(self, checkouts: Checkouts, project: Path) -> None:
+        if project == checkouts.primary:
+            pytest.skip("outlink sits outside the primary, which judges it by name")
+
+    @staticmethod
+    def _assert_explains(reason: str, link: str) -> None:
+        assert f"`{link}`" in reason
+        assert "link to a directory outside the project" in reason
+        assert "run the command from the checkout that holds" in reason
+        assert "real path" not in reason
+
+    @pytest.mark.parametrize(
+        "command",
+        ["cat outlink/*", "grep -r hello outlink", "cat out*/*", f"grep -r {_PROTECTED} outlink"],
+    )
+    def test_bash_deny_names_the_link(
+        self, checkouts: Checkouts, project: Path, command: str
+    ) -> None:
+        reason = _reason(checkouts.worktree, "Bash", {"command": command})
+        self._assert_explains(reason, "outlink")
+
+    def test_grep_tool_deny_names_the_link(self, checkouts: Checkouts, project: Path) -> None:
+        path = str(checkouts.worktree / "outlink")
+        reason = _reason(checkouts.worktree, "Grep", {"pattern": "x", "path": path})
+        self._assert_explains(reason, path)
+
+    def test_a_protected_name_deny_does_not_blame_a_link(
+        self, checkouts: Checkouts, project: Path
+    ) -> None:
+        reason = _reason(checkouts.worktree, "Bash", {"command": f"cat {_PROTECTED}"})
+        assert "link to a directory outside the project" not in reason
+
+
+class TestBoundedCostOfManyDirectoryChanges:
+    """Review F5: many ``cd`` targets must not multiply the per-word filesystem calls."""
+
+    _WORDS = 3000
+    _CDS = 200
+
+    def _command(self, targets: list[str]) -> str:
+        cds = " && ".join(f"cd {target}" for target in targets)
+        words = " ".join(f"word{n}.txt" for n in range(self._WORDS))
+        return f"{cds} && echo {words}"
+
+    def test_many_absent_directories_cost_about_one_call_per_word(
+        self, checkouts: Checkouts, project: Path
+    ) -> None:
+        targets = [f"/nonexistent-614/d{n}" for n in range(self._CDS)]
+        relative = [f"r{n}" for n in range(self._CDS)]
+        for chosen in (targets, relative):
+            command = self._command(chosen)
+            with patch.object(sfm.os.path, "lexists", wraps=os.path.lexists) as spy:
+                assert _bash(checkouts, command) is Decision.ALLOW
+            assert spy.call_count <= 2 * self._WORDS + 4 * self._CDS
+
+    def test_many_real_directories_fail_closed_on_a_link_word(
+        self, checkouts: Checkouts, project: Path, tmp_path: Path
+    ) -> None:
+        """Past the cap a relative word that could be a link is a finding, not a skipped check."""
+        many = tmp_path / "many"
+        targets = []
+        for n in range(self._CDS):
+            directory = many / f"d{n}"
+            directory.mkdir(parents=True)
+            targets.append(str(directory))
+        targets.append(str(checkouts.worktree / "inner"))
+        cds = " && ".join(f"cd {target}" for target in targets[1:]) + f" && cd {targets[0]}"
+        with patch.object(sfm.os.path, "lexists", wraps=os.path.lexists) as spy:
+            assert _bash(checkouts, f"{cds} && cat ilink") is Decision.DENY
+            assert _bash(checkouts, f"{cds} && echo {'w ' * self._WORDS}") is Decision.ALLOW
+        assert spy.call_count <= 40 * self._WORDS
