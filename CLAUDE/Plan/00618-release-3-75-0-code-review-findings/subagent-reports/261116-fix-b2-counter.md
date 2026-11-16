@@ -4,11 +4,12 @@ Branch: `worktree-plan-00618-b1-b2`. It is pushed, not merged. This follows `261
 
 ## Commits
 
-| Commit      | What                                                                           |
-| ----------- | ------------------------------------------------------------------------------ |
-| `1249b2ae0` | Red tests. 11 failed on `f97374cdb`, each on an assertion, not an error.       |
-| `938169c8f` | Fix A in `core/branch_stop_gate.py`.                                           |
-| (this one)  | Release note 089, the `HANDLER_REFERENCE.md` stop-guard line, and this report. |
+| Commit      | What                                                                                                     |
+| ----------- | -------------------------------------------------------------------------------------------------------- |
+| `1249b2ae0` | Red tests. 11 failed on `f97374cdb`, each on an assertion, not an error.                                 |
+| `938169c8f` | Fix A in `core/branch_stop_gate.py`.                                                                     |
+| `d07606150` | Release note 089, the `HANDLER_REFERENCE.md` stop-guard line, and this report.                           |
+| (next)      | `handlers/stop/branch_stop_guard.py`: docstring, `get_claude_md` and safety note name the second budget. |
 
 ## Fix (`core/branch_stop_gate.py`)
 
@@ -61,6 +62,8 @@ Branch: `worktree-plan-00618-b1-b2`. It is pushed, not merged. This follows `261
 
 ## Known gap, not fixed: equal to origin/main, not a loosening
 
+The consequence: suppose an ordinary own branch uses up `blocks` first and stays unresolved. An own harness branch that shows up later is then never refused, because every later stop is mixed and counts on the spent main counter. origin/main never refuses that branch at all.
+
 Take a mixed stop that comes after `blocks` is spent: a newly judged branch plus an ordinary branch. It counts on `blocks`, so it is allowed, and the newly judged branch is recorded as abandoned without ever drawing on its own counter. origin/main also allows that stop. Falling through to the harness counter would be tighter, but it departs from the specified rule, so it was not done.
 
 ## QA
@@ -75,4 +78,7 @@ Take a mixed stop that comes after `blocks` is spent: a newly judged branch plus
   - `tests/unit/handlers/subagent_stop/`;
   - 345 passed.
 - `tests/integration/test_claude_md_guidance_coverage.py` and `tests/unit/core/test_agent_ownership.py`: 418 passed.
+- Re-run on `d07606150`, after the autofix: the four stop-gate paths above plus `tests/integration/test_declared_behaviour_matches_source.py`, 364 passed. After the handler prose edit: `run_autofix.sh` was clean; the stop handler tests and both integration tests, 432 passed; `llm_qa.py lint type_check magic_values docs_qa`, 4/4 passed.
 - Not run: the full suite and `llm_qa.py all`.
+
+A cosmetic point, not changed: a newly judged branch that is both dirty and unpushed prints the same three hold-remedy lines under each of its findings.
