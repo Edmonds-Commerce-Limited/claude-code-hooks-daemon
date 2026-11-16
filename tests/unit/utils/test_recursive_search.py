@@ -91,7 +91,9 @@ def test_search_reaching_a_protected_file_is_reported(tree: Path, command: str) 
         "rg x clean",
         "find clean | xargs rg x",
         "find . -name '*.txt'",
-        "find . -exec cat {} +",
+        "find clean -exec cat {} +",
+        "find . -exec ls {} +",
+        "find . | xargs echo",
         "echo rg",
         "echo grep -r x .",
         "git commit -m 'grep -r x .'",
@@ -119,8 +121,79 @@ def test_piped_rg_without_a_root_reads_stdin(tree: Path) -> None:
     assert _reach("echo hi | rg x", tree) is None
 
 
-def test_xargs_after_a_non_find_producer_names_no_root(tree: Path) -> None:
-    assert _reach("echo a | xargs grep x", tree) is None
+def test_xargs_after_a_non_find_producer_judges_the_cwd(tree: Path) -> None:
+    """The producer's paths are unknown, so the tree xargs runs in is judged."""
+    assert _reach("echo a | xargs grep x", tree) == PROTECTED_GLOB
+    assert _reach("echo a | xargs grep x", tree / "clean", root=tree) is None
+
+
+def _roots(command: str, cwd: Path) -> list[str]:
+    return [read.root for read in rs.search_reads(command, str(cwd))]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("find sub -exec cat {} +", ["sub"]),
+        ("find sub clean -exec cat {} \\;", ["sub", "clean"]),
+        ("find sub -execdir sh -c 'cat $1' _ {} \\;", ["sub"]),
+        ("find sub -exec ls {} \\; -exec cat {} \\;", ["sub"]),
+        ("find sub -exec cat", ["sub"]),
+        ("find sub | xargs cat", ["sub"]),
+        ("find sub -print0 | xargs -0 -n 1 cat", ["sub"]),
+        ("find sub | sort | xargs cat", ["sub"]),
+        ("find sub | xargs sudo cat", ["sub"]),
+        ("find sub | xargs --max-args 1 cat", ["sub"]),
+        ("diff sub clean", ["sub", "clean"]),
+        ("diff -r sub clean", ["sub", "clean"]),
+        ("tar cf - sub", ["sub"]),
+        ("tar -C sub -cf - .", ["sub"]),
+        ("tar --directory=sub -cf - .", ["sub"]),
+        ("cp -r sub x", ["sub"]),
+        ("cp -rt x sub", ["sub"]),
+        ("rsync -a sub/ x", ["sub"]),
+        ("zip -r x.zip sub", ["sub"]),
+        ("git diff --no-index sub clean", ["sub", "clean"]),
+        ("git ls-files | xargs cat", ["."]),
+    ],
+)
+def test_directory_readers_name_the_roots_they_read(
+    tree: Path, command: str, expected: list[str]
+) -> None:
+    roots = _roots(command, tree)
+    for name in expected:
+        assert str(tree / name if name != "." else tree) in roots
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "find sub -exec ls {} +",
+        "find sub -exec echo {} +",
+        "find sub -type f -exec rm {} +",
+        "find sub -name x -print",
+        "find sub | xargs echo",
+        "find sub | xargs",
+        "find sub | xargs -n 1 ls",
+        "git diff",
+        "git diff HEAD~1",
+        "cp a b",
+        "cp -r clean sub",
+        "tar cf - clean",
+        "git ls-files | xargs echo",
+    ],
+)
+def test_content_free_or_unrelated_commands_reach_no_protected_file(
+    tree: Path, command: str
+) -> None:
+    assert _reach(command, tree) is None
+
+
+def test_a_root_reached_through_a_link_and_dotdot_is_judged_physically(tree: Path) -> None:
+    (tree / "hop").mkdir()
+    (tree / "hop" / "up").symlink_to(Path("..") / "sub", target_is_directory=True)
+    assert _reach("tar cf - hop/up/..", tree) == PROTECTED_GLOB
+    assert _reach("grep -r x hop/up/..", tree) == PROTECTED_GLOB
 
 
 def test_missing_cwd_leaves_relative_roots_unjudged(tree: Path) -> None:
