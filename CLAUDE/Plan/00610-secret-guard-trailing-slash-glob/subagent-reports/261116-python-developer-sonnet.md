@@ -32,4 +32,4 @@ Green: `909 passed` over the new file, `test_recursive_search.py`, `test_protect
 
 ## QA
 
-See the final reply for the `llm_qa.py changed --allow-unmapped` verdict.
+`./scripts/qa/llm_qa.py changed --allow-unmapped` at the final design: `QA: 43/43 PASSED` (rc=0). An earlier run on the pathlib version failed only on lint PTH207, which the rework removed.
