@@ -8,6 +8,11 @@ verifies the binary itself (static, and it runs) instead.
 The build needs the musl rustc target. Locally its absence is an honest skip; in
 CI (`CI` or `GITHUB_ACTIONS` set) the workflow provisions it, so absence there is
 a failure, never a skip.
+
+This lives under tests/integration, not tests/unit, because only the daemon legs
+(`daemon: true` in scripts/ci/shard_legs.yaml) run `rustup target add
+x86_64-unknown-linux-musl`; the unit legs, and the native arm64 unit run, do not
+and must not need a Rust toolchain.
 """
 
 from __future__ import annotations
