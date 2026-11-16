@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
@@ -152,6 +153,83 @@ class ProtectedFileIndex:
             return None
         return directory if self._leads_out(directory, os.path.realpath(directory)) else None
 
+    def _wildcard_links(
+        self, token: str, absolute_token: str, *, include_last: bool
+    ) -> list[tuple[str, str, bool]]:
+        """``(link, glob read through it, leads out)`` for each directory link the first wildcard component names.
+
+        Review F2: ``dl*/*`` reads what ``dlink`` points at, but no literal directory
+        precedes the wildcard for :meth:`_link_out_directory` to resolve. The literal
+        parent is listed once and each link matching that component is judged. A
+        glob whose first component is wildcards only (``*/*``) names no place and is
+        not expanded; nor is a last component, unless ``include_last`` (a recursive
+        reader descends into it).
+        """
+        below = _relative_to(absolute_token, self._roots()) if token.startswith("/") else None
+        spelled = _components(token if below is None else below)
+        if not spelled or _WILDCARD_ONLY.fullmatch(spelled[0]):
+            return []
+        parts = _components(absolute_token)
+        first = next((depth for depth, part in enumerate(parts) if _has_glob_syntax(part)), None)
+        if first is None or (first == len(parts) - 1 and not include_last):
+            return []
+        # Resolved as :func:`_glob_parts` resolves the literal prefix.
+        parent = os.path.realpath("/" + "/".join(parts[:first]))
+        if not Path(parent).is_dir():
+            return []
+        try:
+            with os.scandir(parent) as listing:
+                names = [entry.name for entry in listing if entry.is_symlink()]
+        except OSError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a directory that cannot be listed cannot be glob-expanded by the shell either, so the wildcard reads no link in it",
+                level=logging.DEBUG,
+            )
+            return []
+        hits: list[tuple[str, str, bool]] = []
+        for name in names:
+            if not _segments_match([name], [parts[first]]):
+                continue
+            link = f"{parent.rstrip('/')}/{name}"
+            real = os.path.realpath(link)
+            if not Path(real).is_dir():
+                continue
+            through = "/".join(
+                [*(_escape_glob(part) for part in _components(real)), *parts[first + 1 :]]
+            )
+            hits.append((link, "/" + through, self._leads_out(link, real)))
+        return hits
+
+    def _glob_link_out(self, token: str, absolute_token: str, *, include_last: bool) -> str | None:
+        """The link out of the project a glob reads through, by its literal or its wildcard directory."""
+        literal = self._link_out_directory(token, absolute_token)
+        if literal is not None:
+            return literal
+        hits = self._wildcard_links(token, absolute_token, include_last=include_last)
+        return next((link for link, _through, leads_out in hits if leads_out), None)
+
+    def link_out_of(self, token: str, bases: Sequence[str] = ()) -> str | None:
+        """The link to a directory outside the project that reading ``token`` goes through, else None.
+
+        ``token`` is a path, a search root or a glob, placed from each of ``bases``
+        when relative. The same test the decisions above use: a deny message names
+        this link as its cause (review F4).
+        """
+        if not token or "\0" in token:
+            return None
+        for absolute_token in _absolute_tokens(token, bases):
+            if _has_glob_syntax(token):
+                found = self._glob_link_out(token, absolute_token, include_last=True)
+                if found is not None:
+                    return found
+                continue
+            real = os.path.realpath(absolute_token)
+            if self._leads_out(absolute_token, real) and Path(real).is_dir():
+                return absolute_token
+        return None
+
     def find_under(
         self,
         root: str,
@@ -228,11 +306,19 @@ class ProtectedFileIndex:
                 return self.patterns[0] if self.patterns else None
             if self._names_no_place(token, absolute_token):
                 continue
-            glob_parts, _ = _glob_parts(absolute_token, default_expansion)
-            for entry in self.files:
-                for root in self._roots():
-                    if _segments_match(_components(f"{root}/{entry.relpath}"), glob_parts):
-                        return entry.pattern
+            readings = [absolute_token]
+            for _link, through, leads_out in self._wildcard_links(
+                token, absolute_token, include_last=False
+            ):
+                if leads_out:
+                    return self.patterns[0] if self.patterns else None
+                readings.append(through)
+            for reading in readings:
+                glob_parts, _ = _glob_parts(reading, default_expansion)
+                for entry in self.files:
+                    for root in self._roots():
+                        if _segments_match(_components(f"{root}/{entry.relpath}"), glob_parts):
+                            return entry.pattern
         return None
 
     def directories_matching(
@@ -252,19 +338,30 @@ class ProtectedFileIndex:
             return ()
         found: dict[str, None] = {}
         for absolute_token in _absolute_tokens(token, bases):
-            link_out = self._link_out_directory(token, absolute_token)
+            link_out = self._glob_link_out(token, absolute_token, include_last=True)
             if link_out is not None:
                 # The link's own directory: searching it is judged by find_under,
                 # which does not vouch for a link out of the project.
                 found[link_out] = None
                 continue
             glob_parts, literal = _glob_parts(absolute_token, default_expansion)
+            # A directory read through a wildcard link is reported as the link spells it.
+            throughs = [
+                (_glob_parts(through, default_expansion)[0], os.path.realpath(link), link)
+                for link, through, _out in self._wildcard_links(
+                    token, absolute_token, include_last=True
+                )
+            ]
             for entry in self.files:
                 for root in self._roots():
                     parts = _components(f"{root}/{entry.relpath}")
                     for depth in range(1, len(parts)):
+                        directory = "/" + "/".join(parts[:depth])
                         if _segments_match(parts[:depth], glob_parts):
-                            found["/" + "/".join(parts[:depth])] = None
+                            found[directory] = None
+                        for through_parts, real, link in throughs:
+                            if _segments_match(parts[:depth], through_parts):
+                                found[link + directory[len(real) :]] = None
             if literal == len(glob_parts) - 1:
                 for link in self._matching_symlinked_directories(glob_parts):
                     found[link] = None
