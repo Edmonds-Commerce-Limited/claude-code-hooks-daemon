@@ -2037,6 +2037,13 @@ _PATTERN_FIRST_COMMANDS: Final = frozenset(
 # Separators that end the segment a bare name sits in (``&`` stays inside it:
 # ``2>&1`` carries one, and reading on past it only judges more words).
 _SEGMENT_END_SEPARATORS: Final = ("||", "&&", ";", "|", "\n")
+_ASSIGNMENT_WORD: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+# ``NAME=value`` words in front of a command whose value holds nothing but plain characters.
+_PLAIN_LEADING_ASSIGNMENTS: Final = re.compile(
+    r"""\A\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s"'$`\\]*\s+)+"""
+)
+# Stands for a closed ``$(...)`` in a rebuilt segment: a word bash expands, so it names no command.
+_SUBSTITUTION_WORD: Final = "$SUBSTITUTION"
 # Stands for the bare name while the words around it are read as one command line.
 _TOKEN_WORD: Final = "token"
 # A module-name API whose first argument is a dotted module path, not a file.
@@ -2438,8 +2445,10 @@ def _opens_files(segment: str, tail: str, *, rg_config: bool = False) -> bool:
     unreadable segment, or one with no command word (the name IS the command),
     opens files.
     """
+    segment = _PLAIN_LEADING_ASSIGNMENTS.sub(" ", segment)
     chain = segment_command_chain(segment)
-    if not chain:
+    if not chain or any(_ASSIGNMENT_WORD.match(word) for word in chain):
+        # No command word, or an assignment with a value this reading cannot skip.
         return True
     try:
         words = linear_shlex.split(segment)
@@ -2447,6 +2456,9 @@ def _opens_files(segment: str, tail: str, *, rg_config: bool = False) -> bool:
         return True
     names = [word.rsplit("/", 1)[-1] for word in words]
     for name in (chain_word.rsplit("/", 1)[-1] for chain_word in chain):
+        if name == "eval":
+            # eval runs its words as a command line of its own, which no reading here follows.
+            return True
         if name == "git":
             rest = names[names.index("git") + 1 :] if "git" in names else []
             first = next((word for word in rest if not word.startswith("-")), "")
@@ -2512,12 +2524,55 @@ def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
         return not _git_search_value_prefix_before(command, word_start, segment_start)
     if after_char and after_char not in _AFTER_WORD_CHARS:
         return True
-    segment = command[segment_start:word_start]
-    if _REDIRECT_TAIL.search(segment):
+    segment = _outside_substitutions(command, segment_start, command[segment_start:word_start])
+    if segment is None or _REDIRECT_TAIL.search(segment):
         return True
     return _opens_files(
         segment, _segment_tail(command, word_end), rg_config=RG_CONFIG_ENV in command
     )
+
+
+def _unquoted_close_paren(text: str) -> int:
+    """Index of the first ``)`` of ``text`` that sits outside quotes, else -1."""
+    quote = ""
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == "\\" and quote == '"':
+                index += 1
+            elif char == quote:
+                quote = ""
+        elif char == "\\":
+            index += 1
+        elif char in "'\"":
+            quote = char
+        elif char == ")":
+            return index
+        index += 1
+    return -1
+
+
+def _outside_substitutions(command: str, segment_start: int, segment: str) -> str | None:
+    """``segment`` as the command that really precedes the name, past closed substitutions.
+
+    A segment starts after the ``(`` of ``$(...)``, so in ``$(echo cat) name`` it
+    reads ``echo cat) `` and names ``echo``, while the command that runs is
+    whatever the substitution prints. Each closed substitution is replaced by a
+    word bash would expand (``$SUBSTITUTION``), which names no command, and the
+    segment is rebuilt from the text around it. None when a ``)`` closes
+    something this reading cannot place.
+    """
+    while (close := _unquoted_close_paren(segment)) >= 0:
+        if segment_start == 0 or command[segment_start - 1] != "(":
+            return None
+        outer_end = segment_start - 1
+        if command[:outer_end].endswith("$"):
+            outer_end -= 1
+        outer_start = _scan_shell_prefix(command[:outer_end])[0]
+        segment = f"{command[outer_start:outer_end]} {_SUBSTITUTION_WORD} {segment[close + 1 :]}"
+        segment_start = outer_start
+    return segment
 
 
 def _segment_tail(command: str, word_end: int) -> str:

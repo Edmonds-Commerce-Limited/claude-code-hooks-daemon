@@ -214,6 +214,10 @@ class TestUnit5CommandWordIndirection:
             "x=1 $(echo cat) {A}",
             "true && $(echo cat) {A}",
             "$(echo $(echo cat)) {A}",
+            # An assignment in front is no command word (found while fixing this unit).
+            "FOO=1 cat {A}",
+            'FOO="a b" cat {A}',
+            "FOO=1 BAR=2 grep zz {A}",
             # Already denied: the backtick form leaves no command word.
             "`echo cat` {A}",
             "cat {A}",
@@ -232,6 +236,8 @@ class TestUnit5CommandWordIndirection:
             "grep {A} sub/plain.txt",
             "git log -S {A}",
             "echo ')' {A}",
+            "FOO=1 echo {A}",
+            "FOO=1 grep {A} sub/plain.txt",
         ],
     )
     def test_twin_where_the_name_is_an_argument_of_a_plain_command_stays_allowed(
