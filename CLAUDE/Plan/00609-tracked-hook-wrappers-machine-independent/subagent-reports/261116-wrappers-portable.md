@@ -59,3 +59,17 @@ Pre-existing open question: the legacy `daemon<suffix>.socket-path` discovery fi
 `tests/unit/install/test_bin_wrapper_project_anchoring.py::TestTheAnchorReachesTheCommand::test_a_global_anchor_selects_the_tree_the_command_reads` fails identically on a fresh detached worktree of origin/main (1 failed, 14 passed), so it is not caused by this branch.
 
 Note: 56 relay-guard integration tests skip here for lack of a built relay binary; they could not be exercised locally.
+
+## Worktree without a daemon: measured before and after
+
+Method: two real `git worktree add --detach` checkouts of this repository (origin/main and this branch), no daemon running in either, a PreToolUse payload for a destructive git command piped into the checkout's own `.claude/hooks/pre-tool-use`, the main checkout's daemon live throughout.
+
+| Question                            | (a) origin/main wrapper                                         | (b) this branch                                             |
+| ----------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------- |
+| Relay path taken                    | no (baked-root guard fails in a copy), falls to init.sh         | own checkout's events dir; absent, so falls to init.sh      |
+| Daemon auto-started in the worktree | attempted by init.sh; not ready within 15s here                 | identical                                                   |
+| Outcome with no daemon              | fail closed: `permissionDecision: deny`, daemon_startup_failed  | identical                                                   |
+| Silent allow                        | no                                                              | no                                                          |
+| Reached the MAIN checkout's daemon  | no (own sockets derived from the script location)               | no (own checkout's events dir only)                         |
+
+Conclusion: (b) is no worse than (a); no fix needed. Pinned by `test_a_worktree_copy_without_a_daemon_still_fails_closed` (a copy beside a live original socket and relay: no relay exec, no allow, init.sh's start-or-deny reached). The probe worktrees and their disposable ignored files were deleted before `git worktree remove`.

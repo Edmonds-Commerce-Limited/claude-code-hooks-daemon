@@ -133,11 +133,11 @@ def short_tmp() -> Iterator[Path]:
     shutil.rmtree(path)
 
 
-def _install(project: Path, *, relay: bool = True) -> Path:
+def _install(project: Path, *, relay: bool = True, source: str = _SOURCE) -> Path:
     """Generate the forwarder in a throwaway root and deploy it (and a fake relay)."""
     transport = TransportConfig(relay_enabled=True)
     content = generate_forwarder_content(
-        _SOURCE, "pre-tool-use", transport, project / "untracked", project
+        source, "pre-tool-use", transport, project / "untracked", project
     )
     hooks = project / ".claude" / "hooks"
     hooks.mkdir(parents=True)
@@ -247,3 +247,36 @@ def test_the_hot_path_still_spawns_nothing() -> None:
     assert "$(" not in block
     assert "`" not in block
     assert os.sep + "p" + os.sep not in block
+
+
+_FAIL_CLOSED_INIT_SH = """ensure_daemon() { return 1; }
+emit_hook_error() { printf 'DENY %s\\n' "$2"; }
+send_request_stdin() { printf 'ALLOW\\n'; }
+"""
+
+
+def test_a_worktree_copy_without_a_daemon_still_fails_closed(short_tmp: Path) -> None:
+    """A copy whose own checkout runs no daemon reaches init.sh, never a silent allow.
+
+    The original checkout has a live socket and a relay. The copy must not use
+    them (it dials its own, absent, events dir), and it must hand over to
+    init.sh's start-or-deny path exactly as the baked-in guard's skip did.
+    """
+    original = short_tmp / "main"
+    forwarder_source = _SOURCE + (
+        'if ! ensure_daemon; then emit_hook_error "PreToolUse" "daemon_startup_failed" "x"; '
+        "exit 0; fi\nsend_request_stdin PreToolUse\n"
+    )
+    _install(original, source=forwarder_source)
+    listener = _listen(original / "untracked" / "events-testhost" / "pre-tool-use.sock")
+    worktree = short_tmp / "main" / ".claude" / "worktrees" / "wt"
+    try:
+        shutil.copytree(original / ".claude" / "hooks", worktree / ".claude" / "hooks")
+        (worktree / ".claude" / "init.sh").write_text(_FAIL_CLOSED_INIT_SH)
+        result = _run(worktree / ".claude" / "hooks" / "pre-tool-use")
+    finally:
+        listener.close()
+    assert result.returncode == 0, result.stderr
+    assert "RELAY" not in result.stdout
+    assert "ALLOW" not in result.stdout
+    assert "DENY daemon_startup_failed" in result.stdout
