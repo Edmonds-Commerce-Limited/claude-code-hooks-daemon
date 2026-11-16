@@ -3565,6 +3565,9 @@ def _run_start_probe(python: Path) -> tuple[dict[str, Any] | None, str]:
             timeout=_VENV_RUN_PROBE_TIMEOUT_SECS,
             check=False,
             cwd=python.parent,
+            # The probe judges the venv itself: an ambient PYTHONPATH would make
+            # the package importable from outside it.
+            env={key: value for key, value in os.environ.items() if key != "PYTHONPATH"},
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return None, str(exc)
