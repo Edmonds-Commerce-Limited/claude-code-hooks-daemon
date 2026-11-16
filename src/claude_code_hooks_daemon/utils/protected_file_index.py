@@ -57,6 +57,8 @@ MAX_CACHED_INDEXES: Final[int] = 8
 _HIDDEN_PREFIX: Final[str] = "."
 _RECURSIVE_COMPONENT: Final[str] = "**"
 _WILDCARD_ONLY: Final[re.Pattern[str]] = re.compile(r"[*?]+")
+# fnmatch reads ``[^x]`` as a class holding ``^`` and ``x``; bash negates it like ``[!x]``.
+_BRACKET_CARET: Final[re.Pattern[str]] = re.compile(r"\[\^")
 
 #: A glob with this many wildcard-only components names no particular place.
 _NAMELESS_DEPTH: Final[int] = 2
@@ -162,25 +164,49 @@ class ProtectedFileIndex:
         ``ls */*/*`` in every tree that has one visible protected file. A glob
         anchored by a literal directory (``dir/*``, ``dir/**/*``) or ending in one
         wildcard (``*``) names a place and is judged.
+
+        A ``token`` ending in ``/`` expands to directories only, so it never
+        names a file at its own level and matches none here. A tool that
+        recurses into those directories is judged over each of them by
+        :meth:`find_under`, as for a literal directory argument.
         """
-        if not token or "\0" in token:
+        if not token or "\0" in token or token.endswith("/"):
             return None
-        absolute_tokens = (
-            [os.path.normpath(token)]
-            if token.startswith("/")
-            else [os.path.normpath(Path(base) / token) for base in dict.fromkeys(bases)]
-        )
-        for absolute_token in absolute_tokens:
+        for absolute_token in _absolute_tokens(token, bases):
             if self._names_no_place(token, absolute_token):
                 continue
-            glob_parts = _components(absolute_token)
-            if default_expansion:
-                glob_parts = ["*" if part == _RECURSIVE_COMPONENT else part for part in glob_parts]
+            glob_parts = _glob_parts(absolute_token, default_expansion)
             for entry in self.files:
                 for root in self._roots():
                     if _segments_match(_components(f"{root}/{entry.relpath}"), glob_parts):
                         return entry.pattern
         return None
+
+    def directories_matching(
+        self, token: str, bases: Sequence[str] = (), *, default_expansion: bool = False
+    ) -> tuple[str, ...]:
+        """The directories holding a protected file that the shell glob ``token`` names.
+
+        ``token`` ends in ``/``, so the shell expands it to directories only. Each
+        is an ancestor directory of an indexed file, matched component by component
+        with the matcher :meth:`glob_matches` uses (so ``*`` skips dot names and
+        ``default_expansion`` reads ``**`` like ``*``), but never against the file
+        itself. A search that recurses into those directories reads the file, exactly
+        as it does for a directory named literally. A glob that names no place
+        (``*/``) is still resolved: the tool reads whatever lies below.
+        """
+        if not token.endswith("/") or "\0" in token:
+            return ()
+        found: dict[str, None] = {}
+        for absolute_token in _absolute_tokens(token, bases):
+            glob_parts = _glob_parts(absolute_token, default_expansion)
+            for entry in self.files:
+                for root in self._roots():
+                    parts = _components(f"{root}/{entry.relpath}")
+                    for depth in range(1, len(parts)):
+                        if _segments_match(parts[:depth], glob_parts):
+                            found["/" + "/".join(parts[:depth])] = None
+        return tuple(found)
 
     def _names_no_place(self, token: str, absolute_token: str) -> bool:
         """Is the glob, read relative to the project, wildcard-only from its first component?"""
@@ -209,6 +235,21 @@ class ProtectedFileIndex:
 
 def _components(path: str) -> list[str]:
     return [part for part in path.split("/") if part]
+
+
+def _absolute_tokens(token: str, bases: Sequence[str]) -> list[str]:
+    """``token`` placed under each base (or as it is, when absolute), normalised."""
+    if token.startswith("/"):
+        return [os.path.normpath(token)]
+    return [os.path.normpath(Path(base) / token) for base in dict.fromkeys(bases)]
+
+
+def _glob_parts(absolute_token: str, default_expansion: bool) -> list[str]:
+    """The glob's components; under bash's defaults a ``**`` component is read like ``*``."""
+    parts = _components(absolute_token)
+    if default_expansion:
+        return ["*" if part == _RECURSIVE_COMPONENT else part for part in parts]
+    return parts
 
 
 def _is_under(path: str, base: str) -> bool:
@@ -246,7 +287,9 @@ def _segments_match(path: Sequence[str], glob: Sequence[str]) -> bool:
     name = path[0]
     if name.startswith(_HIDDEN_PREFIX) and not head.startswith(_HIDDEN_PREFIX):
         return False
-    return fnmatch.fnmatchcase(name, head) and _segments_match(path[1:], rest)
+    return fnmatch.fnmatchcase(name, _BRACKET_CARET.sub("[!", head)) and _segments_match(
+        path[1:], rest
+    )
 
 
 # ── Build and cache ─────────────────────────────────────────────────────────
