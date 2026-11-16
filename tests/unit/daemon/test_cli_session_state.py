@@ -61,6 +61,18 @@ def _modes_response() -> dict[str, Any]:
     return {"result": {SessionModeIPC.KEY_SESSION_ID: "s1", SessionModeIPC.KEY_MODES: [_MODE]}}
 
 
+class TestTheWatchInterval:
+    """Plan 00618 N-16: a zero or negative interval is a usage error, not a crash or a busy loop."""
+
+    @pytest.mark.parametrize("value", ["0", "-1", "-0.5", "nan", "inf", "soon"])
+    def test_a_non_positive_or_unreadable_interval_is_refused(self, value: str) -> None:
+        with pytest.raises(SystemExit):
+            _args("--session", "s1", "--watch", "--interval", value)
+
+    def test_a_positive_fraction_is_accepted(self) -> None:
+        assert _args("--session", "s1", "--watch", "--interval", "0.5").interval == 0.5
+
+
 class TestSessionStateCommand:
     def test_session_is_required(self) -> None:
         with pytest.raises(SystemExit):
