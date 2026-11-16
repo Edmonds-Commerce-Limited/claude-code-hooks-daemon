@@ -252,8 +252,7 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00569: hooks screen target by host arch](Completed/00569-hooks-screen-target-by-host-arch/PLAN.md) - Complete at merge `ae0af5761` (green CI run 42404687976) + the archiving commit (GitHub #174: the ccy supervisor and `screen/build.sh` choose the hooks-screen musl target triple from the host architecture, x86_64 or aarch64, and the failure note names the architecture; release note 003)
 
-- [00567: lsp coverage extensionless file targets](Completed/00567-lsp-coverage-extensionless-file-targets/PLAN.md) - Complete at merge `6ab6b7bfb` + the archiving commit (GitHub #162: named file targets are judged by their own suffix, an extensionless file counts as unserved, so a grep over extensionless scripts gets the same advisory as a search of their directory; release note 002)
-  Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
+Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
 
