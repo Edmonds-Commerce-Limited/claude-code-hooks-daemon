@@ -64,12 +64,20 @@ Note: 56 relay-guard integration tests skip here for lack of a built relay binar
 
 Method: two real `git worktree add --detach` checkouts of this repository (origin/main and this branch), no daemon running in either, a PreToolUse payload for a destructive git command piped into the checkout's own `.claude/hooks/pre-tool-use`, the main checkout's daemon live throughout.
 
-| Question                            | (a) origin/main wrapper                                         | (b) this branch                                             |
-| ----------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------- |
-| Relay path taken                    | no (baked-root guard fails in a copy), falls to init.sh         | own checkout's events dir; absent, so falls to init.sh      |
-| Daemon auto-started in the worktree | attempted by init.sh; not ready within 15s here                 | identical                                                   |
-| Outcome with no daemon              | fail closed: `permissionDecision: deny`, daemon_startup_failed  | identical                                                   |
-| Silent allow                        | no                                                              | no                                                          |
-| Reached the MAIN checkout's daemon  | no (own sockets derived from the script location)               | no (own checkout's events dir only)                         |
+| Question                            | (a) origin/main wrapper                                        | (b) this branch                                        |
+| ----------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------ |
+| Relay path taken                    | no (baked-root guard fails in a copy), falls to init.sh        | own checkout's events dir; absent, so falls to init.sh |
+| Daemon auto-started in the worktree | attempted by init.sh; not ready within 15s here                | identical                                              |
+| Outcome with no daemon              | fail closed: `permissionDecision: deny`, daemon_startup_failed | identical                                              |
+| Silent allow                        | no                                                             | no                                                     |
+| Reached the MAIN checkout's daemon  | no (own sockets derived from the script location)              | no (own checkout's events dir only)                    |
 
 Conclusion: (b) is no worse than (a); no fix needed. Pinned by `test_a_worktree_copy_without_a_daemon_still_fails_closed` (a copy beside a live original socket and relay: no relay exec, no allow, init.sh's start-or-deny reached). The probe worktrees and their disposable ignored files were deleted before `git worktree remove`.
+
+## CI run 43817330858: two forwarder socket-stdin failures on the py3.13 integration leg
+
+Root cause: `init.sh`, when it follows the socket discovery file into the runtime dir, moved `PID_PATH` beside the discovered socket unconditionally. The daemon decides the PID location on the PID path's own length (`paths.pid_path_for`, limit 104), and the socket name is one character longer. A checkout whose PID path is exactly 104 characters has a socket that falls back (105) while the PID file stays in `untracked/`. The CI checkout sat on exactly that boundary (CI status showed the PID file in `untracked/` and the socket in `/run/user/`). `init.sh` looked for the PID where nothing was written, judged the live daemon dead, could not start another ("a live daemon owns the socket but is not ours"), and in CI the wrapper answered the silent passthrough `{}` with exit 0. Five other tests in the file accept `{}`, so only the Stop (must exit 2) and WorktreeCreate (no JSON) tests noticed.
+
+Reproduced in a clone at a path of length 70 (this host's hostname is 3 characters shorter than CI's) with CI=true, the env file as the workflow writes it, and a restarted daemon: Stop answered the passthrough advisory. An origin/main clone at the same length fails identically, so the branch did not change the outcome; the rule dates from Plan 00291. Fix: `init.sh` rewrites `PID_PATH` only when the natural PID path itself exceeds 104. Test: `tests/integration/test_init_sh_discovery_pid_path.py` (boundary case added; the old fixture paired a discovered socket with a short PID path, which no real daemon produces). With the fix the boundary clone passes 7 of 7.
+
+Matrix (HOOKS_DAEMON_VENV_PATH set): branch worktree 7 passed; /workspace 7 passed; detached origin/main worktree 6 passed, the Stop test fails there (wrapper reports "venv missing for this project path", a main-side worktree dependence); an origin/main clone with a live daemon failed the status-line wrapper with exit 127 (`Status: command not found`), which the branch does not show.

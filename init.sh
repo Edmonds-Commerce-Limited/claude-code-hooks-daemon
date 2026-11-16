@@ -2279,7 +2279,12 @@ if [[ -z "${CLAUDE_HOOKS_SOCKET_PATH:-}" ]] && [[ ! -S "$SOCKET_PATH" ]]; then
             # is_daemon_running finds no PID, `cli start` then sees a live
             # socket that is "not ours" and refuses it, and every forwarder
             # reports daemon_startup_failed while status shows RUNNING.
-            if [[ -z "${CLAUDE_HOOKS_PID_PATH:-}" ]]; then
+            # Only when the PID path ITSELF overflows (paths.pid_path_for
+            # decides on the PID path's own length, 104 = _UNIX_SOCKET_PATH_LIMIT):
+            # its socket is one character longer, so at exactly the limit the
+            # socket falls back while the PID file stays in the untracked dir,
+            # and following the socket would look where nothing was written.
+            if [[ -z "${CLAUDE_HOOKS_PID_PATH:-}" ]] && ((${#PID_PATH} > 104)); then
                 PID_PATH="${_discovered_path%.sock}.pid"
             fi
         fi
