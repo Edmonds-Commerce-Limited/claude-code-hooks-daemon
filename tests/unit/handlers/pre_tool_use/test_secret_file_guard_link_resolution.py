@@ -314,7 +314,9 @@ class TestDirectoryChangeTheCommandMakes:
             'sh -c "cd inner; cat ilink"',
             "env -C inner cat ilink",
             "env --chdir=inner cat ilink",
+            "env -u HOME -C inner cat ilink",
             "git -C inner diff --no-index ilink /dev/null",
+            "git -c core.pager=cat -C inner diff --no-index ilink /dev/null",
             "while cd inner; do cat ilink; break; done",
             "(cd inner && cat idlink/*)",
             "(cd inner && grep -r . idlink)",
@@ -432,6 +434,8 @@ class TestLinkOutDenyExplainsTheLink:
     ) -> None:
         reason = _reason(checkouts.worktree, "Bash", {"command": command})
         self._assert_explains(reason, "outlink")
+        # The target is never offered: a path outside the project is judged by name only.
+        assert str(checkouts.outside) not in reason
 
     def test_grep_tool_deny_names_the_link(self, checkouts: Checkouts, project: Path) -> None:
         path = str(checkouts.worktree / "outlink")

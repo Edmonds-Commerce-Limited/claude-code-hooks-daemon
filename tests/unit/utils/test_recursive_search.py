@@ -177,6 +177,23 @@ class TestWorkingDirectoryFollowsCd:
         expected = [str(tree), str(tree / "sub")]
         assert self._roots_from_project("cd && grep -r x .", tree) == expected
 
+    @pytest.mark.parametrize(
+        ("command", "root"),
+        [
+            ("FOO=$(true) grep -r x .", "."),
+            ("D=`pwd` grep -r x .", "."),
+            ("grep -r foo\\(\\)", "."),
+            ("grep -r x dir\\ \\(1\\)", "dir (1)"),
+        ],
+    )
+    def test_unwrapping_a_segment_never_loses_its_read(
+        self, tree: Path, command: str, root: str
+    ) -> None:
+        """Plan 00614: the segment as written is still judged beside its unwrapped form."""
+        roots = [read.root for read in rs.search_reads(command, str(tree))]
+        expected = str(tree) if root == "." else str(tree / root)
+        assert expected in roots
+
     def test_cd_dash_is_unknown(self, tree: Path) -> None:
         expected = [str(tree), str(tree / "sub")]
         assert self._roots_from_project("cd - && grep -r x .", tree) == expected

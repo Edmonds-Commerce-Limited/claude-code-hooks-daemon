@@ -1787,8 +1787,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             if command is not None and cwd is not None and link.startswith(cwd.rstrip("/") + "/"):
                 shown = os.path.relpath(link, cwd)
             return (
-                f"Denied because `{shown}` is a link to a directory outside the project "
-                f"(`{os.path.realpath(link)}`). The protected-file index lists only this "
+                f"Denied because `{shown}` is a link to a directory outside the project. "
+                "The protected-file index lists only this "
                 "project, so a glob or search through that link cannot be checked, and it is "
                 "denied whether or not the target holds a protected file. To read it, run the "
                 "command from the checkout that holds the target."

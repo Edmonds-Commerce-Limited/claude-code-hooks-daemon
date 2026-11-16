@@ -3380,9 +3380,12 @@ def _change_target(words: list[str], start: int) -> str | None:
 
 def chdir_wrapper_targets(name: str, words: list[str], start: int) -> list[str]:
     """The directories an ``env -C`` / ``git -C`` at ``words[start - 1]`` moves to."""
+    # Scanned to the next operator, not to the first operand: an option before
+    # `-C` takes a value (`env -u HOME -C x`, `git -c k=v -C x`). A later `-C`
+    # of the wrapped command is read as a move too, which only adds a directory.
     targets: list[str] = []
     index = start
-    while index < len(words) and words[index].startswith("-"):
+    while index < len(words) and not all(char in _SHELL_OPERATOR_CHARS for char in words[index]):
         word = words[index]
         if name == _ENV_EXECUTABLE and word.startswith(_ENV_CHDIR_LONG + "="):
             targets.append(word.partition("=")[2])

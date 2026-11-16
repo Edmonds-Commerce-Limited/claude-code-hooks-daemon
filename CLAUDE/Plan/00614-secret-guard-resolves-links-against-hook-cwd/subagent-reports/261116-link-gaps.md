@@ -127,7 +127,7 @@ particular file matched. The release note says so.
 - The unreadable-target arm of `find_under` has no test, because the tests run as
   root.
 
-## Independent review follow-up (review-614): design handed over, F1/F2/F4/F5 still open
+## Independent review follow-up (review-614): the design hand-over
 
 The review found no loosening and no fail-open. It did find four in-scope items:
 
@@ -136,8 +136,8 @@ The review found no loosening and no fail-open. It did find four in-scope items:
 - **F4:** a link-out deny message never names the link.
 - **F5:** cost grows with the number of `cd` targets times the number of words.
 
-None of these is fixed yet. The agent that produced the design reached its context
-budget before writing any code. The design and the list of tests to write first are
+The agent that produced the design reached its context budget before writing any code.
+All four are now closed; see the next section. The design and the list of tests to write first are
 in the handoff (untracked, `untracked/scratch/261116-a70d6790445dbefba-handoff.md`).
 The design has three main points:
 
@@ -221,24 +221,67 @@ as the project.
     covers the case where the project is the primary and the link sits outside it. A
     search reports that directory as the link spells it.
   - `*/*` stays allowed: a wildcard-only first component is not expanded.
-- **F4 (commit after ce62a08db).**
+- **F4 (commit 5e7a82a66; the target path was dropped from the message in the follow-up commit).**
   - `_build_deny_result` gets the cause from `ProtectedFileIndex.link_out_of`, the same
     test the decision uses. It applies only when the matched token does not spell a
     protected path.
-  - The cause names the link and its target, says the index lists only this project,
-    and says to run the command from the checkout that holds the target. On the search
-    route it replaces `_SEARCH_REMEDY`.
-  - It does not suggest the real path: a path outside the project is judged by name
-    only, which is the weaker check.
+  - The cause names the link, says the index lists only this project, and says to run
+    the command from the checkout that holds the target. On the search route it
+    replaces `_SEARCH_REMEDY`.
+  - It neither prints the target's absolute path nor suggests the real path. A path
+    outside the project is judged by name only, which is the weaker check, and a test
+    asserts that the outside directory does not appear in the reason.
   - A deny caused by the F5 overflow gets its own sentence.
   - The decision is unchanged.
 
+Advisor follow-up, fixed in the last commit:
+
+- **Unwrapping could lose a search the tip saw.** `FOO=$(true) grep -r x .`,
+  `` D=`pwd` grep -r x . ``, `grep -r foo\(\)` and `grep -r x dir\ \(1\)` placed no root
+  after unwrapping. The segment as written is now judged beside its unwrapped form, so
+  unwrapping can only add reads. All four are pinned in `test_recursive_search`.
+- **Options before `-C` hid the move.** `env -u HOME -C inner cat ilink` and
+  `git -c k=v -C inner diff ...` were missed. `-C` is now searched up to the next
+  operator.
+
+Evidence:
+
+- **Differential run.** The reviewer's `probe614.py` was run over its six case files
+  plus a new `cases614g.json` (25 wrapped and unwrapped search shapes), 216 cases in
+  all, comparing e26ca21da with this tip. No case went from DENY to ALLOW, the new tip
+  denies 29 more, and no call raised. The runner is `untracked/scratch/diff614.sh` in
+  the worktree.
+
+- **CPU time.** The reviewer's `probe614t.py` with 200 distinct `cd` targets and 3000
+  words, measured as `process_time` on a host at load average about 9.5:
+
+  | Tree        | CPU time |
+  | ----------- | -------- |
+  | main        | 5.14 s   |
+  | e26ca21da   | 9.64 s   |
+  | this branch | 5.11 s   |
+
+  The 2000-word shape: 0.99 s on main, 0.90 s here.
+
 Residue, not fixed:
+
+- `grep -r x *` through a link out is still allowed: a bare wildcard names no place and
+  is skipped by design.
+
+- A `cd` inside a shell function body is not tracked by the search route.
+
+- Past the cap, a relative `cd` is joined to only the first 17 existing directories.
+
+- `time -p grep ...` is unjudged by the search route, as it was on the tip (`-p` is
+  read as the head).
 
 - `git -C X grep` is still treated as relocated and unjudged by the search route. It
   was the same on main.
+
 - `make -C` is not tracked.
+
 - In overflow, `glob_matches` still scans every lexical base. This is main's baseline
   cost, plus one scandir per existing base for F2.
+
 - A `case` arm `pat)` is stripped like a subshell closer. That can add, but never drop,
   a directory.

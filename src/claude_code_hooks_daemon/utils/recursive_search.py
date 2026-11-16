@@ -496,7 +496,11 @@ def _reads(command: str, cwds: tuple[str, ...], depth: int, tracker: _SearchCwds
             yield from _reads(body, current, depth + 1, tracker)
         segment, opens, closes = _unwrapped(raw)
         saved.extend([current] * opens)
-        yield from _segment_reads(segment, piped_in, feeder, current, depth, tracker)
+        # The segment as written is judged too: unwrapping is a guess that can
+        # misread one (`FOO=$(true) grep -r x .`, `grep -r x a\(1\)`), and it
+        # may only ever add reads.
+        for judged in dict.fromkeys((raw, segment)):
+            yield from _segment_reads(judged, piped_in, feeder, current, depth, tracker)
         feeder, current = _segment_state(segment, current, tracker)
         for _ in range(min(closes, len(saved))):
             current = tuple(dict.fromkeys((*saved.pop(), *current)))
