@@ -39,6 +39,12 @@ A release carries no known defect, and deferring one needs the human's explicit 
 - [ ] ⬜ **Task 2.1**: Triage the 20 non-blocking defects in the report: fix each test-first, or record the owner's explicit acceptance.
 - [ ] ⬜ **Task 2.2**: Fix the nits in the code touched by Tasks 1.x and 2.1.
 
+### Phase 2b: Red release gate (run 43961579876 on the aborted release head)
+
+- [ ] ⬜ **Task 2.3**: The Plan 00609 proof script failed the `format` check; formatted on main (done outside this list).
+- [ ] ⬜ **Task 2.4**: On the re-run, after the Step 1H remote-docs refresh, update `docs_sha256` in the instruction-loading contract's `META.json` through the contract refresh procedure (the refreshed memory page changed one paragraph about additional-directory loading); confirm no contract fact breaks.
+- [ ] ⬜ **Task 2.5**: The playbook harness probe for the Kotlin linter timed out at 15 s on a loaded runner and the blocking gate skipped; make that probe's timeout load-scaled, test-first.
+
 ### Phase 3: Hand-off
 
 - [ ] ⬜ **Task 3.1**: Independent loosening review of Phase 1 and 2, CI green on main, a release note, then tell the owner the release can be re-run.
