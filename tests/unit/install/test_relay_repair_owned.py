@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import psutil
@@ -48,7 +49,7 @@ _SPAWNS_GRANDCHILD = (
 
 
 @pytest.fixture(autouse=True)
-def _no_repairs_left() -> None:
+def _no_repairs_left() -> Iterator[None]:
     """Each test starts and ends with no owned repair, whatever it did."""
     stop_owned_repairs()
     yield
