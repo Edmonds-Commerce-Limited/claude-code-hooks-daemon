@@ -11,7 +11,13 @@ Branch `agent-a13d7c8504105d4c9-aeae03b4`. It started at 62629e103. Every commit
 | 7d0c8499f | R5 fix                                                    |
 | 2b53259f0 | R4 fix, release note 089                                  |
 | 6dcbe439f | RED: R4 follow-up                                         |
-| (next)    | R4 follow-up fix                                          |
+| 48c2be15c | R4 follow-up fix                                          |
+
+Final tip 48c2be15c results:
+
+- The suites (secret guard, recursive search, index, segmentation, wrapper, sudo) pass: 5101 passed.
+- `llm_qa.py ... declared_invariant_pairs changed_tests --base 62629e103` passes on every checker except one. `changed_tests` itself ran 7868 tests with 0 failed, but it is marked FAIL. The reason is four `[too-broad]` files that no map rule can narrow, so it needs `--allow-unmapped`: `secret_file_guard.py`, `protected_file_index.py`, `secret_file_matching.py` and `shell_segmentation.py`.
+- The reviewer harness on both fixtures shows no allow that leaks, no raise, and no loosening against the old tip or main.
 
 R4 follow-up came from a self-review of 2b53259f0. That commit had two fail-open paths and one unbounded cost:
 
