@@ -323,3 +323,116 @@ class TestOneClassifier:
         guard = self._guard_pools(repo, config, labels)
         assert guard == sweep
         assert any(sweep.values()), "a fixture with no pooled branch proves nothing"
+
+
+def _push_remote_only(repo: Path, name: str) -> None:
+    """Push ``name`` and drop the local copy, leaving only ``refs/remotes/origin/<name>``."""
+    _git(repo, "push", "-q", "-u", "origin", name)
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "branch", "-q", "-D", name)
+
+
+def _merge_work_into_main(repo: Path, name: str) -> None:
+    """``name`` carries one file, merged into main (no-ff) and pushed; ``name`` checked out."""
+    _git(repo, "checkout", "-q", "-b", name, "main")
+    _commit(repo, f"{name}.txt", f"{name}\n")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "--no-ff", "-q", "-m", f"Merge {name}", name)
+    _git(repo, "push", "-q", "origin", "main")
+    _git(repo, "checkout", "-q", name)
+
+
+def _real_work_under_park(repo: Path, name: str) -> None:
+    """Unmerged work, then a park commit on top; remote-only."""
+    _parked_over_unmerged(repo, name, keep_local=False)
+
+
+def _real_work_above_park(repo: Path, name: str) -> None:
+    """A park commit, then a non-empty commit on top of it; remote-only."""
+    _git(repo, "checkout", "-q", "-b", name, "main")
+    _park(repo, "waiting")
+    _commit(repo, f"{name}.txt", f"{name}\n")
+    _push_remote_only(repo, name)
+
+
+def _non_park_empty_over_merged(repo: Path, name: str) -> None:
+    """An empty commit WITHOUT a Parked-* trailer over merged work; remote-only."""
+    _merge_work_into_main(repo, name)
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "Nothing to see")
+    _push_remote_only(repo, name)
+
+
+def _park_over_merged_then_work(repo: Path, name: str) -> None:
+    """A park commit over merged work, then a later non-empty commit; remote-only."""
+    _merge_work_into_main(repo, name)
+    _park(repo, _CARRIED_REASON)
+    _commit(repo, f"{name}-more.txt", "more\n")
+    _push_remote_only(repo, name)
+
+
+class TestParkCarriedIsOnlyParkCommits:
+    """A ref with real work beyond the default is never park-carried: it stays counted."""
+
+    def test_remote_only_park_over_real_work_stays_parked_and_counted(self, repo: Path) -> None:
+        _real_work_under_park(repo, "forgotten")
+        _git(repo, "fetch", "-q", "--prune", "origin")
+        assert _git(repo, "branch", "--list", "forgotten").strip() == ""
+        config = _config(parked_cap=1)
+        inventory = _inventory(repo, config)
+        assert inventory.records["forgotten"].state == BranchState.PARKED
+        assert branch_sweep.pool_count(inventory, Pool.PARKED) == 1
+        assert str(RuleID.BRANCH_PARKED_POOL) in _rules(repo, config)
+        guard = branch_creation.work_pools(repo, config)
+        assert [w.names for w in guard[Pool.PARKED]] == [frozenset({"forgotten"})]
+
+    @pytest.mark.parametrize(
+        "build",
+        [_real_work_above_park, _park_over_merged_then_work],
+        ids=["work-above-park", "park-over-merged-then-work"],
+    )
+    def test_real_work_above_a_park_commit_is_not_park_carried(
+        self, repo: Path, build: Any
+    ) -> None:
+        build(repo, "work-above")
+        _git(repo, "fetch", "-q", "--prune", "origin")
+        config = _config()
+        inventory = _inventory(repo, config)
+        state = inventory.records["work-above"].state
+        assert state != BranchState.PARK_CARRIED
+        assert state in {BranchState.PARKED, BranchState.LIVE}
+        assert not branch_sweep.group_records(inventory).park_carried
+        tip = _git(repo, "rev-parse", "origin/work-above").strip()
+        assert not branch_inventory.is_park_residue(repo, tip, "main")
+        guard = branch_creation.work_pools(repo, config)
+        counted = {n for works in guard.values() for w in works for n in w.names}
+        assert "work-above" in counted
+
+    def test_a_non_park_empty_commit_over_merged_work_is_not_park_carried(self, repo: Path) -> None:
+        _non_park_empty_over_merged(repo, "plain-empty")
+        _git(repo, "fetch", "-q", "--prune", "origin")
+        inventory = _inventory(repo, _config())
+        assert inventory.records["plain-empty"].state != BranchState.PARK_CARRIED
+        assert branch_sweep.pool_count(inventory, Pool.PARKED) == 0
+        tip = _git(repo, "rev-parse", "origin/plain-empty").strip()
+        assert not branch_inventory.is_park_residue(repo, tip, "main")
+
+    def test_the_guard_and_the_sweep_agree_on_the_mixed_fixture(self, repo: Path) -> None:
+        for index in range(6):
+            _parked_over_merged(repo, f"carried-{index}")
+        for index in range(2):
+            _real_work_under_park(repo, f"remote-real-{index}")
+        for index in range(2):
+            _parked_over_unmerged(repo, f"local-real-{index}")
+        _real_work_above_park(repo, "above")
+        _park_over_merged_then_work(repo, "merged-then-work")
+        _non_park_empty_over_merged(repo, "plain-empty")
+        _git(repo, "fetch", "-q", "--prune", "origin")
+        config = _config(parked_cap=4)
+        inventory = _inventory(repo, config)
+        sweep = TestOneClassifier._sweep_pools(inventory)
+        guard = TestOneClassifier._guard_pools(repo, config, None)
+        assert guard == sweep
+        parked = {n for group in sweep[Pool.PARKED] for n in group}
+        assert {"remote-real-0", "remote-real-1", "local-real-0", "local-real-1"} <= parked
+        assert not {f"carried-{i}" for i in range(6)} & parked
+        assert str(RuleID.BRANCH_PARKED_POOL) in _rules(repo, config)
