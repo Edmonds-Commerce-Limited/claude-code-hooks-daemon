@@ -17,11 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.install.forwarder_generator import (
-    recorded_project_root,
-    recorded_untracked_dir,
-    unexpected_absolute_paths,
-)
+from claude_code_hooks_daemon.install.forwarder_generator import surviving_absolute_paths
 
 
 def get_project_root() -> Path:
@@ -66,7 +62,7 @@ def generate_fresh_hook_scripts() -> dict[str, str]:
     # Import installer functions
     from install import create_forwarder_script, create_status_line_script
 
-    from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir
+    from claude_code_hooks_daemon.daemon.paths import get_untracked_dir
     from claude_code_hooks_daemon.install.forwarder_generator import (
         generate_forwarder_content,
         load_transport_config,
@@ -74,16 +70,11 @@ def generate_fresh_hook_scripts() -> dict[str, str]:
 
     project_root = get_project_root()
     transport = load_transport_config(project_root)
-    # Generate for the roots the DEPLOYED forwarders record, not this
-    # checkout's. Comparing against a regeneration at the current root
-    # additionally asserts "this checkout sits where the committed file's did"
-    # — false on every machine but the one that generated them (Plan 00250
-    # Task 2.4c), and false in every worktree of it.
-    installed = get_installed_hook_scripts()
-    untracked_dir = recorded_untracked_dir(installed) or (get_event_socket_dir(project_root).parent)
-    # The guard bakes the checkout too (Plan 00364 Task 5.1), so it is read
-    # back for the same reason and from the same artefact.
-    guard_root = recorded_project_root(installed) or project_root
+    # Generated forwarders are machine independent (Plan 00609): no checkout
+    # path is written into them, so regenerating at THIS checkout's root is
+    # byte-identical to the tracked files wherever the checkout lives.
+    untracked_dir = get_untracked_dir(project_root)
+    guard_root = project_root
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_hooks_dir = Path(tmpdir) / "hooks"
@@ -135,15 +126,9 @@ class TestDogfoodingHookScripts:
         - No manual edits have drifted from installer
         - Script updates are propagated to installer code
 
-        The comparison is EXACT, and stays exact by generating for the root the
-        deployed forwarders record rather than for this checkout's. The
-        forwarders bake that root as a literal on purpose — the relay guard is a
-        zero-spawn hot path that must not compute a path at hook-run time — so
-        comparing against a regeneration at the CURRENT root additionally
-        asserted "this checkout sits where the committed file's did". True on
-        one box, false on every CI runner, and none of the three properties
-        above (Plan 00250 Task 2.4c). See `recorded_untracked_dir`, which
-        refuses to pick a root when the forwarders disagree about it.
+        The comparison is EXACT with no normalisation: the forwarders name no
+        absolute path (Plan 00609), so a regeneration at any checkout root is
+        byte-identical to the tracked files.
         """
         installed = get_installed_hook_scripts()
         fresh = generate_fresh_hook_scripts()
@@ -212,38 +197,23 @@ class TestDogfoodingHookScripts:
 
             pytest.fail("".join(error_msg))
 
-    def test_no_other_machine_specific_path_survives(self):
-        """The comparison above must not hide a SECOND baked path.
+    def test_no_machine_specific_path_is_tracked(self):
+        """No tracked forwarder names an absolute path that is not a system path.
 
-        The forwarders bake one machine-specific thing on purpose: the
-        untracked directory the relay guard needs. If a future change bakes
-        another absolute path, the comparison would treat it as template — so
-        it is asserted here instead, over the tracked files themselves.
-
-        The roots are DECLARED rather than assumed to be this checkout's. The
-        artefact records where it was generated, which is only the live
-        checkout on the machine that generated it — judging against the live
-        root alone reported every legitimately baked path as an offender on
-        every CI runner, which is the same defect Task 2.4c fixed in the
-        comparison this guards.
+        The files may be tracked by a project and regenerated on any machine
+        (Plan 00609), so a checkout path, a runtime directory or a uid in one is
+        a dirty checkout waiting to happen. ``/.claude/hooks`` is the fixed
+        segment the relay guard matches ``BASH_SOURCE`` against.
         """
-        installed = get_installed_hook_scripts()
-        baked_roots = [str(get_project_root())]
-        for recorded in (recorded_untracked_dir(installed), recorded_project_root(installed)):
-            if recorded is not None:
-                baked_roots.append(str(recorded))
-
         offenders = {
-            name: unexpected
-            for name, content in installed.items()
-            if (unexpected := unexpected_absolute_paths(content, baked_roots))
+            name: leaked
+            for name, content in get_installed_hook_scripts().items()
+            if (leaked := [p for p in surviving_absolute_paths(content) if p != "/.claude/hooks"])
         }
 
         assert not offenders, (
-            "a tracked hook script names an absolute path that is neither a "
-            f"baked root ({baked_roots}) nor a portable system path, so it is "
-            "machine-specific content the dogfooding comparison would compare "
-            f"away rather than catch:\n{offenders}"
+            "a tracked hook script names a machine-specific absolute path; "
+            f"forwarders must resolve it at run time:\n{offenders}"
         )
 
     def test_all_hook_scripts_are_executable(self):

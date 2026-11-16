@@ -186,8 +186,9 @@ def test_f2_enabled_config_replaces_foreign_guard_with_clients_own_paths() -> No
     )
 
     assert "/workspace/untracked" not in result
-    assert '_rl_dir="/client/untracked"' in result
-    assert '"${BASH_SOURCE[0]}" == "/client/.claude/hooks/"*' in result
+    assert '_rl_dir="$_rl_root/untracked"' in result
+    assert '"$_rl_src" == /*/.claude/hooks/*' in result
+    assert "/client" not in result
     assert result.count("relay hot path (generated") == 1
 
 
@@ -327,8 +328,9 @@ def test_guard_block_reentry_check_is_first() -> None:
         "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"), Path("/p")
     )
     lines = [line for line in block.splitlines() if line.strip()]
-    assert lines[1].startswith('if [[ "${1:-}" != "--no-relay" &&')
-    assert lines[1].endswith("]]; then")
+    assert lines[1] == '_rl_src="${BASH_SOURCE[0]}"'
+    assert lines[2].startswith('if [[ "${1:-}" != "--no-relay" &&')
+    assert lines[2].endswith("]]; then")
 
 
 def test_guard_block_names_the_correct_event_socket() -> None:
@@ -338,85 +340,69 @@ def test_guard_block_names_the_correct_event_socket() -> None:
     assert '_rl_sock="$_rl_events_dir/user-prompt-submit.sock"' in block
 
 
-def test_guard_block_uses_literal_untracked_dir() -> None:
+def test_guard_block_derives_the_untracked_dir_from_the_source_path() -> None:
+    """Plan 00609: only the layout below the root is written, never the root."""
     block = build_relay_guard_block(
         "pre-tool-use",
         TransportConfig(relay_enabled=True),
         Path("/some/project/untracked"),
         Path("/some/project"),
     )
-    assert '_rl_dir="/some/project/untracked"' in block
+    assert '_rl_dir="$_rl_root/untracked"' in block
+    assert "/some/project" not in block
 
 
-class TestTheGuardBlockEscapesWhatItInterpolates:
-    """Plan 00412: the escaper exists in this module and this site skipped it.
+class TestTheGuardBlockInterpolatesNoCheckoutPath:
+    """Plan 00412 escaped the checkout path into the block; Plan 00609 removes it.
 
-    `_escape_for_double_quotes`'s own docstring makes the case: the catalogue
-    it is currently applied to is an internal constant and nothing there is
-    hostile, and it is escaped anyway because the failure would be silent and
-    remote — a value gaining a backtick or `$` emits a forwarder that runs a
-    command substitution every time the daemon is down.
-
-    A PATH is not an internal constant. It is wherever the user cloned the
-    repository, so the argument applies more strongly here than where the
-    helper is already used.
-
-    Scope is deliberate. These are the interpolations that land in a plain
-    double-quoted string, which is exactly what this escaper is for. The two
-    that land inside `${VAR:-default}` are NOT covered here: that context has
-    `}` as an additional terminator, which this escaper has no rule for, and
-    pretending otherwise would leave them broken while looking fixed. See
-    CLAUDE/Plan/00412-jobs-recurring-work-and-security-review/
-    DECISION-forwarder-interpolation-contexts.md.
+    A path is wherever the user cloned the repository, so one carrying a `$`, a
+    backtick or a quote once had to be escaped to stop the forwarder running a
+    command substitution. With the root derived from ``BASH_SOURCE`` at run time
+    the path never reaches the file, so there is nothing left to escape.
     """
 
-    def _block(self, untracked: Path, root: Path) -> str:
-        return build_relay_guard_block(
-            "pre-tool-use", TransportConfig(relay_enabled=True), untracked, root
+    @pytest.mark.parametrize("root", ["/some/$USER", "/some/`id`", '/some/pro"ject'])
+    def test_a_hostile_path_never_reaches_the_block(self, root: str) -> None:
+        block = build_relay_guard_block(
+            "pre-tool-use",
+            TransportConfig(relay_enabled=True),
+            Path(root) / "untracked",
+            Path(root),
         )
+        assert root not in block
+        assert "some" not in block
 
-    def test_a_dollar_in_the_untracked_path_cannot_expand(self) -> None:
-        """Unescaped, `$USER` would expand when the forwarder runs."""
-        block = self._block(Path("/some/$USER/untracked"), Path("/some/$USER"))
+    def test_a_client_layout_keeps_its_nested_untracked_dir(self) -> None:
+        block = build_relay_guard_block(
+            "pre-tool-use",
+            TransportConfig(relay_enabled=True),
+            Path("/c/.claude/hooks-daemon/untracked"),
+            Path("/c"),
+        )
+        assert '_rl_dir="$_rl_root/.claude/hooks-daemon/untracked"' in block
 
-        assert '_rl_dir="/some/\\$USER/untracked"' in block
-        assert '_rl_dir="/some/$USER/untracked"' not in block
-
-    def test_a_backtick_in_the_untracked_path_cannot_substitute(self) -> None:
-        """This is the failure the escaper's docstring calls silent and remote."""
-        block = self._block(Path("/some/`id`/untracked"), Path("/some/`id`"))
-
-        assert "\\`id\\`" in block
-
-    def test_a_quote_in_the_checkout_path_cannot_break_the_condition(self) -> None:
-        block = self._block(Path('/some/pro"ject/untracked'), Path('/some/pro"ject'))
-
-        assert '\\"ject' in block
-
-    def test_an_ordinary_path_is_unchanged(self) -> None:
-        """Escaping must be a no-op for every normal install.
-
-        Without this, the fix would silently rewrite the generated forwarder
-        for every existing project.
-        """
-        block = self._block(Path("/some/project/untracked"), Path("/some/project"))
-
-        assert '_rl_dir="/some/project/untracked"' in block
-        assert "\\" not in block.split("_rl_dir=")[1].split("\n")[0]
+    def test_an_untracked_dir_outside_the_root_fails_fast(self) -> None:
+        with pytest.raises(ValueError, match="not below project root"):
+            build_relay_guard_block(
+                "pre-tool-use",
+                TransportConfig(relay_enabled=True),
+                Path("/elsewhere/untracked"),
+                Path("/c"),
+            )
 
 
 def test_guard_block_default_relay_binary_path() -> None:
     block = build_relay_guard_block(
         "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
     )
-    assert '_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/proj/untracked/bin/hooks-relay}"' in block
+    assert '_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-$_rl_dir/bin/hooks-relay}"' in block
 
 
 def test_guard_block_honours_relay_binary_override() -> None:
     transport = TransportConfig(relay_enabled=True, relay_binary="/opt/custom/hooks-relay")
     block = build_relay_guard_block("pre-tool-use", transport, _UNTRACKED, _ROOT)
     assert '_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/opt/custom/hooks-relay}"' in block
-    assert "/proj/untracked/bin/hooks-relay" not in block
+    assert "bin/hooks-relay}" not in block.replace("/opt/custom/hooks-relay}", "")
 
 
 def test_guard_block_events_dir_is_env_overridable() -> None:
@@ -435,7 +421,7 @@ def test_guard_block_relay_binary_is_env_overridable() -> None:
     block = build_relay_guard_block(
         "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
     )
-    assert '_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/proj/untracked/bin/hooks-relay}"' in block
+    assert '_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-$_rl_dir/bin/hooks-relay}"' in block
 
 
 def test_guard_block_env_overrides_are_pure_parameter_expansion() -> None:
@@ -485,8 +471,8 @@ def test_guard_block_hands_the_relay_its_daemon_root() -> None:
         "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"), Path("/p")
     )
     assert (
-        f'                {RELAY_DAEMON_ROOT_ENV}="/p" \\\n                    exec "$_rl_bin"'
-        in block
+        f'                {RELAY_DAEMON_ROOT_ENV}="${{_rl_dir%/*}}" \\\n'
+        '                    exec "$_rl_bin"' in block
     )
 
 
@@ -602,39 +588,33 @@ def test_nc_enabled_short_path_appends_empty_events_dir_override() -> None:
     assert 'send_request_stdin "PreToolUse" "" "pre-tool-use" ""' in result
 
 
-def test_nc_enabled_deep_path_bakes_resolved_events_dir_override() -> None:
-    """A deep untracked_dir whose natural events dir would overflow AF_UNIX's
-    108-byte limit gets the daemon's own resolved fallback path baked in,
-    matching build_relay_guard_block's identical decision for the relay
-    guard's `_rl_events_dir`."""
-    from claude_code_hooks_daemon.daemon.paths import (
-        event_socket_dir_is_fallback,
-        get_event_socket_dir_from_untracked,
-    )
+def test_nc_enabled_deep_path_bakes_no_events_dir() -> None:
+    """A deep untracked_dir whose natural events dir would overflow the AF_UNIX
+    limit still gets the empty placeholder: the fallback path is machine
+    specific (Plan 00609), so init.sh finds it through the daemon's location
+    file instead."""
+    from claude_code_hooks_daemon.daemon.paths import event_socket_dir_is_fallback
 
     deep_untracked_dir = Path("/" + "a" * 90 + "/untracked")
     assert event_socket_dir_is_fallback(deep_untracked_dir) is True
-    expected_fallback = str(get_event_socket_dir_from_untracked(deep_untracked_dir))
 
     transport = TransportConfig(relay_enabled=False, nc_enabled=True)
     result = generate_forwarder_content(
         _SAMPLE_SOURCE, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT
     )
 
-    assert f'send_request_stdin "PreToolUse" "" "pre-tool-use" "{expected_fallback}"' in result
+    assert 'send_request_stdin "PreToolUse" "" "pre-tool-use" ""' in result
+    assert "/run/user" not in result
 
 
-def test_nc_enabled_deep_path_forward_stop_event_bakes_override() -> None:
-    from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir_from_untracked
-
+def test_nc_enabled_deep_path_forward_stop_event_bakes_no_events_dir() -> None:
     deep_untracked_dir = Path("/" + "a" * 90 + "/untracked")
-    expected_fallback = str(get_event_socket_dir_from_untracked(deep_untracked_dir))
 
     source = _SAMPLE_SOURCE.replace('send_request_stdin "PreToolUse"', 'forward_stop_event "Stop"')
     transport = TransportConfig(relay_enabled=False, nc_enabled=True)
     result = generate_forwarder_content(source, "stop", transport, deep_untracked_dir, _DEEP_ROOT)
 
-    assert f'forward_stop_event "Stop" "stop" "{expected_fallback}"' in result
+    assert 'forward_stop_event "Stop" "stop" ""' in result
 
 
 def test_nc_enabled_deep_path_is_still_idempotent() -> None:
@@ -719,23 +699,19 @@ def test_nc_enabled_repairs_a_doubled_call_site() -> None:
     assert _call_line(result) == 'send_request_stdin "PreToolUse" "" "pre-tool-use" ""'
 
 
-def test_previous_release_form_gains_the_events_dir_override_on_a_deep_path() -> None:
-    """Re-generating a legacy call site still bakes the overflow fallback."""
-    from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir_from_untracked
-
-    deep_untracked_dir = Path("/" + "a" * 90 + "/untracked")
-    expected_fallback = str(get_event_socket_dir_from_untracked(deep_untracked_dir))
-    legacy = _source_with_call('send_request_stdin "PreToolUse" "" "pre-tool-use"')
+def test_a_baked_events_dir_from_an_older_forwarder_is_rewritten_to_the_placeholder() -> None:
+    """Plan 00609: an older generator baked the machine-specific fallback path;
+    regenerating converges it to the portable empty placeholder, once."""
+    old = _source_with_call(
+        'send_request_stdin "PreToolUse" "" "pre-tool-use" "/run/user/1000/hooks-daemon-ab-cd-events"'
+    )
     transport = TransportConfig(relay_enabled=False, nc_enabled=True)
 
-    result = generate_forwarder_content(
-        legacy, "pre-tool-use", transport, deep_untracked_dir, _DEEP_ROOT
-    )
+    once = generate_forwarder_content(old, "pre-tool-use", transport, _UNTRACKED, _ROOT)
+    twice = generate_forwarder_content(once, "pre-tool-use", transport, _UNTRACKED, _ROOT)
 
-    assert (
-        _call_line(result)
-        == f'send_request_stdin "PreToolUse" "" "pre-tool-use" "{expected_fallback}"'
-    )
+    assert _call_line(once) == 'send_request_stdin "PreToolUse" "" "pre-tool-use" ""'
+    assert twice == once
 
 
 def test_previous_release_form_still_generates_valid_bash() -> None:
@@ -877,7 +853,9 @@ def test_guard_block_requires_the_source_to_live_under_its_own_hooks_dir() -> No
     block = build_relay_guard_block(
         "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
     )
-    assert '"${BASH_SOURCE[0]}" == "/proj/.claude/hooks/"*' in block
+    assert '"$_rl_src" == /*/.claude/hooks/*' in block
+    assert '_rl_root="${_rl_src%/.claude/hooks/*}"' in block
+    assert "/proj" not in block
 
 
 def test_the_checkout_test_is_on_the_same_line_as_the_reentry_check() -> None:
@@ -903,7 +881,7 @@ def test_the_relay_binary_override_still_applies() -> None:
     transport = TransportConfig(relay_enabled=True, relay_binary="/opt/custom/hooks-relay")
     block = build_relay_guard_block("pre-tool-use", transport, _UNTRACKED, _ROOT)
     assert '_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/opt/custom/hooks-relay}"' in block
-    assert '"${BASH_SOURCE[0]}" == "/proj/.claude/hooks/"*' in block
+    assert '"$_rl_src" == /*/.claude/hooks/*' in block
 
 
 def test_the_events_dir_override_still_applies() -> None:
@@ -921,15 +899,16 @@ def test_a_client_layouts_root_is_not_derived_from_its_untracked_dir() -> None:
         Path("/client/.claude/hooks-daemon/untracked"),
         Path("/client"),
     )
-    assert '"${BASH_SOURCE[0]}" == "/client/.claude/hooks/"*' in block
-    assert '_rl_dir="/client/.claude/hooks-daemon/untracked"' in block
+    assert '_rl_root="${_rl_src%/.claude/hooks/*}"' in block
+    assert '_rl_dir="$_rl_root/.claude/hooks-daemon/untracked"' in block
+    assert "/client" not in block
 
 
 def test_the_generated_forwarder_carries_the_checkout_test() -> None:
     content = generate_forwarder_content(
         _SAMPLE_SOURCE, "pre-tool-use", TransportConfig(relay_enabled=True), _UNTRACKED, _ROOT
     )
-    assert '"${BASH_SOURCE[0]}" == "/proj/.claude/hooks/"*' in content
+    assert '"$_rl_src" == /*/.claude/hooks/*' in content
 
 
 def test_stripping_still_removes_a_guard_that_carries_the_checkout_test() -> None:

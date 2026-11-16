@@ -24,7 +24,6 @@ import logging
 import re
 import string
 import sys
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Final
 
@@ -39,11 +38,7 @@ from claude_code_hooks_daemon.constants.events import (
     wired_event_metas,
 )
 from claude_code_hooks_daemon.constants.protocol import HookInputField, RawTextReply
-from claude_code_hooks_daemon.daemon.paths import (
-    event_socket_dir_is_fallback,
-    get_event_socket_dir_from_untracked,
-    get_untracked_dir,
-)
+from claude_code_hooks_daemon.daemon.paths import EVENTS_DIR_LOCATION_SUFFIX, get_untracked_dir
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 #: The line every current forwarder sources init.sh through. The guard block
@@ -281,63 +276,98 @@ def apply_init_parse_guard(source_content: str, event_file_name: str) -> str:
     return stripped.replace(INIT_SH_ANCHOR, guard + INIT_SH_ANCHOR, 1)
 
 
-def _default_relay_binary_path(untracked_dir: Path) -> str:
-    """``{untracked}/bin/hooks-relay`` — the default when unoverridden (design §4)."""
-    return str(untracked_dir / "bin" / "hooks-relay")
+#: ``{untracked}/bin/hooks-relay`` as the generated bash spells it, relative to
+#: the ``_rl_dir`` it has already resolved (design §4).
+_DEFAULT_RELAY_BINARY_BASH = "$_rl_dir/bin/hooks-relay"
 
+#: The directory a deployed forwarder lives in, as a segment of its own path.
+_HOOKS_DIR_SEGMENT = "/.claude/hooks/"
 
-def deployed_hooks_dir(project_root: Path) -> str:
-    """``<project_root>/.claude/hooks/`` — where a deployed forwarder lives.
+def _untracked_dir_below_root(untracked_dir: Path, project_root: Path) -> str:
+    """The untracked dir as a path relative to the checkout root.
 
-    Trailing slash included: it is a PREFIX the guard compares
-    ``${BASH_SOURCE[0]}`` against, and without it ``/proj/.claude/hooks-old/``
-    would match too.
+    A tracked forwarder must not carry the machine's absolute root, so the
+    generated bash re-derives the root from ``BASH_SOURCE`` and appends this
+    layout-only remainder (``untracked`` or ``.claude/hooks-daemon/untracked``).
+
+    Raises:
+        ValueError: if ``untracked_dir`` is not below ``project_root``; there is
+            no root-relative spelling of such a layout.
     """
-    return f"{project_root}/.claude/hooks/"
+    try:
+        return untracked_dir.relative_to(project_root).as_posix()
+    except ValueError as exc:
+        raise ValueError(
+            f"untracked dir {untracked_dir} is not below project root {project_root}; "
+            "a forwarder can only name it relative to its own checkout"
+        ) from exc
 
 
-def _checkout_guard_open(project_root: Path, *, honour_no_relay: bool) -> str:
-    """The ``if`` line that confines a generated block to ONE checkout.
+def _checkout_guard_open(untracked_dir: Path, project_root: Path, *, honour_no_relay: bool) -> str:
+    """The lines that open a generated block, confined to ONE checkout at run time.
 
-    The condition tests ``${BASH_SOURCE[0]}`` against :func:`deployed_hooks_dir`
-    (see :func:`build_relay_guard_block` for why), and, for the relay guard,
-    also lets ``--no-relay`` re-entry skip it.
+    ``${BASH_SOURCE[0]}`` — the file bash is actually executing — must be an
+    absolute path inside a ``.claude/hooks/`` directory; the checkout root is
+    that path minus the directory segment, and ``_rl_dir`` the untracked dir
+    below it. Nothing machine-specific is written into the file (Plan 00609),
+    and a COPY of the forwarder (a git worktree inherits the tracked file
+    verbatim) resolves ITS OWN checkout rather than dialling the original's
+    socket (Plan 00364 Task 5.1). A path bash cannot anchor that way (a relative
+    invocation) skips the block and takes the legacy transport, never a wrong
+    answer. Builtins only, so this costs no spawn.
+
+    For the relay guard, ``--no-relay`` re-entry also skips the block.
     """
-    hooks_dir = _escape_for_double_quotes(deployed_hooks_dir(project_root))
+    below_root = _untracked_dir_below_root(untracked_dir, project_root)
     no_relay = '"${1:-}" != "--no-relay" && ' if honour_no_relay else ""
-    return f'if [[ {no_relay}"${{BASH_SOURCE[0]}}" == "{hooks_dir}"* ]]; then\n'
+    return (
+        '_rl_src="${BASH_SOURCE[0]}"\n'
+        f'if [[ {no_relay}"$_rl_src" == /*{_HOOKS_DIR_SEGMENT}* ]]; then\n'
+        f'    _rl_root="${{_rl_src%{_HOOKS_DIR_SEGMENT}*}}"\n'
+        f'    _rl_dir="$_rl_root/{below_root}"\n'
+    )
 
 
 #: "Aa Bb ... Zz": the table the generated lowercase loop walks.
 _UPPER_LOWER_PAIRS = " ".join(f"{c.upper()}{c}" for c in string.ascii_lowercase)
 
 
-def _events_dir_lines(untracked_dir: Path) -> list[str]:
-    """Bash lines that set ``_rl_dir`` and ``_rl_events_dir`` with no spawn.
+def _events_dir_lines() -> list[str]:
+    """Bash lines that set ``_rl_events_dir`` from ``_rl_dir`` with no spawn.
 
     Shared by the relay guard and the status fast path so both name the same
-    per-event socket directory; the lines' shapes are what
-    :func:`recorded_untracked_dir` reads back.
+    per-event socket directory. The natural ``$_rl_dir/events$_rl_sfx`` is
+    always tried first; only when it does not exist (the daemon bound its
+    sockets in the short fallback root because the natural path overflows the
+    AF_UNIX limit) is the location file the daemon publishes consulted. That
+    file records the untracked dir it was written for and is trusted only when
+    it names THIS checkout's, so a copied checkout never dials the original's
+    daemon. The fallback path itself (a runtime dir, a uid, two hashes) is
+    machine-specific and so is never written into a forwarder (Plan 00609).
     """
-    lines = [f'    _rl_dir="{_escape_for_double_quotes(str(untracked_dir))}"\n']
-    if event_socket_dir_is_fallback(untracked_dir):
-        resolved_events_dir = get_event_socket_dir_from_untracked(untracked_dir)
-        # Test-isolation fix (Plan 00290 Phase 6 dogfood finding), preserved
-        # in the fallback case too: still `${VAR:-default}` parameter
-        # expansion, zero spawns, so a test fixture can still redirect this.
-        lines.append(f'    _rl_events_dir="${{HOOKS_DAEMON_EVENTS_DIR:-{resolved_events_dir}}}"\n')
-    else:
+    return [
         # Lowercased with parameter expansion only, one upper/lower pair per
         # pass: `${v,,}` is bash 4+ and macOS ships /bin/bash 3.2, where the
         # bad substitution would exit the forwarder before it judges anything.
-        lines.append('    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx// /-}"\n')
-        lines.append('    if [[ "$_rl_sfx" == *[[:upper:]]* ]]; then\n')
-        lines.append(f"        for _rl_c in {_UPPER_LOWER_PAIRS}; do\n")
-        lines.append('            _rl_sfx="${_rl_sfx//${_rl_c:0:1}/${_rl_c:1:1}}"\n')
-        lines.append("        done\n")
-        lines.append("    fi\n")
-        lines.append('    _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"\n')
-    return lines
+        '    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx// /-}"\n',
+        '    if [[ "$_rl_sfx" == *[[:upper:]]* ]]; then\n',
+        f"        for _rl_c in {_UPPER_LOWER_PAIRS}; do\n",
+        '            _rl_sfx="${_rl_sfx//${_rl_c:0:1}/${_rl_c:1:1}}"\n',
+        "        done\n",
+        "    fi\n",
+        '    _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"\n',
+        # Test-isolation: an explicit HOOKS_DAEMON_EVENTS_DIR always wins. The
+        # reads sit in an `if` condition (a failing `read` must not trip the
+        # wrapper's errexit) and follow an `-r` test (no redirect error text).
+        '    if [[ -z "${HOOKS_DAEMON_EVENTS_DIR:-}" && ! -d "$_rl_events_dir" ]]; then\n',
+        f'        _rl_loc="$_rl_dir/events$_rl_sfx{EVENTS_DIR_LOCATION_SUFFIX}"\n',
+        '        if [[ -r "$_rl_loc" ]] \\\n',
+        '            && { IFS= read -r _rl_loc_dir && IFS= read -r _rl_loc_events; } < "$_rl_loc" \\\n',
+        '            && [[ "$_rl_loc_dir" == "$_rl_dir" && -n "$_rl_loc_events" ]]; then\n',
+        '            _rl_events_dir="$_rl_loc_events"\n',
+        "        fi\n",
+        "    fi\n",
+    ]
 
 
 def build_relay_guard_block(
@@ -359,10 +389,10 @@ def build_relay_guard_block(
         transport: The resolved transport config (``relay_enabled`` is not
             consulted here — the caller decides whether to call this at all).
         untracked_dir: The project's daemon untracked directory, already
-            resolved for install mode (self-install vs ``.claude/hooks-daemon/``)
-            — baked in as a literal absolute path, never computed at hook-run
-            time.
-        project_root: The checkout this forwarder is generated FOR. Not
+            resolved for install mode (self-install vs ``.claude/hooks-daemon/``).
+            Only its position below ``project_root`` is written into the
+            block; the absolute path is resolved at hook-run time.
+        project_root: The checkout this forwarder is generated for. Not
             derivable from ``untracked_dir`` (a client install puts that three
             levels down, at ``<root>/.claude/hooks-daemon/untracked``), so it
             is an argument rather than an inference.
@@ -371,66 +401,43 @@ def build_relay_guard_block(
         The guard block text, newline-terminated, ready to be inserted
         directly above :data:`INIT_SH_ANCHOR`.
 
-    **One guard belongs to ONE checkout (Plan 00364 Task 5.1)**: every path
-    here is a literal, which is what makes the hot path free — and what makes
-    a COPY of the file dangerous. A git worktree inherits the tracked
-    forwarder verbatim, so its ``.claude/hooks/pre-tool-use`` dialled the main
-    checkout's relay socket and was answered by the main checkout's daemon,
-    with the worktree's own config and project handlers never consulted. The
-    guard therefore also tests ``${BASH_SOURCE[0]}`` — the file bash is
-    actually executing — against :func:`deployed_hooks_dir` for
-    ``project_root``. A forwarder running from anywhere else falls through to
-    ``init.sh``, which computes that checkout's own project-scoped socket.
-    Bash builtins throughout, so this costs no spawn; the cost of a false
-    negative (a hook invoked by a path that does not match the literal, e.g.
-    through a symlinked root) is one legacy-transport round trip, never a
-    wrong answer.
+    **Machine independence (Plan 00609)**: a project may TRACK its forwarders,
+    so the block names no absolute path, uid, hostname-derived hash or runtime
+    directory — see :func:`_checkout_guard_open` for how the checkout root is
+    derived from ``${BASH_SOURCE[0]}``, and :func:`_events_dir_lines` for the
+    events directory.
 
-    **Events-dir three-way agreement (Plan 00290 F3 fix)**: the events
-    directory is normally computed DYNAMICALLY in bash
-    (``$_rl_dir/events$_rl_sfx``, using bash's own ``$HOSTNAME`` at hook-run
-    time) so a project checkout shared across multiple hosts over NFS gets a
-    correctly host-isolated path on every host without redeployment. But on
-    a deeply-nested standard client layout that dynamic path can itself
-    exceed the AF_UNIX length limit for most event names — silently inert
-    (canary-observed). When ``paths.event_socket_dir_is_fallback`` says the
-    daemon's own bind decision (``paths.get_event_socket_dir_from_untracked``)
-    would use its short fallback root instead, this function BAKES that
-    same resolved path as the guard's literal default — computed once, at
-    generation time, on the deploying host. This is the one case where the
-    dynamic-per-host guarantee is knowingly given up: a project that is
-    BOTH multi-host-NFS-shared AND deep enough to overflow must either set
-    ``HOOKS_DAEMON_EVENTS_DIR`` per host or accept a shared fallback path
-    (still correct — the fallback root is keyed by project, not by host —
-    just not host-isolated in that narrow combination).
+    **One guard belongs to ONE checkout (Plan 00364 Task 5.1)**: a git
+    worktree inherits the tracked forwarder verbatim, and it once dialled the
+    main checkout's relay socket and was answered by the main checkout's
+    daemon, with the worktree's own config and project handlers never
+    consulted. Deriving the root from the file bash is executing means a copy
+    dials ITS OWN checkout's socket (absent unless that checkout runs a
+    daemon), then falls through to ``init.sh``.
+
+    **The AF_UNIX overflow case**: on a deeply-nested layout the natural events
+    directory can exceed the socket path limit, and the daemon binds in a short
+    fallback root instead. That path cannot be computed in bash without a spawn
+    (it is keyed by hashes), so the daemon publishes it in a location file
+    beside the untracked dir's events directory and the block reads it back
+    (:func:`_events_dir_lines`).
     """
-    relay_binary = transport.relay_binary or _default_relay_binary_path(untracked_dir)
+    relay_binary = transport.relay_binary or _DEFAULT_RELAY_BINARY_BASH
     # An event with its own budget (Plan 00512: the worktree events) waits for
     # it, whatever the transport timeout says; every other event waits for
     # `transport.timeout_seconds`.
     json_key = _METAS_BY_BASH_KEY[event_file_name].json_key
     event_wait = {str(e): wait for e, wait in Timeout.EVENT_CLIENT_WAIT.items()}.get(json_key, 0)
     timeout_ms = max(transport.timeout_seconds, event_wait) * 1000
-    # Escaped for the same reason `_escape_for_double_quotes` exists, and with
-    # more force: its docstring notes the CATALOGUE is an internal constant and
-    # escapes it anyway, because the failure is silent and remote -- a value
-    # carrying a backtick or `$` emits a forwarder that runs a command
-    # substitution every time the daemon is down. A path is not an internal
-    # constant; it is wherever the user cloned the repository.
-    #
-    # Both sites below are a plain double-quoted string, which is exactly the
-    # context this escaper is for. In the `==` comparison the path sits INSIDE
-    # the quotes and only the trailing `*` is a pattern, so glob characters in
-    # the path are already literal and need nothing further.
-    #
-    # The two `${VAR:-default}` interpolations further down are NOT escaped
-    # here: that context takes `}` as a terminator and this escaper has no rule
-    # for it, so applying it there would leave them broken while looking fixed.
-    # See DECISION-forwarder-interpolation-contexts.md.
+    # No checkout path is interpolated into the block any more (it is derived
+    # from BASH_SOURCE at run time), so the only text left to escape is the
+    # configured relay binary, which sits in a `${VAR:-default}` context that
+    # takes `}` as a terminator and that the double-quote escaper has no rule
+    # for. See DECISION-forwarder-interpolation-contexts.md.
     lines = [
         _GUARD_HEADER,
-        _checkout_guard_open(project_root, honour_no_relay=True),
-        *_events_dir_lines(untracked_dir),
+        _checkout_guard_open(untracked_dir, project_root, honour_no_relay=True),
+        *_events_dir_lines(),
     ]
     lines.append(f'    _rl_bin="${{HOOKS_DAEMON_RELAY_BINARY:-{relay_binary}}}"\n')
     lines.append(f'    _rl_sock="$_rl_events_dir/{event_file_name}.sock"\n')
@@ -456,7 +463,7 @@ def build_relay_guard_block(
     # The daemon root is the untracked dir's parent in both install modes
     # (paths.get_untracked_dir). The relay names this install's launcher by
     # it, with the rule init.sh's carve-out applies (Plan 00466 round 4, P3-2).
-    daemon_root = _escape_for_double_quotes(str(untracked_dir.parent))
+    daemon_root = "${_rl_dir%/*}"
     # The exec lives in its own function: with execfail a failed exec RETURNS
     # and the script carries on to the fallback below, which shellcheck's
     # SC2093 cannot know. A function whose last command is the exec ends where
@@ -566,15 +573,15 @@ def build_status_fast_path_block(
     timeout_s = _FAST_PATH_TIMEOUT_SECONDS
     lines = [
         _FAST_PATH_HEADER,
-        _checkout_guard_open(project_root, honour_no_relay=False),
-        *_events_dir_lines(untracked_dir),
+        _checkout_guard_open(untracked_dir, project_root, honour_no_relay=False),
+        *_events_dir_lines(),
         f"    _sf_sock={sock}\n",
         "    # One red line naming the fault and its fix, then exit 0: the status line\n",
         "    # is the loud channel and nothing below falls back silently.\n",
         "    _sf_loud() { printf '\\033[31m%s\\033[0m\\n' \"$1\"; exit 0; }\n",
     ]
     if transport.relay_enabled:
-        relay_binary = transport.relay_binary or _default_relay_binary_path(untracked_dir)
+        relay_binary = transport.relay_binary or _DEFAULT_RELAY_BINARY_BASH
         refused, timed_out = _RELAY_EXIT_CONNECT_FAIL, _RELAY_EXIT_TIMEOUT
         lines += [
             f'    _rl_bin="${{HOOKS_DAEMON_RELAY_BINARY:-{relay_binary}}}"\n',
@@ -702,12 +709,8 @@ def strip_relay_guard_block(source_content: str) -> str:
     return _GUARD_BLOCK_PATTERN.sub("", source_content)
 
 
-#: Stands in for the project root when two checkouts' forwarders are compared.
-PROJECT_ROOT_PLACEHOLDER = "@@PROJECT_ROOT@@"
-
 #: Absolute paths a forwarder may legitimately name on ANY machine. Anything
-#: else surviving :func:`normalise_project_root` is machine-specific content the
-#: comparison would otherwise hide — see :func:`surviving_absolute_paths`.
+#: else is machine-specific — see :func:`surviving_absolute_paths`.
 _PORTABLE_PATH_PREFIXES = ("/usr/", "/bin/", "/sbin/", "/etc/", "/dev/", "/proc/")
 
 #: An absolute path as it appears in a shell script. Two conditions, and both
@@ -723,151 +726,22 @@ _ABSOLUTE_PATH = re.compile(
     r"(?<![A-Za-z0-9_.$])" r"/[A-Za-z0-9._+-]*[A-Za-z0-9][A-Za-z0-9._+-]*" r"(?:/[A-Za-z0-9._+-]+)*"
 )
 
-#: A path already rooted at the placeholder, INCLUDING its trailing components.
-#: Removed whole before scanning, because leaving it would let the scanner match
-#: its tail (`@@PROJECT_ROOT@@/untracked` → `/untracked`) and report an
-#: already-normalised path as machine-specific.
-_PLACEHOLDER_ROOTED_PATH = re.compile(
-    re.escape(PROJECT_ROOT_PLACEHOLDER) + r"(?:/[A-Za-z0-9._+-]+)*"
-)
-
-
-def normalise_project_root(content: str, project_root: str) -> str:
-    """Replace a checkout's own absolute root with a stable placeholder.
-
-    The generated forwarders bake the project root as a literal, deliberately:
-    ``build_relay_guard_block`` is a zero-spawn hot path that must not compute
-    a path at hook-run time. That makes the artefact correct and
-    machine-specific at once, so a byte comparison between two checkouts fails
-    on the root alone.
-
-    Normalising it lets the comparison stay EXACT on everything else. The
-    surface is small enough to be safe: two distinct lines, in 27 of the 31
-    tracked hook files (Plan 00250 Task 2.4c). Pair this with
-    :func:`surviving_absolute_paths` so normalising one path cannot hide a
-    second one appearing later.
-    """
-    return content.replace(project_root.rstrip("/"), PROJECT_ROOT_PLACEHOLDER)
-
-
-#: The `_rl_dir="..."` assignment every relay guard opens with, which records
-#: the untracked directory the forwarder was generated for.
-_RECORDED_UNTRACKED_DIR = re.compile(r'^\s*_rl_dir="([^"]+)"', re.MULTILINE)
-
-#: The guard's checkout test, which records the project root it was generated
-#: for — the second literal a forwarder bakes (see `build_relay_guard_block`).
-_RECORDED_PROJECT_ROOT = re.compile(r'\$\{BASH_SOURCE\[0\]\}" == "([^"]+)/\.claude/hooks/"\*')
-
-
-def _one_recorded_value(
-    hook_contents: dict[str, str], pattern: re.Pattern[str], what: str
-) -> Path | None:
-    """The single value ``pattern`` reads back out of every guarded forwarder.
-
-    Shared by :func:`recorded_untracked_dir` and :func:`recorded_project_root`
-    so "what the artefact records" and "what counts as the files disagreeing"
-    cannot drift into two answers.
-
-    Raises:
-        AssertionError: if two forwarders record DIFFERENT values.
-    """
-    found: dict[str, str] = {}
-    for name, content in hook_contents.items():
-        match = pattern.search(content)
-        if match:
-            found[name] = match.group(1)
-    if not found:
-        return None
-
-    distinct = sorted(set(found.values()))
-    if len(distinct) > 1:
-        raise AssertionError(
-            f"the deployed forwarders disagree about the {what} "
-            f"they were generated for: {distinct}. One has been hand-edited — "
-            f"regenerate them all rather than reconciling by hand.\n{found}"
-        )
-    return Path(distinct[0])
-
-
-def recorded_untracked_dir(hook_contents: dict[str, str]) -> Path | None:
-    """The untracked dir the deployed forwarders say they were generated for.
-
-    Comparing a tracked forwarder against a regeneration is only meaningful if
-    both are generated for the SAME root — otherwise the comparison asserts that
-    this checkout sits where the committed file's did, which no caller wants and
-    which is false on every machine but one.
-
-    Reading the root back out of the artefact lets the comparison stay exact and
-    machine-independent. Safe because the recorded root is short: it keeps the
-    generator on its dynamic events branch anywhere, with 54 characters of
-    hostname headroom against a 64-character OS cap.
-
-    Returns ``None`` when no forwarder carries a guard (relay disabled), so the
-    caller falls back to the live project. Files without a guard —
-    ``status-line``, ``stop``, ``subagent-stop``, ``worktree-create`` — are
-    ignored rather than treated as disagreement.
-
-    Raises:
-        AssertionError: if two forwarders record DIFFERENT roots. That means one
-            was hand-edited, and regenerating to match either would launder the
-            edit the comparison exists to catch.
-    """
-    return _one_recorded_value(hook_contents, _RECORDED_UNTRACKED_DIR, "untracked directory")
-
-
-def recorded_project_root(hook_contents: dict[str, str]) -> Path | None:
-    """The checkout the deployed forwarders' relay guard belongs to.
-
-    The guard bakes TWO absolute paths, and a caller that reads back only one
-    of them re-makes the mistake :func:`recorded_untracked_dir` was written to
-    fix: it silently assumes the other is this checkout's, which is true only
-    on the machine that generated the artefact. Same contract as its sibling —
-    ``None`` when no forwarder carries a guard, ``AssertionError`` when two
-    disagree.
-    """
-    return _one_recorded_value(hook_contents, _RECORDED_PROJECT_ROOT, "project root")
-
 
 def surviving_absolute_paths(content: str) -> list[str]:
-    """Machine-specific absolute paths left after normalisation, if any.
+    """Machine-specific absolute paths in a forwarder, if any.
 
-    Without this, :func:`normalise_project_root` would be a blind spot: a third
-    baked path added later would be compared away rather than caught. System
-    paths (``/usr/bin/env`` and the like) are portable and excluded.
+    Generated forwarders are tracked by some projects and regenerated on every
+    machine, so they must name no checkout path, runtime directory or uid
+    (Plan 00609). System paths (``/usr/bin/env`` and the like) are portable and
+    excluded.
     """
-    scannable = _PLACEHOLDER_ROOTED_PATH.sub("", content)
     return sorted(
         {
             match.group(0)
-            for match in _ABSOLUTE_PATH.finditer(scannable)
+            for match in _ABSOLUTE_PATH.finditer(content)
             if not match.group(0).startswith(_PORTABLE_PATH_PREFIXES)
         }
     )
-
-
-def unexpected_absolute_paths(content: str, baked_roots: Iterable[str | Path]) -> list[str]:
-    """Absolute paths beyond the ones a forwarder is DESIGNED to bake.
-
-    ``surviving_absolute_paths`` alone answers "what is left after normalising
-    one root", which silently assumes the caller knows which root that is. A
-    caller that reaches for the LIVE checkout gets the right answer only on the
-    machine that generated the artefact — the same mistake Task 2.4c fixed in
-    the comparison, repeated in the guard that watches it.
-
-    Declaring the roots makes the assumption an argument. Pass every root the
-    forwarders legitimately bake (the recorded untracked dir, and the live
-    checkout — on one machine they are the same string); anything else absolute
-    and non-portable that survives is a second baked path the byte comparison
-    would hide.
-
-    Roots are stripped longest-first so an overlapping pair (``/repo`` and
-    ``/repo/untracked``) cannot leave the longer one's tail looking like a
-    fresh absolute path.
-    """
-    normalised = content
-    for root in sorted((str(root) for root in baked_roots), key=len, reverse=True):
-        normalised = normalise_project_root(normalised, root)
-    return surviving_absolute_paths(normalised)
 
 
 #: Matches the single `send_request_stdin "Event" [mode]` or
@@ -878,31 +752,24 @@ _TRANSPORT_CALL_PATTERN = re.compile(
 )
 
 
-def append_nc_socket_arg(source_content: str, event_file_name: str, untracked_dir: Path) -> str:
-    """Append the event's bash_key + resolved events-dir override as trailing
-    literal args (design §6.2; events-dir override added by Plan 00295 Task
-    2.5).
+def append_nc_socket_arg(source_content: str, event_file_name: str) -> str:
+    """Append the event's bash_key + an empty events-dir placeholder as trailing
+    literal args (design §6.2; events-dir slot added by Plan 00295 Task 2.5).
 
     ``send_request_stdin``/``forward_stop_event`` receive the PascalCase
     event name at runtime and have no way to derive the per-event socket's
     kebab-case filename from it without a spawn or a lookup table. Baking
-    the filename in at generation time — exactly as :func:`build_relay_guard_block`
-    bakes in the untracked dir — avoids both: ``send_request_stdin`` only
+    the filename in at generation time avoids both: ``send_request_stdin`` only
     ever needs to string-concatenate this literal onto the (already
     computed) untracked dir + hostname suffix to reach the socket.
 
-    A SECOND trailing arg carries the resolved events directory, but only
-    when :func:`~claude_code_hooks_daemon.daemon.paths.event_socket_dir_is_fallback`
-    says the natural ``$_untracked_dir/events$_hostname_suffix`` path would
-    overflow the AF_UNIX socket length limit for at least one wired event —
-    the identical decision :func:`build_relay_guard_block` makes for its own
-    ``_rl_events_dir``. The common (non-overflowing) case appends an empty
-    string placeholder, so ``send_request_stdin`` keeps computing the
-    dynamic path at hook-run time exactly as before (a project checkout
-    shared across hosts over NFS still gets a correctly host-isolated path
-    on every host). ``send_request_stdin`` itself still checks
-    ``HOOKS_DAEMON_EVENTS_DIR`` FIRST, ahead of either this baked value or
-    the dynamic default — an operator's own override always wins.
+    The SECOND trailing arg is always the empty string (Plan 00609): the
+    AF_UNIX-overflow fallback events directory is a machine-specific path
+    (runtime dir, uid, hashes), so a tracked forwarder cannot carry it.
+    ``send_request_stdin`` finds that directory through the location file the
+    daemon publishes. The slot stays so the argument positions are fixed, and a
+    non-empty value in an older forwarder is still honoured by init.sh
+    (``HOOKS_DAEMON_EVENTS_DIR`` is still checked first).
 
     A missing existing ``response_mode`` argument is filled with an empty
     string placeholder so the new arguments always land in a fixed position
@@ -916,11 +783,6 @@ def append_nc_socket_arg(source_content: str, event_file_name: str, untracked_di
     discipline the relay guard uses, and the reason a `transport relay on|off`
     toggle over already-deployed files converges instead of accumulating.
     """
-    baked_events_dir = (
-        str(get_event_socket_dir_from_untracked(untracked_dir))
-        if event_socket_dir_is_fallback(untracked_dir)
-        else ""
-    )
 
     def _augment(match: re.Match[str]) -> str:
         func = match.group(1)
@@ -935,7 +797,7 @@ def append_nc_socket_arg(source_content: str, event_file_name: str, untracked_di
             kept = existing_args[:key_index]
             kept.extend([""] * (key_index - len(kept)))
             kept.append(event_file_name)
-        rendered = " ".join(f'"{arg}"' for arg in [*kept, baked_events_dir])
+        rendered = " ".join(f'"{arg}"' for arg in [*kept, ""])
         return f"{func} {rendered}"
 
     return _TRANSPORT_CALL_PATTERN.sub(_augment, source_content, count=1)
@@ -1016,7 +878,7 @@ def generate_forwarder_content(
         fast_path = build_status_fast_path_block(transport, untracked_dir, project_root)
         result = result.replace(SCRIPT_DIR_ANCHOR, fast_path + SCRIPT_DIR_ANCHOR, 1)
     if transport.nc_enabled:
-        result = append_nc_socket_arg(result, event_file_name, untracked_dir)
+        result = append_nc_socket_arg(result, event_file_name)
     return result
 
 

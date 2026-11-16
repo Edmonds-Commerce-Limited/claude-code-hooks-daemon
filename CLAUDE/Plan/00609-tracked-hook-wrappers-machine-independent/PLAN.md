@@ -43,24 +43,26 @@ written into the file.
 
 ### Phase 1: Defence and measurement
 
-- [ ] ⬜ **Task 1.1**: Regenerate all wrappers in two different temp roots and
+- [x] ✅ **Task 1.1**: Regenerate all wrappers in two different temp roots and
   list every byte that differs; record which are paths, uid, hash or host.
-- [ ] ⬜ **Task 1.2**: Failing test: generation in two roots asserts identical
+  Measurement in `subagent-reports/261116-wrappers-portable.md`.
+- [x] ✅ **Task 1.2**: Failing test: generation in two roots asserts identical
   bytes (this is the Defence; it also guards any later generated block).
+  `tests/unit/install/test_forwarder_machine_independent.py`.
 
 ### Phase 2: Fix
 
-- [ ] ⬜ **Task 2.1**: Resolve each differing value at run time in
+- [x] ✅ **Task 2.1**: Resolve each differing value at run time in
   `forwarder_generator.py`; keep the hot-path latency (no extra process spawns).
-- [ ] ⬜ **Task 2.2**: Confirm the relay still engages (socket test, existing
+- [x] ✅ **Task 2.2**: Confirm the relay still engages (socket test, existing
   relay tests) and the fallback path is unchanged.
-- [ ] ⬜ **Task 2.3**: Converge/upgrade: a wrapper with the old embedded block
+- [x] ✅ **Task 2.3**: Converge/upgrade: a wrapper with the old embedded block
   is rewritten once to the portable form; a second regeneration is a no-op.
 
 ### Phase 3: Release bound
 
-- [ ] ⬜ **Task 3.1**: Release note under `CLAUDE/UPGRADES` pending area;
-  holding-area artefact cited here before completion.
+- [x] ✅ **Task 3.1**: Release note under `CLAUDE/UPGRADES` pending area;
+  holding-area artefact: `CLAUDE/UPGRADES/UNRELEASED/release-notes/084-hook-wrappers-name-no-machine-specific-path.md`.
 
 ## Success Criteria
 

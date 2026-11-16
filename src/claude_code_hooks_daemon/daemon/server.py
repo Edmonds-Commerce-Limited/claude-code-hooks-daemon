@@ -1780,6 +1780,7 @@ class HooksDaemon:
         from claude_code_hooks_daemon.daemon.paths import (
             get_event_socket_dir_from_untracked,
             get_event_socket_path_in_dir,
+            publish_events_dir_location,
         )
 
         events_dir = get_event_socket_dir_from_untracked(legacy_socket_path.parent)
@@ -1818,6 +1819,18 @@ class HooksDaemon:
                     level=logging.ERROR,
                 )
         events_dir.mkdir(parents=True, mode=0o750, exist_ok=True)
+        try:
+            publish_events_dir_location(legacy_socket_path.parent, events_dir)
+        except OSError as e:
+            log_and_continue(
+                logger,
+                e,
+                reason=(
+                    "without the events-dir location file a forwarder cannot find a fallback "
+                    "events dir and uses the legacy socket; the daemon itself is unaffected"
+                ),
+                level=logging.ERROR,
+            )
 
         bound: dict[str, asyncio.Server] = {}
         skipped: dict[str, str] = {}

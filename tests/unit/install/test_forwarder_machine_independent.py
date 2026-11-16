@@ -77,7 +77,12 @@ def test_no_machine_specific_absolute_path_survives(
     generated = _generate_everywhere(
         monkeypatch, _LONG_ROOT, _TRANSPORTS[transport_name], "host-one", "/run/user/1000"
     )
-    leaked = {n: surviving_absolute_paths(c) for n, c in generated.items()}
+    # `/.claude/hooks` is the fixed directory segment the guard matches
+    # BASH_SOURCE against, not a path on any machine.
+    leaked = {
+        n: [p for p in surviving_absolute_paths(c) if p != "/.claude/hooks"]
+        for n, c in generated.items()
+    }
     assert {n: v for n, v in leaked.items() if v} == {}
     assert all("/run/user" not in c and str(_LONG_ROOT) not in c for c in generated.values())
 

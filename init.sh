@@ -3737,6 +3737,19 @@ send_request_stdin() {
         && [[ "${HOOKS_DAEMON_NC_UNIX_CAPABLE:-0}" == "1" ]] \
         && command -v nc > /dev/null; then
         local _nc_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-${events_dir_override:-$_untracked_dir/events${_hostname_suffix}}}"
+        # Plan 00609: when the natural events dir does not exist the daemon
+        # bound in its AF_UNIX-overflow fallback root and published where, in
+        # a location file recording the untracked dir it was written for (a
+        # copied checkout must not trust another's).
+        if [[ -z "${HOOKS_DAEMON_EVENTS_DIR:-}" && -z "$events_dir_override" && ! -d "$_nc_events_dir" ]]; then
+            local _nc_loc="$_untracked_dir/events${_hostname_suffix}.location"
+            local _nc_loc_dir="" _nc_loc_events=""
+            if [[ -r "$_nc_loc" ]] \
+                && { IFS= read -r _nc_loc_dir && IFS= read -r _nc_loc_events; } < "$_nc_loc" \
+                && [[ "$_nc_loc_dir" == "$_untracked_dir" && -n "$_nc_loc_events" ]]; then
+                _nc_events_dir="$_nc_loc_events"
+            fi
+        fi
         local _nc_sock="$_nc_events_dir/${event_sock_name}.sock"
         if [[ -S "$_nc_sock" ]]; then
             local _nc_payload _nc_response _nc_stderr _nc_rc
