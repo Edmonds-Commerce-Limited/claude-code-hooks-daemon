@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/cli-reference
-fetched_at: '2026-11-10T16:35:04.125414+00:00'
+fetched_at: '2026-11-16T21:15:37.270541+00:00'
 fidelity: converted
-source_sha256: 2714471fe96cb9b4679604f024a05543449eed702953c8891527e0de21b21323
+source_sha256: 8d24a5282d3f8ffb48c70f094abe0f7dd404de5836b610ce53f996c6363201d9
 licence: unreviewed
-stale_after: '2027-02-08'
+stale_after: '2027-02-14'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -92,7 +92,7 @@ Most plugins install without a prompt. For a plugin whose marketplace entry [run
 | :- | :- |
 | `-s, --scope <scope>` | Installation scope: `user`, `project`, or `local`. Defaults to `user` |
 | `--config <key=value>` | Set a [`userConfig`](https://code.claude.com/docs/en/plugins/manifest-reference) option the plugin's manifest declares. Repeat the flag for each option. A key written `<server>.<key>` sets a setting that a [bundled MCP server](https://code.claude.com/docs/en/plugins/components.md#include-a-packaged-mcpb-server) declares in its own `user_config` instead, for a bundle file shipped inside the plugin. The `<server>.<key>` form requires Claude Code v2.1.285 or later |
-| `-y, --yes` | Accept the displayed install command without the `Run this command now?` prompt. Ignored when the command runs inside a Claude Code session, such as from the Bash tool or a hook. Requires Claude Code v2.1.229 or later |
+| `-y, --yes` | Accept the displayed install command without the `Run this command now?` prompt. Ignored when the command runs inside a Claude Code session, such as from the Bash tool or a hook |
 | `--accept-command <sha256>` | Accept the displayed install command whose `sha256` a previous [`--json` run](#plugin-json-result) reported in `shownCommand`, in place of `-y`. Can't be combined with `-y`. See [Accept a displayed install command](#accept-a-displayed-install-command). Requires Claude Code v2.1.271 or later |
 | `--json` | Print the result as one JSON object on the last line of stdout instead of the human-readable message, for use in scripts. See [JSON result format](#plugin-json-result). Requires Claude Code v2.1.268 or later |
 | `--marketplace <source>` | Install `<plugin>`, given by its bare name, from the marketplace at `<source>`, adding the marketplace first if you haven't added it yet. See [Add a marketplace and install in one command](https://code.claude.com/docs/en/plugins/install.md#add-a-marketplace-and-install-in-one-command). Requires Claude Code v2.1.292 or later |
@@ -104,7 +104,7 @@ Pass `-y` from your own terminal to accept the displayed command without the pro
 * **stdin or stdout isn't a TTY, and you pass neither `-y` nor `--accept-command`**: the install is refused. The output says the command was only displayed, and the exit code is `1`
 * **Claude runs the command through its Bash tool**: `-y` is ignored. Run the command from your own terminal instead
 
-Use `--scope project` to record the plugin in `.claude/settings.json` for everyone who clones the project. Each person [also runs this command](https://code.claude.com/docs/en/plugins/loading.md#enabled-in-project-settings-but-not-installed) in their own clone:
+To share a plugin with everyone who clones the project, run `claude plugin install` with `--scope project` and commit `.claude/settings.json`. Then have each person [add the marketplace](https://code.claude.com/docs/en/plugins/install.md#add-a-marketplace) and [run the same command](https://code.claude.com/docs/en/plugins/loading.md#enabled-in-project-settings-but-not-installed) in their own clone:
 
 ```bash theme={null}
 claude plugin install formatter@my-marketplace --scope project
@@ -271,7 +271,7 @@ claude plugin update <plugin> [options]
 | Flag | Description |
 | :- | :- |
 | `-s, --scope <scope>` | Scope to update: `user`, `project`, `local`, or `managed`. Auto-detected when omitted |
-| `-y, --yes` | Accept a changed install command from a [command-source](https://code.claude.com/docs/en/plugins/host-marketplace.md) plugin, without the prompt. Required when stdin or stdout isn't a TTY, unless you pass `--accept-command`. Requires Claude Code v2.1.229 or later |
+| `-y, --yes` | Accept a changed install command from a [command-source](https://code.claude.com/docs/en/plugins/host-marketplace.md) plugin, without the prompt. Required when stdin or stdout isn't a TTY, unless you pass `--accept-command` |
 | `--accept-command <sha256>` | Accept the marketplace-declared command whose `sha256` a previous [`--json` run](#plugin-json-result) reported in `shownCommand`, in place of `-y`. Can't be combined with `-y`. Requires Claude Code v2.1.271 or later |
 | `--json` | Print the result as one JSON object on the last line of stdout, in the [same format as `plugin install --json`](#plugin-json-result). Requires Claude Code v2.1.268 or later |
 
@@ -622,7 +622,7 @@ The `<path>` is a [manifest file](#validate-a-manifest-file) or a directory. Giv
 
 * `.claude-plugin/marketplace.json`, when it exists
 * Otherwise `.claude-plugin/plugin.json`
-* Otherwise the component files, chosen by the directory's name. Validating component files without a manifest requires Claude Code v2.1.233 or later:
+* Otherwise the component files, chosen by the directory's name:
   * A directory named `skills`, `agents`, or `commands`: the files inside it
   * A directory named `.claude`: the `skills`, `agents`, and `commands` directories inside it
   * Any other directory: those three directories under its `.claude`
@@ -787,7 +787,7 @@ With `--json`, Claude Code prints an array with one object per marketplace, carr
 | `repo` | `owner/repo`. `github` sources only |
 | `url` | The clone or fetch URL. `git` and `url` sources only |
 | `path` | The local path. `directory` and `file` sources only |
-| `ref` | The pinned branch or tag. `github` and `git` sources, only when pinned |
+| `ref` | The pinned branch, tag, or commit SHA. `github` and `git` sources, only when pinned |
 | `installLocation` | Where Claude Code cached the marketplace |
 
 An added [claude.ai marketplace](https://code.claude.com/docs/en/plugins/install.md#add-from-claude-ai) has no local clone, so its entry carries its claude.ai identifiers, `marketplaceId` and `organizationUuid`, in place of `installLocation`. It also carries `scope` when one is recorded, and `status`.
