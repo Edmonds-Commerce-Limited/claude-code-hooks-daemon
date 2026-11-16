@@ -137,6 +137,93 @@ class TestIndexLevel:
         assert index.directories_matching("[!x]*/", (str(tmp_path),)) == ()
         assert index.directories_matching("[^y]*/", (str(tmp_path),)) == (f"{tmp_path}/xa",)
 
+    @pytest.mark.parametrize(
+        "token",
+        ["[[:alpha:]]*/", "[[:lower:]]*/", "[[:alnum:]]*/", "[![:digit:]]*/", "[^[:upper:]]*/"],
+    )
+    def test_a_posix_class_is_translated_for_a_directory_glob(
+        self, tmp_path: Path, token: str
+    ) -> None:
+        index = _index(tmp_path, _NESTED)
+        assert index.directories_matching(token, (str(tmp_path),)) == (f"{tmp_path}/dir",)
+
+    @pytest.mark.parametrize("token", ["[[:digit:]]*/", "[[:upper:]]*/", "[![:alpha:]]*/"])
+    def test_a_posix_class_that_misses_the_directory_matches_none(
+        self, tmp_path: Path, token: str
+    ) -> None:
+        index = _index(tmp_path, _NESTED)
+        assert index.directories_matching(token, (str(tmp_path),)) == ()
+
+    def test_a_posix_class_is_translated_for_a_file_glob_too(self, tmp_path: Path) -> None:
+        index = _index(tmp_path, f"dir/key.{_SUFFIX}")
+        assert index.glob_matches("dir/[[:alpha:]]*", (str(tmp_path),)) is not None
+        assert index.glob_matches("dir/[[:digit:]]*", (str(tmp_path),)) is None
+
+    @pytest.mark.parametrize(
+        ("token", "expected"),
+        [
+            ("[z-a]*/", False),
+            ("[a-]*/", False),
+            ("d[*/", False),
+            ("d[i]r/", True),
+            ("[]d]*/", True),
+            ("\\d*/", True),
+            ("[\\d]*/", True),
+            ("[[:bogus:]]*/", False),
+            ("[[:punct:]d]*/", True),
+            ("[a-c-e]*/", False),
+            ("[[:alpha:]-]*/", True),
+        ],
+    )
+    def test_odd_bracket_shapes_are_read_like_bash(
+        self, tmp_path: Path, token: str, expected: bool
+    ) -> None:
+        index = _index(tmp_path, _NESTED)
+        found = index.directories_matching(token, (str(tmp_path),))
+        assert bool(found) is expected
+
+    def test_a_posix_class_mixed_with_other_members(self, tmp_path: Path) -> None:
+        index = _index(tmp_path, f"7x/key.{_SUFFIX}")
+        assert index.directories_matching("[[:alpha:]7]*/", (str(tmp_path),)) != ()
+        assert index.directories_matching("[[:alpha:]_]*/", (str(tmp_path),)) == ()
+
+    def test_a_symlink_to_a_protected_directory_is_matched_by_the_glob(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "dir").mkdir()
+        (tmp_path / "l").symlink_to(tmp_path / "dir")
+        index = _index(tmp_path, _NESTED)
+        found = index.directories_matching("l*/", (str(tmp_path),))
+        assert found == (f"{tmp_path}/l",)
+
+    def test_a_symlink_to_a_directory_without_a_protected_file_is_not_matched(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "dir").mkdir()
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "l").symlink_to(tmp_path / "docs")
+        index = _index(tmp_path, _NESTED)
+        assert index.directories_matching("l*/", (str(tmp_path),)) == ()
+
+    def test_a_symlink_to_a_file_or_a_dangling_symlink_is_ignored(self, tmp_path: Path) -> None:
+        (tmp_path / "dir").mkdir()
+        (tmp_path / "f.txt").write_text("x")
+        (tmp_path / "lf").symlink_to(tmp_path / "f.txt")
+        (tmp_path / "ld").symlink_to(tmp_path / "gone")
+        index = _index(tmp_path, _NESTED)
+        assert index.directories_matching("l*/", (str(tmp_path),)) == ()
+
+    def test_a_hidden_symlink_is_reached_only_by_a_dot_glob(self, tmp_path: Path) -> None:
+        (tmp_path / "dir").mkdir()
+        (tmp_path / ".l").symlink_to(tmp_path / "dir")
+        index = _index(tmp_path, _NESTED)
+        assert index.directories_matching("*/", (str(tmp_path),)) == (f"{tmp_path}/dir",)
+        assert index.directories_matching(".l*/", (str(tmp_path),)) == (f"{tmp_path}/.l",)
+
+    def test_a_missing_literal_parent_is_not_an_error(self, tmp_path: Path) -> None:
+        index = _index(tmp_path, _NESTED)
+        assert index.directories_matching("nope/l*/", (str(tmp_path),)) == ()
+
     def test_a_search_read_of_a_trailing_slash_glob_is_not_expanded_on_disk(
         self, nested: Path
     ) -> None:
@@ -174,6 +261,41 @@ class TestCommandLevel:
         self, nested: Path, command: str
     ) -> None:
         assert _verdict(nested, command) == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -r x [[:alpha:]]*/",
+            "grep -r x [[:lower:]][[:lower:]]?/",
+            "rg x [[:alnum:]]*/",
+            "grep -r x [![:digit:]]*/",
+        ],
+    )
+    def test_a_posix_class_glob_is_denied_through_a_matching_directory(
+        self, nested: Path, command: str
+    ) -> None:
+        assert _verdict(nested, command) == Decision.DENY
+
+    def test_a_posix_class_glob_that_misses_is_allowed(self, nested: Path) -> None:
+        assert _verdict(nested, "grep -r x [[:digit:]]*/") == Decision.ALLOW
+
+    def test_a_posix_class_file_glob_is_judged_like_the_plain_one(self, nested: Path) -> None:
+        assert _verdict(nested, "cat dir/[[:alpha:]]*") == _verdict(nested, "cat dir/k*")
+        assert _verdict(nested, "cat dir/[[:alpha:]]*") == Decision.DENY
+
+    def test_a_glob_matching_a_symlink_to_a_protected_directory_is_denied(
+        self, nested: Path
+    ) -> None:
+        (nested / "l").symlink_to(nested / "dir")
+        assert _verdict(nested, "grep -r x l/") == Decision.DENY
+        assert _verdict(nested, "grep -r x l*/") == Decision.DENY
+        assert _verdict(nested, "grep -r x ./?/") == Decision.DENY
+
+    def test_a_glob_matching_only_a_symlink_to_a_harmless_directory_is_allowed(
+        self, top_level_only: Path
+    ) -> None:
+        (top_level_only / "l").symlink_to(top_level_only / "docs")
+        assert _verdict(top_level_only, "grep -r x l*/") == Decision.ALLOW
 
     def test_an_absolute_trailing_slash_glob_is_denied_too(self, nested: Path) -> None:
         assert _verdict(nested, f"grep -r x {nested}/*/") == Decision.DENY
