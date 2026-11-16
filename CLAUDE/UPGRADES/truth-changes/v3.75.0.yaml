@@ -1,0 +1,49 @@
+# Added at the v3.75.0 release documentation review (Step 7): Plan 00594
+# changed operator commands a project's own docs and housekeeping notes are
+# likely to quote.
+version: "3.75.0"
+
+truth_changes:
+  - topic: git-safety
+    was: >
+      `hooks-daemon branch-sweep --clean` (plus `--remote` for remote copies)
+      deletes every merged and patch-equivalent branch.
+    now: >
+      `branch-sweep --clean` is a dry run: it prints each branch it would
+      delete with its proof and deletes nothing. Add `--apply` to delete
+      (`branch-sweep --clean --remote --apply` for remote copies too);
+      `--apply` works in resumable batches of 50 and cannot be combined with
+      `--dry-run`. Re-running the same command resumes an interrupted run.
+
+  - topic: git-safety
+    was: >
+      `hooks-daemon delete-branch` writes a recovery bundle under
+      `untracked/deleted-branches/` (or `--bundle PATH`, skipped with
+      `--no-bundle`), and `branch-sweep --clean` writes one under
+      `untracked/branch-cleanup/`; an unproven branch can still be deleted
+      with `--allow-unproven --reason "..."` and a human confirmation, and
+      `--protected-ref` may name any ref.
+    now: >
+      No recovery bundle is written. A delete is permitted by the machine
+      proof alone, and each deleted branch prints a restore line
+      (`git branch <name> <sha>`, or `git push <remote> <sha>:refs/heads/<name>`
+      for a remote delete); `delete-branch --format json` returns a `restore`
+      list in place of `bundle`. `--allow-unproven`, `--reason`, `--bundle` and
+      `--no-bundle` are removed: unproven work is never deleted by the
+      command. `--protected-ref` (and `worktree-reap --base-branch`) accepts
+      only the default branch or a declared integration line.
+
+  - topic: git-safety
+    was: >
+      Creating a branch is denied as soon as the open work branches reach
+      `branches.wip.cap`, and every branch the remote holds counts toward the
+      branch pools.
+    now: >
+      The open-work cap warns at `branches.wip.cap` and denies a creation only
+      at `cap + branches.wip.creation_grace` (default 2; set 0 for the old
+      deny at the cap). Pool pressure is reported at session start and at
+      stop, and `hooks-daemon branch-preflight` lists every blocker with its
+      fix. Pools are counted per owner: a branch this clone did not create,
+      holds no local ref for, and whose remote tip is not authored by
+      `git config user.email` is foreign, listed under `Foreign` in
+      `branch-sweep`, and counted in no pool.

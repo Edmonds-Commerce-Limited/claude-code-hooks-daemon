@@ -6,7 +6,12 @@ breaking: false
 
 config_changes:
   added:
+    # A new key whose default CHANGES BEHAVIOUR on upgrade: promoted so the
+    # client decides deliberately instead of inheriting it silently.
     - key: claude_md.ownership
+      recommended: true
+      dormant: false
+      recommended_value: own
       description: >-
         Whether the injected CLAUDE.md block leads with a sentence telling the
         model the codebase is its own, and whether handlers drop short hints
@@ -17,9 +22,15 @@ config_changes:
         behaviour.
       example_yaml: |
         claude_md:
-          ownership: off
-      migration_note: "Default own changes behaviour on upgrade: set off to keep the old block."
+          ownership: own  # the new default; off restores the previous block
+      migration_note: >-
+        This default changes behaviour on upgrade with no config edit: the
+        CLAUDE.md block gains a leading sentence and handlers drop ownership
+        hints. Write the key explicitly either way; set off to keep the old
+        block.
     - key: claude_md.ownership_text
+      recommended: false
+      dormant: false
       description: >-
         The single-line sentence that leads the block under ownership: custom.
         Required and non-blank for custom, rejected in every other mode.
@@ -27,7 +38,11 @@ config_changes:
         claude_md:
           ownership: custom
           ownership_text: "This codebase is yours except vendor/."
-    - key: omit_permission_surface
+    # Opt-in, but NOT promoted: turning it on lowers defence in depth for any
+    # session that is not in bypass mode, so the advisory lists it quietly.
+    - key: daemon.omit_permission_surface
+      recommended: false
+      dormant: true
       description: >-
         Opt in to registering no PermissionRequest hook and writing no
         permissions.deny rules, so Claude Code's critical-path removal prompt
@@ -37,7 +52,12 @@ config_changes:
       example_yaml: |
         daemon:
           omit_permission_surface: true
+    # A new key whose default CHANGES BEHAVIOUR on upgrade (the open-work cap
+    # no longer denies at the cap itself): promoted for the same reason.
     - key: branches.wip.creation_grace
+      recommended: true
+      dormant: false
+      recommended_value: 2
       description: >-
         How many branches past branches.wip.cap a creation is still allowed,
         with a warning, before it is denied. Default 2. Set 0 to restore the
@@ -45,9 +65,14 @@ config_changes:
       example_yaml: |
         branches:
           wip:
-            creation_grace: 0
-      migration_note: "Default 2 relaxes the creation deny at the cap: set 0 to keep the old behaviour."
+            creation_grace: 2  # the new default; 0 keeps the old deny at the cap
+      migration_note: >-
+        This default changes behaviour on upgrade with no config edit: a
+        creation at branches.wip.cap now warns, and is denied only at cap + 2.
+        Set 0 to keep the old deny at the cap.
     - key: branches.park.commit
+      recommended: false
+      dormant: false
       description: >-
         Whether branch-park writes the empty Parked-Reason trailer commit
         (default true). Set false to record the park in git config only; such
@@ -57,19 +82,52 @@ config_changes:
           park:
             commit: false
     - key: branches.park.push
+      recommended: false
+      dormant: false
       description: >-
         Whether branch-park pushes the branch after parking it (default true).
       example_yaml: |
         branches:
           park:
             push: false
+    - key: handlers.worktree_create.worktree_create.options.add_base_seconds
+      recommended: false
+      dormant: false
+      description: >-
+        Idle-host budget, in seconds, for the git worktree add the
+        worktree_create handler runs (default 30, the previous constant). The
+        budget grows with host load up to add_ceiling_seconds. A positive
+        number no larger than add_ceiling_seconds; an invalid value is
+        reported at session start and the default is used.
+      example_yaml: |
+        handlers:
+          worktree_create:
+            worktree_create:
+              options:
+                add_base_seconds: 30
+    - key: handlers.worktree_create.worktree_create.options.add_ceiling_seconds
+      recommended: false
+      dormant: false
+      description: >-
+        Ceiling, in seconds, of the load-scaled git worktree add budget
+        (default 120, the previous constant). A positive number no larger than
+        120, because the WorktreeCreate event deadline is sized for it.
+      example_yaml: |
+        handlers:
+          worktree_create:
+            worktree_create:
+              options:
+                add_ceiling_seconds: 120
+    # Opt-in feature that ships off: promoted so it does not stay dormant.
     - key: handlers.pre_tool_use.long_running_command_guard
+      recommended: true
+      dormant: true
       description: >-
         New handler that denies a long foreground Bash call in the main
         thread (a timeout or sleep above threshold_seconds, or a known-slow
         program) and points to run_in_background. Options: mode (deny |
         advise | off), threshold_seconds (default 30), extra_slow_patterns,
-        extra_fast_programs, exempt_patterns. Opt-in in the example config.
+        extra_fast_programs, exempt_patterns. Ships off; opt in.
       example_yaml: |
         handlers:
           pre_tool_use:
