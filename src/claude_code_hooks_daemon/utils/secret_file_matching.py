@@ -2303,6 +2303,7 @@ def _searched_paths_hold_no_protected_file(
 #: dash-led path could follow it unseen by the operand filter.
 _NO_PATTERN_OPERAND_WORDS: Final = frozenset({"--", "--files", *_PATTERN_FILE_OPTIONS})
 _NO_PATTERN_OPERAND_PREFIXES: Final = ("--regexp=", "--file=")
+_PATTERN_LONG_OPTIONS: Final = ("--regexp", "--file")
 
 
 def _names_no_pattern_operand(word: str) -> bool:
@@ -2313,6 +2314,10 @@ def _names_no_pattern_operand(word: str) -> bool:
     """
     if word in _NO_PATTERN_OPERAND_WORDS or word.startswith(_NO_PATTERN_OPERAND_PREFIXES):
         return True
+    # GNU grep accepts any unambiguous abbreviation (--regex=zz is --regexp=zz).
+    name = word.split("=", 1)[0]
+    if len(name) > len("--") and name.startswith("--"):
+        return any(full.startswith(name) for full in _PATTERN_LONG_OPTIONS)
     return word.startswith("-") and not word.startswith("--") and bool(set(word[1:]) & {"e", "f"})
 
 
