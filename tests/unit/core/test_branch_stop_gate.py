@@ -10,7 +10,7 @@ import pytest
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.branch_guard import BRANCH_LIMIT_PRINCIPLE
 from claude_code_hooks_daemon.core import branch_stop_gate
-from claude_code_hooks_daemon.core.agent_ownership import RunningHolds
+from claude_code_hooks_daemon.core.agent_ownership import RunningHolds, ownership_refusal
 from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command
 from claude_code_hooks_daemon.core.branch_inventory import DormancyStage
 from claude_code_hooks_daemon.core.branch_records import TOUCHED_KEY
@@ -320,11 +320,25 @@ class TestHandedOverToTheWorkQueue:
         assert _decide(repo, untracked).reason is not None
 
 
+def _live_in(monkeypatch: pytest.MonkeyPatch, *worktrees: Path) -> None:
+    """Make the process scan report one live process inside each of ``worktrees``."""
+    cwds = {1000 + index: path.resolve() for index, path in enumerate(worktrees)}
+    monkeypatch.setattr(branch_stop_gate, "default_process_cwds", lambda: cwds, raising=False)
+
+
+@pytest.fixture
+def nobody_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No process sits in any worktree, whatever the host is running."""
+    _live_in(monkeypatch)
+
+
 class TestHandedOverToHarnessWorktrees:
     """A background sub-agent outside the work queue is told by its worktree.
 
-    The harness directory and git's lock are the signals ``agent_ownership`` already uses
-    to leave a live agent's worktree alone; the coordinator stop honours them too.
+    The harness directory and git's lock are the signals ``agent_ownership`` uses to
+    leave a live agent's worktree alone. For the coordinator stop they are not enough
+    alone: a live process must have its working directory inside the worktree, the
+    signal ``worktree-reap`` uses (Plan 00618 B-2).
     """
 
     def _worktree(self, repo: Path, branch: str, where: Path, *, lock: bool = False) -> None:
@@ -334,10 +348,12 @@ class TestHandedOverToHarnessWorktrees:
         if lock:
             _git(repo, "worktree", "lock", "--reason", "claude agent", str(where))
 
-    def test_a_harness_worktree_branch_is_handed_over_not_abandoned(
-        self, repo: Path, untracked: Path
+    def test_a_live_harness_worktree_branch_is_handed_over_not_abandoned(
+        self, repo: Path, untracked: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        self._worktree(repo, "agent-abc123", repo / ".claude" / "worktrees" / "agent-abc123")
+        where = repo / ".claude" / "worktrees" / "agent-abc123"
+        self._worktree(repo, "agent-abc123", where)
+        _live_in(monkeypatch, where)
         decisions = [_decide(repo, untracked) for _ in range(MAX_STOP_BLOCKS + 1)]
         for decision in decisions:
             assert decision.reason is None
@@ -345,11 +361,39 @@ class TestHandedOverToHarnessWorktrees:
         last = decisions[-1]
         assert any("handed over" in line and "agent-abc123" in line for line in last.context)
 
-    def test_a_locked_worktree_branch_is_handed_over(self, repo: Path, untracked: Path) -> None:
-        self._worktree(repo, "feat-l", repo.parent / "wt-locked", lock=True)
+    def test_a_live_locked_worktree_branch_is_handed_over(
+        self, repo: Path, untracked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        where = repo.parent / "wt-locked"
+        self._worktree(repo, "feat-l", where, lock=True)
+        _live_in(monkeypatch, where)
         decision = _decide(repo, untracked)
         assert decision.reason is None
         assert any("handed over" in line and "feat-l" in line for line in decision.context)
+
+    def test_a_harness_worktree_nobody_is_in_is_judged(
+        self, repo: Path, untracked: Path, nobody_alive: None
+    ) -> None:
+        self._worktree(repo, "agent-gone", repo / ".claude" / "worktrees" / "agent-gone")
+        decision = _decide(repo, untracked)
+        assert decision.reason is not None
+        assert "agent-gone" in decision.reason
+        assert not any("handed over" in line for line in decision.context)
+
+    def test_a_locked_worktree_nobody_is_in_is_judged(
+        self, repo: Path, untracked: Path, nobody_alive: None
+    ) -> None:
+        self._worktree(repo, "feat-l", repo.parent / "wt-locked", lock=True)
+        decision = _decide(repo, untracked)
+        assert decision.reason is not None
+        assert "feat-l" in decision.reason
+
+    def test_a_process_in_another_worktree_hands_nothing_over(
+        self, repo: Path, untracked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._worktree(repo, "agent-a", repo / ".claude" / "worktrees" / "agent-a")
+        _live_in(monkeypatch, repo.parent / "somewhere-else")
+        assert _decide(repo, untracked).reason is not None
 
     def test_an_ordinary_unlocked_worktree_is_still_held(self, repo: Path, untracked: Path) -> None:
         self._worktree(repo, "feat-p", repo.parent / "wt-plain")
@@ -370,3 +414,115 @@ class TestHandedOverToHarnessWorktrees:
 
         monkeypatch.setattr(branch_stop_gate, "linked_worktree_records", broken)
         assert _decide(repo, untracked).reason is not None
+
+
+class TestTheSessionsOwnBranchIsNeverHandedOver:
+    """Plan 00618 B-2: a branch the stopping thread touched is judged, whatever owns its worktree."""
+
+    def _own_harness_worktree(self, repo: Path, name: str) -> Path:
+        """The review's reproduction: touched by the main thread, checked out under the
+        harness directory, a commit no remote holds and a dirty file."""
+        _unpushed_branch(repo, name)
+        where = repo / ".claude" / "worktrees" / name
+        where.parent.mkdir(parents=True, exist_ok=True)
+        _git(repo, "worktree", "add", "-q", str(where), name)
+        (where / "work.txt").write_text("more work\n", encoding="utf-8")
+        _git(where, "add", "work.txt")
+        _git(where, "commit", "-q", "-m", "more work")
+        (where / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+        return where
+
+    def test_the_reviewers_reproduction_is_judged(
+        self, repo: Path, untracked: Path, nobody_alive: None
+    ) -> None:
+        self._own_harness_worktree(repo, "x")
+        decision = _decide(repo, untracked)
+        assert decision.reason is not None
+        assert "x: dirty worktree" in decision.reason
+        assert "x: commits no remote holds" in decision.reason
+        assert not any("handed over" in line for line in decision.context)
+
+    def test_a_live_process_in_its_worktree_does_not_hand_it_over(
+        self, repo: Path, untracked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A ``claude --worktree`` session sits in its own worktree; that is not another agent."""
+        where = self._own_harness_worktree(repo, "x")
+        _live_in(monkeypatch, where)
+        assert _decide(repo, untracked).reason is not None
+
+    def test_a_running_queue_record_does_not_hand_it_over(
+        self, repo: Path, untracked: Path, nobody_alive: None
+    ) -> None:
+        _unpushed_branch(repo, "feat-own")
+        _queue(untracked, "feat-own")
+        decision = _decide(repo, untracked)
+        assert decision.reason is not None
+        assert "feat-own" in decision.reason
+
+    def test_a_locked_live_worktree_does_not_hand_it_over(
+        self, repo: Path, untracked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _unpushed_branch(repo, "feat-own")
+        where = repo.parent / "wt-own"
+        _git(repo, "worktree", "add", "-q", str(where), "feat-own")
+        _git(repo, "worktree", "lock", str(where))
+        _live_in(monkeypatch, where)
+        assert _decide(repo, untracked).reason is not None
+
+    def test_a_branch_both_threads_touched_is_judged(
+        self, repo: Path, untracked: Path, nobody_alive: None
+    ) -> None:
+        _unpushed_branch(repo, "feat-both", agent="sub-1")
+        _git(repo, "config", "--add", f"branch.feat-both.{TOUCHED_KEY}", f"{SESSION}:")
+        _queue(untracked, "feat-both")
+        assert _decide(repo, untracked).reason is not None
+
+
+class TestHandOverOnlyNarrows:
+    """Differential: every branch handed over now was handed over before (Plan 00618 B-2)."""
+
+    @pytest.mark.parametrize(
+        ("touch", "where", "lock", "queued", "live"),
+        [
+            ("sub-1", ".claude/worktrees/agent-q", False, True, False),
+            ("sub-1", ".claude/worktrees/agent-q", False, False, True),
+            ("sub-1", ".claude/worktrees/agent-q", False, False, False),
+            ("sub-1", "../wt-l", True, False, True),
+            ("sub-1", "../wt-l", True, False, False),
+            ("sub-1", "../wt-p", False, False, True),
+            ("", ".claude/worktrees/agent-q", False, True, True),
+            ("", "../wt-l", True, True, True),
+        ],
+    )
+    def test_the_new_handed_set_is_inside_the_old_one(
+        self,
+        repo: Path,
+        untracked: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        touch: str,
+        where: str,
+        lock: bool,
+        queued: bool,
+        live: bool,
+    ) -> None:
+        name = "feat-d"
+        _unpushed_branch(repo, name, agent=touch)
+        path = (repo / where).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _git(repo, "worktree", "add", "-q", str(path), name)
+        if lock:
+            _git(repo, "worktree", "lock", str(path))
+        if queued:
+            _queue(untracked, name)
+        _live_in(monkeypatch, *([path] if live else []))
+        records = branch_stop_gate.linked_worktree_records(repo)
+        holds = branch_stop_gate.running_holds(untracked, repo)
+        old = holds.branches | {
+            branch
+            for branch, record in records.items()
+            if ownership_refusal(branch, record.path, locked=record.locked, holds=holds)
+            is not None
+        }
+        own = frozenset({name}) if touch == "" else frozenset()
+        new = branch_stop_gate._owned_branches(repo, untracked, own=own)
+        assert new <= old
