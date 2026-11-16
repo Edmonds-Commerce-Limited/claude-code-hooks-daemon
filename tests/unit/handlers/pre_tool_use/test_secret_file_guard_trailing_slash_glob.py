@@ -362,9 +362,7 @@ class TestReviewFindings:
             ("x*?y", "xaay", True),
         ],
     )
-    def test_atomic_stars_keep_the_same_answers(
-        self, glob: str, name: str, expected: bool
-    ) -> None:
+    def test_atomic_stars_keep_the_same_answers(self, glob: str, name: str, expected: bool) -> None:
         from claude_code_hooks_daemon.utils.protected_file_index import _segments_match
 
         assert _segments_match([name], [glob]) is expected

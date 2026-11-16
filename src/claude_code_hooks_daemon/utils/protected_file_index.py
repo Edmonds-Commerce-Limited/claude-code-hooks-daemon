@@ -258,7 +258,7 @@ class ProtectedFileIndex:
                 continue
             link = f"{parent.rstrip('/')}/{name}"
             target = os.path.realpath(link)
-            if os.path.isdir(target) and any(_is_under(path, target) for path in real_files):
+            if Path(target).is_dir() and any(_is_under(path, target) for path in real_files):
                 links.append(link)
         return links
 
