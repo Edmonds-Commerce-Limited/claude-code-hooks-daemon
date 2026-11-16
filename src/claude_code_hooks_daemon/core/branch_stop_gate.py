@@ -27,9 +27,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
 )
 from claude_code_hooks_daemon.core.branch_stop_guard import StopCheck, StopFinding, judge_stop
 from claude_code_hooks_daemon.core.branch_sweep import dormant_action
-from claude_code_hooks_daemon.core.worktree_reaping import default_process_cwds
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.spend_ledger import read_state, state_path, write_state
 
 logger = logging.getLogger(__name__)
@@ -120,23 +118,17 @@ def _noisy_context(
     return (line,)
 
 
-def _someone_inside(worktree: Path, cwds: list[Path]) -> bool:
-    """Whether any of ``cwds`` is ``worktree`` or inside it."""
-    resolved = worktree.resolve()
-    return any(path_is_relative_to(cwd, resolved) for cwd in cwds)
-
-
 def _owned_branches(repo: Path, untracked: Path, *, own: frozenset[str]) -> frozenset[str]:
     """Branches another live agent owns, so the coordinator hands them over.
 
     Never a branch in ``own``: the stopping thread touched it, so it is judged in full
-    whatever owns its worktree (Plan 00618 B-2). Of the rest, a branch is owned when a
-    ``running`` work-queue record names it (or the worktree it is checked out in, in
-    whatever spelling). A worktree that is locked by git or sits under the harness's
-    ``.claude/worktrees/`` directory says only that an agent once worked there; it is
-    owned only while a live process has its working directory inside it, the liveness
-    signal ``worktree-reap`` uses. When the worktrees cannot be listed only the queue's
-    branch names apply; an unreadable queue contributes nothing, so every finding stands.
+    whatever owns its worktree (Plan 00618 B-2). Of the rest, a branch is owned on the
+    holds ``worktree-reap`` honours: a ``running`` work-queue record names it (or the
+    worktree it is checked out in, in whatever spelling), or git reports its worktree
+    locked. A worktree merely sitting under the harness's ``.claude/worktrees/``
+    directory says only that an agent once worked there, so it hands nothing over.
+    When the worktrees cannot be listed only the queue's branch names apply; an
+    unreadable queue contributes nothing, so every finding stands.
     """
     holds = running_holds(untracked, repo)
     try:
@@ -149,25 +141,15 @@ def _owned_branches(repo: Path, untracked: Path, *, own: frozenset[str]) -> froz
             "running work-queue record names are handed over",
         )
         return holds.branches - own
-    owned = set(holds.branches)
-    cwds: list[Path] | None = None
-    for name, record in records.items():
-        if (
-            name in own
-            or ownership_refusal(name, record.path, locked=record.locked, holds=holds) is None
-        ):
-            continue
-        queued = ownership_refusal(
-            name, record.path, locked=False, holds=holds, harness_directory=False
+    owned = holds.branches | {
+        name
+        for name, record in records.items()
+        if ownership_refusal(
+            name, record.path, locked=record.locked, holds=holds, harness_directory=False
         )
-        if queued is None:
-            # Only the directory or lock signal fired: it needs a live process inside.
-            if cwds is None:
-                cwds = list(default_process_cwds().values())
-            if not _someone_inside(record.path, cwds):
-                continue
-        owned.add(name)
-    return frozenset(owned - own)
+        is not None
+    }
+    return owned - own
 
 
 def decide_stop(
@@ -205,7 +187,7 @@ def decide_stop(
     state_file = state_path(untracked, session_id, STATE_KIND, agent_id or _MAIN_KEY)
     state = read_state(state_file)
     # N581: the coordinator cannot finish a branch another live agent owns (a running
-    # queue record, or a locked or harness-directory worktree with a live process in it),
+    # queue record, or a git-locked worktree: the holds worktree-reap honours),
     # so it is handed over, not left behind. Its own branches and a sub-agent's own stop
     # are still judged in full.
     handed = (
