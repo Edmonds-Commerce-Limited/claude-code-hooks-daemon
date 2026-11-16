@@ -196,3 +196,45 @@ class TestUnit3RipgrepConfigPath:
     )
     def test_twin_over_clean_paths_stays_allowed(self, project: Path, command: str) -> None:
         assert _verdict(project, command) is Decision.ALLOW
+
+
+class TestUnit5CommandWordIndirection:
+    """A command word the text scan cannot name (eval, a substitution) may open the bare name."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "eval cat {A}",
+            "eval git blame -S {A} f",
+            "eval grep zz {A}",
+            "$(echo cat) {A}",
+            "git $(echo blame) -S {A} f",
+            "sudo $(echo cat) {A}",
+            "grep $(echo x) {A}",
+            "x=1 $(echo cat) {A}",
+            "true && $(echo cat) {A}",
+            "$(echo $(echo cat)) {A}",
+            # Already denied: the backtick form leaves no command word.
+            "`echo cat` {A}",
+            "cat {A}",
+        ],
+    )
+    def test_indirect_command_with_the_name_is_denied(self, project: Path, template: str) -> None:
+        assert _verdict(project, template.format(A=_ABSENT)) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "echo $(date) {A}",
+            "echo {A}",
+            "x=$(echo hi); echo {A}",
+            "echo $(echo hi) $(echo there) {A}",
+            "grep {A} sub/plain.txt",
+            "git log -S {A}",
+            "echo ')' {A}",
+        ],
+    )
+    def test_twin_where_the_name_is_an_argument_of_a_plain_command_stays_allowed(
+        self, project: Path, template: str
+    ) -> None:
+        assert _verdict(project, template.format(A=_ABSENT)) is Decision.ALLOW
