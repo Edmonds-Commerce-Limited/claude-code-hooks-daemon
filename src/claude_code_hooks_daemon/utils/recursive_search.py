@@ -19,7 +19,10 @@ reason, and two readers of one grammar drift.
 
 Scope, deliberately: literal spellings. A search hidden behind an obfuscated
 command word (``g\\rep``, ``"grep"``, ``$G``) is dismissed (ledger 00474 N152),
-and a producer other than ``find`` feeding ``xargs`` names no root.
+and a producer other than ``find`` feeding ``xargs`` names no root, so the directory
+``xargs`` runs in is judged instead (the paths it will be handed are unknown). Commands
+that hand a whole directory to a reader (``find -exec``, ``xargs``, ``tar``, ``cp``,
+``diff``, ``zip``, ``rsync``, ``git diff --no-index``) are judged the same way as a search.
 """
 
 import fnmatch
@@ -411,7 +414,8 @@ def _reads(command: str, cwd: str | None, depth: int) -> Iterator[Read]:
     for segment, piped_in in command_segments(command):
         words = _command_words(segment)
         fed_by = feeder if piped_in else None
-        feeder = None
+        # A stage that is not a `find` passes the producer's roots on (`find d | sort | xargs cat`).
+        feeder = fed_by
         if not words:
             continue
         head = posixpath.basename(words[0])
@@ -424,13 +428,18 @@ def _reads(command: str, cwd: str | None, depth: int) -> Iterator[Read]:
             yield from _reads(" ".join(words[1:]), current, depth + 1)
         elif head == _FIND:
             feeder = _find_roots(words)
-            if _find_execs_a_search(words):
+            if _find_execs_a_reader(words):
                 yield from _reads_of_roots(feeder, current)
         elif head == _XARGS:
             inner_words = _xargs_command(words)
             if inner_words and _is_search(inner_words):
                 yield from _search_reads(inner_words, current, piped_in=True)
-                yield from _reads_of_roots(fed_by or (), current)
+            if _runs_a_reader(inner_words):
+                # Fed by `find`, xargs reads what `find` lists. Fed by anything else the paths are
+                # unknown, so the tree it runs in is judged.
+                yield from _reads_of_roots(fed_by or (".",), current)
+        elif (directory_roots := _directory_reader_roots(words)) is not None:
+            yield from _reads_of_roots(directory_roots, current)
         elif _is_search(words):
             yield from _search_reads(words, current, piped_in=piped_in)
 
@@ -520,14 +529,13 @@ def _find_roots(words: list[str]) -> tuple[str, ...]:
     return tuple(roots) or (".",)
 
 
-def _find_execs_a_search(words: list[str]) -> bool:
-    """Does a ``find`` command run a grep-family tool on what it finds?"""
+def _find_execs_a_reader(words: list[str]) -> bool:
+    """Does any ``-exec``-style action of a ``find`` command run a reader on what it finds?"""
     for index, word in enumerate(words):
         if word not in FIND_EXEC_ACTIONS:
             continue
         end = find_exec_end(words, index + 1)
-        inner = words[index + 1 : end]
-        if inner and _is_search(inner):
+        if _runs_a_reader(words[index + 1 : end]):
             return True
     return False
 
@@ -536,14 +544,215 @@ def _xargs_command(words: list[str]) -> list[str]:
     """The command ``xargs`` runs: the words after its own options."""
     index = 1
     while index < len(words) and words[index].startswith("-"):
-        index += 2 if words[index] in _XARGS_VALUE_FLAGS else 1
+        takes_value = words[index] in _XARGS_VALUE_FLAGS | _XARGS_LONG_VALUE_FLAGS
+        index += 2 if takes_value else 1
     return words[index:]
+
+
+# --- Readers of a whole directory that are not a search -----------------------------------------
+#
+# A command that hands a directory to `find -exec`, `xargs`, an archiver, a copier or a
+# directory diff puts every file under it into its output, whatever flags it carries. The
+# rule is fail closed: only a command on the short allowlist below is known to open no file
+# for its content, so every other command word (an unresolvable one, a wrapper around
+# nothing, a shell, an interpreter) counts as a reader of every root it is handed.
+
+_XARGS_LONG_VALUE_FLAGS: Final[frozenset[str]] = frozenset(
+    {
+        "--arg-file",
+        "--delimiter",
+        "--max-args",
+        "--max-procs",
+        "--max-lines",
+        "--max-chars",
+        "--eof",
+        "--process-slot-var",
+    }
+)
+# Matched on the exact bare word: `./ls` and `/tmp/ls` are not `ls`.
+_CONTENT_FREE_COMMANDS: Final[frozenset[str]] = frozenset(
+    {
+        "echo",
+        "printf",
+        "true",
+        "false",
+        "ls",
+        "stat",
+        "basename",
+        "dirname",
+        "test",
+        "[",
+        "rm",
+        "rmdir",
+        "chmod",
+        "chown",
+        "touch",
+        "mkdir",
+    }
+)
+_DIFF_COMMANDS: Final[frozenset[str]] = frozenset({"diff", "sdiff", "diff3", "colordiff"})
+_ARCHIVE_COMMANDS: Final[frozenset[str]] = frozenset({"zip", "7z", "7za", "7zr"})
+_TAR_COMMANDS: Final[frozenset[str]] = frozenset({"tar", "gtar", "bsdtar"})
+# The last operand of these is where the copy goes, which is not read.
+_COPY_COMMANDS: Final[frozenset[str]] = frozenset({"cp", "rsync", "scp"})
+_CP: Final[str] = "cp"
+_COPY_TARGET_DIRECTORY_OPTION: Final[str] = "--target-directory"
+_TAR_DIRECTORY_OPTIONS: Final[frozenset[str]] = frozenset({"-C", "--directory"})
+_GIT_DIFF_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"diff", "difftool"})
+_GIT_NO_INDEX_FLAG: Final[str] = "--no-index"
+_LONE_DASH: Final[str] = "-"
+_PARENT: Final[str] = ".."
+_LONG_OPTION_PREFIX: Final[str] = "--"
+
+
+def _runs_a_reader(command: list[str]) -> bool:
+    """Does the command a ``find -exec`` or ``xargs`` runs possibly open what it is handed?
+
+    An empty command runs nothing (``xargs`` alone runs ``echo``). A command made only of
+    wrappers has no command word to prove harmless, so it counts.
+    """
+    if not command:
+        return False
+    _wrappers, start = peel_command_wrappers(command)
+    if start >= len(command):
+        return True
+    return command[start] not in _CONTENT_FREE_COMMANDS
+
+
+def _directory_reader_roots(words: list[str]) -> tuple[str, ...] | None:
+    """The paths a directory-reading command is handed, or None when it is not one.
+
+    Every path operand counts, whatever the flags: ``diff a b`` compares the files of two
+    directories without ``-r``, and an archiver takes a directory whole. An option's value
+    is counted too (it costs nothing when it names no directory with a protected file).
+    ``git diff --no-index`` is the only ``git`` form here: without it the diff reads
+    history and the index, which this module does not judge.
+    """
+    head = posixpath.basename(words[0])
+    arguments = words[1:]
+    if head in _DIFF_COMMANDS or head in _ARCHIVE_COMMANDS:
+        return tuple(_path_operands(arguments))
+    if head in _TAR_COMMANDS:
+        return _tar_roots(arguments)
+    if head in _COPY_COMMANDS:
+        return _copy_sources(head, arguments)
+    if head == TOOL_GIT:
+        return _git_no_index_roots(arguments)
+    return None
+
+
+def _path_operands(arguments: list[str]) -> list[str]:
+    """The words of ``arguments`` that can be a path: operands, and values attached to ``--opt=``."""
+    operands: list[str] = []
+    options_ended = False
+    for word in arguments:
+        if options_ended:
+            operands.append(word)
+        elif word == _END_OF_OPTIONS:
+            options_ended = True
+        elif word.startswith(_LONG_OPTION_PREFIX):
+            _option, equals, value = word.partition("=")
+            if equals and value:
+                operands.append(value)
+        elif word != _LONE_DASH and not word.startswith("-"):
+            operands.append(word)
+    return operands
+
+
+def _copy_sources(command: str, arguments: list[str]) -> tuple[str, ...]:
+    """The operands of ``cp``/``rsync``/``scp`` that are read: all but the destination.
+
+    The destination is the ``-t``/``--target-directory`` value of ``cp`` (for ``rsync``
+    ``-t`` is ``--times``, which takes no value), else the last operand; a lone operand
+    is judged (the command is malformed or reads it).
+    """
+    operands: list[str] = []
+    destination_is_option = False
+    skip_next = False
+    for word in arguments:
+        if skip_next:
+            skip_next = False
+            continue
+        is_short_target = (
+            command == _CP
+            and word.startswith("-")
+            and not word.startswith(_LONG_OPTION_PREFIX)
+            and word.endswith("t")
+        )
+        if (word == _COPY_TARGET_DIRECTORY_OPTION and command == _CP) or is_short_target:
+            destination_is_option = True
+            skip_next = True
+        elif command == _CP and word.startswith(_COPY_TARGET_DIRECTORY_OPTION + "="):
+            destination_is_option = True
+        else:
+            operands.extend(_path_operands([word]))
+    if not destination_is_option and len(operands) > 1:
+        operands = operands[:-1]
+    return tuple(operands)
+
+
+def _tar_roots(arguments: list[str]) -> tuple[str, ...]:
+    """The paths ``tar`` reads, each placed under the ``-C`` directory in force where it stands.
+
+    A leading bundle without a dash (``tar cf - deep``) is the mode, not a path.
+    """
+    roots: list[str] = []
+    base: str | None = None
+    words = arguments[1:] if arguments and not arguments[0].startswith("-") else arguments
+    index = 0
+    while index < len(words):
+        word = words[index]
+        directory: str | None = None
+        if word in _TAR_DIRECTORY_OPTIONS and index + 1 < len(words):
+            directory = words[index + 1]
+            index += 1
+        elif word.startswith("--directory="):
+            directory = word.partition("=")[2]
+        elif word.startswith("-C") and not word.startswith(_LONG_OPTION_PREFIX) and len(word) > 2:
+            directory = word[2:]
+        if directory is not None:
+            base = _under(base, directory)
+            roots.append(base)
+        else:
+            roots.extend(_under(base, operand) for operand in _path_operands([word]))
+        index += 1
+    return tuple(roots)
+
+
+def _git_no_index_roots(arguments: list[str]) -> tuple[str, ...] | None:
+    """The two paths of ``git diff --no-index``, or None for any other ``git`` command."""
+    base: str | None = None
+    position = 0
+    while position < len(arguments) and arguments[position].startswith("-"):
+        option = arguments[position]
+        if option == "-C" and position + 1 < len(arguments):
+            base = _under(base, arguments[position + 1])
+        position += 2 if option in _GIT_OPTIONS_TAKING_VALUE else 1
+    if position >= len(arguments) or arguments[position] not in _GIT_DIFF_SUBCOMMANDS:
+        return None
+    rest = arguments[position + 1 :]
+    if _GIT_NO_INDEX_FLAG not in rest:
+        return None
+    return tuple(_under(base, operand) for operand in _path_operands(rest))
+
+
+def _under(base: str | None, path: str) -> str:
+    """``path`` read from ``base``: unchanged when absolute or when there is no base."""
+    if base is None or posixpath.isabs(path):
+        return path
+    return posixpath.join(base, path)
 
 
 def _place(
     root: str, cwd: str | None, *, unplaceable: re.Pattern[str] = _UNPLACEABLE_ROOT
 ) -> str | None:
     """The absolute, normalised form of ``root``, or None when it cannot be placed."""
+    anchored = _anchored(root, cwd, unplaceable)
+    return None if anchored is None else posixpath.normpath(anchored)
+
+
+def _anchored(root: str, cwd: str | None, unplaceable: re.Pattern[str]) -> str | None:
+    """``root`` made absolute but not normalised (``a/link/..`` keeps its ``..``)."""
     if unplaceable.search(root):
         return None
     expanded = str(Path(root).expanduser())
@@ -551,7 +760,20 @@ def _place(
         if cwd is None or not posixpath.isabs(cwd):
             return None
         expanded = posixpath.join(cwd, expanded)
-    return posixpath.normpath(expanded)
+    return expanded
+
+
+def _physical_root(root: str, cwd: str | None) -> str | None:
+    """Where a root with a ``..`` really points once the links before it are followed.
+
+    ``normpath`` removes ``link/..`` as if it were the link's parent; a command's own path
+    lookup steps out of the link's TARGET. None when the root has no ``..`` (the lexical
+    form is then the whole answer: a link as the root itself is resolved by the index).
+    """
+    if _PARENT not in root.split("/"):
+        return None
+    anchored = _anchored(root, cwd, _UNPLACEABLE_ROOT)
+    return None if anchored is None else os.path.realpath(anchored)
 
 
 def _placed(roots: tuple[str, ...], cwd: str | None) -> list[str]:
@@ -590,5 +812,10 @@ def _reads_of_roots(
         if glob_root is not None:
             # Answered from the index when judged: no directory is listed here.
             yield Read(glob_root, view=_view_for(rules), glob=True, rules=rules)
-    for root in _placed(roots, cwd):
+    placed = _placed(roots, cwd)
+    for root in placed:
         yield Read(root, view=_view_for(rules), skip=rules.predicate(root))
+    for root in roots:
+        physical = _physical_root(root, cwd)
+        if physical is not None and physical not in placed:
+            yield Read(physical, view=_view_for(rules), skip=rules.predicate(physical))
