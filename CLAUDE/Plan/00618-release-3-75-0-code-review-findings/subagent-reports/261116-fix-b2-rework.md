@@ -39,7 +39,7 @@ The red commit message says "39 combinations"; the differential actually has 54 
 
 ## Residual risk (by design, for the coordinator)
 
-The only extra denials are on branches the stopping thread touched that have no queue record and no lock. Example: the coordinator wrote into a live harness sub-agent's worktree (a brief, a `git -C <wt> commit`) and did not lock it. Such a stop is denied where origin/main allowed it. Those denials share the session's never-reset `MAX_STOP_BLOCKS` budget, so if that branch stays outstanding, a later genuinely abandoned own branch can still be waved through after 3 blocks. The brief accepts this: requirement (2) asks for it, and those are branches the coordinator worked on itself.
+The only extra denials are on branches the stopping thread touched that have no queue record and no lock. Example: the coordinator wrote into a live harness sub-agent's worktree (a brief, a `git -C <wt> commit`) and did not lock it. Such a stop is denied where origin/main allowed it. Those denials share the session's never-reset `MAX_STOP_BLOCKS` budget, so if that branch stays outstanding, a later genuinely abandoned own branch can still be waved through after 3 blocks. Requirement (2) entails this sequence (origin/main refuses stop N, this tree allows it), and the brief's "no loosening" does not explicitly accept it: it is the owner's decision. Verified on this tree: `own` is exactly the branches with a touch record under the stopping identity (`branch_stop_guard._scope`), and `handoff` only waives the merged check, so it does not change the hand-over set.
 
 To remove even that residue, a follow-up could choose either option the review listed:
 
@@ -68,4 +68,6 @@ Test: `TestTheContentTierNeedsTheNetChange::test_the_net_change_proof_runs_on_th
   - `remote_branch_proof`, `remote_archive_proof`, `merge_proof_shapes`, `branch_cleanup`, `branch_cleanup_bulk`;
   - `tests/integration/test_claude_md_guidance_coverage.py`.
 - The `destructive_git` remote-delete, branch-delete and remote-ref handler tests also pass (159).
+- `llm_qa.py pyright fixed_worktree_budget plan_qa british_english docs_qa`: 5/5 passed (plan_qa: 2 advisories, 0 block).
+- The probe output on this tree equals the reviewer's `rev618/stop-main.txt` line for line, apart from tip hashes.
 - Not run: the full suite and `llm_qa.py all`.
