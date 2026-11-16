@@ -53,13 +53,32 @@ _RULE: Final[str] = "fixed-git-budget"
 _GIT_RUNNERS: Final[frozenset[str]] = frozenset({"run_git", "run_fn"})
 _SCALING_VERB: Final[str] = "worktree"
 _SCALING_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"add", "remove"})
+#: Verbs whose timeout is a hard failure with no retry (ledger N622): a commit
+#: killed mid-write orphans ``index.lock``, and a fetch or push on a loaded host
+#: is not a hang.
+_SCALING_SINGLE_VERBS: Final[frozenset[str]] = frozenset({"commit", "fetch", "push"})
 _SCALER: Final[str] = "scaled_timeout"
 #: ``scaled_timeout`` and the handler's own one-line wrapper over it.
 _SCALERS: Final[frozenset[str]] = frozenset({_SCALER, "_cleanup_budget", "branch_metadata_timeout"})
 _TIMEOUT_KEYWORD: Final[str] = "timeout"
 
 #: (path relative to the scan root, function name) -> why it is allowed.
-_ALLOWED: Final[dict[tuple[str, str], str]] = {}
+_ALLOWED: Final[dict[tuple[str, str], str]] = {
+    (
+        "handlers/status_line/git_branch.py",
+        "_run_background_fetch",
+    ): (
+        "a background fetch whose failure only leaves the status-line counts stale, "
+        "so no hard failure is gated on it"
+    ),
+    (
+        "handlers/utils/plan_numbering.py",
+        "remote_highest_plan_number",
+    ): (
+        "a failed or timed-out fetch reports the remote as unchecked, never a failure; "
+        "its budget is pinned to mkplan.bash by a test"
+    ),
+}
 
 _REMEDIATION: Final[str] = (
     "Each site above runs a tree-sized git mutation on a fixed budget. Under\n"
@@ -120,6 +139,13 @@ def _names_scaling_verb(function: ast.FunctionDef | ast.AsyncFunctionDef) -> boo
     return False
 
 
+def _carries_single_verb(call: ast.Call) -> bool:
+    """Whether this one git runner call is itself a commit, fetch or push."""
+    return any(
+        isinstance(arg, ast.Constant) and arg.value in _SCALING_SINGLE_VERBS for arg in call.args
+    )
+
+
 def _runner_name(call: ast.Call) -> str | None:
     func = call.func
     if isinstance(func, ast.Name):
@@ -171,12 +197,13 @@ def scan_file(path: Path, root: Path) -> tuple[list[Violation], set[tuple[str, s
     for function in ast.walk(tree):
         if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
-        if not _names_scaling_verb(function):
-            continue
+        writes_worktree = _names_scaling_verb(function)
         key = (relative, function.name)
         scaled = _scaled_names(function)
         for node in ast.walk(function):
             if not isinstance(node, ast.Call) or _runner_name(node) not in _GIT_RUNNERS:
+                continue
+            if not (writes_worktree or _carries_single_verb(node)):
                 continue
             if _is_scaled(node, scaled) or node.lineno in seen:
                 continue
@@ -190,7 +217,7 @@ def scan_file(path: Path, root: Path) -> tuple[list[Violation], set[tuple[str, s
                     line=node.lineno,
                     function=function.name,
                     detail=(
-                        f"{function.name}() writes a worktree but this git call has a fixed "
+                        f"{function.name}() runs a hard-failing git call on a fixed "
                         f"budget; wrap its timeout in {_SCALER}(...)"
                     ),
                 )

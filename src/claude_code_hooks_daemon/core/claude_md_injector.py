@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.utils.conflict_markers import (
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree, run_git
 from claude_code_hooks_daemon.utils.git_sync import current_branch, resolve_default_branch
+from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_document
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
@@ -1049,7 +1050,12 @@ class ClaudeMdInjector:
             # orphaned, which is the failure this whole area exists to avoid.
             # These are the only two lock-taking writes left here, so they must
             # share a budget that cannot cause it (Plan 00248 F4).
-            stage = run_git(cwd, "add", filename, timeout=Timeout.GIT_COMMIT)
+            stage = run_git(
+                cwd,
+                "add",
+                filename,
+                timeout=scaled_timeout(Timeout.GIT_COMMIT, Timeout.GIT_COMMIT_MAX),
+            )
             if stage.returncode != 0:
                 ClaudeMdInjector._log_git_failure("staging", stage)
                 return
@@ -1062,7 +1068,7 @@ class ClaudeMdInjector:
             filename,
             "-m",
             ClaudeMdInjector._commit_message(cwd, filename, content),
-            timeout=Timeout.GIT_COMMIT,
+            timeout=scaled_timeout(Timeout.GIT_COMMIT, Timeout.GIT_COMMIT_MAX),
         )
         if commit.returncode != 0:
             ClaudeMdInjector._log_git_failure("commit", commit)

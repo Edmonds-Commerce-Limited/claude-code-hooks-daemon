@@ -330,6 +330,16 @@ class Timeout:
     # alone takes 3 to 7 seconds, and more while hooks run beside it. A build that
     # inherited GIT_CONTEXT timed out every time and the daemon never had an index.
     INDEX_BUILD_GIT = 120
+    # Plan 00474 N622: each of these calls treats a timeout as a hard failure with
+    # no retry, so it runs on its base above scaled by host load (or repository
+    # size) and bounded by a ceiling its own caller can afford. None runs inside a
+    # pinned event budget: the auto-commit is daemon startup, park/keep are CLI
+    # commands, the safety walks are CLI or daemon work, the index build is a
+    # background thread.
+    GIT_COMMIT_MAX = 120
+    GIT_FETCH_SESSION_MAX = 120
+    GIT_BRANCH_SAFETY_MAX = 480
+    INDEX_BUILD_GIT_MAX = 480
 
     # QA runner timeouts (seconds)
     QA_TEST_TIMEOUT = 120  # 2 minutes (mypy, individual tool checks)

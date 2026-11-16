@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.utils.git_config_write import (
     run_git_config_write,
 )
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.remote_refs import remote_git_env
 
 _HEADS = "refs/heads/"
@@ -284,7 +285,7 @@ def _park_remote_only(
         "push",
         remote,
         f"{new}:{_HEADS}{name}",
-        timeout=Timeout.GIT_FETCH_SESSION,
+        timeout=scaled_timeout(Timeout.GIT_FETCH_SESSION, Timeout.GIT_FETCH_SESSION_MAX),
         env=remote_git_env(),
     )
     if pushed.returncode != 0:
@@ -385,7 +386,12 @@ def park_branch(
         return ParkResult(new, False, None, None, local_only=True)
     retry = f"git push {remote} {name}"
     pushed = run_git(
-        repo, "push", remote, name, timeout=Timeout.GIT_FETCH_SESSION, env=remote_git_env()
+        repo,
+        "push",
+        remote,
+        name,
+        timeout=scaled_timeout(Timeout.GIT_FETCH_SESSION, Timeout.GIT_FETCH_SESSION_MAX),
+        env=remote_git_env(),
     )
     if pushed.returncode != 0:
         return ParkResult(new, False, pushed.stderr.strip() or "git push failed", retry)
