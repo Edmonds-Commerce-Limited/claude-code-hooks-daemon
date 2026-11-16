@@ -109,7 +109,7 @@ _PATHSPEC_MAGIC_PREFIX: Final[str] = ":"
 _ASSIGNMENT: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 # A root carrying any of these is not one directory the command line names.
 _UNPLACEABLE_ROOT: Final[re.Pattern[str]] = re.compile(r"[$`*?\[{]")
-# Of those, the ones that are not a glob: a trailing-slash glob carrying one is not judged.
+# Of those, the ones that are not a glob: a glob root carrying one is not judged.
 _EXPANSION_ROOT: Final[re.Pattern[str]] = re.compile(r"[$`{]")
 _DIRECTORY_GLOB: Final[re.Pattern[str]] = re.compile(r"[*?\[]")
 
@@ -375,8 +375,9 @@ def protected_reached(
 def _directories_read(read: Read, index: ProtectedFileIndex) -> list[Read]:
     """``read`` itself, or for a ``glob`` read the directories of ``index`` it names.
 
-    The shell expands a glob ending in ``/`` to directories only, so each one is
-    searched as a literal directory is; only those holding a protected file matter.
+    A recursive reader searches each directory the glob expands to as it searches a
+    literal directory, with or without a trailing ``/``; only those holding a
+    protected file matter.
     """
     if not read.glob:
         return [read]

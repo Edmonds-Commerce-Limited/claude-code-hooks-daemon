@@ -206,8 +206,8 @@ class ProtectedFileIndex:
     ) -> tuple[str, ...]:
         """The directories holding a protected file that the shell glob ``token`` names.
 
-        ``token`` ends in ``/``, so the shell expands it to directories only. Each
-        is an ancestor directory of an indexed file, matched component by component
+        ``token`` is a glob a recursive reader searches, with or without a trailing
+        ``/``. Each directory returned is an ancestor directory of an indexed file, matched component by component
         with the matcher :meth:`glob_matches` uses (so ``*`` skips dot names and
         ``default_expansion`` reads ``**`` like ``*``), but never against the file
         itself. A search that recurses into those directories reads the file, exactly
