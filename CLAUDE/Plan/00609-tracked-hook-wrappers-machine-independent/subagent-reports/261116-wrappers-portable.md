@@ -49,3 +49,13 @@ Targeted only: `tests/unit/install/{test_forwarder_generator,test_forwarder_gene
 Not done: no end-to-end test of `init.sh`'s nc location lookup (only syntax-checked and mirrored from the tested wrapper lines); no server-level test that `start` calls the publisher; `llm_qa.py changed` and the full gate not run (coordinator's). `tests/unit/install/test_bin_wrapper_project_anchoring.py` fails in this worktree for an unrelated venv reason and was not touched.
 
 Pre-existing open question: the legacy `daemon<suffix>.socket-path` discovery file has no recorded-untracked-dir confinement; I mirrored the safer design for the new file only.
+
+## Follow-up: the two coordinator gaps (closed)
+
+1. Server test, `tests/unit/daemon/test_event_socket_location_publish.py` (5 tests, real `HooksDaemon.start`/`shutdown`): an overflowing layout publishes the untracked dir then the events dir; a natural layout and a disabled transport publish nothing; after shutdown the file remains but its events dir is gone (nothing to dial, so a forwarder falls through; a file naming another checkout is ignored, covered by the wrapper and nc tests); a restart overwrites a stale file.
+2. Executable nc test, `tests/integration/test_init_sh_nc_location.py` (3 tests): sources a copy of the real init.sh and runs the real `send_request_stdin` with a stub `nc` that reports its socket, against a real listening socket. A location naming its own untracked dir is used; one naming another checkout's dir is ignored; an existing natural events dir wins without consulting the file.
+3. Found while checking: `tests/unit/install/test_forwarder_status_fast_path.py` still asserted the old literal guard; updated to the derived-root form (it was not in my first targeted run).
+
+`tests/unit/install/test_bin_wrapper_project_anchoring.py::TestTheAnchorReachesTheCommand::test_a_global_anchor_selects_the_tree_the_command_reads` fails identically on a fresh detached worktree of origin/main (1 failed, 14 passed), so it is not caused by this branch.
+
+Note: 56 relay-guard integration tests skip here for lack of a built relay binary; they could not be exercised locally.
