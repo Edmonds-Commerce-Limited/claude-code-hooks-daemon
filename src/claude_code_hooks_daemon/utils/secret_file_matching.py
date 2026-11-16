@@ -3263,18 +3263,23 @@ _link_scans: dict[str, tuple[float, tuple[str, ...]]] = {}
 
 
 def expand_directory_glob(base: str, pattern: str) -> list[str] | None:
-    """The directories ``pattern`` matches from ``base``, component by component; None past the cap.
+    """The directories ``pattern`` matches from ``base``, component by component; None past a cap.
 
     Read as bash reads it by default: ``**`` is ``*``, and a wildcard skips dot
     names unless the component starts with a dot. At most
     :data:`LINK_SCAN_DIRECTORY_CAP` directories are listed, so a glob that
-    matches nothing is never followed through the whole tree.
+    matches nothing is never followed through the whole tree, and more than
+    :data:`LINK_DIRECTORY_CAP` matches is None too (review 614c X1): bash
+    refuses a ``cd`` with several, and every match kept costs each later word.
     """
     current = ["/"] if pattern.startswith("/") else [base]
     listed = 0
-    for component in (part for part in pattern.split("/") if part not in ("", ".")):
+    components = [part for part in pattern.split("/") if part not in ("", ".")]
+    for depth, component in enumerate(components):
         if component == "**":
             component = "*"
+        last = depth == len(components) - 1
+        limit = LINK_DIRECTORY_CAP if last else LINK_SCAN_DIRECTORY_CAP - listed - len(current)
         following: list[str] = []
         for directory in current:
             # Every listing and every probe counts, so the walk is bounded however deep.
@@ -3305,6 +3310,12 @@ def expand_directory_glob(base: str, pattern: str) -> list[str] | None:
                 )
                 continue
             following.extend(os.path.normpath(f"{directory.rstrip('/')}/{name}") for name in names)
+            # Each directory kept is listed or probed next, or is a match: stop as soon as
+            # either cap is certain to be passed, before the list grows any further.
+            if len(following) > limit:
+                return None
+        if len(following) > limit:
+            return None
         current = following
         if not current:
             return []
@@ -3508,19 +3519,24 @@ class _DirectoryWalk:
             bases = list(dict.fromkeys([self.directories[-1], *self.existing]))
         else:
             bases = []
-        found = 0
+        found: dict[str, None] = {}
         for base in bases[: LINK_DIRECTORY_CAP + 1]:
             matches = expand_directory_glob(base, target)
             if matches is None:
                 # Too wide to follow: judged as a computed move instead.
                 self.indeterminate()
                 return
-            for match in matches:
-                self._add(match, exists=True)
-                found += 1
+            found.update(dict.fromkeys(matches))
+            if len(found) > LINK_DIRECTORY_CAP:
+                # Review 614c X1: none of them is kept; bash refuses a cd with
+                # several matches, and every one kept costs each later word.
+                self.indeterminate()
+                return
         if not found:
             # No match leaves the word as written, which then names no directory.
             self.indeterminate()
+        for match in found:
+            self._add(match, exists=True)
 
     def change(self, target: str | None) -> None:
         """Record a ``cd``-like move to ``target`` (None: no literal operand)."""

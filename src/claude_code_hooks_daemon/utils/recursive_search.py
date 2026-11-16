@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.utils.protected_file_index import (
 )
 from claude_code_hooks_daemon.utils.resolution_failure import fails_closed
 from claude_code_hooks_daemon.utils.secret_file_matching import (
+    LINK_DIRECTORY_CAP,
     chdir_wrapper_targets,
     expand_directory_glob,
     link_holding_directories,
@@ -413,8 +414,6 @@ _DIRECTORY_CHANGERS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
 _CHDIR_WRAPPERS: Final[frozenset[str]] = frozenset({"env", "sudo"})
 _BUILTIN: Final[str] = "builtin"
 _GLOB_CHARACTERS: Final[frozenset[str]] = frozenset("*?[")
-#: A globbed ``cd`` target is followed into at most this many matches per base.
-_GLOB_CD_MATCH_CAP: Final[int] = 17
 #: A redirection with its file glued on (``>/dev/null``, ``2>&1``), and one without (``2>``).
 _REDIRECTION_WORD: Final[re.Pattern[str]] = re.compile(r"\d*(?:&>>?|>>?|<>?|>&|<&)\S+")
 _BARE_REDIRECTION: Final[re.Pattern[str]] = re.compile(r"\d*(?:&>>?|>>?|<>?|>&|<&)")
@@ -513,21 +512,24 @@ class _SearchCwds:
 
     def _globbed(self, target: str, bases: tuple[str | None, ...]) -> tuple[str, ...]:
         """The directories a globbed ``cd`` target matches from each base, as bash expands it."""
-        matched: list[str] = []
+        stayed = tuple(base for base in bases if base is not None)
+        matched: dict[str, None] = {}
         for base in bases:
             placed = _place(target, base)
             if placed is None:
                 continue
             found = expand_directory_glob("/", placed)
-            if found is None:
-                # Too wide to follow (review 614b): judged as a computed move.
-                return self.indeterminate()
-            matched.extend(found[:_GLOB_CD_MATCH_CAP])
+            if found is not None:
+                matched.update(dict.fromkeys(found))
+            if found is None or len(matched) > LINK_DIRECTORY_CAP:
+                # Too wide to follow (reviews 614b, 614c X1): judged as a computed
+                # move, and bash refuses a cd with several matches, so the bases stay.
+                return tuple(dict.fromkeys((*self.indeterminate(), *stayed)))
         if not matched:
             return self.indeterminate()
         self.targets.extend(matched)
         # The cd may still fail (several matches are too many arguments): the base stays too.
-        return tuple(dict.fromkeys((*matched, *(base for base in bases if base is not None))))
+        return tuple(dict.fromkeys((*matched, *stayed)))
 
 
 def _reads(command: str, cwds: tuple[str, ...], depth: int, tracker: _SearchCwds) -> Iterator[Read]:
