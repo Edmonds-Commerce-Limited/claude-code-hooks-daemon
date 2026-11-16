@@ -305,11 +305,11 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Plan Statistics
 
-- **Total Plans Created**: 608 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 609 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 512 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 73 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 74 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
