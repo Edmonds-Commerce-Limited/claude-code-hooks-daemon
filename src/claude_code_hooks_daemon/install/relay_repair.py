@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.install.relay_deploy import (
     missing_configured_relay_binary,
     relay_binary_defect,
 )
+from claude_code_hooks_daemon.utils.safe_signal import signal_own_session_child
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 if TYPE_CHECKING:
@@ -236,7 +237,7 @@ def owned_repair_pids() -> list[int]:
 def _end_group(child: subprocess.Popen[bytes], sig: int, grace: float) -> bool:
     """Signal the child's whole process group; True when the child exited within ``grace``."""
     try:
-        os.killpg(child.pid, sig)
+        signal_own_session_child(child, sig)
     except ProcessLookupError:
         return child.poll() is not None
     try:

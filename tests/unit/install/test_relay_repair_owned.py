@@ -9,11 +9,13 @@ parent is a hook process that exits at once, so it stays detached by design.
 
 from __future__ import annotations
 
-import os
+import signal
+import subprocess
 import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import psutil
 import pytest
@@ -25,6 +27,8 @@ from claude_code_hooks_daemon.install.relay_repair import (
     spawn_owned,
     stop_owned_repairs,
 )
+from claude_code_hooks_daemon.utils.safe_signal import signal_own_session_child
+from tests.load_scaling import scaled_seconds
 
 _DEADLINE_SECONDS = 10.0
 _POLL_SECONDS = 0.02
@@ -92,7 +96,7 @@ class TestStopOwnedRepairs:
         stop_owned_repairs()
 
         assert _gone(pid)
-        assert time.monotonic() - started < 5
+        assert time.monotonic() - started < scaled_seconds(5.0)
 
     def test_a_process_the_child_started_is_ended_too(self, tmp_path: Path) -> None:
         pid_file = tmp_path / "grandchild.pid"
@@ -154,14 +158,25 @@ class TestStopOwnedRepairs:
 
 
 class TestSessionStartRepairStaysDetached:
-    def test_spawn_detached_is_not_owned(self, tmp_path: Path) -> None:
+    def test_spawn_detached_is_not_owned(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The hook that starts it exits at once; a stop must not end it."""
+        spawned: list[subprocess.Popen[Any]] = []
+        real_popen = subprocess.Popen
+
+        def recording_popen(*args: Any, **kwargs: Any) -> subprocess.Popen[Any]:
+            child: subprocess.Popen[Any] = real_popen(*args, **kwargs)
+            spawned.append(child)
+            return child
+
+        monkeypatch.setattr(subprocess, "Popen", recording_popen)
         pid = spawn_detached(_argv(_SLEEPER, tmp_path / "s.state"), tmp_path / "s.log")
         try:
             assert stop_owned_repairs() == []
             assert psutil.pid_exists(pid)
         finally:
-            os.killpg(pid, 9)
+            signal_own_session_child(spawned[0], signal.SIGKILL)
 
     def test_owned_registry_is_a_module_level_view(self) -> None:
         assert relay_repair.owned_repair_pids() == []
