@@ -141,6 +141,20 @@ class ProtectedFileIndex:
             return False
         return not _is_under(real, os.path.realpath(self.project_root))
 
+    def _base_out(self, token: str, bases: Sequence[str]) -> str | None:
+        """The first of ``bases`` a relative ``token`` is read from that a link leads out.
+
+        Review 614b R5: after ``cd dlink`` a glob with no slash (``*``, ``i*``) reads
+        what ``dlink`` points at, which the spelling of the glob never names.
+        """
+        if token.startswith("/"):
+            return None
+        for base in dict.fromkeys(bases):
+            lexical = os.path.normpath(base)
+            if self._leads_out(lexical, _realpath_or_lexical(lexical)):
+                return lexical
+        return None
+
     def _link_out_directory(self, token: str, absolute_token: str) -> str | None:
         """The directory a glob spells before its first wildcard, when a link leads it out.
 
@@ -223,6 +237,10 @@ class ProtectedFileIndex:
         """
         if not token or "\0" in token:
             return None
+        if _has_glob_syntax(token):
+            base_out = self._base_out(token, bases)
+            if base_out is not None:
+                return base_out
         for absolute_token in _absolute_tokens(token, bases):
             if _has_glob_syntax(token):
                 found = self._glob_link_out(token, absolute_token, include_last=True)
@@ -307,6 +325,8 @@ class ProtectedFileIndex:
         """
         if not token or "\0" in token or token.endswith("/"):
             return None
+        if self._base_out(token, bases) is not None:
+            return self.patterns[0] if self.patterns else None
         for absolute_token in _absolute_tokens(token, bases):
             if self._link_out_directory(token, absolute_token) is not None:
                 return self.patterns[0] if self.patterns else None
