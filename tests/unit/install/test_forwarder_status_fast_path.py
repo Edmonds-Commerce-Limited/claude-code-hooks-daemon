@@ -96,8 +96,10 @@ class TestGeneratedText:
         assert off == _generate(TransportConfig(relay_enabled=False), tmp_path)
 
     def test_the_block_is_guarded_to_its_own_checkout(self, tmp_path: Path) -> None:
+        """The checkout is derived from BASH_SOURCE at run time (Plan 00609), never written."""
         text = _generate(TransportConfig(relay_enabled=True), tmp_path)
-        assert f'"${{BASH_SOURCE[0]}}" == "{tmp_path}/.claude/hooks/"*' in text
+        assert '"$_rl_src" == /*/.claude/hooks/*' in text
+        assert str(tmp_path) not in text
 
     def test_a_read_status_above_one_is_loud(self, tmp_path: Path) -> None:
         """bash `read` returns 1 for every I/O error (EISDIR, EBADF, EIO, EOF alike) and above 1
