@@ -1,6 +1,6 @@
 # Plan 00608: provision sh provisions the relay binary
 
-**Status**: In Progress
+**Status**: Complete (2026-11-16)
 **Created**: 2026-11-15
 **Owner**: joseph
 **Priority**: Medium
@@ -45,8 +45,26 @@ A second question rode along: on that box the session-start relay repair left no
 
 - [x] Targeted tests for the provision relay step and the `--check` mode pass.
 - [x] Release note `CLAUDE/UPGRADES/UNRELEASED/release-notes/078-provision-sh-provisions-the-relay-binary.md` records the release-bound consequence (holding-area artefact); the plan has no other release-bound consequence.
-- [ ] Targeted QA (`llm_qa.py changed --base origin/main`) passes.
+- [x] Targeted QA (`llm_qa.py changed --base origin/main`) passes: `QA: 43/43 PASSED` at the branch head, after the
+  Opus review fixes in `a3707d629` and the semgrep interpreter pin on main in `c96a6a9f0`. Main CI run 43780371862 is
+  green.
+
+## Follow-ups
+
+These were queued in the 22:20 journal entry and are not done:
+
+- Start the relay repair at daemon startup.
+- Log the silent failure branch.
+- Show the repair state in `status`.
 
 ## Delivery & Milestones
 
-- Provision relay step and `--check` mode: see the branch commits.
+- The provision relay step and the `--check` mode were built on branch `agent-a85cf266bd3c1c30d-57f43a44` and merged
+  with `--no-ff` as `71bc70cfd`.
+- Review fixes `a3707d629`:
+  - The forwarder change check now compares content.
+  - Only exit 2 from `--check` counts as an old CLI.
+  - A failure to source the helper prints a banner.
+  - The background tests are stronger.
+- Reports: `subagent-reports/provision-relay-step-report.md`, `relay-checker-no-trace-report.md` and
+  `261115-python-developer-sonnet-review-fixes.md`.
