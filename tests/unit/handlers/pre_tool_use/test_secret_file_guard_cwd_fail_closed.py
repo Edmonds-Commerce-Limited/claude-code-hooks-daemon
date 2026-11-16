@@ -391,6 +391,60 @@ class TestComputedDirectoryChange:
     def test_an_ordinary_computed_cd_allowed(self, tree: Tree, command: str) -> None:
         assert _decision(tree, command) is Decision.ALLOW
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'x="$(env -C inner cat ilink)"; echo "$x"',
+            'x="$(git -C inner diff --no-index ilink /dev/null)"',
+            'export x="$(env -C inner cat ilink)"',
+        ],
+    )
+    def test_a_move_inside_an_assigned_value_is_walked(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "reassignment",
+        [
+            "export D=$(echo inner)",
+            "declare -x D=inner",
+            "read D <<< inner",
+            "A=1 D=inner",
+        ],
+    )
+    def test_a_reassignment_it_cannot_read_still_fails_closed(
+        self, tree: Tree, reassignment: str
+    ) -> None:
+        command = f'D=clean; {reassignment}; cd "$D" && cat ilink'
+        assert _decision(tree, command) is Decision.DENY
+
+    def test_a_loop_variable_still_fails_closed(self, tree: Tree) -> None:
+        command = 'D=clean; for D in inner; do cd "$D" && cat ilink; done'
+        assert _decision(tree, command) is Decision.DENY
+
+    @pytest.mark.parametrize("target", ["**/nope", "*/*/*/*/*/nope", "/*/*/*/nope"])
+    def test_a_globbed_target_costs_a_bounded_walk(self, tree: Tree, target: str) -> None:
+        """A glob that matches nothing is not followed through the whole tree (or filesystem)."""
+        with patch.object(sfm.os, "scandir", wraps=os.scandir) as spy:
+            assert _decision(tree, f"cd {target} && cat clean/plain.txt") is Decision.ALLOW
+        assert spy.call_count <= 3 * sfm.LINK_SCAN_DIRECTORY_CAP
+
+
+class TestWrappedChdirCommand:
+    """A wrapper before a command with a chdir option does not hide the option."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "sudo tar -C inner -chf - ilink",
+            "nice git -C inner diff --no-index ilink /dev/null",
+            "timeout 5 git -C inner diff --no-index ilink /dev/null",
+            "nohup env -C inner cat ilink",
+            "sudo -u root env -C inner cat ilink",
+        ],
+    )
+    def test_wrapped_chdir_denied(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
 
 #: Names a filesystem call may refuse, or that Python may refuse to encode.
 _ODD_NAMES = [
