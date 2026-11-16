@@ -262,7 +262,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Blocked / On Hold Plans
 
-- None. (00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
+- [00616: secret guard regex token in interpreter code](00616-secret-guard-regex-token-in-interpreter-code/PLAN.md) - Blocked on the owner (#205, N626: should a glob-shaped token in interpreter code, such as the regex `.*?\n`, be judged against the protected-file index? Options A/B/C in PLAN.md)
+
+(00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
 
 ## Cancelled Plans
 
@@ -309,11 +311,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 615 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 616 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 515 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 76 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 77 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
