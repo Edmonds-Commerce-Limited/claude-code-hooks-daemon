@@ -1531,6 +1531,27 @@ class TestTheContentTierNeedsTheNetChange:
         assert result.tier == TIER_UNPROVEN
         assert "novel-only.txt" in result.content_unique_paths
 
+    def test_the_net_change_proof_runs_on_the_load_scaled_git_budget(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every git call of the proof uses the budget the rest of branch_safety uses."""
+        TestContentPreservedTier._squash_merged_branch(repo, "sq")
+        budget = 123.5
+        monkeypatch.setattr(branch_safety, "scaled_timeout", lambda *_a, **_k: budget)
+        real = remote_branch_proof.run_git
+        seen: list[object] = []
+
+        def recording(
+            directory: Path, *args: str, **kwargs: Any
+        ) -> subprocess.CompletedProcess[str]:
+            seen.append(kwargs.get("timeout"))
+            return real(directory, *args, **kwargs)
+
+        monkeypatch.setattr(remote_branch_proof, "run_git", recording)
+        assert classify_branch(repo, "sq").tier == TIER_CONTENT_PRESERVED
+        assert seen
+        assert set(seen) == {budget}
+
     def test_the_proof_runs_from_the_top_level_when_given_a_subdirectory(self, repo: Path) -> None:
         TestContentPreservedTier._squash_merged_branch(repo, "sq")
         sub = repo / "nested"
