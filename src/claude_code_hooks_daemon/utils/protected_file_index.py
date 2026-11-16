@@ -162,8 +162,13 @@ class ProtectedFileIndex:
         ``ls */*/*`` in every tree that has one visible protected file. A glob
         anchored by a literal directory (``dir/*``, ``dir/**/*``) or ending in one
         wildcard (``*``) names a place and is judged.
+
+        A ``token`` ending in ``/`` expands to directories only, so it never
+        names a file at its own level and matches none here. A tool that
+        recurses into those directories is judged over each of them by
+        :meth:`find_under`, as for a literal directory argument.
         """
-        if not token or "\0" in token:
+        if not token or "\0" in token or token.endswith("/"):
             return None
         absolute_tokens = (
             [os.path.normpath(token)]

@@ -23,6 +23,7 @@ and a producer other than ``find`` feeding ``xargs`` names no root.
 """
 
 import fnmatch
+import glob
 import os
 import posixpath
 import re
@@ -108,6 +109,9 @@ _PATHSPEC_MAGIC_PREFIX: Final[str] = ":"
 _ASSIGNMENT: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 # A root carrying any of these is not one directory the command line names.
 _UNPLACEABLE_ROOT: Final[re.Pattern[str]] = re.compile(r"[$`*?\[{]")
+# Of those, the ones that are not a glob: a trailing-slash glob carrying one is not expanded.
+_EXPANSION_ROOT: Final[re.Pattern[str]] = re.compile(r"[$`{]")
+_DIRECTORY_GLOB: Final[re.Pattern[str]] = re.compile(r"[*?\[]")
 
 
 @dataclass
@@ -526,9 +530,29 @@ def _placed(roots: tuple[str, ...], cwd: str | None) -> list[str]:
     return placed
 
 
+def _expand_directory_glob(root: str, cwd: str | None) -> list[str]:
+    """The directories a glob ending in ``/`` expands to, or ``[root]`` for any other root.
+
+    The shell expands such a glob to directories only, so a search of it reads
+    each of them exactly as it reads a directory named literally. Only
+    ``*``, ``?`` and ``[`` are expanded; a root with a variable, substitution
+    or brace is left for ``_place`` to refuse.
+    """
+    if not root.endswith("/") or _EXPANSION_ROOT.search(root) or not _DIRECTORY_GLOB.search(root):
+        return [root]
+    placed = Path(root).expanduser()
+    if not placed.is_absolute():
+        if cwd is None or not posixpath.isabs(cwd):
+            return [root]
+        placed = Path(cwd) / placed
+    pattern = str(placed) + "/"
+    return glob.glob(pattern, recursive="**" in pattern)
+
+
 def _reads_of_roots(
     roots: tuple[str, ...], cwd: str | None, rules: _Rules = _NO_RULES
 ) -> Iterator[Read]:
-    for root in _placed(roots, cwd):
+    expanded = tuple(directory for root in roots for directory in _expand_directory_glob(root, cwd))
+    for root in _placed(expanded, cwd):
         view = TreeView.UNIGNORED if rules.honour_ignore else TreeView.ALL
         yield Read(root, view=view, skip=rules.predicate(root))
