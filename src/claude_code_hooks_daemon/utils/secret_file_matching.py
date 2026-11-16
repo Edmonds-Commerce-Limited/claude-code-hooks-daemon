@@ -2157,7 +2157,7 @@ def _git_subcommand_after(words: list[str]) -> tuple[int, str] | None:
         word = words[index]
         if not word.startswith("-"):
             return index, word
-        if word.startswith("--") and "=" in word or word in _GIT_VALUELESS_GLOBAL_OPTIONS:
+        if (word.startswith("--") and "=" in word) or word in _GIT_VALUELESS_GLOBAL_OPTIONS:
             index += 1
         elif word in _GIT_GLOBAL_OPTIONS_WITH_VALUE:
             index += 2
