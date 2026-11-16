@@ -29,6 +29,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
+
 if __name__ == "__main__":
     # Run as a script, the first 3.10+ construct below (`functools.cache`, `str | Path`)
     # fails at import with a traceback on an older interpreter; refuse first, in one line.
@@ -1947,7 +1949,7 @@ def publish_events_dir_location(untracked_dir: Path, events_dir: Path) -> None:
     if not event_socket_dir_is_fallback(untracked_dir):
         location.unlink(missing_ok=True)
         return
-    scratch = location.with_name(location.name + f".{os.getpid()}.tmp")
+    scratch = unique_temp_path(location)
     scratch.write_text(f"{untracked_dir}\n{events_dir}\n")
     scratch.replace(location)
 

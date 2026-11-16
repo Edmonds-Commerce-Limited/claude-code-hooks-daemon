@@ -163,9 +163,7 @@ def test_no_socket_means_no_marker(tmp_path: Path, events_dir: Path) -> None:
     assert f"STDIN={_PAYLOAD}\n" in result.stdout
 
 
-def test_a_worktree_copy_never_dials_the_originals_socket(
-    tmp_path: Path, events_dir: Path
-) -> None:
+def test_a_worktree_copy_never_dials_the_originals_socket(tmp_path: Path, events_dir: Path) -> None:
     """A copy resolves ITS OWN checkout (Plan 00609): the original's socket, named
     here by the events-dir override, is not its socket, so with the override gone
     the copy finds no daemon of its own and sets no marker."""

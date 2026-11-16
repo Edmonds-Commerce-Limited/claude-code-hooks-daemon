@@ -283,6 +283,7 @@ _DEFAULT_RELAY_BINARY_BASH = "$_rl_dir/bin/hooks-relay"
 #: The directory a deployed forwarder lives in, as a segment of its own path.
 _HOOKS_DIR_SEGMENT = "/.claude/hooks/"
 
+
 def _untracked_dir_below_root(untracked_dir: Path, project_root: Path) -> str:
     """The untracked dir as a path relative to the checkout root.
 

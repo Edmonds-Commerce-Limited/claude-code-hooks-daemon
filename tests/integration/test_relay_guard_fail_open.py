@@ -1256,17 +1256,20 @@ def test_stop_events_keep_exit_code_2_contract_even_with_relay_enabled(
 def test_env_override_redirects_relay_away_from_baked_default(
     tmp_path: Path, sock_path: Path, live_pid_file: Path
 ) -> None:
-    """The guard's baked `_rl_dir`/default relay binary point at a location
-    with NO working relay+socket; `HOOKS_DAEMON_EVENTS_DIR` +
-    `HOOKS_DAEMON_RELAY_BINARY` redirect it to a fixture-controlled one, and
-    the relay is genuinely used from there — proving the override actually
-    takes effect at runtime, not just in the generated string."""
-    baked_untracked_dir = tmp_path / "baked-nonexistent" / "untracked"
+    """The guard's run-time-derived `_rl_dir`/default relay binary (under the
+    checkout the wrapper runs from) point at a location with NO working
+    relay+socket; `HOOKS_DAEMON_EVENTS_DIR` + `HOOKS_DAEMON_RELAY_BINARY`
+    redirect it to a fixture-controlled one, and the relay is genuinely used
+    from there — proving the override actually takes effect at runtime, not
+    just in the generated string. The wrapper names no machine path (Plan
+    00609), so the default is the layout below the checkout, which is empty."""
+    default_untracked_dir = tmp_path / "untracked"
     transport = TransportConfig(relay_enabled=True, relay_binary=str(_RELAY_BINARY))
     forwarder = _write_generated_forwarder(
-        tmp_path, "pre-tool-use", "PreToolUse", transport, baked_untracked_dir
+        tmp_path, "pre-tool-use", "PreToolUse", transport, default_untracked_dir
     )
-    assert str(baked_untracked_dir) in forwarder.read_text()
+    assert str(tmp_path) not in forwarder.read_text()
+    assert not default_untracked_dir.exists()
 
     override_events_dir = tmp_path / "override-events"
     override_events_dir.mkdir(parents=True)

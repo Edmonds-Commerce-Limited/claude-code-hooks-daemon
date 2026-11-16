@@ -84,5 +84,10 @@ deploy_all_hooks "{project_root}" "{daemon_dir}" "normal" "{sys.executable}"
 
     assert result.returncode == 0, result.stderr
     deployed = stale.read_text()
-    assert str(events_dir) in deployed
+    # The wrapper is machine independent (Plan 00609): the old baked block is
+    # rewritten away and neither the stale nor the current fallback dir, nor
+    # the checkout root, is written into it.
+    assert "_rl_events_dir=" in deployed
     assert str(stale_dir) not in deployed
+    assert str(events_dir) not in deployed
+    assert str(project_root) not in deployed
