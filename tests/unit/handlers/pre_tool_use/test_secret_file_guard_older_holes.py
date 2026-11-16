@@ -109,3 +109,55 @@ class TestUnit1SearchOptionGrammar:
     )
     def test_twin_over_a_clean_directory_stays_allowed(self, project: Path, command: str) -> None:
         assert _verdict(project, command) is Decision.ALLOW
+
+
+class TestUnit2BareNameAsPatternOrFile:
+    """A bare unindexed name after grep is a file unless positively the pattern operand.
+
+    The whole segment is judged, not the words before the name: a pattern option
+    given after the name, in a cluster, abbreviated, or by ugrep, leaves the name a file.
+    """
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "grep -ezz {A}",
+            "grep --regexp=zz {A}",
+            "grep --reg=zz {A}",
+            "grep -iezz {A}",
+            "grep -fzz {A}",
+            "grep --and=zz {A}",
+            "rg -ezz {A}",
+            "egrep -ezz {A}",
+            "ag -ezz {A}",
+            "grep {A} -e zz",
+            "grep {A} -ezz",
+            "rg {A} -ezz",
+            "ugrep zz {A}",
+            "ug zz {A}",
+            "grep -- -e {A}",
+            "grep zz {A}",
+            "grep -e zz {A}",
+            "cat {A}",
+        ],
+    )
+    def test_name_that_is_a_file_is_denied(self, project: Path, template: str) -> None:
+        assert _verdict(project, template.format(A=_ABSENT)) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "grep zz sub/plain.txt",
+            "grep -e zz sub/plain.txt",
+            "grep {A} sub/plain.txt",
+            "grep -n {A} sub/plain.txt",
+            "grep -i {A} sub/plain.txt",
+            "rg {A} sub",
+            "rg -n {A} sub",
+            "ugrep {A} sub/plain.txt",
+        ],
+    )
+    def test_pattern_spelling_the_name_with_no_file_open_stays_allowed(
+        self, project: Path, template: str
+    ) -> None:
+        assert _verdict(project, template.format(A=_ABSENT)) is Decision.ALLOW
