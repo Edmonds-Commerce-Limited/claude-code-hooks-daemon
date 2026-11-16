@@ -84,6 +84,10 @@ CLEAN_STATES = frozenset(
     {BranchState.MERGED_DEFAULT, BranchState.MERGED_LINE, BranchState.PATCH_EQUIVALENT}
 )
 
+#: States ``--clean --remote`` considers: those plus a park marker over work the default holds,
+#: whose remote delete :func:`prove_remote_merged` accepts (``park-carried``).
+REMOTE_CLEAN_STATES = CLEAN_STATES | {BranchState.PARK_CARRIED}
+
 _UNTRACKED = "untracked"
 
 #: Blocking paths listed per skipped worktree before the rest are counted.
@@ -1094,7 +1098,7 @@ def _proven_remote(
     for name in sorted(records):
         record = records[name]
         if (
-            record.cleanup_state not in CLEAN_STATES
+            record.cleanup_state not in REMOTE_CLEAN_STATES
             or record.remote_tip is None
             or name in spared
             or policy_refusal(name, config, default) is not None
@@ -1202,6 +1206,7 @@ __all__ = [
     "BULK_BATCH_SIZE",
     "CLEAN_STATES",
     "MERGED_TIERS",
+    "REMOTE_CLEAN_STATES",
     "CleanupMode",
     "CleanupReport",
     "clean_sweep",

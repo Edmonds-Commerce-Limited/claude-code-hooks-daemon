@@ -15,8 +15,10 @@ its diff against that merge base, renames off, where every added or modified pat
 has the same blob and mode in the commit's tree and every deleted path is absent.
 That is what a squash merge, a renamed pull request or a cherry-pick leaves
 behind; the content is then permanently in the default's history, so patch-id
-evidence never proves a branch alone, and an empty change (a park branch) proves
-nothing. Every git call runs from the repository top level.
+evidence never proves a branch alone, and an empty change proves nothing, with ONE
+exception decided before the net-change check: a tip whose every commit beyond the default
+is a park marker (``is_park_residue``, the inventory's own rule) is ``park-carried``: the
+work is in the default and the delete loses only the marker. Every git call runs from the repository top level.
 Results are cached by algorithm version, tip and default sha in the inventory
 cache, so the next call is offline and cheap. Then the remote's LIVE tip, read with one batched
 ``git ls-remote`` per chunk, equal to that tracking tip. Every failure, timeout and
@@ -35,6 +37,7 @@ from typing import Final
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.branch_inventory import (
+    is_park_residue,
     merge_proof_key,
     read_merge_proofs,
     write_merge_proofs,
@@ -42,6 +45,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
 from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_CONTENT_PRESERVED,
     TIER_MERGED,
+    TIER_PARK_CARRIED,
     TIER_PATCH_EQUIVALENT,
     TIER_UNPROVEN,
     matches_any_glob,
@@ -409,6 +413,32 @@ def _offline_evidence(
     return found
 
 
+def _park_marked(directory: Path, refnames: list[str]) -> set[str]:
+    """Which of ``refnames`` have a tip carrying a ``Parked-Reason`` trailer: one call.
+
+    Only those can be a park marker, so the walk of :func:`is_park_residue` is paid
+    for no other branch. A failed listing marks nothing, which leaves the branch to
+    the net-change proof (unproven when empty): the safe direction.
+    """
+    if not refnames:
+        return set()
+    listing = run_git(
+        directory,
+        "for-each-ref",
+        "--format=%(refname)%00%(trailers:key=Parked-Reason,valueonly,unfold)",
+        *refnames,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if listing.returncode != 0:
+        return set()
+    marked: set[str] = set()
+    for line in listing.stdout.split("\n"):
+        refname, _, trailer = line.partition("\0")
+        if refname and trailer.strip():
+            marked.add(refname)
+    return marked
+
+
 def _merged_tracking_tips(
     directory: Path, remote: str, names: list[str], default: str, branches: BranchesConfig
 ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
@@ -477,6 +507,17 @@ def _merged_tracking_tips(
             for name in tips
             if name in feature_names and tracking[name] not in proven
         }
+        # A park marker over work the default holds: decided by the inventory's rule,
+        # before the (cached) net-change proof, which reads an empty change as unproven.
+        undecided = [n for n in tips if n in feature_names and tracking[n] not in proven]
+        marked = (
+            _park_marked(directory, [tracking[n] for n in undecided]) if default_targets else set()
+        )
+        for name in [n for n in undecided if tracking[n] in marked]:
+            if any(is_park_residue(directory, tips[name], target) for target in default_targets):
+                proven.add(tracking[name])
+                evidence[name] = TIER_PARK_CARRIED
+                pending.pop(tracking[name], None)
         if pending and default_targets:
             found = _offline_evidence(directory, pending, default_targets, refs)
             for name in tips:

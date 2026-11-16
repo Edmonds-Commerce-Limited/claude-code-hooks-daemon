@@ -108,6 +108,7 @@ class SweepGroups:
     contained_nowhere: tuple[BranchRecord, ...]
     merged: tuple[BranchRecord, ...]
     patch_equivalent: tuple[BranchRecord, ...]
+    park_carried: tuple[BranchRecord, ...]
     dormant: tuple[BranchRecord, ...]
     live: tuple[BranchRecord, ...]
     parked: tuple[BranchRecord, ...]
@@ -130,6 +131,8 @@ def _group_name(record: BranchRecord) -> str:
         return "merged"
     if state == BranchState.PATCH_EQUIVALENT:
         return "patch-equivalent"
+    if state == BranchState.PARK_CARRIED:
+        return "park-carried"
     if state == BranchState.DORMANT:
         if record.containment == Containment.NOWHERE:
             return "contained-nowhere"
@@ -155,6 +158,7 @@ def group_records(inventory: BranchInventory) -> SweepGroups:
         contained_nowhere=take("contained-nowhere"),
         merged=take("merged"),
         patch_equivalent=take("patch-equivalent"),
+        park_carried=take("park-carried"),
         dormant=take("dormant"),
         live=take("live"),
         parked=take("parked"),
@@ -220,7 +224,7 @@ def effective_behind_threshold(config: BranchesConfig, legacy_options: Mapping[s
 
 def _far_behind(inventory: BranchInventory, threshold: int) -> list[BranchRecord]:
     """Unmerged work branches more than ``threshold`` commits behind the default."""
-    done = _NEVER_WORK | _MERGED | {BranchState.PATCH_EQUIVALENT}
+    done = _NEVER_WORK | _MERGED | {BranchState.PATCH_EQUIVALENT, BranchState.PARK_CARRIED}
     return [
         inventory.records[name]
         for name in sorted(inventory.records)
@@ -308,14 +312,23 @@ def _done_line(
     config: BranchesConfig,
     remote_proven: frozenset[str],
 ) -> str:
+    carried = record.state == BranchState.PARK_CARRIED
     verb = "patch-equivalent to" if record.state == BranchState.PATCH_EQUIVALENT else "merged into"
+    if carried:
+        verb = "work already in"
     proof = f" (proven by {record.proven_by})" if record.proven_by else ""
-    return (
-        f"  {record.name}: {verb} {record.merged_into}{proof}, {_age(record)}{_where(record)}"
-        f"{_keep_text(record, config)}"
-        f"\n      {delete_action(record, inventory, config, remote_proven)}"
-        f"\n      keep it instead: {daemon_cli_command_for_docs('branch-keep')} "
+    reason = f", park reason: {record.parked_reason}" if carried and record.parked_reason else ""
+    marker = " (only the empty park marker is ahead)" if carried else ""
+    keep = (
+        ""
+        if carried
+        else f"\n      keep it instead: {daemon_cli_command_for_docs('branch-keep')} "
         f"{record.name} --reason ..."
+    )
+    return (
+        f"  {record.name}: {verb} {record.merged_into}{marker}{proof}, "
+        f"{_age(record)}{_where(record)}{reason}{_keep_text(record, config)}"
+        f"\n      {delete_action(record, inventory, config, remote_proven)}{keep}"
     )
 
 
@@ -486,6 +499,14 @@ def render_report(
         _with_clean_line(
             [_done_line(r, inventory, config, remote_proven) for r in groups.patch_equivalent],
             remote=False,
+        ),
+    )
+    out += _section(
+        "Park-carried (a park marker over work the default already holds; in no pool, "
+        "and the delete below loses only the marker):",
+        _with_clean_line(
+            [_done_line(r, inventory, config, remote_proven) for r in groups.park_carried],
+            remote=any(r.remote_tip is not None for r in groups.park_carried),
         ),
     )
     out += _section("Dormant:", _dormant_section(groups.dormant))

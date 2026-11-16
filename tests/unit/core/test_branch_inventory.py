@@ -382,8 +382,10 @@ class TestParkCommits:
     def test_park_commit_does_not_make_a_merged_branch_unique(
         self, inventory: BranchInventory
     ) -> None:
+        # Only the empty park marker is ahead: the work is in the default, so the
+        # branch is in no pool (park-carried), and it is never unique work.
         record = inventory.records["parked-merged"]
-        assert record.state == BranchState.MERGED_DEFAULT
+        assert record.state == BranchState.PARK_CARRIED
         assert record.ahead == 0
 
 

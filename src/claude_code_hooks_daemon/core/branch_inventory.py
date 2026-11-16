@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 #: Repository-relative path of the per-pair cache.
 CACHE_RELATIVE_PATH = Path("untracked/branch-inventory/cache.json")
 #: Containment never counts tags; a version-2 entry may hold a tag's vouch.
-_CACHE_VERSION = 3
+_CACHE_VERSION = 4
 
 _SECONDS_PER_DAY = 86_400
 _REFS = "refs/"
@@ -154,6 +154,9 @@ class BranchState(StrEnum):
     MERGED_DEFAULT = "merged"
     MERGED_LINE = "merged-into-line"
     PATCH_EQUIVALENT = "patch-equivalent"
+    #: A park marker (an empty ``Parked-*`` commit) over work the default already holds:
+    #: nothing is unique but the marker, so it is in no pool and its delete is proven.
+    PARK_CARRIED = "park-carried"
     PARKED = "parked"
     DORMANT = "dormant"
     LIVE = "live"
@@ -165,6 +168,7 @@ _DONE_RANK = {
     BranchState.MERGED_DEFAULT: 0,
     BranchState.MERGED_LINE: 1,
     BranchState.PATCH_EQUIVALENT: 2,
+    BranchState.PARK_CARRIED: 3,
 }
 
 
@@ -191,6 +195,21 @@ _POOL_OF_STATE = {
 def pool_of(state: BranchState) -> Pool | None:
     """The pool of a record in ``state``; None for a branch that is never work."""
     return _POOL_OF_STATE.get(state)
+
+
+def pool_for_ref(*, merged: bool, park_carried: bool, parked: bool) -> Pool | None:
+    """The pool of one ref from its facts: the rule the creation guard and the sweep share.
+
+    A park marker over work the default holds is in no pool (None); a ref the
+    default holds is MERGED; a park trailer on a tip nothing else holds is PARKED;
+    anything else is open work. :func:`pool_of` is this rule applied to a state, and
+    a test pins the two together.
+    """
+    if park_carried:
+        return None
+    if merged:
+        return Pool.MERGED
+    return Pool.PARKED if parked else Pool.OPEN
 
 
 class DormancyStage(StrEnum):
@@ -323,6 +342,8 @@ class _PairFacts:
     unique: int
     merges: int
     lines: int | None
+    #: Park commits in the range (they are not in ``ahead``).
+    parks: int = 0
 
 
 @dataclass
@@ -605,7 +626,9 @@ def _pair_facts(
         return None
     ahead = len(walked.commits) - len(walked.parks)
     if ahead == 0:
-        return _PairFacts(ahead=0, unique=0, merges=0, lines=0 if want_lines else None)
+        return _PairFacts(
+            ahead=0, unique=0, merges=0, lines=0 if want_lines else None, parks=len(walked.parks)
+        )
     if _has_no_merge_base(repo, target, tip):
         # Nothing is shared with the target, so nothing in the tip can be a patch the
         # target already holds: git cherry would compare against the target's whole
@@ -615,7 +638,9 @@ def _pair_facts(
         lines = _empty_tree_lines(repo, tip) if want_lines else None
         if want_lines and lines is None:
             return None
-        return _PairFacts(ahead=ahead, unique=ahead, merges=walked.merges, lines=lines)
+        return _PairFacts(
+            ahead=ahead, unique=ahead, merges=walked.merges, lines=lines, parks=len(walked.parks)
+        )
     unique = branch_safety.cherry_unique_shas(repo, target, tip, timeout=_GIT_TIMEOUT)
     if unique is None:
         return None
@@ -623,8 +648,35 @@ def _pair_facts(
     if want_lines and lines is None:
         return None
     return _PairFacts(
-        ahead=ahead, unique=len(set(unique) - walked.parks), merges=walked.merges, lines=lines
+        ahead=ahead,
+        unique=len(set(unique) - walked.parks),
+        merges=walked.merges,
+        lines=lines,
+        parks=len(walked.parks),
     )
+
+
+def is_park_residue(repo: Path, tip: str, target: str) -> bool:
+    """Whether ``tip`` differs from ``target`` ONLY by park commits (at least one).
+
+    The one test for a park marker over work the target already holds: every commit
+    in ``target..tip`` is an empty commit carrying a ``Parked-*`` or ``Unparked``
+    trailer, so deleting the ref loses the marker and nothing else. False on any git
+    failure (fail closed) and for a tip with no park commit.
+    """
+    keys = ",".join(f"key={key}" for key in _PARK_TRAILER_KEYS)
+    log = run_git(
+        repo,
+        "log",
+        "--boundary",
+        f"--format=%m%x1f%H%x1f%T%x1f%P%x1f%(trailers:{keys},valueonly,unfold,separator=%x1d)",
+        f"{target}..{tip}",
+        timeout=_GIT_TIMEOUT,
+    )
+    if log.returncode != 0:
+        return False
+    walked = _park_shas(log.stdout)
+    return walked is not None and bool(walked.parks) and len(walked.commits) == len(walked.parks)
 
 
 # --- never-work names ---------------------------------------------------------------
@@ -831,7 +883,10 @@ def _facts_from_cache(entry: dict[str, Any] | None) -> _PairFacts | None:
         return None
     if lines is not None and not isinstance(lines, int):
         return None
-    return _PairFacts(ahead=ahead, unique=unique, merges=merges, lines=lines)
+    parks = entry.get("parks")
+    if not isinstance(parks, int):
+        return None
+    return _PairFacts(ahead=ahead, unique=unique, merges=merges, lines=lines, parks=parks)
 
 
 # --- links ----------------------------------------------------------------------------
@@ -942,6 +997,7 @@ class _Pass:
                 "unique": computed.unique,
                 "merges": computed.merges,
                 "lines": computed.lines,
+                "parks": computed.parks,
             }
         return computed
 
@@ -1286,6 +1342,10 @@ def _tip_verdict(run: _Pass, context: _Context, row: _RefRow) -> _Verdict:
     contained_by = next((t for t, f in facts if f.ahead == 0), None)
     if contained_by is not None:
         state = BranchState.MERGED_DEFAULT if contained_by.is_default else BranchState.MERGED_LINE
+        carried = next((f for t, f in facts if t is contained_by), None)
+        if contained_by.is_default and carried is not None and carried.parks:
+            # Not an ancestor, yet nothing but park markers is ahead: the work is in the default.
+            state = BranchState.PARK_CARRIED
         return _Verdict(state, contained_by.name, contained_by.ref, ahead, lines)
     # A merge commit can carry content no patch-id shows, so it is never equivalent.
     equivalent = next((t for t, f in facts if f.unique == 0 and f.merges == 0), None)
