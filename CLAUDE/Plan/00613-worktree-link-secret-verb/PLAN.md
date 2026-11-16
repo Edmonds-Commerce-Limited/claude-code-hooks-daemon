@@ -1,6 +1,6 @@
 # Plan 00613: worktree link secret verb
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-16
 **Owner**: joseph
 **Priority**: Medium
@@ -43,7 +43,9 @@ own worktree files came from a peer and is not verified here.
 
 ### Phase 1: Design and owner decision
 
-- [ ] ⬜ **Task 1.1**: Establish by running whether a symlink inside a worktree to
+- [x] ✅ **Task 1.1**: (Done: three gaps found, report in
+  `subagent-reports/261116-symlink-resolution.md`, fixed under Plan 00614.)
+  Establish by running whether a symlink inside a worktree to
   a protected primary-checkout file is judged by the guard on its RESOLVED path
   when read through the link (`Read`, `cat`, `grep`, an interpreter one-liner).
   If it is not, the verb opens a hole and the guard must resolve links first.
