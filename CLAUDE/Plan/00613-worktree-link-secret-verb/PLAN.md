@@ -49,7 +49,8 @@ own worktree files came from a peer and is not verified here.
   a protected primary-checkout file is judged by the guard on its RESOLVED path
   when read through the link (`Read`, `cat`, `grep`, an interpreter one-liner).
   If it is not, the verb opens a hole and the guard must resolve links first.
-- [ ] ⬜ **Task 1.2**: Write DESIGN.md: the threat model, the verb's argument
+- [x] ✅ **Task 1.2**: (Done: [DESIGN.md](DESIGN.md); recommends the shipped
+  config seed list over a new verb, gated on Plan 00614.) Write DESIGN.md: the threat model, the verb's argument
   checks, how the protected set is read (never its content), and the owner
   question: is a link acceptable, and is the instruction from the owner
   verified in a human line of the team history.
