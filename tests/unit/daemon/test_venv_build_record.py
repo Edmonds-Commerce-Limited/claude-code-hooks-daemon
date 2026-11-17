@@ -127,6 +127,26 @@ class TestBuildResult:
     def test_no_record_reads_as_none(self, tmp_path: Path) -> None:
         assert read_build_result(tmp_path) is None
 
+    def test_a_record_that_vanishes_after_the_listing_is_skipped(self, tmp_path: Path) -> None:
+        """T-9: the glob lists a record another process removes before it is stat'ed."""
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        write_build_result(tmp_path, "kept", "failed", 2, tmp_path / "kept.log")
+        # A dangling link is listed by the glob and raises FileNotFoundError on stat.
+        (untracked / ".venv-bootstrap-gone.result").symlink_to(untracked / "nowhere")
+
+        result = read_build_result(tmp_path)
+
+        assert result is not None
+        assert result.result == "failed"
+
+    def test_only_vanished_records_read_as_none(self, tmp_path: Path) -> None:
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        (untracked / ".venv-bootstrap-gone.result").symlink_to(untracked / "nowhere")
+
+        assert read_build_result(tmp_path) is None
+
     def test_a_record_the_bash_writer_made_is_read(self, tmp_path: Path) -> None:
         untracked = tmp_path / "untracked"
         untracked.mkdir()
