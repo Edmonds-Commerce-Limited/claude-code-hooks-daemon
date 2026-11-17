@@ -43,10 +43,10 @@ def _refuse_unlistable(error: OSError) -> None:
     ) from error
 
 
-#: ``git``'s messages when the tree is outside any repository, which has no ignore
-#: rules. Exit status 128 is git's status for EVERY fatal error, so the message,
-#: read in the C locale, is what tells this case from a corrupt index or a bad
-#: ``.git``. Standard library only (a bare python3 loads this module), so this
+#: ``git``'s messages when the tree has no repository (outside any, or a ``.git``
+#: file naming none), which has no ignore rules. Exit status 128 is git's status
+#: for EVERY fatal error, so the message, read in the C locale, is what tells
+#: this case from a corrupt index or another fatal error. Standard library only (a bare python3 loads this module), so this
 #: module keeps its own spawn and bound rather than the package's ``run_git``.
 _NOT_A_REPOSITORY_MESSAGES = (
     "not a git repository",

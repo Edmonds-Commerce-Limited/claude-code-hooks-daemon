@@ -55,8 +55,9 @@ _REASON_KEY = "hooksDaemonParkedReason"
 _AT_KEY = "hooksDaemonParkedAt"
 _BY_KEY = "hooksDaemonParkedBy"
 _RECORD_KEYS = (_SHA_KEY, _REASON_KEY, _AT_KEY, _BY_KEY)
-#: A parked-at value ``int()`` reads: an optional sign, then digits.
-_INTEGER = re.compile(r"[+-]?\d+")
+#: A parked-at epoch: an optional sign, then at most 18 ASCII digits, which
+#: ``int()`` always reads (it refuses a string past 4300 digits).
+_INTEGER = re.compile(r"[+-]?[0-9]{1,18}")
 
 
 class BranchParkError(Exception):

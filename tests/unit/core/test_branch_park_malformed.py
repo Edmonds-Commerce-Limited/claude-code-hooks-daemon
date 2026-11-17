@@ -65,6 +65,13 @@ def test_read_is_no_record_not_a_value_error(repo: Path) -> None:
     assert read_park_record(repo, "feat") is None
 
 
+def test_a_parked_at_too_long_for_int_is_no_record(repo: Path) -> None:
+    """``int()`` refuses a string past 4300 digits; that must not escape the read."""
+    _malformed_park(repo, "feat")
+    _git(repo, "config", "branch.feat.hooksDaemonParkedAt", "9" * 5000)
+    assert read_park_record(repo, "feat") is None
+
+
 def test_creation_guard_still_counts_the_branch_and_does_not_raise(repo: Path) -> None:
     _malformed_park(repo, "feat")
     cfg = BranchesConfig(default="main")
