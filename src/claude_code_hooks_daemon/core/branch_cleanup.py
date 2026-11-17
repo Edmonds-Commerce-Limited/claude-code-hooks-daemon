@@ -558,18 +558,26 @@ def preview_paths(paths: Sequence[str]) -> str:
     return f"{shown} and {rest} more" if rest > 0 else shown
 
 
-def remote_delete_advice(repo: Path, config: BranchesConfig, default: str, name: str) -> str | None:
+def remote_delete_advice(
+    repo: Path, config: BranchesConfig, default: str, name: str, *, prove: bool = True
+) -> str | None:
     """What to tell a person about the remote copy of ``name``, when the remote holds one.
 
     The runnable delete line only when the remote-delete guard's own proof
     (:func:`prove_remote_merged`) accepts the branch, so a printed command is one the
     guard allows. Otherwise owner-only wording, which is advice and not a command.
+
+    ``prove=False`` is for a hook path, where the proof's ``ls-remote`` and history
+    walks are too slow and need the network: the line is then owner-only wording that
+    points at the sweep, which does prove and delete. The guard is not involved.
     """
     remote = config.remote
     if not _ref_exists(repo, f"refs/remotes/{remote}/{name}"):
         return None
     problem = named_ref_problem(remote, name, default, config)
-    if problem is None:
+    if problem is None and not prove:
+        problem = f"run `{sweep_clean_command(remote=True)}` to prove and delete it"
+    elif problem is None:
         proof = prove_remote_merged(repo, remote, [name], default, config)
         problem = proof.problems.get(name)
         if problem is None and name in proof.tips:
@@ -709,7 +717,7 @@ def cleanup_after_merge(
             park_cleared += _clear_parks(repo, [name], before)
             deleted.append(name)
             commands.append(f"git branch {name} {verdict.tip}")
-        remote = remote_delete_advice(repo, config, protected_default, name)
+        remote = remote_delete_advice(repo, config, protected_default, name, prove=False)
         if remote is not None:
             commands.append(remote)
     return CleanupReport(
@@ -783,7 +791,7 @@ def delete_if_merged(
         return CleanupReport(skipped=tuple(f"{name}: {b}" for b in report.blockers))
     park_cleared = _clear_parks(repo, [name], before)
     commands = [f"git branch {name} {verdict.tip}"]
-    remote = remote_delete_advice(repo, config, default, name)
+    remote = remote_delete_advice(repo, config, default, name, prove=False)
     if remote is not None:
         commands.append(remote)
     return CleanupReport(deleted=(name,), commands=tuple(commands), park_cleared=park_cleared)
