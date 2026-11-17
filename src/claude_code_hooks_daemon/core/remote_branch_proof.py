@@ -217,7 +217,9 @@ class _PathChange:
     blob: str
 
 
-def _net_change(directory: Path, base: str, tracking_ref: str) -> list[_PathChange]:
+def _net_change(
+    directory: Path, base: str, tracking_ref: str, *, timeout: float
+) -> list[_PathChange]:
     """The branch's net change: ``git diff --raw -z --no-renames`` of base to tip.
 
     Raises:
@@ -234,7 +236,7 @@ def _net_change(directory: Path, base: str, tracking_ref: str) -> list[_PathChan
         "--no-ext-diff",
         base,
         tracking_ref,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=timeout,
     )
     if raw.returncode != 0:
         raise ProofUnavailableError(f"git diff failed for {tracking_ref}")
@@ -251,7 +253,9 @@ def _net_change(directory: Path, base: str, tracking_ref: str) -> list[_PathChan
     return changes
 
 
-def _tree_entries(directory: Path, commit: str, paths: list[str]) -> dict[str, tuple[str, str]]:
+def _tree_entries(
+    directory: Path, commit: str, paths: list[str], *, timeout: float
+) -> dict[str, tuple[str, str]]:
     """Map path to ``(mode, blob)`` as ``commit``'s tree holds it, for the paths it has.
 
     ``directory`` is the repository top level, so the root-relative paths of
@@ -270,7 +274,7 @@ def _tree_entries(directory: Path, commit: str, paths: list[str]) -> dict[str, t
             commit,
             "--",
             *paths[start : start + _LS_TREE_CHUNK],
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=timeout,
         )
         if listing.returncode != 0:
             raise ProofUnavailableError(f"git ls-tree failed for {commit}")
@@ -282,9 +286,11 @@ def _tree_entries(directory: Path, commit: str, paths: list[str]) -> dict[str, t
     return held
 
 
-def _tree_holds(directory: Path, commit: str, changes: list[_PathChange]) -> bool:
+def _tree_holds(
+    directory: Path, commit: str, changes: list[_PathChange], *, timeout: float
+) -> bool:
     """Whether ``commit``'s tree holds every change: same blob and mode, deletions absent."""
-    held = _tree_entries(directory, commit, [change.path for change in changes])
+    held = _tree_entries(directory, commit, [change.path for change in changes], timeout=timeout)
     return all(
         (
             change.path not in held
@@ -295,7 +301,9 @@ def _tree_holds(directory: Path, commit: str, changes: list[_PathChange]) -> boo
     )
 
 
-def _touching_commits(directory: Path, base: str, target: str, paths: list[str]) -> list[str]:
+def _touching_commits(
+    directory: Path, base: str, target: str, paths: list[str], *, timeout: float
+) -> list[str]:
     """The first-parent commits in ``base..target`` that touched any of ``paths``.
 
     Raises:
@@ -312,7 +320,7 @@ def _touching_commits(directory: Path, base: str, target: str, paths: list[str])
             f"{base}..{target}",
             "--",
             *paths[start : start + _LS_TREE_CHUNK],
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=timeout,
         )
         if listing.returncode != 0:
             raise ProofUnavailableError(f"git log failed for {target}")
@@ -320,8 +328,13 @@ def _touching_commits(directory: Path, base: str, target: str, paths: list[str])
     return list(commits)
 
 
-def _holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
+def holds_net_change(
+    directory: Path, target: str, tracking_ref: str, *, timeout: float = Timeout.GIT_CONTEXT
+) -> bool:
     """Whether the default's first-parent history holds the whole net change of the branch.
+
+    Shared with ``branch_safety``'s local ``content-preserved`` tier, so a local and a
+    remote delete rest on the same per-path proof (Plan 00618 B-1).
 
     The net change is the branch's diff against ``merge-base(target, tip)``. It is
     held by a commit whose tree has every added or modified path at the same blob
@@ -334,42 +347,45 @@ def _holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
     change (empty commits, or changes that cancel out). The default's history is
     read from the local refs: the live remote check covers the deleted branch's
     tip, not the default's, so a squash only on an unpushed local default proves.
+    ``timeout`` is each git call's budget: the hook-context default here, the
+    load-scaled branch-safety budget from ``delete-branch``. A timeout is a failure.
 
     Raises:
         ProofUnavailableError: git failed, so there is no answer to cache.
     """
-    base = run_git(directory, "merge-base", target, tracking_ref, timeout=Timeout.GIT_CONTEXT)
+    base = run_git(directory, "merge-base", target, tracking_ref, timeout=timeout)
     if base.returncode == _NO_MERGE_BASE:
         return False
     if base.returncode != 0:
         raise ProofUnavailableError(f"git merge-base failed for {tracking_ref}")
     merge_base = base.stdout.strip()
-    changes = _net_change(directory, merge_base, tracking_ref)
+    changes = _net_change(directory, merge_base, tracking_ref, timeout=timeout)
     if not changes or len(changes) > MAX_PROOF_PATHS:
         return False
-    if _tree_holds(directory, target, changes):
+    if _tree_holds(directory, target, changes, timeout=timeout):
         return True
-    candidates = _touching_commits(directory, merge_base, target, [c.path for c in changes])
+    paths = [c.path for c in changes]
+    candidates = _touching_commits(directory, merge_base, target, paths, timeout=timeout)
     if len(candidates) > MAX_PROOF_CANDIDATES:
         return False
-    return any(_tree_holds(directory, commit, changes) for commit in candidates)
+    return any(_tree_holds(directory, commit, changes, timeout=timeout) for commit in candidates)
 
 
 def _judge_offline(directory: Path, tracking_ref: str, targets: list[str]) -> str:
     """The tier that proves one tracking ref merged into a default ref, or ``unproven``.
 
-    The default's history must hold the branch's net change (:func:`_holds_net_change`):
+    The default's history must hold the branch's net change (:func:`holds_net_change`):
     that check comes FIRST and alone decides, so neither patch-id evidence nor an
     empty commit on main can prove a branch.
     The tier only names how the change got there: ``patch-equivalent`` when every
     commit has its patch in the default, else ``content-preserved`` (a squash). It is
-    not ``branch_safety``'s local-delete tier, which proves only recoverability.
+    the same proof ``branch_safety``'s local ``content-preserved`` tier requires.
 
     Raises:
         ProofUnavailableError: git failed, so there is no answer to cache.
     """
     for target in targets:
-        if not _holds_net_change(directory, target, tracking_ref):
+        if not holds_net_change(directory, target, tracking_ref):
             continue
         equivalent, count = patch_equivalent(directory, target, tracking_ref)
         if count is None:

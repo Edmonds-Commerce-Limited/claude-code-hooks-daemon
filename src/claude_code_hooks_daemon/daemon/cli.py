@@ -32,6 +32,7 @@ import fcntl
 import importlib.util
 import json
 import logging
+import math
 import os
 import platform
 import shutil
@@ -2345,6 +2346,21 @@ def _positive_int(text: str) -> int:
         raise argparse.ArgumentTypeError(f"expected a whole number, got {text!r}") from error
     if value < 1:
         raise argparse.ArgumentTypeError(f"expected at least 1, got {value}")
+    return value
+
+
+def _positive_seconds(text: str) -> float:
+    """An argparse type: a finite number of seconds above zero.
+
+    Zero makes a watch loop call the daemon back to back, and a negative value
+    crashes ``time.sleep`` after the first line (Plan 00618 N-16).
+    """
+    try:
+        value = float(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"expected a number of seconds, got {text!r}") from error
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError(f"expected a finite number above 0, got {text!r}")
     return value
 
 
@@ -11840,7 +11856,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_session_state.add_argument(
         "--interval",
-        type=float,
+        type=_positive_seconds,
         default=2.0,
         help="Seconds between checks for --watch (default 2)",
     )
