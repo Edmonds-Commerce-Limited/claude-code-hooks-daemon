@@ -54,6 +54,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
 from claude_code_hooks_daemon.utils.long_running_command import (
     DEFAULT_THRESHOLD_SECONDS,
@@ -282,7 +283,14 @@ class LongRunningCommandGuardHandler(PreToolUseHandlerBase):
                 exempt_patterns=exempt,
             )
         except ValueError as exc:
-            logger.warning("long_running_command_guard: %s; its exemptions are dropped", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "long_running_command_guard: an invalid pattern drops every exemption, "
+                    "which only makes the guard stricter"
+                ),
+            )
         # No exemption survives a bad pattern (that would loosen the guard); the
         # extra slow patterns are kept when they are themselves valid.
         try:

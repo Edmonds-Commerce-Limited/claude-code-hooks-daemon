@@ -18,10 +18,10 @@ A park with no commit is local to this clone: no other checkout can see it.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_config_write import (
@@ -55,6 +55,8 @@ _REASON_KEY = "hooksDaemonParkedReason"
 _AT_KEY = "hooksDaemonParkedAt"
 _BY_KEY = "hooksDaemonParkedBy"
 _RECORD_KEYS = (_SHA_KEY, _REASON_KEY, _AT_KEY, _BY_KEY)
+#: A parked-at value ``int()`` reads: an optional sign, then digits.
+_INTEGER = re.compile(r"[+-]?\d+")
 
 
 class BranchParkError(Exception):
@@ -144,12 +146,10 @@ def _record_from_fields(name: str, found: dict[str, str]) -> ParkRecord | None:
     if any(leaf not in found for leaf in leaves):
         return None
     sha, reason, at, by = (found[leaf] for leaf in leaves)
-    try:
-        parked_at = int(at.strip())
-    except ValueError:
+    if _INTEGER.fullmatch(at.strip()) is None:
         logger.warning("park record of %s has a non-integer %s; ignored", name, _AT_KEY)
         return None
-    return ParkRecord(sha.strip(), reason.strip(), parked_at, by.strip())
+    return ParkRecord(sha.strip(), reason.strip(), int(at.strip()), by.strip())
 
 
 def clear_park_record(repo: Path, name: str) -> ParkRecord | None:
@@ -300,19 +300,19 @@ def _record_park(repo: Path, name: str, sha: str, reason: str, *, clear: bool) -
 
 def _restore_tip(
     repo: Path, ref: str, name: str, old: str, new: str, cause: BranchParkError
-) -> NoReturn:
-    """Move ``ref`` back to ``old`` after its record could not be written, then raise.
+) -> BranchParkError:
+    """Move ``ref`` back to ``old`` after its record could not be written; the error to raise.
 
     The park commit has already moved the branch; without a record the park does
     not stand, so the error's "nothing changed" has to be made true.
     """
     back = run_git(repo, "update-ref", ref, old, new)
     if back.returncode != 0:
-        raise BranchParkError(
+        return BranchParkError(
             f"{name} was moved to the park commit {new} but its record could not be written "
             f"({cause}) and the branch could not be moved back: {back.stderr.strip()}"
-        ) from cause
-    raise BranchParkError(f"{cause}; the branch was put back, nothing changed") from cause
+        )
+    return BranchParkError(f"{cause}; the branch was put back, nothing changed")
 
 
 def _park_remote_only(
@@ -439,7 +439,7 @@ def park_branch(
     try:
         _record_park(repo, name, new, stripped, clear=clear)
     except BranchParkError as exc:
-        _restore_tip(repo, ref, name, old, new, exc)
+        raise _restore_tip(repo, ref, name, old, new, exc) from exc
     if not push:
         return ParkResult(new, False, None, None, local_only=True)
     retry = f"git push {remote} {name}"

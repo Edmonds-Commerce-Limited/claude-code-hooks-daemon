@@ -132,6 +132,18 @@ class TestGitFatalExit:
 
         assert walk_files(tmp_path, "*.py") == [tmp_path / "a.py"]
 
+    def test_a_git_file_naming_no_repository_means_no_ignore_rules(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Git 2.47 says 'not a git repository: <dir>' here; newer git says this."""
+        _touch(tmp_path / "a.py")
+        self._git_says(
+            monkeypatch,
+            f"fatal: gitfile does not point to a valid repository: {tmp_path / '.git'}",
+        )
+
+        assert walk_files(tmp_path, "*.py") == [tmp_path / "a.py"]
+
     def test_git_is_asked_in_the_c_locale_so_its_message_can_be_recognised(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

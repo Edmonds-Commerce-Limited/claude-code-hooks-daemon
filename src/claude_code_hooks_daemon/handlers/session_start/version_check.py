@@ -150,8 +150,12 @@ class VersionCheckHandler(SessionStartHandlerBase):
         if isinstance(ttl_hours, int | float | str):
             try:
                 return int(ttl_hours) * _SECONDS_PER_HOUR
-            except (ValueError, OverflowError):
-                pass
+            except (ValueError, OverflowError) as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="version_check cache_ttl_hours is not a whole number; the default TTL applies",
+                )
         return _DEFAULT_CACHE_TTL_HOURS * _SECONDS_PER_HOUR
 
     def _is_cache_valid(self, cache_file: Path) -> bool:

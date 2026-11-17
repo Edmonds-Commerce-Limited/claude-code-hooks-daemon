@@ -34,7 +34,7 @@ import os
 import shutil
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -230,12 +230,11 @@ def _latest_result_path(project_root: Path) -> Path | None:
     """
     newest: tuple[float, Path] | None = None
     for record in (project_root / "untracked").glob(_RESULT_GLOB):
-        try:
+        # Removed between the listing and this stat: it is not a record.
+        with suppress(FileNotFoundError):
             modified = record.stat().st_mtime
-        except FileNotFoundError:
-            continue  # removed between the listing and this stat: it is not a record
-        if newest is None or modified > newest[0]:
-            newest = (modified, record)
+            if newest is None or modified > newest[0]:
+                newest = (modified, record)
     return None if newest is None else newest[1]
 
 
