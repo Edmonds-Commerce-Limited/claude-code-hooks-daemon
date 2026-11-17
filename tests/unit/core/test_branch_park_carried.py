@@ -455,3 +455,15 @@ class TestJsonAction:
         assert row["action"] is not None
         text = "\n".join(branch_sweep.render_report(inventory, config, cap=10))
         assert row["action"] in text
+
+
+class TestOwnershipHint:
+    """The owned-branch hint follows every actionable group, park-carried included."""
+
+    def test_a_park_carried_branch_alone_earns_the_hint(self, repo: Path) -> None:
+        _parked_over_merged(repo, "carried-hint")
+        _git(repo, "fetch", "-q", "--prune", "origin")
+        config = _config()
+        inventory = _inventory(repo, config)
+        lines = branch_sweep.render_report(inventory, config, cap=10, ownership_hints=True)
+        assert branch_sweep.HINT_TEXT[branch_sweep.OwnershipHint.BRANCH_OWNED] in lines
