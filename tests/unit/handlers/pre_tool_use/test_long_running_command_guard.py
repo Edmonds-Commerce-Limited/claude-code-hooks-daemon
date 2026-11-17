@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 from typing import Any
 
@@ -281,3 +283,58 @@ class TestDocumentationSurface:
         for test in handler.get_acceptance_tests():
             assert test.harness_cannot_produce, test.title
             assert "main thread" in test.harness_cannot_produce
+
+
+class TestExactBackgroundForm:
+    """N-13: the form offered back must be the command, never a cut of it."""
+
+    @staticmethod
+    def _offered(reason: str) -> dict[str, Any]:
+        line = next(
+            ln.strip() for ln in reason.splitlines() if ln.strip().startswith('{"command"')
+        )
+        offered: dict[str, Any] = json.loads(line)
+        return offered
+
+    def test_long_command_is_offered_whole(self, handler: LongRunningCommandGuardHandler) -> None:
+        command = "pytest " + " ".join(f"tests/unit/test_module_{n}.py" for n in range(30))
+        assert len(command) > 240
+        reason = handler.handle(_input(command)).reason or ""
+        assert self._offered(reason) == {"command": command, "run_in_background": True}
+
+    def test_oversized_command_is_never_offered_cut(
+        self, handler: LongRunningCommandGuardHandler
+    ) -> None:
+        command = "pytest " + "tests/unit/x.py " * 500
+        reason = handler.handle(_input(command)).reason or ""
+        assert len(reason) < 3000
+        assert "run_in_background" in reason
+        assert '{"command"' not in reason
+        assert ' ..."' not in reason
+
+
+class TestBadPolicyRegexIsLogged:
+    """N-14: a bad regex falls back loudly, and keeps what is still valid."""
+
+    def test_bad_exempt_pattern_is_logged_and_keeps_valid_slow_pattern(
+        self, handler: LongRunningCommandGuardHandler, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        handler._extra_slow_patterns = [r"^deploy\.sh\b"]
+        handler._exempt_patterns = ["(unclosed"]
+        with caplog.at_level(logging.WARNING):
+            assert handler.matches(_input("./deploy.sh prod")) is True
+        assert "exempt_patterns" in caplog.text
+
+    def test_bad_slow_pattern_is_logged(
+        self, handler: LongRunningCommandGuardHandler, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        handler._extra_slow_patterns = ["(unclosed"]
+        with caplog.at_level(logging.WARNING):
+            assert handler.matches(_input("sleep 60")) is True
+        assert "extra_slow_patterns" in caplog.text
+
+    def test_bad_exempt_pattern_never_exempts(
+        self, handler: LongRunningCommandGuardHandler
+    ) -> None:
+        handler._exempt_patterns = [r"^pytest tests/unit -q$", "(unclosed"]
+        assert handler.matches(_input(PYTEST_COMMAND)) is True

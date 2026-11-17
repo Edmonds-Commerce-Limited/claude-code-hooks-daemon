@@ -220,3 +220,52 @@ class TestFindingDetail:
     def test_findings_are_deduplicated(self) -> None:
         findings = classify("pytest a; pytest b", POLICY)
         assert len(findings) == len(set(findings))
+
+
+#: Shapes the classifier read as short or harmless although they block the session.
+MISSED_SHAPES: list[tuple[str, FindingKind]] = [
+    # N-11: a trailing `&` backgrounds only the last statement of a `;` list.
+    ("sleep 300; echo x &", FindingKind.LONG_SLEEP),
+    ("pytest tests/; true &", FindingKind.SLOW_COMMAND),
+    ("sleep 300\necho x &", FindingKind.LONG_SLEEP),
+    ("sleep 5 & sleep 100 && echo x &", FindingKind.LONG_SLEEP),
+    # N-12: never-ending and wrapped long shapes.
+    ("tail -f log", FindingKind.SLOW_COMMAND),
+    ("tail -n 5 -F log", FindingKind.SLOW_COMMAND),
+    ("tail --follow=name log", FindingKind.SLOW_COMMAND),
+    ("sleep infinity", FindingKind.LONG_SLEEP),
+    ('bash -c "sleep 100"', FindingKind.LONG_SLEEP),
+    ("sh -c 'pytest tests/unit'", FindingKind.SLOW_COMMAND),
+    ("(sleep 100)", FindingKind.LONG_SLEEP),
+    ("( pytest tests/unit )", FindingKind.SLOW_COMMAND),
+    ("sleep 100 & wait", FindingKind.SLOW_COMMAND),
+    # T-13: a leading redirect does not hide the command.
+    (">out.txt pytest tests/", FindingKind.SLOW_COMMAND),
+    ("> out.txt pytest tests/", FindingKind.SLOW_COMMAND),
+    ("2>err.txt sleep 100", FindingKind.LONG_SLEEP),
+]
+
+
+@pytest.mark.parametrize(("command", "kind"), MISSED_SHAPES)
+def test_missed_shape_is_found(command: str, kind: FindingKind) -> None:
+    assert kind in {finding.kind for finding in classify(command, POLICY)}
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "(sleep 2)",
+        "sleep 100 &",
+        "(sleep 100) &",
+        "echo a; sleep 100 &",
+        "pytest tests/ && echo done &",
+        "pytest tests/ | cat &",
+        "tail -f log &",
+        "timeout 20 tail -f log",
+        "tail -n 5 log",
+        "bash -c 'git status'",
+    ],
+)
+def test_still_allowed_after_the_corrections(command: str) -> None:
+    kinds = {finding.kind for finding in classify(command, POLICY)}
+    assert kinds <= {FindingKind.UNBOUNDED}
