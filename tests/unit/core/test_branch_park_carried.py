@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.core import (
     branch_sweep,
 )
 from claude_code_hooks_daemon.core.branch_inventory import BranchState, Pool
+from claude_code_hooks_daemon.core.branch_park import is_park_message, is_park_residue
 from claude_code_hooks_daemon.core.remote_branch_proof import prove_remote_merged
 from tests.conftest import HERMETIC_GIT_EMAIL
 
@@ -57,21 +58,23 @@ def _commit(repo: Path, filename: str, text: str) -> None:
 
 
 def _park(repo: Path, reason: str, *, days_old: float = 0.0) -> None:
-    """An empty park commit on the checked-out branch, dated ``days_old`` days ago."""
+    """The park writer's empty commit on the checked-out branch, dated ``days_old`` days ago.
+
+    Written with ``git commit`` (not ``park_branch``) so the date can be set; the
+    message is the writer's exact text, which the one classifier requires (Plan 00617).
+    """
     when = f"{int(time.time() - days_old * _DAY)} +0000"
     _git(
         repo,
         "commit",
         "-q",
         "--allow-empty",
+        "--cleanup=verbatim",
         "-m",
-        "Park",
-        "--trailer",
-        f"Parked-Reason: {reason}",
-        "--trailer",
-        "Parked-By: tester",
+        f"Park branch: {reason}\n\nParked-Reason: {reason}\nParked-By: tester\n",
         env={"GIT_COMMITTER_DATE": when, "GIT_AUTHOR_DATE": when},
     )
+    assert is_park_message(_git(repo, "log", "-1", "--format=%B"))
 
 
 @pytest.fixture
@@ -402,7 +405,7 @@ class TestParkCarriedIsOnlyParkCommits:
         assert state in {BranchState.PARKED, BranchState.LIVE}
         assert not branch_sweep.group_records(inventory).park_carried
         tip = _git(repo, "rev-parse", "origin/work-above").strip()
-        assert not branch_inventory.is_park_residue(repo, tip, "main")
+        assert not is_park_residue(repo, tip, "main")
         guard = branch_creation.work_pools(repo, config)
         counted = {n for works in guard.values() for w in works for n in w.names}
         assert "work-above" in counted
@@ -414,7 +417,7 @@ class TestParkCarriedIsOnlyParkCommits:
         assert inventory.records["plain-empty"].state != BranchState.PARK_CARRIED
         assert branch_sweep.pool_count(inventory, Pool.PARKED) == 0
         tip = _git(repo, "rev-parse", "origin/plain-empty").strip()
-        assert not branch_inventory.is_park_residue(repo, tip, "main")
+        assert not is_park_residue(repo, tip, "main")
 
     def test_the_guard_and_the_sweep_agree_on_the_mixed_fixture(self, repo: Path) -> None:
         for index in range(6):

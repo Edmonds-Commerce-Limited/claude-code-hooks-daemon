@@ -53,6 +53,7 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.branch_park import is_park_residue, walk_park_range
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.remote_refs import (
@@ -69,7 +70,7 @@ TIER_PATCH_EQUIVALENT = "patch-equivalent"
 TIER_CONTENT_PRESERVED = "content-preserved"
 TIER_UNPROVEN = "unproven"
 #: Only park markers (empty ``Parked-*`` commits) are ahead of the default: the work is in
-#: the default and the remote ref holds nothing else. Decided by ``branch_inventory.is_park_residue``.
+#: the default and the ref holds nothing else. Decided by ``branch_park.is_park_residue``.
 TIER_PARK_CARRIED = "park-carried"
 #: The remote holds the tip, or a descendant of it, under a ref this clone does not
 #: fetch (an archive namespace). Proved by ONE ``ls-remote`` the explicit command
@@ -264,6 +265,10 @@ _TIER_DETAIL = {
     TIER_PATCH_EQUIVALENT: (
         "every commit is already upstream by patch-id — the shape a history rewrite produces"
     ),
+    TIER_PARK_CARRIED: (
+        "every commit the default branch lacks is an empty park commit the park writer "
+        "made — the work is in the default, only the park markers go"
+    ),
     TIER_CONTENT_PRESERVED: (
         "a commit on the protected ref holds this branch's whole net change — every "
         "added or changed file at the same bytes, every deleted file absent — the "
@@ -301,6 +306,7 @@ class BranchClassification:
             TIER_MERGED_UNPUSHED,
             TIER_MERGED_NOT_IN_HEAD,
             TIER_PATCH_EQUIVALENT,
+            TIER_PARK_CARRIED,
             TIER_REMOTE_HELD,
             TIER_CONTENT_PRESERVED,
         )
@@ -349,7 +355,7 @@ def _git(
     hard failure here (Plan 00474 N622). ``timeout`` is overridable per call.
     """
     if timeout is None:
-        timeout = scaled_timeout(Timeout.GIT_BRANCH_SAFETY, Timeout.GIT_BRANCH_SAFETY_MAX)
+        timeout = _safety_timeout()
     result = run_git(repo, *args, timeout=timeout)
     if check and result.returncode != 0:
         raise subprocess.CalledProcessError(
@@ -600,15 +606,29 @@ def _protected_base_ref(repo: Path, protected_ref: str) -> str:
 def patch_equivalent(repo: Path, target: str, tip_ref: str) -> tuple[bool, int | None]:
     """Whether every patch of ``tip_ref`` is in ``target``, and the unique count.
 
-    Fails CLOSED: a failed ``git cherry`` or merge listing is never equivalent,
-    and a range holding a merge commit is never equivalent.
+    A park commit (``branch_park.walk_park_range``: the park writer's message on a
+    tree identical to its single parent) carries no patch, so it is not counted as
+    unique; every other commit still needs its patch in ``target``.
+
+    Fails CLOSED: a failed ``git cherry``, park walk or merge listing is never
+    equivalent, and a range holding a merge commit is never equivalent.
     """
     unique = cherry_unique_shas(repo, target, tip_ref)
     if unique is None:
         return False, None
     if unique:
+        walked = walk_park_range(repo, target, tip_ref, timeout=_safety_timeout())
+        if walked is None:
+            return False, len(unique)
+        unique = [sha for sha in unique if sha not in walked.parks]
+    if unique:
         return False, len(unique)
     return _has_merge_commits(repo, target, tip_ref) is False, 0
+
+
+def _safety_timeout() -> float:
+    """The object-walk budget of :func:`_git`, scaled by host load."""
+    return scaled_timeout(Timeout.GIT_BRANCH_SAFETY, Timeout.GIT_BRANCH_SAFETY_MAX)
 
 
 def _remote_unchecked_note(listing: RemoteRefs | None) -> str:
@@ -757,6 +777,19 @@ def classify_branch(
             refusal=REFUSAL_UNMERGED_LINE,
             detail=f"is an integration line not yet merged into the default branch ({', '.join(bases)})",
         )
+
+    # Only park commits beyond the DEFAULT (never another line, as in the inventory):
+    # the work is in the default and the delete loses nothing but the markers.
+    default_refs = (protected_ref,) if line_targets is None else line_targets
+    for base in (_protected_base_ref(repo, ref) for ref in default_refs):
+        if is_park_residue(repo, tip, base, timeout=_safety_timeout()):
+            return BranchClassification(
+                name=name,
+                tier=TIER_PARK_CARRIED,
+                detail=_TIER_DETAIL[TIER_PARK_CARRIED],
+                tip=tip,
+                proven_against=base,
+            )
 
     known_counts: list[int] = []
     for base in bases:
