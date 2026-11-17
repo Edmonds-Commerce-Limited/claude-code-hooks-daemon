@@ -188,8 +188,11 @@ def record_tracking(
 
     Raises:
         FileNotFoundError: if ``venv_dir`` has no readable metadata to update.
-        ValueError: if the values fail the schema.
+        ValueError: if the values fail the schema, or a sha or release tag is
+            given without a ref (clearing would drop it without a word).
     """
+    if tracked_ref is None and (tracked_sha is not None or last_release_tag is not None):
+        raise ValueError("tracked_sha and last_release_tag need a tracked_ref; none was given")
     current = read_daemon_metadata(venv_dir)
     if current is None:
         raise FileNotFoundError(f"no usable {_DAEMON_METADATA_FILENAME} in {venv_dir}")
