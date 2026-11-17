@@ -35,7 +35,11 @@ from claude_code_hooks_daemon.core.agent_ownership import (
     running_holds,
 )
 from claude_code_hooks_daemon.core.branch_inventory import BranchRecord, BranchState
-from claude_code_hooks_daemon.core.branch_park import clear_park_record
+from claude_code_hooks_daemon.core.branch_park import (
+    ParkRecord,
+    clear_park_record,
+    read_park_records,
+)
 from claude_code_hooks_daemon.core.remote_branch_proof import (
     named_ref_problem,
     prove_remote_merged,
@@ -596,14 +600,27 @@ def _classify(
     )
 
 
-def _clear_parks(repo: Path, names: Sequence[str]) -> tuple[str, ...]:
+def _park_snapshot(repo: Path, names: Sequence[str]) -> dict[str, ParkRecord]:
+    """The park records of ``names`` as they stand now.
+
+    Taken BEFORE a delete: deleting a branch takes its ``branch.<name>.*`` config
+    with it, so the record can no longer be read afterwards to say what was cleared.
+    """
+    records = read_park_records(repo)
+    return {name: records[name] for name in names if name in records}
+
+
+def _clear_parks(
+    repo: Path, names: Sequence[str], before: Mapping[str, ParkRecord] | None = None
+) -> tuple[str, ...]:
     """Clear the park record of each merged branch; ``"<name>: <reason>"`` for each cleared.
 
     A merge ends a park, so the record goes with it and the report says so.
+    ``before`` names a record read before a delete took the branch's config with it.
     """
     cleared: list[str] = []
     for name in names:
-        record = clear_park_record(repo, name)
+        record = clear_park_record(repo, name) or (before or {}).get(name)
         if record is not None:
             cleared.append(f"{name}: {record.reason}")
     return tuple(cleared)
@@ -668,13 +685,15 @@ def cleanup_after_merge(
         if verdict.tier not in MERGED_TIERS:
             skipped.append(f"{name}: {verdict.detail}")
             continue
-        park_cleared += _clear_parks(repo, [name])
         if held_by is not None:
+            park_cleared += _clear_parks(repo, [name])
             skipped.append(f"{name}: checked out in the worktree {held_by}")
             commands += [f"git worktree remove {held_by}", delete_command.format(name=name)]
         elif mode == "advise":
+            park_cleared += _clear_parks(repo, [name])
             commands.append(delete_command.format(name=name))
         else:
+            before = _park_snapshot(repo, [name])
             report = delete_branches(
                 repo,
                 [name],
@@ -687,6 +706,7 @@ def cleanup_after_merge(
             if name not in report.deleted:
                 skipped += [f"{name}: {blocker}" for blocker in report.blockers]
                 continue
+            park_cleared += _clear_parks(repo, [name], before)
             deleted.append(name)
             commands.append(f"git branch {name} {verdict.tip}")
         remote = remote_delete_advice(repo, config, protected_default, name)
@@ -749,7 +769,7 @@ def delete_if_merged(
     )
     if verdict.refusal is not None or verdict.tier not in MERGED_TIERS:
         return CleanupReport(skipped=(f"{name}: {verdict.detail}",))
-    park_cleared = _clear_parks(repo, [name])
+    before = _park_snapshot(repo, [name])
     report = delete_branches(
         repo,
         [name],
@@ -760,9 +780,8 @@ def delete_if_merged(
         line_targets=line_targets,
     )
     if name not in report.deleted:
-        return CleanupReport(
-            skipped=tuple(f"{name}: {b}" for b in report.blockers), park_cleared=park_cleared
-        )
+        return CleanupReport(skipped=tuple(f"{name}: {b}" for b in report.blockers))
+    park_cleared = _clear_parks(repo, [name], before)
     commands = [f"git branch {name} {verdict.tip}"]
     remote = remote_delete_advice(repo, config, default, name)
     if remote is not None:
@@ -1041,9 +1060,9 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             outcome.removed.append(held_by)
         local.append(name)
     tips = {name: plan.remote_tips[name] for name in batch if name in plan.remote_tips}
-    outcome.park_cleared += _clear_parks(repo, local)
     deleted: tuple[str, ...] = ()
     if local:
+        before = _park_snapshot(repo, local)
         report = delete_branches(
             repo,
             local,
@@ -1054,6 +1073,7 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             line_targets=plan.line_targets,
         )
         deleted = report.deleted
+        outcome.park_cleared += _clear_parks(repo, deleted, before)
         outcome.skipped += report.blockers
         outcome.commands += report.restore_commands
     outcome.deleted += deleted
