@@ -54,7 +54,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.branch_keep import read_keeps
-from claude_code_hooks_daemon.core.branch_park import read_park_record
+from claude_code_hooks_daemon.core.branch_park import ParkRecord, read_park_records
 from claude_code_hooks_daemon.core.branch_records import CREATOR_KEY
 from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.utils import git_sync
@@ -956,6 +956,13 @@ class _Pass:
         self.deadline = time.monotonic() + config.sweep.budget_ms / 1000
         #: Why a (tip, target sha) pair went unmeasured this pass: the budget, or a git failure.
         self.unmeasured: dict[tuple[str, str], str] = {}
+        self._park_records: dict[str, ParkRecord] | None = None
+
+    def park_records(self) -> dict[str, ParkRecord]:
+        """Every readable park record, read once per pass (one git process)."""
+        if self._park_records is None:
+            self._park_records = read_park_records(self.repo)
+        return self._park_records
 
     def within_budget(self) -> bool:
         """Whether the sweep's time budget (``sweep.budget_ms``) has not yet run out."""
@@ -1289,7 +1296,7 @@ def _classify(
     own: dict[str, Any] = {"ahead": verdict.ahead, "lines": verdict.lines}
     if row.parked_reason is None and isinstance(local, _RefRow) and local.sha == row.sha:
         # A park with no trailer commit lives only in the record; its age is the record's.
-        standing = read_park_record(run.repo, name)
+        standing = run.park_records().get(name)
         if standing is not None and standing.sha == row.sha:
             facts["parked_reason"] = standing.reason
             facts["age_days"] = (context.moment - standing.parked_at) / _SECONDS_PER_DAY
