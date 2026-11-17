@@ -4641,7 +4641,7 @@ These handlers run when Claude stops generating a response.
 | **Type**       | Blocking            |
 | **Event**      | Stop                |
 
-**Description:** Refuses a stop (rule `R-BRANCH-STOP-GUARD`) while a branch this session touched is dirty, holds commits no remote contains, or is merged but not deleted. The message lists the commands that finish, park or hand over each branch. It yields to the usage-pause and release gates and gives way after 3 blocks; stops refused only on a branch the main thread touched in an unlocked `.claude/worktrees/` worktree with no work-queue record have a separate budget of 3, so they never spend the blocks owed to the session's other branches. `branches.stop_guard.mode: warn` only warns.
+**Description:** Refuses a stop (rule `R-BRANCH-STOP-GUARD`) while a branch this session touched is dirty, holds commits no remote contains, or is merged but not deleted. The message lists the commands that finish, park or hand over each branch. It yields to the usage-pause and release gates and gives way after 3 blocks; stops refused only on a branch the main thread touched in an unlocked `.claude/worktrees/` worktree with no work-queue record have a separate budget of 3, so they never spend the blocks owed to the session's other branches. `branches.stop_guard.mode: warn` only warns. A touched open branch past the dormancy block stage, or in an open pool over `branches.wip.cap` (branches on one tip counted once), refuses the stop only when `dormancy.mode` / `wip.mode` is `block`; `warn` reports it and allows the stop.
 
 **Config example:**
 
