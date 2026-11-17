@@ -201,6 +201,14 @@ class TestAcceptance:
         remaining = _git(cloned, "ls-remote", "--heads", "origin")
         assert "real-park-0" in remaining and "carried-0" not in remaining
 
+    def test_the_dry_run_names_the_park_carried_evidence_not_a_plain_merge(
+        self, cloned: Path
+    ) -> None:
+        report = branch_cleanup.clean_sweep(cloned, _config(), dry_run=True, remote=True)
+        line = next(c for c in report.commands if "origin/carried-0" in c)
+        assert "park-carried" in line
+        assert "proven merged into" not in line
+
 
 class TestAge:
     def test_age_is_the_tip_committer_date_in_sweep_and_guard(self, repo: Path) -> None:
