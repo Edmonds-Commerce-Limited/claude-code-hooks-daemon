@@ -665,8 +665,12 @@ def session_summary(
     deprecation: str | None = None,
     behind_threshold: int | None = None,
     owned_hint: Callable[[], str | None] | None = None,
+    open_pool_reported: bool = False,
 ) -> list[str]:
     """The SessionStart lines; empty when there is nothing to say.
+
+    ``open_pool_reported`` is True when the caller prints the full open-work pool
+    report beside this summary, so the cap is not stated a second time here.
 
     ``owned_hint`` is asked for the owned-branch hint only when a new session has
     branches to act on; it returns the text, or ``None`` once it has been said
@@ -706,7 +710,7 @@ def session_summary(
                 f"(`{sweep_command()}` lists them)."
             )
         count = open_work_count(inventory)
-        if count >= cap:
+        if count >= cap and not open_pool_reported:
             notes.append(
                 f"Open work: {count} of {cap} (branches.wip.cap). Finish, park or delete "
                 f"branches; `{sweep_command()}` lists them."
