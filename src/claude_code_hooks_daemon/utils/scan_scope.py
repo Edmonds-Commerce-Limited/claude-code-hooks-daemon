@@ -43,8 +43,18 @@ def _refuse_unlistable(error: OSError) -> None:
     ) from error
 
 
-#: ``git`` exit status for "not a git repository"; a tree outside one has no ignore rules.
-_NOT_A_REPOSITORY = 128
+#: ``git``'s messages when the tree has no repository (outside any, or a ``.git``
+#: file naming none), which has no ignore rules. Exit status 128 is git's status
+#: for EVERY fatal error, so the message, read in the C locale, is what tells
+#: this case from a corrupt index or another fatal error. Standard library only (a bare python3 loads this module), so this
+#: module keeps its own spawn and bound rather than the package's ``run_git``.
+_NOT_A_REPOSITORY_MESSAGES = (
+    "not a git repository",
+    # A ``.git`` file whose ``gitdir:`` names no repository; git 2.47 reports
+    # that with the message above, newer git with this one.
+    "gitfile does not point to a valid repository",
+)
+_FATAL_EXIT = 128
 #: Variables that would point git at a repository other than ``root``'s own.
 _RELOCATING_VARIABLES = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"})
 #: Generous: ``--directory`` keeps the listing small, so this only bounds a wedged git.
@@ -64,6 +74,7 @@ def _git_ignored(root: Path) -> tuple[frozenset[str], frozenset[str]]:
             unknown, and treating it as "nothing" is how an untracked tree got scanned.
     """
     environment = {k: v for k, v in os.environ.items() if k not in _RELOCATING_VARIABLES}
+    environment["LC_ALL"] = "C"
     argv = [
         "git",
         "-C",
@@ -90,7 +101,9 @@ def _git_ignored(root: Path) -> tuple[frozenset[str], frozenset[str]]:
             f"cannot ask git what {root} ignores: {exc}; "
             "an ignored tree might have been scanned, so this is not a pass"
         ) from exc
-    if result.returncode == _NOT_A_REPOSITORY:
+    if result.returncode == _FATAL_EXIT and any(
+        message in result.stderr for message in _NOT_A_REPOSITORY_MESSAGES
+    ):
         return frozenset(), frozenset()
     if result.returncode != 0:
         raise WalkError(

@@ -1,4 +1,7 @@
-"""Deny creating a branch while the open work branches are at the cap (Plan 00558 Task 4.2).
+"""Deny creating a branch while the open work branches are past the cap (Plan 00558 Task 4.2).
+
+The deny starts at ``branches.wip.cap`` plus ``wip.creation_grace``; at the cap
+itself the guard only warns.
 
 Two routes create a branch from a tool call: a git command (``switch -c``,
 ``checkout -b``, ``branch <n>``, ``worktree add``, or ``scripts/setup_worktree.sh <n>``,
@@ -61,7 +64,8 @@ _SEVERITY = {"allow": 0, "warn": 1, "deny": 2}
 
 
 class BranchCreationGuardHandler(PreToolUseHandlerBase):
-    """Hold the open work branches at ``branches.wip.cap``; warn on likely duplicates."""
+    """Hold the open work branches to ``branches.wip.cap`` (``wip.creation_grace`` past it
+    the deny starts; at the cap it warns); warn on likely duplicates."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -73,7 +77,8 @@ class BranchCreationGuardHandler(PreToolUseHandlerBase):
         self._project_root_override: Path | None = None
         self._rule = Rule(
             rule_id=RuleID.BRANCH_WIP_CAP,
-            blocked="creating a branch while the open work branches are at `branches.wip.cap`",
+            blocked="creating a branch while the open work branches are past `branches.wip.cap` "
+            "plus `wip.creation_grace` (at the cap itself it only warns)",
             why="Work that is started and never finished piles up as branches nobody "
             "returns to; the cap makes an agent finish before it starts",
             fix=f"Finish (merge) one of the listed branches, {POOL_PARK_CLAUSE}, or delete it "

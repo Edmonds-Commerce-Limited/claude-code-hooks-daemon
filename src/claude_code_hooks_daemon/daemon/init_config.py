@@ -369,7 +369,7 @@ class ConfigTemplate:
             "      #     - Swift\n"
             "      #     - Dart\n"
             "    gh_issue_comments: {enabled: true, priority: 40}  # Require --comments on gh issue view\n"
-            "    branch_creation_guard: {enabled: true, priority: 40}  # Deny a new branch while open work branches are at branches.wip.cap (Plan 00558)\n"
+            "    branch_creation_guard: {enabled: true, priority: 40}  # Warn at branches.wip.cap, deny a new branch past it plus creation_grace (Plan 00558)\n"
             "    gh_pr_comments: {enabled: true, priority: 40}    # Require --comments on gh pr view\n"
             # Plan 00602: opt-in; a project that runs suites in the foreground on purpose keeps it off.
             "    long_running_command_guard: {enabled: false, priority: 40, options: {mode: deny, threshold_seconds: 30}}  # Deny a long foreground Bash call in the main thread; use run_in_background (Plan 00602)\n"

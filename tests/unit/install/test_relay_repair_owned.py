@@ -55,9 +55,12 @@ _SPAWNS_GRANDCHILD = (
 @pytest.fixture(autouse=True)
 def _no_repairs_left() -> Iterator[None]:
     """Each test starts and ends with no owned repair, whatever it did."""
+    relay_repair.resume_owned_spawns()
     stop_owned_repairs()
+    relay_repair.resume_owned_spawns()
     yield
     stop_owned_repairs()
+    relay_repair.resume_owned_spawns()
 
 
 def _argv(script: str, state: Path, *extra: str) -> list[str]:
@@ -155,6 +158,38 @@ class TestStopOwnedRepairs:
         stop_owned_repairs()
 
         assert stop_owned_repairs() == []
+
+
+class TestNoSpawnAfterStop:
+    """N-18: a start that passed the shutdown check must not spawn once stop began."""
+
+    def test_spawn_owned_refuses_after_stop(self, tmp_path: Path) -> None:
+        stop_owned_repairs()
+
+        with pytest.raises(OSError):
+            spawn_owned(_argv(_SLEEPER, tmp_path / "s.state"), tmp_path / "s.log")
+
+        assert relay_repair.owned_repair_pids() == []
+
+    def test_a_refused_start_withdraws_its_claim_so_the_next_start_retries(
+        self, tmp_path: Path
+    ) -> None:
+        stop_owned_repairs()
+        untracked = tmp_path / "untracked"
+        binary = tmp_path / "relay"
+
+        notice = relay_repair.start_relay_repair(
+            tmp_path,
+            binary,
+            "missing",
+            untracked_dir=untracked,
+            version="1.0",
+            spawn_fn=spawn_owned,
+        )
+
+        assert not notice.started
+        assert notice.failure is not None
+        assert not notice.state_path.exists()
 
 
 class TestSessionStartRepairStaysDetached:

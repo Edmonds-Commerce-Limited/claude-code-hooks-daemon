@@ -1953,8 +1953,12 @@ def publish_events_dir_location(untracked_dir: Path, events_dir: Path) -> None:
     from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
     scratch = unique_temp_path(location)
-    scratch.write_text(f"{untracked_dir}\n{events_dir}\n")
-    scratch.replace(location)
+    try:
+        scratch.write_text(f"{untracked_dir}\n{events_dir}\n")
+        scratch.replace(location)
+    except OSError:
+        scratch.unlink(missing_ok=True)
+        raise
 
 
 def get_event_socket_dir(project_dir: Path | str) -> Path:

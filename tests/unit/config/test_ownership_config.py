@@ -42,6 +42,11 @@ class TestOwnershipConfig:
         with pytest.raises(ValidationError, match="single line"):
             ClaudeMdConfig(ownership=ClaudeMdOwnership.CUSTOM, ownership_text=text)
 
+    @pytest.mark.parametrize("text", ["return\rhere", "tail\r", "\rhead"])
+    def test_custom_text_rejects_a_carriage_return(self, text: str) -> None:
+        with pytest.raises(ValidationError, match="single line"):
+            ClaudeMdConfig(ownership=ClaudeMdOwnership.CUSTOM, ownership_text=text)
+
     def test_unknown_mode_is_rejected(self) -> None:
         with pytest.raises(ValidationError):
             ClaudeMdConfig.model_validate({"ownership": "maybe"})

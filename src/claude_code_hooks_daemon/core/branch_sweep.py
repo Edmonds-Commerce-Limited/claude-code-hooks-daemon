@@ -459,8 +459,8 @@ def render_report(
     """The ``branch-sweep`` text: actionable groups first, then the count against the cap.
 
     ``remote_proven`` names the remote-only branches the remote-delete guard's proof
-    accepted (see :func:`delete_action`). ``ownership_hints`` (``claude_md.ownership``
-    not ``off``) adds the owned-branch hint after the actionable groups and the
+    accepted (see :func:`delete_action`). ``ownership_hints`` (the CLI sets it only
+    when ``claude_md.ownership`` is ``own``) adds the owned-branch hint after the actionable groups and the
     foreign-branch counter-hint under the foreign list.
     """
     groups = group_records(inventory)
@@ -511,7 +511,11 @@ def render_report(
     )
     out += _section("Dormant:", _dormant_section(groups.dormant))
     if ownership_hints and (
-        groups.contained_nowhere or groups.merged or groups.patch_equivalent or groups.dormant
+        groups.contained_nowhere
+        or groups.merged
+        or groups.patch_equivalent
+        or groups.park_carried
+        or groups.dormant
     ):
         out += [HINT_TEXT[OwnershipHint.BRANCH_OWNED], ""]
     out += _section("Live work:", [_work_line(r) for r in groups.live])
@@ -582,7 +586,7 @@ def _record_json(
 ) -> dict[str, Any]:
     group = _group_name(record)
     action: str | None = None
-    if group in {"merged", "patch-equivalent"}:
+    if group in {"merged", "patch-equivalent", "park-carried"}:
         action = delete_action(record, inventory, config, remote_proven)
     elif group == "contained-nowhere":
         action = push_command(record, config)
@@ -661,8 +665,12 @@ def session_summary(
     deprecation: str | None = None,
     behind_threshold: int | None = None,
     owned_hint: Callable[[], str | None] | None = None,
+    open_pool_reported: bool = False,
 ) -> list[str]:
     """The SessionStart lines; empty when there is nothing to say.
+
+    ``open_pool_reported`` is True when the caller prints the full open-work pool
+    report beside this summary, so the cap is not stated a second time here.
 
     ``owned_hint`` is asked for the owned-branch hint only when a new session has
     branches to act on; it returns the text, or ``None`` once it has been said
@@ -702,7 +710,7 @@ def session_summary(
                 f"(`{sweep_command()}` lists them)."
             )
         count = open_work_count(inventory)
-        if count >= cap:
+        if count >= cap and not open_pool_reported:
             notes.append(
                 f"Open work: {count} of {cap} (branches.wip.cap). Finish, park or delete "
                 f"branches; `{sweep_command()}` lists them."

@@ -596,7 +596,14 @@ class GitRepo:
         urls = (line.partition(" ")[2].strip() for line in output.splitlines())
         return tuple(url for url in urls if url)
 
-    def write_config(self, key: str, value: str) -> None:
+    def write_config(
+        self,
+        key: str,
+        value: str,
+        *,
+        lock_base: float | None = None,
+        lock_ceiling: float | None = None,
+    ) -> None:
         """Set a ``--local`` config value.
 
         FAIL FAST: raises ``CalledProcessError`` if git rejects the write, so
@@ -604,11 +611,21 @@ class GitRepo:
         failure being silently lost. Goes through :func:`run_git` like every
         other invocation and re-raises here, rather than keeping its own
         ``check=True`` spawn outside the one bounded home.
+
+        The wait for ``config.lock`` defaults to the load-scaled
+        ``GIT_CONFIG_LOCK_WAIT`` pair (up to 30 s); a caller on a deadline-bound
+        hook path passes a short ``lock_base``/``lock_ceiling``.
+
+        Raises:
+            subprocess.CalledProcessError: If git rejects the write.
+            GitConfigLockError: If ``config.lock`` stays held for the whole wait.
         """
         # Local import: git_config_write itself builds on run_git from this module.
         from claude_code_hooks_daemon.utils.git_config_write import run_git_config_write
 
-        result = run_git_config_write(self.root, "--local", key, value)
+        result = run_git_config_write(
+            self.root, "--local", key, value, base_wait=lock_base, ceiling=lock_ceiling
+        )
         if result.returncode != 0:
             raise subprocess.CalledProcessError(
                 result.returncode, result.args, result.stdout, result.stderr

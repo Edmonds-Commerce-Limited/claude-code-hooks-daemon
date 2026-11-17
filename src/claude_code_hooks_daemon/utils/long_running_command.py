@@ -45,6 +45,8 @@ DEFAULT_THRESHOLD_SECONDS: Final[float] = 30.0
 
 _BACKGROUND_OPERATOR: Final = "&"
 _AND_OPERATOR: Final = "&&"
+#: Separators that join one statement to the next into a single backgroundable unit.
+_LIST_JOINERS: Final[frozenset[str]] = frozenset({"&&", "||", "|", "|&"})
 _REDIRECT_CHARS: Final = "<>"
 
 #: Placeholder the command-position view puts where a heredoc body was.
@@ -55,6 +57,9 @@ _DURATION: Final[re.Pattern[str]] = re.compile(r"^(\d+(?:\.\d*)?|\.\d+)([smhd]?)
 _UNIT_SECONDS: Final[dict[str, float]] = {"": 1.0, "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
 
 _ASSIGNMENT: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+#: A redirect before the command (``>out.txt cmd``, ``2>err cmd``, ``> out cmd``);
+#: group 1 is the target when it is attached, empty when it is the next word.
+_LEADING_REDIRECT: Final[re.Pattern[str]] = re.compile(r"^\d*(?:<<<|<<-?|<>|>>|>\||>&|<&|>|<)(.*)$")
 _PYTHON: Final[re.Pattern[str]] = re.compile(r"^python[\d.]*$")
 _HEREDOC_DELIMITER: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 
@@ -95,6 +100,9 @@ _STRUCTURE_WORDS: Final[frozenset[str]] = frozenset(
 
 _TIMEOUT: Final = "timeout"
 _SLEEP: Final = "sleep"
+_WAIT: Final = "wait"
+#: GNU ``sleep`` operands that never end.
+_ENDLESS_SLEEP: Final[frozenset[str]] = frozenset({"inf", "infinity"})
 _TIMEOUT_VALUE_OPTIONS: Final[frozenset[str]] = frozenset({"-k", "-s", "--kill-after", "--signal"})
 
 #: Wrappers that start their operand as the real command, with how many leading
@@ -146,6 +154,8 @@ DEFAULT_SLOW_PATTERNS: Final[tuple[str, ...]] = (
     r"^gh\s+run\s+watch\b",
     r"^gh\s+pr\s+checks\b.*--watch\b",
     r"^watch\b",
+    # `tail -f` / `-F` / `--follow` never ends on its own.
+    r"^tail\b.*?\s(?:-[A-Za-z0-9]*[fF][A-Za-z0-9]*|--follow)(?=[=\s]|$)",
 )
 
 
@@ -243,17 +253,46 @@ class _Peeled:
 
 
 def _segment_words(segment: str) -> list[str]:
-    return [_UNRESOLVED_WORD if word is None else word for word in iter_shell_words(segment)]
+    """The words of ``segment``, with subshell parentheses split off the command.
+
+    ``(sleep 100)`` is the command ``sleep 100`` in a subshell, not a program
+    named ``(sleep``: a leading ``(`` becomes a word of its own (syntax, dropped
+    with the other prefix words) and the matching ``)`` is cut from the last word.
+    """
+    words: list[str] = []
+    opened = 0
+    for raw in iter_shell_words(segment):
+        word = _UNRESOLVED_WORD if raw is None else raw
+        while word.startswith("(") and len(word) > 1 and all(w == "(" for w in words):
+            words.append("(")
+            opened += 1
+            word = word[1:]
+        if word:
+            words.append(word)
+    while opened and words and words[-1].endswith(")") and len(words) > opened:
+        if words[-1] == ")":
+            words.pop()
+        else:
+            words[-1] = words[-1][:-1]
+        opened -= 1
+    return words
 
 
 def _skip_prefix(words: list[str]) -> tuple[list[str], bool]:
-    """Drop leading assignments and shell syntax; say whether a loop keyword was dropped."""
+    """Drop leading assignments, redirects and shell syntax.
+
+    Says whether a loop keyword was dropped.
+    """
     index = 0
     loop_head = False
     while index < len(words):
         word = words[index]
-        if word in _STRUCTURE_WORDS or word.startswith(tuple(_REDIRECT_CHARS)):
+        if word in _STRUCTURE_WORDS:
             return [], loop_head
+        redirect = _LEADING_REDIRECT.match(word)
+        if redirect is not None:
+            index += 1 if redirect.group(1) else 2
+            continue
         if word in _LOOP_WORDS:
             loop_head = True
         elif not (_ASSIGNMENT.match(word) or word in _SYNTAX_WORDS):
@@ -296,8 +335,23 @@ def _peel_wrapper(words: list[str]) -> list[str] | None:
         return rest[index:]
     if _PYTHON.match(head) and rest[:1] == ["-m"] and len(rest) > 1:
         return rest[1:]
+    if head in _SHELLS:
+        body = _shell_command_string(rest)
+        if body is not None:
+            return body
     if (_PYTHON.match(head) or head in _SHELLS) and rest and not rest[0].startswith("-"):
         return rest
+    return None
+
+
+def _shell_command_string(arguments: list[str]) -> list[str] | None:
+    """The words of a ``bash -c`` body, or None when the shell is not given one."""
+    index = 0
+    while index < len(arguments) and arguments[index].startswith(("-", "+")):
+        word = arguments[index]
+        if word.startswith("-") and not word.startswith("--") and "c" in word:
+            return arguments[index + 1 :]
+        index += 2 if word in ("-o", "+o") else 1
     return None
 
 
@@ -319,17 +373,6 @@ def _peel(segment: str) -> _Peeled:
     return peeled
 
 
-def _shell_body_is_loop(peeled: _Peeled) -> bool:
-    """Whether the segment is ``bash -c`` whose body opens with ``until``/``while``."""
-    if peeled.program not in _SHELLS:
-        return False
-    arguments = peeled.arguments
-    for index, word in enumerate(arguments[:-1]):
-        if word.startswith("-") and not word.startswith("--") and "c" in word:
-            return arguments[index + 1] in _LOOP_WORDS
-    return False
-
-
 def _git_is_slow(arguments: list[str]) -> bool:
     index = 0
     while index < len(arguments):
@@ -345,7 +388,7 @@ def _sleep_seconds(arguments: list[str]) -> float | None:
     total = 0.0
     seen = False
     for word in arguments:
-        seconds = parse_duration_seconds(word)
+        seconds = float("inf") if word.lower() in _ENDLESS_SLEEP else parse_duration_seconds(word)
         if seconds is None:
             return None
         total += seconds
@@ -360,6 +403,26 @@ def _is_background(view: str) -> bool:
         return False
     before = tail[:-1].rstrip()
     return not (before and before[-1] in _REDIRECT_CHARS)
+
+
+def _background_unit_start(view: str, segments: list[tuple[str, str]]) -> int:
+    """Index of the first segment a trailing ``&`` puts in the background.
+
+    A trailing ``&`` backgrounds the last pipeline or ``&&``/``||`` list, not the
+    statements before a ``;``, ``&`` or newline. ``len(segments)`` when nothing is
+    backgrounded. A compound command (``... done &``, ``( ... ) &``) is
+    backgrounded whole, so it starts at 0.
+    """
+    if not segments or not _is_background(view):
+        return len(segments)
+    last = segments[-1][1].strip()
+    first_word = last.split(maxsplit=1)[0] if last else ""
+    if last.endswith((")", "}")) or first_word in _STRUCTURE_WORDS:
+        return 0
+    start = len(segments) - 1
+    while start > 0 and segments[start][0].strip() in _LIST_JOINERS:
+        start -= 1
+    return start
 
 
 def _bounded(timeouts: list[float | None], threshold: float) -> bool:
@@ -389,7 +452,7 @@ def _segment_findings(peeled: _Peeled, policy: LongRunningPolicy) -> list[Findin
     elif program not in policy.fast_programs or (
         program == "git" and _git_is_slow(peeled.arguments)
     ):
-        if not _shell_body_is_loop(peeled) and program not in _SHELLS:
+        if program not in _SHELLS:
             findings.append(Finding(FindingKind.UNBOUNDED, program))
     return findings
 
@@ -398,18 +461,20 @@ def classify(command: str, policy: LongRunningPolicy | None = None) -> tuple[Fin
     """The reasons ``command`` looks long or unbounded; empty when it looks short.
 
     Judged on the command-position view, so text bash hands over as data is
-    never read as a command. A command ending in a lone ``&`` is background
-    work and draws nothing; so does a statement followed by one.
+    never read as a command. A statement followed by a lone ``&`` is background
+    work and draws nothing; a trailing ``&`` backgrounds only the last statement
+    (the ``&&``/``||``/``|`` list it ends), so ``sleep 300; echo x &`` still
+    blocks on the sleep.
     """
     policy = policy or LongRunningPolicy()
     if not command.strip() or any(pattern.search(command) for pattern in policy.exempt_patterns):
         return ()
-    if _is_background(command_position_view(command)):
-        return ()
     segments = command_position_code_segments_with_separators(command)
+    background_from = _background_unit_start(command_position_view(command), segments)
     findings: list[Finding] = []
     loop_seen = False
     sleep_seen = False
+    background_seen = False
     previous_words: list[str] = []
     for index, (_separator, segment) in enumerate(segments):
         following = segments[index + 1][0].strip() if index + 1 < len(segments) else ""
@@ -420,11 +485,15 @@ def classify(command: str, policy: LongRunningPolicy | None = None) -> tuple[Fin
             and _HEREDOC_DELIMITER.match(words[0]) is not None
         )
         previous_words = words
-        if following == _BACKGROUND_OPERATOR or is_delimiter:
+        if following == _BACKGROUND_OPERATOR or index >= background_from or is_delimiter:
+            background_seen = background_seen or not is_delimiter
             continue
         peeled = _peel(segment)
-        loop_seen = loop_seen or peeled.loop_head or _shell_body_is_loop(peeled)
+        loop_seen = loop_seen or peeled.loop_head
         sleep_seen = sleep_seen or peeled.program == _SLEEP
+        if peeled.program == _WAIT and background_seen:
+            findings.append(Finding(FindingKind.SLOW_COMMAND, "wait for a background job"))
+            continue
         findings.extend(_segment_findings(peeled, policy))
     if loop_seen and sleep_seen:
         findings.insert(0, Finding(FindingKind.WAIT_LOOP, "a loop that sleeps"))

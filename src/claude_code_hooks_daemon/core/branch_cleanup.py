@@ -35,7 +35,11 @@ from claude_code_hooks_daemon.core.agent_ownership import (
     running_holds,
 )
 from claude_code_hooks_daemon.core.branch_inventory import BranchRecord, BranchState
-from claude_code_hooks_daemon.core.branch_park import clear_park_record
+from claude_code_hooks_daemon.core.branch_park import (
+    ParkRecord,
+    clear_park_record,
+    read_park_records,
+)
 from claude_code_hooks_daemon.core.remote_branch_proof import (
     named_ref_problem,
     prove_remote_merged,
@@ -560,18 +564,26 @@ def preview_paths(paths: Sequence[str]) -> str:
     return f"{shown} and {rest} more" if rest > 0 else shown
 
 
-def remote_delete_advice(repo: Path, config: BranchesConfig, default: str, name: str) -> str | None:
+def remote_delete_advice(
+    repo: Path, config: BranchesConfig, default: str, name: str, *, prove: bool = True
+) -> str | None:
     """What to tell a person about the remote copy of ``name``, when the remote holds one.
 
     The runnable delete line only when the remote-delete guard's own proof
     (:func:`prove_remote_merged`) accepts the branch, so a printed command is one the
     guard allows. Otherwise owner-only wording, which is advice and not a command.
+
+    ``prove=False`` is for a hook path, where the proof's ``ls-remote`` and history
+    walks are too slow and need the network: the line is then owner-only wording that
+    points at the sweep, which does prove and delete. The guard is not involved.
     """
     remote = config.remote
     if not _ref_exists(repo, f"refs/remotes/{remote}/{name}"):
         return None
     problem = named_ref_problem(remote, name, default, config)
-    if problem is None:
+    if problem is None and not prove:
+        problem = f"run `{sweep_clean_command(remote=True)}` to prove and delete it"
+    elif problem is None:
         proof = prove_remote_merged(repo, remote, [name], default, config)
         problem = proof.problems.get(name)
         if problem is None and name in proof.tips:
@@ -602,14 +614,27 @@ def _classify(
     )
 
 
-def _clear_parks(repo: Path, names: Sequence[str]) -> tuple[str, ...]:
+def _park_snapshot(repo: Path, names: Sequence[str]) -> dict[str, ParkRecord]:
+    """The park records of ``names`` as they stand now.
+
+    Taken BEFORE a delete: deleting a branch takes its ``branch.<name>.*`` config
+    with it, so the record can no longer be read afterwards to say what was cleared.
+    """
+    records = read_park_records(repo)
+    return {name: records[name] for name in names if name in records}
+
+
+def _clear_parks(
+    repo: Path, names: Sequence[str], before: Mapping[str, ParkRecord] | None = None
+) -> tuple[str, ...]:
     """Clear the park record of each merged branch; ``"<name>: <reason>"`` for each cleared.
 
     A merge ends a park, so the record goes with it and the report says so.
+    ``before`` names a record read before a delete took the branch's config with it.
     """
     cleared: list[str] = []
     for name in names:
-        record = clear_park_record(repo, name)
+        record = clear_park_record(repo, name) or (before or {}).get(name)
         if record is not None:
             cleared.append(f"{name}: {record.reason}")
     return tuple(cleared)
@@ -674,13 +699,15 @@ def cleanup_after_merge(
         if verdict.tier not in MERGED_TIERS:
             skipped.append(f"{name}: {verdict.detail}")
             continue
-        park_cleared += _clear_parks(repo, [name])
         if held_by is not None:
+            park_cleared += _clear_parks(repo, [name])
             skipped.append(f"{name}: checked out in the worktree {held_by}")
             commands += [f"git worktree remove {held_by}", delete_command.format(name=name)]
         elif mode == "advise":
+            park_cleared += _clear_parks(repo, [name])
             commands.append(delete_command.format(name=name))
         else:
+            before = _park_snapshot(repo, [name])
             report = delete_branches(
                 repo,
                 [name],
@@ -693,9 +720,10 @@ def cleanup_after_merge(
             if name not in report.deleted:
                 skipped += [f"{name}: {blocker}" for blocker in report.blockers]
                 continue
+            park_cleared += _clear_parks(repo, [name], before)
             deleted.append(name)
             commands.append(f"git branch {name} {verdict.tip}")
-        remote = remote_delete_advice(repo, config, protected_default, name)
+        remote = remote_delete_advice(repo, config, protected_default, name, prove=False)
         if remote is not None:
             commands.append(remote)
     return CleanupReport(
@@ -755,7 +783,7 @@ def delete_if_merged(
     )
     if verdict.refusal is not None or verdict.tier not in MERGED_TIERS:
         return CleanupReport(skipped=(f"{name}: {verdict.detail}",))
-    park_cleared = _clear_parks(repo, [name])
+    before = _park_snapshot(repo, [name])
     report = delete_branches(
         repo,
         [name],
@@ -766,14 +794,28 @@ def delete_if_merged(
         line_targets=line_targets,
     )
     if name not in report.deleted:
-        return CleanupReport(
-            skipped=tuple(f"{name}: {b}" for b in report.blockers), park_cleared=park_cleared
-        )
+        return CleanupReport(skipped=tuple(f"{name}: {b}" for b in report.blockers))
+    park_cleared = _clear_parks(repo, [name], before)
     commands = [f"git branch {name} {verdict.tip}"]
-    remote = remote_delete_advice(repo, config, default, name)
+    remote = remote_delete_advice(repo, config, default, name, prove=False)
     if remote is not None:
         commands.append(remote)
     return CleanupReport(deleted=(name,), commands=tuple(commands), park_cleared=park_cleared)
+
+
+def _proof_words(tier: str | None, default: str) -> str:
+    """How a dry-run line states its proof: a plain merge, or the named evidence tier."""
+    if tier is None or tier == TIER_MERGED:
+        return f"proven merged into {default}"
+    return f"proven {tier} against {default}"
+
+
+def _blockers_line(held_by: Path, blockers: Sequence[str]) -> str:
+    """Why a worktree is not removed: the paths a removal would lose."""
+    return (
+        f"the worktree {held_by} holds {len(blockers)} path(s) a removal "
+        f"would lose: {preview_paths(blockers)}"
+    )
 
 
 def _remove_worktree(repo: Path, path: Path) -> str | None:
@@ -867,10 +909,7 @@ def clean_sweep(
         if held_by is not None:
             blockers = worktree_blockers(held_by, config.cleanup_after_merge.regenerable)
             if blockers:
-                skipped.append(
-                    f"{name}: the worktree {held_by} holds {len(blockers)} path(s) a removal "
-                    f"would lose: {preview_paths(blockers)}"
-                )
+                skipped.append(f"{name}: {_blockers_line(held_by, blockers)}")
                 continue
         verdict = _classify(
             repo,
@@ -891,13 +930,14 @@ def clean_sweep(
         proven.append(name)
 
     remote_tips: dict[str, str] = {}
+    remote_evidence: dict[str, str] = {}
     if remote and keep_fetch_error is not None:
         skipped.append(
             f"{config.remote}: keep notes could not be fetched ({keep_fetch_error}), "
             "so the remote half was refused"
         )
     elif remote:
-        remote_tips, problems = _proven_remote(
+        remote_tips, problems, remote_evidence = _proven_remote(
             repo, config, default, inventory.records, spared=frozenset({*owned, *spared})
         )
         skipped += [f"{config.remote}/{name}: {why}" for name, why in problems.items()]
@@ -911,7 +951,7 @@ def clean_sweep(
     if dry_run:
         commands += [
             f"would delete remote {config.remote}/{name} (tip {tip[:_TIP_PREVIEW]}, "
-            f"proven merged into {default})"
+            f"{_proof_words(remote_evidence.get(name), default)})"
             for name, tip in remote_tips.items()
         ]
         for name in proven:
@@ -1030,6 +1070,11 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             continue
         held_by = plan.worktrees.get(name)
         if held_by is not None:
+            # The proof ran long ago; work may have landed in the worktree since.
+            blockers = worktree_blockers(held_by, config.cleanup_after_merge.regenerable)
+            if blockers:
+                outcome.skipped.append(f"{name}: {_blockers_line(held_by, blockers)}")
+                continue
             refused = _remove_worktree(repo, held_by)
             if refused is not None:
                 outcome.skipped.append(f"{name}: git refused to remove {held_by}: {refused}")
@@ -1037,9 +1082,9 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             outcome.removed.append(held_by)
         local.append(name)
     tips = {name: plan.remote_tips[name] for name in batch if name in plan.remote_tips}
-    outcome.park_cleared += _clear_parks(repo, local)
     deleted: tuple[str, ...] = ()
     if local:
+        before = _park_snapshot(repo, local)
         report = delete_branches(
             repo,
             local,
@@ -1050,6 +1095,7 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             line_targets=plan.line_targets,
         )
         deleted = report.deleted
+        outcome.park_cleared += _clear_parks(repo, deleted, before)
         outcome.skipped += report.blockers
         outcome.commands += report.restore_commands
     outcome.deleted += deleted
@@ -1090,8 +1136,8 @@ def _proven_remote(
     records: Mapping[str, BranchRecord],
     *,
     spared: frozenset[str] = frozenset(),
-) -> tuple[dict[str, str], dict[str, str]]:
-    """``(name -> live tip, name -> problem)`` for every merged branch the remote holds.
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """``(name -> live tip, name -> problem, name -> evidence tier)`` per merged remote branch.
 
     Candidates are the inventory's merged and patch-equivalent records with a remote
     copy, past the cleanup policy; each is then judged by the remote-delete guard's
@@ -1116,9 +1162,9 @@ def _proven_remote(
         else:
             problems[name] = problem
     if not names:
-        return {}, problems
+        return {}, problems, {}
     proof = prove_remote_merged(repo, config.remote, names, default, config)
-    return proof.tips, {**problems, **proof.problems}
+    return proof.tips, {**problems, **proof.problems}, proof.evidence
 
 
 def proven_remote_only(
@@ -1139,7 +1185,7 @@ def proven_remote_only(
     }
     if not remote_only:
         return frozenset()
-    tips, _problems = _proven_remote(repo, config, default, remote_only)
+    tips, _problems, _evidence = _proven_remote(repo, config, default, remote_only)
     return frozenset(tips)
 
 

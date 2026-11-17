@@ -36,6 +36,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.load_scaling import scaled_seconds
+
 _FILE_PATH_KEY = "file_path"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -78,7 +80,7 @@ def _looks_like_a_command(command: str) -> bool:
 # Generous next to the 120s its neighbours here allow a QA checker: this
 # subprocess imports every handler module and walks all ~280 test blocks, so
 # its cost tracks handler COUNT rather than the size of any one input.
-_GENERATE_TIMEOUT_SECONDS = 180
+_GENERATE_TIMEOUT_SECONDS = scaled_seconds(180)
 
 # The sanctioned probe location: inside the repo so `project_containment`
 # permits it (Plan 00333), gitignored so nothing reaches review, and NOT the

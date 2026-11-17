@@ -53,6 +53,7 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
     wrapper_unreachable_reason,
 )
 from tests.acceptance.conftest import wrapper_subprocess_env
+from tests.load_scaling import scaled_seconds
 from tests.usage_ceiling import exempt_from_usage_ceiling
 
 
@@ -78,8 +79,9 @@ HOOKS_DIR = REPO_ROOT / ".claude" / "hooks"
 DAEMON_CLI = REPO_ROOT / "bin" / "hooks-daemon"
 
 #: Generous next to a hook dispatch: this subprocess imports every handler
-#: module and renders all ~287 blocks, so its cost tracks handler COUNT.
-_GENERATE_TIMEOUT_SECONDS = 180
+#: module and renders all ~287 blocks, so its cost tracks handler COUNT, and it
+#: slows with host load, so the bound is scaled by it.
+_GENERATE_TIMEOUT_SECONDS = scaled_seconds(180)
 
 #: Fresh per run, so a once-per-session handler answers this run's probe
 #: rather than remembering the last one. `lsp_enforcement` is `block_once` by
