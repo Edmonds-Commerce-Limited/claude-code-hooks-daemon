@@ -51,6 +51,11 @@ from claude_code_hooks_daemon.utils.command_evasion import (
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.find_expression import find_regex_operand_indexes
+from claude_code_hooks_daemon.utils.grep_option_grammar import (
+    RG_CONFIG_ENV,
+    grammar_for,
+    parse_arguments,
+)
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
     literal_screen,
@@ -2025,8 +2030,22 @@ _FILE_OPENING_COMMANDS: Final = frozenset(
     ]
 )
 _FILE_OPENING_PREFIXES: Final = ("python", "ansible")
-_PATTERN_FIRST_COMMANDS: Final = frozenset({"grep", "egrep", "fgrep", "rg", "ag", "ack"})
-_PATTERN_FILE_OPTIONS: Final = frozenset({"-f", "--file", "-e", "--regexp"})
+# ``ug`` reads a config of its own, so its grammar never proves a pattern operand.
+_PATTERN_FIRST_COMMANDS: Final = frozenset(
+    {"grep", "egrep", "fgrep", "zgrep", "ugrep", "ug", "rg", "ag", "ack"}
+)
+# Separators that end the segment a bare name sits in (``&`` stays inside it:
+# ``2>&1`` carries one, and reading on past it only judges more words).
+_SEGMENT_END_SEPARATORS: Final = ("||", "&&", ";", "|", "\n")
+_ASSIGNMENT_WORD: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+# ``NAME=value`` words in front of a command whose value holds nothing but plain characters.
+_PLAIN_LEADING_ASSIGNMENTS: Final = re.compile(
+    r"""\A\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s"'$`\\]*\s+)+"""
+)
+# Stands for a closed ``$(...)`` in a rebuilt segment: a word bash expands, so it names no command.
+_SUBSTITUTION_WORD: Final = "$SUBSTITUTION"
+# Stands for the bare name while the words around it are read as one command line.
+_TOKEN_WORD: Final = "token"
 # A module-name API whose first argument is a dotted module path, not a file.
 _MODULE_API_BEFORE_STRING: Final = re.compile(
     r"\b(?:import_module|find_spec|run_module|patch|getLogger)\(\s*$"
@@ -2252,7 +2271,11 @@ _SEARCH_PATH_COMMANDS: Final = frozenset({"grep", "egrep", "fgrep", "rg"})
 
 
 def _searched_paths_hold_no_protected_file(
-    segment_words: list[str], index: "ProtectedFileIndex", cwds: tuple[str, ...]
+    segment_words: list[str],
+    index: "ProtectedFileIndex",
+    cwds: tuple[str, ...],
+    *,
+    rg_config: bool = False,
 ) -> bool:
     """Whether a grep/rg segment names searched paths and none holds a protected file.
 
@@ -2264,17 +2287,15 @@ def _searched_paths_hold_no_protected_file(
     if command is None:
         return False
     rest = segment_words[command + 1 :]
-    if any(_names_no_pattern_operand(word) for word in rest):
-        # The pattern is an option's value (or there is none), so the first
-        # operand is a searched path too: never skip it, judge nothing clean.
+    parsed = parse_arguments(grammar_for(names[command], rg_config=rg_config), rest)
+    if parsed.uncertain or parsed.pattern_supplied or _END_OF_OPTIONS in rest:
+        # An option the grammar cannot place, a pattern given by option (or none at
+        # all), or ``--`` (a dash-led path after it): the first operand may be a
+        # searched path too, so never skip it and judge nothing clean.
         return False
     if any(_follows_links(word, names[command]) for word in rest):
         return False
-    filter_values = {i + 1 for i, word in enumerate(rest) if word in _FILTER_SEPARATE_OPTIONS}
-    operands = [
-        word for i, word in enumerate(rest) if not word.startswith("-") and i not in filter_values
-    ]
-    paths = operands[1:]
+    paths = [rest[position] for position in parsed.operands[1:]]
     if not paths or any(char in _WORD_EXPANDING_CHARACTERS for p in paths for char in p):
         return False
     bases = [cwd for cwd in cwds if cwd]
@@ -2296,29 +2317,6 @@ def _searched_paths_hold_no_protected_file(
             if index.find_under(root) is not None:
                 return False
     return True
-
-
-#: Long spellings after which no operand is the pattern: the pattern is given by
-#: option or file, or (rg --files) there is none. ``--`` ends the options, so a
-#: dash-led path could follow it unseen by the operand filter.
-_NO_PATTERN_OPERAND_WORDS: Final = frozenset({"--", "--files", *_PATTERN_FILE_OPTIONS})
-_NO_PATTERN_OPERAND_PREFIXES: Final = ("--regexp=", "--file=")
-_PATTERN_LONG_OPTIONS: Final = ("--regexp", "--file")
-
-
-def _names_no_pattern_operand(word: str) -> bool:
-    """Whether a grep/rg word means the first operand is no pattern.
-
-    Fails closed on short clusters: any single-dash word holding ``e`` or ``f``
-    may be ``-ezz``/``-vezz``/``-fpats`` (an over-match only judges less clean).
-    """
-    if word in _NO_PATTERN_OPERAND_WORDS or word.startswith(_NO_PATTERN_OPERAND_PREFIXES):
-        return True
-    # GNU grep accepts any unambiguous abbreviation (--regex=zz is --regexp=zz).
-    name = word.split("=", 1)[0]
-    if len(name) > len("--") and name.startswith("--"):
-        return any(full.startswith(name) for full in _PATTERN_LONG_OPTIONS)
-    return word.startswith("-") and not word.startswith("--") and bool(set(word[1:]) & {"e", "f"})
 
 
 def _follows_links(word: str, tool: str) -> bool:
@@ -2432,19 +2430,25 @@ def _is_scoped_filter_value(
             words = linear_shlex.split(segment)
         except ValueError:
             return False
-        if not _searched_paths_hold_no_protected_file(words, index, cwds):
+        if not _searched_paths_hold_no_protected_file(
+            words, index, cwds, rg_config=RG_CONFIG_ENV in command
+        ):
             return False
     return True
 
 
-def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
-    """Whether the command in ``segment`` may open an operand placed after it.
+def _opens_files(segment: str, tail: str, *, rg_config: bool = False) -> bool:
+    """Whether the command in ``segment`` may open the bare name that follows it.
 
-    Fails closed: an unreadable segment, or one with no command word (the token
-    IS the command), opens files.
+    ``segment`` is the command text before the name and ``tail`` the rest of its
+    segment after it: a pattern option can come after the name. Fails closed: an
+    unreadable segment, or one with no command word (the name IS the command),
+    opens files.
     """
+    segment = _PLAIN_LEADING_ASSIGNMENTS.sub(" ", segment)
     chain = segment_command_chain(segment)
-    if not chain:
+    if not chain or any(_ASSIGNMENT_WORD.match(word) for word in chain):
+        # No command word, or an assignment with a value this reading cannot skip.
         return True
     try:
         words = linear_shlex.split(segment)
@@ -2452,6 +2456,9 @@ def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
         return True
     names = [word.rsplit("/", 1)[-1] for word in words]
     for name in (chain_word.rsplit("/", 1)[-1] for chain_word in chain):
+        if name == "eval":
+            # eval runs its words as a command line of its own, which no reading here follows.
+            return True
         if name == "git":
             rest = names[names.index("git") + 1 :] if "git" in names else []
             first = next((word for word in rest if not word.startswith("-")), "")
@@ -2459,8 +2466,12 @@ def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
                 continue
             return True
         elif name in _PATTERN_FIRST_COMMANDS:
-            rest = names[names.index(name) + 1 :] if name in names else []
-            if _grep_pattern_word_is_token(rest) and token_is_first_pattern_word:
+            before = words[names.index(name) + 1 :] if name in names else []
+            try:
+                after = linear_shlex.split(tail)
+            except ValueError:
+                return True
+            if _token_is_pattern_operand(name, before, after, rg_config=rg_config):
                 continue
             return True
         elif name in _FILE_OPENING_COMMANDS or name.startswith(_FILE_OPENING_PREFIXES):
@@ -2468,26 +2479,24 @@ def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
     return False
 
 
-def _grep_pattern_word_is_token(words_after_command: list[str]) -> bool:
-    """False when the grep-family words use an option that names files or patterns."""
-    return not any(word in _PATTERN_FILE_OPTIONS for word in words_after_command)
+def _token_is_pattern_operand(
+    command: str, before: list[str], after: list[str], *, rg_config: bool = False
+) -> bool:
+    """Whether a bare name between ``before`` and ``after`` is, provably, the pattern operand.
 
-
-def _first_positional_is_last(segment: str) -> bool:
-    """Whether the segment's last word is its command's first non-option operand."""
-    try:
-        words = linear_shlex.split(segment)
-    except ValueError:
-        return False
-    chain = segment_command_chain(segment)
-    if not chain or not words:
-        return False
-    command_name = chain[-1].rsplit("/", 1)[-1]
-    names = [word.rsplit("/", 1)[-1] for word in words]
-    if command_name not in names:
-        return False
-    operands = [w for w in words[names.index(command_name) + 1 :] if not w.startswith("-")]
-    return not operands
+    The words of the whole command line are read with the option grammar. Only
+    when it places every option (none unknown, none ambiguous), none of them
+    supplies the pattern, and the name is the first operand, is the name the
+    pattern grep searches for rather than a file it opens.
+    """
+    grammar = grammar_for(command, rg_config=rg_config)
+    parsed = parse_arguments(grammar, [*before, _TOKEN_WORD, *after])
+    return (
+        not parsed.uncertain
+        and not parsed.pattern_supplied
+        and bool(parsed.operands)
+        and parsed.operands[0] == len(before)
+    )
 
 
 def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
@@ -2515,10 +2524,62 @@ def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
         return not _git_search_value_prefix_before(command, word_start, segment_start)
     if after_char and after_char not in _AFTER_WORD_CHARS:
         return True
-    segment = command[segment_start:word_start]
-    if _REDIRECT_TAIL.search(segment):
+    segment = _outside_substitutions(command, segment_start, command[segment_start:word_start])
+    if segment is None or _REDIRECT_TAIL.search(segment):
         return True
-    return _opens_files(segment, _first_positional_is_last(segment))
+    return _opens_files(
+        segment, _segment_tail(command, word_end), rg_config=RG_CONFIG_ENV in command
+    )
+
+
+def _unquoted_close_paren(text: str) -> int:
+    """Index of the first ``)`` of ``text`` that sits outside quotes, else -1."""
+    quote = ""
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == "\\" and quote == '"':
+                index += 1
+            elif char == quote:
+                quote = ""
+        elif char == "\\":
+            index += 1
+        elif char in "'\"":
+            quote = char
+        elif char == ")":
+            return index
+        index += 1
+    return -1
+
+
+def _outside_substitutions(command: str, segment_start: int, segment: str) -> str | None:
+    """``segment`` as the command that really precedes the name, past closed substitutions.
+
+    A segment starts after the ``(`` of ``$(...)``, so in ``$(echo cat) name`` it
+    reads ``echo cat) `` and names ``echo``, while the command that runs is
+    whatever the substitution prints. Each closed substitution is replaced by a
+    word bash would expand (``$SUBSTITUTION``), which names no command, and the
+    segment is rebuilt from the text around it. None when a ``)`` closes
+    something this reading cannot place.
+    """
+    while (close := _unquoted_close_paren(segment)) >= 0:
+        if segment_start == 0 or command[segment_start - 1] != "(":
+            return None
+        outer_end = segment_start - 1
+        if command[:outer_end].endswith("$"):
+            outer_end -= 1
+        outer_start = _scan_shell_prefix(command[:outer_end])[0]
+        segment = f"{command[outer_start:outer_end]} {_SUBSTITUTION_WORD} {segment[close + 1 :]}"
+        segment_start = outer_start
+    return segment
+
+
+def _segment_tail(command: str, word_end: int) -> str:
+    """The text after ``word_end`` up to the next unquoted command separator."""
+    rest = command[word_end:]
+    spans = split_unquoted_spans(rest, _SEGMENT_END_SEPARATORS)
+    return rest[: spans[0][1]] if spans else ""
 
 
 def _is_quote(char: str) -> bool:

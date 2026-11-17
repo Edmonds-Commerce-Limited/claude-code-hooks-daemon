@@ -574,11 +574,13 @@ def _recursive_search_reaches(
                 unplaced = True
             else:
                 roots.append(operand)
-    if not roots and not unplaced:
+    if (
+        (scan.default_root_possible or not roots)
+        and not unplaced
+        and not (tool == TOOL_RG and piped_in)
+    ):
         # rg reads a piped stdin instead; grep -r and git grep search the cwd.
-        if tool == TOOL_RG and piped_in:
-            return None
-        roots = ["."]
+        roots = [*roots, "."]
     project_root = resolve_project_root()
     cwd_components = _cwd_components(cwd, project_root)
     for search_root in roots:

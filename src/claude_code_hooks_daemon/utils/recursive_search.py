@@ -19,9 +19,13 @@ reason, and two readers of one grammar drift.
 
 Scope, deliberately: literal spellings. A search hidden behind an obfuscated
 command word (``g\\rep``, ``"grep"``, ``$G``) is dismissed (ledger 00474 N152),
-and a producer other than ``find`` feeding ``xargs`` names no root.
+and a producer other than ``find`` feeding ``xargs`` names no root, so the directory
+``xargs`` runs in is judged instead (the paths it will be handed are unknown). Commands
+that hand a whole directory to a reader (``find -exec``, ``xargs``, ``tar``, ``cp``,
+``diff``, ``zip``, ``rsync``, ``git diff --no-index``) are judged the same way as a search.
 """
 
+import contextvars
 import fnmatch
 import os
 import posixpath
@@ -35,6 +39,11 @@ from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_position import SHELL_NAMES
 from claude_code_hooks_daemon.utils.find_expression import FIND_EXEC_ACTIONS, find_exec_end
+from claude_code_hooks_daemon.utils.grep_option_grammar import (
+    RG_CONFIG_ENV,
+    grammar_for,
+    parse_arguments,
+)
 from claude_code_hooks_daemon.utils.protected_file_index import (
     ExemptHook,
     ProtectedFileIndex,
@@ -46,46 +55,26 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
 )
 from claude_code_hooks_daemon.utils.shell_snapshot import default_glob_semantics
 
+# Whether the command being read names the ripgrep config variable; set by
+# :func:`search_reads` for the duration of one read, so the nested readers see it.
+_rg_config_named: Final[contextvars.ContextVar[bool]] = contextvars.ContextVar(
+    "rg_config_named", default=False
+)
+
 TOOL_GREP: Final[str] = "grep"
 TOOL_RG: Final[str] = "rg"
 TOOL_GIT: Final[str] = "git"
 
 # grep-like: recursive only when asked (-r, -R, --recursive, -d recurse).
-_GREP_COMMANDS: Final[frozenset[str]] = frozenset({"grep", "egrep", "fgrep", "zgrep", "ugrep"})
+_GREP_COMMANDS: Final[frozenset[str]] = frozenset(
+    {"grep", "egrep", "fgrep", "zgrep", "ugrep", "ug"}
+)
 # rg-like: recursive by default, and read piped stdin instead when given no root.
 _RG_COMMANDS: Final[frozenset[str]] = frozenset({"rg", "ag", "ack"})
 # Global git options that move the search somewhere the payload cwd does not describe.
 _GIT_RELOCATING_OPTIONS: Final[frozenset[str]] = frozenset({"-C", "--git-dir", "--work-tree"})
 _GIT_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
     {"-c", "--namespace", "--exec-path"} | _GIT_RELOCATING_OPTIONS
-)
-_PATTERN_OPTIONS: Final[frozenset[str]] = frozenset({"-e", "-f", "--regexp", "--file"})
-# Options whose value is the next word; without this the value would be read
-# as the pattern or as a search root.
-_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
-    {
-        "-A", "-B", "-C", "-m", "-d", "-D", "-g", "-t", "-T", "-j", "-M",
-        "--after-context", "--before-context", "--context", "--max-count",
-        "--directories", "--devices", "--include", "--exclude", "--exclude-dir",
-        "--exclude-from", "--glob", "--iglob", "--type", "--type-not", "--color", "--label",
-    }
-)  # fmt: skip
-# Value-taking options only ``rg`` has. They cannot join the shared set: ``-r``
-# is grep's recursion flag and ``-E`` its extended-regexp flag, neither takes a value.
-_RG_ONLY_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
-    {
-        "-r", "-E",
-        "--replace", "--encoding", "--max-depth", "--max-filesize", "--max-columns",
-        "--threads", "--sort", "--sortr", "--pre", "--pre-glob", "--ignore-file",
-        "--type-add", "--type-clear", "--colors", "--context-separator",
-        "--field-context-separator", "--field-match-separator", "--path-separator",
-        "--regex-size-limit", "--dfa-size-limit", "--engine", "--hostname-bin",
-        "--hyperlink-format",
-    }
-)  # fmt: skip
-_RG_COMMAND: Final[str] = "rg"
-_RECURSIVE_LONG_OPTIONS: Final[frozenset[str]] = frozenset(
-    {"--recursive", "--dereference-recursive"}
 )
 _GLOB_OPTIONS: Final[frozenset[str]] = frozenset({"-g", "--glob", "--iglob"})
 _DIRECTORIES_OPTIONS: Final[frozenset[str]] = frozenset({"-d", "--directories"})
@@ -124,6 +113,9 @@ class SearchArguments:
     excludes: list[str] = field(default_factory=list)
     globs: list[str] = field(default_factory=list)
     pattern_given: bool = False
+    uncertain: bool = False
+    # Whether the tool may search its default root (the cwd) besides the operands.
+    default_root_possible: bool = False
 
     def take_value(self, option: str, value: str) -> None:
         """Record the value of an option that takes one."""
@@ -180,53 +172,37 @@ def search_command(words: list[str]) -> tuple[str, int, bool] | None:
     return None
 
 
-def scan_options(arguments: list[str], *, tool: str, command: str = "") -> SearchArguments:
+def scan_options(
+    arguments: list[str], *, tool: str, command: str = "", rg_config: bool = False
+) -> SearchArguments:
     """Read options and operands of a grep-family invocation's arguments.
 
-    ``command`` is the word that ran the search (``rg``, ``/usr/bin/rg``): ``rg``
-    alone takes a value after ``-r``/``--replace`` and its long options, so its
-    value is not read as the pattern or as a root.
+    ``command`` is the word that ran the search (``rg``, ``/usr/bin/rg``): the
+    option grammar differs per tool (:mod:`grep_option_grammar`). The pattern
+    operand is skipped only on positive proof. An option the grammar cannot
+    place (an unknown name, an ambiguous abbreviation, an ``ug`` that reads its
+    own config) keeps EVERY operand as a possible root, drops the exclusions, and
+    leaves the default root possible whenever the unplaced options could have
+    eaten all the operands: skipping a word on a guess hides a searched path.
+
+    ``rg_config`` says the command names ``RIPGREP_CONFIG_PATH``: an ``rg`` then
+    reads further options (a pattern among them) from a file, so it is uncertain.
     """
-    rg_style = posixpath.basename(command) == _RG_COMMAND
-    value_options = (
-        _OPTIONS_TAKING_VALUE | _RG_ONLY_OPTIONS_TAKING_VALUE if rg_style else _OPTIONS_TAKING_VALUE
-    )
-    scan = SearchArguments(recursive=tool != TOOL_GREP)
-    pending: str | None = None
-    options_ended = False
-    for word in arguments:
-        if pending is not None:
-            scan.take_value(pending, word)
-            pending = None
-        elif options_ended or not word.startswith("-") or word == "-":
-            scan.operands.append(word)
-        elif word == _END_OF_OPTIONS:
-            options_ended = True
-        elif word.startswith("--"):
-            name, has_value, value = word.partition("=")
-            scan.recursive = scan.recursive or name in _RECURSIVE_LONG_OPTIONS
-            scan.pattern_given = scan.pattern_given or name in _PATTERN_OPTIONS
-            if name in value_options or name in _PATTERN_OPTIONS:
-                if has_value:
-                    scan.take_value(name, value)
-                else:
-                    pending = name
-        else:
-            cluster = word[1:]
-            for offset, char in enumerate(cluster):
-                option = f"-{char}"
-                if char in "rR" and option not in value_options:
-                    scan.recursive = True
-                elif option in _PATTERN_OPTIONS or option in value_options:
-                    scan.pattern_given = scan.pattern_given or option in _PATTERN_OPTIONS
-                    attached = cluster[offset + 1 :]
-                    if attached:
-                        scan.take_value(option, attached)
-                    else:
-                        pending = option
-                    break
-    if not scan.pattern_given and scan.operands:
-        scan.operands = scan.operands[1:]
+    chosen = grammar_for(command, git_grep=tool == TOOL_GIT, rg_config=rg_config)
+    parsed = parse_arguments(chosen, arguments)
+    scan = SearchArguments(recursive=tool != TOOL_GREP or parsed.recursive)
+    scan.pattern_given = parsed.pattern_supplied
+    scan.uncertain = parsed.uncertain
+    for option, value in parsed.values:
+        scan.take_value(option, value)
+    operands = [arguments[position] for position in parsed.operands]
+    if parsed.uncertain:
+        scan.operands = operands
+        scan.exclude_dirs, scan.excludes, scan.globs = [], [], []
+        scan.default_root_possible = len(operands) <= 1 + parsed.maybe_consumed
+        return scan
+    scan.operands = operands if parsed.pattern_supplied else operands[1:]
+    scan.default_root_possible = not scan.operands
     return scan
 
 
@@ -346,7 +322,11 @@ def search_reads(command: str, cwd: str | None) -> list[Read]:
     precedes the search; with no absolute directory to place them from they are
     left out, because a guess at where a search reads is worse than no answer.
     """
-    reads = list(_reads(command, cwd, 0))
+    reset = _rg_config_named.set(RG_CONFIG_ENV in command)
+    try:
+        reads = list(_reads(command, cwd, 0))
+    finally:
+        _rg_config_named.reset(reset)
     if not any(read.glob for read in reads):
         return reads
     default_expansion = default_glob_semantics(command)
@@ -411,7 +391,8 @@ def _reads(command: str, cwd: str | None, depth: int) -> Iterator[Read]:
     for segment, piped_in in command_segments(command):
         words = _command_words(segment)
         fed_by = feeder if piped_in else None
-        feeder = None
+        # A stage that is not a `find` passes the producer's roots on (`find d | sort | xargs cat`).
+        feeder = fed_by
         if not words:
             continue
         head = posixpath.basename(words[0])
@@ -424,13 +405,18 @@ def _reads(command: str, cwd: str | None, depth: int) -> Iterator[Read]:
             yield from _reads(" ".join(words[1:]), current, depth + 1)
         elif head == _FIND:
             feeder = _find_roots(words)
-            if _find_execs_a_search(words):
+            if _find_execs_a_reader(words):
                 yield from _reads_of_roots(feeder, current)
         elif head == _XARGS:
             inner_words = _xargs_command(words)
             if inner_words and _is_search(inner_words):
                 yield from _search_reads(inner_words, current, piped_in=True)
-                yield from _reads_of_roots(fed_by or (), current)
+            if _runs_a_reader(inner_words):
+                # Fed by `find`, xargs reads what `find` lists. Fed by anything else the paths are
+                # unknown, so the tree it runs in is judged.
+                yield from _reads_of_roots(fed_by or (".",), current)
+        elif (directory_roots := _directory_reader_roots(words)) is not None:
+            yield from _reads_of_roots(directory_roots, current)
         elif _is_search(words):
             yield from _search_reads(words, current, piped_in=piped_in)
 
@@ -445,10 +431,14 @@ def _command_words(segment: str) -> list[str]:
         words = linear_shlex.split(segment)
     except ValueError:
         return []
-    while words and _ASSIGNMENT.match(words[0]):
-        words = words[1:]
-    _names, start = peel_command_wrappers(words)
-    return words[start:]
+    while True:
+        while words and _ASSIGNMENT.match(words[0]):
+            words = words[1:]
+        _names, start = peel_command_wrappers(words)
+        if start == 0:
+            return words
+        # ``env VAR=x rg ...``: assignments can follow a wrapper too.
+        words = words[start:]
 
 
 def _is_search(words: list[str]) -> bool:
@@ -465,18 +455,22 @@ def _search_reads(words: list[str], cwd: str | None, *, piped_in: bool) -> Itera
     tool, start, relocated = found
     if relocated:
         return
-    scan = scan_options(words[start:], tool=tool, command=words[start - 1])
+    scan = scan_options(
+        words[start:], tool=tool, command=words[start - 1], rg_config=_rg_config_named.get()
+    )
     if not scan.recursive:
         return
     if tool == TOOL_GIT:
         yield from _git_grep_reads(words[start:], scan, cwd)
         return
     roots = tuple(scan.operands)
-    if not roots:
-        if tool == TOOL_RG and piped_in:
-            return
-        roots = (".",)
-    rules = _tool_rules(posixpath.basename(words[0]), words[start:], scan)
+    if scan.default_root_possible and not (tool == TOOL_RG and piped_in):
+        roots = (*roots, ".")
+    rules = (
+        _NO_RULES
+        if scan.uncertain
+        else _tool_rules(posixpath.basename(words[0]), words[start:], scan)
+    )
     yield from _reads_of_roots(roots, cwd, rules)
 
 
@@ -498,7 +492,9 @@ def _git_grep_reads(arguments: list[str], scan: SearchArguments, cwd: str | None
         candidates = arguments[arguments.index(_END_OF_OPTIONS) + 1 :]
     else:
         candidates = [operand for operand in scan.operands if _exists(operand, cwd)]
-    roots = tuple(c for c in candidates if not c.startswith(_PATHSPEC_MAGIC_PREFIX)) or (".",)
+    roots = tuple(c for c in candidates if not c.startswith(_PATHSPEC_MAGIC_PREFIX))
+    if not roots or scan.default_root_possible:
+        roots = (*roots, ".")
     for root in _placed(roots, cwd):
         yield Read(root, view=view)
 
@@ -520,14 +516,13 @@ def _find_roots(words: list[str]) -> tuple[str, ...]:
     return tuple(roots) or (".",)
 
 
-def _find_execs_a_search(words: list[str]) -> bool:
-    """Does a ``find`` command run a grep-family tool on what it finds?"""
+def _find_execs_a_reader(words: list[str]) -> bool:
+    """Does any ``-exec``-style action of a ``find`` command run a reader on what it finds?"""
     for index, word in enumerate(words):
         if word not in FIND_EXEC_ACTIONS:
             continue
         end = find_exec_end(words, index + 1)
-        inner = words[index + 1 : end]
-        if inner and _is_search(inner):
+        if _runs_a_reader(words[index + 1 : end]):
             return True
     return False
 
@@ -536,14 +531,215 @@ def _xargs_command(words: list[str]) -> list[str]:
     """The command ``xargs`` runs: the words after its own options."""
     index = 1
     while index < len(words) and words[index].startswith("-"):
-        index += 2 if words[index] in _XARGS_VALUE_FLAGS else 1
+        takes_value = words[index] in _XARGS_VALUE_FLAGS | _XARGS_LONG_VALUE_FLAGS
+        index += 2 if takes_value else 1
     return words[index:]
+
+
+# --- Readers of a whole directory that are not a search -----------------------------------------
+#
+# A command that hands a directory to `find -exec`, `xargs`, an archiver, a copier or a
+# directory diff puts every file under it into its output, whatever flags it carries. The
+# rule is fail closed: only a command on the short allowlist below is known to open no file
+# for its content, so every other command word (an unresolvable one, a wrapper around
+# nothing, a shell, an interpreter) counts as a reader of every root it is handed.
+
+_XARGS_LONG_VALUE_FLAGS: Final[frozenset[str]] = frozenset(
+    {
+        "--arg-file",
+        "--delimiter",
+        "--max-args",
+        "--max-procs",
+        "--max-lines",
+        "--max-chars",
+        "--eof",
+        "--process-slot-var",
+    }
+)
+# Matched on the exact bare word: `./ls` and `/tmp/ls` are not `ls`.
+_CONTENT_FREE_COMMANDS: Final[frozenset[str]] = frozenset(
+    {
+        "echo",
+        "printf",
+        "true",
+        "false",
+        "ls",
+        "stat",
+        "basename",
+        "dirname",
+        "test",
+        "[",
+        "rm",
+        "rmdir",
+        "chmod",
+        "chown",
+        "touch",
+        "mkdir",
+    }
+)
+_DIFF_COMMANDS: Final[frozenset[str]] = frozenset({"diff", "sdiff", "diff3", "colordiff"})
+_ARCHIVE_COMMANDS: Final[frozenset[str]] = frozenset({"zip", "7z", "7za", "7zr"})
+_TAR_COMMANDS: Final[frozenset[str]] = frozenset({"tar", "gtar", "bsdtar"})
+# The last operand of these is where the copy goes, which is not read.
+_COPY_COMMANDS: Final[frozenset[str]] = frozenset({"cp", "rsync", "scp"})
+_CP: Final[str] = "cp"
+_COPY_TARGET_DIRECTORY_OPTION: Final[str] = "--target-directory"
+_TAR_DIRECTORY_OPTIONS: Final[frozenset[str]] = frozenset({"-C", "--directory"})
+_GIT_DIFF_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"diff", "difftool"})
+_GIT_NO_INDEX_FLAG: Final[str] = "--no-index"
+_LONE_DASH: Final[str] = "-"
+_PARENT: Final[str] = ".."
+_LONG_OPTION_PREFIX: Final[str] = "--"
+
+
+def _runs_a_reader(command: list[str]) -> bool:
+    """Does the command a ``find -exec`` or ``xargs`` runs possibly open what it is handed?
+
+    An empty command runs nothing (``xargs`` alone runs ``echo``). A command made only of
+    wrappers has no command word to prove harmless, so it counts.
+    """
+    if not command:
+        return False
+    _wrappers, start = peel_command_wrappers(command)
+    if start >= len(command):
+        return True
+    return command[start] not in _CONTENT_FREE_COMMANDS
+
+
+def _directory_reader_roots(words: list[str]) -> tuple[str, ...] | None:
+    """The paths a directory-reading command is handed, or None when it is not one.
+
+    Every path operand counts, whatever the flags: ``diff a b`` compares the files of two
+    directories without ``-r``, and an archiver takes a directory whole. An option's value
+    is counted too (it costs nothing when it names no directory with a protected file).
+    ``git diff --no-index`` is the only ``git`` form here: without it the diff reads
+    history and the index, which this module does not judge.
+    """
+    head = posixpath.basename(words[0])
+    arguments = words[1:]
+    if head in _DIFF_COMMANDS or head in _ARCHIVE_COMMANDS:
+        return tuple(_path_operands(arguments))
+    if head in _TAR_COMMANDS:
+        return _tar_roots(arguments)
+    if head in _COPY_COMMANDS:
+        return _copy_sources(head, arguments)
+    if head == TOOL_GIT:
+        return _git_no_index_roots(arguments)
+    return None
+
+
+def _path_operands(arguments: list[str]) -> list[str]:
+    """The words of ``arguments`` that can be a path: operands, and values attached to ``--opt=``."""
+    operands: list[str] = []
+    options_ended = False
+    for word in arguments:
+        if options_ended:
+            operands.append(word)
+        elif word == _END_OF_OPTIONS:
+            options_ended = True
+        elif word.startswith(_LONG_OPTION_PREFIX):
+            _option, equals, value = word.partition("=")
+            if equals and value:
+                operands.append(value)
+        elif word != _LONE_DASH and not word.startswith("-"):
+            operands.append(word)
+    return operands
+
+
+def _copy_sources(command: str, arguments: list[str]) -> tuple[str, ...]:
+    """The operands of ``cp``/``rsync``/``scp`` that are read: all but the destination.
+
+    The destination is the ``-t``/``--target-directory`` value of ``cp`` (for ``rsync``
+    ``-t`` is ``--times``, which takes no value), else the last operand; a lone operand
+    is judged (the command is malformed or reads it).
+    """
+    operands: list[str] = []
+    destination_is_option = False
+    skip_next = False
+    for word in arguments:
+        if skip_next:
+            skip_next = False
+            continue
+        is_short_target = (
+            command == _CP
+            and word.startswith("-")
+            and not word.startswith(_LONG_OPTION_PREFIX)
+            and word.endswith("t")
+        )
+        if (word == _COPY_TARGET_DIRECTORY_OPTION and command == _CP) or is_short_target:
+            destination_is_option = True
+            skip_next = True
+        elif command == _CP and word.startswith(_COPY_TARGET_DIRECTORY_OPTION + "="):
+            destination_is_option = True
+        else:
+            operands.extend(_path_operands([word]))
+    if not destination_is_option and len(operands) > 1:
+        operands = operands[:-1]
+    return tuple(operands)
+
+
+def _tar_roots(arguments: list[str]) -> tuple[str, ...]:
+    """The paths ``tar`` reads, each placed under the ``-C`` directory in force where it stands.
+
+    A leading bundle without a dash (``tar cf - deep``) is the mode, not a path.
+    """
+    roots: list[str] = []
+    base: str | None = None
+    words = arguments[1:] if arguments and not arguments[0].startswith("-") else arguments
+    index = 0
+    while index < len(words):
+        word = words[index]
+        directory: str | None = None
+        if word in _TAR_DIRECTORY_OPTIONS and index + 1 < len(words):
+            directory = words[index + 1]
+            index += 1
+        elif word.startswith("--directory="):
+            directory = word.partition("=")[2]
+        elif word.startswith("-C") and not word.startswith(_LONG_OPTION_PREFIX) and len(word) > 2:
+            directory = word[2:]
+        if directory is not None:
+            base = _under(base, directory)
+            roots.append(base)
+        else:
+            roots.extend(_under(base, operand) for operand in _path_operands([word]))
+        index += 1
+    return tuple(roots)
+
+
+def _git_no_index_roots(arguments: list[str]) -> tuple[str, ...] | None:
+    """The two paths of ``git diff --no-index``, or None for any other ``git`` command."""
+    base: str | None = None
+    position = 0
+    while position < len(arguments) and arguments[position].startswith("-"):
+        option = arguments[position]
+        if option == "-C" and position + 1 < len(arguments):
+            base = _under(base, arguments[position + 1])
+        position += 2 if option in _GIT_OPTIONS_TAKING_VALUE else 1
+    if position >= len(arguments) or arguments[position] not in _GIT_DIFF_SUBCOMMANDS:
+        return None
+    rest = arguments[position + 1 :]
+    if _GIT_NO_INDEX_FLAG not in rest:
+        return None
+    return tuple(_under(base, operand) for operand in _path_operands(rest))
+
+
+def _under(base: str | None, path: str) -> str:
+    """``path`` read from ``base``: unchanged when absolute or when there is no base."""
+    if base is None or posixpath.isabs(path):
+        return path
+    return posixpath.join(base, path)
 
 
 def _place(
     root: str, cwd: str | None, *, unplaceable: re.Pattern[str] = _UNPLACEABLE_ROOT
 ) -> str | None:
     """The absolute, normalised form of ``root``, or None when it cannot be placed."""
+    anchored = _anchored(root, cwd, unplaceable)
+    return None if anchored is None else posixpath.normpath(anchored)
+
+
+def _anchored(root: str, cwd: str | None, unplaceable: re.Pattern[str]) -> str | None:
+    """``root`` made absolute but not normalised (``a/link/..`` keeps its ``..``)."""
     if unplaceable.search(root):
         return None
     expanded = str(Path(root).expanduser())
@@ -551,7 +747,20 @@ def _place(
         if cwd is None or not posixpath.isabs(cwd):
             return None
         expanded = posixpath.join(cwd, expanded)
-    return posixpath.normpath(expanded)
+    return expanded
+
+
+def _physical_root(root: str, cwd: str | None) -> str | None:
+    """Where a root with a ``..`` really points once the links before it are followed.
+
+    ``normpath`` removes ``link/..`` as if it were the link's parent; a command's own path
+    lookup steps out of the link's TARGET. None when the root has no ``..`` (the lexical
+    form is then the whole answer: a link as the root itself is resolved by the index).
+    """
+    if _PARENT not in root.split("/"):
+        return None
+    anchored = _anchored(root, cwd, _UNPLACEABLE_ROOT)
+    return None if anchored is None else os.path.realpath(anchored)
 
 
 def _placed(roots: tuple[str, ...], cwd: str | None) -> list[str]:
@@ -590,5 +799,10 @@ def _reads_of_roots(
         if glob_root is not None:
             # Answered from the index when judged: no directory is listed here.
             yield Read(glob_root, view=_view_for(rules), glob=True, rules=rules)
-    for root in _placed(roots, cwd):
+    placed = _placed(roots, cwd)
+    for root in placed:
         yield Read(root, view=_view_for(rules), skip=rules.predicate(root))
+    for root in roots:
+        physical = _physical_root(root, cwd)
+        if physical is not None and physical not in placed:
+            yield Read(physical, view=_view_for(rules), skip=rules.predicate(physical))

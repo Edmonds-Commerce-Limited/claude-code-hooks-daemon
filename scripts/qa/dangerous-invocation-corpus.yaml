@@ -615,6 +615,66 @@ rows:
       the checkout is: the index is built from `git ls-files` and never walks the
       tree, so a big checkout costs the call nothing (Plan 00483 A2).
 
+  # ------------------------- directory readers that are not a search (Plan 00618, Plan 00615)
+  #
+  # A command that hands a whole directory to `find -exec`, `xargs`, an archiver, a
+  # copier or a directory diff reads every file in it. `secret_file_guard` judges
+  # the directory against the protected-file index, so these rows are denied
+  # wherever the checkout indexes a protected file under the root they name. This
+  # checkout tracks none outside the flaggable fixture, so the chain allows them
+  # here and the rows record that measured fact; the denying behaviour is held by
+  # tests/unit/handlers/pre_tool_use/test_secret_file_guard_directory_readers.py,
+  # whose fixture holds a protected file. A row that starts being denied means a
+  # protected file now sits under `docs`: flip it to COVERED.
+  - id: directory-reader-find-exec-cat
+    command: "find docs -exec cat {} +"
+    axis: protected-file-read
+    verdict: UNCOVERED-accepted
+    note: >-
+      Allowed here only because `docs` holds no indexed protected file; denied
+      by secret_file_guard where it does (Plan 00615, find -exec / -execdir / -ok
+      with any command that is not a content-free one such as `ls` or `rm`).
+
+  - id: directory-reader-xargs-cat
+    command: "find docs | xargs cat"
+    axis: protected-file-read
+    verdict: UNCOVERED-accepted
+    note: >-
+      As the `find -exec` row, for `xargs`. A producer other than `find` feeding
+      an `xargs` reader judges the working directory instead.
+
+  - id: directory-reader-tar
+    command: "tar cf - docs"
+    axis: protected-file-read
+    verdict: UNCOVERED-accepted
+    note: >-
+      Allowed here only because `docs` holds no indexed protected file; an
+      archiver is judged on every path operand and on `-C` directories.
+
+  - id: directory-reader-cp-r
+    command: "cp -r docs x"
+    axis: protected-file-read
+    verdict: UNCOVERED-accepted
+    note: >-
+      Allowed here only because `docs` holds no indexed protected file; the
+      copy source is judged, the destination is not read.
+
+  - id: directory-reader-diff-r
+    command: "diff -r docs src"
+    axis: protected-file-read
+    verdict: UNCOVERED-accepted
+    note: >-
+      Allowed here only because neither directory holds an indexed protected
+      file; every path operand of `diff` is judged, with or without `-r`.
+
+  - id: directory-reader-git-diff-no-index
+    command: "git diff --no-index docs src"
+    axis: protected-file-read
+    verdict: UNCOVERED-accepted
+    note: >-
+      Allowed here only because neither directory holds an indexed protected
+      file; without `--no-index` the diff reads history and is not judged.
+
   # ------------------------------ whole-filesystem scans, careless spellings (ledger N385)
   - id: root-recursion-bash-c
     command: "bash -c 'grep -r x /'"
