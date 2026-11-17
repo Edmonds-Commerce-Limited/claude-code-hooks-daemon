@@ -296,6 +296,30 @@ class TestPlanCounterReadWrite:
         write_plan_counter(repo, 110)
         assert read_plan_counter(repo) == 110
 
+    def test_write_waits_for_config_lock_only_a_short_fixed_time(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """N-10: the counter is written on the PreToolUse guard path, so the
+        config-lock wait must be fixed and short, not the 30 s load-scaled one.
+        """
+        from claude_code_hooks_daemon.constants.timeout import Timeout
+        from claude_code_hooks_daemon.utils import git_config_write
+        seen: dict[str, object] = {}
+
+        def fake(repo: Path, *args: str, **kwargs: object) -> "subprocess.CompletedProcess[str]":
+            seen.update(kwargs)
+            return subprocess.CompletedProcess(["git", "config", *args], 0, "", "")
+
+        monkeypatch.setattr(git_config_write, "run_git_config_write", fake)
+        repo = _git_init(tmp_path / "proj")
+        write_plan_counter(repo, 7)
+
+        base = seen["base_wait"]
+        ceiling = seen["ceiling"]
+        assert isinstance(base, (int, float)) and isinstance(ceiling, (int, float))
+        assert ceiling == base
+        assert ceiling + Timeout.GIT_CONTEXT < Timeout.CHAIN_DEADLINE_DEFAULT
+
     def test_write_overwrites_previous_value(self, tmp_path: Path) -> None:
         repo = _git_init(tmp_path / "proj")
         write_plan_counter(repo, 110)
