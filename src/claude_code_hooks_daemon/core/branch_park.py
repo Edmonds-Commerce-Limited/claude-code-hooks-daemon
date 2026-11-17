@@ -17,6 +17,7 @@ A park with no commit is local to this clone: no other checkout can see it.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,8 @@ from claude_code_hooks_daemon.utils.git_config_write import (
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.remote_refs import remote_git_env
+
+logger = logging.getLogger(__name__)
 
 _HEADS = "refs/heads/"
 _REMOTES = "refs/remotes/"
@@ -111,7 +114,14 @@ def read_park_record(repo: Path, name: str) -> ParkRecord | None:
         if result.returncode != 0:
             raise BranchParkError(f"git config {_record_key(name, key)} failed: {result.stderr}")
         values[key] = result.stdout.strip()
-    return ParkRecord(values[_SHA_KEY], values[_REASON_KEY], int(values[_AT_KEY]), values[_BY_KEY])
+    try:
+        parked_at = int(values[_AT_KEY])
+    except ValueError:
+        # An unreadable record is not a park. Every guard then judges the branch as
+        # unparked, which is never laxer than the record it could not read.
+        logger.warning("park record of %s has a non-integer %s; ignored", name, _AT_KEY)
+        return None
+    return ParkRecord(values[_SHA_KEY], values[_REASON_KEY], parked_at, values[_BY_KEY])
 
 
 def clear_park_record(repo: Path, name: str) -> ParkRecord | None:

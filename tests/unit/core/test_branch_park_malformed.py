@@ -69,8 +69,10 @@ def test_creation_guard_still_counts_the_branch_and_does_not_raise(repo: Path) -
     _malformed_park(repo, "feat")
     cfg = BranchesConfig(default="main")
     verdict = creation_verdict(repo, cfg, "newb")
-    # The unreadable record is not a park: the branch is open work, never waved through.
-    assert verdict.report.open_work_count == 1
+    # The unreadable record is not a park: the verdict equals the one with no record.
+    for key in ("", "Reason", "At", "By"):
+        _git(repo, "config", "--unset", f"branch.feat.hooksDaemonParked{key}")
+    assert verdict == creation_verdict(repo, cfg, "newb")
 
 
 def test_stop_guard_still_judges_the_branch(repo: Path) -> None:
