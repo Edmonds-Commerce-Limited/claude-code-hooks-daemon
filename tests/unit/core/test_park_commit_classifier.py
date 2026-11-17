@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import (
     branch_cleanup,
     branch_creation,
@@ -30,6 +29,7 @@ from claude_code_hooks_daemon.core.remote_branch_proof import prove_remote_merge
 from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import _remote_delete_note
 from tests.conftest import HERMETIC_GIT_EMAIL
+from tests.support.git_fixtures import git_setup_timeout
 
 _WRITER_MESSAGE = "Park branch: waiting\n\nParked-Reason: waiting\nParked-By: t\n"
 
@@ -166,7 +166,7 @@ class TestWalkFailsClosed:
         def fake(
             repo: Path,
             *args: str,
-            timeout: float = Timeout.GIT_CONTEXT,
+            timeout: float = git_setup_timeout(),
             env: Mapping[str, str] | None = None,
         ) -> subprocess.CompletedProcess[str]:
             if on in args:
@@ -185,7 +185,7 @@ class TestWalkFailsClosed:
     def test_a_failed_walk_is_none(self, parked: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         self._fail(monkeypatch, on="--boundary", stdout="", code=128)
         assert (
-            branch_park.walk_park_range(parked, "main", "feat", timeout=Timeout.GIT_CONTEXT) is None
+            branch_park.walk_park_range(parked, "main", "feat", timeout=git_setup_timeout()) is None
         )
         assert not is_park_residue(parked, "feat", "main")
 
@@ -194,7 +194,7 @@ class TestWalkFailsClosed:
     ) -> None:
         self._fail(monkeypatch, on="--boundary", stdout="only\x1ftwo\n", code=0)
         assert (
-            branch_park.walk_park_range(parked, "main", "feat", timeout=Timeout.GIT_CONTEXT) is None
+            branch_park.walk_park_range(parked, "main", "feat", timeout=git_setup_timeout()) is None
         )
 
     def test_a_failed_message_read_is_none(
@@ -202,7 +202,7 @@ class TestWalkFailsClosed:
     ) -> None:
         self._fail(monkeypatch, on="--no-walk=unsorted", stdout="", code=128)
         assert (
-            branch_park.walk_park_range(parked, "main", "feat", timeout=Timeout.GIT_CONTEXT) is None
+            branch_park.walk_park_range(parked, "main", "feat", timeout=git_setup_timeout()) is None
         )
 
     def test_a_message_record_for_another_sha_is_none(
@@ -211,7 +211,7 @@ class TestWalkFailsClosed:
         forged = f"{'0' * 40}\n{_WRITER_MESSAGE}\0"
         self._fail(monkeypatch, on="--no-walk=unsorted", stdout=forged, code=0)
         assert (
-            branch_park.walk_park_range(parked, "main", "feat", timeout=Timeout.GIT_CONTEXT) is None
+            branch_park.walk_park_range(parked, "main", "feat", timeout=git_setup_timeout()) is None
         )
 
     def test_an_extra_message_record_is_none(
@@ -221,7 +221,7 @@ class TestWalkFailsClosed:
         extra = f"{tip}\n{_WRITER_MESSAGE}\0{tip}\n{_WRITER_MESSAGE}\0"
         self._fail(monkeypatch, on="--no-walk=unsorted", stdout=extra, code=0)
         assert (
-            branch_park.walk_park_range(parked, "main", "feat", timeout=Timeout.GIT_CONTEXT) is None
+            branch_park.walk_park_range(parked, "main", "feat", timeout=git_setup_timeout()) is None
         )
 
     def test_a_failed_tip_listing_marks_nothing(
@@ -229,12 +229,12 @@ class TestWalkFailsClosed:
     ) -> None:
         self._fail(monkeypatch, on="for-each-ref", stdout="", code=128)
         marked = branch_park.park_marked_refs(
-            parked, ["refs/heads/feat"], timeout=Timeout.GIT_CONTEXT
+            parked, ["refs/heads/feat"], timeout=git_setup_timeout()
         )
         assert marked == set()
 
     def test_no_refs_marks_nothing(self, parked: Path) -> None:
-        assert branch_park.park_marked_refs(parked, [], timeout=Timeout.GIT_CONTEXT) == set()
+        assert branch_park.park_marked_refs(parked, [], timeout=git_setup_timeout()) == set()
 
 
 # --- the deletable shapes ---------------------------------------------------------------
