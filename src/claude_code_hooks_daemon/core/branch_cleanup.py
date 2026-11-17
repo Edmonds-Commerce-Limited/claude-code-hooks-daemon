@@ -83,14 +83,20 @@ CleanupMode = Literal["act", "advise", "off"]
 #: Tiers whose every commit is reachable from the target: deletable on the ancestry proof alone.
 MERGED_TIERS = frozenset({TIER_MERGED, TIER_MERGED_UNPUSHED, TIER_MERGED_NOT_IN_HEAD})
 
-#: Inventory states ``branch-sweep --clean`` considers.
+#: Inventory states ``branch-sweep --clean`` considers, a park marker over work the
+#: default holds included: ``classify_branch`` proves its local delete and
+#: :func:`prove_remote_merged` its remote one (``park-carried``, Plan 00617).
 CLEAN_STATES = frozenset(
-    {BranchState.MERGED_DEFAULT, BranchState.MERGED_LINE, BranchState.PATCH_EQUIVALENT}
+    {
+        BranchState.MERGED_DEFAULT,
+        BranchState.MERGED_LINE,
+        BranchState.PATCH_EQUIVALENT,
+        BranchState.PARK_CARRIED,
+    }
 )
 
-#: States ``--clean --remote`` considers: those plus a park marker over work the default holds,
-#: whose remote delete :func:`prove_remote_merged` accepts (``park-carried``).
-REMOTE_CLEAN_STATES = CLEAN_STATES | {BranchState.PARK_CARRIED}
+#: States ``--clean --remote`` considers: the same states as the local half.
+REMOTE_CLEAN_STATES = CLEAN_STATES
 
 _UNTRACKED = "untracked"
 

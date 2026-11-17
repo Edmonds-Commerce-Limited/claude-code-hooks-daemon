@@ -37,14 +37,18 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     DormancyStage,
     OwnerRule,
     Pool,
-    is_park_residue,
     is_work_branch,
     merge_proof_key,
     pool_for_ref,
     read_merge_proofs,
     worktrees_by_branch,
 )
-from claude_code_hooks_daemon.core.branch_park import ParkRecord, read_park_records
+from claude_code_hooks_daemon.core.branch_park import (
+    ParkRecord,
+    is_park_residue,
+    park_marked_refs,
+    read_park_records,
+)
 from claude_code_hooks_daemon.daemon.branch_safety import TIER_UNPROVEN, matches_any_glob
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
@@ -480,9 +484,10 @@ def _carried_refnames(
 ) -> set[str]:
     """Park-marked refs whose only unique commits are park markers over the default's work.
 
-    The inventory's own rule (:func:`is_park_residue`), run only for a ref that carries
-    a park trailer and is not already an ancestor of the default, so a clone with no
-    park commit pays no git call here.
+    The one park-commit rule (:func:`is_park_residue`), walked only for a ref whose tip
+    carries a park or unpark trailer and is not already an ancestor of the default. The
+    unpark trailer is read by one batched listing, paid only when some unmerged ref is
+    not already known to be parked.
     """
     if default is None:
         return set()
@@ -492,11 +497,15 @@ def _carried_refnames(
         for ref in (f"{_REMOTES}{config.remote}/{default}", f"{_HEADS}{default}")
         if ref in listed
     ]
+    if not targets:
+        return set()
+    unmerged = [ref for ref in work_refs if ref.refname not in merged]
+    unknown = [ref.refname for ref in unmerged if not ref.parked]
+    marked = park_marked_refs(repo, unknown, timeout=Timeout.GIT_CONTEXT)
     return {
         ref.refname
-        for ref in work_refs
-        if ref.parked
-        and ref.refname not in merged
+        for ref in unmerged
+        if (ref.parked or ref.refname in marked)
         and any(is_park_residue(repo, ref.tip, target) for target in targets)
     }
 
