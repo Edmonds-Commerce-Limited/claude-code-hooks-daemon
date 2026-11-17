@@ -8,6 +8,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00618: release 3 75 0 code review findings](00618-release-3-75-0-code-review-findings/PLAN.md) - Not Started (Step 10 review of release 3.75.0 returned FAIL: 5 blocking fail-open or data-loss findings plus 20 non-blocking defects; release aborted at that gate; fix test-first, then the owner re-runs the release)
+
 - [00617: park commit keeps merged branch deletable](00617-park-commit-keeps-merged-branch-deletable/PLAN.md) - In Progress (peer report: a merged branch carrying only empty park commits is counted unmerged, so no agent may delete it and the merged pool blocks new branches; fix test-first, fail closed, one shared classifier)
 
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
@@ -313,11 +315,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 616 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 618 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 515 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 77 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 79 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

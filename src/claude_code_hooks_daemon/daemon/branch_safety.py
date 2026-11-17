@@ -24,9 +24,12 @@ holds:
 
 ``content-preserved``
     Every file version on the branch is byte-identical to a blob still
-    reachable from the protected ref. Commits and paths differ; bytes do not.
-    This is the common shape of a genuinely stale branch, and neither of the
-    tiers above detects it.
+    reachable from the protected ref, AND a first-parent commit of the protected
+    ref holds the branch's per-path net change (each added or changed path at the
+    same blob and mode, each deleted path absent). This is the shape a squash
+    merge leaves, and neither of the tiers above detects it. Bytes alone are not
+    enough: a deletion, or a file set back to an older version, adds no new bytes
+    and exists only on the branch (Plan 00618 B-1).
 
 ``unproven``
     Everything else. Reported with the files whose CONTENT exists nowhere else,
@@ -267,8 +270,9 @@ _TIER_DETAIL = {
         "made — the work is in the default, only the park markers go"
     ),
     TIER_CONTENT_PRESERVED: (
-        "every file version on this branch is byte-identical to one still "
-        "reachable from the protected ref — only the arrangement differs"
+        "a commit on the protected ref holds this branch's whole net change — every "
+        "added or changed file at the same bytes, every deleted file absent — the "
+        "shape a squash merge leaves"
     ),
 }
 
@@ -322,8 +326,8 @@ class DeletionReport:
         """One ``git branch <name> <sha>`` per deleted branch, from the tip the proof named.
 
         The machine-written record of what each delete removed. A proven delete
-        keeps the branch's content on the protected ref, a remote or as identical
-        files, so this is a pointer back to the exact tip, valid while git still
+        keeps the branch's content on the protected ref (its commits, its patches or
+        its net change) or on a remote, so this is a pointer back to the exact tip, valid while git still
         holds the commit, and not a recovery copy a delete may lean on.
         """
         tips = {c.name: c.tip for c in self.classifications}
@@ -557,8 +561,9 @@ def content_unique_paths_of(repo: Path, tip_ref: str, reachable: set[str]) -> tu
     """Paths of ``tip_ref``'s tree whose blob is absent from ``reachable`` (sorted).
 
     Empty means every file version on the branch is byte-identical to one still
-    reachable from the protected refs (the ``content-preserved`` tier): nothing is
-    lost by deleting the branch, which is what a squash merge looks like afterwards.
+    reachable from the protected refs. That is necessary for the ``content-preserved``
+    tier but not sufficient: a deletion or a revert to an older version adds no
+    bytes, so the tier also needs the per-path net change (:func:`_net_change_held`).
     ``reachable`` is :func:`reachable_object_shas` of every base, computed once by
     the caller so a batch of branches shares one walk.
 
@@ -633,6 +638,35 @@ def _remote_unchecked_note(listing: RemoteRefs | None) -> str:
     return (
         f"; the remote could not be checked (`git ls-remote {listing.remote}` failed: "
         f"{listing.failure}), so only local refs were considered"
+    )
+
+
+def _net_change_held(repo: Path, bases: Sequence[str], tip_ref: str) -> tuple[bool, str]:
+    """Whether some base's history holds the branch's per-path net change, and why not.
+
+    The proof is ``remote_branch_proof.holds_net_change``, the one every remote delete
+    rests on. Imported here, not at module level, because that module imports this one.
+    It reads root-relative paths, so it runs from the repository top level, on the
+    same load-scaled git budget as :func:`_git`. Every failure (no top level, a git
+    error or timeout) is a reason, never a pass.
+    """
+    from claude_code_hooks_daemon.core import remote_branch_proof
+
+    top = _git(repo, "rev-parse", "--show-toplevel", check=False)
+    top_level = top.stdout.strip() if top.returncode == 0 else ""
+    if not top_level:
+        return False, "the repository top level could not be read, so the net change is unchecked"
+    budget = scaled_timeout(Timeout.GIT_BRANCH_SAFETY, Timeout.GIT_BRANCH_SAFETY_MAX)
+    try:
+        for base in bases:
+            if remote_branch_proof.holds_net_change(Path(top_level), base, tip_ref, timeout=budget):
+                return True, ""
+    except remote_branch_proof.ProofUnavailableError as exc:
+        return False, f"the net change could not be checked ({exc})"
+    return False, (
+        f"every byte exists in {', '.join(bases)}, but no commit there holds this "
+        "branch's net change (a deleted file, or a file set back to an older version, "
+        "exists only here)"
     )
 
 
@@ -799,20 +833,31 @@ def classify_branch(
             detail=f"{patch_summary}; the content tier was not run{remote_note}",
         )
 
-    # Commit-level uniqueness does not imply content loss: a stale branch is
-    # usually byte-identical to a target and merely arranged differently.
-    # Compare blob shas, which ARE content identity in git.
+    # Two proofs, BOTH required. Blob identity says every byte on the branch
+    # survives somewhere; it cannot see a deletion or a revert to an older version,
+    # which add no bytes. The per-path net change says a target's history once held
+    # exactly the branch's result (Plan 00618 B-1). Requiring both keeps this tier
+    # strictly narrower than the blob-only proof it replaces.
     reachable: set[str] = set()
     for base in bases:
         reachable |= reachable_object_shas(repo, base)
     content_unique_paths = content_unique_paths_of(repo, tip_ref, reachable)
     if not content_unique_paths:
+        net_held, net_note = _net_change_held(repo, bases, tip_ref)
+        if net_held:
+            return BranchClassification(
+                name=name,
+                tier=TIER_CONTENT_PRESERVED,
+                unique_commits=unique_commits,
+                detail=_TIER_DETAIL[TIER_CONTENT_PRESERVED],
+                tip=tip,
+            )
         return BranchClassification(
             name=name,
-            tier=TIER_CONTENT_PRESERVED,
+            tier=TIER_UNPROVEN,
             unique_commits=unique_commits,
-            detail=_TIER_DETAIL[TIER_CONTENT_PRESERVED],
             tip=tip,
+            detail=f"{patch_summary}; {net_note}{remote_note}",
         )
 
     history: set[str] = set()

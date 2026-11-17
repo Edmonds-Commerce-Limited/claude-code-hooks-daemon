@@ -179,7 +179,7 @@ verified. The coordinator's gate should run them.
 
 ## Other
 
-- Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/089-park-only-branch-stays-deletable.md`
+- Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/091-park-only-branch-stays-deletable.md`
   (**Plan**: 00617, **Audience**: client projects).
 - Plan ticks: Tasks 1.1 to 2.3 are done. Task 3.1 is in progress: the note is
   added, and the peer team is told after the merge. Status is In Progress, in
