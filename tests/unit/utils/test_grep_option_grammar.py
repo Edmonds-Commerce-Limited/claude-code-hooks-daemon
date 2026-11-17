@@ -191,3 +191,39 @@ class TestArity:
     )
     def test_short_arity(self, command: str, letter: str, arity: Arity) -> None:
         assert grammar_for(command).short(letter) is arity
+
+
+#: git's negated options take no argument (``git grep -h`` lists ``--[no-]context <n>``).
+GIT_NEGATIONS: tuple[str, ...] = (
+    "--no-after-context",
+    "--no-before-context",
+    "--no-context",
+    "--no-max-count",
+    "--no-threads",
+    "--no-cont",
+)
+
+
+class TestGitNegations:
+    @pytest.mark.parametrize("option", GIT_NEGATIONS)
+    def test_a_negation_consumes_no_word(self, option: str) -> None:
+        parsed = _parse("git", option, "x", "../deep", git=True)
+        assert parsed.operands == [1, 2]
+        assert parsed.values == []
+
+    @pytest.mark.parametrize("option", GIT_NEGATIONS)
+    def test_a_negation_is_a_flag(self, option: str) -> None:
+        assert grammar_for("git", git_grep=True).long(option).arity is Arity.FLAG
+
+    @pytest.mark.parametrize(
+        "option", ["--context", "--max-count", "--threads", "--max-depth", "--cont"]
+    )
+    def test_the_positive_form_still_takes_a_value(self, option: str) -> None:
+        assert grammar_for("git", git_grep=True).long(option).arity is Arity.VALUE
+
+    @pytest.mark.parametrize("option", ["--no-color", "--no-open-files-in-pager"])
+    def test_a_negation_with_an_optional_value_never_consumes_the_next_word(
+        self, option: str
+    ) -> None:
+        parsed = _parse("git", option, "x", "../deep", git=True)
+        assert parsed.operands == [1, 2]

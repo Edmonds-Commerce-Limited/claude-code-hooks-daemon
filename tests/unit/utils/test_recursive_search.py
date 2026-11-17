@@ -303,6 +303,24 @@ def test_git_grep_no_index_reads_the_working_tree(repo: Path) -> None:
     assert _reach("git grep --no-index needle", repo) == PROTECTED_GLOB
 
 
+@pytest.mark.parametrize(
+    "option",
+    [
+        "--no-after-context",
+        "--no-before-context",
+        "--no-context",
+        "--no-max-count",
+        "--no-threads",
+        "--no-cont",
+    ],
+)
+def test_git_grep_negation_does_not_hide_a_parent_root(repo: Path, option: str) -> None:
+    """A ``--no-*`` negation takes no value, so ``../tracked`` is the searched root."""
+    subdirectory = repo / "plain-dir"
+    subdirectory.mkdir()
+    assert _reach(f"git grep {option} needle ../tracked", subdirectory, repo) == PROTECTED_GLOB
+
+
 @pytest.fixture
 def hidden_tree(tmp_path: Path) -> Path:
     """The only protected files sit in a hidden directory and under a hidden name."""
