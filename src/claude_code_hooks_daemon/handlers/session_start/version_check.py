@@ -144,6 +144,16 @@ class VersionCheckHandler(SessionStartHandlerBase):
             fallback.mkdir(parents=True, exist_ok=True)
             return fallback / name
 
+    def _cache_ttl_seconds(self) -> int:
+        """The cache lifetime in seconds; a TTL that is not a whole number of hours is the default."""
+        ttl_hours = self._cache_ttl_hours
+        if isinstance(ttl_hours, int | float | str):
+            try:
+                return int(ttl_hours) * _SECONDS_PER_HOUR
+            except (ValueError, OverflowError):
+                pass
+        return _DEFAULT_CACHE_TTL_HOURS * _SECONDS_PER_HOUR
+
     def _is_cache_valid(self, cache_file: Path) -> bool:
         """Check if cache file exists and is not expired."""
         if not cache_file.exists():
@@ -154,12 +164,7 @@ class VersionCheckHandler(SessionStartHandlerBase):
                 cache_data = json.load(f)
 
             cached_at = float(cache_data.get("cached_at", 0))
-            ttl_hours = self._cache_ttl_hours
-            if not isinstance(ttl_hours, int | float | str):
-                ttl_hours = _DEFAULT_CACHE_TTL_HOURS
-            ttl_seconds = int(ttl_hours) * _SECONDS_PER_HOUR
-
-            return bool((time.time() - cached_at) < ttl_seconds)
+            return bool((time.time() - cached_at) < self._cache_ttl_seconds())
         except (OSError, json.JSONDecodeError, ValueError, KeyError):
             return False
 
@@ -558,10 +563,7 @@ class VersionCheckHandler(SessionStartHandlerBase):
         sha = cached.get("remote_tip")
         if kind not in _TIP_KINDS or (kind == _TIP_KIND_TIP and not sha):
             return None
-        ttl_hours = self._cache_ttl_hours
-        if not isinstance(ttl_hours, int | float | str):
-            ttl_hours = _DEFAULT_CACHE_TTL_HOURS
-        ttl = int(ttl_hours) * _SECONDS_PER_HOUR if kind == _TIP_KIND_TIP else _NEGATIVE_TTL_SECONDS
+        ttl = self._cache_ttl_seconds() if kind == _TIP_KIND_TIP else _NEGATIVE_TTL_SECONDS
         cached_at = cached.get("cached_at")
         if not isinstance(cached_at, int | float):
             return None
