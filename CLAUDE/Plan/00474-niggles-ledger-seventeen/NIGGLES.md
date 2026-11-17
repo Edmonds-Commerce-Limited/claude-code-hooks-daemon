@@ -7602,3 +7602,17 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: `CLAUDE/Plan/Completed/00609-tracked-hook-wrappers-machine-independent/subagent-reports/prove-two-root-two-host.py` sets `REPO = Path("/workspace")`, so it proves the main checkout whatever checkout runs it: from a worktree it silently tests main's code, and on a host whose checkout lives elsewhere it fails. The same literal is in the archived Plan 00243 prototype, which is historical and not run.
 
 **Status**: ⬜ Open. Derive the repository root from the script's own location (or `git rev-parse --show-toplevel`), so the proof runs against the checkout that holds it.
+
+### N632 — a `lint_on_edit` timeout above about 15 s is cut by the 20 s PostToolUse chain deadline
+
+**Source**: Plan 00618 Phase 2 (Task 2.5), by reading `constants/timeout.py` and `config/models.py` `deadline_for`.
+
+**Evidence**: PostToolUse has no `EVENT_CHAIN_DEADLINE` entry, so it gets `CHAIN_DEADLINE_DEFAULT` (20 s). `lint_on_edit` defaults to 15 s and documents `options.timeouts` values such as `PHP: 30`, which the chain deadline cuts first, replying "skipped" rather than the handler's own lint-timeout notice. The same constraint is why the lint budget could not be load-scaled for the playbook harness's Kotlin probe.
+
+**Status**: ⬜ Open (owner decision recorded in Plan 00618). Fix with the three-layer event budget the Worktree events use (PostToolUse handler budget, chain deadline, client wait, the `init.sh` mirror and the registered hook timeout), then load-scale the lint base under the new ceiling.
+
+### N633 — `test_relay_binary_checker.py` fails 9 tests under `--cov` and passes without it
+
+**Source**: Plan 00618 Phase 2 sub-agent, seen while running targeted tests. Not investigated.
+
+**Status**: ⬜ Open. Reproduce with and without `--cov` on `main`; find which test depends on import or timing state that coverage changes.
