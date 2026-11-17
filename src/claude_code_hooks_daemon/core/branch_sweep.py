@@ -459,8 +459,8 @@ def render_report(
     """The ``branch-sweep`` text: actionable groups first, then the count against the cap.
 
     ``remote_proven`` names the remote-only branches the remote-delete guard's proof
-    accepted (see :func:`delete_action`). ``ownership_hints`` (``claude_md.ownership``
-    not ``off``) adds the owned-branch hint after the actionable groups and the
+    accepted (see :func:`delete_action`). ``ownership_hints`` (the CLI sets it only
+    when ``claude_md.ownership`` is ``own``) adds the owned-branch hint after the actionable groups and the
     foreign-branch counter-hint under the foreign list.
     """
     groups = group_records(inventory)
@@ -511,7 +511,11 @@ def render_report(
     )
     out += _section("Dormant:", _dormant_section(groups.dormant))
     if ownership_hints and (
-        groups.contained_nowhere or groups.merged or groups.patch_equivalent or groups.dormant
+        groups.contained_nowhere
+        or groups.merged
+        or groups.patch_equivalent
+        or groups.park_carried
+        or groups.dormant
     ):
         out += [HINT_TEXT[OwnershipHint.BRANCH_OWNED], ""]
     out += _section("Live work:", [_work_line(r) for r in groups.live])
