@@ -3,9 +3,9 @@
 **Plan**: 00618
 **Audience**: client projects
 
-These are the non-blocking findings of the release code review. Every change makes a guard deny at least as much as before. Two config values that used to be accepted now fail validation.
+These are the non-blocking findings of the release code review. Every change makes a guard deny at least as much as before. Two config values that a pre-release build accepted now fail validation.
 
-**Config validation, may need a change to your `hooks-daemon.yaml`.**
+**Config validation.** Both keys are new in this release, so no released config is affected. A config written against a pre-release build may need a change:
 
 - `omit_permission_surface` must be a real YAML boolean. A quoted or numeric value (`"true"`, `"yes"`, `1`) used to pass validation and then be read as off. It is now rejected, so write `true` or `false` unquoted.
 - `ownership_text` may not contain a carriage return, just as it already could not contain a newline.
