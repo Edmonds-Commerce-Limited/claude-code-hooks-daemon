@@ -104,5 +104,5 @@ Each item below can be answered from this section alone. "Main" means the curren
 
 - Filed after the 3.75.0 release was aborted at Step 10.
 - Phase 1 (B-1 to B-5) merged to main, each fix after its red test.
-- Phase 2 merged to main at `73cd364e5` (CI run 44000713338 green): 29 of 33 items fixed, N-16 already fixed, N-7, N-8 and T-7 held for the owner.
+- Phase 2 merged to main at `73cd364e5` (CI run 44000713338 green on the branch tip `e53eef183` that was merged): 29 of 33 items fixed, N-16 already fixed, N-7, N-8 and T-7 held for the owner.
 - Remaining: the owner decisions above, then the owner's `/release` re-run (Task 2.4 inside it).
