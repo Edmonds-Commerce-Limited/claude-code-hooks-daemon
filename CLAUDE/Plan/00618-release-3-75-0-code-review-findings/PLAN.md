@@ -42,12 +42,12 @@ A release carries no known defect, and deferring one needs the human's explicit 
 ### Phase 2b: Red release gate (run 43961579876 on the aborted release head)
 
 - [x] ✅ **Task 2.3**: The Plan 00609 proof script failed the `format` check; formatted on main (`873880239`).
-- [ ] ⬜ **Task 2.4**: On the re-run, after the Step 1H remote-docs refresh, update `docs_sha256` in the instruction-loading contract's `META.json` through the contract refresh procedure (the refreshed memory page changed one paragraph about additional-directory loading); confirm no contract fact breaks. Done inside the release re-run, not before it.
+- [ ] 🚫 **Task 2.4**: (Blocked on the owner: runs only inside the owner's `/release` re-run.) On the re-run, after the Step 1H remote-docs refresh, update `docs_sha256` in the instruction-loading contract's `META.json` through the contract refresh procedure (the refreshed memory page changed one paragraph about additional-directory loading); confirm no contract fact breaks. Done inside the release re-run, not before it.
 - [ ] 🚫 **Task 2.5**: The playbook harness probe for the Kotlin linter timed out at 15 s on a loaded runner and the blocking gate skipped; make that probe's timeout load-scaled, test-first. Harness half on main: the playbook generator's subprocess bounds are load-scaled. Daemon half (the lint budget itself) is an owner decision; the playbook harness gate was not run on the merged tip.
 
 ### Phase 3: Hand-off
 
-- [ ] ⬜ **Task 3.1**: Independent loosening review of Phase 1 and 2, CI green on main, a release note, then tell the owner the release can be re-run. In place: loosening reviews per fix group, CI run 44000713338 green on the Phase 2 merge, release notes 089 to 092. Open until the owner answers the decisions below and re-runs `/release`.
+- [ ] 🚫 **Task 3.1**: (Blocked on the owner: closes after the owner's decisions and `/release` re-run.) Independent loosening review of Phase 1 and 2, CI green on main, a release note, then tell the owner the release can be re-run. In place: loosening reviews per fix group, CI run 44000713338 green on the Phase 2 merge, release notes 089 to 092. Open until the owner answers the decisions below and re-runs `/release`.
 
 ## Owner decisions
 
