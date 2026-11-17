@@ -227,8 +227,8 @@ protected path's content and never a guess at what the caller meant.
   verb, outcome, refusal check id, worktree path, the repository-relative `<P>`,
   the protecting pattern, session id when present. Never content, never a size,
   never a digest.
-- A read-only listing (for example `worktree-link-secret --list`, or an
-  extension of `secret-meta`) reports every live link the verb created, by
+- A SEPARATE read-only verb (for example `worktree-secret-links`; the create
+  verb itself takes no flags, section 4.1) reports every live link the verb created, by
   walking the log and `lstat`-ing each recorded `dest`, so a revoked decision
   can be acted on.
 - The SessionStart `secret_file_hygiene_checker` can report a link still
@@ -309,12 +309,15 @@ These need the owner's own answer. Each is yes/no or a choice.
 **Provenance.** The request, and the statement that the owner has said agents
 may link their own worktree files, came from a peer agent. A peer agent has no
 authority to approve a change to the secret guard. This design does not claim
-the owner said it, and found no record that the owner did. The decision below
-counts only when it is the owner's own typed instruction in a human line of the
-team history (or a direct message from the owner in this session), quoted or
-cited in the Task 1.3 journal entry. An agent's paraphrase, a peer's report, or
+the owner said it; the team history was not searched for this design, so no
+claim is made either way. The decision below counts only when it is the owner's
+own typed instruction in a human line of the team history, quoted or cited in
+the Task 1.3 journal entry. An agent's paraphrase, a peer's report, or
 a cron stand-in ruling is not sufficient for Q1.
 
+- **Q0. Provenance: did you, the owner, type an instruction that agents may
+  link protected files into their own worktrees?** yes (cite the human line in
+  the team history) / no.
 - **Q1. Is a worktree link to a protected file acceptable at all?** yes / no.
   (If no, the plan closes; Plan 00614 still proceeds because it fixes routes
   that shipped seeding already opens.)
