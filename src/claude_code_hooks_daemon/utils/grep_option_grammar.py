@@ -197,22 +197,24 @@ _RG: Final = _Table(
     abbreviates=False,
 )
 
+# git's negated options take no argument: ``--[no-]context <n>`` gives the value
+# only to the positive form, so every ``--no-*`` name below is a flag.
 _GIT: Final = _Table(
     value_short="ABCefm",
     optional_short="O",
     flag_short="EFGHILPWachilnopqrvwz" + _DIGITS,
     value_long=_names(
-        "--after-context --before-context --context --max-count --max-depth "
-        "--no-after-context --no-before-context --no-context --no-max-count --no-threads "
-        "--threads"
+        "--after-context --before-context --context --max-count --max-depth --threads"
     ),
     optional_long=_names("--color --no-color --no-open-files-in-pager --open-files-in-pager"),
     flag_long=_names(
         "--all-match --and --basic-regexp --break --cached --column --count "
         "--exclude-standard --ext-grep --extended-regexp --files-with-matches "
         "--files-without-match --fixed-strings --full-name --function-context --heading "
-        "--ignore-case --index --invert-match --line-number --name-only --no-all-match "
-        "--no-basic-regexp --no-break --no-cached --no-column --no-count "
+        "--ignore-case --index --invert-match --line-number --name-only "
+        "--no-after-context --no-all-match --no-basic-regexp --no-before-context "
+        "--no-break --no-cached --no-column --no-context --no-count --no-max-count "
+        "--no-threads "
         "--no-exclude-standard --no-ext-grep --no-extended-regexp --no-files-with-matches "
         "--no-files-without-match --no-fixed-strings --no-full-name --no-function-context "
         "--no-heading --no-ignore-case --no-index --no-invert-match --no-line-number "
