@@ -582,7 +582,7 @@ def _record_json(
 ) -> dict[str, Any]:
     group = _group_name(record)
     action: str | None = None
-    if group in {"merged", "patch-equivalent"}:
+    if group in {"merged", "patch-equivalent", "park-carried"}:
         action = delete_action(record, inventory, config, remote_proven)
     elif group == "contained-nowhere":
         action = push_command(record, config)
