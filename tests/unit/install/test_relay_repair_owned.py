@@ -55,9 +55,12 @@ _SPAWNS_GRANDCHILD = (
 @pytest.fixture(autouse=True)
 def _no_repairs_left() -> Iterator[None]:
     """Each test starts and ends with no owned repair, whatever it did."""
+    relay_repair.resume_owned_spawns()
     stop_owned_repairs()
+    relay_repair.resume_owned_spawns()
     yield
     stop_owned_repairs()
+    relay_repair.resume_owned_spawns()
 
 
 def _argv(script: str, state: Path, *extra: str) -> list[str]:
@@ -186,7 +189,7 @@ class TestNoSpawnAfterStop:
 
         assert not notice.started
         assert notice.failure is not None
-        assert not notice.state.exists()
+        assert not notice.state_path.exists()
 
 
 class TestSessionStartRepairStaysDetached:
