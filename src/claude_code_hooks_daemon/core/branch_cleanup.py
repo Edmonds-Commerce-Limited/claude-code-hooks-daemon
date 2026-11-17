@@ -770,6 +770,14 @@ def delete_if_merged(
     return CleanupReport(deleted=(name,), commands=tuple(commands), park_cleared=park_cleared)
 
 
+def _blockers_line(held_by: Path, blockers: Sequence[str]) -> str:
+    """Why a worktree is not removed: the paths a removal would lose."""
+    return (
+        f"the worktree {held_by} holds {len(blockers)} path(s) a removal "
+        f"would lose: {preview_paths(blockers)}"
+    )
+
+
 def _remove_worktree(repo: Path, path: Path) -> str | None:
     """Remove a linked worktree without ``--force``; git's refusal verbatim, or None."""
     result = run_git(
@@ -861,10 +869,7 @@ def clean_sweep(
         if held_by is not None:
             blockers = worktree_blockers(held_by, config.cleanup_after_merge.regenerable)
             if blockers:
-                skipped.append(
-                    f"{name}: the worktree {held_by} holds {len(blockers)} path(s) a removal "
-                    f"would lose: {preview_paths(blockers)}"
-                )
+                skipped.append(f"{name}: {_blockers_line(held_by, blockers)}")
                 continue
         verdict = _classify(
             repo,
@@ -1024,6 +1029,11 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             continue
         held_by = plan.worktrees.get(name)
         if held_by is not None:
+            # The proof ran long ago; work may have landed in the worktree since.
+            blockers = worktree_blockers(held_by, config.cleanup_after_merge.regenerable)
+            if blockers:
+                outcome.skipped.append(f"{name}: {_blockers_line(held_by, blockers)}")
+                continue
             refused = _remove_worktree(repo, held_by)
             if refused is not None:
                 outcome.skipped.append(f"{name}: git refused to remove {held_by}: {refused}")
