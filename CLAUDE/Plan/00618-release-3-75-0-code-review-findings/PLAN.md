@@ -1,6 +1,6 @@
 # Plan 00618: release 3 75 0 code review findings
 
-**Status**: In Progress
+**Status**: In Progress (blocked only on the owner: all code is on main; open items are the owner decisions D-1 to D-4, then the owner's `/release` re-run, inside which Task 2.4 runs and after which Task 3.1 closes)
 **Created**: 2026-11-16
 **Owner**: joseph
 **Priority**: High
