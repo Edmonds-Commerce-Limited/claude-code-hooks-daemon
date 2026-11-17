@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00570: branch containment remote archive refs](00570-branch-containment-remote-archive-refs/PLAN.md) - Complete at merge `df4a928e9` (green CI run 42404687976) + the archiving commit (GitHub #166: branch-sweep and delete-branch accept a remote ref outside `refs/remotes`, such as an archive namespace, as proof of containment via one bounded `ls-remote`; the offline wording says only what it checked; release note 004)
+
 - [00569: hooks screen target by host arch](00569-hooks-screen-target-by-host-arch/PLAN.md) - Complete at merge `ae0af5761` (green CI run 42404687976) + the archiving commit (GitHub #174: the ccy supervisor and `screen/build.sh` choose the hooks-screen musl target triple from the host architecture, x86_64 or aarch64, and the failure note names the architecture; release note 003)
 
 - [00567: lsp coverage extensionless file targets](00567-lsp-coverage-extensionless-file-targets/PLAN.md) - Complete at merge `6ab6b7bfb` + the archiving commit (GitHub #162: named file targets are judged by their own suffix, an extensionless file counts as unserved, so a grep over extensionless scripts gets the same advisory as a search of their directory; release note 002)
