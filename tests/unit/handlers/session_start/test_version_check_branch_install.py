@@ -300,6 +300,37 @@ class TestPinAndReleaseMakeNoNetworkCall:
         listing.assert_not_called()
 
 
+class TestUnparseableTtlNeverDropsTheAdvisory:
+    """N-17: a TTL that is not an integer falls back to the default, in both caches."""
+
+    @pytest.mark.parametrize("ttl", ["1.5", "soon", float("inf")])
+    def test_second_session_still_reports_the_move(
+        self,
+        handler: VersionCheckHandler,
+        new_session_input: dict[str, Any],
+        cache_file: Path,
+        ttl: object,
+    ) -> None:
+        handler._cache_ttl_hours = ttl
+        with (
+            patch(f"{_MODULE}.read_install_stamp", return_value=_BRANCH_STAMP),
+            patch(f"{_MODULE}.read_daemon_metadata", return_value=_tracking()),
+            patch(
+                f"{_MODULE}.list_remote_refs", return_value=_listing("rc/1.2.3", _NEW_SHA)
+            ) as listing,
+        ):
+            handler.handle(new_session_input)
+            second = _context_text(handler.handle(new_session_input))
+
+        assert listing.call_count == 1
+        assert "moved 1111111..2222222" in second
+
+    @pytest.mark.parametrize("ttl", ["1.5", "soon", float("inf")])
+    def test_both_readers_share_one_ttl(self, handler: VersionCheckHandler, ttl: object) -> None:
+        handler._cache_ttl_hours = ttl
+        assert handler._cache_ttl_seconds() == 24 * 3600
+
+
 class TestTipLookupIsCached:
     def test_a_second_session_inside_the_ttl_makes_no_second_listing(
         self, handler: VersionCheckHandler, new_session_input: dict[str, Any], cache_file: Path

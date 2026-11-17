@@ -16,6 +16,7 @@ from pydantic import (
     Field,
     ModelWrapValidatorHandler,
     PrivateAttr,
+    StrictBool,
     ValidationInfo,
     field_validator,
     model_validator,
@@ -2088,7 +2089,7 @@ class DaemonConfig(BaseModel):
         default=False,
         description="Strict mode: FAIL FAST on ALL errors - handler exceptions, validation errors, etc. (fail-closed vs fail-open)",
     )
-    omit_permission_surface: bool = Field(
+    omit_permission_surface: StrictBool = Field(
         default=False,
         description=(
             "Register no PermissionRequest hook and write no permissions.deny rules, so "
@@ -3087,7 +3088,11 @@ class ClaudeMdConfig(BaseModel):
             if self.ownership_text is None or not self.ownership_text.strip():
                 raise ValueError("claude_md.ownership_text is required (non-blank) for custom")
             # The injector wraps the text in bold: a newline or a bold marker breaks it.
-            if "\n" in self.ownership_text or "**" in self.ownership_text:
+            if (
+                "\n" in self.ownership_text
+                or "\r" in self.ownership_text
+                or "**" in self.ownership_text
+            ):
                 raise ValueError(
                     "claude_md.ownership_text must be a single line without '**' markers"
                 )
