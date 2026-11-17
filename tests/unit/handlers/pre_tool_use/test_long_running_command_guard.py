@@ -290,9 +290,7 @@ class TestExactBackgroundForm:
 
     @staticmethod
     def _offered(reason: str) -> dict[str, Any]:
-        line = next(
-            ln.strip() for ln in reason.splitlines() if ln.strip().startswith('{"command"')
-        )
+        line = next(ln.strip() for ln in reason.splitlines() if ln.strip().startswith('{"command"'))
         offered: dict[str, Any] = json.loads(line)
         return offered
 

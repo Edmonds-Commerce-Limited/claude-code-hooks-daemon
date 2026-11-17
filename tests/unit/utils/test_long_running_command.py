@@ -228,7 +228,7 @@ MISSED_SHAPES: list[tuple[str, FindingKind]] = [
     ("sleep 300; echo x &", FindingKind.LONG_SLEEP),
     ("pytest tests/; true &", FindingKind.SLOW_COMMAND),
     ("sleep 300\necho x &", FindingKind.LONG_SLEEP),
-    ("sleep 5 & sleep 100 && echo x &", FindingKind.LONG_SLEEP),
+    ("sleep 5 & sleep 100; echo x &", FindingKind.LONG_SLEEP),
     # N-12: never-ending and wrapped long shapes.
     ("tail -f log", FindingKind.SLOW_COMMAND),
     ("tail -n 5 -F log", FindingKind.SLOW_COMMAND),
@@ -259,6 +259,8 @@ def test_missed_shape_is_found(command: str, kind: FindingKind) -> None:
         "(sleep 100) &",
         "echo a; sleep 100 &",
         "pytest tests/ && echo done &",
+        "sleep 100 && echo x &",
+        "until test -f x; do sleep 5; done &",
         "pytest tests/ | cat &",
         "tail -f log &",
         "timeout 20 tail -f log",
