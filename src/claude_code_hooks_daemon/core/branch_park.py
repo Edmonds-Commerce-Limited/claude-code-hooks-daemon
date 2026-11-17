@@ -21,6 +21,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NoReturn
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_config_write import (
@@ -297,6 +298,23 @@ def _record_park(repo: Path, name: str, sha: str, reason: str, *, clear: bool) -
     write_park_record(repo, name, ParkRecord(sha, reason, int(time.time()), user))
 
 
+def _restore_tip(
+    repo: Path, ref: str, name: str, old: str, new: str, cause: BranchParkError
+) -> NoReturn:
+    """Move ``ref`` back to ``old`` after its record could not be written, then raise.
+
+    The park commit has already moved the branch; without a record the park does
+    not stand, so the error's "nothing changed" has to be made true.
+    """
+    back = run_git(repo, "update-ref", ref, old, new)
+    if back.returncode != 0:
+        raise BranchParkError(
+            f"{name} was moved to the park commit {new} but its record could not be written "
+            f"({cause}) and the branch could not be moved back: {back.stderr.strip()}"
+        ) from cause
+    raise BranchParkError(f"{cause}; the branch was put back, nothing changed") from cause
+
+
 def _park_remote_only(
     repo: Path,
     name: str,
@@ -418,7 +436,10 @@ def park_branch(
         raise BranchParkError(
             f"{name} moved while parking; nothing changed: {moved.stderr.strip()}"
         )
-    _record_park(repo, name, new, stripped, clear=clear)
+    try:
+        _record_park(repo, name, new, stripped, clear=clear)
+    except BranchParkError as exc:
+        _restore_tip(repo, ref, name, old, new, exc)
     if not push:
         return ParkResult(new, False, None, None, local_only=True)
     retry = f"git push {remote} {name}"
