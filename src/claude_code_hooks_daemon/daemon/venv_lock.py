@@ -228,10 +228,15 @@ def _latest_result_path(project_root: Path) -> Path | None:
     The readers (``status``, the stop hook) cannot cheaply tell which view they
     are, so they show the newest record; its ``log=`` names the fingerprint.
     """
-    records = list((project_root / "untracked").glob(_RESULT_GLOB))
-    if not records:
-        return None
-    return max(records, key=lambda record: record.stat().st_mtime)
+    newest: tuple[float, Path] | None = None
+    for record in (project_root / "untracked").glob(_RESULT_GLOB):
+        try:
+            modified = record.stat().st_mtime
+        except FileNotFoundError:
+            continue  # removed between the listing and this stat: it is not a record
+        if newest is None or modified > newest[0]:
+            newest = (modified, record)
+    return None if newest is None else newest[1]
 
 
 def _write_kv_file(path: Path, lines: list[str]) -> None:
