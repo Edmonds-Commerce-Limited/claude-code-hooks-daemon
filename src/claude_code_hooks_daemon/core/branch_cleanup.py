@@ -789,6 +789,13 @@ def delete_if_merged(
     return CleanupReport(deleted=(name,), commands=tuple(commands), park_cleared=park_cleared)
 
 
+def _proof_words(tier: str | None, default: str) -> str:
+    """How a dry-run line states its proof: a plain merge, or the named evidence tier."""
+    if tier is None or tier == TIER_MERGED:
+        return f"proven merged into {default}"
+    return f"proven {tier} against {default}"
+
+
 def _blockers_line(held_by: Path, blockers: Sequence[str]) -> str:
     """Why a worktree is not removed: the paths a removal would lose."""
     return (
@@ -909,13 +916,14 @@ def clean_sweep(
         proven.append(name)
 
     remote_tips: dict[str, str] = {}
+    remote_evidence: dict[str, str] = {}
     if remote and keep_fetch_error is not None:
         skipped.append(
             f"{config.remote}: keep notes could not be fetched ({keep_fetch_error}), "
             "so the remote half was refused"
         )
     elif remote:
-        remote_tips, problems = _proven_remote(
+        remote_tips, problems, remote_evidence = _proven_remote(
             repo, config, default, inventory.records, spared=frozenset({*owned, *spared})
         )
         skipped += [f"{config.remote}/{name}: {why}" for name, why in problems.items()]
@@ -929,7 +937,7 @@ def clean_sweep(
     if dry_run:
         commands += [
             f"would delete remote {config.remote}/{name} (tip {tip[:_TIP_PREVIEW]}, "
-            f"proven merged into {default})"
+            f"{_proof_words(remote_evidence.get(name), default)})"
             for name, tip in remote_tips.items()
         ]
         for name in proven:
@@ -1114,8 +1122,8 @@ def _proven_remote(
     records: Mapping[str, BranchRecord],
     *,
     spared: frozenset[str] = frozenset(),
-) -> tuple[dict[str, str], dict[str, str]]:
-    """``(name -> live tip, name -> problem)`` for every merged branch the remote holds.
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """``(name -> live tip, name -> problem, name -> evidence tier)`` per merged remote branch.
 
     Candidates are the inventory's merged and patch-equivalent records with a remote
     copy, past the cleanup policy; each is then judged by the remote-delete guard's
@@ -1140,9 +1148,9 @@ def _proven_remote(
         else:
             problems[name] = problem
     if not names:
-        return {}, problems
+        return {}, problems, {}
     proof = prove_remote_merged(repo, config.remote, names, default, config)
-    return proof.tips, {**problems, **proof.problems}
+    return proof.tips, {**problems, **proof.problems}, proof.evidence
 
 
 def proven_remote_only(
@@ -1163,7 +1171,7 @@ def proven_remote_only(
     }
     if not remote_only:
         return frozenset()
-    tips, _problems = _proven_remote(repo, config, default, remote_only)
+    tips, _problems, _evidence = _proven_remote(repo, config, default, remote_only)
     return frozenset(tips)
 
 
