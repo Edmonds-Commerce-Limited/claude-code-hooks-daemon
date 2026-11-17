@@ -228,6 +228,9 @@ class Timeout:
     # The touch record runs on the guard path (20 s chain deadline), so its lock
     # wait is a fixed 2 s rather than load scaled.
     GIT_TOUCH_LOCK_WAIT = 2
+    # The plan counter is written from PreToolUse handlers (plan allocation), so
+    # its config-lock wait is likewise fixed and short.
+    GIT_PLAN_COUNTER_LOCK_WAIT = 2
     # Plan 00474 N621: git never retries `.git/config.lock`, and every checkout
     # of a repository (parallel agents) shares the one config file. A config
     # write waits for the lock for a base scaled by host load

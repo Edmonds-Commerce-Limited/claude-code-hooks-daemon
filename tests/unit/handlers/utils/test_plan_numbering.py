@@ -304,6 +304,7 @@ class TestPlanCounterReadWrite:
         """
         from claude_code_hooks_daemon.constants.timeout import Timeout
         from claude_code_hooks_daemon.utils import git_config_write
+
         seen: dict[str, object] = {}
 
         def fake(repo: Path, *args: str, **kwargs: object) -> "subprocess.CompletedProcess[str]":
