@@ -7586,3 +7586,19 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence** (as reported, NOT yet reproduced here): an `Edit` that changes one cell of a large markdown table, in a doc with many tables whose rows hold cells over 1500 characters, makes `markdown_table_formatter` re-pad every row of that table and of other tables in the same file. Harm: the diff no longer shows the change, and every re-padded row counts as an added line to commit-time scanners (the sensitive-content scan), so old content is re-flagged and re-reviewed as new. Expected: only rows the edit touched change, or a table is re-padded only when it was already canonically padded. The reporter's workaround is rebuilding the file by script at the original widths.
 
 **Status**: ⬜ Open. Reproduce first on `main` with a synthetic doc (two tables, long cells, an `Edit` of one cell). If it reproduces, fix test-first: the formatter must leave untouched rows byte-identical (or skip a table whose existing padding is not canonical), with a test that an already-canonical table is still aligned after an edit.
+
+### N630 — playbook test #379 (guard config drift) drives `echo "test"`, which cannot show its notice
+
+**Source**: Plan 00618 Phase 2 (the release 3.75.0 acceptance run), recorded by the Phase 2 sub-agent.
+
+**Evidence**: the generated acceptance playbook's Test 379, "guard config drift - reports an uncommitted guard weakening", is typed as an observable context test whose command is `echo "test"` and whose expected pattern is `GUARD CONFIG DRIFT|uncommitted`. The drift report is a session-start notice computed from the working-tree config against the committed one; a Bash `echo` neither starts a session nor changes the config, so the pattern can never appear and the test can only fail or be waved through by hand.
+
+**Status**: ⬜ Open. Fix the handler's acceptance-test definition: either declare it a session-start test with a setup step that writes a synthetic weakening into a scratch config, or mark it as not drivable by a tool call (prose a human runs), so the playbook stops carrying a test that cannot pass.
+
+### N631 — the Plan 00609 proof script hard-codes `REPO = Path("/workspace")`
+
+**Source**: Plan 00618 Phase 2, recorded by the Phase 2 sub-agent (the script was reformatted in Plan 00618 Task 2.3 after it failed the release gate's `format` check).
+
+**Evidence**: `CLAUDE/Plan/Completed/00609-tracked-hook-wrappers-machine-independent/subagent-reports/prove-two-root-two-host.py` sets `REPO = Path("/workspace")`, so it proves the main checkout whatever checkout runs it: from a worktree it silently tests main's code, and on a host whose checkout lives elsewhere it fails. The same literal is in the archived Plan 00243 prototype, which is historical and not run.
+
+**Status**: ⬜ Open. Derive the repository root from the script's own location (or `git rev-parse --show-toplevel`), so the proof runs against the checkout that holds it.
