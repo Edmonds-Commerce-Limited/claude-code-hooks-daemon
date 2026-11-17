@@ -1,0 +1,3 @@
+## 02:46 · decision · —
+
+The supervisor goal for Plans 00594, 00613 and 00618 cannot be satisfied from inside this session. Each plan's remaining work needs a human: Plan 00618 waits on the owner's decisions D-1 to D-4 and the owner's /release re-run (Task 2.4 runs inside it, Task 3.1 closes after it); Plan 00613 waits on the owner's answers Q0 to Q5 in DESIGN.md for Task 1.3; Plan 00594 waits on a second client seat and the owner's release decision. All code for 00618 and 00617 is merged to main with green CI and independent loosening reviews. The goal evaluator kept asking for completion on tasks that only a human action can complete, so the goal is retracted rather than re-looped.
