@@ -1,6 +1,6 @@
 # Plan 00617: park commit keeps merged branch deletable
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-16
 **Owner**: joseph
 **Priority**: High
@@ -57,14 +57,14 @@ the default branch lacks is provably content-free.
 
 ### Phase 3: Release hand-off
 
-- [ ] 🔄 **Task 3.1**: Add a release note and tell the requesting peer team the plan number and, once landed, the release. (Release note 089 is added. The peer team is told after the merge.)
+- [ ] 🔄 **Task 3.1**: Add a release note and tell the requesting peer team the plan number and, once landed, the release. (Release note 091 is added. Telling the peer team the plan number and release is not done: it needs the coordinator or a release, so the box stays unticked.)
 
 ## Success Criteria
 
 - [x] The reproduction from Task 1.1 ends with the park-only branch deletable by the guards, with no human step.
 - [x] Every unmerged twin from Task 2.1 is still refused.
-- [x] A release note is added under `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (the holding-area artefact for this plan).
+- [x] Every release-bound consequence is in the pending-release holding area: `UNRELEASED/release-notes/091-park-only-branch-stays-deletable.md`
 
 ## Delivery & Milestones
 
-- Filed from a peer report; nothing delivered yet.
+- Delivered at merge `01a13a600` (CI 43991958722 green); release note 091 holds the release-bound change.
