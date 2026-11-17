@@ -44,7 +44,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     read_merge_proofs,
     worktrees_by_branch,
 )
-from claude_code_hooks_daemon.core.branch_park import ParkRecord, read_park_record
+from claude_code_hooks_daemon.core.branch_park import ParkRecord, read_park_records
 from claude_code_hooks_daemon.daemon.branch_safety import TIER_UNPROVEN, matches_any_glob
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
@@ -391,10 +391,11 @@ def _with_standing_parks(repo: Path, refs: list[_Ref]) -> list[_Ref]:
     tip is the recorded park commit; the remote copy is then the park's own
     past, because its tip is an ancestor of the park commit.
     """
+    records = read_park_records(repo)
     standing = {
         ref.name: record
         for ref in refs
-        if ref.local and (record := read_park_record(repo, ref.name)) and record.sha == ref.tip
+        if ref.local and (record := records.get(ref.name)) and record.sha == ref.tip
     }
     return [_with_standing_park(repo, ref, standing) for ref in refs]
 

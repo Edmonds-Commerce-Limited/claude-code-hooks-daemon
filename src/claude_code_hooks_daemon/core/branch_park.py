@@ -17,9 +17,11 @@ A park with no commit is local to this clone: no other checkout can see it.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NoReturn
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_config_write import (
@@ -29,6 +31,8 @@ from claude_code_hooks_daemon.utils.git_config_write import (
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.remote_refs import remote_git_env
+
+logger = logging.getLogger(__name__)
 
 _HEADS = "refs/heads/"
 _REMOTES = "refs/remotes/"
@@ -103,15 +107,49 @@ def write_park_record(repo: Path, name: str, record: ParkRecord) -> None:
 
 def read_park_record(repo: Path, name: str) -> ParkRecord | None:
     """The park record of ``name``; None when it has none (or an incomplete one)."""
-    values: dict[str, str] = {}
-    for key in _RECORD_KEYS:
-        result = run_git(repo, "config", "--get", _record_key(name, key))
-        if result.returncode == _CONFIG_KEY_ABSENT:
-            return None
-        if result.returncode != 0:
-            raise BranchParkError(f"git config {_record_key(name, key)} failed: {result.stderr}")
-        values[key] = result.stdout.strip()
-    return ParkRecord(values[_SHA_KEY], values[_REASON_KEY], int(values[_AT_KEY]), values[_BY_KEY])
+    return read_park_records(repo).get(name)
+
+
+def read_park_records(repo: Path) -> dict[str, ParkRecord]:
+    """Every complete, readable park record in ``repo``, by branch name, in ONE git process.
+
+    A branch with an incomplete record, or one whose ``ParkedAt`` is not an integer,
+    is left out: an unreadable record is not a park, so every guard judges that
+    branch as unparked, which is never laxer than the record it could not read.
+    """
+    pattern = rf"^branch\..+\.({'|'.join(k.lower() for k in _RECORD_KEYS)})$"
+    result = run_git(repo, "config", "-z", "--get-regexp", pattern)
+    if result.returncode == _CONFIG_KEY_ABSENT:
+        return {}
+    if result.returncode != 0:
+        raise BranchParkError(f"git config --get-regexp failed: {result.stderr.strip()}")
+    fields: dict[str, dict[str, str]] = {}
+    for entry in result.stdout.split("\0"):
+        key, _sep, value = entry.partition("\n")
+        if not key.startswith("branch."):
+            continue
+        name, _dot, leaf = key[len("branch.") :].rpartition(".")
+        fields.setdefault(name, {})[leaf] = value
+    records: dict[str, ParkRecord] = {}
+    for name, found in fields.items():
+        record = _record_from_fields(name, found)
+        if record is not None:
+            records[name] = record
+    return records
+
+
+def _record_from_fields(name: str, found: dict[str, str]) -> ParkRecord | None:
+    """The record held by the lower-cased config leaves in ``found``, or None."""
+    leaves = [key.lower() for key in _RECORD_KEYS]
+    if any(leaf not in found for leaf in leaves):
+        return None
+    sha, reason, at, by = (found[leaf] for leaf in leaves)
+    try:
+        parked_at = int(at.strip())
+    except ValueError:
+        logger.warning("park record of %s has a non-integer %s; ignored", name, _AT_KEY)
+        return None
+    return ParkRecord(sha.strip(), reason.strip(), parked_at, by.strip())
 
 
 def clear_park_record(repo: Path, name: str) -> ParkRecord | None:
@@ -260,6 +298,23 @@ def _record_park(repo: Path, name: str, sha: str, reason: str, *, clear: bool) -
     write_park_record(repo, name, ParkRecord(sha, reason, int(time.time()), user))
 
 
+def _restore_tip(
+    repo: Path, ref: str, name: str, old: str, new: str, cause: BranchParkError
+) -> NoReturn:
+    """Move ``ref`` back to ``old`` after its record could not be written, then raise.
+
+    The park commit has already moved the branch; without a record the park does
+    not stand, so the error's "nothing changed" has to be made true.
+    """
+    back = run_git(repo, "update-ref", ref, old, new)
+    if back.returncode != 0:
+        raise BranchParkError(
+            f"{name} was moved to the park commit {new} but its record could not be written "
+            f"({cause}) and the branch could not be moved back: {back.stderr.strip()}"
+        ) from cause
+    raise BranchParkError(f"{cause}; the branch was put back, nothing changed") from cause
+
+
 def _park_remote_only(
     repo: Path,
     name: str,
@@ -381,7 +436,10 @@ def park_branch(
         raise BranchParkError(
             f"{name} moved while parking; nothing changed: {moved.stderr.strip()}"
         )
-    _record_park(repo, name, new, stripped, clear=clear)
+    try:
+        _record_park(repo, name, new, stripped, clear=clear)
+    except BranchParkError as exc:
+        _restore_tip(repo, ref, name, old, new, exc)
     if not push:
         return ParkResult(new, False, None, None, local_only=True)
     retry = f"git push {remote} {name}"
