@@ -436,3 +436,22 @@ class TestParkCarriedIsOnlyParkCommits:
         assert {"remote-real-0", "remote-real-1", "local-real-0", "local-real-1"} <= parked
         assert not {f"carried-{i}" for i in range(6)} & parked
         assert str(RuleID.BRANCH_PARKED_POOL) in _rules(repo, config)
+
+
+class TestJsonAction:
+    """``--json`` names the delete action of a park-carried branch, as the text report does."""
+
+    def test_a_park_carried_branch_carries_the_same_action_as_its_text_line(
+        self, repo: Path
+    ) -> None:
+        _parked_over_merged(repo, "carried-json")
+        _git(repo, "fetch", "-q", "--prune", "origin")
+        config = _config()
+        inventory = _inventory(repo, config)
+        assert inventory.records["carried-json"].state == BranchState.PARK_CARRIED
+        document = branch_sweep.report_json(inventory, cap=10, config=config)
+        row = next(b for b in document["branches"] if b["name"] == "carried-json")
+        assert row["group"] == "park-carried"
+        assert row["action"] is not None
+        text = "\n".join(branch_sweep.render_report(inventory, config, cap=10))
+        assert row["action"] in text
