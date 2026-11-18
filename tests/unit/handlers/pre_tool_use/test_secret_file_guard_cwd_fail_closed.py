@@ -564,14 +564,19 @@ class TestAScanThatGivesUpBesideASearchOrGlob:
     _GAVE_UP = "stopped before"
 
     @pytest.mark.parametrize("prefix", _OVER_THE_CAP)
-    @pytest.mark.parametrize(
-        "read",
-        ["grep -r DUMMY own", "rg DUMMY own", "grep -R DUMMY .", "cat o*/*", "head -n1 own/*"],
-    )
-    def test_a_cap_hit_denies_a_search_or_glob(self, tree: Tree, prefix: str, read: str) -> None:
+    @pytest.mark.parametrize("read", ["grep -r DUMMY own", "rg DUMMY own", "grep -R DUMMY ."])
+    def test_a_cap_hit_denies_a_search(self, tree: Tree, prefix: str, read: str) -> None:
         decision, text = _result(tree, f"{prefix}; {read}")
         assert decision is Decision.DENY, text
         assert self._GAVE_UP in text
+
+    @pytest.mark.parametrize("prefix", _OVER_THE_CAP)
+    @pytest.mark.parametrize("read", ["cat o*/*", "head -n1 own/*"])
+    def test_a_cap_hit_denies_a_glob(self, tree: Tree, prefix: str, read: str) -> None:
+        # The literal fallback matches these globs against the index itself, so
+        # the deny names the protected pattern rather than the gave-up cause.
+        decision, text = _result(tree, f"{prefix}; {read}")
+        assert decision is Decision.DENY, text
 
     @pytest.mark.parametrize(
         "command", ["grep -r DUMMY own", "cat o*/*", "cd clean && grep -r hello ."]

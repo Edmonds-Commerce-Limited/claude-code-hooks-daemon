@@ -165,13 +165,57 @@ _UNRESOLVED_CAUSE: Final[str] = (
     "checked is denied rather than allowed. Rewrite the command with plain paths, or "
     "split it into smaller commands."
 )
+#: The token of a finding for a scan that gave up beside a search or glob (review 614c P2).
+_GAVE_UP_TOKEN: Final[str] = "<gave-up>"
+_GAVE_UP_CAUSE: Final[str] = (
+    "Denied because the scan of this command stopped before it finished (it reached a "
+    "size limit or its deadline), and the command holds a recursive search or a glob. "
+    "Only the full scan can tell which files those read, so they are denied rather than "
+    "allowed unchecked. Split the command into smaller ones, or drop the large brace "
+    "expansion or wide pattern beside the search."
+)
 _NO_INDEX_REASON: Final[str] = (
     "a recursive search, directory read or wildcard path was not checked, because the "
     "index of protected files is not available yet (the daemon has just started, or the "
     "project is not a git repository)"
 )
+#: The deny cause of each finding that names no protected word.
+_CAUSE_BY_TOKEN: Final[dict[str, str]] = {
+    _UNRESOLVED_TOKEN: _UNRESOLVED_CAUSE,
+    _GAVE_UP_TOKEN: _GAVE_UP_CAUSE,
+}
 #: A command with none of these has no glob for the index to judge.
 _MAY_GLOB: Final[re.Pattern[str]] = re.compile(r"[*?\[]")
+#: Where a search is placed from when the hook gave no cwd: only whether one exists is asked.
+_PLACEHOLDER_CWD: Final[str] = "/"
+
+
+def _holds_search_or_glob(hook_input: dict[str, Any]) -> bool:
+    """Does this Bash call hold a recursive search or a glob? True when that cannot be told.
+
+    Asked only after the full scan gave up (review 614c P2). A glob character
+    anywhere outside a quoted text-fed heredoc counts, and so does any search
+    :func:`recursive_search.search_reads` finds, which has no deadline or cap.
+    """
+    tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+    command = tool_input.get(_FIELD_COMMAND) if isinstance(tool_input, dict) else None
+    if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH or not isinstance(command, str):
+        return False
+    raw_cwd = hook_input.get(HookInputField.CWD)
+    cwd = raw_cwd if isinstance(raw_cwd, str) and Path(raw_cwd).is_absolute() else _PLACEHOLDER_CWD
+    try:
+        stripped = strip_quoted_heredoc_bodies(command, text_readers_only=True)
+        return bool(_MAY_GLOB.search(stripped)) or bool(
+            recursive_search.search_reads(stripped, cwd)
+        )
+    except Exception as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="a scan that already gave up cannot rule a search or glob out, so the command is judged as holding one (fail closed)",
+            level=logging.ERROR,
+        )
+        return True
 _ADVISORY_HEADLINE: Final[str] = (
     "secret_file_guard could NOT fully judge this call, so it was ALLOWED. "
     "No protected path was found by the checks that did run."
@@ -1348,10 +1392,12 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         """``(pattern, token, route)`` for this tool call, or ``None``. NEVER raises.
 
         The single dispatch point shared by ``matches()`` and ``handle()``. It
-        denies only on a positive finding (Plan 00483 A1). A cap, the deadline,
-        a command the reader cannot parse or an internal error ends the full
-        scan; the call is then judged on the literal paths in its text alone, and
-        if none is found it is allowed with an advisory (the ``advisory`` route).
+        denies on a positive finding (Plan 00483 A1). A cap, the deadline, a
+        command the reader cannot parse or an internal error ends the full scan;
+        the call is then judged on the literal paths in its text alone, and if
+        none is found it is allowed with an advisory (the ``advisory`` route).
+        A cap or the deadline beside a recursive search or a glob is denied
+        instead (review 614c P2): only the full scan can judge what those read.
         """
         try:
             return self._evaluate(hook_input)
@@ -1363,10 +1409,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             return self._literal_finding_or_advisory(hook_input, "the command could not be parsed")
         except TimeoutError:
             logger.info("secret_file_guard: scan deadline passed")
-            return self._literal_finding_or_advisory(hook_input, "the scan deadline passed")
+            return self._gave_up_finding_or_advisory(hook_input, "the scan deadline passed")
         except shell_expansion.TooManyToEnumerateError:
             logger.info("secret_file_guard: scan hit a size limit")
-            return self._literal_finding_or_advisory(hook_input, "the scan reached a size limit")
+            return self._gave_up_finding_or_advisory(hook_input, "the scan reached a size limit")
         except Exception as exc:
             logger.exception("secret_file_guard: evaluation raised; allowing with an advisory")
             return self._literal_finding_or_advisory(
@@ -1399,6 +1445,16 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             if literal is not None:
                 return (literal, literal, "bash")
         return (_NOT_JUDGED_PATTERN, reason, _ADVISORY_ROUTE)
+
+    def _gave_up_finding_or_advisory(
+        self, hook_input: dict[str, Any], reason: str
+    ) -> tuple[str, str, str]:
+        """The literal fallback, then a finding when a search or glob was left unjudged (review 614c P2)."""
+        found = self._literal_finding_or_advisory(hook_input, reason)
+        if found[2] != _ADVISORY_ROUTE or not _holds_search_or_glob(hook_input):
+            return found
+        patterns = self._patterns()
+        return (patterns[0] if patterns else _NOT_JUDGED_PATTERN, _GAVE_UP_TOKEN, "bash")
 
     def _unresolved_finding(self, hook_input: dict[str, Any]) -> tuple[str, str, str]:
         """A finding for a call whose words could not be placed (review 614b): it is denied."""
@@ -1768,10 +1824,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         rule_route = "read" if route == _SEARCH_ROUTE else route
         rule = _rules_by_route()[rule_route]
         message = self._disclosed(hook_input, rule)
-        if token == _UNRESOLVED_TOKEN:
+        if token in _CAUSE_BY_TOKEN:
             return GatingResult(
                 decision=Decision.DENY,
-                reason=f"{message}\n\n{_UNRESOLVED_CAUSE}",
+                reason=f"{message}\n\n{_CAUSE_BY_TOKEN[token]}",
                 rule=rule.rule_id,
             )
         cause = self._link_cause(hook_input, token)
