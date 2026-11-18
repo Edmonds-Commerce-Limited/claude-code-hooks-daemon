@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -98,7 +99,9 @@ class TestThresholdConfig:
     def test_every_pool_has_its_own_thresholds(self) -> None:
         config = BranchesConfig(
             wip=BranchWipConfig(ladder=BranchLadderConfig(warn=10, strong=20, very_strong=30)),
-            parked=BranchParkedConfig(ladder=BranchLadderConfig(warn=40, strong=50, very_strong=60)),
+            parked=BranchParkedConfig(
+                ladder=BranchLadderConfig(warn=40, strong=50, very_strong=60)
+            ),
         )
         assert config.wip.ladder.warn == 10
         assert config.parked.ladder.warn == 40
@@ -213,7 +216,7 @@ class TestPoolPressures:
 class TestWording:
     CONFIG = BranchesConfig(wip=BranchWipConfig(cap=10, creation_grace=2, count_remote=False))
 
-    def _lines(self, repo: Path, count: int, labels: dict[str, dict[str, str | None]]) -> str:
+    def _lines(self, repo: Path, count: int, labels: Mapping[str, Mapping[str, str | None]]) -> str:
         _open_branches(repo, count)
         (pressure,) = pool_pressures(repo, self.CONFIG, labels)
         return "\n".join(pressure_lines(pressure, now=2_000_000_000.0))

@@ -10,7 +10,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - Not Started (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; draft, no code until the owner approves the design)
 
-- [00619: branch pool graduated warnings](00619-branch-pool-graduated-warnings/PLAN.md) - Not Started (owner ruling: the pool cap stays a hard stop, so warn at 60, 80 and 90 percent of the cap; the 90 percent warning is never silenced)
+- [00619: branch pool graduated warnings](00619-branch-pool-graduated-warnings/PLAN.md) - In Progress (owner ruling: the pool cap stays a hard stop, so warn at 60, 80 and 90 percent of the cap; the 90 percent warning is never silenced)
 
 - [00618: release 3 75 0 code review findings](00618-release-3-75-0-code-review-findings/PLAN.md) - In Progress (Step 10 review of release 3.75.0 returned FAIL: 5 blocking fail-open or data-loss findings plus 20 non-blocking defects; release aborted at that gate; fix test-first, then the owner re-runs the release)
 

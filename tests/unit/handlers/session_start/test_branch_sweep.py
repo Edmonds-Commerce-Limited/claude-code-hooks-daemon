@@ -325,3 +325,37 @@ class TestPoolPressureReport:
         text = "\n".join(_run(self._handler(wip={"cap": 1}), repo, _new())).lower()
         assert "rename" not in text
         assert "branch -m" not in text
+
+
+class TestPoolLadderAtSessionStart:
+    """Plan 00619 Task 1.3: session start reports the warning ladder, below the block."""
+
+    def _two_open(self, repo: Path) -> None:
+        for name in ("a", "b"):
+            _git(repo, "checkout", "-q", "-b", name)
+            _commit(repo, name)
+            _git(repo, "checkout", "-q", "main")
+
+    def _handler(self, **pools: Any) -> BranchSweepHandler:
+        handler = BranchSweepHandler()
+        handler._branches = BranchesConfig.model_validate({"default": "main", **pools})
+        return handler
+
+    def test_a_pool_at_the_warn_level_is_reported_without_a_block(self, repo: Path) -> None:
+        self._two_open(repo)
+        handler = self._handler(wip={"cap": 3, "creation_grace": 0})
+        text = "\n".join(_run(handler, repo, _new()))
+        assert "BRANCH POOL WARNING" in text
+        assert "2 of 3" in text
+        assert "BRANCH POOLS (same report" not in text
+
+    def test_a_resumed_session_is_told_too(self, repo: Path, tmp_path: Path) -> None:
+        self._two_open(repo)
+        handler = self._handler(wip={"cap": 3, "creation_grace": 0})
+        text = "\n".join(_run(handler, repo, _resume(tmp_path)))
+        assert "BRANCH POOL WARNING" in text
+
+    def test_silent_below_the_warn_level(self, repo: Path) -> None:
+        self._two_open(repo)
+        text = "\n".join(_run(self._handler(wip={"cap": 10}), repo, _new()))
+        assert "BRANCH POOL" not in text

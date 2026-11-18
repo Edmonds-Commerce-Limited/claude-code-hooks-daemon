@@ -649,6 +649,10 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
         "matches on the Agent/Task tool's name and subagent_type fields, not a command "
         "string; it records and never denies, so there is no shell spelling to evade"
     ),
+    "BranchPoolPressureAdvisorHandler": (
+        "matches every tool call, keyed on the pool's fullness and not on any command "
+        "name; context only, never denies"
+    ),
     "InstalledPluginEditAdvisorHandler": (
         "matches the write TARGET path (tool file_path, or get_bash_write_targets), "
         "not a command name; advisory only"

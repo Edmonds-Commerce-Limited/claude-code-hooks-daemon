@@ -370,6 +370,7 @@ class ConfigTemplate:
             "      #     - Dart\n"
             "    gh_issue_comments: {enabled: true, priority: 40}  # Require --comments on gh issue view\n"
             "    branch_creation_guard: {enabled: true, priority: 40}  # Warn at branches.wip.cap, deny a new branch past it plus creation_grace (Plan 00558)\n"
+            "    branch_pool_pressure_advisor: {enabled: true, priority: 20}  # Warn as a branch pool fills; every tool call at 90 percent (Plan 00619)\n"
             "    gh_pr_comments: {enabled: true, priority: 40}    # Require --comments on gh pr view\n"
             # Plan 00602: opt-in; a project that runs suites in the foreground on purpose keeps it off.
             "    long_running_command_guard: {enabled: false, priority: 40, options: {mode: deny, threshold_seconds: 30}}  # Deny a long foreground Bash call in the main thread; use run_in_background (Plan 00602)\n"
@@ -448,6 +449,7 @@ class ConfigTemplate:
             "\n"
             "  # UserPromptSubmit - Context injection before processing\n"
             "  user_prompt_submit:\n"
+            "    branch_pool_pressure_prompt: {enabled: true, priority: 44}  # Warn as a branch pool fills; every prompt at 90 percent (Plan 00619)\n"
             "    usage_pause_gate: {enabled: true, priority: 9}  # Pause the session at its host usage ceiling and resume it. Inert unless `hosts:` gives this host a usage_ceiling\n"
             "    git_context_injector: {enabled: true, priority: 20}  # Inject git context into prompts\n"
             "    failsafe_cron_blockage_suppressor: {enabled: true, priority: 37}  # Suppress a delivered failsafe-cron tick while the session is blocked only on human input\n"

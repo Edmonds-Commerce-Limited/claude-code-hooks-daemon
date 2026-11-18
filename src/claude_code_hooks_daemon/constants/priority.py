@@ -181,6 +181,10 @@ class Priority:
     # terminal deny holds a paused session's prompt; never terminal itself.
     FOCUS_MODE_TRIGGER = 41
 
+    # Plan 00619: the branch pool warning ladder, said on a prompt. Context only and
+    # never terminal, so it sits after every gate that can hold the prompt.
+    BRANCH_POOL_PRESSURE_PROMPT = 44
+
     # Plan 00419 Task 1.7: the last free slot BELOW AUTO_CONTINUE_STOP's 10 in
     # this project's config, for the same shadowing reason as the pair above.
     # 9 rather than 6: this handler never denies, so it has no claim to run
@@ -456,6 +460,11 @@ class Priority:
     # and isolated Agent dispatches, after the safety handlers. Not 41: this
     # project's enforce-llm-qa handler holds that slot.
     BRANCH_CREATION_GUARD = 40
+
+    # Plan 00619: the branch pool warning ladder, said on every tool call. Context
+    # only and never terminal; it sits early so a later terminal allow cannot end
+    # the chain before the warning is gathered.
+    BRANCH_POOL_PRESSURE_ADVISOR = 20
 
     # Plan 00602: judges a foreground Bash call's length by shape. Same band
     # as the other Bash workflow guards; it shares no shapes with them.

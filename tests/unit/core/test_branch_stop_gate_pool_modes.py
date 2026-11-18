@@ -192,3 +192,37 @@ class TestSameTipCountsOnceAtStop:
         decision = _decide(repo, untracked, config)
         assert decision.reason is not None
         assert StopCheck.OVER_CAP.value in decision.reason
+
+
+class TestLadderAtStop:
+    """Plan 00619 Task 1.3: the stop report carries the ladder, and never holds a stop by it."""
+
+    def test_a_pool_at_the_warn_level_is_reported_and_the_stop_is_allowed(
+        self, repo: Path, untracked: Path
+    ) -> None:
+        _pushed_branch(repo, "work-a", message="a")
+        _pushed_branch(repo, "work-b", message="b")
+        decision = _decide(repo, untracked, _config(wip={"cap": 3, "creation_grace": 0}))
+        assert decision.reason is None
+        text = "\n".join(decision.context)
+        assert "BRANCH POOL WARNING" in text
+        assert "2 of 3" in text
+
+    def test_silent_below_the_warn_level(self, repo: Path, untracked: Path) -> None:
+        _pushed_branch(repo, "work-a", message="a")
+        decision = _decide(repo, untracked, _config(wip={"cap": 10}))
+        assert "BRANCH POOL" not in "\n".join(decision.context)
+
+    def test_a_subagent_stop_is_not_given_the_ladder(self, repo: Path, untracked: Path) -> None:
+        _pushed_branch(repo, "work-a", message="a")
+        _pushed_branch(repo, "work-b", message="b")
+        decision = decide_stop(
+            repo,
+            _config(wip={"cap": 3, "creation_grace": 0}),
+            untracked,
+            session_id=SESSION,
+            agent_id="agent-1",
+            handoff=False,
+            now=1_000_000.0,
+        )
+        assert "BRANCH POOL" not in "\n".join(decision.context)

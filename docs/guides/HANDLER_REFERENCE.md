@@ -2608,6 +2608,27 @@ handlers:
 
 ---
 
+#### branch_pool_pressure_advisor
+
+| Property       | Value                          |
+| -------------- | ------------------------------ |
+| **Config key** | `branch_pool_pressure_advisor` |
+| **Priority**   | 20                             |
+| **Type**       | Advisory                       |
+| **Event**      | PreToolUse                     |
+
+**Description:** Warns as a branch pool (open work, parked, merged) fills toward the point where creating a branch is refused (Plan 00619). The share used is measured against that block point: `branches.wip.cap` plus `branches.wip.creation_grace` for open work, the pool's cap for the others. At 60 percent it warns once per session, at 80 percent it warns more firmly once per session and says how a branch leaves the pool, and at 90 percent it warns on EVERY tool call, with no rate limit, until the pool drops below 90 percent. Each warning names the pool, its count against the block point, the first branch to finish or remove and its exact command. The percentages are `branches.wip.ladder` and `branches.parked.ladder` / `branches.merged.ladder` (`warn`, `strong`, `very_strong`). The same ladder is reported at session start and at the stop of the main thread; `branch_pool_pressure_prompt` says it on every prompt. Never denies, never terminal, and changes no guard's decision: the block at 100 percent stays, with no exemption. A pool whose `mode` is `off` is not counted.
+
+```yaml
+handlers:
+  pre_tool_use:
+    branch_pool_pressure_advisor:
+      enabled: true
+      priority: 20
+```
+
+---
+
 #### gh_issue_comments
 
 | Property       | Value               |
@@ -4966,6 +4987,27 @@ handlers:
 ```
 
 **On by default** (dogfooding purpose, Plan 00298). Set `enabled: false` to restore unconditional hourly cron delivery.
+
+---
+
+#### branch_pool_pressure_prompt
+
+| Property       | Value                         |
+| -------------- | ----------------------------- |
+| **Config key** | `branch_pool_pressure_prompt` |
+| **Priority**   | 44                            |
+| **Type**       | Advisory                      |
+| **Event**      | UserPromptSubmit              |
+
+**Description:** The prompt-side twin of `branch_pool_pressure_advisor` (Plan 00619): the same branch pool warning ladder, said on a prompt. At 90 percent of a pool's block point it warns on EVERY prompt until the pool drops below it; warn and strong levels are said once per session and are shared with the advisor, so one warning is not said twice. Never denies, never holds a prompt, never terminal.
+
+```yaml
+handlers:
+  user_prompt_submit:
+    branch_pool_pressure_prompt:
+      enabled: true
+      priority: 44
+```
 
 ---
 

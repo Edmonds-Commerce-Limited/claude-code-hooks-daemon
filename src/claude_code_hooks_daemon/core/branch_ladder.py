@@ -30,7 +30,9 @@ from claude_code_hooks_daemon.constants.branch_guard import POOL_PARK_CLAUSE
 from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command
 from claude_code_hooks_daemon.core.branch_creation import (
     CLEANABLE_GROUPS,
+    LABELS_RELATIVE_PATH,
     WorkGroup,
+    read_labels,
     work_pools,
     work_rank,
 )
@@ -59,7 +61,9 @@ class LadderLevel(IntEnum):
 
 
 #: Levels that are never rate-limited: shown on every call until usage drops below.
-_ALWAYS_SHOWN: Final[frozenset[LadderLevel]] = frozenset({LadderLevel.VERY_STRONG, LadderLevel.BLOCK})
+_ALWAYS_SHOWN: Final[frozenset[LadderLevel]] = frozenset(
+    {LadderLevel.VERY_STRONG, LadderLevel.BLOCK}
+)
 
 
 def _threshold_count(base: int, percent: int) -> int:
@@ -258,17 +262,19 @@ PRESSURE_CACHE: Final[PressureCache] = PressureCache()
 def ladder_notice(
     repo: Path,
     config: BranchesConfig,
-    labels: Labels,
     *,
     session_id: str | None,
     throttle: LadderThrottle | None,
     cache: PressureCache | None = None,
     now: float | None = None,
 ) -> list[str]:
-    """The ladder lines due now. ``throttle`` None shows every level (session start, stop)."""
-    pressures = (
-        cache.get(repo, config, labels) if cache else pool_pressures(repo, config, labels)
-    )
+    """The ladder lines due now. ``throttle`` None shows every level (session start, stop).
+
+    The ordering labels are the session-start snapshot under ``repo``, as the
+    creation guard reads them.
+    """
+    labels = read_labels(repo / LABELS_RELATIVE_PATH)
+    pressures = cache.get(repo, config, labels) if cache else pool_pressures(repo, config, labels)
     moment = time.time() if now is None else now
     lines: list[str] = []
     for pressure in pressures:

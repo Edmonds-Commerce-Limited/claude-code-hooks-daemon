@@ -1,0 +1,43 @@
+# Drafted by Plan 00619.
+version: "3.76.0"
+date: "UNRELEASED"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: branches.wip.ladder
+      recommended: false
+      dormant: false
+      description: >-
+        The warning percentages of the open-work pool, measured against the
+        point where creating a branch is refused (branches.wip.cap plus
+        wip.creation_grace). warn, strong and very_strong default to 60, 80
+        and 90 and must rise in that order. The same block exists as
+        branches.parked.ladder and branches.merged.ladder, measured against
+        each pool's cap.
+      example_yaml: |
+        branches:
+          wip:
+            ladder: {warn: 60, strong: 80, very_strong: 90}
+    - key: handlers.pre_tool_use.branch_pool_pressure_advisor
+      recommended: true
+      dormant: false
+      description: >-
+        Warns on tool calls as a branch pool fills; at 90 percent of its block
+        point it warns on every call until the pool drops below it. Context
+        only: it never denies.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            branch_pool_pressure_advisor: {enabled: true, priority: 20}
+    - key: handlers.user_prompt_submit.branch_pool_pressure_prompt
+      recommended: true
+      dormant: false
+      description: >-
+        The same branch pool warning ladder on every prompt at 90 percent.
+        Context only: it never holds a prompt.
+      example_yaml: |
+        handlers:
+          user_prompt_submit:
+            branch_pool_pressure_prompt: {enabled: true, priority: 44}
