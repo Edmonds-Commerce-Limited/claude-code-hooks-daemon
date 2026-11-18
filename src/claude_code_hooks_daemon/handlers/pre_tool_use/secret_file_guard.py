@@ -216,6 +216,8 @@ def _holds_search_or_glob(hook_input: dict[str, Any]) -> bool:
             level=logging.ERROR,
         )
         return True
+
+
 _ADVISORY_HEADLINE: Final[str] = (
     "secret_file_guard could NOT fully judge this call, so it was ALLOWED. "
     "No protected path was found by the checks that did run."
