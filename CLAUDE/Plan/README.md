@@ -12,8 +12,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - Not Started (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; draft, no code until the owner approves the design)
 
-- [00622: remote delete proof ignores empty and park marker commits](00622-remote-delete-proof-ignores-empty-and-park-marker-commits/PLAN.md) - Not Started (client report: empty unpark commits and modified-merge branches defeat the remote-delete proof; reproduce first, never loosen for content)
-
 - [00621: actions qa ci advisory and workflow lint on edit](00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - Not Started (peer request, owner direction relayed: advise adopting an external workflow linter and run it on workflow edits; the design needs the owner's confirmation first)
 
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
@@ -206,6 +204,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00622: remote delete proof ignores empty and park marker commits](Completed/00622-remote-delete-proof-ignores-empty-and-park-marker-commits/PLAN.md) - Complete at merge `eba1de61f` + the archiving commit (empty commits over merged work no longer block a branch delete; reviews rounds 1 and 2 fixed, round 3 ledgered N665, N666; release note 002)
+
 - [00619: branch pool graduated warnings](Completed/00619-branch-pool-graduated-warnings/PLAN.md) - Complete at merge `1dc7ca3e0` + the archiving commit (each branch pool warns at 60, 80 and 90 percent of the point where creation is refused; the 90 percent warning shows on every tool call and prompt until usage drops; session start and the stop report share the ladder; the block and every guard decision are unchanged; release note 001)
 
 - [00618: release 3 75 0 code review findings](Completed/00618-release-3-75-0-code-review-findings/PLAN.md) - Complete at tag `v3.75.0` (PR 209, `1e194b693`) + the archiving commit (the Step 10 review's 5 blocking findings and the re-run's S-1 fixed test-first; 17 non-blocking defects and 12 nits fixed; owner decisions D-1/D-2 yes, D-3 no, D-4 option A; release notes 089 to 095 shipped in v3.75.0; residuals ledgered N630 to N644 and N650 to N659, audit in CLOSEOUT-AUDIT.md)
@@ -264,8 +264,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00576: hotfix release fast path](Completed/00576-hotfix-release-fast-path/PLAN.md) - Complete at merge `8bfcad71f` (PR #190) + the archiving commit (owner request after v3.73.1: `/release hotfix` runs the RELEASING.md "Hotfix fast path" and the state file and `release_blocker` name the mode; advise-severity plan/docs QA findings never fail CI; a test pins the release gate's cancel-in-progress concurrency, which the journal shows did cancel the superseded v3.73.1 run; release note 013)
 
-- [00572: ci wall clock sharding arm and hygiene](Completed/00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - Complete at merge `f2d532f89` (PR #187) + the archiving commit (owner request: `qa.yml` reuses release-gate's shard matrix, so the nightly fell from 116 to 28.5 min; every `main` push gets a verdict; native and released aarch64 relay and hooks-screen, a non-blocking arm64 test leg, SHA-pinned actions; release notes 006, 012)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -321,9 +319,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 623 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 518 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 519 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 81 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 80 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

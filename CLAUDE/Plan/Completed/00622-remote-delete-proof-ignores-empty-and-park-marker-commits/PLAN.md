@@ -1,6 +1,6 @@
 # Plan 00622: remote delete proof ignores empty and park marker commits
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-18
 **Owner**: joseph
 **Priority**: High
@@ -49,13 +49,25 @@ content is not in the default branch. This is data-loss-adjacent, so it needs se
   the proof, in `daemon/branch_safety.py` and `core/remote_branch_proof.py`.
 - [x] ✅ **Task 2.2**: A corpus check showing 0 DENY to ALLOW changes for every branch shape that carries real content,
   including a content-bearing commit that happens to be named like a marker.
-- [ ] ⬜ **Task 2.3**: Independent loosening review (Opus), release note, handler guidance.
+- [x] ✅ **Task 2.3**: Independent loosening review (Opus), release note, handler guidance. Evidence: three review rounds
+  (`subagent-reports/261118-loosening-review.md`, `-2.md`, `-3.md`), each a FAIL verdict. Round 1 (2 defects) was fixed
+  in round 2 (`43fb88b57`) and round 2 (2 Low defects) in round 3 (`164ba4986`, `e1c121abe`); round 3's two Low
+  defects (a hand-forged loose commit object, and a walk that exits 0 without the tip line) are not fixed here and are
+  ledgered as N665 and N666 in `CLAUDE/Plan/00474-niggles-ledger-seventeen/NIGGLES.md`; a whitespace-only older hole
+  is ledgered as N660. Release note
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/002-empty-commits-no-longer-block-branch-deletes.md` exists. Handler
+  guidance: no change needed, because the generated rule text (`R-GIT-PUSH-DELETE-REMOTE`: a branch not merged into
+  the default) stays true; the new `empty-commits-only` tier is documented in the release note and the module docstrings.
 
 ## Success Criteria
 
-- [ ] The reported shapes pass the proof and the RED tests were committed first.
-- [ ] The corpus check shows 0 DENY to ALLOW changes for content-bearing branches.
-- [ ] The release-bound consequences are recorded in the pending-release holding area (the release note).
+- [x] The reported shapes pass the proof and the RED tests were committed first (RED commits `0fff8d932`, `ca5ba5d35`;
+  GREEN `a9bb1177d`, `43fb88b57`, `164ba4986`; merged at `eba1de61f`; non-test QA gate 44/44).
+- [x] The corpus check shows 0 DENY to ALLOW changes for content-bearing branches (`corpus/`, re-run after round 2).
+  The three independent reviews returned FAIL: rounds 1 and 2 were fixed, and round 3's two Low items are ledgered N665
+  and N666 (neither reachable with ordinary git commands).
+- [x] The release-bound consequences are recorded in the pending-release holding area: release note
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/002-empty-commits-no-longer-block-branch-deletes.md`.
 
 ## Delivery & Milestones
 
