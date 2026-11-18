@@ -100,7 +100,10 @@ class TestEquivalentToTheCdForm:
             ("git -C sub grep -e x", "cd sub && git grep -e x"),
             ("git -C deep grep -e x", "cd deep && git grep -e x"),
             ("git -C sub grep -e x ../deep", "cd sub && git grep -e x ../deep"),
-            ("git -C sub -C .. grep --no-index -e .", "cd sub && cd .. && git grep --no-index -e ."),
+            (
+                "git -C sub -C .. grep --no-index -e .",
+                "cd sub && cd .. && git grep --no-index -e .",
+            ),
         ],
     )
     def test_same_reads(self, repo: Path, relocated: str, changed_directory: str) -> None:
@@ -155,7 +158,7 @@ class TestALiteralWorkTreeIsJudged:
             "git --work-tree deep grep --untracked -e x",
             "git --work-tree=deep grep -e x",
             "git -C sub --work-tree=../deep grep -e x",
-            f"git --work-tree={{repo}}/deep grep -e x",
+            "git --work-tree={repo}/deep grep -e x",
         ],
     )
     def test_the_work_tree_is_read_in_full(self, repo: Path, command: str) -> None:
