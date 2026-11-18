@@ -32,7 +32,7 @@ This is a loosening of a delete guard, so it is its own plan and runs under the 
 
 ### Phase 1: Feasibility
 
-- [ ] ⬜ **Task 1.1**: Establish what a hook can prove about a sub-agent (its model and its independence from the session that owns the branch) from the payloads the daemon already receives. If it cannot be proven, report that to the owner before designing further.
+- [ ] ⬜ **Task 1.1**: Establish what a hook can prove about a sub-agent (its model and its independence from the session that owns the branch) from the payloads the daemon already receives. If it cannot be proven, report that to the owner before designing further. Findings: [FEASIBILITY.md](FEASIBILITY.md) (it cannot be proven against a same-user agent; draft design and owner questions Q1-Q8 inside).
 - [ ] ⬜ **Task 1.2**: Design the verdict record (ledger line, tip binding, expiry, reasons) and the review prompt, and write them into a DESIGN.md for the owner to approve.
 
 ### Phase 2: Build (after the owner approves the design)
