@@ -35,3 +35,16 @@ def run_git(root: Path, *args: str) -> None:
         capture_output=True,
         timeout=git_setup_timeout(),
     )
+
+
+def commit_content(root: Path, message: str) -> None:
+    """Commit a new file whose bytes are unique to this commit, so it carries real content.
+
+    An empty commit is lossless to delete (Plan 00622), so a fixture standing for
+    work the default lacks must change a file.
+    """
+    count = sum(1 for _ in root.glob("content-*.txt"))
+    path = root / f"content-{count}.txt"
+    path.write_text(f"{message}\n", encoding="utf-8")
+    run_git(root, "add", path.name)
+    run_git(root, "commit", "-m", message)

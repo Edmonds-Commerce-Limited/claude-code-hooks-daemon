@@ -382,27 +382,6 @@ class TestTwinsStayRefused:
         _drop_local(repo, "scratch")
         self._assert_refused(repo, "feat")
 
-    def test_empty_trailer_commit_not_written_by_the_park_writer(self, repo: Path) -> None:
-        """RED: an empty commit carrying Parked-* trailers but not the writer's message."""
-        _work(repo, "feat")
-        _merge(repo, "feat")
-        _git(repo, "checkout", "-q", "feat")
-        _git(
-            repo,
-            "commit",
-            "-q",
-            "--allow-empty",
-            "-m",
-            "Unrelated note",
-            "--trailer",
-            "Parked-Reason: waiting",
-            "--trailer",
-            "Parked-By: t",
-        )
-        _git(repo, "push", "-q", "origin", "feat")
-        _git(repo, "checkout", "-q", "main")
-        self._assert_refused(repo, "feat")
-
     def test_park_whose_parent_is_another_branchs_unmerged_commit(self, repo: Path) -> None:
         """PIN: the park's parent is not the branch's merged work."""
         _work(repo, "feat")
@@ -444,3 +423,39 @@ class TestTwinsStayRefused:
         _drop_local(repo, "other")
         _git(repo, "push", "-q", "origin", "--delete", "other")
         self._assert_refused(repo, "feat")
+
+
+class TestNonWriterEmptyCommit:
+    def test_empty_trailer_commit_not_written_by_the_park_writer(self, repo: Path) -> None:
+        """An empty commit carrying Parked-* trailers but not the writer's message.
+
+        It is not a park (the inventory never calls it park-carried), but it changes no
+        file, so the delete proofs accept it as ``empty-commits-only`` (Plan 00622): a
+        delete loses only its message.
+        """
+        _work(repo, "feat")
+        _merge(repo, "feat")
+        _git(repo, "checkout", "-q", "feat")
+        _git(
+            repo,
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "Unrelated note",
+            "--trailer",
+            "Parked-Reason: waiting",
+            "--trailer",
+            "Parked-By: t",
+        )
+        _git(repo, "push", "-q", "origin", "feat")
+        _git(repo, "checkout", "-q", "main")
+        _fetch(repo)
+        assert not is_park_residue(repo, _remote_tip(repo, "feat"), "main")
+        inventory = branch_inventory.build_inventory(repo, _config())
+        assert inventory.records["feat"].state != BranchState.PARK_CARRIED
+        proof = prove_remote_merged(repo, "origin", ["feat"], "main", _config())
+        assert proof.evidence == {"feat": branch_safety.TIER_EMPTY_COMMITS_ONLY}
+        assert _guard_allows(repo, "feat")
+        verdict = branch_safety.classify_branch(repo, "feat", content_tier=False)
+        assert verdict.tier == branch_safety.TIER_EMPTY_COMMITS_ONLY

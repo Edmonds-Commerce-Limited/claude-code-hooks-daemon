@@ -7825,6 +7825,14 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open. Run the playbook harness gate on a loaded host against main and record which probes, if any, still time out; fix each test-first.
 
+### N660 — the local patch-equivalent tier passes a branch whose only difference from the default is whitespace
+
+**Source**: Plan 00622 loosening review D1 (`subagent-reports/261118-loosening-review.md`) and the round 2 corpus (`corpus/p622-corpus-compare-r2.txt`).
+
+**Evidence**: a patch-id ignores whitespace, and with no merge base `git cherry` compares against the whole history. `classify_branch` (`delete-branch` and the hook-path cleanup) therefore proves `patch-equivalent` for the corpus shapes `r2-ws-pick-bare` (a pick that the default took reformatted), `r2-orphan-ws-bare` (an orphan whitespace twin) and `r2-ws-pick-writer-park` (the park writer's marker over such a pick, through the park drop from Plan 00617). The branch's blob is not in the default's history in any of them. The decision was the same before and after Plan 00622. The remote proofs refuse all three because they require the net change. Plan 00622 round 2 stopped other empty commits from widening this; the tier itself is unchanged.
+
+**Status**: ⬜ Open, medium priority. Make `patch-equivalent` stand only with the net-change proof (as the remote path does), or refuse it when there is no merge base. Write the tests first, using the three corpus shapes.
+
 ### N661 — secret-guard link residuals left by Plan 00614
 
 **Source**: the Plan 00614 review 614c fix round (`../00614-secret-guard-resolves-links-against-hook-cwd/subagent-reports/261118-finish-opus.md`), measured with the review probe over synthetic fixtures. Each shape below is allowed on main, on the round-start tip and on the Plan 00614 tip alike: none is a regression. (Filed on the branch as N650; renumbered on merging main, whose close-out of Plan 00618 took N650 to N659; N660 is taken by Plan 00622.)
@@ -7853,3 +7861,51 @@ smaller than the add's, but at a load average near 70 they time out too.
 - Suspected, not probed: `_DirectoryWalk.change` and `_expand` follow a relative or globbed `cd` from the first `LINK_DIRECTORY_CAP + 1` existing directories only (a `[:CAP]` slice with no incomplete signal).
 
 **Status**: ⬜ Open. Resolve a `..`-led word from above the scanned links; make the nested-body depth limit an incomplete signal that denies. Decide (owner) whether the A1 no-search advisory and a missing `cwd` should deny. Consider an off-hot-path link index, built like the protected-file index and denying until built, so a large project's computed `cd` is judged instead of denied; make the text walker's segment split quote-aware.
+
+### N663 — a relative word that fits PATH_MAX only relative to the hook cwd is never resolved, and is allowed
+
+**Source**: Plan 00614 second independent review, defect D-A (`subagent-reports/261118-independent-review-2.md`).
+
+**Evidence**: `_link_targets` places a relative word as `Path(cwd) / token`, and `_realpath_if_resolvable` calls `os.path.lexists` on it, which returns False on ENAMETOOLONG. Bash opens the word relative to its own cwd, so there is a window of `len(project_root) + 1` characters where the kernel resolves the path, the guard cannot place it, and the guard allows. `cat $(plain/../ x 449)flink` allows on the branch and on main; at 448 repeats it denies. No test uses a word near `PATH_MAX`.
+
+**Status**: ⬜ Open, low priority. Treat an `OSError` other than ENOENT from the placement stat as unresolvable so it denies, or resolve the word with `dir_fd` / `openat` semantics. Covered by Plan 00623.
+
+### N664 — a recursive search nested 5 or more `bash -c` levels deep is not seen
+
+**Source**: Plan 00614 second independent review, defect D-B (`subagent-reports/261118-independent-review-2.md`).
+
+**Evidence**: the branch denies `grep -r x olink` at nesting depths 3 and 4 and allows it at depths 5 and 6; main allows it at every depth. `cat flink` and `cat olink/i*` deny at every depth from 3 to 6. N662 records the depth limit only for a hidden chdir (`_MAX_DIRECTORY_CHANGE_DEPTH`); the same silent stop on the search side is not recorded.
+
+**Status**: ⬜ Open, low priority. Make the depth limit an incomplete signal that denies, in the same change as the N662 item. Covered by Plan 00623.
+
+### N665 — a hand-forged loose commit object makes a branch with content look empty to the delete proofs
+
+**Source**: Plan 00622 third independent loosening review, defect D1 (`CLAUDE/Plan/00622-remote-delete-proof-ignores-empty-and-park-marker-commits/subagent-reports/261118-loosening-review-3.md`).
+
+**Evidence**: git does not re-hash an object on read, so a loose commit object whose body claims the parent's tree, stored under another commit's name, makes a branch with content read as empty to the delete proofs. Threat model: it needs write access to the repository's object store, where an attacker could equally repoint refs, so it adds little.
+
+**Status**: ⬜ Open, low priority (hardening). Hash each commit body against its sha in `_stored_objects_agree`.
+
+### N666 — if `git log` exits 0 but omits the tip line, the local proof paths prove a branch with content at its tip
+
+**Source**: Plan 00622 third independent loosening review, defect D2 (same report as N665); pre-existing.
+
+**Evidence**: the local proof paths read the commit list from `git log`; when it exits 0 but omits the tip line, they treat the tip as proven. No repository state is known that makes git do this.
+
+**Status**: ⬜ Open, low priority (hardening). Require the tip line in the output and fail closed otherwise.
+
+### N667 — past the scan cap, the `cd "$(git rev-parse --show-toplevel)"` idiom is placed by an assumption that persisted git config breaks
+
+**Source**: Plan 00614 second independent review (round-6 tip), defect D-C (Low-Medium; the branch is not merged, so main is unaffected until it is).
+
+**Evidence**: the round-6 branch excuses the top-level idiom from the incomplete-scan deny and places it at the ancestors of the command's directory. It demotes the idiom only when the same command sets `core.worktree`, names a `GIT_` variable, defines a function or alias, or changes `PATH`. Repository config persisted by an EARLIER call (`core.worktree`) makes `git rev-parse --show-toplevel` print a non-ancestor, and `cd "$(git rev-parse --show-toplevel)" && cat late` (also `grep -r` and a glob form) is then allowed past the cap; under the cap the same commands deny. Main allows them too.
+
+**Status**: ⬜ Open, belongs to Plan 00623 (it must land before the Plan 00614 branch merges). Read `core.worktree` and `GIT_WORK_TREE` at decision time, or keep the exemption only when the computed top level equals the project root or a checkout nested in it.
+
+### N668 — a path through `/proc/self/cwd` or `/dev/fd/..` is judged from the daemon's working directory
+
+**Source**: Plan 00614 second independent review, defect D-D (Low, no worse than main).
+
+**Evidence**: `cat /proc/self/cwd/flink`, `cat /proc/self/cwd/olink/i*`, `grep -r x /proc/self/cwd/olink` and `cat /dev/fd/../cwd/flink` are allowed on main and on the branch: the daemon's `/proc/self/cwd` is `/`, while the shell's is the project. `cd /proc/self/cwd && cat flink` denies on the branch.
+
+**Status**: ⬜ Open, low priority; belongs to Plan 00623. Treat a `/proc/self/`, `/proc/thread-self/` or `/dev/fd/` prefix as unplaceable (fail closed).

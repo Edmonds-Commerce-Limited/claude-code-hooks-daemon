@@ -1,0 +1,41 @@
+ALLOW ON CONTENT NOT IN DEFAULT: r2-orphan-ws-bare local (before patch-equivalent, after patch-equivalent)
+ALLOW ON CONTENT NOT IN DEFAULT: r2-orphan-ws-bare local-hook (before patch-equivalent, after patch-equivalent)
+ALLOW ON CONTENT NOT IN DEFAULT: r2-ws-pick-bare local (before patch-equivalent, after patch-equivalent)
+ALLOW ON CONTENT NOT IN DEFAULT: r2-ws-pick-bare local-hook (before patch-equivalent, after patch-equivalent)
+ALLOW ON CONTENT NOT IN DEFAULT: r2-ws-pick-writer-park local (before patch-equivalent, after patch-equivalent)
+ALLOW ON CONTENT NOT IN DEFAULT: r2-ws-pick-writer-park local-hook (before patch-equivalent, after patch-equivalent)
+shapes=57 decisions=228
+DENY->ALLOW: 18
+  Y s-many-empty remote: DENY -> empty-commits-only
+  Y s-many-empty guard: DENY -> ALLOW
+  Y s-many-empty local: DENY -> empty-commits-only
+  Y s-many-empty local-hook: DENY -> empty-commits-only
+  Y s-plain-empty-ff remote: DENY -> empty-commits-only
+  Y s-plain-empty-ff guard: DENY -> ALLOW
+  Y s-plain-empty-ff local: DENY -> empty-commits-only
+  Y s-plain-empty-ff local-hook: DENY -> empty-commits-only
+  Y s-plain-unpark-merged remote: DENY -> empty-commits-only
+  Y s-plain-unpark-merged guard: DENY -> ALLOW
+  Y s-plain-unpark-merged local: DENY -> empty-commits-only
+  Y s-plain-unpark-merged local-hook: DENY -> empty-commits-only
+  E s-pure-empty remote: DENY -> empty-commits-only
+  E s-pure-empty guard: DENY -> ALLOW
+  E s-pure-empty local: DENY -> empty-commits-only
+  E s-pure-empty local-hook: DENY -> empty-commits-only
+  E s-pure-empty-main-empty remote: DENY -> empty-commits-only
+  E s-pure-empty-main-empty guard: DENY -> ALLOW
+ALLOW->DENY: 12
+  N r2-graft-main-tip remote: merged -> DENY
+  N r2-graft-main-tip guard: ALLOW -> DENY
+  N r2-graft-main-tip local: merged -> DENY
+  N r2-graft-main-tip local-hook: merged -> DENY
+  N r2-replace-content-park-msg remote: park-carried -> DENY
+  N r2-replace-content-park-msg guard: ALLOW -> DENY
+  N r2-replace-content-park-msg local: park-carried -> DENY
+  N r2-replace-content-park-msg local-hook: park-carried -> DENY
+  N r2-replace-main-tip remote: merged -> DENY
+  N r2-replace-main-tip guard: ALLOW -> DENY
+  N r2-replace-main-tip local: merged -> DENY
+  N r2-replace-main-tip local-hook: merged -> DENY
+DENY->ALLOW on N (content not in default): 0
+ALLOW on N after: 6

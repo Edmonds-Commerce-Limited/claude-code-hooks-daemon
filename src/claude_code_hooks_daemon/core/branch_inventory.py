@@ -766,8 +766,11 @@ def _save_cache(path: Path, cache: _Cache, live_tips: set[str]) -> None:
 
 #: Bump when the rule that decides a cached proof changes, so entries the old rule
 #: wrote are never read. v3: some first-parent commit of the default, after the merge
-#: base and up to its tip, holds the branch's net change.
-PROOF_ALGORITHM_VERSION: Final[str] = "v3"
+#: base and up to its tip, holds the branch's net change. v4: a tip whose every commit
+#: beyond the default is empty (one parent, its tree) is proven (Plan 00622). v5: that
+#: emptiness is read from the stored commit objects only, never through a replace ref,
+#: a graft or a commit-graph, so a v4 entry may record a forged object's answer.
+PROOF_ALGORITHM_VERSION: Final[str] = "v5"
 
 
 def merge_proof_key(tip: str, target_shas: Iterable[str]) -> str:

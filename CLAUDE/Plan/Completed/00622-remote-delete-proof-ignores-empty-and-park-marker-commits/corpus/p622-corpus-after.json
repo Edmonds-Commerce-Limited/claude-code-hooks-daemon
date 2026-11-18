@@ -1,0 +1,338 @@
+{
+ "a-change-revert-empty": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-content-named-park": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-content-named-plain-unpark": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-content-named-unpark": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-empty-forged-tree": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-empty-over-other": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-empty-over-unmerged": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-mode-only-then-empty": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-one-byte": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-one-byte-writer": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-ours-merge": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-ours-merge-writer-msg": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-rename-then-empty": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-revert-main-empty": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "a-root-named-unpark": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "s-chmod": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "s-copy": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "s-delete-only": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "s-delete-only-empty": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "s-deletion-both": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "merged",
+  "local-hook": "merged",
+  "remote": "merged"
+ },
+ "s-empty-mid-merged-then-work": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "s-empty-mid-unmerged": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "s-ff": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "merged",
+  "local-hook": "merged",
+  "remote": "merged"
+ },
+ "s-main-reverted-later": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "patch-equivalent",
+  "local-hook": "patch-equivalent",
+  "remote": "patch-equivalent"
+ },
+ "s-many-empty": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "empty-commits-only",
+  "local-hook": "empty-commits-only",
+  "remote": "empty-commits-only"
+ },
+ "s-merge": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "merged",
+  "local-hook": "merged",
+  "remote": "merged"
+ },
+ "s-modified-merge": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "content-preserved",
+  "local-hook": "DENY",
+  "remote": "content-preserved"
+ },
+ "s-modified-merge-writer": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "content-preserved",
+  "local-hook": "DENY",
+  "remote": "content-preserved"
+ },
+ "s-old-base-held": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "patch-equivalent",
+  "local-hook": "patch-equivalent",
+  "remote": "patch-equivalent"
+ },
+ "s-old-base-other": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "s-one-extra": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "s-parked-merged": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "park-carried",
+  "local-hook": "park-carried",
+  "remote": "park-carried"
+ },
+ "s-parked-unmerged": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "s-pick": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "patch-equivalent",
+  "local-hook": "patch-equivalent",
+  "remote": "patch-equivalent"
+ },
+ "s-pick-empty": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "patch-equivalent",
+  "local-hook": "patch-equivalent",
+  "remote": "patch-equivalent"
+ },
+ "s-plain-empty-ff": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "empty-commits-only",
+  "local-hook": "empty-commits-only",
+  "remote": "empty-commits-only"
+ },
+ "s-plain-unpark-merged": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "empty-commits-only",
+  "local-hook": "empty-commits-only",
+  "remote": "empty-commits-only"
+ },
+ "s-pure-empty": {
+  "guard": "ALLOW",
+  "label": "E",
+  "local": "empty-commits-only",
+  "local-hook": "empty-commits-only",
+  "remote": "empty-commits-only"
+ },
+ "s-pure-empty-main-empty": {
+  "guard": "ALLOW",
+  "label": "E",
+  "local": "empty-commits-only",
+  "local-hook": "empty-commits-only",
+  "remote": "empty-commits-only"
+ },
+ "s-pure-writer-park": {
+  "guard": "ALLOW",
+  "label": "E",
+  "local": "park-carried",
+  "local-hook": "park-carried",
+  "remote": "park-carried"
+ },
+ "s-rename": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "s-revert-older": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "s-revert-older-empty": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ },
+ "s-squash-changed-again": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "content-preserved",
+  "local-hook": "DENY",
+  "remote": "content-preserved"
+ },
+ "s-squash-empty": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "content-preserved",
+  "local-hook": "DENY",
+  "remote": "content-preserved"
+ },
+ "s-squash3": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "content-preserved",
+  "local-hook": "DENY",
+  "remote": "content-preserved"
+ },
+ "s-unparked-merged": {
+  "guard": "ALLOW",
+  "label": "Y",
+  "local": "park-carried",
+  "local-hook": "park-carried",
+  "remote": "park-carried"
+ },
+ "s-work-above-park": {
+  "guard": "DENY",
+  "label": "N",
+  "local": "DENY",
+  "local-hook": "DENY",
+  "remote": "DENY"
+ }
+}
