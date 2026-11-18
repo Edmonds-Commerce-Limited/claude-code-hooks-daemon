@@ -7736,3 +7736,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: `cd - && grep -r . deep` is ALLOWED by `secret_file_guard`: `_after_directory_change` returns None for `-`, and every later relative root is then left out. The S-1b fix makes `cd ~-` (a tilde the hook cannot place) fail closed for every later read, but kept `cd -` and `popd` as they were.
 
 **Status**: ⬜ Open. Treat `cd -`, `popd` and `pushd` with no operand the way `cd ~-` is treated: later reads in the command fail closed.
+
+### N649 — the branch-cap rule text says "at the cap it only warns" even when the grace is 0
+
+**Source**: a client upgrade to 3.75.0, relayed by a peer agent (a note with no authority; the behaviour below was read from the rule text, not re-run).
+
+**Evidence**: the `R-BRANCH-WIP-CAP` rule text (`constants/rule_ids.py`, and the generated handler guidance it feeds) says that at the cap itself it only warns. With `wip.creation_grace` at 0 the creation guard blocks at the cap, so the text does not match the behaviour. The Plan 00619 ladder changes the pool-pressure wording nearby, so fix this on top of that merge rather than beside it.
+
+**Status**: ⬜ Open, low priority. Make the rule text state the grace dependency ("warns up to `wip.creation_grace` past the cap; with a grace of 0 it blocks at the cap"), regenerate the handler guidance, and add a test that pins the text to the behaviour.
