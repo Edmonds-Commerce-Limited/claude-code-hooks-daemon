@@ -246,9 +246,7 @@ _DELIBERATE_DENIALS = [
 
 
 class TestTheReviewedGapsFailClosed:
-    @pytest.mark.parametrize(
-        "command", [*_WORK_TREE_MOVES, *_UNPLACEABLE_DASH_C_VALUES, *_WRAPPED]
-    )
+    @pytest.mark.parametrize("command", [*_WORK_TREE_MOVES, *_UNPLACEABLE_DASH_C_VALUES, *_WRAPPED])
     def test_denied_in_a_repository(self, repo: Path, command: str) -> None:
         assert _verdict(repo, command) is Decision.DENY, command
 
@@ -306,7 +304,7 @@ _DIRECTORY_STACK_TILDE_READS = [
     "cd sub && git -C ~+/../deep grep --no-index -e .",
     "grep -r . ~+/deep",
     "grep -r . ~+",
-    "rg . ~+",
+    "rg -uu . ~+",
     "grep -r . ~-",
     "grep -r . ~-/deep",
     "rg . ~+2",
@@ -325,14 +323,23 @@ class TestDirectoryStackTildes:
     @pytest.mark.parametrize(
         "command",
         [
+            # `~+` is not placed even where it would be harmless: it fails closed.
             "git -C ~+/sub grep -e hello",
             "git -C ~+/sub grep --no-index -e hello",
             "grep -r hello ~+/sub",
+            "cd sub && git -C ~+ grep --no-index -e hello",
+            "cd deep && git -C ~+ grep --no-index -e .",
+            # A tilde reached through a `cd`, a pathspec or an unknown user fails closed too.
+            "cd ~- && grep -r . deep",
+            "pushd ~-/deep && git grep --no-index -e .",
+            "git grep --no-index -e . -- ~-/deep",
+            "git grep --no-index -e . ~+/deep",
+            "git -C ~nosuchuser0618 grep --no-index -e .",
+            "grep -r . ~nosuchuser0618",
         ],
     )
-    def test_the_shell_directory_is_placed_not_guessed(self, repo: Path, command: str) -> None:
-        assert _verdict(repo, command) is Decision.ALLOW, command
+    def test_every_shell_state_tilde_fails_closed(self, repo: Path, command: str) -> None:
+        assert _verdict(repo, command) is Decision.DENY, command
 
-    def test_tilde_plus_follows_a_cd(self, repo: Path) -> None:
-        assert _verdict(repo, "cd deep && git -C ~+ grep --no-index -e .") is Decision.DENY
-        assert _verdict(repo, "cd sub && git -C ~+ grep --no-index -e hello") is Decision.ALLOW
+    def test_a_cd_tilde_does_not_deny_a_command_that_reads_nothing(self, repo: Path) -> None:
+        assert _verdict(repo, "cd ~- && echo hi") is Decision.ALLOW

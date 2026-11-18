@@ -806,6 +806,12 @@ class TestShellMovesAndDirectoryStackTildes:
             ("git -C .. grep --no-index foo", _ROOT),
             ("git -C / grep --no-index foo", _ROOT),
             ("git -C ../.. grep --no-index foo", f"{_ROOT}/src"),
+            # `~+`/`~-` fail closed: no tilde from the shell's state is placed.
+            ("git -C ~+/src grep foo", _ROOT),
+            ("grep -rn foo ~+/src", _ROOT),
+            ("grep -rn foo ~+", f"{_ROOT}/src"),
+            ("grep -rn foo ~- --exclude-dir=cyber-flag", _ROOT),
+            ("git grep --no-index foo -- ~-/tests", _ROOT),
         ],
     )
     def test_denied(
@@ -817,9 +823,8 @@ class TestShellMovesAndDirectoryStackTildes:
     @pytest.mark.parametrize(
         ("command", "cwd"),
         [
-            ("git -C ~+/src grep foo", _ROOT),
-            ("grep -rn foo ~+/src", _ROOT),
-            ("grep -rn foo ~+", f"{_ROOT}/src"),
+            ("cd src/inner && git -C .. grep foo", _ROOT),
+            ("echo x | xargs -I% git -C src grep foo %", _ROOT),
             ("cd tests && git -C ../src grep foo", _ROOT),
             ("cd src && git -C inner grep foo", _ROOT),
             ("git -C .. grep --no-index foo -- elsewhere", _ROOT),
