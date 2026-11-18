@@ -96,7 +96,7 @@ The `expand_directory_glob` case still relies on the scan above, so it inherits 
 
 **Records.** The docstring calls this "a residual recorded in the plan", but:
 
-- neither `PLAN.md` Task 3.3 nor ledger N650 (now N660) mentions it;
+- neither `PLAN.md` Task 3.3 nor ledger N650 (now N661) mentions it;
 - the finish report's residual list does not mention it either.
 
 **Why tests miss it:** the computed-`cd` tests use small trees.
@@ -154,7 +154,7 @@ An agent can create the link in one call and read through it in the next within 
 
 ## Recorded residuals, confirmed and not counted
 
-These match the finish report and N650 (now N660):
+These match the finish report and N650 (now N661):
 
 - **N2**: `cat olink/../outside/i*`, `cd -P olink/.. && cat outside/i*`, `cd -P olink/..; cat outside/sub/*`.
 - **A glob matching a file link**: `cat fli[n]k`.

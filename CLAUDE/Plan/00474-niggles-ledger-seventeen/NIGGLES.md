@@ -7825,9 +7825,9 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open. Run the playbook harness gate on a loaded host against main and record which probes, if any, still time out; fix each test-first.
 
-### N660 — secret-guard link residuals left by Plan 00614
+### N661 — secret-guard link residuals left by Plan 00614
 
-**Source**: the Plan 00614 review 614c fix round (`../00614-secret-guard-resolves-links-against-hook-cwd/subagent-reports/261118-finish-opus.md`), measured with the review probe over synthetic fixtures. Each shape below is allowed on main, on the round-start tip and on the Plan 00614 tip alike: none is a regression. (Filed on the branch as N650; renumbered on merging main, whose close-out of Plan 00618 took N650 to N659.)
+**Source**: the Plan 00614 review 614c fix round (`../00614-secret-guard-resolves-links-against-hook-cwd/subagent-reports/261118-finish-opus.md`), measured with the review probe over synthetic fixtures. Each shape below is allowed on main, on the round-start tip and on the Plan 00614 tip alike: none is a regression. (Filed on the branch as N650; renumbered on merging main, whose close-out of Plan 00618 took N650 to N659; N660 is taken by Plan 00622.)
 
 **Evidence**:
 
