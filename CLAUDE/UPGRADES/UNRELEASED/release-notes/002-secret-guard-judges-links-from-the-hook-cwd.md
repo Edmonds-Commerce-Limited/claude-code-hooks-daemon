@@ -23,4 +23,14 @@ Behaviour change: if working out where a command's paths lead raises an error, t
 
 Behaviour change: when a command moves into more than 16 existing directories, a relative word that could pass through a link in one of them is denied rather than resolved from each, and the deny message says to split the command. The same rule applies to the quarantine-artefact guard, which shares the index. A path that is outside the project as spelled is judged as before, and an ordinary relative word that is not a link behaves as before.
 
+Security fix: when the scan of a Bash command stopped early (a brace expansion past the enumeration cap, the scan deadline, a word it could not read, or an internal error), only the literal paths in its text were judged, so a recursive search in the same command (`echo {a..z}{a..z}{a..z}; grep -r x dir`) was allowed with the not-judged advisory. Such a command is now denied whenever it holds a recursive search or a glob, and the deny says the scan stopped before it finished. A command with neither keeps the advisory. A Grep tool call whose check stopped early is denied the same way.
+
+A command with many `cd`s to directories that do not exist no longer makes the search check's cost grow without bound: past 64 candidate directories every later read is judged over every indexed file and over every directory link a move could reach.
+
+A `cd` operand that is an extended glob (`@(x)`, `+(x)`), a relative `cd` in a command that names `CDPATH`, and `eval cd x` are now judged like a computed `cd`.
+
+A globbed `cd` that matches more than 16 directories is judged like a computed `cd` rather than followed match by match, which keeps the guard's cost bounded (`cd */*/*` over a wide tree no longer takes seconds).
+
+A computed `cd` is now also judged from inside each directory link in the project, not only from the directories that hold a link, so `cd $(echo link) && cat .e*` is denied when `link` leads out of the project. At most 512 directory links are considered.
+
 Upgrade: nothing to do.

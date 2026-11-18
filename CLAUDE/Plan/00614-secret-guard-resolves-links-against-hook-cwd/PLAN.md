@@ -56,6 +56,18 @@ project whose worktrees carry seeded links to protected files.
 - [x] ✅ **Task 2.3**: Expand glob tokens and realpath each match.
 - [x] ✅ **Task 2.4**: Release note.
 
+### Phase 3: Review fix rounds
+
+- [x] ✅ **Task 3.1**: Review 614 (F1-F5) and 614b (R1-R5, P1) findings fixed test first.
+- [x] ✅ **Task 3.2**: Review 614c: X1/X1b (wide globbed `cd` bounded), P2 (every scan that
+  gave up beside a search or glob denies, Grep tool included), N1 (a computed `cd` is judged
+  from inside each directory link), N3 partial (CDPATH, extended-glob operand, `eval cd`), a
+  cap on the search walk's directory set. Main merged in (Plan 00618, which carries Plan 00615).
+- [ ] **Task 3.3**: Residuals recorded in `subagent-reports/261118-finish-opus.md`, not fixed
+  here: N2 (physical `..` through a directory link), a glob matching a file link
+  (`cat lin[k]1.txt`), an absolute glob outside the project, `*/*` through a link, a shell
+  function body's `cd` beyond its own operand. Each needs its own plan or a decision.
+
 ## Success Criteria
 
 - [x] Each gap has a test that failed before its fix.
@@ -64,4 +76,4 @@ project whose worktrees carry seeded links to protected files.
 
 ## Delivery & Milestones
 
-- Found by the 00613 Task 1.1 probe. Fixed on branch `agent-a13d7c8504105d4c9-aeae03b4`, not yet merged; release note `089-secret-guard-judges-links-from-the-hook-cwd.md`. Report: `subagent-reports/261116-link-gaps.md`.
+- Found by the 00613 Task 1.1 probe. Fixed on branch `agent-a13d7c8504105d4c9-aeae03b4`, not yet merged; release note `002-secret-guard-judges-links-from-the-hook-cwd.md` (renumbered after the v3.75.0 release emptied the holding area). Reports: `subagent-reports/261116-link-gaps.md`, `subagent-reports/261116-review-b-fixes.md`, `subagent-reports/261118-finish-opus.md`.
