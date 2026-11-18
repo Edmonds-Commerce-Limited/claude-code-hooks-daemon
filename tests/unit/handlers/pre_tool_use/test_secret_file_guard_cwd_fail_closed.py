@@ -1223,3 +1223,24 @@ class TestADeeperRelativeWordAfterAComputedMove:
 
     def test_a_plain_deeper_word_stays_allowed(self, nested: Tree) -> None:
         assert _decision(nested, "cd $(printf q/sub); cat a/plain.txt") is Decision.ALLOW
+
+
+class TestTheTopLevelMoveAddsToTheComputedJudgement:
+    """Round 6 advisor review: placing ``cd "$(git rev-parse --show-toplevel)"`` must only add.
+
+    Under the scan's cap it is judged as the computed move it is (round-start
+    behaviour), the ancestors besides; a shadowed ``git`` makes it plain computed.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cd "$(git rev-parse --show-toplevel)" && cat .e*',
+            'git() { echo plink; }; cd "$(git rev-parse --show-toplevel)" && cat i*',
+            'alias git="echo plink"; cd "$(git rev-parse --show-toplevel)" && cat i*',
+            'PATH=/nowhere:$PATH; cd "$(git rev-parse --show-toplevel)" && cat i*',
+            'git config core.worktree plink; cd "$(git rev-parse --show-toplevel)" && cat i*',
+        ],
+    )
+    def test_denied_under_the_cap(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
