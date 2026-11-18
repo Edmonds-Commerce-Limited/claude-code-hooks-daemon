@@ -82,7 +82,7 @@ The harness and its results are in `corpus/`: `p622_corpus.py`, `p622-corpus-bef
   - A cached `empty-commits-only` proof is read back with no range walk.
   - An integration line (`release/*`) with an empty commit over merged work stays refused on the remote path and the local path.
 - **Creation guard.** `branch_creation._proven_refnames` treats any cached tier other than `unproven` as proven. A remote branch cached as `empty-commits-only` therefore stops counting as open work, the same as a squash-merged one.
-- **Targeted QA:** results are in the commit that follows this report.
+- **Targeted QA on the fix commit `a9bb1177d`: 9/9 passed.** The checks were format, lint, type_check, pyright, error_hiding, magic_values, plan_qa (0 block, 1 advise), docs_qa and british_english.
 - **A missing trailer.** The merge of `origin/main` into this branch (`ba77416d6`) was made with `-m` and carries no Co-Authored-By trailer. Amending is not allowed, so it is recorded here instead.
 
 ## Release note and journal
