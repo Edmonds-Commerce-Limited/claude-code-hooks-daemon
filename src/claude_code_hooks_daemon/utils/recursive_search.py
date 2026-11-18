@@ -821,6 +821,10 @@ def _segment_reads(
     head = posixpath.basename(words[0])
     if tracker.lost and head not in _DIRECTORY_CHANGERS and _reads_files(words, head):
         yield Read(_EVERYTHING, view=TreeView.ALL)
+        # A directory link out of the project is under no indexed file: each place a
+        # move could have reached, the links among them, is read as a root too.
+        for directory in tracker.indeterminate():
+            yield Read(directory, view=TreeView.ALL)
     if head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
         inner = words[words.index(_SHELL_COMMAND_FLAG, 1) + 1]
         yield from _reads(inner, here, depth + 1, tracker)

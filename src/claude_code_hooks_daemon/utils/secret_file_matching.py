@@ -3436,7 +3436,6 @@ EXTGLOB_OPENERS: Final[tuple[str, ...]] = ("@(", "+(", "!(", "*(", "?(")
 CDPATH_VARIABLE: Final[str] = "CDPATH"
 #: A command substitution's opener, glued to the word that starts its body.
 _SUBSTITUTION_OPENERS: Final[tuple[str, ...]] = ("$(", "`")
-_ASSIGNMENT_WORD: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 #: Nested ``bash -c`` / quoted ``$( )`` bodies are walked this deep, no further.
 _MAX_DIRECTORY_CHANGE_DEPTH: Final[int] = 4
 #: How many existing directories a relative word is resolved from (review F5).
