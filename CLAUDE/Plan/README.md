@@ -12,8 +12,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00621: actions qa ci advisory and workflow lint on edit](00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - Not Started (peer request, owner direction relayed: advise adopting an external workflow linter and run it on workflow edits; the design needs the owner's confirmation first)
 
-- [00619: branch pool graduated warnings](00619-branch-pool-graduated-warnings/PLAN.md) - In Progress (owner ruling: the pool cap stays a hard stop, so warn at 60, 80 and 90 percent of the cap; the 90 percent warning is never silenced)
-
 - [00618: release 3 75 0 code review findings](00618-release-3-75-0-code-review-findings/PLAN.md) - In Progress (Step 10 review of release 3.75.0 returned FAIL: 5 blocking fail-open or data-loss findings plus 20 non-blocking defects; release aborted at that gate; fix test-first, then the owner re-runs the release)
 
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
@@ -206,6 +204,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00619: branch pool graduated warnings](Completed/00619-branch-pool-graduated-warnings/PLAN.md) - Complete at merge `1dc7ca3e0` + the archiving commit (each branch pool warns at 60, 80 and 90 percent of the point where creation is refused; the 90 percent warning shows on every tool call and prompt until usage drops; session start and the stop report share the ladder; the block and every guard decision are unchanged; release note 001)
+
 - [00617: park commit keeps merged branch deletable](Completed/00617-park-commit-keeps-merged-branch-deletable/PLAN.md) - Complete at merge `01a13a600` (CI 43991958722 green) + the archiving commit (a branch left with only empty park commits is classified merged by one shared `branch_park.is_park_residue`; release note 091; peer-team notice left open)
 
 - [00612: secret guard dir glob false allows](Completed/00612-secret-guard-dir-glob-false-allows/PLAN.md) - Complete at merge `245b6d98f` + `fbbf9ca5f` (main CI 43862059384 green) + the archiving commit (POSIX bracket classes, symlinked directories and bare globs no longer let a recursive reader past `secret_file_guard`; release note 088)
@@ -264,8 +264,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00571: branch pools parked merged caps](Completed/00571-branch-pools-parked-merged-caps/PLAN.md) - Complete at merge `9314a6e4c` (PR #186) + `7a917cff9` (green CI) + the archiving commit (GitHub #165, closed: open, parked and merged branches are three pools, each with its own cap, max age and deny rule; `branch-keep`, `branches.bot_owned`, safe `branch-sweep --clean --remote`; release note 007)
 
-- [00573: admin seat issue assignment override](Completed/00573-admin-seat-issue-assignment-override/PLAN.md) - Complete at merge `a2b7f27e9` + the archiving commit (owner ruling: a repository admin seat is never blocked by a non-admin's issue assignment; it gets an advisory, and `issue-validity --claim` performs a recorded takeover; non-admin seats and other admins' claims keep the duplicate-work block; dogfooded live on #155; ships in the release after v3.73.0, release note 004)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -321,9 +319,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 621 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 516 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 517 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 81 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 80 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
