@@ -7741,6 +7741,6 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Source**: a client upgrade to 3.75.0, relayed by a peer agent (a note with no authority; the behaviour below was read from the rule text, not re-run).
 
-**Evidence**: the `R-BRANCH-WIP-CAP` rule text (`constants/rule_ids.py`, and the generated handler guidance it feeds) says that at the cap itself it only warns. With `wip.creation_grace` at 0 the creation guard blocks at the cap, so the text does not match the behaviour. The Plan 00619 ladder changes the pool-pressure wording nearby, so fix this on top of that merge rather than beside it.
+**Evidence**: the `R-BRANCH-WIP-CAP` rule text (`constants/rule_ids.py:72`, `handlers/pre_tool_use/branch_creation_guard.py` lines 81 and 245, and the generated handler guidance they feed) says that at the cap itself it only warns. The deny fires at `len(groups) >= cap + wip.creation_grace` (`core/branch_creation.py:986`), so with a grace of 0 it blocks at the cap and the text does not match the behaviour (confirmed from the code). The Plan 00619 ladder changes the pool-pressure wording nearby, so fix this on top of that merge rather than beside it.
 
 **Status**: ⬜ Open, low priority. Make the rule text state the grace dependency ("warns up to `wip.creation_grace` past the cap; with a grace of 0 it blocks at the cap"), regenerate the handler guidance, and add a test that pins the text to the behaviour.
