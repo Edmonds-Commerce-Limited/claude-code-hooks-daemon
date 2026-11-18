@@ -36,7 +36,7 @@ A release carries no known defect, and deferring one needs the human's explicit 
 
 ### Phase 2: Non-blocking defects and nits
 
-- [x] ✅ **Task 2.1**: Triage the 20 non-blocking defects in the report: fix each test-first, or record the owner's explicit acceptance. 17 fixed test-first and N-16 already fixed (merge `73cd364e5`, `subagent-reports/261117-phase2-defects.md`). N-7 and N-8 are D-1 and D-2, answered yes and implemented (merge `d7c7efe37`, review `261117-d1-d2-review.md`). Residuals ledgered N650 to N657 (`CLOSEOUT-AUDIT.md`).
+- [x] ✅ **Task 2.1**: Triage the 20 non-blocking defects in the report: fix each test-first, or record the owner's explicit acceptance. 17 fixed test-first and N-16 already fixed (merge `73cd364e5`, `subagent-reports/261117-phase2-defects.md`). N-7 and N-8 are D-1 and D-2, answered yes and implemented (merge `d7c7efe37`, review `261117-d1-d2-review.md`). Residuals ledgered N650 to N659 (`CLOSEOUT-AUDIT.md`).
 - [x] ✅ **Task 2.2**: Fix the nits in the code touched by Tasks 1.x and 2.1. 12 of 13 fixed. T-7 is D-3, which the owner answered no (journal 2026-11-17 `111756Z`): the false positive is accepted.
 
 ### Phase 2b: Red release gate (run 43961579876 on the aborted release head)
@@ -107,4 +107,4 @@ A release carries no known defect, and deferring one needs the human's explicit 
 - Phase 2 merged to main at `73cd364e5` (CI run 44000713338 green on the branch tip `e53eef183` that was merged): 29 of 33 items fixed, N-16 already fixed, N-7, N-8 and T-7 held for the owner.
 - Owner decisions answered (journal `111756Z`); D-1 and D-2 merged at `d7c7efe37`.
 - Release re-run: Step 10 re-run found S-1 (fixed, two independent reviews) and S-2 (fixed); v3.75.0 tagged and merged through PR 209.
-- Close-out: every task and finding audited in `CLOSEOUT-AUDIT.md`; residuals ledgered N650 to N657.
+- Close-out: every task and finding audited in `CLOSEOUT-AUDIT.md`; residuals ledgered N650 to N659.

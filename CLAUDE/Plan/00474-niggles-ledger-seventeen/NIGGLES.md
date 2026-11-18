@@ -7808,3 +7808,19 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: `tests/unit/utils/test_workable_issues.py` and `test_cron_hosts.py` exist, but whether they cover the change made in `d696d45cc` was not checked line by line; the review's checklist item was "tests exist for every handler change".
 
 **Status**: ⬜ Open, low priority. Read `d696d45cc`'s diff against the two test files and add a test for any changed branch that no test drives.
+
+### N658 — the secret guard's fail-closed git relocation is broader than needed
+
+**Source**: Plan 00618 S-1 first review (`subagent-reports/261118-s1-review.md`, "Over-block").
+
+**Evidence**: any `git grep` relocated by `--work-tree`, `--git-dir`, `-c core.worktree`, `GIT_DIR` or `GIT_WORK_TREE` denies whenever the project holds any protected file, even when the named tree holds none: `git --work-tree=sub grep -e hello` denies (pinned as a deliberate denial in `test_secret_file_guard_git_relocation.py`), and `git --git-dir=.git grep -e x`, equivalent to the allowed `git grep -e x`, denies too. A quoted literal `git -C "~" grep` is judged like an unquoted `~`. All err toward deny.
+
+**Status**: ⬜ Open, low priority. For a literal `--work-tree=<dir>`, judge only the placed work tree, keeping the fail-closed default for values that cannot be placed; update the deliberate-denial pin in the same change.
+
+### N659 — the playbook harness errors under load were not identified, and its gate was not confirmed on the Task 2.5 fix
+
+**Source**: Plan 00618 Phase 2 defects report (`subagent-reports/261117-phase2-defects.md`, Task 2.5).
+
+**Evidence**: Task 2.5 load-scaled only the playbook generator's subprocess bound (`ce15433cc`, `6d309904b`). The report says the harness errors seen under load were not otherwise identified, and the playbook harness gate was not run on the merged tip because no daemon served that worktree. The lint budget half is N632.
+
+**Status**: ⬜ Open. Run the playbook harness gate on a loaded host against main and record which probes, if any, still time out; fix each test-first.
