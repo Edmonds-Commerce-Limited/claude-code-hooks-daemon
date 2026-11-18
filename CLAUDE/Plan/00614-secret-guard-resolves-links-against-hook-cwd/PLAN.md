@@ -65,8 +65,8 @@ project whose worktrees carry seeded links to protected files.
   cap on the search walk's directory set. Main merged in (Plan 00618, which carries Plan 00615).
 - [ ] **Task 3.3**: Residuals recorded in `subagent-reports/261118-finish-opus.md`, not fixed
   here: N2 (physical `..` through a directory link), a glob matching a file link
-  (`cat lin[k]1.txt`), an absolute glob outside the project, `*/*` through a link, a shell
-  function body's `cd` beyond its own operand. Each needs its own plan or a decision.
+  (`cat lin[k]1.txt`), an absolute glob outside the project, `CDPATH` from the environment
+  (niggle N650 in Plan 00474), and `*/*` through a link (allowed by decision).
 
 ## Success Criteria
 

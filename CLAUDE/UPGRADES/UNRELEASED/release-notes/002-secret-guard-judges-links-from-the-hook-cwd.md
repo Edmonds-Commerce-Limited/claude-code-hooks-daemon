@@ -25,6 +25,12 @@ Behaviour change: when a command moves into more than 16 existing directories, a
 
 Security fix: when the scan of a Bash command stopped early (a brace expansion past the enumeration cap, the scan deadline, a word it could not read, or an internal error), only the literal paths in its text were judged, so a recursive search in the same command (`echo {a..z}{a..z}{a..z}; grep -r x dir`) was allowed with the not-judged advisory. Such a command is now denied whenever it holds a recursive search or a glob, and the deny says the scan stopped before it finished. A command with neither keeps the advisory. A Grep tool call whose check stopped early is denied the same way.
 
+Behaviour change: any Bash command holding a glob character (`*`, `?`, `[`) or a recursive search whose scan stops early is now denied, where it was allowed with the not-judged advisory. Split a command that trips this, or drop the large brace expansion beside it.
+
+Behaviour change: after a `cd` whose target bash computes (`cd "$(git rev-parse --show-toplevel)"`), or a globbed `cd` that matches nothing, a glob read (`ls *.md`) is denied in a project that holds a directory link leading out of the project, because the shell could be inside that link. A plain relative path is still judged as before. Spell the directory literally to avoid it.
+
+A `cd`, `env -C`, `sudo -D`, `tar -C` or `git -C` named by its path (`/usr/bin/env -C d`) is now read like the bare command.
+
 A command with many `cd`s to directories that do not exist no longer makes the search check's cost grow without bound: past 64 candidate directories every later read is judged over every indexed file and over every directory link a move could reach.
 
 A `cd` operand that is an extended glob (`@(x)`, `+(x)`), a relative `cd` in a command that names `CDPATH`, and `eval cd x` are now judged like a computed `cd`.
