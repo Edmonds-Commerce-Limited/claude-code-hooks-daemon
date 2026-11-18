@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.support.git_fixtures import run_git
+from tests.support.git_fixtures import commit_content, run_git
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
@@ -47,7 +47,7 @@ def clone(tmp_path: Path) -> Path:
     run_git(work, "push", "-u", "origin", "merged")
     run_git(work, "worktree", "add", str(tmp_path / "wt-merged"), "merged")
     run_git(work, "worktree", "add", "-b", "unmerged", str(tmp_path / "wt-unmerged"))
-    run_git(tmp_path / "wt-unmerged", "commit", "--allow-empty", "-m", "only on unmerged")
+    commit_content(tmp_path / "wt-unmerged", "only on unmerged")
     run_git(tmp_path / "wt-unmerged", "push", "-u", "origin", "unmerged")
     run_git(work, "fetch", "origin")
     return work

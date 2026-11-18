@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
 from claude_code_hooks_daemon.core.remote_branch_proof import prove_remote_merged
 from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_CONTENT_PRESERVED,
+    TIER_EMPTY_COMMITS_ONLY,
     TIER_MERGED,
     TIER_PATCH_EQUIVALENT,
 )
@@ -52,8 +53,9 @@ _ENV = {
 }
 _CONFIG = BranchesConfig(default="main")
 
-#: Git calls one branch may cost the proof beyond the fixed per-call listings.
-_CALLS_PER_BRANCH = 5
+#: Git calls one branch may cost the proof beyond the fixed per-call listings. One of
+#: them is the ``cat-file --batch`` read confirming the range walk from stored objects.
+_CALLS_PER_BRANCH = 6
 
 #: Index of the subcommand in ``git -C <dir> <subcommand> ...``.
 _SUBCOMMAND_AT = 3
@@ -135,7 +137,10 @@ def _git_subcommands_during(action: Callable[[], Any]) -> list[str]:
     real_run = subprocess.run
 
     def spy(argv: list[str], *args: Any, **kwargs: Any) -> Any:
-        spawned.append(argv[_SUBCOMMAND_AT])
+        at = _SUBCOMMAND_AT
+        while argv[at] == "-c":  # a global ``-c key=value`` precedes the subcommand
+            at += 2
+        spawned.append(argv[at])
         return real_run(argv, *args, **kwargs)
 
     with patch("claude_code_hooks_daemon.utils.git_repo.subprocess.run", spy):
@@ -198,7 +203,13 @@ class TestShapes:
         assert "not merged" in problems["feat"]
         assert evidence == {}
 
-    def test_a_park_branch_of_empty_commits_stays_unproven(self, repo: Path) -> None:
+    def test_a_branch_of_only_empty_commits_is_proven_empty_commits_only(self, repo: Path) -> None:
+        """No file changes at all: the delete loses only the commit messages (Plan 00622).
+
+        Before Plan 00622 this was unproven, because an empty net change proves
+        nothing. It still proves nothing; what proves this branch is that EVERY commit
+        it has beyond main is empty (one parent, that parent's tree).
+        """
         _git(repo, "checkout", "-q", "-b", "parked", "main")
         _git(repo, "commit", "-q", "--allow-empty", "-m", "Park it")
         _git(repo, "push", "--quiet", "origin", "parked")
@@ -206,9 +217,9 @@ class TestShapes:
         _commit(repo, "later.txt")
         _publish_main(repo)
         tips, problems, evidence = _prove(repo, ["parked"])
-        assert tips == {}
-        assert "not merged" in problems["parked"]
-        assert evidence == {}
+        assert list(tips) == ["parked"]
+        assert problems == {}
+        assert evidence == {"parked": TIER_EMPTY_COMMITS_ONLY}
 
 
 class TestCaching:
@@ -390,13 +401,32 @@ class TestNetChangeMustBeHeldByTheDefaultTip:
         _push_back_to_main(repo, "chmod")
         _assert_unproven(repo, "chmod")
 
-    def test_a_park_branch_is_unproven_while_main_has_an_empty_commit(self, repo: Path) -> None:
+    def test_an_empty_commit_on_main_never_proves_a_branch_by_net_change(self, repo: Path) -> None:
+        """Main's empty commit holds the (empty) net change trivially; that is no proof.
+
+        The branch is still deletable, but only as ``empty-commits-only`` (its own
+        commits are all empty, Plan 00622), never as ``content-preserved``.
+        """
         _on_branch(repo, "parked")
         _git(repo, "commit", "-q", "--allow-empty", "-m", "Park it")
         _push_back_to_main(repo, "parked")
         _git(repo, "commit", "-q", "--allow-empty", "-m", "An empty commit on main")
         _publish_main(repo)
-        _assert_unproven(repo, "parked")
+        assert not remote_branch_proof.holds_net_change(repo, "main", "refs/remotes/origin/parked")
+        _tips, _problems, evidence = _prove(repo, ["parked"])
+        assert evidence == {"parked": TIER_EMPTY_COMMITS_ONLY}
+
+    def test_an_empty_commit_over_a_branch_that_only_deletes_a_file_is_unproven(
+        self, repo: Path
+    ) -> None:
+        _commit(repo, "keep.txt")
+        _publish_main(repo)
+        _on_branch(repo, "rm")
+        _git(repo, "rm", "-q", "keep.txt")
+        _git(repo, "commit", "-q", "-m", "Remove keep")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "Unpark branch")
+        _push_back_to_main(repo, "rm")
+        _assert_unproven(repo, "rm")
 
     def test_branch_work_that_main_later_reverted_is_proven(self, repo: Path) -> None:
         """Round 1 called this a false positive; under the first-parent rule it is intended.

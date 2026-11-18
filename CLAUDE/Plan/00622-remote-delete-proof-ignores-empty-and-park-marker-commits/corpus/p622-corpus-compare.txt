@@ -1,0 +1,24 @@
+shapes=48 decisions=192
+DENY->ALLOW: 19
+  Y s-many-empty remote: DENY -> empty-commits-only
+  Y s-many-empty guard: DENY -> ALLOW
+  Y s-many-empty local: DENY -> empty-commits-only
+  Y s-many-empty local-hook: DENY -> empty-commits-only
+  Y s-pick-empty local-hook: DENY -> patch-equivalent
+  Y s-plain-empty-ff remote: DENY -> empty-commits-only
+  Y s-plain-empty-ff guard: DENY -> ALLOW
+  Y s-plain-empty-ff local: DENY -> empty-commits-only
+  Y s-plain-empty-ff local-hook: DENY -> empty-commits-only
+  Y s-plain-unpark-merged remote: DENY -> empty-commits-only
+  Y s-plain-unpark-merged guard: DENY -> ALLOW
+  Y s-plain-unpark-merged local: DENY -> empty-commits-only
+  Y s-plain-unpark-merged local-hook: DENY -> empty-commits-only
+  E s-pure-empty remote: DENY -> empty-commits-only
+  E s-pure-empty guard: DENY -> ALLOW
+  E s-pure-empty local: DENY -> empty-commits-only
+  E s-pure-empty local-hook: DENY -> empty-commits-only
+  E s-pure-empty-main-empty remote: DENY -> empty-commits-only
+  E s-pure-empty-main-empty guard: DENY -> ALLOW
+ALLOW->DENY: 0
+DENY->ALLOW on N (content not in default): 0
+ALLOW on N after: 0

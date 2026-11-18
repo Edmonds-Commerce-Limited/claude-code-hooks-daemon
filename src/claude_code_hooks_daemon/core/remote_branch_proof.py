@@ -15,10 +15,13 @@ its diff against that merge base, renames off, where every added or modified pat
 has the same blob and mode in the commit's tree and every deleted path is absent.
 That is what a squash merge, a renamed pull request or a cherry-pick leaves
 behind; the content is then permanently in the default's history, so patch-id
-evidence never proves a branch alone, and an empty change proves nothing, with ONE
-exception decided before the net-change check: a tip whose every commit beyond the default
-is a park commit (``branch_park.is_park_residue``, the one rule) is ``park-carried``: the
-work is in the default and the delete loses only the marker. Every git call runs from the repository top level.
+evidence never proves a branch alone, and an empty change proves nothing, with TWO
+exceptions: a tip whose every commit beyond the default is a park commit
+(``branch_park.is_park_residue``, the one rule) is ``park-carried``, decided before the
+net-change check; and a tip whose every commit beyond the default is empty (one parent,
+that parent's tree, any message: ``branch_park.is_content_free``) is
+``empty-commits-only`` (Plan 00622). Either way the work is in the default and the delete
+loses only those commits. Every git call runs from the repository top level.
 Results are cached by algorithm version, tip and default sha in the inventory
 cache, so the next call is offline and cheap. Then the remote's LIVE tip, read with one batched
 ``git ls-remote`` per chunk, equal to that tracking tip. Every failure, timeout and
@@ -41,9 +44,14 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     read_merge_proofs,
     write_merge_proofs,
 )
-from claude_code_hooks_daemon.core.branch_park import is_park_residue, park_marked_refs
+from claude_code_hooks_daemon.core.branch_park import (
+    is_content_free,
+    is_park_residue,
+    park_marked_refs,
+)
 from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_CONTENT_PRESERVED,
+    TIER_EMPTY_COMMITS_ONLY,
     TIER_MERGED,
     TIER_PARK_CARRIED,
     TIER_PATCH_EQUIVALENT,
@@ -102,7 +110,8 @@ class RemoteProof:
         tips: Branch name to the live remote tip, for every branch proven deletable.
         problems: Branch name to why it is not, for every other branch named.
         evidence: Branch name to the evidence that proved it (a ``branch_safety`` tier:
-            ``merged``, ``patch-equivalent`` or ``content-preserved``).
+            ``merged``, ``park-carried``, ``empty-commits-only``, ``patch-equivalent`` or
+            ``content-preserved``).
     """
 
     tips: dict[str, str]
@@ -353,22 +362,43 @@ def holds_net_change(
     Raises:
         ProofUnavailableError: git failed, so there is no answer to cache.
     """
+    return _net_change_state(directory, target, tracking_ref, timeout=timeout) == _HELD
+
+
+_HELD: Final[str] = "held"
+_EMPTY: Final[str] = "empty"
+_NOT_HELD: Final[str] = "not-held"
+
+
+def _net_change_state(directory: Path, target: str, tracking_ref: str, *, timeout: float) -> str:
+    """:func:`holds_net_change`'s answer, telling an EMPTY net change from one not held.
+
+    ``_EMPTY`` (the branch's diff against the merge base is nothing) is never a proof
+    here; only the caller's empty-commit walk may prove such a branch (Plan 00622).
+    No merge base at all is ``_NOT_HELD``.
+
+    Raises:
+        ProofUnavailableError: git failed, so there is no answer to cache.
+    """
     base = run_git(directory, "merge-base", target, tracking_ref, timeout=timeout)
     if base.returncode == _NO_MERGE_BASE:
-        return False
+        return _NOT_HELD
     if base.returncode != 0:
         raise ProofUnavailableError(f"git merge-base failed for {tracking_ref}")
     merge_base = base.stdout.strip()
     changes = _net_change(directory, merge_base, tracking_ref, timeout=timeout)
-    if not changes or len(changes) > MAX_PROOF_PATHS:
-        return False
+    if not changes:
+        return _EMPTY
+    if len(changes) > MAX_PROOF_PATHS:
+        return _NOT_HELD
     if _tree_holds(directory, target, changes, timeout=timeout):
-        return True
+        return _HELD
     paths = [c.path for c in changes]
     candidates = _touching_commits(directory, merge_base, target, paths, timeout=timeout)
     if len(candidates) > MAX_PROOF_CANDIDATES:
-        return False
-    return any(_tree_holds(directory, commit, changes, timeout=timeout) for commit in candidates)
+        return _NOT_HELD
+    held = any(_tree_holds(directory, commit, changes, timeout=timeout) for commit in candidates)
+    return _HELD if held else _NOT_HELD
 
 
 def _judge_offline(directory: Path, tracking_ref: str, targets: list[str]) -> str:
@@ -380,12 +410,24 @@ def _judge_offline(directory: Path, tracking_ref: str, targets: list[str]) -> st
     The tier only names how the change got there: ``patch-equivalent`` when every
     commit has its patch in the default, else ``content-preserved`` (a squash). It is
     the same proof ``branch_safety``'s local ``content-preserved`` tier requires.
+    An EMPTY net change proves nothing by itself; such a branch is proven only when
+    every commit it has beyond the default is empty (one parent, that parent's tree,
+    any message): ``empty-commits-only`` (Plan 00622). Only an empty net change pays
+    for that walk.
 
     Raises:
         ProofUnavailableError: git failed, so there is no answer to cache.
     """
     for target in targets:
-        if not holds_net_change(directory, target, tracking_ref):
+        state = _net_change_state(directory, target, tracking_ref, timeout=Timeout.GIT_CONTEXT)
+        if state == _EMPTY:
+            content_free = is_content_free(directory, tracking_ref, target)
+            if content_free is None:
+                raise ProofUnavailableError(f"git log failed for {tracking_ref}")
+            if content_free:
+                return TIER_EMPTY_COMMITS_ONLY
+            continue
+        if state != _HELD:
             continue
         equivalent, count = patch_equivalent(directory, target, tracking_ref)
         if count is None:
