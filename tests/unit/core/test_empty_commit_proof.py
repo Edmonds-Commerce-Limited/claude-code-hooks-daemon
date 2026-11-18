@@ -145,10 +145,16 @@ class TestReportedShapesAreDeletable:
         _publish(repo, "feat")
         assert _verdicts(repo, "feat") == _all(True)
 
-    def test_a_cherry_picked_branch_with_a_plain_empty_commit_is_patch_equivalent(
+    def test_a_cherry_picked_branch_with_a_plain_empty_commit_passes_the_net_change_route(
         self, repo: Path
     ) -> None:
-        """The cherry route: every content patch is in main, the empty commit has none."""
+        """Every content patch is in main, with an empty commit on top.
+
+        Patch-ids alone cannot prove it: they ignore whitespace, so an empty commit
+        excused there could cover a pick main took reformatted (round 2, D1). The
+        proofs that check the net change pass it; the hook path, which has only
+        patch-ids, refuses it.
+        """
         _branch(repo, "feat")
         _write(repo, "a.txt", "a\n", "a")
         _write(repo, "b.txt", "b\n", "b")
@@ -160,8 +166,16 @@ class TestReportedShapesAreDeletable:
         _git(repo, "checkout", "-q", "feat")
         _publish(repo, "feat")
         verdict = branch_safety.classify_branch(repo, "feat", content_tier=False)
-        assert verdict.tier == branch_safety.TIER_PATCH_EQUIVALENT
-        assert _verdicts(repo, "feat") == _all(True)
+        assert verdict.tier == branch_safety.TIER_UNPROVEN
+        assert branch_safety.classify_branch(repo, "feat").tier == (
+            branch_safety.TIER_CONTENT_PRESERVED
+        )
+        assert _verdicts(repo, "feat") == {
+            "remote": True,
+            "guard": True,
+            "local": True,
+            "local-hook": False,
+        }
 
 
 class TestReportedShapesAlreadyProven:
@@ -305,6 +319,116 @@ class TestContentBearingTwinsStayRefused:
         _empty(repo, "Unpark branch")
         _publish(repo, "feat")
         _git(repo, "branch", "-q", "-D", "other")
+        assert _verdicts(repo, "feat") == _all(False)
+
+
+# --- lossy shapes the review found (Plan 00622 round 2) ----------------------------------
+
+
+def _commit_tree(repo: Path, tree: str, parents: list[str], message: str) -> str:
+    args = ["commit-tree", tree]
+    for parent in parents:
+        args += ["-p", parent]
+    return _git(repo, *args, "-m", message)
+
+
+class TestAnEmptyCommitNeverWidensPatchEquivalence:
+    """D1: patch-ids ignore whitespace, so an empty commit must not let them stand alone.
+
+    Each branch holds a blob the default's history lacks. Without an empty commit
+    these are an older patch-id weakness; with one, the empty commit must not be the
+    thing that makes them deletable.
+    """
+
+    def test_a_whitespace_only_pick_under_an_empty_commit(self, repo: Path) -> None:
+        _branch(repo, "feat")
+        _write(repo, "f.py", "def f():\n    return  1  \n", "fix f")
+        _empty(repo, "Unpark branch")
+        _git(repo, "checkout", "-q", "main")
+        _write(repo, "f.py", "def f():\n    return 1\n", "fix f (whitespace cleaned)")
+        _git(repo, "push", "-q", "origin", "main")
+        _git(repo, "checkout", "-q", "feat")
+        _publish(repo, "feat")
+        blob = _git(repo, "rev-parse", "feat:f.py")
+        assert blob not in _git(repo, "rev-list", "--objects", "main")
+        assert _verdicts(repo, "feat") == _all(False)
+
+    def test_an_orphan_whitespace_twin_under_an_empty_commit(self, repo: Path) -> None:
+        """No merge base: ``git cherry`` compares against the whole history."""
+        _git(repo, "checkout", "-q", "--orphan", "feat")
+        _git(repo, "rm", "-q", "-rf", ".")
+        _write(repo, "base.txt", "base  \n", "orphan root")
+        _empty(repo, "note")
+        _publish(repo, "feat")
+        assert _verdicts(repo, "feat") == _all(False)
+
+
+class TestReplaceRefsAndGraftsAreIgnored:
+    """D2: every proof reads the real objects, never a replacement or a graft."""
+
+    def _content_commit(self, repo: Path) -> tuple[str, str]:
+        _branch(repo, "feat")
+        _write(repo, "secret.txt", "only-here\n", "add secret")
+        _publish(repo, "feat")
+        return _git(repo, "rev-parse", "feat"), _git(repo, "rev-parse", "feat~1")
+
+    @pytest.mark.parametrize("message", ["note", _PARK_WRITER], ids=["any", "park-writer"])
+    def test_a_content_commit_replaced_by_an_empty_looking_one(
+        self, repo: Path, message: str
+    ) -> None:
+        content, parent = self._content_commit(repo)
+        fake = _commit_tree(repo, _git(repo, "rev-parse", f"{parent}^{{tree}}"), [parent], message)
+        _git(repo, "replace", content, fake)
+        assert _verdicts(repo, "feat") == _all(False)
+
+    def test_a_content_commit_hidden_under_an_empty_commit_by_a_replace(
+        self, repo: Path
+    ) -> None:
+        _branch(repo, "feat")
+        _write(repo, "secret.txt", "only-here\n", "add secret")
+        content = _git(repo, "rev-parse", "HEAD")
+        _empty(repo, "note")
+        _publish(repo, "feat")
+        parent = _git(repo, "rev-parse", f"{content}~1")
+        fake = _commit_tree(repo, _git(repo, "rev-parse", f"{parent}^{{tree}}"), [parent], "n")
+        _git(repo, "replace", content, fake)
+        assert _verdicts(repo, "feat") == _all(False)
+
+    def test_a_default_tip_replaced_to_descend_from_the_branch(self, repo: Path) -> None:
+        content, _parent = self._content_commit(repo)
+        main_tip = _git(repo, "rev-parse", "main")
+        fake = _commit_tree(
+            repo, _git(repo, "rev-parse", "main^{tree}"), [main_tip, content], "Merge"
+        )
+        _git(repo, "replace", main_tip, fake)
+        assert _git(repo, "rev-parse", "origin/main") == main_tip
+        # The replacement is live for plain git: the default now appears to hold the branch.
+        assert _git(repo, "merge-base", "main", content) == content
+        assert _verdicts(repo, "feat") == _all(False)
+
+    def test_a_legacy_graft_making_the_default_descend_from_the_branch(
+        self, repo: Path
+    ) -> None:
+        content, _parent = self._content_commit(repo)
+        _write(repo, "later.txt", "later\n", "later on main")
+        _git(repo, "push", "-q", "origin", "main")
+        _git(repo, "fetch", "-q", "origin")
+        main_tip = _git(repo, "rev-parse", "main")
+        main_parent = _git(repo, "rev-parse", "main~1")
+        grafts = Path(_git(repo, "rev-parse", "--git-path", "info/grafts"))
+        if not grafts.is_absolute():
+            grafts = repo / grafts
+        grafts.parent.mkdir(parents=True, exist_ok=True)
+        grafts.write_text(f"{main_tip} {main_parent} {content}\n", encoding="utf-8")
+        # The graft is live for plain git: the default now appears to hold the branch.
+        assert (
+            subprocess.run(
+                ["git", "-C", str(repo), "merge-base", "--is-ancestor", content, "main"],
+                capture_output=True,
+                check=False,
+            ).returncode
+            == 0
+        )
         assert _verdicts(repo, "feat") == _all(False)
 
 

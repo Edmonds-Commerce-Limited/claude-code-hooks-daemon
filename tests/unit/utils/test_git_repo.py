@@ -444,6 +444,71 @@ class TestCallerSuppliedEnvironment:
         )
 
 
+class TestGitReadsTheRealObjects:
+    """Replace refs and legacy grafts never reach a daemon git read (Plan 00622 D2).
+
+    Either can make a commit look empty, or make the default look as if it holds a
+    branch, so a delete proof reading through one would delete real content.
+    """
+
+    def test_replace_refs_are_ignored(self, tmp_git_repo: Path) -> None:
+        with mock.patch("subprocess.run") as runner:
+            runner.return_value = subprocess.CompletedProcess([], 0, "", "")
+            run_git(tmp_git_repo, "log")
+
+        assert runner.call_args.kwargs["env"]["GIT_NO_REPLACE_OBJECTS"] == "1"
+
+    def test_the_graft_file_points_where_no_file_can_exist(self, tmp_git_repo: Path) -> None:
+        with mock.patch("subprocess.run") as runner:
+            runner.return_value = subprocess.CompletedProcess([], 0, "", "")
+            run_git(tmp_git_repo, "log")
+
+        graft_file = Path(runner.call_args.kwargs["env"]["GIT_GRAFT_FILE"])
+        assert not graft_file.exists()
+        assert graft_file.parent.is_file() or graft_file.parent.is_char_device()
+
+    def test_a_caller_cannot_re_enable_replacements_or_grafts(self, tmp_git_repo: Path) -> None:
+        with mock.patch("subprocess.run") as runner:
+            runner.return_value = subprocess.CompletedProcess([], 0, "", "")
+            run_git(
+                tmp_git_repo,
+                "log",
+                env={"GIT_NO_REPLACE_OBJECTS": "0", "GIT_GRAFT_FILE": "grafts"},
+            )
+
+        passed = runner.call_args.kwargs["env"]
+        assert passed["GIT_NO_REPLACE_OBJECTS"] == "1"
+        assert passed["GIT_GRAFT_FILE"] != "grafts"
+
+    def test_a_real_replace_ref_and_graft_are_not_followed(self, tmp_git_repo: Path) -> None:
+        def plain(*args: str) -> str:
+            return subprocess.run(
+                ["git", "-C", str(tmp_git_repo), *args], check=True, capture_output=True, text=True
+            ).stdout.strip()
+
+        (tmp_git_repo / "a.txt").write_text("a\n", encoding="utf-8")
+        plain("add", "a.txt")
+        plain("commit", "-q", "-m", "a")
+        tip = plain("rev-parse", "HEAD")
+        parent = plain("rev-parse", "HEAD~1")
+        fake = plain("commit-tree", plain("rev-parse", f"{parent}^{{tree}}"), "-p", parent, "-m", "x")
+        plain("replace", tip, fake)
+        assert plain("rev-parse", "HEAD^{tree}") != run_git(
+            tmp_git_repo, "rev-parse", "HEAD^{tree}"
+        ).stdout.strip()
+        assert run_git(tmp_git_repo, "rev-parse", "HEAD^{tree}").stdout.strip() == plain(
+            "--no-replace-objects", "rev-parse", "HEAD^{tree}"
+        )
+        plain("replace", "-d", tip)
+        grafts = tmp_git_repo / ".git" / "info" / "grafts"
+        grafts.parent.mkdir(parents=True, exist_ok=True)
+        grafts.write_text(f"{tip}\n", encoding="utf-8")
+        assert run_git(tmp_git_repo, "rev-list", "--parents", "-n1", tip).stdout.split() == [
+            tip,
+            parent,
+        ]
+
+
 class TestARelocatedRepositoryIsNotInherited:
     """``-C <cwd>`` must name the repository git answers for (Plan 00483 N154).
 
