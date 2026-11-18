@@ -1,0 +1,3 @@
+## 16:38 · correction · 16:34
+
+Correction to the close-out entry: a second pass over the S-1 first review's over-block section and the Task 2.5 notes found two more residuals, now ledger 00474 entries N658 (the secret guard's fail-closed git relocation is broader than needed) and N659 (playbook harness errors under load not identified; its gate not confirmed on the Task 2.5 fix). The residual range is N650 to N659. CLOSEOUT-AUDIT.md also now records that T-4's rmtree and N-20's own bounded spawn stay as they are by design, and that the S-1 review's test-gap shapes are asserted DENY, not only present.

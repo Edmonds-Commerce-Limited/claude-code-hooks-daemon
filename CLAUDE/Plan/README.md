@@ -10,9 +10,9 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - Not Started (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; draft, no code until the owner approves the design)
 
-- [00621: actions qa ci advisory and workflow lint on edit](00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - Not Started (peer request, owner direction relayed: advise adopting an external workflow linter and run it on workflow edits; the design needs the owner's confirmation first)
+- [00622: remote delete proof ignores empty and park marker commits](00622-remote-delete-proof-ignores-empty-and-park-marker-commits/PLAN.md) - Not Started (client report: empty unpark commits and modified-merge branches defeat the remote-delete proof; reproduce first, never loosen for content)
 
-- [00618: release 3 75 0 code review findings](00618-release-3-75-0-code-review-findings/PLAN.md) - In Progress (Step 10 review of release 3.75.0 returned FAIL: 5 blocking fail-open or data-loss findings plus 20 non-blocking defects; release aborted at that gate; fix test-first, then the owner re-runs the release)
+- [00621: actions qa ci advisory and workflow lint on edit](00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - Not Started (peer request, owner direction relayed: advise adopting an external workflow linter and run it on workflow edits; the design needs the owner's confirmation first)
 
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
 
@@ -206,6 +206,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00619: branch pool graduated warnings](Completed/00619-branch-pool-graduated-warnings/PLAN.md) - Complete at merge `1dc7ca3e0` + the archiving commit (each branch pool warns at 60, 80 and 90 percent of the point where creation is refused; the 90 percent warning shows on every tool call and prompt until usage drops; session start and the stop report share the ladder; the block and every guard decision are unchanged; release note 001)
 
+- [00618: release 3 75 0 code review findings](Completed/00618-release-3-75-0-code-review-findings/PLAN.md) - Complete at tag `v3.75.0` (PR 209, `1e194b693`) + the archiving commit (the Step 10 review's 5 blocking findings and the re-run's S-1 fixed test-first; 17 non-blocking defects and 12 nits fixed; owner decisions D-1/D-2 yes, D-3 no, D-4 option A; release notes 089 to 095 shipped in v3.75.0; residuals ledgered N630 to N644 and N650 to N659, audit in CLOSEOUT-AUDIT.md)
+
 - [00617: park commit keeps merged branch deletable](Completed/00617-park-commit-keeps-merged-branch-deletable/PLAN.md) - Complete at merge `01a13a600` (CI 43991958722 green) + the archiving commit (a branch left with only empty park commits is classified merged by one shared `branch_park.is_park_residue`; release note 091; peer-team notice left open)
 
 - [00612: secret guard dir glob false allows](Completed/00612-secret-guard-dir-glob-false-allows/PLAN.md) - Complete at merge `245b6d98f` + `fbbf9ca5f` (main CI 43862059384 green) + the archiving commit (POSIX bracket classes, symlinked directories and bare globs no longer let a recursive reader past `secret_file_guard`; release note 088)
@@ -262,8 +264,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00572: ci wall clock sharding arm and hygiene](Completed/00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - Complete at merge `f2d532f89` (PR #187) + the archiving commit (owner request: `qa.yml` reuses release-gate's shard matrix, so the nightly fell from 116 to 28.5 min; every `main` push gets a verdict; native and released aarch64 relay and hooks-screen, a non-blocking arm64 test leg, SHA-pinned actions; release notes 006, 012)
 
-- [00571: branch pools parked merged caps](Completed/00571-branch-pools-parked-merged-caps/PLAN.md) - Complete at merge `9314a6e4c` (PR #186) + `7a917cff9` (green CI) + the archiving commit (GitHub #165, closed: open, parked and merged branches are three pools, each with its own cap, max age and deny rule; `branch-keep`, `branches.bot_owned`, safe `branch-sweep --clean --remote`; release note 007)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -317,9 +317,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 621 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 622 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 517 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 518 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
 - **Active**: 80 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 

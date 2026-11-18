@@ -84,7 +84,7 @@ The new tip raised 0 times. The 29 allows that leak dummy content are all allowe
 - **`cat */*` through a link.** The plan allows this by decision: a glob made only of wildcards names no place.
 - **Over-deny (accepted, in release note 002 as a behaviour change).** After a computed or no-match globbed `cd`, a GLOB read is now denied in a project that has a directory link out (N1), for example `cd "$(git rev-parse --show-toplevel)" && ls *.md`. A plain relative read is still allowed. `TestComputedDirectoryChange::test_a_globbed_target_costs_a_bounded_walk` now asserts cost only. P2 also denies any command holding `*`, `?` or `[` whose scan gives up; that is in the release note too.
 - **CDPATH inherited from the environment.** Only a `CDPATH` named in the command is seen.
-- All of these are recorded as niggle N650 in the open ledger (Plan 00474 `NIGGLES.md`).
+- All of these are recorded as niggle N660 (filed as N650, renumbered on merging main) in the open ledger (Plan 00474 `NIGGLES.md`).
 
 ## Plan 00615
 

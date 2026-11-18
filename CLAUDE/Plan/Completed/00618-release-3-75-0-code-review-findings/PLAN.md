@@ -1,6 +1,6 @@
 # Plan 00618: release 3 75 0 code review findings
 
-**Status**: In Progress (blocked only on the owner: all code is on main; open items are the owner decisions D-1 to D-4, then the owner's `/release` re-run, inside which Task 2.4 runs and after which Task 3.1 closes)
+**Status**: Complete
 **Created**: 2026-11-16
 **Owner**: joseph
 **Priority**: High
@@ -36,22 +36,22 @@ A release carries no known defect, and deferring one needs the human's explicit 
 
 ### Phase 2: Non-blocking defects and nits
 
-- [ ] 🚫 **Task 2.1**: Triage the 20 non-blocking defects in the report: fix each test-first, or record the owner's explicit acceptance. 17 fixed test-first and N-16 already fixed, all on main (merge `73cd364e5`, `subagent-reports/261117-phase2-defects.md`). N-7 and N-8 await the owner: see Owner decisions.
-- [ ] 🚫 **Task 2.2**: Fix the nits in the code touched by Tasks 1.x and 2.1. 12 of 13 fixed on main. T-7 awaits the owner: see Owner decisions.
+- [x] ✅ **Task 2.1**: Triage the 20 non-blocking defects in the report: fix each test-first, or record the owner's explicit acceptance. 17 fixed test-first and N-16 already fixed (merge `73cd364e5`, `subagent-reports/261117-phase2-defects.md`). N-7 and N-8 are D-1 and D-2, answered yes and implemented (merge `d7c7efe37`, review `261117-d1-d2-review.md`). Residuals ledgered N650 to N659 (`CLOSEOUT-AUDIT.md`).
+- [x] ✅ **Task 2.2**: Fix the nits in the code touched by Tasks 1.x and 2.1. 12 of 13 fixed. T-7 is D-3, which the owner answered no (journal 2026-11-17 `111756Z`): the false positive is accepted.
 
 ### Phase 2b: Red release gate (run 43961579876 on the aborted release head)
 
 - [x] ✅ **Task 2.3**: The Plan 00609 proof script failed the `format` check; formatted on main (`873880239`).
-- [ ] 🚫 **Task 2.4**: (Blocked on the owner: runs only inside the owner's `/release` re-run.) On the re-run, after the Step 1H remote-docs refresh, update `docs_sha256` in the instruction-loading contract's `META.json` through the contract refresh procedure (the refreshed memory page changed one paragraph about additional-directory loading); confirm no contract fact breaks. Done inside the release re-run, not before it.
-- [ ] 🚫 **Task 2.5**: The playbook harness probe for the Kotlin linter timed out at 15 s on a loaded runner and the blocking gate skipped; make that probe's timeout load-scaled, test-first. Harness half on main: the playbook generator's subprocess bounds are load-scaled. Daemon half (the lint budget itself) is an owner decision; the playbook harness gate was not run on the merged tip.
+- [x] ✅ **Task 2.4**: Done inside the release re-run at `78999499b`. On the re-run, after the Step 1H remote-docs refresh, update `docs_sha256` in the instruction-loading contract's `META.json` through the contract refresh procedure (the refreshed memory page changed one paragraph about additional-directory loading); confirm no contract fact breaks. Done inside the release re-run, not before it.
+- [x] ✅ **Task 2.5**: The playbook harness probe for the Kotlin linter timed out at 15 s on a loaded runner and the blocking gate skipped; make that probe's timeout load-scaled, test-first. Harness half on main: the playbook generator's subprocess bounds are load-scaled. Harness half: red `ce15433cc`, fix `6d309904b`. Daemon half: the owner chose D-4 option A (limit stated in release note 092); option B is carried as ledger N632.
 
 ### Phase 3: Hand-off
 
-- [ ] 🚫 **Task 3.1**: (Blocked on the owner: closes after the owner's decisions and `/release` re-run.) Independent loosening review of Phase 1 and 2, CI green on main, a release note, then tell the owner the release can be re-run. In place: loosening reviews per fix group, CI run 44000713338 green on the Phase 2 merge, release notes 089 to 092. Open until the owner answers the decisions below and re-runs `/release`.
+- [x] ✅ **Task 3.1**: Independent loosening review of Phase 1 and 2, CI green on main, a release note, then tell the owner the release can be re-run. In place: loosening reviews per fix group, CI run 44000713338 green on the Phase 2 merge, release notes 089 to 092. The owner answered D-1 to D-5 (journal `111756Z`); the re-run found S-1 and S-2, both fixed (`45f713dd2`, `b05e57cda`, `df00a1e70`, `8f3f469cd`), and v3.75.0 was tagged and merged through PR 209.
 
 ## Owner decisions
 
-Each item below can be answered from this section alone. "Main" means the current default branch.
+**Answered** (journal 2026-11-17 `111756Z`): D-1 yes, D-2 yes (both implemented, `d7c7efe37`), D-3 no, D-4 option A, D-5 the release was run. The cases below are kept as the record of what was decided. "Main" means the default branch at the time.
 
 ### D-1 (N-7): should `warn` mode stop the stop guard from denying?
 
@@ -96,13 +96,15 @@ Each item below can be answered from this section alone. "Main" means the curren
 ## Success Criteria
 
 - [x] All five blocking findings are fixed, each with a test that failed before the fix.
-- [x] No fix makes a guard allow anything it denied on the previous commit (per-group loosening reviews; the items that would loosen are held as D-1 to D-3).
-- [ ] The non-blocking defects are each fixed or explicitly accepted by the owner (open: D-1 to D-3).
-- [x] A release note is added under `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (the holding-area artefact for this plan): notes 089, 090, 091 and 092.
+- [x] No fix makes a guard allow anything it denied on the previous commit (per-group loosening reviews); the only loosenings are the owner-approved D-1 and D-2 (review `261117-d1-d2-review.md` PASS).
+- [x] The non-blocking defects are each fixed or explicitly accepted by the owner (D-1 and D-2 yes and implemented, D-3 no, D-4 option A); every residual is in ledger 00474 (`CLOSEOUT-AUDIT.md`).
+- [x] Release notes 089 to 095 were written in the pending-release holding area (`CLAUDE/UPGRADES/UNRELEASED/release-notes/`) and shipped in v3.75.0; they now live in `CLAUDE/UPGRADES/v3/v3.74.0-to-v3.75.0/release-notes/`. The plan's release-bound consequences all shipped in v3.75.0, so nothing remains in the holding area.
 
 ## Delivery & Milestones
 
 - Filed after the 3.75.0 release was aborted at Step 10.
 - Phase 1 (B-1 to B-5) merged to main, each fix after its red test.
 - Phase 2 merged to main at `73cd364e5` (CI run 44000713338 green on the branch tip `e53eef183` that was merged): 29 of 33 items fixed, N-16 already fixed, N-7, N-8 and T-7 held for the owner.
-- Remaining: the owner decisions above, then the owner's `/release` re-run (Task 2.4 inside it).
+- Owner decisions answered (journal `111756Z`); D-1 and D-2 merged at `d7c7efe37`.
+- Release re-run: Step 10 re-run found S-1 (fixed, two independent reviews) and S-2 (fixed); v3.75.0 tagged and merged through PR 209.
+- Close-out: every task and finding audited in `CLOSEOUT-AUDIT.md`; residuals ledgered N650 to N659.
