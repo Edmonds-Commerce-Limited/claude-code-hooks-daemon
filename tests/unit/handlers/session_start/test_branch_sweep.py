@@ -360,7 +360,7 @@ class TestPoolLadderAtSessionStart:
             raise BranchParkError("git config --get-regexp failed: timed out")
 
         _git(repo, "checkout", "-q", "-b", "lost")
-        _commit(repo, "lost")
+        _commit(repo, "lost", days_ago=10)
         _git(repo, "checkout", "-q", "main")
         monkeypatch.setattr(branch_ladder, "work_pools", boom)
         text = "\n".join(_run(self._handler(wip={"cap": 3}), repo, _new()))

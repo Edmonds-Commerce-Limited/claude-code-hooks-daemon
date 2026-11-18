@@ -270,7 +270,7 @@ class TestWarnModeWording:
         pool = {"wip": Pool.OPEN, "parked": Pool.PARKED, "merged": Pool.MERGED}[section]
         config = BranchesConfig.model_validate({section: {"cap": 2, "mode": "warn"}})
         base = pool_base(config, pool)
-        pressure = PoolPressure(pool, base, base, LadderLevel.BLOCK, work=(), refuses=False)
+        pressure = _pressure(pool, LadderLevel.BLOCK, count=base, base=base, refuses=False)
         text = "\n".join(pressure_lines(pressure, now=2_000_000_000.0))
         assert "refused" not in text
         assert "warn" in text.lower()

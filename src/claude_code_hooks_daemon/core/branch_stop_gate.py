@@ -282,10 +282,12 @@ def decide_stop(
             )
     if reason is None and agent_id is None:
         context.extend(_noisy_context(inventory, state, now=now))
-    if agent_id is None:
-        # Plan 00619: the warning ladder, from the first warning up to the block. Context
-        # only: it holds nothing, so the stop decision above is the one it was before.
-        context.extend(ladder_notice(repo, branches, session_id=None, throttle=None))
     if state:
         write_state(state_file, state)
+    if agent_id is None:
+        # Plan 00619: the warning ladder, from the first warning up to the block. Context
+        # only and read AFTER the decision and its counter are settled and persisted: it
+        # holds nothing, and it cannot raise (a failed read is no lines), so the stop
+        # decision above is exactly the one it was before the ladder existed.
+        context.extend(ladder_notice(repo, branches, session_id=None, throttle=None, now=now))
     return StopDecision(reason, tuple(context))

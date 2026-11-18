@@ -6,10 +6,10 @@ strong pressure shows on every tool call; warn and strong show once per session.
 
 from __future__ import annotations
 
-import os
-import subprocess
 from pathlib import Path
 from typing import Any
+
+from tests.support.ladder_repo import add_open_branches, git, init_repo
 
 from claude_code_hooks_daemon.config.models import BranchesConfig, BranchWipConfig
 from claude_code_hooks_daemon.core import Decision
@@ -22,34 +22,9 @@ CONFIG = BranchesConfig(wip=BranchWipConfig(cap=10, creation_grace=2, count_remo
 TOOL: dict[str, Any] = {"session_id": "s1", "tool_name": "Read", "tool_input": {"file_path": "/x"}}
 
 
-def _git(repo: Path, *args: str) -> str:
-    env = {
-        **os.environ,
-        "GIT_AUTHOR_NAME": "t",
-        "GIT_AUTHOR_EMAIL": "t@example.com",
-        "GIT_COMMITTER_NAME": "t",
-        "GIT_COMMITTER_EMAIL": "t@example.com",
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": os.devnull,
-    }
-    return subprocess.run(
-        ["git", "-C", str(repo), "-c", "commit.gpgsign=false", *args],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    ).stdout.strip()
-
-
 def _repo(tmp_path: Path, open_count: int) -> Path:
-    root = tmp_path / "repo"
-    root.mkdir()
-    _git(root, "init", "-q", "-b", "main")
-    _git(root, "commit", "-q", "--allow-empty", "-m", "root")
-    tree = _git(root, "rev-parse", "main^{tree}")
-    for index in range(open_count):
-        sha = _git(root, "commit-tree", tree, "-p", "main", "-m", f"w{index}")
-        _git(root, "update-ref", f"refs/heads/work-{index:02d}", sha)
+    root = init_repo(tmp_path)
+    add_open_branches(root, open_count)
     return root
 
 
@@ -90,7 +65,7 @@ class TestToolHandler:
         handler = _handler(root)
         assert handler.matches(TOOL) is True
         for index in range(7, 11):
-            _git(root, "update-ref", "-d", f"refs/heads/work-{index:02d}")
+            git(root, "update-ref", "-d", f"refs/heads/work-{index:02d}")
         assert handler.matches(TOOL) is False
 
     def test_silent_outside_a_repository(self, tmp_path: Path) -> None:

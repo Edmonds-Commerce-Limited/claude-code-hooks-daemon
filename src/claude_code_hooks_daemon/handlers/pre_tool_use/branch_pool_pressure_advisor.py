@@ -13,28 +13,16 @@ repository that cannot be read gets no line.
 
 from __future__ import annotations
 
-import logging
-from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.config.models import BranchesConfig
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import GatingResult
-from claude_code_hooks_daemon.core.branch_ladder import (
-    PRESSURE_CACHE,
-    SESSION_THROTTLE,
-    LadderThrottle,
-    PressureCache,
-    ladder_notice,
-)
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
-from claude_code_hooks_daemon.core.project_context import ProjectContext
-
-logger = logging.getLogger(__name__)
+from claude_code_hooks_daemon.handlers.utils.branch_ladder_surface import BranchLadderSurface
 
 
-class BranchPoolPressureAdvisorHandler(PreToolUseHandlerBase):
+class BranchPoolPressureAdvisorHandler(BranchLadderSurface, PreToolUseHandlerBase):
     """Warn on tool calls as a branch pool fills toward the point where creation is refused."""
 
     def __init__(self) -> None:
@@ -49,32 +37,10 @@ class BranchPoolPressureAdvisorHandler(PreToolUseHandlerBase):
                 HandlerTag.NON_TERMINAL,
             ],
         )
-        self._branches: BranchesConfig = BranchesConfig()
-        self._project_root_override: Path | None = None
-        self._throttle: LadderThrottle = SESSION_THROTTLE
-        self._cache: PressureCache = PRESSURE_CACHE
-        self._due: list[str] = []
-
-    def _project_root(self) -> Path:
-        if self._project_root_override is not None:
-            return self._project_root_override
-        try:
-            return ProjectContext.project_root()
-        except RuntimeError:
-            logger.debug("ProjectContext not initialised; reading branch pools from cwd")
-            return Path.cwd()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True when a pool is at or above its warn level and the notice is due now."""
-        session = hook_input.get(HookInputField.SESSION_ID)
-        self._due = ladder_notice(
-            self._project_root(),
-            self._branches,
-            session_id=session if isinstance(session, str) else None,
-            throttle=self._throttle,
-            cache=self._cache,
-        )
-        return bool(self._due)
+        return self.ladder_matches(hook_input)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Allow, with the due ladder lines as context."""

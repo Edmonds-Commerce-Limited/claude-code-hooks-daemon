@@ -29,7 +29,6 @@ from claude_code_hooks_daemon.config.models import BranchesConfig, BranchLadderC
 from claude_code_hooks_daemon.constants.branch_guard import POOL_PARK_CLAUSE
 from claude_code_hooks_daemon.core.branch_cleanup import sweep_clean_command
 from claude_code_hooks_daemon.core.branch_creation import (
-    CLEANABLE_GROUPS,
     LABELS_RELATIVE_PATH,
     WorkGroup,
     read_labels,
@@ -45,6 +44,9 @@ logger = logging.getLogger(__name__)
 #: How long the every-call surfaces reuse one reading of the pools (seconds).
 PRESSURE_CACHE_SECONDS: Final[float] = 10.0
 _SECONDS_PER_DAY: Final[float] = 86400.0
+#: A failed reading is remembered this long (seconds): a failing host pays for one
+#: attempt per window, not one per tool call.
+FAILURE_CACHE_SECONDS: Final[float] = 60.0
 _ICON: Final[str] = "🌿"
 
 Labels = Mapping[str, Mapping[str, str | None]]
@@ -124,6 +126,8 @@ class PoolPressure:
     base: int
     level: LadderLevel
     work: tuple[WorkGroup, ...]
+    #: Creation is actually refused at the block point (the pool's mode is ``block``).
+    refuses: bool = True
 
 
 def _pool_section_mode_and_ladder(
@@ -135,14 +139,30 @@ def _pool_section_mode_and_ladder(
     return section.mode, section.ladder
 
 
-def pool_pressures(repo: Path, config: BranchesConfig, labels: Labels) -> list[PoolPressure]:
-    """Every pool at or above its warn level; empty when git cannot be read.
+def try_pool_pressures(
+    repo: Path, config: BranchesConfig, labels: Labels
+) -> list[PoolPressure] | None:
+    """Every pool at or above its warn level, or None when the pools could not be read.
 
-    A pool whose ``mode`` is ``off`` is not counted, as in the creation guard.
+    The ladder is context only and must never deny anything, so ANY failure of the
+    read (a git timeout, a park-record error, an unexpected exception) is logged
+    and reported as None: the caller degrades to silence. A pool whose ``mode`` is
+    ``off`` is not counted, as in the creation guard.
     """
     try:
         pools = work_pools(repo, config, labels=labels)
-    except (RuntimeError, OSError) as exc:
+        found: list[PoolPressure] = []
+        for pool, work in pools.items():
+            mode, thresholds = _pool_section_mode_and_ladder(config, pool)
+            if mode == "off":
+                continue
+            base = pool_base(config, pool)
+            level = ladder_level(len(work), base, thresholds)
+            if level != LadderLevel.NONE:
+                found.append(
+                    PoolPressure(pool, len(work), base, level, tuple(work), refuses=mode == "block")
+                )
+    except Exception as exc:  # advisory only: no failure of the read may become a deny
         log_and_continue(
             logger,
             exc,
@@ -150,17 +170,13 @@ def pool_pressures(repo: Path, config: BranchesConfig, labels: Labels) -> list[P
             "and the creation guard reports its own failure",
             level=logging.DEBUG,
         )
-        return []
-    found: list[PoolPressure] = []
-    for pool, work in pools.items():
-        mode, thresholds = _pool_section_mode_and_ladder(config, pool)
-        if mode == "off":
-            continue
-        base = pool_base(config, pool)
-        level = ladder_level(len(work), base, thresholds)
-        if level != LadderLevel.NONE:
-            found.append(PoolPressure(pool, len(work), base, level, tuple(work)))
+        return None
     return found
+
+
+def pool_pressures(repo: Path, config: BranchesConfig, labels: Labels) -> list[PoolPressure]:
+    """Every pool at or above its warn level; empty when the pools cannot be read."""
+    return try_pool_pressures(repo, config, labels) or []
 
 
 # --- wording --------------------------------------------------------------------------
@@ -171,22 +187,29 @@ _HEADLINES: Final[dict[LadderLevel, str]] = {
     LadderLevel.STRONG: "STRONG WARNING",
     LadderLevel.VERY_STRONG: "VERY STRONG WARNING (shown on every tool call and prompt until "
     "the pool drops below this level)",
-    LadderLevel.BLOCK: "AT THE LIMIT (a new branch is refused)",
 }
+_AT_LIMIT_REFUSING: Final[str] = "AT THE LIMIT (a new branch is refused)"
+#: A pool in ``mode: warn`` reaches its limit without ever refusing creation.
+_AT_LIMIT_WARNING_ONLY: Final[str] = "AT THE LIMIT (this pool's mode is warn: creation goes ahead)"
+
+
+def _headline(pressure: PoolPressure) -> str:
+    if pressure.level != LadderLevel.BLOCK:
+        return _HEADLINES[pressure.level]
+    return _AT_LIMIT_REFUSING if pressure.refuses else _AT_LIMIT_WARNING_ONLY
 
 
 def _first_to_close(pressure: PoolPressure) -> WorkGroup:
     """The branch to finish or remove first.
 
-    From the strong level up, an unfinished branch comes first (oldest first):
-    merged ones are cleared by a sweep and need no decision. At warn the cheapest
-    to close comes first, as the deny list orders them.
+    From the strong level up, the oldest comes first. A branch the snapshot knows
+    as merged or patch-equivalent is already in the merged pool, so every branch of
+    the open pool is unfinished. At warn the cheapest to close comes first, as the
+    deny list orders them.
     """
     work = pressure.work
     if pressure.level >= LadderLevel.STRONG:
-        unfinished = [w for w in work if w.label.get("group") not in CLEANABLE_GROUPS]
-        pool = unfinished or list(work)
-        return min(pool, key=lambda w: (w.committed, w.name))
+        return min(work, key=lambda w: (w.committed, w.name))
     return min(work, key=lambda w: (work_rank(w), w.committed, w.name))
 
 
@@ -199,26 +222,42 @@ def _command(pressure: PoolPressure, work: WorkGroup) -> str:
     return str(work.label.get("action") or f"{park} {work.name} --reason ...")
 
 
+def _exit_advice(pool: Pool) -> str:
+    """How a branch leaves ``pool``: each pool is left a different way."""
+    if pool == Pool.MERGED:
+        keep = daemon_cli_command_for_docs("branch-keep")
+        return (
+            "A merged branch leaves the pool by being deleted (the sweep above deletes only "
+            f"what its proof shows loses nothing) or kept on purpose with `{keep} <name> "
+            "--reason ...`."
+        )
+    if pool == Pool.PARKED:
+        return (
+            "A parked branch leaves the pool by clearing its park and merging it; a park is "
+            "a short, bounded pause, not a place to leave work."
+        )
+    return (
+        "A branch leaves the pool by being merged or, only when it holds no value, "
+        "through the no-value verdict route of Plan 00620 once it ships "
+        f"(your own assertion never counts); {POOL_PARK_CLAUSE}."
+    )
+
+
 def pressure_lines(pressure: PoolPressure, *, now: float) -> list[str]:
     """The few lines for one pool: its count against the block point, one branch, one command."""
     percent = pressure.count * 100 // pressure.base
+    point = (
+        "the point where creating a branch is refused" if pressure.refuses else "the pool's limit"
+    )
+    first = _first_to_close(pressure)
+    age = max(0, int((now - first.committed) // _SECONDS_PER_DAY))
     lines = [
-        f"{_ICON}  BRANCH POOL {_HEADLINES[pressure.level]}: the {pressure.pool.value} pool "
-        f"holds {pressure.count} of {pressure.base} ({percent}% of the point where creating "
-        "a branch is refused)."
+        f"{_ICON}  BRANCH POOL {_headline(pressure)}: the {pressure.pool.value} pool "
+        f"holds {pressure.count} of {pressure.base} ({percent}% of {point}).",
+        f"  Finish or remove first: {first.name} ({age}d old) -> {_command(pressure, first)}",
     ]
-    if pressure.work:
-        first = _first_to_close(pressure)
-        age = max(0, int((now - first.committed) // _SECONDS_PER_DAY))
-        lines.append(
-            f"  Finish or remove first: {first.name} ({age}d old) -> {_command(pressure, first)}"
-        )
     if pressure.level >= LadderLevel.STRONG:
-        lines.append(
-            "  A branch leaves the pool by being merged or, only when it holds no value, "
-            "through the no-value verdict route of Plan 00620 once it ships "
-            f"(your own assertion never counts); {POOL_PARK_CLAUSE}."
-        )
+        lines.append(f"  {_exit_advice(pressure.pool)}")
     preflight = daemon_cli_command_for_docs("branch-preflight")
     lines.append(f"  Every branch and its fix: `{preflight}`.")
     return lines
@@ -228,11 +267,18 @@ def pressure_lines(pressure: PoolPressure, *, now: float) -> list[str]:
 
 
 class PressureCache:
-    """One recent reading of the pools per repository, so every-call surfaces stay cheap."""
+    """One recent reading of the pools per repository, so every-call surfaces stay cheap.
 
-    def __init__(self, ttl: float = PRESSURE_CACHE_SECONDS) -> None:
+    A reading that failed is kept too, for ``failure_ttl``: a host whose git is
+    timing out is not asked again on every tool call.
+    """
+
+    def __init__(
+        self, ttl: float = PRESSURE_CACHE_SECONDS, failure_ttl: float = FAILURE_CACHE_SECONDS
+    ) -> None:
         self._ttl = ttl
-        self._entries: dict[tuple[str, int], tuple[float, list[PoolPressure]]] = {}
+        self._failure_ttl = failure_ttl
+        self._entries: dict[tuple[str, str], tuple[float, float, list[PoolPressure]]] = {}
 
     def get(
         self,
@@ -242,15 +288,17 @@ class PressureCache:
         *,
         clock: Callable[[], float] = time.monotonic,
     ) -> list[PoolPressure]:
-        """The pressures of ``repo``, read afresh once the last reading is ``ttl`` old."""
-        key = (str(repo), id(config))
+        """The pressures of ``repo``, read afresh once the last reading has expired."""
+        key = (str(repo), config.model_dump_json())
         stamp = clock()
         cached = self._entries.get(key)
-        if cached is not None and stamp - cached[0] < self._ttl:
-            return cached[1]
-        pressures = pool_pressures(repo, config, labels)
-        self._entries[key] = (stamp, pressures)
-        return pressures
+        if cached is not None and stamp - cached[0] < cached[1]:
+            return cached[2]
+        pressures = try_pool_pressures(repo, config, labels)
+        ttl = self._failure_ttl if pressures is None else self._ttl
+        reading = pressures or []
+        self._entries[key] = (stamp, ttl, reading)
+        return reading
 
 
 #: What this daemon process has already told each session (warn and strong only).
@@ -271,13 +319,26 @@ def ladder_notice(
     """The ladder lines due now. ``throttle`` None shows every level (session start, stop).
 
     The ordering labels are the session-start snapshot under ``repo``, as the
-    creation guard reads them.
+    creation guard reads them. Context only, so it cannot fail: any error reading
+    the pools or the labels yields no lines (silence), never an exception that a
+    caller, or the handler chain in strict mode, could turn into a deny.
     """
-    labels = read_labels(repo / LABELS_RELATIVE_PATH)
-    pressures = cache.get(repo, config, labels) if cache else pool_pressures(repo, config, labels)
-    moment = time.time() if now is None else now
-    lines: list[str] = []
-    for pressure in pressures:
-        if throttle is None or throttle.should_show(session_id, pressure.pool, pressure.level):
-            lines.extend(pressure_lines(pressure, now=moment))
+    try:
+        labels = read_labels(repo / LABELS_RELATIVE_PATH)
+        pressures = (
+            cache.get(repo, config, labels) if cache else pool_pressures(repo, config, labels)
+        )
+        moment = time.time() if now is None else now
+        lines: list[str] = []
+        for pressure in pressures:
+            if throttle is None or throttle.should_show(session_id, pressure.pool, pressure.level):
+                lines.extend(pressure_lines(pressure, now=moment))
+    except Exception as exc:  # advisory only: the ladder must never deny or hide a decision
+        log_and_continue(
+            logger,
+            exc,
+            reason="the ladder is context only: a failure to build it is silence, not a deny",
+            level=logging.WARNING,
+        )
+        return []
     return lines

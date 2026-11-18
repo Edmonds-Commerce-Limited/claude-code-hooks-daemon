@@ -13,12 +13,31 @@ config_changes:
         The warning percentages of the open-work pool, measured against the
         point where creating a branch is refused (branches.wip.cap plus
         wip.creation_grace). warn, strong and very_strong default to 60, 80
-        and 90 and must rise in that order. The same block exists as
-        branches.parked.ladder and branches.merged.ladder, measured against
-        each pool's cap.
+        and 90 and must rise in that order. A pool whose mode is warn still
+        gets the ladder, worded as a limit rather than a refusal.
       example_yaml: |
         branches:
           wip:
+            ladder: {warn: 60, strong: 80, very_strong: 90}
+    - key: branches.parked.ladder
+      recommended: false
+      dormant: false
+      description: >-
+        The same warning percentages for the parked pool, measured against
+        branches.parked.cap. Defaults 60, 80 and 90; must rise in order.
+      example_yaml: |
+        branches:
+          parked:
+            ladder: {warn: 60, strong: 80, very_strong: 90}
+    - key: branches.merged.ladder
+      recommended: false
+      dormant: false
+      description: >-
+        The same warning percentages for the merged pool, measured against
+        branches.merged.cap. Defaults 60, 80 and 90; must rise in order.
+      example_yaml: |
+        branches:
+          merged:
             ladder: {warn: 60, strong: 80, very_strong: 90}
     - key: handlers.pre_tool_use.branch_pool_pressure_advisor
       recommended: true
