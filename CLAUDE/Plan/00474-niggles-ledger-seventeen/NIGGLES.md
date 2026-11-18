@@ -7648,3 +7648,91 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Source**: Plan 00618 Phase 2 sub-agent, seen while running targeted tests. Not investigated.
 
 **Status**: ⬜ Open. Reproduce with and without `--cov` on `main`; find which test depends on import or timing state that coverage changes.
+
+### N634 — the search guards do not read a search inside a `{ ...; }` brace group
+
+**Source**: Plan 00618 S-1 second independent review (finding F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix and does not depend on `-C`.
+
+**Evidence**: in a synthetic project with a protected file under `deep/`, `{ git -C deep grep --no-index -e .; }` and `{ grep -r . deep; }` are ALLOWED by `secret_file_guard`, while the bare `grep -r . deep` is DENIED. The brace group's words reach the reader with `{` as the command word, so no search is recognised.
+
+**Status**: ⬜ Open. Peel a leading `{` (and the closing `}` segment) before the command word is read, in `recursive_search._command_words` and its callers.
+
+### N635 — the search guards do not read a search inside an `if ... then ... fi` body
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: `if true; then git -C deep grep --no-index -e .; fi` (and the plain `grep -r . deep` form) is ALLOWED by `secret_file_guard`; the `then` keyword is read as the command word.
+
+**Status**: ⬜ Open. Treat the compound-command keywords (`if`, `then`, `elif`, `else`, `do`, `while`, `until`) as words to peel before the command word.
+
+### N636 — the search guards do not read a search run through `exec`
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: `exec git -C deep grep --no-index -e .` (and `exec grep -r . deep`) is ALLOWED by `secret_file_guard`; `exec` is not one of the peeled command wrappers.
+
+**Status**: ⬜ Open. Add `exec` (with its `-a NAME`, `-c`, `-l` options) to the wrappers `peel_command_wrappers` removes.
+
+### N637 — the search guards do not read a search run through the `time` keyword
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: `time git -C deep grep --no-index -e .` (and `time grep -r . deep`) is ALLOWED by `secret_file_guard`; `time` (and `time -p`) is not peeled.
+
+**Status**: ⬜ Open. Peel the `time` keyword and `/usr/bin/time` with its options.
+
+### N638 — the search guards do not read a search inside `bash -lc '...'`
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: `bash -lc 'git -C deep grep --no-index -e .'` (and `bash -lc 'grep -r . deep'`) is ALLOWED by `secret_file_guard`, while `bash -c '...'` is DENIED: the reader looks for a separate `-c` word, and a clustered flag (`-lc`, `-ec`, `-xc`) does not match.
+
+**Status**: ⬜ Open. Recognise any short-option cluster that contains `c` as the shell's command flag.
+
+### N639 — the search guards place a search under `sudo -D <dir>` from the payload cwd
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: from a sub-directory with no protected file, `sudo -D <project root> git -C deep grep --no-index -e .` (and `sudo -D <root> grep -r . deep`) is ALLOWED by `secret_file_guard`. `sudo -D`/`--chdir` changes the directory the command runs in, as `cd` does, but the wrapper is peeled without moving the cwd.
+
+**Status**: ⬜ Open. Treat `sudo -D`/`--chdir` (and `env -C`/`--chdir`) as a directory change when peeling the wrapper; fail closed when the value cannot be placed.
+
+### N640 — a `core.worktree` set through `GIT_CONFIG_PARAMETERS` or `GIT_CONFIG_COUNT/KEY/VALUE` is not recognised
+
+**Source**: Plan 00618 S-1 second independent review (F3), recorded by the S-1b fix sub-agent.
+
+**Evidence**: `GIT_CONFIG_PARAMETERS="'core.worktree'='..'" git -C <root>/sub grep -e r` and `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.worktree GIT_CONFIG_VALUE_0=.. git -C <root>/sub grep -e r` are ALLOWED by both `secret_file_guard` and `flaggable_content_channel_guard`; the same `core.worktree` given as `-c core.worktree=..` is DENIED by both. They deny with `-C .` only because that searches the project root. The review's real-git runs read nothing in the combinations tested, but those were not exhaustive.
+
+**Status**: ⬜ Open. Add `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` and `GIT_CONFIG_KEY_*` to the relocating variables (`git_repo.RELOCATING_VARIABLES`), or read their keys and fail closed on `core.worktree`.
+
+### N641 — the secret guard does not follow a `cd` inside a `( ... )` subshell
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. The flaggable guard was fixed for this shape in the S-1b fix; the secret guard was not.
+
+**Evidence**: `( cd sub; git -C ../deep grep --no-index -e . )` is ALLOWED by `secret_file_guard`, while `cd sub && git -C ../deep grep --no-index -e .` is DENIED. The first segment's command word is `(`, so the `cd` is not tracked, and the trailing `)` is read as a pathspec.
+
+**Status**: ⬜ Open. In `recursive_search._reads`, peel a leading `(`/`{` before testing for `cd`/`pushd` (the flaggable guard's `shell_directory_after` does this) and drop a trailing unquoted `)` word.
+
+### N642 — the flaggable guard skips a relocating environment variable when `-C` is also given
+
+**Source**: Plan 00618 S-1 second independent review (F3), recorded by the S-1b fix sub-agent.
+
+**Evidence**: `GIT_WORK_TREE=flagdir git -C sub grep -e r` (also `sudo GIT_WORK_TREE=...`, `env -i GIT_WORK_TREE=...`, `export GIT_WORK_TREE=...;`) is ALLOWED by `flaggable_content_channel_guard`; it was an advisory allow before the S-1 fix, and the same command without `-C` is DENIED. The review's real-git runs read nothing in the cases tested (git limits `git grep` to the `-C` prefix), so this is a modelling gap, not an observed read.
+
+**Status**: ⬜ Open. Treat a relocating assignment on the segment (and an earlier `export`) as an unplaced move in the flaggable guard, as `recursive_search` does for the secret guard.
+
+### N643 — the flaggable guard's plain `grep -r` ignores an earlier `cd`, an ancestor root and an `xargs -I` token
+
+**Source**: Plan 00618 S-1 second independent review (corpus 3), recorded by the S-1b fix sub-agent. Predates the S-1 fix; the S-1b fix closed these shapes for `git -C` only.
+
+**Evidence**: with `flagdir/**` flagged, `cd sub && grep -r r ../flagdir`, `grep -r r ..` (run from the project root) and `echo flagdir | xargs -I% grep -r r %` are ALLOWED by `flaggable_content_channel_guard`; the secret guard denies the protected-tree equivalents.
+
+**Status**: ⬜ Open. Place plain search roots from the shell directory as well as the payload cwd (the `git -C` path already does), count an ancestor root as reading the whole project, and treat an `xargs` replacement token as an unknown root.
+
+### N644 — the secret guard loses the directory after `cd -` or `popd` without failing closed
+
+**Source**: the S-1b fix sub-agent (Plan 00618), while closing the `cd ~-` form.
+
+**Evidence**: `cd - && grep -r . deep` is ALLOWED by `secret_file_guard`: `_after_directory_change` returns None for `-`, and every later relative root is then left out. The S-1b fix makes `cd ~-` (a tilde the hook cannot place) fail closed for every later read, but kept `cd -` and `popd` as they were.
+
+**Status**: ⬜ Open. Treat `cd -`, `popd` and `pushd` with no operand the way `cd ~-` is treated: later reads in the command fail closed.
