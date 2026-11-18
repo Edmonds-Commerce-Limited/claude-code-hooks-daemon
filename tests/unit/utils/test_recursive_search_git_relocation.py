@@ -159,7 +159,7 @@ class TestALiteralWorkTreeIsJudged:
         ],
     )
     def test_the_work_tree_is_read_in_full(self, repo: Path, command: str) -> None:
-        assert _reach(command.format(repo=repo), repo / "sub", repo) == PROTECTED_GLOB
+        assert _reach(command.format(repo=repo), repo, repo) == PROTECTED_GLOB
 
     def test_the_project_index_does_not_describe_another_work_tree(self, repo: Path) -> None:
         views = {read.view for read in rs.search_reads("git --work-tree=sub grep -e x", str(repo))}

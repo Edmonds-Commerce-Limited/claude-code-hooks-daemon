@@ -2190,7 +2190,7 @@ can only advise about: content-revealing git commands (`git diff`,
 `grep`/`rg`/`egrep`/`fgrep` family pull a flaggable file's content into
 context inside a routine command's output, with no deliberate `Read` at all.
 
-A recursive search whose roots or exclusions cannot be placed (a shell expansion, unparseable quoting, `git -C`, unknown pathspec magic, a relative root with no working directory) is allowed with an advisory; a root that positively reaches the flagged directory still denies the whole command.
+A recursive search whose roots or exclusions cannot be placed (a shell expansion, unparseable quoting, `git --git-dir`/`--work-tree`, unknown pathspec magic, a relative root with no working directory) is allowed with an advisory; a literal `git -C <dir>` is placed as `cd <dir>` would be; a root that positively reaches the flagged directory still denies the whole command.
 
 Denies a Bash command segment (statements and pipe/`&&`/`||` spans, quote-
 and heredoc-aware) whose SHAPE is content-revealing AND that references a
