@@ -17,11 +17,15 @@ hook-path cleanup).
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
+from claude_code_hooks_daemon.core import branch_park
+from claude_code_hooks_daemon.core.branch_park import is_content_free
 from claude_code_hooks_daemon.core.remote_branch_proof import prove_remote_merged
 from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import _remote_delete_note
@@ -112,7 +116,7 @@ def _all(value: bool) -> dict[str, bool]:
 
 
 class TestReportedShapesAreDeletable:
-    """RED until Plan 00622 Phase 2: content in the default, empty commits on top."""
+    """Content in the default, empty commits on top (RED before the Plan 00622 fix)."""
 
     def test_a_plain_unpark_commit_over_merged_work(self, repo: Path) -> None:
         """(a) A hand-written ``Unpark branch`` (no trailer) over merge-commit-merged work."""
@@ -302,3 +306,106 @@ class TestContentBearingTwinsStayRefused:
         _publish(repo, "feat")
         _git(repo, "branch", "-q", "-D", "other")
         assert _verdicts(repo, "feat") == _all(False)
+
+
+# --- the rule itself, and failure ---------------------------------------------------------
+
+
+def _plain_unpark_over_merged(repo: Path) -> None:
+    _branch(repo, "feat")
+    _write(repo, "feat.txt", "feat\n", "work")
+    _main_merges(repo, "feat", "merge")
+    _empty(repo, "Unpark branch")
+    _publish(repo, "feat")
+
+
+class TestContentFreeRule:
+    def test_the_tier_names_the_empty_commits(self, repo: Path) -> None:
+        _plain_unpark_over_merged(repo)
+        remote = prove_remote_merged(
+            repo, "origin", ["feat"], "main", BranchesConfig(default="main")
+        )
+        assert remote.evidence == {"feat": branch_safety.TIER_EMPTY_COMMITS_ONLY}
+        local = branch_safety.classify_branch(repo, "feat", content_tier=False)
+        assert local.tier == branch_safety.TIER_EMPTY_COMMITS_ONLY
+        assert local.proven_against == "refs/heads/main"
+
+    def test_no_commit_beyond_the_target_is_not_content_free(self, repo: Path) -> None:
+        assert is_content_free(repo, _git(repo, "rev-parse", "main"), "main") is False
+
+    def test_a_failed_walk_is_none(self, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _plain_unpark_over_merged(repo)
+        tip = _git(repo, "rev-parse", "feat")
+        monkeypatch.setattr(branch_park, "run_git", _failing_log(branch_park.run_git))
+        assert is_content_free(repo, tip, "main") is None
+
+    def test_a_malformed_walk_line_is_none(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _plain_unpark_over_merged(repo)
+        tip = _git(repo, "rev-parse", "feat")
+        real = branch_park.run_git
+
+        def garbled(directory: Path, *args: str, **kwargs: Any) -> object:
+            if args[:2] == ("log", "--boundary"):
+                return subprocess.CompletedProcess(args, 0, "not\x1fa walk line\n", "")
+            return real(directory, *args, **kwargs)
+
+        monkeypatch.setattr(branch_park, "run_git", garbled)
+        assert is_content_free(repo, tip, "main") is None
+
+    def test_every_proof_refuses_when_the_walk_fails(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _plain_unpark_over_merged(repo)
+        real = branch_park.run_git
+        monkeypatch.setattr(branch_park, "run_git", _failing_log(real))
+        assert _verdicts(repo, "feat") == _all(False)
+        # The refusal was not cached: once git answers, the same tip is proven.
+        monkeypatch.setattr(branch_park, "run_git", real)
+        assert _verdicts(repo, "feat") == _all(True)
+
+    def test_a_cached_empty_commits_only_proof_runs_no_walk_the_second_time(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _plain_unpark_over_merged(repo)
+        config = BranchesConfig(default="main")
+        first = prove_remote_merged(repo, "origin", ["feat"], "main", config)
+        assert first.evidence == {"feat": branch_safety.TIER_EMPTY_COMMITS_ONLY}
+        spawned: list[tuple[str, ...]] = []
+        real = branch_park.run_git
+
+        def spy(directory: Path, *args: str, **kwargs: Any) -> object:
+            spawned.append(args)
+            return real(directory, *args, **kwargs)
+
+        monkeypatch.setattr(branch_park, "run_git", spy)
+        second = prove_remote_merged(repo, "origin", ["feat"], "main", config)
+        assert second.evidence == {"feat": branch_safety.TIER_EMPTY_COMMITS_ONLY}
+        assert not [args for args in spawned if args[:2] == ("log", "--boundary")]
+
+    def test_an_integration_line_with_an_empty_commit_stays_refused(self, repo: Path) -> None:
+        """A line is proven by ancestry of the default only; empty commits never prove one."""
+        config = BranchesConfig(default="main", integration_lines=["release/*"])
+        _branch(repo, "release/1")
+        _write(repo, "release.txt", "release\n", "release work")
+        _main_merges(repo, "release/1", "merge")
+        _empty(repo, "Unpark branch")
+        _publish(repo, "release/1")
+        remote = prove_remote_merged(repo, "origin", ["release/1"], "main", config)
+        assert remote.tips == {}
+        local = branch_safety.classify_branch(
+            repo, "release/1", line_names=["release/*"], content_tier=False
+        )
+        assert not local.is_safe
+
+
+def _failing_log(real: Callable[..., subprocess.CompletedProcess[str]]) -> Callable[..., object]:
+    """``run_git`` with every ``git log --boundary`` (the range walk) failing."""
+
+    def run(directory: Path, *args: str, **kwargs: Any) -> object:
+        if args[:2] == ("log", "--boundary"):
+            return subprocess.CompletedProcess(args, 128, "", "fatal: simulated")
+        return real(directory, *args, **kwargs)
+
+    return run

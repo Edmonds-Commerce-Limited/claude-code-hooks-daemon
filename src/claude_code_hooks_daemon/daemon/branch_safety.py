@@ -53,7 +53,7 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.core.branch_park import is_park_residue, walk_park_range
+from claude_code_hooks_daemon.core.branch_park import walk_park_range
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.remote_refs import (
@@ -72,6 +72,10 @@ TIER_UNPROVEN = "unproven"
 #: Only park markers (empty ``Parked-*`` commits) are ahead of the default: the work is in
 #: the default and the ref holds nothing else. Decided by ``branch_park.is_park_residue``.
 TIER_PARK_CARRIED = "park-carried"
+#: Every commit ahead of the default is empty (one parent, that parent's tree), whatever
+#: its message: the tip's tree is in the default's history and a delete loses only
+#: those commits' messages (Plan 00622). Decided by ``branch_park.is_content_free``.
+TIER_EMPTY_COMMITS_ONLY = "empty-commits-only"
 #: The remote holds the tip, or a descendant of it, under a ref this clone does not
 #: fetch (an archive namespace). Proved by ONE ``ls-remote`` the explicit command
 #: makes; never reached from a hook path (issue #166).
@@ -269,6 +273,11 @@ _TIER_DETAIL = {
         "every commit the default branch lacks is an empty park commit the park writer "
         "made — the work is in the default, only the park markers go"
     ),
+    TIER_EMPTY_COMMITS_ONLY: (
+        "every commit the default branch lacks changes no file (one parent, the same "
+        "tree) — the work is in the default, only those empty commits and their "
+        "messages go"
+    ),
     TIER_CONTENT_PRESERVED: (
         "a commit on the protected ref holds this branch's whole net change — every "
         "added or changed file at the same bytes, every deleted file absent — the "
@@ -307,6 +316,7 @@ class BranchClassification:
             TIER_MERGED_NOT_IN_HEAD,
             TIER_PATCH_EQUIVALENT,
             TIER_PARK_CARRIED,
+            TIER_EMPTY_COMMITS_ONLY,
             TIER_REMOTE_HELD,
             TIER_CONTENT_PRESERVED,
         )
@@ -606,11 +616,12 @@ def _protected_base_ref(repo: Path, protected_ref: str) -> str:
 def patch_equivalent(repo: Path, target: str, tip_ref: str) -> tuple[bool, int | None]:
     """Whether every patch of ``tip_ref`` is in ``target``, and the unique count.
 
-    A park commit (``branch_park.walk_park_range``: the park writer's message on a
-    tree identical to its single parent) carries no patch, so it is not counted as
-    unique; every other commit still needs its patch in ``target``.
+    An empty commit (``branch_park.walk_park_range``'s ``empties``: one parent and
+    that parent's tree, any message, the park writer's markers included) carries no
+    patch, so it is not counted as unique (Plan 00622); every other commit still
+    needs its patch in ``target``.
 
-    Fails CLOSED: a failed ``git cherry``, park walk or merge listing is never
+    Fails CLOSED: a failed ``git cherry``, range walk or merge listing is never
     equivalent, and a range holding a merge commit is never equivalent.
     """
     unique = cherry_unique_shas(repo, target, tip_ref)
@@ -620,7 +631,7 @@ def patch_equivalent(repo: Path, target: str, tip_ref: str) -> tuple[bool, int |
         walked = walk_park_range(repo, target, tip_ref, timeout=_safety_timeout())
         if walked is None:
             return False, len(unique)
-        unique = [sha for sha in unique if sha not in walked.parks]
+        unique = [sha for sha in unique if sha not in walked.empties]
     if unique:
         return False, len(unique)
     return _has_merge_commits(repo, target, tip_ref) is False, 0
@@ -781,12 +792,22 @@ def classify_branch(
     # Only park commits beyond the DEFAULT (never another line, as in the inventory):
     # the work is in the default and the delete loses nothing but the markers.
     default_refs = (protected_ref,) if line_targets is None else line_targets
+    # Then any other empty commits (one parent, its tree, any message): the same walk
+    # answers both (Plan 00622). A failed walk is None and proves nothing here.
     for base in (_protected_base_ref(repo, ref) for ref in default_refs):
-        if is_park_residue(repo, tip, base, timeout=_safety_timeout()):
+        walked = walk_park_range(repo, base, tip, timeout=_safety_timeout())
+        if walked is None:
+            continue
+        free_tier = (
+            TIER_PARK_CARRIED
+            if walked.is_residue
+            else TIER_EMPTY_COMMITS_ONLY if walked.is_content_free else None
+        )
+        if free_tier is not None:
             return BranchClassification(
                 name=name,
-                tier=TIER_PARK_CARRIED,
-                detail=_TIER_DETAIL[TIER_PARK_CARRIED],
+                tier=free_tier,
+                detail=_TIER_DETAIL[free_tier],
                 tip=tip,
                 proven_against=base,
             )

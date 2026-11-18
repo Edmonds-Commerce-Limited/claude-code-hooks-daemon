@@ -262,11 +262,82 @@ _TIP_MARK_FORMAT = (
 
 @dataclass(frozen=True)
 class ParkWalk:
-    """The commits of ``target..tip``, which of them are park commits, and the merge count."""
+    """The commits of ``target..tip``, which of them are park commits, and the merge count.
+
+    ``empties`` are the commits that change nothing: ONE parent and that parent's
+    tree, whatever their message (Plan 00622). Every park commit is one of them.
+    """
 
     commits: tuple[str, ...]
     parks: frozenset[str]
     merges: int
+    empties: frozenset[str] = frozenset()
+
+    @property
+    def is_residue(self) -> bool:
+        """Every commit is a park commit, and there is at least one (:func:`is_park_residue`)."""
+        return bool(self.parks) and len(self.commits) == len(self.parks)
+
+    @property
+    def is_content_free(self) -> bool:
+        """Every commit is empty, and there is at least one (:func:`is_content_free`)."""
+        return bool(self.commits) and len(self.commits) == len(self.empties)
+
+
+@dataclass(frozen=True)
+class _RangeShape:
+    """``target..tip`` read structurally: each commit with its parents, and the empty ones."""
+
+    in_range: tuple[tuple[str, tuple[str, ...]], ...]
+    empties: tuple[str, ...]
+
+
+def _walk_shape(repo: Path, target: str, tip: str, timeout: float) -> _RangeShape | None:
+    """Shas, trees and parents of ``target..tip`` (no free text); None on any git failure.
+
+    A commit is empty when it has exactly one parent and that parent's tree. A merge
+    is never empty, even with its first parent's tree (``-s ours`` carries a whole
+    side history), and a root commit has nothing to be empty against.
+    """
+    log = run_git(repo, "log", "--boundary", _WALK_FORMAT, f"{target}..{tip}", timeout=timeout)
+    if log.returncode != 0:
+        return None
+    trees: dict[str, str] = {}
+    in_range: list[tuple[str, str, tuple[str, ...]]] = []
+    for line in log.stdout.split("\n"):
+        if not line:
+            continue
+        parts = line.split(_WALK_UNIT)
+        if len(parts) != _WALK_FIELDS:
+            return None
+        mark, sha, tree, parents = parts
+        trees[sha] = tree
+        if mark != _BOUNDARY_MARK:
+            in_range.append((sha, tree, tuple(parents.split())))
+    empties = tuple(
+        sha
+        for sha, tree, parents in in_range
+        if len(parents) == 1 and parents[0] in trees and trees[parents[0]] == tree
+    )
+    return _RangeShape(
+        in_range=tuple((sha, parents) for sha, _tree, parents in in_range), empties=empties
+    )
+
+
+def is_content_free(
+    repo: Path, tip: str, target: str, *, timeout: float = Timeout.GIT_CONTEXT
+) -> bool | None:
+    """Whether every commit ``tip`` has beyond ``target`` is empty (at least one); None on failure.
+
+    Then ``tip``'s tree is a tree ``target``'s history holds, and a delete loses only
+    those commits' messages. The message plays no part: an empty commit of any wording
+    qualifies, and a commit that changes a file never does, whatever it is called.
+    None when git cannot say, which every caller reads as unproven (fail closed).
+    """
+    shape = _walk_shape(repo, target, tip, timeout)
+    if shape is None:
+        return None
+    return bool(shape.in_range) and len(shape.empties) == len(shape.in_range)
 
 
 def _park_bodies_match(repo: Path, shas: list[str], timeout: float) -> set[str] | None:
@@ -304,33 +375,17 @@ def walk_park_range(repo: Path, target: str, tip: str, *, timeout: float) -> Par
     so it changes nothing. The structural walk carries no free text (shas only); the
     messages of the few tree-identical candidates are then read in one framed call.
     """
-    log = run_git(repo, "log", "--boundary", _WALK_FORMAT, f"{target}..{tip}", timeout=timeout)
-    if log.returncode != 0:
+    shape = _walk_shape(repo, target, tip, timeout)
+    if shape is None:
         return None
-    trees: dict[str, str] = {}
-    in_range: list[tuple[str, str, list[str]]] = []
-    for line in log.stdout.split("\n"):
-        if not line:
-            continue
-        parts = line.split(_WALK_UNIT)
-        if len(parts) != _WALK_FIELDS:
-            return None
-        mark, sha, tree, parents = parts
-        trees[sha] = tree
-        if mark != _BOUNDARY_MARK:
-            in_range.append((sha, tree, parents.split()))
-    empty = [
-        sha
-        for sha, tree, parents in in_range
-        if len(parents) == 1 and parents[0] in trees and trees[parents[0]] == tree
-    ]
-    parks = _park_bodies_match(repo, empty, timeout)
+    parks = _park_bodies_match(repo, list(shape.empties), timeout)
     if parks is None:
         return None
     return ParkWalk(
-        commits=tuple(sha for sha, _tree, _parents in in_range),
+        commits=tuple(sha for sha, _parents in shape.in_range),
         parks=frozenset(parks),
-        merges=sum(1 for _sha, _tree, parents in in_range if len(parents) > 1),
+        merges=sum(1 for _sha, parents in shape.in_range if len(parents) > 1),
+        empties=frozenset(shape.empties),
     )
 
 
@@ -345,7 +400,7 @@ def is_park_residue(
     park commit (:func:`walk_park_range`).
     """
     walked = walk_park_range(repo, target, tip, timeout=timeout)
-    return walked is not None and bool(walked.parks) and len(walked.commits) == len(walked.parks)
+    return walked is not None and walked.is_residue
 
 
 def park_marked_refs(repo: Path, refnames: list[str], *, timeout: float) -> set[str]:

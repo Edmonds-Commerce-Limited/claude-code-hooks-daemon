@@ -1,6 +1,6 @@
 # Plan 00622: remote delete proof ignores empty and park marker commits
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-18
 **Owner**: joseph
 **Priority**: High
@@ -33,7 +33,7 @@ content is not in the default branch. This is data-loss-adjacent, so it needs se
 
 ### Phase 1: Reproduce
 
-- [ ] ⬜ **Task 1.1**: Build the reported shapes as synthetic repositories and show the current proof refuses them. RED
+- [x] ✅ **Task 1.1**: Build the reported shapes as synthetic repositories and show the current proof refuses them. RED
   tests. Shapes: (a) content merged, an empty unpark commit on top; (b) a park marker commit; (c) the case the peer
   measured on one branch, where `git cherry` also marks two CONTENT commits unmerged because the default branch merged a
   modified version of them (a pull request that changed the patch). Which proof applies depends on the path: the REMOTE
@@ -45,9 +45,9 @@ content is not in the default branch. This is data-loss-adjacent, so it needs se
 
 ### Phase 2: Fix (test first)
 
-- [ ] ⬜ **Task 2.1**: Ignore commits whose tree equals their parent's tree, and the daemon's own park marker commits, in
+- [x] ✅ **Task 2.1**: Ignore commits whose tree equals their parent's tree, and the daemon's own park marker commits, in
   the proof, in `daemon/branch_safety.py` and `core/remote_branch_proof.py`.
-- [ ] ⬜ **Task 2.2**: A corpus check showing 0 DENY to ALLOW changes for every branch shape that carries real content,
+- [x] ✅ **Task 2.2**: A corpus check showing 0 DENY to ALLOW changes for every branch shape that carries real content,
   including a content-bearing commit that happens to be named like a marker.
 - [ ] ⬜ **Task 2.3**: Independent loosening review (Opus), release note, handler guidance.
 
