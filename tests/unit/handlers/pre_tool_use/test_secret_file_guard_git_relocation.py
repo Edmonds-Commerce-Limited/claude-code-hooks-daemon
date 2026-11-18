@@ -198,3 +198,92 @@ class TestAPathAnchoredProtectedPath:
     ) -> None:
         root, handler = anchored
         assert self._decide(handler, root, "git -C other show HEAD:creds.json") is Decision.ALLOW
+
+
+# The S-1 review's listed test gaps: every one of these git moves fails closed.
+_WORK_TREE_MOVES = [
+    "git -c core.worktree=deep grep -e x",
+    "git -C sub -c core.worktree=.. grep -e x",
+    "git -c core.worktree=.. -C sub grep -e x",
+    "git --config-env=core.worktree=WT grep -e x",
+    "git --config-env core.worktree=WT -C sub grep -e x",
+    "GIT_DIR=.git git grep -e x",
+    "GIT_WORK_TREE=deep git grep -e x",
+    "env GIT_WORK_TREE=deep git grep -e x",
+    "env GIT_DIR=.git git -C sub grep -e x",
+]
+
+_UNPLACEABLE_DASH_C_VALUES = [
+    "git -C de* grep --no-index -e .",
+    "git -C dee? grep --no-index -e .",
+    "git -C {deep,sub} grep --no-index -e .",
+    "git -C sub -C $X grep -e hello",
+    "git -C $(pwd)/deep grep --no-index -e .",
+]
+
+_WRAPPED = [
+    "sudo git -C deep grep --no-index -e .",
+    "sudo -u git git -C deep grep --no-index -e .",
+    "env git -C deep grep --no-index -e .",
+    "env -u git git -C deep grep --no-index -e .",
+    "timeout 5 git -C deep grep --no-index -e .",
+    "nice git -C deep grep --no-index -e .",
+    "/usr/bin/git -C deep grep --no-index -e .",
+    "bash -c 'git -C deep grep --no-index -e .'",
+    "xargs git -C deep grep --no-index -e . < /dev/null",
+    "echo x | xargs git -C deep grep --no-index -e .",
+]
+
+# Deliberate fail-closed over-blocks: the named tree holds no protected file,
+# but a moved work tree or git dir is not narrowed. Pinned so a later
+# narrowing is a decision, not an accident.
+_DELIBERATE_DENIALS = [
+    "git --work-tree=sub grep -e hello",
+    "git --git-dir=.git grep -e hello",
+    "git -c core.worktree=sub grep -e hello",
+    "GIT_WORK_TREE=sub git grep -e hello",
+]
+
+
+class TestTheReviewedGapsFailClosed:
+    @pytest.mark.parametrize(
+        "command", [*_WORK_TREE_MOVES, *_UNPLACEABLE_DASH_C_VALUES, *_WRAPPED]
+    )
+    def test_denied_in_a_repository(self, repo: Path, command: str) -> None:
+        assert _verdict(repo, command) is Decision.DENY, command
+
+    @pytest.mark.parametrize("command", _DELIBERATE_DENIALS)
+    def test_a_moved_tree_is_denied_even_when_it_is_clean(self, repo: Path, command: str) -> None:
+        assert _verdict(repo, command) is Decision.DENY, command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -C sub grep -e hello",
+            "git -C sub log --oneline",
+            "git -C sub show HEAD",
+            "git -C sub diff",
+            "git -C deep log --oneline",
+            "git -c core.pager=cat -C sub grep -e hello",
+        ],
+    )
+    def test_ordinary_dash_c_use_stays_allowed(self, repo: Path, command: str) -> None:
+        assert _verdict(repo, command) is Decision.ALLOW, command
+
+
+class TestATildeDashCValue:
+    """``~`` is placed at ``$HOME``: judged like ``grep -r x ~``."""
+
+    def test_home_above_the_project_denies(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HOME", str(repo.parent))
+        assert _verdict(repo, "git -C ~ grep --no-index -e .") is Decision.DENY
+
+    def test_home_elsewhere_allows(
+        self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.setenv("HOME", str(elsewhere))
+        assert _verdict(repo, "git -C ~ grep --no-index -e .") is Decision.ALLOW

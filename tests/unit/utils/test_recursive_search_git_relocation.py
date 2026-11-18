@@ -232,3 +232,54 @@ class TestTheFlaggableGuardSharesThePlacement:
     )
     def test_an_unplaceable_or_foreign_move_is_none(self, command: str) -> None:
         assert rs.git_search_directory(shlex.split(command), "/r") is None
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            # A wrapper's value named `git` is not the git that runs.
+            ("sudo -u git git -C deep grep x", "/r/deep"),
+            ("/x/git git -C .. grep x", "/"),
+            ("git -C /x/git grep x", "/x/git"),
+        ],
+    )
+    def test_the_git_that_runs_is_placed(self, command: str, expected: str) -> None:
+        assert rs.git_search_directory(shlex.split(command), "/r") == expected
+
+    def test_search_command_finds_the_git_that_runs(self) -> None:
+        words = shlex.split("sudo -u git git -C deep grep -e x")
+        assert rs.search_command(words) == (rs.TOOL_GIT, 6, True)
+
+    def test_a_later_grep_word_is_not_a_git_search(self) -> None:
+        assert rs.search_command(shlex.split("git log grep")) is None
+
+
+class TestACoreWorktreeOverride:
+    """``git_overrides_worktree`` reads every global option, in any order."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -c core.worktree=.. grep x",
+            "git -C . -c core.worktree=.. grep x",
+            "git -C $X -c core.worktree=.. grep x",
+            "git -c CORE.WORKTREE=x grep x",
+            "git --config-env=core.worktree=WT grep x",
+            "git --config-env core.worktree=WT -C . grep x",
+            "sudo -u git git -C . -c core.worktree=.. grep x",
+        ],
+    )
+    def test_detected(self, command: str) -> None:
+        assert rs.git_overrides_worktree(shlex.split(command)) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git grep x",
+            "git -c core.pager=cat -C . grep x",
+            "git --config-env=core.pager=PG grep x",
+            "git grep -e core.worktree=x",
+            "grep -r core.worktree=x .",
+        ],
+    )
+    def test_not_detected(self, command: str) -> None:
+        assert rs.git_overrides_worktree(shlex.split(command)) is False
