@@ -28,7 +28,7 @@ from claude_code_hooks_daemon.utils.git_config_write import (
     GitConfigLockError,
     run_git_config_write,
 )
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import read_blobs, run_git
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.remote_refs import remote_git_env
 
@@ -292,14 +292,84 @@ class _RangeShape:
     empties: tuple[str, ...]
 
 
+#: The commit-graph is a cache git fills a commit's tree and parents from when it
+#: reaches that commit through a parent, so a forged graph (the repository's or an
+#: alternate store's) can make a content commit read as empty or drop it from the
+#: range (Plan 00622 R2-1). The walk turns it off; ``GIT_TEST_COMMIT_GRAPH`` would
+#: override the config, so it is pinned off too. The stored objects decide anyway.
+_NO_COMMIT_GRAPH: tuple[str, ...] = ("-c", "core.commitGraph=false")
+_NO_COMMIT_GRAPH_ENV: dict[str, str] = {"GIT_TEST_COMMIT_GRAPH": "0"}
+_HEADER_END = b"\n\n"
+_TREE_HEADER = b"tree "
+_PARENT_HEADER = b"parent "
+
+
+def _stored_header(body: bytes) -> tuple[str, tuple[str, ...]] | None:
+    """The ``tree`` and ``parent`` headers of a raw commit object; None if it has no tree.
+
+    Only the header block is read (up to the first blank line), so a message line that
+    starts with ``parent`` is never taken for one, and a continuation line (a signature)
+    starts with a space and matches neither.
+    """
+    header = body.split(_HEADER_END, 1)[0]
+    tree: str | None = None
+    parents: list[str] = []
+    for line in header.split(b"\n"):
+        if line.startswith(_TREE_HEADER) and tree is None:
+            tree = line[len(_TREE_HEADER) :].decode("ascii", "replace")
+        elif line.startswith(_PARENT_HEADER):
+            parents.append(line[len(_PARENT_HEADER) :].decode("ascii", "replace"))
+    return None if tree is None else (tree, tuple(parents))
+
+
+def _stored_objects_agree(
+    repo: Path,
+    trees: dict[str, str],
+    candidates: list[tuple[str, tuple[str, ...]]],
+    timeout: float,
+) -> bool:
+    """Whether the STORED commits back every tree the walk reported and each empty candidate.
+
+    One ``cat-file --batch`` read of the raw commit objects, which no commit-graph,
+    replace ref or graft can change. Every walked commit's stored tree must be the
+    walk's; each empty candidate's stored parents must be exactly the walk's one
+    parent, so a forged parent cannot hide a commit beneath it. A commit that is not
+    a candidate already counts as content, so its parents are not compared: a shallow
+    clone's cut commit reads as parentless while its stored header names a parent.
+    A failed read or a missing object is a no.
+    """
+    stored = read_blobs(repo, list(trees), timeout=timeout)
+    if stored is None:
+        return False
+    headers: dict[str, tuple[str, tuple[str, ...]]] = {}
+    for sha in trees:
+        body = stored.get(sha)
+        parsed = None if body is None else _stored_header(body)
+        if parsed is None or parsed[0] != trees[sha]:
+            return False
+        headers[sha] = parsed
+    return all(headers[sha][1] == parents for sha, parents in candidates)
+
+
 def _walk_shape(repo: Path, target: str, tip: str, timeout: float) -> _RangeShape | None:
     """Shas, trees and parents of ``target..tip`` (no free text); None on any git failure.
 
     A commit is empty when it has exactly one parent and that parent's tree. A merge
     is never empty, even with its first parent's tree (``-s ours`` carries a whole
-    side history), and a root commit has nothing to be empty against.
+    side history), and a root commit has nothing to be empty against. Every tree and
+    parent the walk reports is confirmed against the stored commit objects before any
+    commit is called empty (:func:`_stored_objects_agree`).
     """
-    log = run_git(repo, "log", "--boundary", _WALK_FORMAT, f"{target}..{tip}", timeout=timeout)
+    log = run_git(
+        repo,
+        *_NO_COMMIT_GRAPH,
+        "log",
+        "--boundary",
+        _WALK_FORMAT,
+        f"{target}..{tip}",
+        timeout=timeout,
+        env=_NO_COMMIT_GRAPH_ENV,
+    )
     if log.returncode != 0:
         return None
     trees: dict[str, str] = {}
@@ -314,11 +384,14 @@ def _walk_shape(repo: Path, target: str, tip: str, timeout: float) -> _RangeShap
         trees[sha] = tree
         if mark != _BOUNDARY_MARK:
             in_range.append((sha, tree, tuple(parents.split())))
-    empties = tuple(
-        sha
+    candidates: list[tuple[str, tuple[str, ...]]] = [
+        (sha, parents)
         for sha, tree, parents in in_range
         if len(parents) == 1 and parents[0] in trees and trees[parents[0]] == tree
-    )
+    ]
+    if trees and not _stored_objects_agree(repo, trees, candidates, timeout):
+        return None
+    empties = tuple(sha for sha, _parents in candidates)
     return _RangeShape(
         in_range=tuple((sha, parents) for sha, _tree, parents in in_range), empties=empties
     )

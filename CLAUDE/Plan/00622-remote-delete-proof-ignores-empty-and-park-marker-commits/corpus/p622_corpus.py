@@ -507,6 +507,91 @@ def r2_graft_main_tip(r, n):
     grafts.write_text(f"{tip} {parent} {content}\n", encoding="utf-8")
 
 
+def _graph_chunks(data: bytearray) -> dict[bytes, int]:
+    return {
+        bytes(data[8 + i * 12 : 12 + i * 12]): int.from_bytes(
+            data[12 + i * 12 : 20 + i * 12], "big"
+        )
+        for i in range(data[6] + 1)
+    }
+
+
+def _graph_position(data: bytearray, sha: str) -> int:
+    chunks = _graph_chunks(data)
+    count = int.from_bytes(data[chunks[b"OIDF"] + 1020 : chunks[b"OIDF"] + 1024], "big")
+    lookup, wanted = chunks[b"OIDL"], bytes.fromhex(sha)
+    for i in range(count):
+        if bytes(data[lookup + i * 20 : lookup + i * 20 + 20]) == wanted:
+            return i
+    raise LookupError(sha)
+
+
+def _forge_graph(objects: Path, victim: str, tree: str | None = None, parent: str | None = None):
+    """Rewrite one commit-graph CDAT record (tree, or first parent) and re-checksum it."""
+    import hashlib
+
+    path = objects / "info" / "commit-graph"
+    data = bytearray(path.read_bytes())
+    record = _graph_chunks(data)[b"CDAT"] + _graph_position(data, victim) * 36
+    if tree is not None:
+        data[record : record + 20] = bytes.fromhex(tree)
+    if parent is not None:
+        data[record + 20 : record + 24] = _graph_position(data, parent).to_bytes(4, "big")
+    data[-20:] = hashlib.sha1(bytes(data[:-20]), usedforsecurity=False).digest()
+    path.write_bytes(bytes(data))
+
+
+def _content_then_undo(r, n, message):
+    """C adds a file only this branch holds; the tip removes it again (tree = main's)."""
+    br(r, n)
+    write(r, f"{n}-secret.txt", "only here\n", message)
+    content = git(r, "rev-parse", "HEAD")
+    git(r, "rm", "-q", f"{n}-secret.txt")
+    git(r, "commit", "-q", "--cleanup=verbatim", "-m", message)
+    return content, git(r, "rev-parse", f"{content}~1^{{tree}}")
+
+
+def _publish_then_graph(r, n):
+    """Push first: a push packs objects through the graph, and would trip on the forgery."""
+    git(r, "push", "-q", "-f", "origin", f"refs/heads/{n}:refs/heads/{n}")
+    git(r, "fetch", "-q", "origin")
+    git(r, "commit-graph", "write", "--reachable")
+
+
+def r3_cg_tree_below_tip(r, n):
+    content, tree = _content_then_undo(r, n, "add secret")
+    _publish_then_graph(r, n)
+    _forge_graph(Path(git(r, "rev-parse", "--absolute-git-dir")) / "objects", content, tree=tree)
+
+
+def r3_cg_tree_below_tip_park_msg(r, n):
+    content, tree = _content_then_undo(r, n, PARK)
+    _publish_then_graph(r, n)
+    _forge_graph(Path(git(r, "rev-parse", "--absolute-git-dir")) / "objects", content, tree=tree)
+
+
+def r3_cg_alternate_store(r, n):
+    content, tree = _content_then_undo(r, n, "add secret")
+    git(r, "push", "-q", "-f", "origin", f"refs/heads/{n}:refs/heads/{n}")
+    git(r, "fetch", "-q", "origin")
+    store = r.parent / "alternate.git"
+    git(r.parent, "clone", "-q", "--bare", str(r), str(store))
+    git(store, "commit-graph", "write", "--reachable")
+    _forge_graph(store / "objects", content, tree=tree)
+    alternates = Path(git(r, "rev-parse", "--absolute-git-dir")) / "objects" / "info" / "alternates"
+    alternates.write_text(f"{store / 'objects'}\n", encoding="utf-8")
+
+
+def r3_cg_parent_below_tip(r, n):
+    """X adds, Y removes, Z empty; the graph gives Y main's tip as parent (drops X)."""
+    _content_then_undo(r, n, "add secret")
+    empty(r, "note")
+    undo = git(r, "rev-parse", "HEAD~1")
+    _publish_then_graph(r, n)
+    objects = Path(git(r, "rev-parse", "--absolute-git-dir")) / "objects"
+    _forge_graph(objects, undo, parent=git(r, "rev-parse", "main"))
+
+
 SHAPES: list[tuple[str, Callable[[Path, str], None]]] = [
     ("Y", s_ff),
     ("Y", s_merge),
@@ -565,6 +650,10 @@ SHAPES: list[tuple[str, Callable[[Path, str], None]]] = [
     ("N", r2_replace_content_park_msg),
     ("N", r2_replace_main_tip),
     ("N", r2_graft_main_tip),
+    ("N", r3_cg_tree_below_tip),
+    ("N", r3_cg_tree_below_tip_park_msg),
+    ("N", r3_cg_alternate_store),
+    ("N", r3_cg_parent_below_tip),
 ]
 
 

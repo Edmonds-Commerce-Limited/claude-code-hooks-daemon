@@ -59,9 +59,12 @@ _OPTIONAL_LOCKS_DECLINED: Final[str] = "0"
 #: A replace ref or a legacy ``info/grafts`` entry makes git show a commit that is
 #: not the one stored: a content commit can read as empty, or the default can read
 #: as descending from a branch. Delete proofs read through these would delete real
-#: content (Plan 00622 D2), so every daemon git call sees the stored objects.
+#: content (Plan 00622 D2), so no daemon git call reads through either.
 #: ``GIT_NO_REPLACE_OBJECTS`` does not disable grafts, so the graft file is pointed
 #: beneath ``/dev/null``, where no file can exist and git reads none, silently.
+#: This does NOT cover the commit-graph, a cache git may fill a walked commit's tree
+#: and parents from (and which ``GIT_NO_REPLACE_OBJECTS`` re-enables). A proof that
+#: must not trust it turns it off and confirms against ``cat-file`` (``branch_park``).
 _REAL_OBJECTS_ENV: Final[Mapping[str, str]] = {
     "GIT_NO_REPLACE_OBJECTS": "1",
     "GIT_GRAFT_FILE": "/dev/null/no-grafts",

@@ -53,8 +53,9 @@ _ENV = {
 }
 _CONFIG = BranchesConfig(default="main")
 
-#: Git calls one branch may cost the proof beyond the fixed per-call listings.
-_CALLS_PER_BRANCH = 5
+#: Git calls one branch may cost the proof beyond the fixed per-call listings. One of
+#: them is the ``cat-file --batch`` read confirming the range walk from stored objects.
+_CALLS_PER_BRANCH = 6
 
 #: Index of the subcommand in ``git -C <dir> <subcommand> ...``.
 _SUBCOMMAND_AT = 3
@@ -136,7 +137,10 @@ def _git_subcommands_during(action: Callable[[], Any]) -> list[str]:
     real_run = subprocess.run
 
     def spy(argv: list[str], *args: Any, **kwargs: Any) -> Any:
-        spawned.append(argv[_SUBCOMMAND_AT])
+        at = _SUBCOMMAND_AT
+        while argv[at] == "-c":  # a global ``-c key=value`` precedes the subcommand
+            at += 2
+        spawned.append(argv[at])
         return real_run(argv, *args, **kwargs)
 
     with patch("claude_code_hooks_daemon.utils.git_repo.subprocess.run", spy):
