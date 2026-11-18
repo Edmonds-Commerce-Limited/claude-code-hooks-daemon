@@ -7840,14 +7840,16 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 ### N662 — "stopped early, so allowed" routes left in and beside the secret guard after Plan 00614 round 6
 
-**Source**: the Plan 00614 round-6 fix of the independent review (`../00614-secret-guard-resolves-links-against-hook-cwd/subagent-reports/261118-fix-round-6.md`, class sweep). Every shape below is allowed on main too: none is a regression.
+**Source**: the Plan 00614 round-6 fix of the independent review (`../00614-secret-guard-resolves-links-against-hook-cwd/subagent-reports/261118-fix-round-6.md`, class sweep). Every allow below is allowed on main and on the round-start tip too: none is a regression. (The quarantine guard's advisory route for a `ResolutionFailedError` was one, and was fixed in the same round.)
 
 **Evidence**:
 
-- The quarantine-artefact guard (`quarantine_artefact_read_guard._matched_pattern_and_glob`) sends a `ResolutionFailedError` (including the new `IncompleteScanError`) to its `except Exception` advisory route, where the secret guard denies it.
+- A `..`-led relative word after a computed `cd` (`cd $(printf q/sub/a/x); cat ../late`, `cat ../../a/late`) is not resolved from the directories above the scanned link, unlike a deeper word without `..`.
+- A chdir hidden more than `_MAX_DIRECTORY_CHANGE_DEPTH` (4) nested `bash -c` bodies deep (`env -C inner cat rel` wrapped 5 or 7 times) is not followed; the walk stops silently.
+- A pathless Grep tool call whose hook `cwd` passes through no link is judged as on main (not at all), so from a directory holding a protected file it is allowed where `path=<that dir>` is denied.
 - The secret guard's Plan 00483 A1 route still allows with an advisory when the full scan gives up on a command holding no search or glob (a cap, the deadline, an unreadable word or an internal error).
 - A hook payload with no `cwd` or a relative one: relative words, globs, searches and a pathless Grep tool call are not placed and are allowed.
 - In a project past the link-scan cap, `cd "$D" && make test` and any other computed `cd` before a relative word is denied (accepted over-deny, release note 002); only the `git rev-parse --show-toplevel` idiom is placed without a scan. The unquoted `$( )` form before a recursive search is still denied. The text walker's segment split is not quote-aware, so a quoted body holding an operator (`bash -c 'cd sub && cat f'`) is read loosely as a computed move, and is denied in such a project too.
 - Suspected, not probed: `_DirectoryWalk.change` and `_expand` follow a relative or globbed `cd` from the first `LINK_DIRECTORY_CAP + 1` existing directories only (a `[:CAP]` slice with no incomplete signal).
 
-**Status**: ⬜ Open. Route `ResolutionFailedError` to a deny in the quarantine guard, test first. Decide (owner) whether the A1 no-search advisory and a missing `cwd` should deny. Consider an off-hot-path link index, built like the protected-file index and denying until built, so a large project's computed `cd` is judged instead of denied; make the text walker's segment split quote-aware.
+**Status**: ⬜ Open. Resolve a `..`-led word from above the scanned links; make the nested-body depth limit an incomplete signal that denies. Decide (owner) whether the A1 no-search advisory and a missing `cwd` should deny. Consider an off-hot-path link index, built like the protected-file index and denying until built, so a large project's computed `cd` is judged instead of denied; make the text walker's segment split quote-aware.

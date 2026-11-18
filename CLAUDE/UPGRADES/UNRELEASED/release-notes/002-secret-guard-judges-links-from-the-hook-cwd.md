@@ -47,6 +47,8 @@ The scan is reused only within one tool call. Before, it was kept for 5 seconds,
 
 A chdir option inside a short-option cluster (`env -iC d`, `sudo -nD d`, `env -iCd`) or abbreviated (`env --chd=d`, `env --ch d`, `sudo --chd=d`) now moves where a relative word is read, as does `exec` before the command (`exec env -C d`, `exec -a name env -C d`).
 
-A Grep tool call with no `path` is judged at the hook's `cwd`, so a session whose directory is a link out of the project is denied a search there.
+A Grep tool call with no `path` is judged at the hook's `cwd` when that directory passes through a link, so a session whose directory is a link out of the project is denied a search there. A pathless Grep from an ordinary directory is judged as before.
+
+`cd "$(git rev-parse --show-toplevel)"` is not trusted when the command defines a function or alias, changes `PATH`, sets `core.worktree` or names a `GIT_` variable; it is then judged as computed. Otherwise it is judged as computed too, with each ancestor added, but a link scan that did not finish does not deny it. The quarantine-artefact guard now denies a call whose paths could not be placed, as the secret guard does, instead of allowing it with an advisory.
 
 Upgrade: nothing to do.

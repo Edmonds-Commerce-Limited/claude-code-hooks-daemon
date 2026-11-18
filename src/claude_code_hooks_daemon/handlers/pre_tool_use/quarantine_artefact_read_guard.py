@@ -56,6 +56,7 @@ from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.protected_file_index import ProtectedFileIndex, TreeView
+from claude_code_hooks_daemon.utils.resolution_failure import ResolutionFailedError
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,8 @@ _RULE = Rule(
 # a deny: ``handle()`` allows it and says what was not checked. Never a real
 # glob (those come from ``_effective_globs()``), so it cannot collide with one.
 _NOT_JUDGED_PATTERN: Final[str] = "<not-judged>"
+#: The detail of a finding for a call whose paths could not be placed (no artefact is named).
+_UNPLACED_DETAIL: Final[str] = "a path in this call could not be placed"
 _NO_INDEX_REASON: Final[str] = (
     "a recursive search, directory read or wildcard path was not checked, because the index of "
     "quarantined artefacts is not available yet (the daemon has just started, or "
@@ -227,6 +230,14 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         """
         try:
             pattern = self._evaluate_matched_pattern(hook_input)
+        except ResolutionFailedError:
+            # Plan 00614 round 6: a placement or scan that could not finish is a
+            # finding, as in the secret guard; it never reaches the advisory route.
+            logger.exception("quarantine_artefact_read_guard: placing the command's words failed")
+            globs = self._effective_globs()
+            if not globs:
+                return None
+            return (globs[0], _UNPLACED_DETAIL)
         except shell_expansion.UnresolvableBraceQuotingError:
             return self._literal_finding_or_advisory(hook_input, "the command could not be parsed")
         except TimeoutError:

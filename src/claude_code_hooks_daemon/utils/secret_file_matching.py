@@ -3448,18 +3448,27 @@ _TOPLEVEL_MOVES: Final[frozenset[str]] = frozenset(
     }
 )
 _TOPLEVEL_MOVE_LENGTHS: Final[tuple[int, ...]] = (1, 3, 5, 6)
-#: Variables that move git's top level away from the command's own directory.
-_TOPLEVEL_RELOCATING_PREFIX: Final[str] = "GIT_"
+#: Text that may move git's top level away from the command's own directory, or
+#: make ``git`` another program: a ``GIT_`` variable, ``core.worktree``, a function,
+#: an alias or a ``PATH`` change.
+_TOPLEVEL_UNTRUSTED_MARKERS: Final[tuple[str, ...]] = (
+    "GIT_",
+    "core.worktree",
+    "()",
+    "function",
+    "alias",
+    "PATH",
+)
 
 
 def toplevel_move_length(words: Sequence[str], command: str) -> int:
     """How many of ``words`` spell a move to git's top level (0: none).
 
     Quoted, the substitution is one word; unquoted, it is split into several.
-    A command that names a ``GIT_`` variable may relocate the top level, so
-    it is not read this way.
+    A command holding any of :data:`_TOPLEVEL_UNTRUSTED_MARKERS` may relocate
+    the top level or replace ``git``, so it is not read this way.
     """
-    if _TOPLEVEL_RELOCATING_PREFIX in command:
+    if any(marker in command for marker in _TOPLEVEL_UNTRUSTED_MARKERS):
         return 0
     for length in _TOPLEVEL_MOVE_LENGTHS:
         if " ".join(words[:length]) in _TOPLEVEL_MOVES:
@@ -3544,6 +3553,10 @@ def link_scan_scope() -> Iterator[None]:
     made by the previous call. Inside the scope one command's many computed
     moves cost one scan; outside any scope nothing is reused.
     """
+    if _link_scan_scope.get() is not None:
+        # Already inside one call's scope: its scans are reused.
+        yield
+        return
     token = _link_scan_scope.set({})
     try:
         yield
@@ -3904,33 +3917,41 @@ class _DirectoryWalk:
         if exists if exists is not None else path_is_dir(directory, unreadable_means=True):
             self.existing[directory] = None
 
-    def indeterminate(self) -> None:
+    def indeterminate(self, *, fail_closed: bool = True) -> None:
         """A move bash computes: read from the project root and every place it could land badly.
 
         Review 614b R4 and 614c N1: every project directory holding a link, and
         every directory link, found by :func:`scan_project_links`, a bounded
         scan. A scan that did not finish marks the walk ``unscanned``: a
-        relative word read after the move is then denied (review D2).
+        relative word read after the move is then denied (review D2). With
+        ``fail_closed`` False the caller has placed the move exactly too
+        (git's top level), so an unfinished scan only adds what it found.
         """
         root = resolve_project_root()
         if root:
             self._add(os.path.normpath(root))
             scan = scan_project_links(root)
-            self.unscanned = self.unscanned or not scan.complete
+            self.unscanned = self.unscanned or (fail_closed and not scan.complete)
             for directory in scan.directories:
                 self._add(directory, exists=True)
                 self.scanned[directory] = None
 
     def to_toplevel(self) -> None:
-        """A move to git's top level: an ancestor of where the command is, each one kept."""
-        if not self.directories:
+        """A move to git's top level: an ancestor of where the command is, each one kept.
+
+        It only adds: the computed-move judgement is made too, but a scan that
+        did not finish does not deny, because the ancestors place the move.
+        Past :data:`LINK_DIRECTORY_CAP` bases it is a plain computed move.
+        """
+        bases = list(dict.fromkeys([*self.directories[-1:], *self.existing]))
+        if not bases or len(bases) > LINK_DIRECTORY_CAP + 1:
             self.indeterminate()
             return
-        bases = list(dict.fromkeys([self.directories[-1], *self.existing]))
         root = resolve_project_root()
-        for base in bases[: LINK_DIRECTORY_CAP + 1]:
+        for base in bases:
             for ancestor in directory_ancestors(base, root):
                 self._add(ancestor)
+        self.indeterminate(fail_closed=False)
 
     def assign(self, name: str, value: str) -> None:
         """Record ``name=value``; a value bash would expand is not known, so it is forgotten."""
@@ -4207,7 +4228,9 @@ def effective_cwds(command: str, cwd: str | None) -> CwdSet:
     (ledger 00474 N465).
     """
     walk = _DirectoryWalk(cwd, cdpath=CDPATH_VARIABLE in command, command=command)
-    _walk_directory_changes(command, walk, 0)
+    # One scan for the command's many computed moves, even outside a guard's scope.
+    with link_scan_scope():
+        _walk_directory_changes(command, walk, 0)
     return walk.result()
 
 

@@ -223,6 +223,13 @@ def _holds_search_or_glob(hook_input: dict[str, Any]) -> bool:
         return True
 
 
+def _linked_cwd(cwd: str | None) -> str:
+    """``cwd`` when it is absolute and passes through a link, else ``""``."""
+    if not cwd or not Path(cwd).is_absolute():
+        return ""
+    return cwd if os.path.realpath(cwd) != os.path.normpath(cwd) else ""
+
+
 _ADVISORY_HEADLINE: Final[str] = (
     "secret_file_guard could NOT fully judge this call, so it was ALLOWED. "
     "No protected path was found by the checks that did run."
@@ -1615,9 +1622,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # A Grep rooted at an ancestor of a protected file reads its
             # content without naming it. Every indexed file under the root
             # counts (the Grep tool's own ignore handling is not relied on).
-            # With no path it searches the hook cwd, which may itself be a
-            # link out of the project (review D6).
-            root = placed or path or (cwd if cwd and Path(cwd).is_absolute() else "")
+            # With no path it searches the hook cwd. That is judged only when
+            # the cwd passes through a link (review D6): a session inside a
+            # link out of the project. A plain cwd is left as before.
+            root = placed or path or _linked_cwd(cwd)
             if root:
                 return self._directory_reach(root, patterns)
 

@@ -1182,12 +1182,15 @@ class TestGrepToolWithNoPathFromALinkedCwd:
             return Decision.ALLOW
         return handler.handle(hook_input).decision
 
-    @pytest.mark.parametrize("cwd", ["plink", "dlink", "deep/idlink", "own"])
+    @pytest.mark.parametrize("cwd", ["plink", "dlink", "deep/idlink", "plink/sub"])
     def test_denied(self, tree: Tree, cwd: str) -> None:
         assert self._grep(tree.worktree / cwd) is Decision.DENY
 
-    def test_a_cwd_with_nothing_protected_stays_allowed(self, tree: Tree) -> None:
-        assert self._grep(tree.worktree / "clean") is Decision.ALLOW
+    @pytest.mark.parametrize("cwd", ["clean", ".", "own"])
+    def test_a_cwd_through_no_link_is_judged_as_before(self, tree: Tree, cwd: str) -> None:
+        """Only a cwd that passes through a link is judged: a pathless Grep from the
+        project root is not denied for the protected files under it (as on main)."""
+        assert self._grep(tree.worktree / cwd) is Decision.ALLOW
 
 
 class TestADeeperRelativeWordAfterAComputedMove:

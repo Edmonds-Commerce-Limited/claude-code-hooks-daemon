@@ -61,6 +61,7 @@ from claude_code_hooks_daemon.utils.secret_file_matching import (
     chdir_wrapper_targets,
     directory_ancestors,
     expand_directory_glob,
+    link_scan_scope,
     scan_project_links,
     toplevel_move_length,
 )
@@ -513,17 +514,11 @@ def search_reads(command: str, cwd: str | None) -> list[Read]:
     """
     bases = (cwd,) if cwd is not None and posixpath.isabs(cwd) else ()
     reset = _rg_config_named.set(RG_CONFIG_ENV in command)
+    tracker = _SearchCwds(cwd, cdpath=CDPATH_VARIABLE in command, command=command)
     try:
-        reads = list(
-            dict.fromkeys(
-                _reads(
-                    command,
-                    bases,
-                    0,
-                    _SearchCwds(cwd, cdpath=CDPATH_VARIABLE in command, command=command),
-                )
-            )
-        )
+        # One link scan for the command's many computed moves, even outside a guard's scope.
+        with link_scan_scope():
+            reads = list(dict.fromkeys(_reads(command, bases, 0, tracker)))
     finally:
         _rg_config_named.reset(reset)
     if not any(read.glob for read in reads):
@@ -644,11 +639,11 @@ def _directory_change(
     while spelled and spelled[0].startswith("-"):
         spelled = spelled[1:]
     if toplevel_move_length(spelled, cwds.command) and current:
-        # An ancestor of where the search is: each one kept, no project-wide scan.
+        # An ancestor of where the search is, each one kept, besides the computed-move
+        # judgement; an unfinished scan does not deny, since the ancestors place the move.
         root = path_exclusion.resolve_project_root()
-        return tuple(
-            dict.fromkeys(above for base in current for above in directory_ancestors(base, root))
-        )
+        above = (ancestor for base in current for ancestor in directory_ancestors(base, root))
+        return tuple(dict.fromkeys((*above, *cwds.indeterminate(fail_closed=False))))
     return cwds.moved(operands[0], current)
 
 
@@ -703,12 +698,16 @@ class _SearchCwds:
     # The directory links a computed move's scan found: a later reader may pass through one.
     computed_links: list[str] = field(default_factory=list)
 
-    def indeterminate(self) -> tuple[str, ...]:
-        """A move that cannot be placed: the project root, every named target and the hook cwd."""
+    def indeterminate(self, *, fail_closed: bool = True) -> tuple[str, ...]:
+        """A move that cannot be placed: the project root, every named target and the hook cwd.
+
+        With ``fail_closed`` False the caller placed the move exactly too (git's
+        top level), so a scan that did not finish only adds what it found.
+        """
         root = path_exclusion.resolve_project_root()
         # Reviews 614b R4, 614c N1: every project directory holding a link, and every directory link.
         scan = scan_project_links(root) if root else None
-        if scan is not None and not scan.complete:
+        if scan is not None and fail_closed and not scan.complete:
             self.unscanned = True
         if scan is not None:
             self.computed_links.extend(scan.directory_links)
