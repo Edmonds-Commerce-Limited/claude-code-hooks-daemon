@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.core import (
     branch_sweep,
 )
 from claude_code_hooks_daemon.core.branch_inventory import BranchState, Pool
+from claude_code_hooks_daemon.core.branch_park import is_park_message, is_park_residue
 from claude_code_hooks_daemon.core.remote_branch_proof import prove_remote_merged
 from tests.conftest import HERMETIC_GIT_EMAIL
 
@@ -57,21 +58,23 @@ def _commit(repo: Path, filename: str, text: str) -> None:
 
 
 def _park(repo: Path, reason: str, *, days_old: float = 0.0) -> None:
-    """An empty park commit on the checked-out branch, dated ``days_old`` days ago."""
+    """The park writer's empty commit on the checked-out branch, dated ``days_old`` days ago.
+
+    Written with ``git commit`` (not ``park_branch``) so the date can be set; the
+    message is the writer's exact text, which the one classifier requires (Plan 00617).
+    """
     when = f"{int(time.time() - days_old * _DAY)} +0000"
     _git(
         repo,
         "commit",
         "-q",
         "--allow-empty",
+        "--cleanup=verbatim",
         "-m",
-        "Park",
-        "--trailer",
-        f"Parked-Reason: {reason}",
-        "--trailer",
-        "Parked-By: tester",
+        f"Park branch: {reason}\n\nParked-Reason: {reason}\nParked-By: tester\n",
         env={"GIT_COMMITTER_DATE": when, "GIT_AUTHOR_DATE": when},
     )
+    assert is_park_message(_git(repo, "log", "-1", "--format=%B"))
 
 
 @pytest.fixture
@@ -200,6 +203,14 @@ class TestAcceptance:
         assert sorted(report.deleted_remote) == [f"origin/carried-{i}" for i in range(6)]
         remaining = _git(cloned, "ls-remote", "--heads", "origin")
         assert "real-park-0" in remaining and "carried-0" not in remaining
+
+    def test_the_dry_run_names_the_park_carried_evidence_not_a_plain_merge(
+        self, cloned: Path
+    ) -> None:
+        report = branch_cleanup.clean_sweep(cloned, _config(), dry_run=True, remote=True)
+        line = next(c for c in report.commands if "origin/carried-0" in c)
+        assert "park-carried" in line
+        assert "proven merged into" not in line
 
 
 class TestAge:
@@ -402,7 +413,7 @@ class TestParkCarriedIsOnlyParkCommits:
         assert state in {BranchState.PARKED, BranchState.LIVE}
         assert not branch_sweep.group_records(inventory).park_carried
         tip = _git(repo, "rev-parse", "origin/work-above").strip()
-        assert not branch_inventory.is_park_residue(repo, tip, "main")
+        assert not is_park_residue(repo, tip, "main")
         guard = branch_creation.work_pools(repo, config)
         counted = {n for works in guard.values() for w in works for n in w.names}
         assert "work-above" in counted
@@ -414,7 +425,7 @@ class TestParkCarriedIsOnlyParkCommits:
         assert inventory.records["plain-empty"].state != BranchState.PARK_CARRIED
         assert branch_sweep.pool_count(inventory, Pool.PARKED) == 0
         tip = _git(repo, "rev-parse", "origin/plain-empty").strip()
-        assert not branch_inventory.is_park_residue(repo, tip, "main")
+        assert not is_park_residue(repo, tip, "main")
 
     def test_the_guard_and_the_sweep_agree_on_the_mixed_fixture(self, repo: Path) -> None:
         for index in range(6):
@@ -436,3 +447,34 @@ class TestParkCarriedIsOnlyParkCommits:
         assert {"remote-real-0", "remote-real-1", "local-real-0", "local-real-1"} <= parked
         assert not {f"carried-{i}" for i in range(6)} & parked
         assert str(RuleID.BRANCH_PARKED_POOL) in _rules(repo, config)
+
+
+class TestJsonAction:
+    """``--json`` names the delete action of a park-carried branch, as the text report does."""
+
+    def test_a_park_carried_branch_carries_the_same_action_as_its_text_line(
+        self, repo: Path
+    ) -> None:
+        _parked_over_merged(repo, "carried-json")
+        _git(repo, "fetch", "-q", "--prune", "origin")
+        config = _config()
+        inventory = _inventory(repo, config)
+        assert inventory.records["carried-json"].state == BranchState.PARK_CARRIED
+        document = branch_sweep.report_json(inventory, cap=10, config=config)
+        row = next(b for b in document["branches"] if b["name"] == "carried-json")
+        assert row["group"] == "park-carried"
+        assert row["action"] is not None
+        text = "\n".join(branch_sweep.render_report(inventory, config, cap=10))
+        assert row["action"] in text
+
+
+class TestOwnershipHint:
+    """The owned-branch hint follows every actionable group, park-carried included."""
+
+    def test_a_park_carried_branch_alone_earns_the_hint(self, repo: Path) -> None:
+        _parked_over_merged(repo, "carried-hint")
+        _git(repo, "fetch", "-q", "--prune", "origin")
+        config = _config()
+        inventory = _inventory(repo, config)
+        lines = branch_sweep.render_report(inventory, config, cap=10, ownership_hints=True)
+        assert branch_sweep.HINT_TEXT[branch_sweep.OwnershipHint.BRANCH_OWNED] in lines

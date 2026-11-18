@@ -7587,7 +7587,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open. Reproduce first on `main` with a synthetic doc (two tables, long cells, an `Edit` of one cell). If it reproduces, fix test-first: the formatter must leave untouched rows byte-identical (or skip a table whose existing padding is not canonical), with a test that an already-canonical table is still aligned after an edit.
 
-### N630 — use `agent_id` and `agent_type` on compaction payloads (Claude Code 2.1.323)
+### N634 — use `agent_id` and `agent_type` on compaction payloads (Claude Code 2.1.323)
 
 **Source**: the Claude Code changelog review for release 3.75.0 (`subagent-reports/261116-claude-code-review-v3.75.0.md`), an adopt row.
 
@@ -7595,7 +7595,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open. Decide whether the signal should say which agent compacted; if so, read both fields with a default for older Claude Code versions, test-first.
 
-### N631 — check PreToolUse allow does not rely on surviving a permission-check error (Claude Code 2.1.323)
+### N635 — check PreToolUse allow does not rely on surviving a permission-check error (Claude Code 2.1.323)
 
 **Source**: the same review, a conflict row (a check, not a known break).
 
@@ -7603,7 +7603,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open. List the PreToolUse handlers that return allow, and confirm none depends on the allow surviving. The review found none on the PreToolUse side.
 
-### N632 — check the PermissionRequest auto-approve handler never rewrites tool input (Claude Code 2.1.323)
+### N636 — check the PermissionRequest auto-approve handler never rewrites tool input (Claude Code 2.1.323)
 
 **Source**: the same review, a conflict row (a check, not a known break).
 
@@ -7611,10 +7611,40 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open. Confirm the handler returns decisions only and never an updated input; add a test that pins it.
 
-### N633 — check WorktreeCreate prints a real path, not one through a project symlink (Claude Code 2.1.325)
+### N637 — check WorktreeCreate prints a real path, not one through a project symlink (Claude Code 2.1.325)
 
 **Source**: the same review, a conflict row (a check, not a known break).
 
 **Evidence**: from 2.1.325 EnterWorktree refuses a worktree path that goes through a symlink. The overlap is `handlers/worktree_create/worktree_create_handler.py`.
 
 **Status**: ⬜ Open. Confirm the printed path is the resolved real path, with a test whose project directory is reached through a link.
+
+### N630 — playbook test #379 (guard config drift) drives `echo "test"`, which cannot show its notice
+
+**Source**: Plan 00618 Phase 2 (the release 3.75.0 acceptance run), recorded by the Phase 2 sub-agent.
+
+**Evidence**: the generated acceptance playbook's Test 379, "guard config drift - reports an uncommitted guard weakening", is typed as an observable context test whose command is `echo "test"` and whose expected pattern is `GUARD CONFIG DRIFT|uncommitted`. The drift report is a session-start notice computed from the working-tree config against the committed one; a Bash `echo` neither starts a session nor changes the config, so the pattern can never appear and the test can only fail or be waved through by hand.
+
+**Status**: ⬜ Open. Fix the handler's acceptance-test definition: either declare it a session-start test with a setup step that writes a synthetic weakening into a scratch config, or mark it as not drivable by a tool call (prose a human runs), so the playbook stops carrying a test that cannot pass.
+
+### N631 — the Plan 00609 proof script hard-codes `REPO = Path("/workspace")`
+
+**Source**: Plan 00618 Phase 2, recorded by the Phase 2 sub-agent (the script was reformatted in Plan 00618 Task 2.3 after it failed the release gate's `format` check).
+
+**Evidence**: `CLAUDE/Plan/Completed/00609-tracked-hook-wrappers-machine-independent/subagent-reports/prove-two-root-two-host.py` sets `REPO = Path("/workspace")`, so it proves the main checkout whatever checkout runs it: from a worktree it silently tests main's code, and on a host whose checkout lives elsewhere it fails. The same literal is in the archived Plan 00243 prototype, which is historical and not run.
+
+**Status**: ⬜ Open. Derive the repository root from the script's own location (or `git rev-parse --show-toplevel`), so the proof runs against the checkout that holds it.
+
+### N632 — a `lint_on_edit` timeout above about 15 s is cut by the 20 s PostToolUse chain deadline
+
+**Source**: Plan 00618 Phase 2 (Task 2.5), by reading `constants/timeout.py` and `config/models.py` `deadline_for`.
+
+**Evidence**: PostToolUse has no `EVENT_CHAIN_DEADLINE` entry, so it gets `CHAIN_DEADLINE_DEFAULT` (20 s). `lint_on_edit` defaults to 15 s and documents `options.timeouts` values such as `PHP: 30`, which the chain deadline cuts first, replying "skipped" rather than the handler's own lint-timeout notice. The same constraint is why the lint budget could not be load-scaled for the playbook harness's Kotlin probe.
+
+**Status**: ⬜ Open (owner decision recorded in Plan 00618). Fix with the three-layer event budget the Worktree events use (PostToolUse handler budget, chain deadline, client wait, the `init.sh` mirror and the registered hook timeout), then load-scale the lint base under the new ceiling.
+
+### N633 — `test_relay_binary_checker.py` fails 9 tests under `--cov` and passes without it
+
+**Source**: Plan 00618 Phase 2 sub-agent, seen while running targeted tests. Not investigated.
+
+**Status**: ⬜ Open. Reproduce with and without `--cov` on `main`; find which test depends on import or timing state that coverage changes.

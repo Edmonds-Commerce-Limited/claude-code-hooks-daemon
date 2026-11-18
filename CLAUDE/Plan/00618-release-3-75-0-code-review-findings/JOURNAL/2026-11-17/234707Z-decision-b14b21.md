@@ -1,0 +1,3 @@
+## 23:47 · decision · —
+
+Stand-in ruling (automated one-off, NOT the owner): declined a sixth time. No owner message has arrived. The pending question is the release's accept-wip over in-flight plans, reserved for the owner, plus two public upstream issues that cannot be retracted. Nothing was chosen or changed.

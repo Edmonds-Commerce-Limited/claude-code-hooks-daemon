@@ -50,7 +50,12 @@ from claude_code_hooks_daemon.core.worktree_seed import (
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.git_repo import GIT_TIMED_OUT, GitRepo, run_git
+from claude_code_hooks_daemon.utils.git_repo import (
+    GIT_TIMED_OUT,
+    GitRepo,
+    parse_worktree_porcelain,
+    run_git,
+)
 from claude_code_hooks_daemon.utils.load_scaling import describe_load, scaled_timeout
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.worktree_seeding import seed_worktree, validate_seed_sources
@@ -445,7 +450,7 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             steps = []
         steps += [("worktree", "remove", "--force", str(path)), ("worktree", "prune")]
         WorktreeCreateHandler._run_undo_steps(cwd, steps)
-        if WorktreeCreateHandler._remove_unregistered_directory(path):
+        if WorktreeCreateHandler._remove_unregistered_directory(cwd, path):
             WorktreeCreateHandler._run_undo_steps(cwd, [("worktree", "prune")])
         if not branch_preexisted:
             WorktreeCreateHandler._run_undo_steps(cwd, [("branch", "-D", branch)])
@@ -464,15 +469,35 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
                 )
 
     @staticmethod
-    def _remove_unregistered_directory(path: Path) -> bool:
+    def _is_registered(cwd: str, path: Path) -> bool | None:
+        """Whether git lists a worktree at ``path``; ``None`` when git could not say."""
+        result = run_git(Path(cwd), "worktree", "list", "--porcelain", timeout=_cleanup_budget())
+        if result.returncode != 0:
+            return None
+        target = path.resolve()
+        return any(
+            record.path.resolve() == target for record in parse_worktree_porcelain(result.stdout)
+        )
+
+    @staticmethod
+    def _remove_unregistered_directory(cwd: str, path: Path) -> bool:
         """Delete what a killed add left at ``path`` when git no longer owns it.
 
         This handler created ``path`` (the caller proved it absent before the
         add), so a directory still there with no registered worktree is its own
         debris: ``git worktree remove`` answers "not a working tree" for it and
-        can never clear it. Returns whether a directory was removed.
+        can never clear it. A directory git still lists, or one git could not be
+        asked about, is left alone and reported by ``_left_behind``. Returns
+        whether a directory was removed.
         """
         if not path_exists(path, unreadable_means=True):
+            return False
+        if WorktreeCreateHandler._is_registered(cwd, path) is not False:
+            logger.warning(
+                "worktree_create: %s is registered with git or its registration is unknown; "
+                "not deleting it",
+                path,
+            )
             return False
         try:
             shutil.rmtree(path)

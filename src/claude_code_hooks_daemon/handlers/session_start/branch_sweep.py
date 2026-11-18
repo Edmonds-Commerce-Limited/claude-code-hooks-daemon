@@ -23,9 +23,11 @@ from typing import Any
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ownership
 from claude_code_hooks_daemon.core.branch_creation import (
     LABELS_RELATIVE_PATH,
+    CreationReport,
     creation_report,
     read_labels,
     render_creation_report,
@@ -168,6 +170,9 @@ class BranchSweepHandler(SessionStartHandlerBase):
             root / LABELS_RELATIVE_PATH,
             report_json(inventory, cap=cap, config=self._branches)["branches"],
         )
+        report = creation_report(
+            root, self._branches, None, labels=read_labels(root / LABELS_RELATIVE_PATH)
+        )
         lines = session_summary(
             inventory,
             self._branches,
@@ -176,15 +181,15 @@ class BranchSweepHandler(SessionStartHandlerBase):
             deprecation=deprecation_line(self._branches, legacy),
             behind_threshold=effective_behind_threshold(self._branches, legacy),
             owned_hint=owned_hint,
+            open_pool_reported=any(s.rule_id == RuleID.BRANCH_WIP_CAP for s in report.blockers),
         )
         out = [f"{_ICON}  GIT BRANCHES:", *lines] if lines else []
-        return [*out, *self._pool_lines(root, owned_hint)]
+        return [*out, *self._pool_lines(report, owned_hint)]
 
-    def _pool_lines(self, root: Path, owned_hint: Callable[[], str | None]) -> list[str]:
+    def _pool_lines(
+        self, report: CreationReport, owned_hint: Callable[[], str | None]
+    ) -> list[str]:
         """Every full pool with its fix: the preflight report (``branch-preflight``)."""
-        report = creation_report(
-            root, self._branches, None, labels=read_labels(root / LABELS_RELATIVE_PATH)
-        )
         if not report.blockers:
             return []
         preflight = daemon_cli_command_for_docs("branch-preflight")

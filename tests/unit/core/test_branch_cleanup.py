@@ -432,14 +432,14 @@ class TestCleanupAfterMerge:
         assert report.deleted == ()
         assert report.skipped
 
-    def test_the_remote_delete_is_printed_never_run(self, repo: Path, tmp_path: Path) -> None:
+    def test_the_remote_delete_is_pointed_at_never_run(self, repo: Path, tmp_path: Path) -> None:
         bare = tmp_path / "remote.git"
         _git(tmp_path, "init", "--quiet", "--bare", str(bare))
         _git(repo, "remote", "add", "origin", str(bare))
         _merged(repo, "feat")
         _git(repo, "push", "--quiet", "origin", "feat")
         report = cleanup_after_merge(repo, ["feat"], config=_CONFIG, target="main", mode="act")
-        assert "git push origin --delete feat" in report.commands
+        assert any("origin/feat is for the owner" in c for c in report.commands)
         assert "feat" in _git(bare, "branch")
 
     def test_a_line_merged_into_another_line_is_refused(self, repo: Path) -> None:

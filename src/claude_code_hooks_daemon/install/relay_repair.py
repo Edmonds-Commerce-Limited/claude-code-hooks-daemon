@@ -198,6 +198,12 @@ class _OwnedRepair:
 _owned_lock = threading.Lock()
 #: Repairs this process started with :func:`spawn_owned` and has not yet stopped.
 _owned: list[_OwnedRepair] = []
+#: Set by :func:`stop_owned_repairs`; while set, :func:`spawn_owned` refuses.
+_stopping = False
+
+
+class OwnedSpawnRefusedError(OSError):
+    """:func:`spawn_owned` was called after the daemon began to stop."""
 
 
 def _state_of(argv: list[str]) -> Path:
@@ -212,20 +218,32 @@ def spawn_owned(argv: list[str], log: Path) -> int:
     it stops: the daemon. The SessionStart hook keeps :func:`spawn_detached`,
     since its process exits at once and the repair is meant to outlive it.
     """
-    log_fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, _FILE_MODE)
-    try:
-        child = subprocess.Popen(  # nosec B603 - argv list, no shell
-            argv,
-            stdin=subprocess.DEVNULL,
-            stdout=log_fd,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-    finally:
-        os.close(log_fd)
+    state = _state_of(argv)
+    # The check, the spawn and the registration share one hold of the lock, so a
+    # stop cannot empty the registry between them and leave a repair it never saw.
     with _owned_lock:
-        _owned.append(_OwnedRepair(child, _state_of(argv)))
+        if _stopping:
+            raise OwnedSpawnRefusedError("the daemon is stopping; no new repair is started")
+        log_fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, _FILE_MODE)
+        try:
+            child = subprocess.Popen(  # nosec B603 - argv list, no shell
+                argv,
+                stdin=subprocess.DEVNULL,
+                stdout=log_fd,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        finally:
+            os.close(log_fd)
+        _owned.append(_OwnedRepair(child, state))
     return child.pid
+
+
+def resume_owned_spawns() -> None:
+    """Allow :func:`spawn_owned` again: a new daemon lifetime begins in this process."""
+    global _stopping
+    with _owned_lock:
+        _stopping = False
 
 
 def owned_repair_pids() -> list[int]:
@@ -263,8 +281,11 @@ def stop_owned_repairs(grace: float = float(Timeout.DAEMON_REPAIR_STOP_GRACE)) -
 
     SIGTERM to the process group, SIGKILL after ``grace`` seconds, ``grace``
     more to reap. Returns the pids of the repairs that were still running.
+    New spawns are refused from here until :func:`resume_owned_spawns`.
     """
+    global _stopping
     with _owned_lock:
+        _stopping = True
         owned, _owned[:] = list(_owned), []
     stopped: list[int] = []
     for repair in owned:
@@ -329,6 +350,12 @@ def start_relay_repair(
     ]
     try:
         pid = spawn_fn(argv, log)
+    except OwnedSpawnRefusedError as exc:
+        # Interrupted, not failed: withdraw the claim so the next start retries.
+        _withdraw_unfinished_claim(state)
+        failure = f"the background repair was not started ({exc})"
+        logger.warning("relay repair of %s not started: %s", binary, exc)
+        return notice(failure=failure)
     except OSError as exc:
         failure = f"the background repair could not be started ({exc})"
         logger.error("relay repair of %s not started: %s", binary, exc)

@@ -196,4 +196,4 @@ releases:
       ran FROM 2.1.322 to 2.1.325; the vendored changelog has no 2.1.324
       entry, so only 2.1.323 and 2.1.325 were reviewed. One adopt row and
       three conflict rows (each a check, not a known break), filed as
-      niggles N630 to N633. No instruction-loading change.
+      niggles N634 to N637. No instruction-loading change.

@@ -301,6 +301,12 @@ class TestPoolPressureReport:
         assert "Open work branches: 2 (cap 1)" in text
         assert "branch-park" in text
 
+    def test_a_new_session_states_the_open_work_cap_once(self, repo: Path) -> None:
+        self._two_open(repo)
+        text = "\n".join(_run(self._handler(wip={"cap": 1}), repo, _new()))
+        assert "Open work branches: 2 (cap 1)" in text
+        assert "Open work: 2 of 1" not in text
+
     def test_lists_every_blocker_not_only_the_first(self, repo: Path) -> None:
         self._two_open(repo)
         _git(repo, "branch", "done", "main")

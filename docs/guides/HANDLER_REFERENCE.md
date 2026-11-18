@@ -327,13 +327,13 @@ affected branch even though nothing would be lost. `delete-branch` fills that
 gap, refusing by default and deleting only what it can prove is recoverable,
 across these tiers, evaluated cheapest-first:
 
-| Tier                | Proof                                                                                 |
-| ------------------- | ------------------------------------------------------------------------------------- |
-| `merged`            | Tip is an ancestor of the protected ref (what `git branch -d` proves)                 |
-| `merged-unpushed`   | The same ancestry proof, but the branch is ahead of its OWN upstream                  |
-| `patch-equivalent`  | Every commit is already upstream by patch-id -- the shape a history rewrite produces  |
-| `content-preserved` | Every file version is byte-identical to a blob still reachable from the protected ref |
-| `unproven`          | Everything else -- refused, naming the files whose content exists nowhere else        |
+| Tier                | Proof                                                                                                                                                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `merged`            | Tip is an ancestor of the protected ref (what `git branch -d` proves)                                                                                                                          |
+| `merged-unpushed`   | The same ancestry proof, but the branch is ahead of its OWN upstream                                                                                                                           |
+| `patch-equivalent`  | Every commit is already upstream by patch-id -- the shape a history rewrite produces                                                                                                           |
+| `content-preserved` | Every file version is byte-identical to a blob still reachable from the protected ref, and a commit on the protected ref holds the branch's whole net change (the shape a squash merge leaves) |
+| `unproven`          | Everything else -- refused, naming the files whose content exists nowhere else                                                                                                                 |
 
 `merged-unpushed` exists because `git branch -d` enforces a **different
 predicate** from the `merged` proof: *merged into its upstream if it has one*,
@@ -4641,7 +4641,7 @@ These handlers run when Claude stops generating a response.
 | **Type**       | Blocking            |
 | **Event**      | Stop                |
 
-**Description:** Refuses a stop (rule `R-BRANCH-STOP-GUARD`) while a branch this session touched is dirty, holds commits no remote contains, or is merged but not deleted. The message lists the commands that finish, park or hand over each branch. It yields to the usage-pause and release gates and gives way after 3 blocks. `branches.stop_guard.mode: warn` only warns.
+**Description:** Refuses a stop (rule `R-BRANCH-STOP-GUARD`) while a branch this session touched is dirty, holds commits no remote contains, or is merged but not deleted. The message lists the commands that finish, park or hand over each branch. It yields to the usage-pause and release gates and gives way after 3 blocks; stops refused only on a branch the main thread touched in an unlocked `.claude/worktrees/` worktree with no work-queue record have a separate budget of 3, so they never spend the blocks owed to the session's other branches. `branches.stop_guard.mode: warn` only warns. A touched open branch past the dormancy block stage, or in an open pool over `branches.wip.cap` (branches on one tip counted once), refuses the stop only when `dormancy.mode` / `wip.mode` is `block`; `warn` reports it and allows the stop.
 
 **Config example:**
 

@@ -54,7 +54,11 @@ from typing import Any, Final
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.branch_keep import read_keeps
-from claude_code_hooks_daemon.core.branch_park import read_park_record
+from claude_code_hooks_daemon.core.branch_park import (
+    ParkRecord,
+    read_park_records,
+    walk_park_range,
+)
 from claude_code_hooks_daemon.core.branch_records import CREATOR_KEY
 from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.utils import git_sync
@@ -73,8 +77,9 @@ logger = logging.getLogger(__name__)
 
 #: Repository-relative path of the per-pair cache.
 CACHE_RELATIVE_PATH = Path("untracked/branch-inventory/cache.json")
-#: Containment never counts tags; a version-2 entry may hold a tag's vouch.
-_CACHE_VERSION = 4
+#: Containment never counts tags; a version-2 entry may hold a tag's vouch. Version 5:
+#: a park commit must carry the park writer's exact message (Plan 00617).
+_CACHE_VERSION = 5
 
 _SECONDS_PER_DAY = 86_400
 _REFS = "refs/"
@@ -89,11 +94,8 @@ _RECORD_END = "\n"
 _FIELD_COUNT = 9
 _UNIT = "\x1f"
 _GIT_TIMEOUT = Timeout.GIT_CONTEXT
-_BOUNDARY_MARK = "-"
 _OBJECT_NAME = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
-#: Trailers that mark a park (or unpark) commit.
-_PARK_TRAILER_KEYS = ("Parked-Reason", "Parked-By", "Unparked")
 _PARK_REASON_KEY = "Parked-Reason"
 
 _ISSUE_IN_NAME = re.compile(r"(?:^|[-_/])(?:issue|gh)-(\d+)(?=$|[-_/])", re.IGNORECASE)
@@ -124,15 +126,6 @@ _SHALLOW_REASON = (
 @dataclass(frozen=True)
 class HistoryNotFetched:
     """A shallow clone lacks the history needed to find the tip's merge base."""
-
-
-def _lines_of(output: str) -> list[str]:
-    """Non-empty newline-separated lines.
-
-    Not ``str.splitlines``: it also breaks on ``\\x1c``-``\\x1e``, and ``\\x1d``
-    separates trailer values in the log format below.
-    """
-    return [line for line in output.split("\n") if line]
 
 
 class BranchInventoryError(RuntimeError):
@@ -532,37 +525,6 @@ def _merged_refs(repo: Path, target_ref: str, remote: str) -> set[str]:
 # --- step 5: per-pair facts -------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class _Walk:
-    commits: list[str]
-    parks: set[str]
-    merges: int
-
-
-def _park_shas(log_output: str) -> _Walk | None:
-    """Range commits, the park commits and the merge count, from a ``--boundary`` log."""
-    trees: dict[str, str] = {}
-    in_range: list[tuple[str, str, list[str], str]] = []
-    for line in _lines_of(log_output):
-        parts = line.split(_UNIT)
-        if len(parts) != 5:
-            return None
-        mark, sha, tree, parents, trailers = parts
-        trees[sha] = tree
-        if mark != _BOUNDARY_MARK:
-            in_range.append((sha, tree, parents.split(), trailers))
-    parks = {
-        sha
-        for sha, tree, parents, trailers in in_range
-        if trailers.strip() and len(parents) == 1 and trees.get(parents[0]) == tree
-    }
-    return _Walk(
-        commits=[sha for sha, _tree, _parents, _trailers in in_range],
-        parks=parks,
-        merges=sum(1 for _sha, _tree, parents, _trailers in in_range if len(parents) > 1),
-    )
-
-
 def _shortstat_lines(repo: Path, *diff_args: str) -> int | None:
     result = run_git(repo, "diff", "--shortstat", *diff_args, timeout=_GIT_TIMEOUT)
     if result.returncode != 0:
@@ -610,18 +572,7 @@ def _pair_facts(
 
     None on any git failure; :class:`HistoryNotFetched` when a shallow clone lacks the fork point.
     """
-    keys = ",".join(f"key={key}" for key in _PARK_TRAILER_KEYS)
-    log = run_git(
-        repo,
-        "log",
-        "--boundary",
-        f"--format=%m%x1f%H%x1f%T%x1f%P%x1f%(trailers:{keys},valueonly,unfold,separator=%x1d)",
-        f"{target}..{tip}",
-        timeout=_GIT_TIMEOUT,
-    )
-    if log.returncode != 0:
-        return None
-    walked = _park_shas(log.stdout)
+    walked = walk_park_range(repo, target, tip, timeout=_GIT_TIMEOUT)
     if walked is None:
         return None
     ahead = len(walked.commits) - len(walked.parks)
@@ -654,29 +605,6 @@ def _pair_facts(
         lines=lines,
         parks=len(walked.parks),
     )
-
-
-def is_park_residue(repo: Path, tip: str, target: str) -> bool:
-    """Whether ``tip`` differs from ``target`` ONLY by park commits (at least one).
-
-    The one test for a park marker over work the target already holds: every commit
-    in ``target..tip`` is an empty commit carrying a ``Parked-*`` or ``Unparked``
-    trailer, so deleting the ref loses the marker and nothing else. False on any git
-    failure (fail closed) and for a tip with no park commit.
-    """
-    keys = ",".join(f"key={key}" for key in _PARK_TRAILER_KEYS)
-    log = run_git(
-        repo,
-        "log",
-        "--boundary",
-        f"--format=%m%x1f%H%x1f%T%x1f%P%x1f%(trailers:{keys},valueonly,unfold,separator=%x1d)",
-        f"{target}..{tip}",
-        timeout=_GIT_TIMEOUT,
-    )
-    if log.returncode != 0:
-        return False
-    walked = _park_shas(log.stdout)
-    return walked is not None and bool(walked.parks) and len(walked.commits) == len(walked.parks)
 
 
 # --- never-work names ---------------------------------------------------------------
@@ -956,6 +884,13 @@ class _Pass:
         self.deadline = time.monotonic() + config.sweep.budget_ms / 1000
         #: Why a (tip, target sha) pair went unmeasured this pass: the budget, or a git failure.
         self.unmeasured: dict[tuple[str, str], str] = {}
+        self._park_records: dict[str, ParkRecord] | None = None
+
+    def park_records(self) -> dict[str, ParkRecord]:
+        """Every readable park record, read once per pass (one git process)."""
+        if self._park_records is None:
+            self._park_records = read_park_records(self.repo)
+        return self._park_records
 
     def within_budget(self) -> bool:
         """Whether the sweep's time budget (``sweep.budget_ms``) has not yet run out."""
@@ -1289,7 +1224,7 @@ def _classify(
     own: dict[str, Any] = {"ahead": verdict.ahead, "lines": verdict.lines}
     if row.parked_reason is None and isinstance(local, _RefRow) and local.sha == row.sha:
         # A park with no trailer commit lives only in the record; its age is the record's.
-        standing = read_park_record(run.repo, name)
+        standing = run.park_records().get(name)
         if standing is not None and standing.sha == row.sha:
             facts["parked_reason"] = standing.reason
             facts["age_days"] = (context.moment - standing.parked_at) / _SECONDS_PER_DAY
