@@ -7864,3 +7864,19 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: the local proof paths read the commit list from `git log`; when it exits 0 but omits the tip line, they treat the tip as proven. No repository state is known that makes git do this.
 
 **Status**: ⬜ Open, low priority (hardening). Require the tip line in the output and fail closed otherwise.
+
+### N667 — past the scan cap, the `cd "$(git rev-parse --show-toplevel)"` idiom is placed by an assumption that persisted git config breaks
+
+**Source**: Plan 00614 second independent review (round-6 tip), defect D-C (Low-Medium; the branch is not merged, so main is unaffected until it is).
+
+**Evidence**: the round-6 branch excuses the top-level idiom from the incomplete-scan deny and places it at the ancestors of the command's directory. It demotes the idiom only when the same command sets `core.worktree`, names a `GIT_` variable, defines a function or alias, or changes `PATH`. Repository config persisted by an EARLIER call (`core.worktree`) makes `git rev-parse --show-toplevel` print a non-ancestor, and `cd "$(git rev-parse --show-toplevel)" && cat late` (also `grep -r` and a glob form) is then allowed past the cap; under the cap the same commands deny. Main allows them too.
+
+**Status**: ⬜ Open, belongs to Plan 00623 (it must land before the Plan 00614 branch merges). Read `core.worktree` and `GIT_WORK_TREE` at decision time, or keep the exemption only when the computed top level equals the project root or a checkout nested in it.
+
+### N668 — a path through `/proc/self/cwd` or `/dev/fd/..` is judged from the daemon's working directory
+
+**Source**: Plan 00614 second independent review, defect D-D (Low, no worse than main).
+
+**Evidence**: `cat /proc/self/cwd/flink`, `cat /proc/self/cwd/olink/i*`, `grep -r x /proc/self/cwd/olink` and `cat /dev/fd/../cwd/flink` are allowed on main and on the branch: the daemon's `/proc/self/cwd` is `/`, while the shell's is the project. `cd /proc/self/cwd && cat flink` denies on the branch.
+
+**Status**: ⬜ Open, low priority; belongs to Plan 00623. Treat a `/proc/self/`, `/proc/thread-self/` or `/dev/fd/` prefix as unplaceable (fail closed).
