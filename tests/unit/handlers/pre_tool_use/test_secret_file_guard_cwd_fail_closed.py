@@ -907,3 +907,254 @@ def test_no_odd_name_turns_a_protected_read_into_an_allow(
     """Property: whatever the name, the read beside it is judged and denied."""
     decision, text = _result(tree, shape.format(name=name))
     assert decision is Decision.DENY, text
+
+
+class _SortedScandir:
+    """``os.scandir`` with its entries in name order, so a test fixes which entry comes first."""
+
+    def __init__(self, path: Any) -> None:
+        with _REAL_SCANDIR(path) as entries:
+            self._entries = sorted(entries, key=lambda entry: entry.name)
+
+    def __enter__(self) -> list[os.DirEntry[str]]:
+        return self._entries
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+    def __iter__(self) -> Iterator[os.DirEntry[str]]:
+        return iter(self._entries)
+
+
+_REAL_SCANDIR = os.scandir
+
+
+@pytest.fixture()
+def sorted_scandir(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sfm.os, "scandir", _SortedScandir)
+
+
+class TestALinkLoopDoesNotEndTheComputedMoveScan:
+    """Independent review D1: one entry the scan cannot stat never ends the scan open.
+
+    ``DirEntry.is_dir`` follows a link and raises ELOOP on a loop. The raise ended
+    the listing of that directory, so every sibling after the loop went unqueued
+    and links below them were never judged from a computed cd.
+    """
+
+    @pytest.fixture()
+    def looped(self, tree: Tree, sorted_scandir: None) -> Tree:
+        # Named to sort first, so the loop is met before every sibling.
+        (tree.worktree / "aaloop1").symlink_to("aaloop2")
+        (tree.worktree / "aaloop2").symlink_to("aaloop1")
+        (tree.worktree / "zlate").mkdir()
+        (tree.worktree / "zlate" / "late").symlink_to(
+            os.path.relpath(tree.primary / _PROTECTED, tree.worktree / "zlate")
+        )
+        (tree.worktree / "zlate" / "latedir").symlink_to(
+            os.path.relpath(tree.primary / "sub", tree.worktree / "zlate")
+        )
+        sfm.reset_link_scans()
+        return tree
+
+    def test_the_scan_still_finds_every_sibling_of_the_loop(self, looped: Tree) -> None:
+        scan = sfm.scan_project_links(str(looped.worktree))
+        assert scan.complete
+        assert str(looped.worktree / "zlate") in scan.directories
+        assert str(looped.worktree / "zlate" / "latedir") in scan.directories
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd $(printf zlate); cat late",
+            "cd $(printf zlate); grep -r DUMMY latedir",
+            "cd $(printf zlate) && head -n1 late",
+        ],
+    )
+    def test_a_read_after_a_computed_cd_is_denied(self, looped: Tree, command: str) -> None:
+        assert _decision(looped, command) is Decision.DENY
+
+    def test_a_plain_read_after_a_computed_cd_stays_allowed(self, looped: Tree) -> None:
+        assert _decision(looped, "cd $(printf clean); cat plain.txt") is Decision.ALLOW
+
+    def test_a_glob_cd_beside_a_loop_still_matches(self, looped: Tree) -> None:
+        assert sfm.expand_directory_glob(str(looped.worktree), "inn*") == [
+            str(looped.worktree / "inner")
+        ]
+
+    def test_an_unstatable_link_marks_the_scan_incomplete(
+        self, looped: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Any error other than a loop leaves the link's kind unknown: the scan is incomplete."""
+        real_is_dir = os.DirEntry.is_dir
+
+        class _Refusing:
+            def __init__(self, path: Any) -> None:
+                self._inner = _SortedScandir(path)
+
+            def __enter__(self) -> list[Any]:
+                return [_RefusedEntry(entry) for entry in self._inner.__enter__()]
+
+            def __exit__(self, *_exc: object) -> None:
+                return None
+
+        class _RefusedEntry:
+            def __init__(self, entry: os.DirEntry[str]) -> None:
+                self._entry = entry
+                self.name = entry.name
+                self.path = entry.path
+
+            def is_symlink(self) -> bool:
+                return self._entry.is_symlink()
+
+            def is_dir(self, *, follow_symlinks: bool = True) -> bool:
+                if follow_symlinks and self._entry.name == "latedir":
+                    raise PermissionError(13, "synthetic refusal")
+                return real_is_dir(self._entry, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(sfm.os, "scandir", _Refusing)
+        sfm.reset_link_scans()
+        assert not sfm.scan_project_links(str(looped.worktree)).complete
+
+
+class TestALinkScanPastItsCapFailsClosed:
+    """Independent review D2: a scan that stops at its cap denies; it never logs and allows."""
+
+    @pytest.fixture()
+    def wide(self, tree: Tree, sorted_scandir: None, monkeypatch: pytest.MonkeyPatch) -> Tree:
+        monkeypatch.setattr(sfm, "LINK_SCAN_DIRECTORY_CAP", 8)
+        top = tree.worktree / "w"
+        top.mkdir()
+        for number in range(12):
+            (top / f"w{number:02d}").mkdir()
+        last = top / "w11"
+        (last / "wl").symlink_to(os.path.relpath(tree.primary / _PROTECTED, last))
+        (last / "wdl").symlink_to(os.path.relpath(tree.primary / "sub", last))
+        sfm.reset_link_scans()
+        return tree
+
+    def test_the_scan_reports_itself_incomplete(self, wide: Tree) -> None:
+        assert not sfm.scan_project_links(str(wide.worktree)).complete
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd $(printf w/w11); cat wl",
+            "cd $(printf w/w11); grep -r DUMMY wdl",
+            "cd $(printf w/w11); cat wdl/*",
+            "cd w/w1? && cat wl",
+        ],
+    )
+    def test_a_read_after_a_computed_cd_is_denied(self, wide: Tree, command: str) -> None:
+        decision, text = _result(wide, command)
+        assert decision is Decision.DENY, text
+
+    def test_too_many_directory_links_mark_the_scan_incomplete(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sfm, "LINK_SCAN_DIRECTORY_CAP", 64)
+        for number in range(70):
+            (tree.worktree / f"dl{number:02d}").symlink_to("clean")
+        sfm.reset_link_scans()
+        assert not sfm.scan_project_links(str(tree.worktree)).complete
+
+    def test_a_complete_scan_keeps_the_ordinary_computed_cd_allowed(self, tree: Tree) -> None:
+        sfm.reset_link_scans()
+        assert sfm.scan_project_links(str(tree.worktree)).complete
+        assert _decision(tree, 'cd "$(git rev-parse --show-toplevel)" && ls') is Decision.ALLOW
+
+
+class TestChdirOptionSpellings:
+    """Independent review D3: a clustered short option or an abbreviated long one still moves."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "env -iC inner cat ilink",
+            "env -iCinner cat ilink",
+            "env -0C inner cat ilink",
+            "env -vC inner cat ilink",
+            "env -iC plink cat .e*",
+            "env --chd=inner cat ilink",
+            "env --ch inner cat ilink",
+            "env --c=inner cat ilink",
+            "sudo -nD inner cat ilink",
+            "sudo -bD inner cat ilink",
+            "sudo -nDinner cat ilink",
+            "sudo -nD plink cat .e*",
+            "sudo --chd=inner cat ilink",
+            "/usr/bin/env -iC inner cat ilink",
+            "nohup env -iC inner cat ilink",
+        ],
+    )
+    def test_denied(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command", ["env -iC plink grep -r DUMMY .", "sudo -nD plink grep -r DUMMY ."]
+    )
+    def test_a_search_from_a_clustered_move_denied(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+    @pytest.mark.parametrize("command", ["env -iC clean cat plain.txt", "env --chd=clean ls"])
+    def test_a_harmless_move_stays_allowed(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.ALLOW
+
+
+class TestExecBeforeAChdirCommand:
+    """Independent review D4: ``exec`` runs the next word as the command, like ``command``."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "exec env -C inner cat ilink",
+            "exec env -C plink cat .e*",
+            "exec sudo -D inner cat ilink",
+            "exec -a name env -C inner cat ilink",
+            "exec -c env -C inner cat ilink",
+            "exec -cl env -C inner cat ilink",
+        ],
+    )
+    def test_denied(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command", ["exec env -C plink grep -r DUMMY .", "exec -a x env -C plink grep -r DUMMY ."]
+    )
+    def test_a_search_behind_exec_denied(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+
+class TestALinkMadeBetweenTwoCallsIsSeen:
+    """Independent review D5: the link scan is never reused across tool calls."""
+
+    def test_the_next_call_sees_a_new_link(self, tree: Tree) -> None:
+        command = "cd $(printf clean); cat late"
+        assert _decision(tree, command) is Decision.ALLOW
+        (tree.worktree / "clean" / "late").symlink_to(
+            os.path.relpath(tree.primary / _PROTECTED, tree.worktree / "clean")
+        )
+        assert _decision(tree, command) is Decision.DENY
+
+
+class TestGrepToolWithNoPathFromALinkedCwd:
+    """Independent review D6: a Grep with no ``path`` searches the hook cwd, which may be a link out."""
+
+    @staticmethod
+    def _grep(cwd: Path) -> Decision:
+        hook_input: dict[str, Any] = {
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "DUMMY"},
+            "cwd": str(cwd),
+        }
+        handler = SecretFileGuardHandler()
+        if not handler.matches(hook_input):
+            return Decision.ALLOW
+        return handler.handle(hook_input).decision
+
+    @pytest.mark.parametrize("cwd", ["plink", "dlink", "deep/idlink", "own"])
+    def test_denied(self, tree: Tree, cwd: str) -> None:
+        assert self._grep(tree.worktree / cwd) is Decision.DENY
+
+    def test_a_cwd_with_nothing_protected_stays_allowed(self, tree: Tree) -> None:
+        assert self._grep(tree.worktree / "clean") is Decision.ALLOW
