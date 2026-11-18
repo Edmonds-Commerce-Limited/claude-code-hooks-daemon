@@ -16,6 +16,8 @@ hook-path cleanup).
 
 from __future__ import annotations
 
+import hashlib
+import json
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -24,7 +26,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
-from claude_code_hooks_daemon.core import branch_park
+from claude_code_hooks_daemon.core import branch_inventory, branch_park
 from claude_code_hooks_daemon.core.branch_park import is_content_free
 from claude_code_hooks_daemon.core.remote_branch_proof import prove_remote_merged
 from claude_code_hooks_daemon.daemon import branch_safety
@@ -428,6 +430,210 @@ class TestReplaceRefsAndGraftsAreIgnored:
         assert _verdicts(repo, "feat") == _all(False)
 
 
+# --- a forged commit-graph (Plan 00622 round 3, R2-1) ---------------------------------------
+
+#: One commit-graph CDAT record: tree oid (20), parent 1 index (4), parent 2 index (4),
+#: generation and time (8). SHA-1 repositories only, which is what these fixtures make.
+_CDAT_RECORD = 36
+_OID = 20
+
+
+def _graph_file(objects: Path) -> Path:
+    return objects / "info" / "commit-graph"
+
+
+def _graph_chunks(data: bytearray) -> dict[bytes, int]:
+    chunks: dict[bytes, int] = {}
+    for index in range(data[6] + 1):
+        offset = 8 + index * 12
+        chunks[bytes(data[offset : offset + 4])] = int.from_bytes(
+            data[offset + 4 : offset + 12], "big"
+        )
+    return chunks
+
+
+def _graph_position(data: bytearray, sha: str) -> int:
+    chunks = _graph_chunks(data)
+    count = int.from_bytes(data[chunks[b"OIDF"] + 1020 : chunks[b"OIDF"] + 1024], "big")
+    lookup = chunks[b"OIDL"]
+    wanted = bytes.fromhex(sha)
+    for position in range(count):
+        if bytes(data[lookup + position * _OID : lookup + (position + 1) * _OID]) == wanted:
+            return position
+    raise LookupError(sha)
+
+
+def _forge_graph(
+    objects: Path, victim: str, *, tree: str | None = None, parent: str | None = None
+) -> None:
+    """Rewrite ``victim``'s commit-graph record (its tree, or its first parent) in place."""
+    path = _graph_file(objects)
+    data = bytearray(path.read_bytes())
+    record = _graph_chunks(data)[b"CDAT"] + _graph_position(data, victim) * _CDAT_RECORD
+    if tree is not None:
+        data[record : record + _OID] = bytes.fromhex(tree)
+    if parent is not None:
+        position = _graph_position(data, parent)
+        data[record + _OID : record + _OID + 4] = position.to_bytes(4, "big")
+    data[-_OID:] = hashlib.sha1(bytes(data[:-_OID]), usedforsecurity=False).digest()
+    path.write_bytes(bytes(data))
+
+
+def _walk(repo: Path, range_spec: str) -> str:
+    """What plain git (graph enabled) reports for the range, to prove a forgery is live."""
+    return _git(repo, "log", "--boundary", "--format=%H %T %P", range_spec)
+
+
+def _content_then_undo(repo: Path, message: str) -> tuple[str, str]:
+    """C adds a file only this branch holds; the tip R removes it, so R's tree is main's."""
+    _branch(repo, "feat")
+    (repo / "secret.txt").write_text("only-here\n", encoding="utf-8")
+    _git(repo, "add", "secret.txt")
+    _git(repo, "commit", "-q", "--cleanup=verbatim", "-m", message)
+    content = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "rm", "-q", "secret.txt")
+    _git(repo, "commit", "-q", "--cleanup=verbatim", "-m", message)
+    _publish(repo, "feat")
+    return content, _git(repo, "rev-parse", f"{content}~1^{{tree}}")
+
+
+class TestACommitGraphIsIgnored:
+    """R2-1: a commit reached through a parent is filled in from the commit-graph.
+
+    A hand-forged graph record can make a content commit below the tip read as empty,
+    or drop it from the range. Every proof must read the stored commit objects.
+    """
+
+    @pytest.mark.parametrize("message", ["add secret", _PARK_WRITER], ids=["any", "park-writer"])
+    def test_a_content_commit_below_the_tip_forged_empty(self, repo: Path, message: str) -> None:
+        content, parent_tree = _content_then_undo(repo, message)
+        _git(repo, "commit-graph", "write", "--reachable")
+        _forge_graph(repo / ".git" / "objects", content, tree=parent_tree)
+        assert f"{content} {parent_tree} " in _walk(repo, "main..feat")
+        assert _verdicts(repo, "feat") == _all(False)
+
+    def test_an_inherited_test_variable_cannot_re_enable_the_graph(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``GIT_TEST_COMMIT_GRAPH=1`` overrides ``core.commitGraph=false``."""
+        content, parent_tree = _content_then_undo(repo, "add secret")
+        _git(repo, "commit-graph", "write", "--reachable")
+        _forge_graph(repo / ".git" / "objects", content, tree=parent_tree)
+        monkeypatch.setenv("GIT_TEST_COMMIT_GRAPH", "1")
+        assert f"{content} {parent_tree} " in _git(
+            repo,
+            "-c",
+            "core.commitGraph=false",
+            "log",
+            "--boundary",
+            "--format=%H %T %P",
+            "main..feat",
+        )
+        assert _verdicts(repo, "feat") == _all(False)
+
+    def test_a_forged_graph_in_an_alternate_object_store(self, repo: Path) -> None:
+        content, parent_tree = _content_then_undo(repo, "add secret")
+        store = repo.parent / "alternate.git"
+        _git(repo.parent, "clone", "-q", "--bare", str(repo), str(store))
+        _git(store, "commit-graph", "write", "--reachable")
+        _forge_graph(store / "objects", content, tree=parent_tree)
+        alternates = repo / ".git" / "objects" / "info" / "alternates"
+        alternates.write_text(f"{store / 'objects'}\n", encoding="utf-8")
+        assert not _graph_file(repo / ".git" / "objects").exists()
+        assert f"{content} {parent_tree} " in _walk(repo, "main..feat")
+        assert _verdicts(repo, "feat") == _all(False)
+
+    def test_a_forged_parent_below_the_tip_drops_a_content_commit(self, repo: Path) -> None:
+        """X adds a file, Y removes it, Z is empty; the graph gives Y main's tip as parent."""
+        content, _parent_tree = _content_then_undo(repo, "add secret")
+        _git(repo, "checkout", "-q", "feat")
+        _empty(repo, "note")
+        _publish(repo, "feat")
+        undo = _git(repo, "rev-parse", "feat~1")
+        main_tip = _git(repo, "rev-parse", "main")
+        _git(repo, "commit-graph", "write", "--reachable")
+        _forge_graph(repo / ".git" / "objects", undo, parent=main_tip)
+        assert content not in _walk(repo, "main..feat")
+        assert _verdicts(repo, "feat") == _all(False)
+
+
+class TestTheStoredObjectReadFailsClosed:
+    """The walk's emptiness is confirmed from the stored commits; any doubt is unproven."""
+
+    def test_a_failed_object_read_is_none(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _plain_unpark_over_merged(repo)
+        tip = _git(repo, "rev-parse", "feat")
+        monkeypatch.setattr(branch_park, "read_blobs", lambda *_a, **_k: None)
+        assert is_content_free(repo, tip, "main") is None
+
+    def test_a_missing_object_is_none(self, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _plain_unpark_over_merged(repo)
+        tip = _git(repo, "rev-parse", "feat")
+        monkeypatch.setattr(branch_park, "read_blobs", lambda *_a, **_k: {})
+        assert is_content_free(repo, tip, "main") is None
+
+    def test_a_stored_tree_the_walk_did_not_report_is_none(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _plain_unpark_over_merged(repo)
+        tip = _git(repo, "rev-parse", "feat")
+        real = branch_park.read_blobs
+
+        def other_tree(directory: Path, shas: list[str], **kwargs: Any) -> object:
+            stored = real(directory, shas, **kwargs)
+            assert stored is not None
+            body = stored[tip]
+            stored[tip] = body.replace(body[5:45], b"0" * 40, 1)
+            return stored
+
+        monkeypatch.setattr(branch_park, "read_blobs", other_tree)
+        assert is_content_free(repo, tip, "main") is None
+
+    def test_every_proof_refuses_when_the_object_read_fails(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _plain_unpark_over_merged(repo)
+        real = branch_park.read_blobs
+        monkeypatch.setattr(branch_park, "read_blobs", lambda *_a, **_k: None)
+        assert _verdicts(repo, "feat") == _all(False)
+        monkeypatch.setattr(branch_park, "read_blobs", real)
+        assert _verdicts(repo, "feat") == _all(True)
+
+
+class TestAProofCachedUnderAnOlderRuleIsNotHonoured:
+    """R2-2: a proof an earlier rule cached is never read once the rule changes."""
+
+    def test_a_stale_v4_empty_commits_only_entry_for_a_content_branch(self, repo: Path) -> None:
+        _branch(repo, "feat")
+        _write(repo, "secret.txt", "only-here\n", "add secret")
+        _publish(repo, "feat")
+        tip = _git(repo, "rev-parse", "origin/feat")
+        main_tip = _git(repo, "rev-parse", "origin/main")
+        cache = repo / branch_inventory.CACHE_RELATIVE_PATH
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        document = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else {}
+        document.update(
+            {
+                "version": branch_inventory._CACHE_VERSION,
+                "pairs": document.get("pairs", {}),
+                "containment": document.get("containment", {}),
+                "park_counts": document.get("park_counts", {}),
+                "proofs": {f"v4:{tip}:{main_tip}": branch_safety.TIER_EMPTY_COMMITS_ONLY},
+            }
+        )
+        cache.write_text(json.dumps(document), encoding="utf-8")
+        remote = prove_remote_merged(
+            repo, "origin", ["feat"], "main", BranchesConfig(default="main")
+        )
+        assert remote.tips == {}
+        guard = _remote_delete_note(
+            "git push origin --delete feat", repo, BranchesConfig(default="main")
+        )
+        assert guard is not None
+
+
 # --- the rule itself, and failure ---------------------------------------------------------
 
 
@@ -467,7 +673,7 @@ class TestContentFreeRule:
         real = branch_park.run_git
 
         def garbled(directory: Path, *args: str, **kwargs: Any) -> object:
-            if args[:2] == ("log", "--boundary"):
+            if _is_walk(args):
                 return subprocess.CompletedProcess(args, 0, "not\x1fa walk line\n", "")
             return real(directory, *args, **kwargs)
 
@@ -499,10 +705,15 @@ class TestContentFreeRule:
             spawned.append(args)
             return real(directory, *args, **kwargs)
 
+        def no_object_read(*_args: Any, **_kwargs: Any) -> object:
+            raise AssertionError("a cached proof must read no commit objects")
+
         monkeypatch.setattr(branch_park, "run_git", spy)
+        monkeypatch.setattr(branch_park, "read_blobs", no_object_read)
         second = prove_remote_merged(repo, "origin", ["feat"], "main", config)
         assert second.evidence == {"feat": branch_safety.TIER_EMPTY_COMMITS_ONLY}
-        assert not [args for args in spawned if args[:2] == ("log", "--boundary")]
+        assert spawned
+        assert not [args for args in spawned if _is_walk(args)]
 
     def test_an_integration_line_with_an_empty_commit_stays_refused(self, repo: Path) -> None:
         """A line is proven by ancestry of the default only; empty commits never prove one."""
@@ -520,11 +731,16 @@ class TestContentFreeRule:
         assert not local.is_safe
 
 
+def _is_walk(args: tuple[str, ...]) -> bool:
+    """Whether a ``run_git`` call is the range walk, whatever global options precede it."""
+    return "log" in args and "--boundary" in args
+
+
 def _failing_log(real: Callable[..., subprocess.CompletedProcess[str]]) -> Callable[..., object]:
     """``run_git`` with every ``git log --boundary`` (the range walk) failing."""
 
     def run(directory: Path, *args: str, **kwargs: Any) -> object:
-        if args[:2] == ("log", "--boundary"):
+        if _is_walk(args):
             return subprocess.CompletedProcess(args, 128, "", "fatal: simulated")
         return real(directory, *args, **kwargs)
 
