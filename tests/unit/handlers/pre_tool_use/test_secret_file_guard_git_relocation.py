@@ -287,3 +287,52 @@ class TestATildeDashCValue:
         elsewhere.mkdir()
         monkeypatch.setenv("HOME", str(elsewhere))
         assert _verdict(repo, "git -C ~ grep --no-index -e .") is Decision.ALLOW
+
+
+# Plan 00618 S-1 second review F5: bash expands `~+` to $PWD, and `~-`/`~N`/`~+N`/`~-N` to
+# directories this hook cannot see ($OLDPWD, the directory stack). `~+` is placed at the
+# shell's directory; the others fail closed. None of them may crash into an advisory allow.
+_DIRECTORY_STACK_TILDE_READS = [
+    "git -C ~+/deep grep --no-index -e .",
+    "git -C ~+ grep --no-index -e .",
+    "git -C ~+/ grep --untracked -e .",
+    "git -C sub -C ~+/deep grep --no-index -e .",
+    "git -C ~- grep --no-index -e .",
+    "git -C ~-/deep grep --no-index -e .",
+    "git -C ~+1 grep --no-index -e .",
+    "git -C ~-1 grep --no-index -e .",
+    "git -C ~2 grep --no-index -e .",
+    "git --work-tree=~- grep -e .",
+    "cd sub && git -C ~+/../deep grep --no-index -e .",
+    "grep -r . ~+/deep",
+    "grep -r . ~+",
+    "rg . ~+",
+    "grep -r . ~-",
+    "grep -r . ~-/deep",
+    "rg . ~+2",
+]
+
+
+class TestDirectoryStackTildes:
+    @pytest.mark.parametrize("command", _DIRECTORY_STACK_TILDE_READS)
+    def test_denied_outside_a_repository(self, project: Path, command: str) -> None:
+        assert _verdict(project, command) is Decision.DENY, command
+
+    @pytest.mark.parametrize("command", _DIRECTORY_STACK_TILDE_READS)
+    def test_denied_in_a_repository(self, repo: Path, command: str) -> None:
+        assert _verdict(repo, command) is Decision.DENY, command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -C ~+/sub grep -e hello",
+            "git -C ~+/sub grep --no-index -e hello",
+            "grep -r hello ~+/sub",
+        ],
+    )
+    def test_the_shell_directory_is_placed_not_guessed(self, repo: Path, command: str) -> None:
+        assert _verdict(repo, command) is Decision.ALLOW, command
+
+    def test_tilde_plus_follows_a_cd(self, repo: Path) -> None:
+        assert _verdict(repo, "cd deep && git -C ~+ grep --no-index -e .") is Decision.DENY
+        assert _verdict(repo, "cd sub && git -C ~+ grep --no-index -e hello") is Decision.ALLOW

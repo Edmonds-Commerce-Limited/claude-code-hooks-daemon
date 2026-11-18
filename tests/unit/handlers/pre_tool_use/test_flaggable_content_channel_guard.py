@@ -771,6 +771,75 @@ class TestACoreWorktreeOverrideDenies:
         assert "no fixed directory" in reason
 
 
+class TestShellMovesAndDirectoryStackTildes:
+    """Plan 00618 S-1 second review, F1 and F2.
+
+    F1: ``Path('~+').expanduser()`` raised, so these crashed. ``~+`` is bash's
+    $PWD and is placed there; ``~-``/``~N`` name directories the hook cannot see
+    and fail closed. F2: a placed ``-C`` must follow a ``cd`` earlier in the
+    command, an ``xargs`` replacement token, and a ``-C`` above the project.
+    """
+
+    @pytest.mark.parametrize(
+        ("command", "cwd"),
+        [
+            ("git -C ~+ grep foo", _ROOT),
+            ("git -C ~+/tests grep foo", _ROOT),
+            ("git -C ~- grep foo", _ROOT),
+            ("git -C ~-/tests grep foo", _ROOT),
+            ("git -C ~+1 grep foo", _ROOT),
+            ("git -C ~2 grep foo", _ROOT),
+            ("git -C src -C ~+/tests grep foo", _ROOT),
+            ("git -C ~+/.. grep foo", f"{_ROOT}/src"),
+            ("grep -rn foo ~+", _ROOT),
+            ("grep -rn foo ~+/tests", _ROOT),
+            ("grep -rn foo ~-", _ROOT),
+            ("rg foo ~-/x", _ROOT),
+            ("cd src && git -C ../tests grep foo", _ROOT),
+            ("cd src && git -C ../tests grep --no-index foo", _ROOT),
+            ("( cd src; git -C ../tests grep foo )", _ROOT),
+            ("pushd src >/dev/null && git -C ../tests grep foo", _ROOT),
+            ("cd src && git -C ~+/../tests grep foo", _ROOT),
+            ("echo tests | xargs -I% git -C % grep foo", _ROOT),
+            ("echo tests | xargs -I @ git -C @ grep foo", _ROOT),
+            ("echo tests | xargs --replace git -C {} grep foo", _ROOT),
+            ("git -C .. grep --no-index foo", _ROOT),
+            ("git -C / grep --no-index foo", _ROOT),
+            ("git -C ../.. grep --no-index foo", f"{_ROOT}/src"),
+        ],
+    )
+    def test_denied(
+        self, flagged_handler: FlaggableContentChannelGuardHandler, command: str, cwd: str
+    ) -> None:
+        result = flagged_handler.handle(_bash_in(command, cwd=cwd))
+        assert result.decision == Decision.DENY, command
+
+    @pytest.mark.parametrize(
+        ("command", "cwd"),
+        [
+            ("git -C ~+/src grep foo", _ROOT),
+            ("grep -rn foo ~+/src", _ROOT),
+            ("grep -rn foo ~+", f"{_ROOT}/src"),
+            ("cd tests && git -C ../src grep foo", _ROOT),
+            ("cd src && git -C inner grep foo", _ROOT),
+            ("git -C .. grep --no-index foo -- elsewhere", _ROOT),
+            ("echo x | xargs git -C src grep foo", _ROOT),
+        ],
+    )
+    def test_placed_outside_the_flagged_tree_is_allowed(
+        self, flagged_handler: FlaggableContentChannelGuardHandler, command: str, cwd: str
+    ) -> None:
+        assert flagged_handler.matches(_bash_in(command, cwd=cwd)) is False, command
+
+    def test_a_cd_the_guard_cannot_place_warns(
+        self,
+        flagged_handler: FlaggableContentChannelGuardHandler,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        result = flagged_handler.handle(_bash_in("cd $X && git -C src grep foo"))
+        assert_unknown_verdict(result, caplog, "flaggable_content_channel_guard")
+
+
 class TestNoFlaggablePathsConfigured:
     @pytest.mark.parametrize(
         "command",
