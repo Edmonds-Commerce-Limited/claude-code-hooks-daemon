@@ -591,6 +591,26 @@ class TestTheStoredObjectReadFailsClosed:
         monkeypatch.setattr(branch_park, "read_blobs", other_tree)
         assert is_content_free(repo, tip, "main") is None
 
+    def test_a_stored_parent_the_walk_did_not_report_is_none(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Isolates the parent comparison: with the graph off the walk itself is truthful."""
+        _plain_unpark_over_merged(repo)
+        tip = _git(repo, "rev-parse", "feat")
+        parent = _git(repo, "rev-parse", "feat~1")
+        real = branch_park.read_blobs
+
+        def other_parent(directory: Path, shas: list[str], **kwargs: Any) -> object:
+            stored = real(directory, shas, **kwargs)
+            assert stored is not None
+            old = f"parent {parent}\n".encode()
+            assert old in stored[tip]
+            stored[tip] = stored[tip].replace(old, b"parent " + b"0" * 40 + b"\n", 1)
+            return stored
+
+        monkeypatch.setattr(branch_park, "read_blobs", other_parent)
+        assert is_content_free(repo, tip, "main") is None
+
     def test_every_proof_refuses_when_the_object_read_fails(
         self, repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

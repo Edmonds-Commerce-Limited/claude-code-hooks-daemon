@@ -6,7 +6,8 @@ Commits:
 
 - RED: `0fff8d932`
 - GREEN: `164ba4986`
-- journal and this report: the commit after those
+- journal: `0098f2bb0`
+- the stored-parent isolation test and this report's corrections: the commit after those
 
 Not merged to main.
 
@@ -36,13 +37,22 @@ Why only the candidates' parents are compared: a shallow clone's cut commit is p
 
 The comment at `utils/git_repo.py:59` now says the replace and graft pin does NOT cover the commit-graph, and names where that is handled.
 
+**Limit of the guarantee.** Trees, and the parents of empty candidates, come from the stored objects. Which commits are in `target..tip` at all still rests on the walk, which is truthful because of the two pins and nothing more.
+
+The ancestry reads behind the other tiers are not pinned against the commit-graph. These are `merge-base`, `--is-ancestor` and the net-change route. They are out of scope here, and the reviewer's `cg_parent_merged` probe shows git's generation-number check rejecting a forged parent there.
+
 ## R2-2: `PROOF_ALGORITHM_VERSION` v4 to v5
 
 The comment beside it records what v5 changed: emptiness is now read from the stored objects only.
 
 ## Tests
 
-All of these are in `tests/unit/core/test_empty_commit_proof.py`. Every one was RED before the fix, failing on behaviour: all four paths allowed the delete, or the stale entry was honoured.
+All of these are in `tests/unit/core/test_empty_commit_proof.py`. All were RED before the fix, in two ways:
+
+- The commit-graph and stale-cache tests failed on behaviour: all four paths allowed the delete, or the stale entry was honoured.
+- The fail-closed and cached-proof tests failed on the missing `branch_park.read_blobs` attribute.
+
+The RED commit was made with `--no-verify`, because its tests fail by design.
 
 **`TestACommitGraphIsIgnored`.** Each test first asserts that plain git shows the forgery, then asserts that every path refuses.
 
@@ -55,7 +65,8 @@ All of these are in `tests/unit/core/test_empty_commit_proof.py`. Every one was 
 
 - a failed read;
 - a missing object;
-- a stored tree the walk did not report.
+- a stored tree the walk did not report;
+- a stored parent the walk did not report. This one isolates the parent comparison, since with the graph off the walk is already truthful. It was added after GREEN, in the report commit.
 
 A further test shows every proof refusing and then proving again once the read recovers.
 
@@ -71,7 +82,7 @@ A further test shows every proof refusing and then proving again once the read r
 - `_CALLS_PER_BRANCH` is now 6, up from 5, for the one batch read per cold walk. It measured 49 against the old budget of 47.
 - The subcommand spy skips global `-c` options, so `"log" not in calls` still bites.
 
-**Targeted run:** 13 file groups, 730 passed:
+**Targeted run:** 13 file groups, 730 passed at GREEN. After the stored-parent test was added, `test_empty_commit_proof` was re-run alone: 41 passed. The groups:
 
 - `test_empty_commit_proof`, `test_merge_proof_shapes` and `test_park_commit_classifier`;
 - `test_branch_inventory` and `test_branch_inventory_no_merge_base`;
@@ -107,6 +118,13 @@ Totals:
   - `r3-cg-tree-below-tip-park-msg`, which main passes as `park-carried`.
 - **6 ALLOWs remain on N after the change.** They are the N660 whitespace patch-equivalent shapes, local and local-hook, identical on main. That is why `compare` exits 1. They are already ledgered as older than this plan.
 
+Three of the four r3 shapes are DENY on main too, so the comparison against main alone does not show that the forgery was live. To show it, the corpus was also run with round 2's `src` (`git archive 43fb88b57`, output `untracked/scratch/r3/corpus-r2src.json`), where all four r3 shapes ALLOW on every path:
+
+- `r3-cg-tree-below-tip`, `r3-cg-alternate-store` and `r3-cg-parent-below-tip` gave `empty-commits-only` and the guard ALLOW.
+- `r3-cg-tree-below-tip-park-msg` gave `park-carried`.
+
+A forged parent below the tip was therefore a further live variant of R2-1 on round 2's code. The review had probed a parent forgery only at main's tip. All four are DENY on the final code.
+
 ## Reviewer probes, re-run
 
 All runs used fresh work directories under `untracked/scratch/r3/`, with branch and main side by side.
@@ -125,7 +143,12 @@ All runs used fresh work directories under `untracked/scratch/r3/`, with branch 
 | `probes3`                                                               | identical             | identical                                                                |
 | `p660`                                                                  | identical             | identical (N660, older)                                                  |
 
-Every row here was re-run by this round against the final code; the reviewer had observed `empty-commits-only` on the branch for the first two R2-1 rows and `park-carried` for `cgpark`.
+This round re-ran every branch row against the final code:
+
+- `probes5`, `cgpark` and `probes4 all` went into `out-branch-v2/`.
+- `probes.py`, `probes3`, `p660`, the argv-independent `probes2`, and the seed and read pair went into `out-final/`. Each of these is identical to the first pass.
+
+On round 2's code the reviewer had observed `empty-commits-only` on the branch for the first two R2-1 rows, and `park-carried` for `cgpark`.
 
 **Caveat on `probes2.py`.** Its fail-injection matches the walk by `args[:1] == ("log",)`, which no longer sees the walk now that `-c` precedes `log`. Its log-failure rows therefore injected nothing and read `empty-commits-only` on the remote path; the probe broke, not the code.
 
