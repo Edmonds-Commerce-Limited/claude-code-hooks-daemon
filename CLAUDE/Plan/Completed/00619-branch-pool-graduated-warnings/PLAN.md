@@ -1,6 +1,6 @@
 # Plan 00619: branch pool graduated warnings
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-18
 **Owner**: joseph
 **Priority**: High
@@ -39,7 +39,7 @@ This plan adds a warning ladder driven by the share of each pool's cap in use: a
 - [x] ✅ **Task 1.2a**: Decide and test the 100 percent base for the open-work pool: the block point (cap plus `wip.creation_grace`), not the nominal cap.
 - [x] ✅ **Task 1.3**: Emit the warnings with the branch and command named. Session start and the stop guard already report pressure; there is no prompt-submit branch handler and no per-tool-call surface besides the creation guard, so the every-call and every-prompt warning needs new handlers (a prompt-submit handler and a pre-tool-use advisory), each test-first.
 - [x] ✅ **Task 1.5**: Correct the stale `--allow-unproven` mention in the handler reference guide.
-- [ ] ⬜ **Task 1.4**: Independent review, targeted QA, CI green, merge, release note.
+- [x] ✅ **Task 1.4**: Independent review, targeted QA, CI green, merge, release note.
 
 ### Phase 2: Confirm the remaining peer claim
 
@@ -47,10 +47,10 @@ This plan adds a warning ladder driven by the share of each pool's cap in use: a
 
 ## Success Criteria
 
-- [ ] The ladder test table passes and was committed red first.
-- [ ] A session at 90 percent sees the warning on every call and prompt.
-- [ ] No guard denies or allows anything it did not before (loosening and tightening review).
-- [ ] A release note records the ladder in the pending-release holding area (CLAUDE/UPGRADES/UNRELEASED/release-notes/).
+- [x] The ladder test table passes and was committed red first.
+- [x] A session at 90 percent sees the warning on every call and prompt.
+- [x] No guard denies or allows anything it did not before (loosening and tightening review).
+- [x] A release note records the ladder in the pending-release holding area (CLAUDE/UPGRADES/UNRELEASED/release-notes/001-branch-pool-warning-ladder.md).
 
 ## Delivery & Milestones
 
