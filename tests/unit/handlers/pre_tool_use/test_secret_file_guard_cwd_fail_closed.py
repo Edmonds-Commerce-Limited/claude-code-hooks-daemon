@@ -25,6 +25,7 @@ from unittest.mock import patch
 
 import pytest
 from tests.indexed_project import index_project
+from tests.load_scaling import scaled_seconds
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
@@ -755,7 +756,7 @@ class TestManyFailedDirectoryChangesBesideASearch:
         moves = " && ".join(f"cd r{number}" for number in range(self._CDS))
         start = time.monotonic()
         decision = _decision(tree, f"{moves} && grep -r DUMMY own")
-        assert time.monotonic() - start < 3.0
+        assert time.monotonic() - start < scaled_seconds(3.0)
         assert decision is Decision.DENY
 
     def test_a_search_past_the_cap_still_sees_a_link_out(
@@ -850,6 +851,21 @@ class TestWrappedChdirCommand:
         ],
     )
     def test_wrapped_chdir_denied(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "/usr/bin/env -C inner cat ilink",
+            "/usr/bin/env --chdir=inner cat ilink",
+            "/usr/bin/sudo -D inner cat ilink",
+            "/bin/tar -C inner -chf - ilink",
+            "/usr/bin/git -C inner diff --no-index ilink /dev/null",
+            "nice /usr/bin/env -C inner cat ilink",
+            "/usr/bin/env -C inner grep -r DUMMY .",
+        ],
+    )
+    def test_a_path_qualified_chdir_command_denied(self, tree: Tree, command: str) -> None:
         assert _decision(tree, command) is Decision.DENY
 
 
