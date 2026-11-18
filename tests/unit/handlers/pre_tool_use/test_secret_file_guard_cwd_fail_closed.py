@@ -758,6 +758,43 @@ class TestManyFailedDirectoryChangesBesideASearch:
         assert time.monotonic() - start < 3.0
         assert decision is Decision.DENY
 
+    def test_a_search_past_the_cap_still_sees_a_link_out(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Past the cap every indexed file is read, and so is every link a move could reach.
+
+        The project holds no protected file, so only the links out can make the deny.
+        """
+        base = tmp_path.resolve()
+        outside = base / "outside"
+        outside.mkdir()
+        (outside / _PROTECTED).write_bytes(_DUMMY)
+        project = base / "project"
+        project.mkdir()
+        _git("init", "-q", "-b", "main", cwd=project)
+        for number in range(300):
+            holder = project / f"h{number:03d}"
+            holder.mkdir()
+            (holder / "out").symlink_to(os.path.relpath(outside, holder))
+        monkeypatch.chdir("/")
+        protected_file_index.reset_index_cache()
+        root = str(project)
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cd $(echo x) && grep -r DUMMY ."},
+            "cwd": root,
+        }
+        with (
+            patch.object(guard_module, "resolve_project_root", return_value=root),
+            patch.object(sfm, "resolve_project_root", return_value=root),
+            patch.object(path_exclusion, "resolve_project_root", return_value=root),
+        ):
+            index_project(project, SecretFileGuardHandler()._patterns())
+            handler = SecretFileGuardHandler()
+            assert handler.matches(hook_input)
+            assert handler.handle(hook_input).decision is Decision.DENY
+        protected_file_index.reset_index_cache()
+
     def test_many_moves_beside_no_reader_stay_allowed(self, tree: Tree) -> None:
         moves = " && ".join(f"cd r{number}" for number in range(self._CDS))
         assert _decision(tree, f"{moves} && echo done") is Decision.ALLOW
