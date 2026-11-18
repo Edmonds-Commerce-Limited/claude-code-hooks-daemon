@@ -20,14 +20,14 @@ This plan adds a warning ladder driven by the share of each pool's cap in use: a
 - Each warning names the pool, its count against its cap, and the specific branch to finish or remove first with its exact command; the text is generic.
 - At the very strong level the warning shows on every tool call and every prompt, bypassing any rate limit, until usage falls below the threshold.
 - Session start and stop reports use the same ladder.
-- From the strong warn up, an unproven or unfinished branch is named first, and the text says removing it needs the owner's decision.
+- From the strong warn up, an unproven or unfinished branch is named first, and the text says how it leaves the pool: merge it, or remove it through the no-value verdict route of Plan 00620.
 - No change to what the guards deny or allow.
 
 ## Non-Goals
 
 - No exemption from the cap for any task, and no change to the 100 percent block.
 - No re-adding `delete-branch --allow-unproven`, and no loosening of any delete guard.
-- No archive refs or tags for unproven work: the owner rejected them as a way to lose valuable work unrecovered and to sprawl. Work with value is merged; work without value is removed only by the owner's decision.
+- No archive refs or tags for unproven work: the owner rejected them as a way to lose valuable work unrecovered and to sprawl. Work with value is merged; work without value is removed through the verdict route designed in Plan 00620 (a separate Opus review).
 - No agent-side override of the delete proof of any kind (the unproven-delete flag stays gone). An agent's own assertion never counts.
 
 ## Tasks
