@@ -16,6 +16,7 @@ throughout, as in the daemon.
 
 import os
 import subprocess
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -426,8 +427,10 @@ class TestComputedDirectoryChange:
     @pytest.mark.parametrize("target", ["**/nope", "*/*/*/*/*/nope", "/*/*/*/nope"])
     def test_a_globbed_target_costs_a_bounded_walk(self, tree: Tree, target: str) -> None:
         """A glob that matches nothing is not followed through the whole tree (or filesystem)."""
+        # The decision is not asserted: a glob that matches nothing is a computed move,
+        # and this fixture's directory links lead out of the project (review 614c N1).
         with patch.object(sfm.os, "scandir", wraps=os.scandir) as spy:
-            assert _decision(tree, f"cd {target} && cat clean/plain.txt") is Decision.ALLOW
+            _decision(tree, f"cd {target} && cat clean/plain.txt")
         assert spy.call_count <= 3 * sfm.LINK_SCAN_DIRECTORY_CAP
 
 
@@ -688,6 +691,112 @@ class TestAScanThatGivesUpBesideASearchOrGlob:
         decision, text = _result(tree, f"grep -r x own; cat own/{_PROTECTED}")
         assert decision is Decision.DENY
         assert self._GAVE_UP not in text
+
+
+#: A word the brace reader cannot resolve: the full scan gives up on it as unparseable.
+_UNPARSEABLE = 'echo .p-{"$(case a in a) echo;; esac)",q}'
+
+
+class TestEveryGaveUpRouteBesideASearch:
+    """Review 614c P2, the other routes: a parse failure or an internal error is a gave-up scan too."""
+
+    @pytest.mark.parametrize("read", ["grep -r DUMMY own", "rg DUMMY own"])
+    def test_an_unparseable_word_beside_a_search_denies(self, tree: Tree, read: str) -> None:
+        decision, text = _result(tree, f"{_UNPARSEABLE}; {read}")
+        assert decision is Decision.DENY, text
+
+    def test_an_unparseable_word_alone_stays_an_advisory(self, tree: Tree) -> None:
+        decision, text = _result(tree, f"{_UNPARSEABLE}; ls clean")
+        assert decision is Decision.ALLOW, text
+
+    def test_an_internal_error_beside_a_search_denies(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic evaluation failure")
+
+        monkeypatch.setattr(SecretFileGuardHandler, "_evaluate", boom)
+        decision, text = _result(tree, "grep -r DUMMY own")
+        assert decision is Decision.DENY, text
+
+    def test_an_internal_error_with_no_search_stays_an_advisory(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic evaluation failure")
+
+        monkeypatch.setattr(SecretFileGuardHandler, "_evaluate", boom)
+        decision, _text = _result(tree, "cat clean/plain.txt")
+        assert decision is Decision.ALLOW
+
+    def test_a_deadline_hit_on_the_grep_tool_denies(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def late(*_args: object, **_kwargs: object) -> None:
+            raise TimeoutError("synthetic deadline")
+
+        monkeypatch.setattr(SecretFileGuardHandler, "_evaluate", late)
+        hook_input: dict[str, Any] = {
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "DUMMY", "path": str(tree.worktree / "own")},
+            "cwd": str(tree.worktree),
+        }
+        handler = SecretFileGuardHandler()
+        assert handler.matches(hook_input)
+        assert handler.handle(hook_input).decision is Decision.DENY
+
+
+class TestManyFailedDirectoryChangesBesideASearch:
+    """A failed cd keeps its base beside its target, so the search's directories can double per cd."""
+
+    _CDS = 18
+
+    def test_the_search_is_judged_quickly_and_denied(self, tree: Tree) -> None:
+        moves = " && ".join(f"cd r{number}" for number in range(self._CDS))
+        start = time.monotonic()
+        decision = _decision(tree, f"{moves} && grep -r DUMMY own")
+        assert time.monotonic() - start < 3.0
+        assert decision is Decision.DENY
+
+    def test_many_moves_beside_no_reader_stay_allowed(self, tree: Tree) -> None:
+        moves = " && ".join(f"cd r{number}" for number in range(self._CDS))
+        assert _decision(tree, f"{moves} && echo done") is Decision.ALLOW
+
+
+class TestComputedMoveIntoALinkPastTheDirectoryCap:
+    """Review 614c N1 in a tree with more link-holding directories than LINK_DIRECTORY_CAP."""
+
+    def test_a_computed_cd_into_a_link_still_denied(self, tree: Tree) -> None:
+        for number in range(sfm.LINK_DIRECTORY_CAP + 4):
+            holder = tree.worktree / f"h{number:02d}"
+            holder.mkdir()
+            (holder / "here").symlink_to("../clean")
+        assert _decision(tree, "cd $(echo plink) && cat .e*") is Decision.DENY
+
+
+class TestOtherWaysBashChangesDirectory:
+    """Review 614c N3: CDPATH, extended globs, eval and a function placing a cd."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "CDPATH=deep cd idlink && cat i*",
+            "export CDPATH=deep; cd idlink && cat *",
+            "shopt -s extglob\ncd @(plink) && cat .e*",
+            "shopt -s extglob\ncd +(plink) && cat .e*",
+            "cd deep && cd @(idlink) && cat *",
+            "eval cd plink && cat .e*",
+            'f() { cd "$1"; }; f plink && cat .e*',
+            "CDPATH=deep cd idlink && grep -r DUMMY .",
+            "shopt -s extglob\ncd @(plink) && grep -r DUMMY .",
+        ],
+    )
+    def test_denied(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+    @pytest.mark.parametrize("command", ["CDPATH=deep cd clean && ls", "cd @(clean) && ls"])
+    def test_a_harmless_move_stays_allowed(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.ALLOW
 
 
 class TestWrappedChdirCommand:
