@@ -241,6 +241,10 @@ class TestBashRecursiveSearch:
             "find . | xargs rg x",
             "find . -name '*.md' -exec grep x {} +",
             "bash -c 'grep -r x .'",
+            # Plan 00618 S-1: a git search moved by `-C` reads the tree it is moved to.
+            "git -C reports grep --no-index -e x",
+            "git -C other -C ../reports grep --no-index -e x",
+            "git -C $D grep --no-index -e x",
         ],
     )
     def test_search_over_a_tree_holding_an_artefact_matches(
@@ -250,7 +254,10 @@ class TestBashRecursiveSearch:
         assert handler.matches(payload) is True
         assert handler.handle(payload).decision == Decision.DENY
 
-    @pytest.mark.parametrize("command", ["grep -r x other", "rg x other", "grep x ."])
+    @pytest.mark.parametrize(
+        "command",
+        ["grep -r x other", "rg x other", "grep x .", "git -C other grep --no-index -e x"],
+    )
     def test_search_over_a_clean_tree_does_not_match(
         self, handler: QuarantineArtefactReadGuardHandler, holding_dir: Path, command: str
     ) -> None:

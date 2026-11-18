@@ -631,7 +631,6 @@ class TestUnplaceableRootsWarnInsteadOfBlocking:
         [
             "grep -rn foo $SOME_DIR",
             'rg foo "$S"',
-            "git -C elsewhere grep foo",
             "git -C $REPO grep foo",
             "git --git-dir=/x/.git grep foo",
             "git grep foo -- ':(top)x'",
@@ -679,6 +678,10 @@ class TestUnplaceableRootsWarnInsteadOfBlocking:
         [
             f"git -C {_ROOT} grep -n foo",
             f"git -C {_ROOT} grep -n foo -- tests",
+            # Plan 00618 S-1: a relative `-C` is placed from the payload cwd, cumulatively.
+            "git -C tests grep -n foo",
+            "git -C src -C ../tests grep -n foo",
+            "git -C src grep -n foo ../tests",
             "grep -rn foo tests --exclude-dir=$X",
             "rg foo $A tests | sort",
         ],
@@ -687,6 +690,11 @@ class TestUnplaceableRootsWarnInsteadOfBlocking:
         self, flagged_handler: FlaggableContentChannelGuardHandler, command: str
     ) -> None:
         assert flagged_handler.handle(_bash_in(command)).decision == Decision.DENY, command
+
+    def test_a_relative_git_dash_c_outside_the_flagged_tree_is_not_reached(
+        self, flagged_handler: FlaggableContentChannelGuardHandler
+    ) -> None:
+        assert flagged_handler.matches(_bash_in("git -C src grep foo")) is False
 
     def test_unanchored_glob_says_it_cannot_be_excluded(self, project_root: str) -> None:
         handler = FlaggableContentChannelGuardHandler()
