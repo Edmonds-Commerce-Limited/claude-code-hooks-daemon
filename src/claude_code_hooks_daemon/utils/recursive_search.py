@@ -47,8 +47,8 @@ from claude_code_hooks_daemon.utils.resolution_failure import fails_closed
 from claude_code_hooks_daemon.utils.secret_file_matching import (
     LINK_DIRECTORY_CAP,
     chdir_wrapper_targets,
+    computed_move_directories,
     expand_directory_glob,
-    link_holding_directories,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
@@ -487,8 +487,8 @@ class _SearchCwds:
     def indeterminate(self) -> tuple[str, ...]:
         """A move that cannot be placed: the project root, every named target and the hook cwd."""
         root = path_exclusion.resolve_project_root()
-        # Review 614b R4: and every project directory holding a link it could read through.
-        linked = link_holding_directories(root) if root else ()
+        # Reviews 614b R4, 614c N1: every project directory holding a link, and every directory link.
+        linked = computed_move_directories(root) if root else ()
         found = [root, *self.targets, self.hook_cwd, *linked]
         return tuple(dict.fromkeys(path for path in found if path and posixpath.isabs(path)))
 

@@ -3322,22 +3322,30 @@ def expand_directory_glob(base: str, pattern: str) -> list[str] | None:
     return current
 
 
-def link_holding_directories(root: str) -> tuple[str, ...]:
-    """The directories under ``root`` that hold a link, breadth first, from a bounded scan.
+def computed_move_directories(root: str) -> tuple[str, ...]:
+    """Where a computed ``cd`` could leave a relative word dangerous, from a bounded scan.
 
-    Review 614b R4. A link is read through only from the directory holding it,
-    so these are where a computed ``cd`` could make a relative word dangerous.
+    Two kinds of directory under ``root``, breadth first:
+
+    - Review 614b R4: each directory that holds a link. A link is read through
+      only from the directory holding it.
+    - Review 614c N1: each link whose target is a directory. A computed ``cd``
+      can land INSIDE it, and a relative glob read there (``cat .e*``) is read
+      from the link's target, which may be outside the project.
+
     ``.git`` is not entered and links are not followed. A directory that cannot
-    be listed is counted (fail closed). The scan stops after
-    :data:`LINK_SCAN_DIRECTORY_CAP` directories: a link deeper than that, in a
-    larger tree, is not found here -- a residual recorded in the plan, never an
-    error -- and the project root is still read as before.
+    be listed is counted as holding a link (fail closed). The scan stops after
+    :data:`LINK_SCAN_DIRECTORY_CAP` directories, and keeps at most that many
+    directory links: a link past either limit, in a larger tree, is not found
+    here -- a residual recorded in the plan, never an error -- and the project
+    root is still read as before.
     """
     now = time.monotonic()
     held = _link_scans.get(root)
     if held is not None and now - held[0] < _LINK_SCAN_REUSE_SECONDS:
         return held[1]
     holding: list[str] = []
+    directory_links: list[str] = []
     queue = [os.path.normpath(root)]
     visited = 0
     while queue and visited < LINK_SCAN_DIRECTORY_CAP:
@@ -3349,6 +3357,8 @@ def link_holding_directories(root: str) -> tuple[str, ...]:
                 for entry in entries:
                     if entry.is_symlink():
                         has_link = True
+                        if len(directory_links) < LINK_SCAN_DIRECTORY_CAP and entry.is_dir():
+                            directory_links.append(entry.path)
                     elif entry.name != _GIT_DIRECTORY and entry.is_dir(follow_symlinks=False):
                         queue.append(entry.path)
         except OSError as exc:
@@ -3368,8 +3378,9 @@ def link_holding_directories(root: str) -> tuple[str, ...]:
             root,
             visited,
         )
-    _link_scans[root] = (now, tuple(holding))
-    return tuple(holding)
+    found = tuple(dict.fromkeys((*holding, *directory_links)))
+    _link_scans[root] = (now, found)
+    return found
 
 
 def _may_change_directory(segment: str) -> bool:
@@ -3485,16 +3496,16 @@ class _DirectoryWalk:
             self.existing[directory] = None
 
     def indeterminate(self) -> None:
-        """A move bash computes: read from the project root and every project directory holding a link.
+        """A move bash computes: read from the project root and every place it could land badly.
 
-        Review 614b R4: a link is read through only from the directory that holds
-        it, so those are the places a computed move can make a relative word
-        dangerous. Found by :func:`link_holding_directories`, a bounded scan.
+        Review 614b R4 and 614c N1: every project directory holding a link, and
+        every directory link, found by :func:`computed_move_directories`, a
+        bounded scan.
         """
         root = resolve_project_root()
         if root:
             self._add(os.path.normpath(root))
-            for directory in link_holding_directories(root):
+            for directory in computed_move_directories(root):
                 self._add(directory, exists=True)
 
     def assign(self, name: str, value: str) -> None:
@@ -3718,9 +3729,10 @@ def effective_cwds(command: str, cwd: str | None) -> CwdSet:
     ``command`` or a redirection. Review 614b R4: a globbed target adds each
     directory it matches; a variable the command assigned literally is put in;
     any other computed target (substitution, unknown variable, brace list,
-    tilde, ``cd -``, no operand) adds the project root and every project
-    directory holding a link (:func:`link_holding_directories`, a bounded scan
-    whose limit is a recorded residual).
+    tilde, ``cd -``, no operand) adds the project root, every project
+    directory holding a link and every directory link
+    (:func:`computed_move_directories`, a bounded scan whose limit is a
+    recorded residual).
 
     Only a segment that could make such a move is tokenised
     (:func:`_may_change_directory`), not every line of a large authored script
