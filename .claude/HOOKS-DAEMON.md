@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (83 handlers)
+### PreToolUse (84 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -35,6 +35,7 @@
 | 18 | write_protected_paths | BLOCKING | Deny any agent write to a configured path; reading is never denied |
 | 19 | ancestry_preserving_merge | BLOCKING | Block (or, in warn mode, advise against) ancestry-severing merges |
 | 19 | git_stash | BLOCKING | Block or warn about git stash based on mode configuration |
+| 20 | branch_pool_pressure_advisor | ADVISORY | Warn on tool calls as a branch pool fills toward the point where creation is refused |
 | 20 | git_message_backtick | BLOCKING | Block a double-quoted git message whose backticks would be executed |
 | 20 | lock_file_edit_blocker | BLOCKING | Block direct editing of package manager lock files |
 | 20 | merge_to_main_approval | BLOCKING | Deny a merge into the main checkout's default branch while the key is on |
@@ -163,7 +164,7 @@
 | 15 | disclosure_reset_pre_compact | NON-TERMINAL | Reset DisclosureTracker state for the firing agent on PreCompact |
 | 20 | compaction_signal | NON-TERMINAL | Write a ``<session>.compacting`` signal on PreCompact for the supervisor |
 
-### UserPromptSubmit (11 handlers)
+### UserPromptSubmit (12 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -174,6 +175,7 @@
 | 39 | limit_rebrief | ADVISORY | Re-brief after a usage-limit resume; name a background or teammate agent a limit killed |
 | 41 | focus_mode_trigger | ADVISORY | Turn the session's focus mode on or off from the prompt; renew it on every human prompt |
 | 43 | evacuation_turn_marker | ADVISORY | Start a new main-thread turn at each prompt |
+| 44 | branch_pool_pressure_prompt | ADVISORY | Warn on prompts as a branch pool fills toward the point where creation is refused |
 | 55 | critical_thinking_advisory | ADVISORY | Periodically inject advisory context encouraging critical evaluation |
 | 56 | idle_housekeeping_advisory | ADVISORY | After N consecutive no-op recovery ticks, advise a report-first |
 | 57 | standing_authorisations | ADVISORY | Inject the authorisations a project has recorded in its config |

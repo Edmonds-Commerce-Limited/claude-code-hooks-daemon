@@ -2271,11 +2271,41 @@ BRANCH_DORMANCY_PRESETS: dict[str, tuple[int, int, int]] = {
 BRANCH_DEFAULT_AUTO = "auto"
 
 
+class BranchLadderConfig(BaseModel):
+    """The warning ladder of one pool (Plan 00619): percent of its block point in use.
+
+    A pool at ``warn`` percent is warned once per session, at ``strong`` percent
+    warned more firmly once per session, and at ``very_strong`` percent warned on
+    every tool call and prompt until it drops below. The block at 100 percent is
+    not configurable here.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    warn: Annotated[int, Field(ge=1, le=99)] = Field(default=60)
+    strong: Annotated[int, Field(ge=1, le=99)] = Field(default=80)
+    very_strong: Annotated[int, Field(ge=1, le=99)] = Field(default=90)
+
+    @model_validator(mode="after")
+    def validate_order(self) -> Self:
+        """Require ``warn < strong < very_strong`` so each level is reachable."""
+        if not self.warn < self.strong < self.very_strong:
+            raise ValueError(
+                "ladder: percentages must satisfy warn < strong < very_strong; got "
+                f"{self.warn}/{self.strong}/{self.very_strong}"
+            )
+        return self
+
+
 class BranchWipConfig(BaseModel):
     """``branches.wip``: the repository-wide cap on open work branches."""
 
     model_config = ConfigDict(extra="forbid")
 
+    ladder: BranchLadderConfig = Field(
+        default_factory=BranchLadderConfig,
+        description="Warning percentages of the block point (cap + creation_grace)",
+    )
     cap: Annotated[int, Field(ge=1)] = Field(default=10, description="Open work branches allowed")
     mode: Literal["block", "warn", "off"] = Field(default="block")
     count_remote: bool = Field(
@@ -2304,6 +2334,10 @@ class BranchPoolConfig(BaseModel):
         default=None, description="Age at which a member is stale; null = dormancy block_days"
     )
     mode: Literal["block", "warn", "off"] = Field(default="block")
+    ladder: BranchLadderConfig = Field(
+        default_factory=BranchLadderConfig,
+        description="Warning percentages of this pool's cap",
+    )
 
 
 class BranchParkedConfig(BranchPoolConfig):

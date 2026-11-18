@@ -12,7 +12,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00621: actions qa ci advisory and workflow lint on edit](00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - Not Started (peer request, owner direction relayed: advise adopting an external workflow linter and run it on workflow edits; the design needs the owner's confirmation first)
 
-- [00619: branch pool graduated warnings](00619-branch-pool-graduated-warnings/PLAN.md) - Not Started (owner ruling: the pool cap stays a hard stop, so warn at 60, 80 and 90 percent of the cap; the 90 percent warning is never silenced)
+- [00619: branch pool graduated warnings](00619-branch-pool-graduated-warnings/PLAN.md) - In Progress (owner ruling: the pool cap stays a hard stop, so warn at 60, 80 and 90 percent of the cap; the 90 percent warning is never silenced)
 
 - [00618: release 3 75 0 code review findings](00618-release-3-75-0-code-review-findings/PLAN.md) - In Progress (Step 10 review of release 3.75.0 returned FAIL: 5 blocking fail-open or data-loss findings plus 20 non-blocking defects; release aborted at that gate; fix test-first, then the owner re-runs the release)
 

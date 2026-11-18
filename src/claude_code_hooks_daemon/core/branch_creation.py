@@ -91,7 +91,7 @@ _GROUP_ORDER: Final[tuple[str, ...]] = (
 )
 
 #: Snapshot groups ``branch-sweep --clean`` deletes, so the cap deny names it.
-_CLEANABLE: Final[frozenset[str | None]] = frozenset({"merged", "patch-equivalent"})
+CLEANABLE_GROUPS: Final[frozenset[str | None]] = frozenset({"merged", "patch-equivalent"})
 
 Decision = Literal["allow", "warn", "deny"]
 Labels = Mapping[str, Mapping[str, str | None]]
@@ -206,6 +206,10 @@ class _Work:
     stale: bool = False
     #: The display label of the ref named ``name`` (see ``_display_label``).
     label: Mapping[str, str | None] = field(default_factory=dict)
+
+
+#: The public name of one connected piece of work, for modules that read ``work_pools``.
+WorkGroup = _Work
 
 
 # --- naming ---------------------------------------------------------------------------
@@ -565,7 +569,7 @@ def _display_label(ref: _Ref, labels: Labels) -> Mapping[str, str | None]:
 def _ref_pool(ref: _Ref, merged: set[str], carried: set[str], labels: Labels) -> Pool | None:
     """One ref's pool, by the rule the sweep shares (:func:`pool_for_ref`); None when carried."""
     return pool_for_ref(
-        merged=ref.refname in merged or _tip_label(ref, labels).get("group") in _CLEANABLE,
+        merged=ref.refname in merged or _tip_label(ref, labels).get("group") in CLEANABLE_GROUPS,
         park_carried=ref.refname in carried,
         parked=ref.parked,
     )
@@ -641,7 +645,8 @@ def _detail(work: _Work, now: float, worktrees: Mapping[str, Path] | None) -> st
     return f"{work.name} ({age}d old{place})"
 
 
-def _rank(work: _Work) -> int:
+def work_rank(work: _Work) -> int:
+    """Sort key putting the cheapest-to-close group first (merged ... live)."""
     group = work.label.get("group")
     return _GROUP_ORDER.index(group) if group in _GROUP_ORDER else len(_GROUP_ORDER)
 
@@ -653,7 +658,7 @@ def _cap_lines(
     worktrees: Mapping[str, Path] | None,
 ) -> tuple[list[str], list[str]]:
     """``(lines, fixes)`` for the open-work cap."""
-    ordered = sorted(groups, key=lambda work: (_rank(work), work.committed, work.name))
+    ordered = sorted(groups, key=lambda work: (work_rank(work), work.committed, work.name))
     lines = [
         f"Open work branches: {len(groups)} (cap {config.effective_wip_cap()}). "
         f"Finish (merge) one, {POOL_PARK_CLAUSE}, or delete it ({POOL_DELETE_CONDITION}), "

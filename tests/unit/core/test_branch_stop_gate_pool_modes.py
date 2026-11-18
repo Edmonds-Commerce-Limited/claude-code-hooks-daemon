@@ -9,14 +9,16 @@ as :func:`branch_sweep.open_work_count` counts them.
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
-from claude_code_hooks_daemon.core import branch_stop_gate
+from claude_code_hooks_daemon.core import branch_ladder, branch_stop_gate
 from claude_code_hooks_daemon.core.branch_inventory import DormancyStage, build_inventory
+from claude_code_hooks_daemon.core.branch_park import BranchParkError
 from claude_code_hooks_daemon.core.branch_records import TOUCHED_KEY
 from claude_code_hooks_daemon.core.branch_stop_gate import StopDecision, decide_stop
 from claude_code_hooks_daemon.core.branch_stop_guard import StopCheck
@@ -192,3 +194,69 @@ class TestSameTipCountsOnceAtStop:
         decision = _decide(repo, untracked, config)
         assert decision.reason is not None
         assert StopCheck.OVER_CAP.value in decision.reason
+
+
+class TestLadderAtStop:
+    """Plan 00619 Task 1.3: the stop report carries the ladder, and never holds a stop by it."""
+
+    def test_a_pool_at_the_warn_level_is_reported_and_the_stop_is_allowed(
+        self, repo: Path, untracked: Path
+    ) -> None:
+        _pushed_branch(repo, "work-a", message="a")
+        _pushed_branch(repo, "work-b", message="b")
+        decision = _decide(repo, untracked, _config(wip={"cap": 3, "creation_grace": 0}))
+        assert decision.reason is None
+        text = "\n".join(decision.context)
+        assert "BRANCH POOL WARNING" in text
+        assert "2 of 3" in text
+
+    def test_silent_below_the_warn_level(self, repo: Path, untracked: Path) -> None:
+        _pushed_branch(repo, "work-a", message="a")
+        decision = _decide(repo, untracked, _config(wip={"cap": 10}))
+        assert "BRANCH POOL" not in "\n".join(decision.context)
+
+    def test_a_failed_ladder_read_never_loosens_a_held_stop(
+        self, repo: Path, untracked: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The ladder's own read failing must leave the stop decision, and its counter, alone."""
+
+        def boom(*_args: object, **_kwargs: object) -> object:
+            raise BranchParkError("git config --get-regexp failed: timed out")
+
+        monkeypatch.setattr(branch_ladder, "work_pools", boom)
+        _pushed_branch(repo, "work-a", message="a")
+        _pushed_branch(repo, "work-b", message="b")
+        decision = _decide(repo, untracked, _config(wip={"cap": 1, "mode": "block"}))
+        assert decision.reason is not None
+        assert StopCheck.OVER_CAP.value in decision.reason
+        written = [p for p in untracked.rglob("*") if p.is_file()]
+        assert written, "the block counter must still be persisted"
+        assert "BRANCH POOL" not in "\n".join(decision.context)
+
+    def test_the_ladder_ages_use_the_injected_clock(self, repo: Path, untracked: Path) -> None:
+        _pushed_branch(repo, "work-a", message="a")
+        _pushed_branch(repo, "work-b", message="b")
+        decision = decide_stop(
+            repo,
+            _config(wip={"cap": 3, "creation_grace": 0}),
+            untracked,
+            session_id=SESSION,
+            agent_id=None,
+            handoff=False,
+            now=time.time() + 5 * 86_400,
+        )
+        assert "(5d old)" in "\n".join(decision.context)
+
+    def test_a_subagent_stop_is_not_given_the_ladder(self, repo: Path, untracked: Path) -> None:
+        _pushed_branch(repo, "work-a", message="a")
+        _pushed_branch(repo, "work-b", message="b")
+        decision = decide_stop(
+            repo,
+            _config(wip={"cap": 3, "creation_grace": 0}),
+            untracked,
+            session_id=SESSION,
+            agent_id="agent-1",
+            handoff=False,
+            now=1_000_000.0,
+        )
+        assert "BRANCH POOL" not in "\n".join(decision.context)

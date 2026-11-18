@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.core.branch_creation import (
     write_labels,
 )
 from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
+from claude_code_hooks_daemon.core.branch_ladder import ladder_notice
 from claude_code_hooks_daemon.core.branch_park import BranchParkError, announce_ended_parks
 from claude_code_hooks_daemon.core.branch_sweep import (
     deprecation_line,
@@ -184,7 +185,9 @@ class BranchSweepHandler(SessionStartHandlerBase):
             open_pool_reported=any(s.rule_id == RuleID.BRANCH_WIP_CAP for s in report.blockers),
         )
         out = [f"{_ICON}  GIT BRANCHES:", *lines] if lines else []
-        return [*out, *self._pool_lines(report, owned_hint)]
+        # The warning ladder (Plan 00619): every level, from the first warning up to the block.
+        ladder = ladder_notice(root, self._branches, session_id=None, throttle=None)
+        return [*out, *self._pool_lines(report, owned_hint), *ladder]
 
     def _pool_lines(
         self, report: CreationReport, owned_hint: Callable[[], str | None]

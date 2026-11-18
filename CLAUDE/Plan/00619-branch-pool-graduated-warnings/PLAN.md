@@ -1,6 +1,6 @@
 # Plan 00619: branch pool graduated warnings
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-18
 **Owner**: joseph
 **Priority**: High
@@ -34,16 +34,16 @@ This plan adds a warning ladder driven by the share of each pool's cap in use: a
 
 ### Phase 1: Ladder
 
-- [ ] ⬜ **Task 1.1**: Write the failing table test for the level function and the very-strong never-silenced behaviour, commit it red.
-- [ ] ⬜ **Task 1.2**: Implement the level function and config keys (the thresholds per pool), reusing the existing pool inventory counts.
-- [ ] ⬜ **Task 1.2a**: Decide and test the 100 percent base for the open-work pool: the block point (cap plus `wip.creation_grace`), not the nominal cap.
-- [ ] ⬜ **Task 1.3**: Emit the warnings with the branch and command named. Session start and the stop guard already report pressure; there is no prompt-submit branch handler and no per-tool-call surface besides the creation guard, so the every-call and every-prompt warning needs new handlers (a prompt-submit handler and a pre-tool-use advisory), each test-first.
-- [ ] ⬜ **Task 1.5**: Correct the stale `--allow-unproven` mention in the handler reference guide.
+- [x] ✅ **Task 1.1**: Write the failing table test for the level function and the very-strong never-silenced behaviour, commit it red.
+- [x] ✅ **Task 1.2**: Implement the level function and config keys (the thresholds per pool), reusing the existing pool inventory counts.
+- [x] ✅ **Task 1.2a**: Decide and test the 100 percent base for the open-work pool: the block point (cap plus `wip.creation_grace`), not the nominal cap.
+- [x] ✅ **Task 1.3**: Emit the warnings with the branch and command named. Session start and the stop guard already report pressure; there is no prompt-submit branch handler and no per-tool-call surface besides the creation guard, so the every-call and every-prompt warning needs new handlers (a prompt-submit handler and a pre-tool-use advisory), each test-first.
+- [x] ✅ **Task 1.5**: Correct the stale `--allow-unproven` mention in the handler reference guide.
 - [ ] ⬜ **Task 1.4**: Independent review, targeted QA, CI green, merge, release note.
 
 ### Phase 2: Confirm the remaining peer claim
 
-- [ ] ⬜ **Task 2.1**: The stop guard resolves its repository from the project root, while the creation guard follows `cd` and `-C` to the repo the command runs in, so they differ by construction. Decide whether the stop guard should also follow a command into another clone (it judges the session's own branches, so likely not), record the decision, and add a test for whichever is chosen.
+- [x] ✅ **Task 2.1**: The stop guard resolves its repository from the project root, while the creation guard follows `cd` and `-C` to the repo the command runs in, so they differ by construction. Decide whether the stop guard should also follow a command into another clone (it judges the session's own branches, so likely not), record the decision, and add a test for whichever is chosen.
 
 ## Success Criteria
 

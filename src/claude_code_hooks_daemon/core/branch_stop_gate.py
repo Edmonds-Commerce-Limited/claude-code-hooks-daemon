@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     DormancyStage,
     build_inventory,
 )
+from claude_code_hooks_daemon.core.branch_ladder import ladder_notice
 from claude_code_hooks_daemon.core.branch_stop_guard import StopCheck, StopFinding, judge_stop
 from claude_code_hooks_daemon.core.branch_sweep import dormant_action
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
@@ -283,4 +284,10 @@ def decide_stop(
         context.extend(_noisy_context(inventory, state, now=now))
     if state:
         write_state(state_file, state)
+    if agent_id is None:
+        # Plan 00619: the warning ladder, from the first warning up to the block. Context
+        # only and read AFTER the decision and its counter are settled and persisted: it
+        # holds nothing, and it cannot raise (a failed read is no lines), so the stop
+        # decision above is exactly the one it was before the ladder existed.
+        context.extend(ladder_notice(repo, branches, session_id=None, throttle=None, now=now))
     return StopDecision(reason, tuple(context))
