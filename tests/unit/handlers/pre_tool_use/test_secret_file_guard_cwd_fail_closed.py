@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 
 # Assembled so this file never spells a protected name itself.
 _PROTECTED = "id_" + "rsa"
+_ENV_FILE = ".e" + "nv"
 _DUMMY = b"DUMMY\n"
 #: One path component longer than NAME_MAX (255 bytes on Linux).
 _LONG = "A" * 300
@@ -67,6 +68,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Tree]:
     _git("add", "-A", cwd=primary)
     _git("commit", "-qm", "init", cwd=primary)
     (primary / _PROTECTED).write_bytes(_DUMMY)
+    (primary / _ENV_FILE).write_bytes(_DUMMY)
     (primary / "sub").mkdir()
     (primary / "sub" / _PROTECTED).write_bytes(_DUMMY)
 
@@ -548,6 +550,56 @@ class TestAWideCdInAProjectWithNoLinkOut:
         assert not handler.matches(hook_input) or (
             handler.handle(hook_input).decision is Decision.ALLOW
         )
+
+
+class TestComputedDirectoryChangeIntoALink:
+    """Review 614c N1: a computed cd may land IN a directory link, not only beside one."""
+
+    @pytest.mark.parametrize("read", ["cat .e*", "cat i*", "cat *"])
+    @pytest.mark.parametrize(
+        "move",
+        [
+            "cd $(echo plink)",
+            "cd `echo plink`",
+            "cd ${X:-plink}",
+            "X=plink; cd ${X%%z}",
+            "X=pl Y=ink; cd $X$Y",
+            "read X <<< plink; cd $X",
+            "cd $'plink'",
+            "cd $'\\x70link'",
+            "HOME=plink; cd",
+            "HOME=plink; cd ~",
+            "OLDPWD=plink; cd -",
+            "cd ~+/plink",
+        ],
+    )
+    def test_a_slashless_glob_after_a_computed_cd_into_a_link_denied(
+        self, tree: Tree, move: str, read: str
+    ) -> None:
+        assert _decision(tree, f"{move} && {read}") is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "for d in plink; do cd $d; cat .e*; done",
+            "cd $(echo dlink) && cat *",
+            "cd $(echo deep/idlink) && cat i*",
+            "cd $(echo plink) && grep -r DUMMY .",
+        ],
+    )
+    def test_other_computed_moves_into_a_link_denied(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+    @pytest.mark.parametrize("command", ["cd plink && cat .e*", "X=plink; cd ${X} && cat .e*"])
+    def test_the_literal_forms_stay_denied(self, tree: Tree, command: str) -> None:
+        assert _decision(tree, command) is Decision.DENY
+
+    def test_the_walk_adds_the_directory_links(self, tree: Tree) -> None:
+        cwds = sfm.effective_cwds("cd $(echo x) && ls", str(tree.worktree))
+        assert str(tree.worktree / "plink") in cwds
+        assert str(tree.worktree / "deep" / "idlink") in cwds
+        # A link to a file is no place a cd can land.
+        assert str(tree.worktree / "inner" / "ilink") not in cwds
 
 
 #: Brace expansions past the enumeration cap: the full scan gives up on them.
