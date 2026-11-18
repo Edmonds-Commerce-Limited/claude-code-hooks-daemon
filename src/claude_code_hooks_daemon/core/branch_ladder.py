@@ -139,15 +139,22 @@ def _pool_section_mode_and_ladder(
     return section.mode, section.ladder
 
 
-def try_pool_pressures(
-    repo: Path, config: BranchesConfig, labels: Labels
-) -> list[PoolPressure] | None:
-    """Every pool at or above its warn level, or None when the pools could not be read.
+@dataclass(frozen=True)
+class PoolReading:
+    """The outcome of one read of the pools: the pressures, or that it could not be read."""
+
+    pressures: tuple[PoolPressure, ...] = ()
+    #: The read failed; ``pressures`` is empty and the caller degrades to silence.
+    unreadable: bool = False
+
+
+def try_pool_pressures(repo: Path, config: BranchesConfig, labels: Labels) -> PoolReading:
+    """Every pool at or above its warn level, flagged ``unreadable`` when the read failed.
 
     The ladder is context only and must never deny anything, so ANY failure of the
     read (a git timeout, a park-record error, an unexpected exception) is logged
-    and reported as None: the caller degrades to silence. A pool whose ``mode`` is
-    ``off`` is not counted, as in the creation guard.
+    and reported as an unreadable reading: the caller degrades to silence. A pool
+    whose ``mode`` is ``off`` is not counted, as in the creation guard.
     """
     try:
         pools = work_pools(repo, config, labels=labels)
@@ -170,13 +177,13 @@ def try_pool_pressures(
             "and the creation guard reports its own failure",
             level=logging.DEBUG,
         )
-        return None
-    return found
+        return PoolReading(unreadable=True)
+    return PoolReading(pressures=tuple(found))
 
 
 def pool_pressures(repo: Path, config: BranchesConfig, labels: Labels) -> list[PoolPressure]:
     """Every pool at or above its warn level; empty when the pools cannot be read."""
-    return try_pool_pressures(repo, config, labels) or []
+    return list(try_pool_pressures(repo, config, labels).pressures)
 
 
 # --- wording --------------------------------------------------------------------------
@@ -294,11 +301,11 @@ class PressureCache:
         cached = self._entries.get(key)
         if cached is not None and stamp - cached[0] < cached[1]:
             return cached[2]
-        pressures = try_pool_pressures(repo, config, labels)
-        ttl = self._failure_ttl if pressures is None else self._ttl
-        reading = pressures or []
-        self._entries[key] = (stamp, ttl, reading)
-        return reading
+        reading = try_pool_pressures(repo, config, labels)
+        ttl = self._failure_ttl if reading.unreadable else self._ttl
+        pressures = list(reading.pressures)
+        self._entries[key] = (stamp, ttl, pressures)
+        return pressures
 
 
 #: What this daemon process has already told each session (warn and strong only).
