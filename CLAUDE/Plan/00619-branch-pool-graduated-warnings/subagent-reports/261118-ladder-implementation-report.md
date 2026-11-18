@@ -26,8 +26,9 @@ Branch: `agent-aa5b3e19f48a28f06-f164c7f6` (pushed). Not merged. Task 1.4 (indep
 
 ## Verification
 
-- Targeted pytest green: ladder (37), both new handlers, session start sweep, stop gate, stop handlers, user prompt handlers, guidance and evasion classification tests, constants.
-- `llm_qa.py changed` first run: only format, pyright (test annotation) and generated-doc drift failed, plus changed_tests unmapped (`[too-broad]`, needs `--allow-unmapped`). All fixed (autofix, annotation, `generate-docs`). The re-run waited on the host-wide QA lock held by another run; see the final reply line for whether it completed.
+- Venv note: `./scripts/setup_worktree.sh` creates a NEW worktree and cannot adopt an existing one, so this worktree's venv was built with `UV_PROJECT_ENVIRONMENT=<worktree>/untracked/venv-wt uv sync --frozen --all-extras`; pytest from it imports this worktree's `src`.
+- Targeted pytest green after the review fix round (835 tests across the ladder, both handlers, the shared surface, session start, the stop gate and the stop handlers).
+- `llm_qa.py changed --range main..HEAD`: see `261118-ladder-fix-round.md` for the latest result. Review round fixes: `261118-ladder-fix-round.md`.
 
 ## For the coordinator
 

@@ -312,9 +312,7 @@ class TestPerPoolExitAdvice:
         assert "no-value verdict" not in text
 
     @pytest.mark.parametrize("level", [LadderLevel.STRONG, LadderLevel.VERY_STRONG])
-    def test_parked_pool_is_left_by_clearing_the_park_and_merging(
-        self, level: LadderLevel
-    ) -> None:
+    def test_parked_pool_is_left_by_clearing_the_park_and_merging(self, level: LadderLevel) -> None:
         text = self._text(Pool.PARKED, level)
         assert "--clear" in text
         assert "merge" in text
