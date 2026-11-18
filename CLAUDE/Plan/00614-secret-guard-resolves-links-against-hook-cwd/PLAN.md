@@ -67,6 +67,11 @@ project whose worktrees carry seeded links to protected files.
   here: N2 (physical `..` through a directory link), a glob matching a file link
   (`cat lin[k]1.txt`), an absolute glob outside the project, `CDPATH` from the environment
   (niggle N661 in Plan 00474), and `*/*` through a link (allowed by decision).
+- [x] ✅ **Task 3.4**: Independent review (`subagent-reports/261118-independent-review.md`, 6 defects)
+  fixed test first: the link scan reports whether it finished and every caller denies when it did
+  not (D1, D2), chdir option clusters and abbreviations (D3), `exec` (D4), scan reuse limited to one
+  call (D5), a pathless Grep judged at the hook cwd (D6). Report `subagent-reports/261118-fix-round-6.md`;
+  the remaining "stopped early, so allowed" routes are niggle N662.
 
 ## Success Criteria
 

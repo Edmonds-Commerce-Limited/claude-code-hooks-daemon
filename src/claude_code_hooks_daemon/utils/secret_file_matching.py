@@ -35,6 +35,7 @@ import time
 import urllib.parse
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal
 
@@ -3525,6 +3526,8 @@ class LinkScan:
 
     directories: tuple[str, ...]
     complete: bool
+    #: The links among ``directories`` that lead to a directory.
+    directory_links: tuple[str, ...] = ()
 
 
 #: The scans made during one tool call (:func:`link_scan_scope`); None outside one.
@@ -3555,24 +3558,32 @@ def reset_link_scans() -> None:
         held.clear()
 
 
-def _link_is_directory(entry: os.DirEntry[str]) -> bool | None:
-    """Does link ``entry`` lead to a directory: None when that cannot be told.
+class _LinkKind(Enum):
+    """Where a link leads, as far as a stat can tell."""
+
+    DIRECTORY = "directory"
+    OTHER = "other"
+    UNKNOWN = "unknown"
+
+
+def _link_kind(entry: os.DirEntry[str]) -> _LinkKind:
+    """Does link ``entry`` lead to a directory; UNKNOWN when that cannot be told.
 
     A link loop leads nowhere a ``cd`` can land, so it is no directory. Any
     other refusal (a target under an unsearchable directory) leaves it unknown.
     """
     try:
-        return entry.is_dir()
+        return _LinkKind.DIRECTORY if entry.is_dir() else _LinkKind.OTHER
     except OSError as exc:
         if exc.errno == errno.ELOOP:
-            return False
+            return _LinkKind.OTHER
         log_and_continue(
             logger,
             exc,
             reason="a link whose target cannot be stat-ed may lead to a directory, so the scan is incomplete (fail closed)",
             level=logging.DEBUG,
         )
-        return None
+        return _LinkKind.UNKNOWN
 
 
 def _entry_may_be_directory(entry: os.DirEntry[str]) -> bool:
@@ -3639,14 +3650,16 @@ def expand_directory_glob(base: str, pattern: str) -> list[str] | None:
             for entry in candidates:
                 # Review D1: one entry that cannot be classified never drops its siblings.
                 kind = (
-                    _link_is_directory(entry)
+                    _link_kind(entry)
                     if entry.is_symlink()
-                    else _entry_may_be_directory(entry)
+                    else (
+                        _LinkKind.DIRECTORY if _entry_may_be_directory(entry) else _LinkKind.OTHER
+                    )
                 )
-                if kind is None:
+                if kind is _LinkKind.UNKNOWN:
                     # A match that may be a directory cannot be placed: a computed move.
                     return None
-                if kind:
+                if kind is _LinkKind.DIRECTORY:
                     names.append(entry.name)
             following.extend(os.path.normpath(f"{directory.rstrip('/')}/{name}") for name in names)
             # Each directory kept is listed or probed next, or is a match: stop as soon as
@@ -3697,10 +3710,10 @@ def scan_project_links(root: str) -> LinkScan:
                 for entry in entries:
                     if entry.is_symlink():
                         has_link = True
-                        leads_to_directory = _link_is_directory(entry)
-                        if leads_to_directory is None:
+                        kind = _link_kind(entry)
+                        if kind is _LinkKind.UNKNOWN:
                             complete = False
-                        elif leads_to_directory:
+                        elif kind is _LinkKind.DIRECTORY:
                             directory_links.append(entry.path)
                     elif entry.name != _GIT_DIRECTORY and _entry_may_be_directory(entry):
                         queue.append(entry.path)
@@ -3716,11 +3729,11 @@ def scan_project_links(root: str) -> LinkScan:
             holding.append(directory)
     if queue or len(directory_links) > LINK_SCAN_DIRECTORY_CAP:
         complete = False
+    kept_links = tuple(directory_links[:LINK_SCAN_DIRECTORY_CAP])
     scan = LinkScan(
-        directories=tuple(
-            dict.fromkeys((*holding, *directory_links[:LINK_SCAN_DIRECTORY_CAP]))
-        ),
+        directories=tuple(dict.fromkeys((*holding, *kept_links))),
         complete=complete,
+        directory_links=kept_links,
     )
     if held_scans is not None:
         held_scans[root] = scan
@@ -3769,20 +3782,50 @@ class CwdSet(tuple[str, ...]):
     link_dirs: tuple[str, ...]
     overflowed: bool
     unscanned: bool
+    _by_name: dict[str, list[str]]
     _existing: tuple[str, ...]
     _listings: dict[str, dict[str, tuple[bool, bool]] | None]
 
     def __new__(
-        cls, lexical: Iterable[str], existing: Sequence[str], *, unscanned: bool = False
+        cls,
+        lexical: Iterable[str],
+        existing: Sequence[str],
+        *,
+        unscanned: bool = False,
+        scanned: Sequence[str] = (),
     ) -> "CwdSet":
         instance = super().__new__(cls, tuple(dict.fromkeys(lexical)))
         instance.link_dirs = tuple(existing[:LINK_DIRECTORY_CAP])
         instance.overflowed = len(existing) > LINK_DIRECTORY_CAP
         # A computed move's link scan did not finish (review D2).
         instance.unscanned = unscanned
+        instance._by_name = {}
+        for directory in scanned:
+            instance._by_name.setdefault(Path(directory).name, []).append(directory)
         instance._existing = tuple(existing)
         instance._listings = {}
         return instance
+
+    def bases_above_scanned(self, token: str) -> list[str]:
+        """Where a computed move could leave ``token`` passing through a scanned directory.
+
+        Round 6 class sweep: the scan names each directory holding a link, but
+        the shell may be ABOVE one, and ``a/late`` read there reaches the link
+        in ``a``. For each scanned ``.../x/a`` whose trailing components spell
+        the word's leading ones, the directory they hang from is a base.
+        """
+        if not self._by_name or not _may_be_relative_path(token):
+            return []
+        components = [part for part in token.split("/") if part not in ("", ".")]
+        if ".." in components:
+            return []
+        bases: list[str] = []
+        for depth in range(1, len(components)):
+            for directory in self._by_name.get(components[depth - 1], ()):
+                parts = directory.split("/")
+                if parts[-depth:] == components[:depth]:
+                    bases.append("/".join(parts[:-depth]) or "/")
+        return list(dict.fromkeys(bases))
 
     def _listing(self, directory: str) -> dict[str, tuple[bool, bool]] | None:
         """``name -> (is a link, is a directory)`` for ``directory``; None when it cannot be listed."""
@@ -3847,6 +3890,8 @@ class _DirectoryWalk:
         self.cdpath = cdpath
         # A computed move's link scan did not finish: where it lands is not known.
         self.unscanned = False
+        # What a computed move's scan found: a deeper word may pass through one of them.
+        self.scanned: dict[str, None] = {}
         if cwd is not None and Path(cwd).is_absolute():
             self._add(cwd)
 
@@ -3874,6 +3919,7 @@ class _DirectoryWalk:
             self.unscanned = self.unscanned or not scan.complete
             for directory in scan.directories:
                 self._add(directory, exists=True)
+                self.scanned[directory] = None
 
     def to_toplevel(self) -> None:
         """A move to git's top level: an ancestor of where the command is, each one kept."""
@@ -3966,7 +4012,12 @@ class _DirectoryWalk:
                 self._add(joined, exists=True)
 
     def result(self) -> CwdSet:
-        return CwdSet(self.directories, list(self.existing), unscanned=self.unscanned)
+        return CwdSet(
+            self.directories,
+            list(self.existing),
+            unscanned=self.unscanned,
+            scanned=tuple(self.scanned),
+        )
 
 
 def _is_redirection(words: list[str], index: int) -> bool:
@@ -4215,7 +4266,9 @@ def _link_targets(token: str, cwds: tuple[str, ...]) -> tuple[str, ...]:
     candidates = [token]
     if not token.startswith(("/", "~")):
         # Only a directory that exists can hold a link (review F5).
-        bases = cwds.link_dirs if isinstance(cwds, CwdSet) else cwds
+        bases: Sequence[str] = cwds
+        if isinstance(cwds, CwdSet):
+            bases = [*cwds.link_dirs, *cwds.bases_above_scanned(token)]
         candidates = [str(Path(cwd) / token) for cwd in bases if cwd] + candidates
     found = (_realpath_if_resolvable(candidate) for candidate in dict.fromkeys(candidates))
     return tuple(dict.fromkeys(real for real in found if real is not None))

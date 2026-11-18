@@ -7837,3 +7837,16 @@ smaller than the add's, but at a load average near 70 they time out too.
 - `CDPATH` inherited from the environment rather than named in the command.
 
 **Status**: ⬜ Open. Apply the link-out rule to a physical root and honour `cd -P` in the text walker; judge a glob's matches that are file links; decide whether an absolute glob outside the project is in scope.
+
+### N662 — "stopped early, so allowed" routes left in and beside the secret guard after Plan 00614 round 6
+
+**Source**: the Plan 00614 round-6 fix of the independent review (`../00614-secret-guard-resolves-links-against-hook-cwd/subagent-reports/261118-fix-round-6.md`, class sweep). Every shape below is allowed on main too: none is a regression.
+
+**Evidence**:
+
+- The quarantine-artefact guard (`quarantine_artefact_read_guard._matched_pattern_and_glob`) sends a `ResolutionFailedError` (including the new `IncompleteScanError`) to its `except Exception` advisory route, where the secret guard denies it.
+- The secret guard's Plan 00483 A1 route still allows with an advisory when the full scan gives up on a command holding no search or glob (a cap, the deadline, an unreadable word or an internal error).
+- A hook payload with no `cwd` or a relative one: relative words, globs, searches and a pathless Grep tool call are not placed and are allowed.
+- In a project past the link-scan cap, `cd "$D" && make test` and any other computed `cd` before a relative word is denied (accepted over-deny, release note 002); only the `git rev-parse --show-toplevel` idiom is placed without a scan. The unquoted `$( )` form before a recursive search is still denied. The text walker's segment split is not quote-aware, so a quoted body holding an operator (`bash -c 'cd sub && cat f'`) is read loosely as a computed move, and is denied in such a project too.
+
+**Status**: ⬜ Open. Route `ResolutionFailedError` to a deny in the quarantine guard, test first. Decide (owner) whether the A1 no-search advisory and a missing `cwd` should deny. Consider an off-hot-path link index, built like the protected-file index and denying until built, so a large project's computed `cd` is judged instead of denied; make the text walker's segment split quote-aware.

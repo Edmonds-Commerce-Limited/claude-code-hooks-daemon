@@ -700,6 +700,8 @@ class _SearchCwds:
     unscanned: bool = False
     # The whole command, for what a move's spelling depends on (git's top level).
     command: str = ""
+    # The directory links a computed move's scan found: a later reader may pass through one.
+    computed_links: list[str] = field(default_factory=list)
 
     def indeterminate(self) -> tuple[str, ...]:
         """A move that cannot be placed: the project root, every named target and the hook cwd."""
@@ -708,6 +710,8 @@ class _SearchCwds:
         scan = scan_project_links(root) if root else None
         if scan is not None and not scan.complete:
             self.unscanned = True
+        if scan is not None:
+            self.computed_links.extend(scan.directory_links)
         linked = scan.directories if scan is not None else ()
         found = [root, *self.targets, self.hook_cwd, *linked]
         return tuple(dict.fromkeys(path for path in found if path and posixpath.isabs(path)))
@@ -849,7 +853,14 @@ def _segment_reads(
     head = posixpath.basename(words[0])
     if tracker.unscanned and head not in _DIRECTORY_CHANGERS and _reads_files(words, head):
         # Review D2: the reader may run from a directory the unfinished scan never reached.
-        raise IncompleteScanError("a computed directory change's link scan stopped before it finished")
+        raise IncompleteScanError(
+            "a computed directory change's link scan stopped before it finished"
+        )
+    if tracker.computed_links and head not in _DIRECTORY_CHANGERS and _reads_files(words, head):
+        # Round 6 class sweep: after a computed move the shell may sit above a directory
+        # link, and a deeper root (`sub/a/dl`) reaches it; each such link is read as a root.
+        for link in dict.fromkeys(tracker.computed_links):
+            yield Read(link, view=TreeView.ALL)
     if tracker.lost and head not in _DIRECTORY_CHANGERS and _reads_files(words, head):
         yield Read(_EVERYTHING, view=TreeView.ALL)
         # A directory link out of the project is under no indexed file: each place a
