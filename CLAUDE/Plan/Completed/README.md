@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00571: branch pools parked merged caps](00571-branch-pools-parked-merged-caps/PLAN.md) - Complete at merge `9314a6e4c` (PR #186) + `7a917cff9` (green CI) + the archiving commit (GitHub #165, closed: open, parked and merged branches are three pools, each with its own cap, max age and deny rule; `branch-keep`, `branches.bot_owned`, safe `branch-sweep --clean --remote`; release note 007)
+
 - [00573: admin seat issue assignment override](00573-admin-seat-issue-assignment-override/PLAN.md) - Complete at merge `a2b7f27e9` + the archiving commit (owner ruling: a repository admin seat is never blocked by a non-admin's issue assignment; it gets an advisory, and `issue-validity --claim` performs a recorded takeover; non-admin seats and other admins' claims keep the duplicate-work block; dogfooded live on #155; ships in the release after v3.73.0, release note 004)
 
 - [00570: branch containment remote archive refs](00570-branch-containment-remote-archive-refs/PLAN.md) - Complete at merge `df4a928e9` (green CI run 42404687976) + the archiving commit (GitHub #166: branch-sweep and delete-branch accept a remote ref outside `refs/remotes`, such as an archive namespace, as proof of containment via one bounded `ls-remote`; the offline wording says only what it checked; release note 004)

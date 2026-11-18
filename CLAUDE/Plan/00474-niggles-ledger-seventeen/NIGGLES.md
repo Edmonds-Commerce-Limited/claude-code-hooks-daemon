@@ -7744,3 +7744,67 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: the `R-BRANCH-WIP-CAP` rule text (`constants/rule_ids.py:72`, `handlers/pre_tool_use/branch_creation_guard.py` lines 81 and 245, and the generated handler guidance they feed) says that at the cap itself it only warns. The deny fires at `len(groups) >= cap + wip.creation_grace` (`core/branch_creation.py:986`), so with a grace of 0 it blocks at the cap and the text does not match the behaviour (confirmed from the code). The Plan 00619 ladder changes the pool-pressure wording nearby, so fix this on top of that merge rather than beside it.
 
 **Status**: ⬜ Open, low priority. Make the rule text state the grace dependency ("warns up to `wip.creation_grace` past the cap; with a grace of 0 it blocks at the cap"), regenerate the handler guidance, and add a test that pins the text to the behaviour.
+
+### N650 — the stop guard's dormancy `warn` advisory can never fire, and the docs say `warn` reports it
+
+**Source**: Plan 00618, the independent review of D-1/D-2 (`subagent-reports/261117-d1-d2-review.md`, F-1 and F-2) and the release 3.75.0 Step 10 re-run (S-3). Recorded at the plan's close-out.
+
+**Evidence**: `core/branch_stop_guard.py` `_pressure_findings` builds the DORMANT finding with `advisory=dormancy == "warn"`, but it only builds it for a record at `DormancyStage.BLOCK`, and `core/branch_inventory.py` `_stage` returns `BLOCK` only when `dormancy.mode == "block"` (re-read on the v3.75.0 tree). So under `warn` no DORMANT finding exists and the advisory branch is dead code. The test `TestDormancyModeAtStop.test_warn_mode_advises_and_allows` passes only because it monkeypatches a `(warn, BLOCK)` record the inventory cannot produce. `docs/guides/CONFIGURATION.md` (the `branches.dormancy` paragraph) says such a branch "is only reported in `warn` mode", and `docs/guides/HANDLER_REFERENCE.md` (the branch stop guard entry) says `warn` "reports it"; the only report is the existing rate-limited noisy-stage line, not a stop finding. Behaviour matches the previous release, so nothing is loosened.
+
+**Status**: ⬜ Open, low priority. Either remove the dead branch and the impossible-state test, or replace that test with one driven by a real inventory asserting no DORMANT line under `warn`; reword both docs to point at the noisy-stage line.
+
+### N651 — stop guard pool-mode test gaps, and its over-cap count ignores `creation_grace`
+
+**Source**: Plan 00618, the D-1/D-2 review's test-gap section and the D-1/D-2 fix report's "Where this could loosen" section (`subagent-reports/261117-d1-d2-review.md`, `261117-d1-d2.md`). Recorded at the plan's close-out.
+
+**Evidence**: `tests/unit/core/test_branch_stop_gate_pool_modes.py` pins only two same-tip cases (two names on one pushed tip count once; distinct tips over the cap still deny). Not pinned: a same-tip pair over the raw cap still denies when the shared tip is on no remote, or when one touched name's worktree is dirty (the obvious regression risk of D-2); mixed modes (`wip: warn` with `dormancy: block`, or `wip: block` with `stop_guard.mode: warn`). Two behaviour notes from the fix report: the `warn` advisory repeats on every stop with no throttle, and the stop guard denies at `open > cap` while the creation guard denies only at `cap + wip.creation_grace`, so with a grace above 0 a session can create a branch the stop guard then refuses the stop over.
+
+**Status**: ⬜ Open. Add the missing tests first. Then decide whether the stop guard's over-cap test should follow `creation_grace` (a loosening, so an owner decision) and whether the `warn` advisory needs the noisy line's hourly throttle.
+
+### N652 — stop guard: a mixed stop after the main counter is spent never refuses a newly judged branch, and four fail-open paths predate B-2
+
+**Source**: Plan 00618 Task 1.2 (B-2) fix reports `261116-fix-b2-rework.md` (residual risk) and `261116-fix-b2-counter.md` (known gap). Not re-verified at the close-out.
+
+**Evidence**: once an ordinary own branch has used up the session's stop blocks and stays unresolved, every later stop that also holds a newly judged branch (an own branch in an unlocked harness worktree with no queue record) counts on the spent main counter, so it is allowed and the newly judged branch is recorded as abandoned without drawing on its own capped counter. The previous release never refused that branch at all, so this is not a loosening. The rework report also lists fail-open paths the B-2 fix left unchanged: unreadable touch records, an inventory failure, `judgement.incomplete` being ignored, and an exception in `decide_stop`.
+
+**Status**: ⬜ Open. Decide whether a mixed stop should fall through to the harness counter, and whether each listed fail-open path is intended (a stop guard that cannot judge may be meant to allow); pin whichever is chosen with a test.
+
+### N653 — the secret guard anchors `git -C` for a mention only when `git` is the segment's first word
+
+**Source**: Plan 00618 S-1 fix report (`subagent-reports/261118-s1-fix.md`, "Known limits"). Not re-verified at the close-out.
+
+**Evidence**: `secret_file_matching.effective_cwds` follows `git -C <dir>` only when `git` is the first word, so `sudo git -C d show HEAD:x` is not anchored at `d` (the recursive-search path does peel wrappers). Same report: `git -C <nested-repo> grep x` is judged in the tracked view of this project's index, so a file tracked only in the nested repository is not seen; that matches the `cd <nested-repo> && git grep x` verdict.
+
+**Status**: ⬜ Open. Peel command wrappers before reading `git -C` in `effective_cwds`, with a deny test for the wrapped form; decide whether the nested-repository view needs its own handling.
+
+### N654 — secret guard over-deny residuals in the git search-option code
+
+**Source**: Plan 00618 Tasks 1.3 and 1.4 fix report (`subagent-reports/261116-fix-b3-b5.md`, "Residual, not fixed").
+
+**Evidence**: the list of valueless options allowed as the word before a separate `-S` is hand-written, so a real valueless log option missing from it causes an over-deny; and `secret_file_matching.py` still locates the git word with `names.index("git")` (two call sites on the v3.75.0 tree), which can pick a wrapper argument spelled `git` (`sudo -u git git ...`). Both err toward deny, never allow.
+
+**Status**: ⬜ Open, low priority. Derive the valueless set from git's own option list (or pin it against `git log -h`), and locate the git word through the wrapper peeler instead of `index`.
+
+### N655 — the long-running classifier still treats a compound backgrounded whole as exempt
+
+**Source**: Plan 00618 Phase 2 long-running/config group (`subagent-reports/261117-phase2-lr-config-group.md`, owner notes on N-11 and N-14). The handler ships disabled.
+
+**Evidence**: a compound closed by `done`/`fi`/`)`/`}` and then backgrounded (`until ...; do sleep 5; done &`, `( a; b ) &`) is read as backgrounded whole and stays exempt, as on the previous release; `sleep 300; (echo x) &` is a known miss of that rule. Separately, a bad regex in any long-running policy list still drops every `exempt_patterns` entry (kept deliberately: keeping them would allow what the previous release denied).
+
+**Status**: ⬜ Open, low priority. Judge the statements inside a backgrounded compound that are not themselves the backgrounded job, test-first, before the handler is enabled by default.
+
+### N656 — the remote-delete proof may print a credentialed remote URL from `ls-remote` stderr
+
+**Source**: release 3.75.0 Step 10 code review (`subagent-reports/261116-step10-code-review.md`, "Speculative, not counted"). Not reproduced.
+
+**Evidence**: `core/remote_branch_proof.py` joins `git ls-remote` failure text verbatim into the problem message ("git ls-remote said: ..."). If git does not redact a URL carrying a token, the token reaches the transcript.
+
+**Status**: ⬜ Open. Reproduce with a scratch remote whose URL carries a dummy credential; if it appears, redact the userinfo part of any URL before the text is shown.
+
+### N657 — N-19's test-gap check did not confirm coverage of the `workable_issues` and `cron_hosts` change
+
+**Source**: Plan 00618 Phase 2 defects report (`subagent-reports/261117-phase2-defects.md`, N-19 row).
+
+**Evidence**: `tests/unit/utils/test_workable_issues.py` and `test_cron_hosts.py` exist, but whether they cover the change made in `d696d45cc` was not checked line by line; the review's checklist item was "tests exist for every handler change".
+
+**Status**: ⬜ Open, low priority. Read `d696d45cc`'s diff against the two test files and add a test for any changed branch that no test drives.
