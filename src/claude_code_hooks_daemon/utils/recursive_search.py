@@ -673,6 +673,8 @@ class _SearchCwds:
     targets: list[str] = field(default_factory=list)
     # A `cd` to a tilde the hook cannot place (`~-`) was seen: later reads judge every file.
     lost: bool = False
+    # The directories passed SEARCH_DIRECTORY_CAP: later moves are not followed.
+    overflowed: bool = False
     # The command names CDPATH: a relative cd may land in any directory it lists.
     cdpath: bool = False
 
@@ -763,7 +765,7 @@ def _reads(command: str, cwds: tuple[str, ...], depth: int, tracker: _SearchCwds
             # Each failed `cd` keeps its base beside its target, so the set can double
             # per `cd`. Past the cap every later read is judged over every indexed file.
             # Where a read is placed then makes no difference, so the set is cut.
-            tracker.lost = True
+            tracker.lost = tracker.overflowed = True
             current = current[:SEARCH_DIRECTORY_CAP]
         for _ in range(min(closes, len(saved))):
             current = tuple(dict.fromkeys((*saved.pop(), *current)))
@@ -784,7 +786,7 @@ def _segment_state(
     if head in _DIRECTORY_CHANGERS:
         # A `cd ~-` (a tilde the hook cannot place) loses the directory: every later read fails closed.
         tracker.lost = tracker.lost or any(unknown_tilde(word) for word in words[1:])
-        if tracker.lost:
+        if tracker.overflowed:
             # Every later read is judged over every indexed file: the move is not followed.
             return fed_by, current
         return fed_by, _directory_change(words, 1, current, tracker)

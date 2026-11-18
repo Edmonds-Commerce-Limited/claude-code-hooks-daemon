@@ -3903,22 +3903,25 @@ def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bo
             at_start = True
         if at_start or opened or loose:
             moves: list[str | None] = []
+            # `/usr/bin/env -C d` is env: the command is named by its last component.
+            name = Path(head).name
             if head in _DIRECTORY_CHANGE_COMMANDS:
                 moves.extend(_change_targets(words, index + 1))
-            elif head in _CHDIR_OPTIONS:
-                moves.extend(chdir_wrapper_targets(head, words, index + 1))
+            elif name in _CHDIR_OPTIONS:
+                moves.extend(chdir_wrapper_targets(name, words, index + 1))
             for move in moves:
                 walk.change(move)
                 if loose:
                     walk.indeterminate()
-            if head in COMMAND_WRAPPERS:
+            if name in COMMAND_WRAPPERS:
                 # `sudo tar -C d`, `nice git -C d`: the wrapped command is at start too.
-                _names, offset = peel_command_wrappers([head, *words[index + 1 :]])
+                _names, offset = peel_command_wrappers([name, *words[index + 1 :]])
                 wrapped_at = index + offset
                 # A chdir wrapper inside the chain (`nohup env -C d`) moves too.
                 for inner in range(index + 1, wrapped_at):
-                    if words[inner] in _CHDIR_OPTIONS and words[inner] in COMMAND_WRAPPERS:
-                        for move in chdir_wrapper_targets(words[inner], words, inner + 1):
+                    inner_name = Path(words[inner]).name
+                    if inner_name in _CHDIR_OPTIONS and inner_name in COMMAND_WRAPPERS:
+                        for move in chdir_wrapper_targets(inner_name, words, inner + 1):
                             walk.change(move)
         if not (word in _COMMAND_START_WORDS or (at_start and _ASSIGNMENT_WORD.match(word))):
             at_start = opened and not head
