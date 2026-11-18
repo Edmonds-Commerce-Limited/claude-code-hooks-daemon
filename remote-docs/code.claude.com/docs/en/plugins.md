@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins.md
-fetched_at: '2026-11-10T16:35:17.116674+00:00'
+fetched_at: '2026-11-16T21:15:47.541920+00:00'
 fidelity: converted
-source_sha256: 9124d73faba1ae251d9f4229d03e19bd9fc0cd811a43aefc014c75a9d34e64ad
+source_sha256: e5b255a52965b71be9d9583bb9b6707f65ce1f214f6afa4f614e1a492787e599
 licence: unreviewed
-stale_after: '2027-02-08'
+stale_after: '2027-02-14'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -46,7 +46,7 @@ This diagram shows a plugin named `my-plugin` that holds a skill, an agent, hook
 
 ![Diagram in two columns joined by five straight arrows. Left, the directory of a plugin named my-plugin, holding a manifest at .claude-plugin/plugin.json, skills/review/SKILL.md, agents/reviewer.md, hooks/hooks.json, .mcp.json, and other components. Right, what each file gives you in your session: the manifest sets the plugin name, my-plugin; the skill runs as /my-plugin:review; the agent file is a subagent Claude can delegate to; the hooks file holds hooks that run on lifecycle events; and .mcp.json adds an MCP server that gives Claude tools.](https://mintcdn.com/claude-code/2Q_GtOEovg5qaBem/images/plugin-directory.svg?fit=max\&auto=format\&n=2Q_GtOEovg5qaBem\&q=85\&s=f623b64e82713b830e48174f0a922888)
 
-For every component type a plugin can hold, with an example of each, see [Plugin components](https://code.claude.com/docs/en/plugins/components.md). To see where each piece is located in a plugin's directory, use the [plugin explorer](https://code.claude.com/docs/en/plugins/components.md#explore-the-plugin-directory) on that page.
+For component types a plugin can hold, with an example of each, see [Plugin components](https://code.claude.com/docs/en/plugins/components.md). To see where each piece is located in a plugin's directory, use the [plugin explorer](https://code.claude.com/docs/en/plugins/components.md#explore-the-plugin-directory) on that page.
 
 ### Decide whether you need a plugin
 

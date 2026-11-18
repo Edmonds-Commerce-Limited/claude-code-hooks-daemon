@@ -8,13 +8,17 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - Not Started (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; draft, no code until the owner approves the design)
+
+- [00621: actions qa ci advisory and workflow lint on edit](00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - Not Started (peer request, owner direction relayed: advise adopting an external workflow linter and run it on workflow edits; the design needs the owner's confirmation first)
+
+- [00618: release 3 75 0 code review findings](00618-release-3-75-0-code-review-findings/PLAN.md) - In Progress (Step 10 review of release 3.75.0 returned FAIL: 5 blocking fail-open or data-loss findings plus 20 non-blocking defects; release aborted at that gate; fix test-first, then the owner re-runs the release)
+
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
 
 - [00614: secret guard resolves links against hook cwd](00614-secret-guard-resolves-links-against-hook-cwd/PLAN.md) - In Progress (found by the 00613 probe: a relative Bash token such as `cat link` is resolved against the daemon's cwd `/`, so a link to a protected file passes; also a directory-link grep and a glob under a directory link; fix test-first and fail closed)
 
 - [00613: worktree link secret verb](00613-worktree-link-secret-verb/PLAN.md) - Not Started (peer report: the secret guard denies a relative symlink to a protected file made inside a worktree, which a peer workflow needs; design first, because a link is itself a route to the content and the owner instruction is unverified)
-
-- [00612: secret guard dir glob false allows](00612-secret-guard-dir-glob-false-allows/PLAN.md) - In Progress (Plan 00610 follow-ups: POSIX bracket classes and symlinked directories let a recursive reader past `secret_file_guard`; chosen by the stand-in)
 
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
@@ -200,6 +204,12 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00619: branch pool graduated warnings](Completed/00619-branch-pool-graduated-warnings/PLAN.md) - Complete at merge `1dc7ca3e0` + the archiving commit (each branch pool warns at 60, 80 and 90 percent of the point where creation is refused; the 90 percent warning shows on every tool call and prompt until usage drops; session start and the stop report share the ladder; the block and every guard decision are unchanged; release note 001)
+
+- [00617: park commit keeps merged branch deletable](Completed/00617-park-commit-keeps-merged-branch-deletable/PLAN.md) - Complete at merge `01a13a600` (CI 43991958722 green) + the archiving commit (a branch left with only empty park commits is classified merged by one shared `branch_park.is_park_residue`; release note 091; peer-team notice left open)
+
+- [00612: secret guard dir glob false allows](Completed/00612-secret-guard-dir-glob-false-allows/PLAN.md) - Complete at merge `245b6d98f` + `fbbf9ca5f` (main CI 43862059384 green) + the archiving commit (POSIX bracket classes, symlinked directories and bare globs no longer let a recursive reader past `secret_file_guard`; release note 088)
+
 - [00609: tracked hook wrappers machine independent](Completed/00609-tracked-hook-wrappers-machine-independent/PLAN.md) - Complete at merge `8ea7c03c6` (CI run 43822592185 green) + the archiving commit (generated wrappers resolve the checkout root at run time and carry no machine-specific path; the daemon publishes an overflowing socket location in a file the wrapper trusts only for its own checkout; an older `init.sh` PID-path boundary defect fixed in the same merge; release note 085)
 
 - [00610: secret guard trailing slash glob](Completed/00610-secret-guard-trailing-slash-glob/PLAN.md) - Complete at merge `31a2cce4f` (main CI 43816232915 green) + the archiving commit (GitHub #204: a glob ending in `/` is judged as the directories it expands to, so `ls -d */` is allowed and `grep -r x */` still denied; release note 084; follow-ups in PLAN.md)
@@ -254,17 +264,13 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00571: branch pools parked merged caps](Completed/00571-branch-pools-parked-merged-caps/PLAN.md) - Complete at merge `9314a6e4c` (PR #186) + `7a917cff9` (green CI) + the archiving commit (GitHub #165, closed: open, parked and merged branches are three pools, each with its own cap, max age and deny rule; `branch-keep`, `branches.bot_owned`, safe `branch-sweep --clean --remote`; release note 007)
 
-- [00573: admin seat issue assignment override](Completed/00573-admin-seat-issue-assignment-override/PLAN.md) - Complete at merge `a2b7f27e9` + the archiving commit (owner ruling: a repository admin seat is never blocked by a non-admin's issue assignment; it gets an advisory, and `issue-validity --claim` performs a recorded takeover; non-admin seats and other admins' claims keep the duplicate-work block; dogfooded live on #155; ships in the release after v3.73.0, release note 004)
-
-- [00570: branch containment remote archive refs](Completed/00570-branch-containment-remote-archive-refs/PLAN.md) - Complete at merge `df4a928e9` (green CI run 42404687976) + the archiving commit (GitHub #166: branch-sweep and delete-branch accept a remote ref outside `refs/remotes`, such as an archive namespace, as proof of containment via one bounded `ls-remote`; the offline wording says only what it checked; release note 004)
-
-- [00569: hooks screen target by host arch](Completed/00569-hooks-screen-target-by-host-arch/PLAN.md) - Complete at merge `ae0af5761` (green CI run 42404687976) + the archiving commit (GitHub #174: the ccy supervisor and `screen/build.sh` choose the hooks-screen musl target triple from the host architecture, x86_64 or aarch64, and the failure note names the architecture; release note 003)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
 
-- None. (00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
+- [00616: secret guard regex token in interpreter code](00616-secret-guard-regex-token-in-interpreter-code/PLAN.md) - Blocked on the owner (#205, N626: should a glob-shaped token in interpreter code, such as the regex `.*?\n`, be judged against the protected-file index? Options A/B/C in PLAN.md)
+
+(00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
 
 ## Cancelled Plans
 
@@ -311,11 +317,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 612 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 621 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 514 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 517 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 74 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 80 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

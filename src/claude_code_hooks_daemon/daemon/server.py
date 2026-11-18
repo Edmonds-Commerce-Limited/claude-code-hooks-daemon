@@ -1289,6 +1289,11 @@ class HooksDaemon:
         self.deferred_startup_done = asyncio.Event()
         self._active_requests = 0
         self._shutdown_requested = False
+        # A new daemon lifetime may own repairs again (a stop refuses new ones).
+        # Imported here: the install package imports this module at load time.
+        from claude_code_hooks_daemon.install.relay_repair import resume_owned_spawns
+
+        resume_owned_spawns()
         self._shutdown_task: asyncio.Task[None] | None = None
         self._idle_check_interval = idle_check_interval
         self._is_new_controller = isinstance(controller, Controller)

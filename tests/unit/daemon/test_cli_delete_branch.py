@@ -464,3 +464,32 @@ class TestAPartialBatchIsReportedHonestly:
         assert report.deleted == ("shipped",), "and the other branch must be gone"
         assert len(report.restore_commands) == 1, "a restore line is owed for what went"
         assert report.restore_commands[0].startswith("git branch shipped ")
+
+
+class TestADeletionMainNeverHeldIsRefused:
+    """Plan 00618 B-1 through the command: no new bytes, but a net change main never held."""
+
+    @pytest.fixture
+    def repo(self, tmp_path: Path) -> Path:
+        path = tmp_path / "repo"
+        path.mkdir()
+        (path / ".claude" / "hooks-daemon").mkdir(parents=True)
+        _git(path, "init", "-b", "main")
+        _commit(path, "a.txt", "v1\n", "Add a at v1")
+        _commit(path, "b.txt", "b\n", "Add b")
+        _commit(path, "a.txt", "v2\n", "Main moves a to v2")
+        _git(path, "checkout", "-b", "doomed")
+        _git(path, "rm", "-q", "b.txt")
+        _commit(path, "a.txt", "v1\n", "Delete b, put a back to v1")
+        _git(path, "checkout", "main")
+        return path
+
+    def test_the_command_refuses_and_says_why(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        tip = _git(repo, "rev-parse", "refs/heads/doomed").strip()
+        exit_code = cmd_delete_branch(_args(repo))
+        captured = capsys.readouterr()
+        assert exit_code == _EXIT_REFUSED
+        assert _git(repo, "rev-parse", "refs/heads/doomed").strip() == tip
+        assert "net change" in captured.out + captured.err

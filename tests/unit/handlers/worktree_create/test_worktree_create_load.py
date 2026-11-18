@@ -290,6 +290,43 @@ class TestUnregisteredPartialDirectory:
         assert WorktreeCreateHandler._undo_failed_add(str(repo), path, "wb", False) == ""
         assert not path.exists()
 
+    def test_a_directory_git_still_owns_is_never_deleted(self, repo: Path) -> None:
+        """T-4: the debris rule is 'git no longer owns it'; a registered worktree is not debris."""
+        path = repo / ".claude" / "worktrees" / "w"
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "wb", str(path)], check=True
+        )
+
+        def remove_refused(
+            cwd: Path, *args: str, timeout: float = 5.0
+        ) -> subprocess.CompletedProcess[str]:
+            if args[:2] == ("worktree", "remove"):
+                return subprocess.CompletedProcess(["git", *args], 1, "", "refused")
+            return real_run_git(cwd, *args, timeout=timeout)
+
+        with patch(f"{_HANDLER_MODULE}.run_git", side_effect=remove_refused):
+            left = WorktreeCreateHandler._undo_failed_add(str(repo), path, "wb", False)
+
+        assert (path / "README.md").is_file()
+        assert str(path) in left
+
+    def test_a_directory_whose_ownership_cannot_be_read_is_not_deleted(self, repo: Path) -> None:
+        path = repo / ".claude" / "worktrees" / "w"
+        path.mkdir(parents=True)
+        (path / "partial.txt").write_text("x", encoding="utf-8")
+
+        def list_fails(
+            cwd: Path, *args: str, timeout: float = 5.0
+        ) -> subprocess.CompletedProcess[str]:
+            if args[:2] == ("worktree", "list"):
+                return subprocess.CompletedProcess(["git", *args], GIT_TIMED_OUT, "", "timed out")
+            return real_run_git(cwd, *args, timeout=timeout)
+
+        with patch(f"{_HANDLER_MODULE}.run_git", side_effect=list_fails):
+            WorktreeCreateHandler._undo_failed_add(str(repo), path, "wb", False)
+
+        assert (path / "partial.txt").is_file()
+
     def test_one_that_cannot_be_deleted_is_named_as_left_behind(self, repo: Path) -> None:
         path = repo / ".claude" / "worktrees" / "w"
         path.mkdir(parents=True)

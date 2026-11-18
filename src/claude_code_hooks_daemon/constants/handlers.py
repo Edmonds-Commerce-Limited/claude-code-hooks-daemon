@@ -785,6 +785,18 @@ class HandlerID:
         config_key="branch_creation_guard",
         display_name="branch-creation-guard",
     )
+    # Branch pool warning ladder (PreToolUse, UserPromptSubmit) -- Plan 00619: the
+    # share of each pool's block point in use, said on every call at 90 percent.
+    BRANCH_POOL_PRESSURE_ADVISOR = HandlerIDMeta(
+        class_name="BranchPoolPressureAdvisorHandler",
+        config_key="branch_pool_pressure_advisor",
+        display_name="branch-pool-pressure-advisor",
+    )
+    BRANCH_POOL_PRESSURE_PROMPT = HandlerIDMeta(
+        class_name="BranchPoolPressurePromptHandler",
+        config_key="branch_pool_pressure_prompt",
+        display_name="branch-pool-pressure-prompt",
+    )
     # Branch stop guards (Stop, SubagentStop) -- Plan 00558 Task 4.4: a stop
     # that leaves a dirty worktree, unpushed commits or a merged branch behind.
     BRANCH_STOP_GUARD = HandlerIDMeta(

@@ -32,6 +32,7 @@ import fcntl
 import importlib.util
 import json
 import logging
+import math
 import os
 import platform
 import shutil
@@ -2345,6 +2346,21 @@ def _positive_int(text: str) -> int:
         raise argparse.ArgumentTypeError(f"expected a whole number, got {text!r}") from error
     if value < 1:
         raise argparse.ArgumentTypeError(f"expected at least 1, got {value}")
+    return value
+
+
+def _positive_seconds(text: str) -> float:
+    """An argparse type: a finite number of seconds above zero.
+
+    Zero makes a watch loop call the daemon back to back, and a negative value
+    crashes ``time.sleep`` after the first line (Plan 00618 N-16).
+    """
+    try:
+        value = float(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"expected a number of seconds, got {text!r}") from error
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError(f"expected a finite number above 0, got {text!r}")
     return value
 
 
@@ -11840,7 +11856,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_session_state.add_argument(
         "--interval",
-        type=float,
+        type=_positive_seconds,
         default=2.0,
         help="Seconds between checks for --watch (default 2)",
     )
@@ -13460,6 +13476,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser_delete_branch.set_defaults(func=cmd_delete_branch)
 
     # branch-sweep command (Plan 00558 Task 2.2)
+    from claude_code_hooks_daemon.core.branch_cleanup import BULK_BATCH_SIZE
+    from claude_code_hooks_daemon.core.branch_creation import EXIT_CREATION_REFUSED
     from claude_code_hooks_daemon.core.branch_sweep import JSON_RECORD_KEYS
 
     parser_branch_sweep = subparsers.add_parser(
@@ -13497,7 +13515,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser_branch_sweep.add_argument(
         "--apply",
         action="store_true",
-        help="With --clean: delete, in batches of 50, printing a restore line per branch "
+        help=f"With --clean: delete, in batches of {BULK_BATCH_SIZE}, printing a restore line per branch "
         "and making one remote push per batch, removing a linked worktree "
         "only when it holds nothing outside branches.cleanup_after_merge.regenerable. An "
         "interrupted run is resumed by running the same command again",
@@ -13530,8 +13548,9 @@ def build_parser() -> argparse.ArgumentParser:
         "branch-preflight",
         help="List every reason creating a branch is refused right now (open cap, parked, "
         "merged, dormant), each with its fix command; read-only",
-        epilog="Exit 0 when a branch may be created, 4 when a pool refuses it, 1 when this "
-        "is not a git repository. The creation deny prints the same report.",
+        epilog=f"Exit 0 when a branch may be created, {EXIT_CREATION_REFUSED} when a pool "
+        "refuses it, 1 when this is not a git repository. The creation deny prints the "
+        "same report.",
     )
     parser_branch_preflight.add_argument(
         "name",

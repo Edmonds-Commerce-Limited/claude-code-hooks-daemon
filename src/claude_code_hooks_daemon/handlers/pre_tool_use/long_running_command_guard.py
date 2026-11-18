@@ -37,6 +37,7 @@ corpus holds foreground ``pytest`` rows the owner has not dropped.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
 from typing import Any, Final
 
@@ -53,6 +54,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
 from claude_code_hooks_daemon.utils.long_running_command import (
     DEFAULT_THRESHOLD_SECONDS,
@@ -61,6 +63,8 @@ from claude_code_hooks_daemon.utils.long_running_command import (
     LongRunningPolicy,
     classify,
 )
+
+logger = logging.getLogger(__name__)
 
 _MODE_DENY: Final = "deny"
 _MODE_ADVISE: Final = "advise"
@@ -87,8 +91,8 @@ _HARNESS_CANNOT_PRODUCE: Final = (
     "tests/unit/handlers/pre_tool_use/test_long_running_command_guard.py."
 )
 
-#: Longest command text echoed back in a message.
-_ECHO_LIMIT: Final = 240
+#: Longest command echoed back whole in a message; a longer one is not echoed.
+_ECHO_LIMIT: Final = 2000
 
 _RULE_FOR_KIND: Final[dict[FindingKind, str]] = {
     FindingKind.WAIT_LOOP: RuleID.LONG_RUNNING_WAIT_LOOP,
@@ -278,7 +282,27 @@ class LongRunningCommandGuardHandler(PreToolUseHandlerBase):
                 extra_fast_programs=fast,
                 exempt_patterns=exempt,
             )
-        except ValueError:
+        except ValueError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "long_running_command_guard: an invalid pattern drops every exemption, "
+                    "which only makes the guard stricter"
+                ),
+            )
+        # No exemption survives a bad pattern (that would loosen the guard); the
+        # extra slow patterns are kept when they are themselves valid.
+        try:
+            return LongRunningPolicy.build(
+                threshold_seconds=self._threshold(),
+                extra_slow_patterns=slow,
+                extra_fast_programs=fast,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "long_running_command_guard: %s; the extra slow patterns are dropped", exc
+            )
             return LongRunningPolicy.build(
                 threshold_seconds=self._threshold(), extra_fast_programs=fast
             )
@@ -340,13 +364,20 @@ class LongRunningCommandGuardHandler(PreToolUseHandlerBase):
             _RULE_FOR_KIND[f.kind] for f in ordered if _RULE_FOR_KIND[f.kind] != primary.rule_id
         ]
         seen = "; ".join(dict.fromkeys(f"{f.kind.value}: {f.subject}" for f in ordered))
-        shown = command if len(command) <= _ECHO_LIMIT else command[:_ECHO_LIMIT] + " ..."
-        form = json.dumps({"command": shown, _RUN_IN_BACKGROUND: True})
+        if len(command) <= _ECHO_LIMIT:
+            form = json.dumps({"command": command, _RUN_IN_BACKGROUND: True})
+            reissue = f"Re-issue the same Bash call with run_in_background set:\n  {form}\n\n"
+        else:
+            # A cut command is a different command, so a long one is never echoed.
+            reissue = (
+                "Re-issue the same Bash call, command unchanged, with "
+                f"{_RUN_IN_BACKGROUND} set to true.\n\n"
+            )
         also_line = f" Also: {', '.join(dict.fromkeys(also))}." if also else ""
         return (
             f"{RuleFormatter().headline(primary)}\n"
             f"This call looks long ({seen}).{also_line} {_WHY}\n\n"
-            f"Re-issue the same Bash call with run_in_background set:\n  {form}\n\n"
+            f"{reissue}"
             "The harness notifies you when it ends; keep working meanwhile. To wait "
             "for a condition (a CI run, a file, a process), use the Monitor tool or "
             "start the waiter in the background; never sleep-loop in the foreground.\n\n"

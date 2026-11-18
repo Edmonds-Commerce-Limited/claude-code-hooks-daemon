@@ -37,14 +37,18 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     DormancyStage,
     OwnerRule,
     Pool,
-    is_park_residue,
     is_work_branch,
     merge_proof_key,
     pool_for_ref,
     read_merge_proofs,
     worktrees_by_branch,
 )
-from claude_code_hooks_daemon.core.branch_park import ParkRecord, read_park_record
+from claude_code_hooks_daemon.core.branch_park import (
+    ParkRecord,
+    is_park_residue,
+    park_marked_refs,
+    read_park_records,
+)
 from claude_code_hooks_daemon.daemon.branch_safety import TIER_UNPROVEN, matches_any_glob
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
@@ -87,7 +91,7 @@ _GROUP_ORDER: Final[tuple[str, ...]] = (
 )
 
 #: Snapshot groups ``branch-sweep --clean`` deletes, so the cap deny names it.
-_CLEANABLE: Final[frozenset[str | None]] = frozenset({"merged", "patch-equivalent"})
+CLEANABLE_GROUPS: Final[frozenset[str | None]] = frozenset({"merged", "patch-equivalent"})
 
 Decision = Literal["allow", "warn", "deny"]
 Labels = Mapping[str, Mapping[str, str | None]]
@@ -202,6 +206,10 @@ class _Work:
     stale: bool = False
     #: The display label of the ref named ``name`` (see ``_display_label``).
     label: Mapping[str, str | None] = field(default_factory=dict)
+
+
+#: The public name of one connected piece of work, for modules that read ``work_pools``.
+WorkGroup = _Work
 
 
 # --- naming ---------------------------------------------------------------------------
@@ -391,10 +399,11 @@ def _with_standing_parks(repo: Path, refs: list[_Ref]) -> list[_Ref]:
     tip is the recorded park commit; the remote copy is then the park's own
     past, because its tip is an ancestor of the park commit.
     """
+    records = read_park_records(repo)
     standing = {
         ref.name: record
         for ref in refs
-        if ref.local and (record := read_park_record(repo, ref.name)) and record.sha == ref.tip
+        if ref.local and (record := records.get(ref.name)) and record.sha == ref.tip
     }
     return [_with_standing_park(repo, ref, standing) for ref in refs]
 
@@ -479,9 +488,10 @@ def _carried_refnames(
 ) -> set[str]:
     """Park-marked refs whose only unique commits are park markers over the default's work.
 
-    The inventory's own rule (:func:`is_park_residue`), run only for a ref that carries
-    a park trailer and is not already an ancestor of the default, so a clone with no
-    park commit pays no git call here.
+    The one park-commit rule (:func:`is_park_residue`), walked only for a ref whose tip
+    carries a park or unpark trailer and is not already an ancestor of the default. The
+    unpark trailer is read by one batched listing, paid only when some unmerged ref is
+    not already known to be parked.
     """
     if default is None:
         return set()
@@ -491,11 +501,15 @@ def _carried_refnames(
         for ref in (f"{_REMOTES}{config.remote}/{default}", f"{_HEADS}{default}")
         if ref in listed
     ]
+    if not targets:
+        return set()
+    unmerged = [ref for ref in work_refs if ref.refname not in merged]
+    unknown = [ref.refname for ref in unmerged if not ref.parked]
+    marked = park_marked_refs(repo, unknown, timeout=Timeout.GIT_CONTEXT)
     return {
         ref.refname
-        for ref in work_refs
-        if ref.parked
-        and ref.refname not in merged
+        for ref in unmerged
+        if (ref.parked or ref.refname in marked)
         and any(is_park_residue(repo, ref.tip, target) for target in targets)
     }
 
@@ -555,7 +569,7 @@ def _display_label(ref: _Ref, labels: Labels) -> Mapping[str, str | None]:
 def _ref_pool(ref: _Ref, merged: set[str], carried: set[str], labels: Labels) -> Pool | None:
     """One ref's pool, by the rule the sweep shares (:func:`pool_for_ref`); None when carried."""
     return pool_for_ref(
-        merged=ref.refname in merged or _tip_label(ref, labels).get("group") in _CLEANABLE,
+        merged=ref.refname in merged or _tip_label(ref, labels).get("group") in CLEANABLE_GROUPS,
         park_carried=ref.refname in carried,
         parked=ref.parked,
     )
@@ -631,7 +645,8 @@ def _detail(work: _Work, now: float, worktrees: Mapping[str, Path] | None) -> st
     return f"{work.name} ({age}d old{place})"
 
 
-def _rank(work: _Work) -> int:
+def work_rank(work: _Work) -> int:
+    """Sort key putting the cheapest-to-close group first (merged ... live)."""
     group = work.label.get("group")
     return _GROUP_ORDER.index(group) if group in _GROUP_ORDER else len(_GROUP_ORDER)
 
@@ -643,7 +658,7 @@ def _cap_lines(
     worktrees: Mapping[str, Path] | None,
 ) -> tuple[list[str], list[str]]:
     """``(lines, fixes)`` for the open-work cap."""
-    ordered = sorted(groups, key=lambda work: (_rank(work), work.committed, work.name))
+    ordered = sorted(groups, key=lambda work: (work_rank(work), work.committed, work.name))
     lines = [
         f"Open work branches: {len(groups)} (cap {config.effective_wip_cap()}). "
         f"Finish (merge) one, {POOL_PARK_CLAUSE}, or delete it ({POOL_DELETE_CONDITION}), "

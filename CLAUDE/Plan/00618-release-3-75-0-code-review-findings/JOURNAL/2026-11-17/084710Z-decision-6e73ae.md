@@ -1,0 +1,3 @@
+## 08:47 · decision · —
+
+Stand-in ruling (automated one-off, NOT the owner): declined. No owner message arrived since the awaiting-human stop. The open items are D-1 and D-2 (each would let the stop guard allow a stop that main denies), D-3 (the recommendation is "no", and "yes" opens a real bypass) and D-4 (a design choice touching every PostToolUse hook), plus D-5, the `/release` re-run, which is reserved for the owner. The plan itself marks D-1 to D-4 as owner decisions because they loosen or reshape guards, so the stand-in made none of them and changed no code. Plans 00618, 00613 and 00594 stay blocked on the owner.

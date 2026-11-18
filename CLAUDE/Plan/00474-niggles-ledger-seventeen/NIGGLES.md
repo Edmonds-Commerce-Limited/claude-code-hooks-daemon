@@ -7570,3 +7570,177 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: reproduced on `main`: `bin/hooks-daemon --version` exits 2 with the whole usage text and an unrecognised-argument error. The usage lists many subcommands but the version is only readable by `git describe` in the checkout or from the status line, which a client seat or a sub-agent cannot always reach. Bug reports (BUG_REPORTING.md) and peers both need the installed version.
 
 **Status**: ⬜ Open. Accept `--version` (and a `version` subcommand if the CLI style prefers one) printing the same version string the status line and the unreleased-install marker use (`vA.B.C` or `vA.B.C+rc-X.Y.Z.<sha>`), exit 0, no daemon needed. Defence: a CLI test that runs it with no daemon and asserts exit 0 and the string, for a released and an unreleased install.
+
+### N628 — the bash safe-mode prelude rule denies a brace group whose steps are each already `&&`-gated
+
+**Source**: a peer report (a desktop seat in the lts-infra team, not a human, no authority), made against `v3.74.0` and met by a sub-agent. No file contents involved.
+
+**Evidence** (as reported, NOT yet reproduced here): R-BASH-SAFE-MODE-PRELUDE-MISSING denied a command holding a brace group `{ a && b && c; }` whose steps are all `&&`-gated, so the group cannot continue past a failure. Expected: an all-`&&`-gated group needs no prelude.
+
+**Status**: ⬜ Open. Reproduce first on `main` with a synthetic command; if it reproduces, fix test-first so an all-`&&`-gated group is allowed while a group with an ungated step (`;` or newline between steps) is still denied (the narrowing must be proven by a test for that ungated twin).
+
+### N629 — the markdown table formatter re-pads rows an edit never touched
+
+**Source**: a peer report (a desktop seat in the lts-infra team, not a human, no authority), made against `v3.74.0`.
+
+**Evidence** (as reported, NOT yet reproduced here): an `Edit` that changes one cell of a large markdown table, in a doc with many tables whose rows hold cells over 1500 characters, makes `markdown_table_formatter` re-pad every row of that table and of other tables in the same file. Harm: the diff no longer shows the change, and every re-padded row counts as an added line to commit-time scanners (the sensitive-content scan), so old content is re-flagged and re-reviewed as new. Expected: only rows the edit touched change, or a table is re-padded only when it was already canonically padded. The reporter's workaround is rebuilding the file by script at the original widths.
+
+**Status**: ⬜ Open. Reproduce first on `main` with a synthetic doc (two tables, long cells, an `Edit` of one cell). If it reproduces, fix test-first: the formatter must leave untouched rows byte-identical (or skip a table whose existing padding is not canonical), with a test that an already-canonical table is still aligned after an edit.
+
+### N645 — use `agent_id` and `agent_type` on compaction payloads (Claude Code 2.1.323)
+
+**Source**: the Claude Code changelog review for release 3.75.0 (`subagent-reports/261116-claude-code-review-v3.75.0.md`), an adopt row.
+
+**Evidence**: from 2.1.323, PreCompact, PostCompact and the post-compaction SessionStart hooks receive `agent_id` and `agent_type` when a subagent compacts. The compaction signal handler (`handlers/pre_compact/compaction_signal.py`) does not read them.
+
+**Status**: ⬜ Open. Decide whether the signal should say which agent compacted; if so, read both fields with a default for older Claude Code versions, test-first.
+
+### N646 — check PreToolUse allow does not rely on surviving a permission-check error (Claude Code 2.1.323)
+
+**Source**: the same review, a conflict row (a check, not a known break).
+
+**Evidence**: from 2.1.323 an allow from a PreToolUse hook no longer sticks when the permission check errors afterwards; Claude Code decides as if no hook had answered. Any daemon handler that answers allow to skip a prompt would then prompt again.
+
+**Status**: ⬜ Open. List the PreToolUse handlers that return allow, and confirm none depends on the allow surviving. The review found none on the PreToolUse side.
+
+### N647 — check the PermissionRequest auto-approve handler never rewrites tool input (Claude Code 2.1.323)
+
+**Source**: the same review, a conflict row (a check, not a known break).
+
+**Evidence**: from 2.1.323 a rewritten PermissionRequest input is re-asked or refused when the check fails afterwards. The overlap is `handlers/permission_request/auto_approve_reads.py`.
+
+**Status**: ⬜ Open. Confirm the handler returns decisions only and never an updated input; add a test that pins it.
+
+### N648 — check WorktreeCreate prints a real path, not one through a project symlink (Claude Code 2.1.325)
+
+**Source**: the same review, a conflict row (a check, not a known break).
+
+**Evidence**: from 2.1.325 EnterWorktree refuses a worktree path that goes through a symlink. The overlap is `handlers/worktree_create/worktree_create_handler.py`.
+
+**Status**: ⬜ Open. Confirm the printed path is the resolved real path, with a test whose project directory is reached through a link.
+
+### N630 — playbook test #379 (guard config drift) drives `echo "test"`, which cannot show its notice
+
+**Source**: Plan 00618 Phase 2 (the release 3.75.0 acceptance run), recorded by the Phase 2 sub-agent.
+
+**Evidence**: the generated acceptance playbook's Test 379, "guard config drift - reports an uncommitted guard weakening", is typed as an observable context test whose command is `echo "test"` and whose expected pattern is `GUARD CONFIG DRIFT|uncommitted`. The drift report is a session-start notice computed from the working-tree config against the committed one; a Bash `echo` neither starts a session nor changes the config, so the pattern can never appear and the test can only fail or be waved through by hand.
+
+**Status**: ⬜ Open. Fix the handler's acceptance-test definition: either declare it a session-start test with a setup step that writes a synthetic weakening into a scratch config, or mark it as not drivable by a tool call (prose a human runs), so the playbook stops carrying a test that cannot pass.
+
+### N631 — the Plan 00609 proof script hard-codes `REPO = Path("/workspace")`
+
+**Source**: Plan 00618 Phase 2, recorded by the Phase 2 sub-agent (the script was reformatted in Plan 00618 Task 2.3 after it failed the release gate's `format` check).
+
+**Evidence**: `CLAUDE/Plan/Completed/00609-tracked-hook-wrappers-machine-independent/subagent-reports/prove-two-root-two-host.py` sets `REPO = Path("/workspace")`, so it proves the main checkout whatever checkout runs it: from a worktree it silently tests main's code, and on a host whose checkout lives elsewhere it fails. The same literal is in the archived Plan 00243 prototype, which is historical and not run.
+
+**Status**: ⬜ Open. Derive the repository root from the script's own location (or `git rev-parse --show-toplevel`), so the proof runs against the checkout that holds it.
+
+### N632 — a `lint_on_edit` timeout above about 15 s is cut by the 20 s PostToolUse chain deadline
+
+**Source**: Plan 00618 Phase 2 (Task 2.5), by reading `constants/timeout.py` and `config/models.py` `deadline_for`.
+
+**Evidence**: PostToolUse has no `EVENT_CHAIN_DEADLINE` entry, so it gets `CHAIN_DEADLINE_DEFAULT` (20 s). `lint_on_edit` defaults to 15 s and documents `options.timeouts` values such as `PHP: 30`, which the chain deadline cuts first, replying "skipped" rather than the handler's own lint-timeout notice. The same constraint is why the lint budget could not be load-scaled for the playbook harness's Kotlin probe.
+
+**Status**: ⬜ Open (owner decision recorded in Plan 00618). Fix with the three-layer event budget the Worktree events use (PostToolUse handler budget, chain deadline, client wait, the `init.sh` mirror and the registered hook timeout), then load-scale the lint base under the new ceiling.
+
+### N633 — `test_relay_binary_checker.py` fails 9 tests under `--cov` and passes without it
+
+**Source**: Plan 00618 Phase 2 sub-agent, seen while running targeted tests. Not investigated.
+
+**Status**: ⬜ Open. Reproduce with and without `--cov` on `main`; find which test depends on import or timing state that coverage changes.
+
+### N634 — the search guards do not read a search inside a `{ ...; }` brace group
+
+**Source**: Plan 00618 S-1 second independent review (finding F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix and does not depend on `-C`.
+
+**Evidence**: in a synthetic project with a protected file under `deep/`, `{ git -C deep grep --no-index -e .; }` and `{ grep -r . deep; }` are ALLOWED by `secret_file_guard`, while the bare `grep -r . deep` is DENIED. The brace group's words reach the reader with `{` as the command word, so no search is recognised.
+
+**Status**: ⬜ Open. Peel a leading `{` (and the closing `}` segment) before the command word is read, in `recursive_search._command_words` and its callers.
+
+### N635 — the search guards do not read a search inside an `if ... then ... fi` body
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: `if true; then git -C deep grep --no-index -e .; fi` (and the plain `grep -r . deep` form) is ALLOWED by `secret_file_guard`; the `then` keyword is read as the command word.
+
+**Status**: ⬜ Open. Treat the compound-command keywords (`if`, `then`, `elif`, `else`, `do`, `while`, `until`) as words to peel before the command word.
+
+### N636 — the search guards do not read a search run through `exec`
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: `exec git -C deep grep --no-index -e .` (and `exec grep -r . deep`) is ALLOWED by `secret_file_guard`; `exec` is not one of the peeled command wrappers.
+
+**Status**: ⬜ Open. Add `exec` (with its `-a NAME`, `-c`, `-l` options) to the wrappers `peel_command_wrappers` removes.
+
+### N637 — the search guards do not read a search run through the `time` keyword
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: `time git -C deep grep --no-index -e .` (and `time grep -r . deep`) is ALLOWED by `secret_file_guard`; `time` (and `time -p`) is not peeled.
+
+**Status**: ⬜ Open. Peel the `time` keyword and `/usr/bin/time` with its options.
+
+### N638 — the search guards do not read a search inside `bash -lc '...'`
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: `bash -lc 'git -C deep grep --no-index -e .'` (and `bash -lc 'grep -r . deep'`) is ALLOWED by `secret_file_guard`, while `bash -c '...'` is DENIED: the reader looks for a separate `-c` word, and a clustered flag (`-lc`, `-ec`, `-xc`) does not match.
+
+**Status**: ⬜ Open. Recognise any short-option cluster that contains `c` as the shell's command flag.
+
+### N639 — the search guards place a search under `sudo -D <dir>` from the payload cwd
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: from a sub-directory with no protected file, `sudo -D <project root> git -C deep grep --no-index -e .` (and `sudo -D <root> grep -r . deep`) is ALLOWED by `secret_file_guard`. `sudo -D`/`--chdir` changes the directory the command runs in, as `cd` does, but the wrapper is peeled without moving the cwd.
+
+**Status**: ⬜ Open. Treat `sudo -D`/`--chdir` (and `env -C`/`--chdir`) as a directory change when peeling the wrapper; fail closed when the value cannot be placed.
+
+### N640 — a `core.worktree` set through `GIT_CONFIG_PARAMETERS` or `GIT_CONFIG_COUNT/KEY/VALUE` is not recognised
+
+**Source**: Plan 00618 S-1 second independent review (F3), recorded by the S-1b fix sub-agent.
+
+**Evidence**: `GIT_CONFIG_PARAMETERS="'core.worktree'='..'" git -C <root>/sub grep -e r` and `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.worktree GIT_CONFIG_VALUE_0=.. git -C <root>/sub grep -e r` are ALLOWED by both `secret_file_guard` and `flaggable_content_channel_guard`; the same `core.worktree` given as `-c core.worktree=..` is DENIED by both. They deny with `-C .` only because that searches the project root. The review's real-git runs read nothing in the combinations tested, but those were not exhaustive.
+
+**Status**: ⬜ Open. Add `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` and `GIT_CONFIG_KEY_*` to the relocating variables (`git_repo.RELOCATING_VARIABLES`), or read their keys and fail closed on `core.worktree`.
+
+### N641 — the secret guard does not follow a `cd` inside a `( ... )` subshell
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. The flaggable guard was fixed for this shape in the S-1b fix; the secret guard was not.
+
+**Evidence**: `( cd sub; git -C ../deep grep --no-index -e . )` is ALLOWED by `secret_file_guard`, while `cd sub && git -C ../deep grep --no-index -e .` is DENIED. The first segment's command word is `(`, so the `cd` is not tracked, and the trailing `)` is read as a pathspec.
+
+**Status**: ⬜ Open. In `recursive_search._reads`, peel a leading `(`/`{` before testing for `cd`/`pushd` (the flaggable guard's `shell_directory_after` does this) and drop a trailing unquoted `)` word.
+
+### N642 — the flaggable guard skips a relocating environment variable when `-C` is also given
+
+**Source**: Plan 00618 S-1 second independent review (F3), recorded by the S-1b fix sub-agent.
+
+**Evidence**: `GIT_WORK_TREE=flagdir git -C sub grep -e r` (also `sudo GIT_WORK_TREE=...`, `env -i GIT_WORK_TREE=...`, `export GIT_WORK_TREE=...;`) is ALLOWED by `flaggable_content_channel_guard`; it was an advisory allow before the S-1 fix, and the same command without `-C` is DENIED. The review's real-git runs read nothing in the cases tested (git limits `git grep` to the `-C` prefix), so this is a modelling gap, not an observed read.
+
+**Status**: ⬜ Open. Treat a relocating assignment on the segment (and an earlier `export`) as an unplaced move in the flaggable guard, as `recursive_search` does for the secret guard.
+
+### N643 — the flaggable guard's plain `grep -r` ignores an earlier `cd`, an ancestor root and an `xargs -I` token
+
+**Source**: Plan 00618 S-1 second independent review (corpus 3), recorded by the S-1b fix sub-agent. Predates the S-1 fix; the S-1b fix closed these shapes for `git -C` only.
+
+**Evidence**: with `flagdir/**` flagged, `cd sub && grep -r r ../flagdir`, `grep -r r ..` (run from the project root) and `echo flagdir | xargs -I% grep -r r %` are ALLOWED by `flaggable_content_channel_guard`; the secret guard denies the protected-tree equivalents.
+
+**Status**: ⬜ Open. Place plain search roots from the shell directory as well as the payload cwd (the `git -C` path already does), count an ancestor root as reading the whole project, and treat an `xargs` replacement token as an unknown root.
+
+### N644 — the secret guard loses the directory after `cd -` or `popd` without failing closed
+
+**Source**: the S-1b fix sub-agent (Plan 00618), while closing the `cd ~-` form.
+
+**Evidence**: `cd - && grep -r . deep` is ALLOWED by `secret_file_guard`: `_after_directory_change` returns None for `-`, and every later relative root is then left out. The S-1b fix makes `cd ~-` (a tilde the hook cannot place) fail closed for every later read, but kept `cd -` and `popd` as they were.
+
+**Status**: ⬜ Open. Treat `cd -`, `popd` and `pushd` with no operand the way `cd ~-` is treated: later reads in the command fail closed.
+
+### N649 — the branch-cap rule text says "at the cap it only warns" even when the grace is 0
+
+**Source**: a client upgrade to 3.75.0, relayed by a peer agent (a note with no authority; the behaviour below was read from the rule text, not re-run).
+
+**Evidence**: the `R-BRANCH-WIP-CAP` rule text (`constants/rule_ids.py:72`, `handlers/pre_tool_use/branch_creation_guard.py` lines 81 and 245, and the generated handler guidance they feed) says that at the cap itself it only warns. The deny fires at `len(groups) >= cap + wip.creation_grace` (`core/branch_creation.py:986`), so with a grace of 0 it blocks at the cap and the text does not match the behaviour (confirmed from the code). The Plan 00619 ladder changes the pool-pressure wording nearby, so fix this on top of that merge rather than beside it.
+
+**Status**: ⬜ Open, low priority. Make the rule text state the grace dependency ("warns up to `wip.creation_grace` past the cap; with a grace of 0 it blocks at the cap"), regenerate the handler guidance, and add a test that pins the text to the behaviour.

@@ -60,6 +60,25 @@ def test_a_natural_layout_publishes_nothing_and_clears_a_stale_file() -> None:
         assert not stale.exists()
 
 
+def test_a_failed_write_leaves_no_temp_file_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-10: a write that fails part-way must not strand its scratch file."""
+    untracked = _deep(tmp_path)
+    real_write_text = Path.write_text
+
+    def partial_then_fail(self: Path, data: str, *args: object, **kwargs: object) -> int:
+        real_write_text(self, data[:3])
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "write_text", partial_then_fail)
+
+    with pytest.raises(OSError, match="disk full"):
+        publish_events_dir_location(untracked, Path("/run/user/1/a"))
+
+    assert list(untracked.iterdir()) == []
+
+
 def test_publishing_again_replaces_the_file(tmp_path: Path) -> None:
     untracked = _deep(tmp_path)
     publish_events_dir_location(untracked, Path("/run/user/1/a"))

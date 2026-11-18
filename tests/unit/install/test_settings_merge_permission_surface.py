@@ -19,7 +19,9 @@ from claude_code_hooks_daemon.utils.hook_registration import (
 )
 from claude_code_hooks_daemon.utils.permission_surface import (
     PERMISSION_REQUEST_EVENT,
+    SwitchSetting,
     daemon_deny_rules,
+    read_permission_surface_setting,
     restore_deny_rules,
 )
 
@@ -99,6 +101,25 @@ class TestSwitchOffRestores:
         run_settings_merge(client, new_default, restore_permission_surface=True)
         written = json.loads(client.read_text(encoding="utf-8"))
         assert written["permissions"]["deny"] == [_USER_RULE, *daemon_deny_rules()]
+
+    def test_an_unreadable_config_adds_the_hook_back_but_restores_no_deny_rule(
+        self, tmp_path: Path
+    ) -> None:
+        """T-11: UNREADABLE is neither omit nor restore; the merge keeps the protective hook."""
+        (tmp_path / "hooks-daemon.yaml").write_text("daemon: [unclosed", encoding="utf-8")
+        switch = read_permission_surface_setting(tmp_path / "settings.json")
+        assert switch is SwitchSetting.UNREADABLE
+        client = _shipped()
+        del client["hooks"][PERMISSION_REQUEST_EVENT]
+        client["permissions"] = {"deny": [_USER_RULE]}
+        merged, _ = merge_settings(
+            client,
+            _shipped(),
+            omit_permission_surface=switch is SwitchSetting.ON,
+            restore_permission_surface=switch is SwitchSetting.OFF,
+        )
+        assert PERMISSION_REQUEST_EVENT in merged["hooks"]
+        assert merged["permissions"] == {"deny": [_USER_RULE]}
 
     def test_a_full_set_is_left_alone(self) -> None:
         merged, report = merge_settings(_shipped(), _shipped())

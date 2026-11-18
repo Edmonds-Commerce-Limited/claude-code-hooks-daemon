@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 _SUFFIX = "sec" + "ret"
 _PROTECTED = f"demo.{_SUFFIX}"
 _SEARCH_STRING = "org.freedesktop." + _SUFFIX + "s"
+_ABSENT = f"absent.{_SUFFIX}"
 
 
 def _reindex(root: Path) -> None:
@@ -98,6 +99,128 @@ class TestGitSearchStringIsNotAFile:
     )
     def test_named_pathspec_still_denied(self, project: Path, command: str) -> None:
         assert _verdict(project, command) is Decision.DENY
+
+
+class TestGitSearchExemptionIsScopedToSubcommand:
+    """Plan 00618 B-3/B-4: -S/-G/--grep take a VALUE only on some git subcommands.
+
+    On ``git grep``, ``-G`` is valueless (the next word is a file git reads); on
+    ``git blame``, ``-S`` names a revs-file git reads. The same word after the
+    same letters is a search string on ``git log`` and a file elsewhere.
+
+    ``{p}`` is a name matched only by a protected GLOB and absent from the tree
+    (the shape the review reproduced); the indexed protected file is denied by
+    another route and is kept as a regression case.
+    """
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "git log -S {p}",
+            "git log -G{p}",
+            "git show -S {p} HEAD",
+            "git diff -G {p}",
+            "git log --grep {p}",
+            "git log --grep={p}",
+            "git -C sub log -S {p}",
+            "git --no-pager log -p -S {p}",
+            "git log --oneline -1 -S {p}",
+            "git log -n5 -S {p}",
+        ],
+    )
+    def test_same_letters_as_search_value_still_allowed(self, project: Path, template: str) -> None:
+        assert _verdict(project, template.format(p=_ABSENT)) is Decision.ALLOW
+
+    @pytest.mark.parametrize("name", [_ABSENT, _PROTECTED, f"sub/{_ABSENT}"])
+    @pytest.mark.parametrize(
+        "template",
+        [
+            # git grep: -G is --basic-regexp, valueless.
+            "git grep --no-index -e . -G {p}",
+            "git grep -G {p}",
+            "git grep -G{p}",
+            # git blame: -S <revs-file> is read.
+            "git blame -S {p} f",
+            "git blame -S{p} f",
+            "git --no-pager blame -S {p} f",
+            # A global option's value is not the subcommand.
+            "git -C log blame -S {p} f",
+            "git --work-tree log blame -S {p} f",
+            "git --attr-source log blame -S {p} f",
+            "git --unknown-global log -S {p}",
+            # Other subcommands where -S/--grep is no search value.
+            "git commit -S {p}",
+            "git unknownsub -S {p}",
+            "git shortlog --committer {p}",
+            # After end-of-options the option and the word are both pathspecs.
+            "git log -p -- -S {p}",
+            "git log --end-of-options -S {p}",
+            "git diff --no-index -- -S {p}",
+            # The option is itself consumed as an earlier option's value.
+            "git log -p --until -S {p}",
+            "git show --until -S {p}",
+            "git log -p -S -S {p}",
+            "git log -p --grep -S {p}",
+            # A wrapper argument spelled git is not the git command word.
+            "sudo -u git git blame -S {p} f",
+        ],
+    )
+    def test_option_that_is_no_search_value_denied(
+        self, project: Path, template: str, name: str
+    ) -> None:
+        assert _verdict(project, template.format(p=name)) is Decision.DENY
+
+
+class TestGrepPatternOptionSearchesEveryOperand:
+    """Plan 00618 B-5: a pattern given by option leaves no pattern operand to skip."""
+
+    @pytest.fixture()
+    def dash_dir(self, project: Path) -> Path:
+        """A protected file inside a directory whose name starts with a dash."""
+        held = project / "-held"
+        held.mkdir()
+        (held / f"k.{_SUFFIX}").write_bytes(b"not-a-real-secret\n")
+        _reindex(project)
+        return held
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -r --regexp=zz deep sub --include=*",
+            "grep -r -ezz deep sub --include=*",
+            "grep -r -vezz deep sub --include=*",
+            "grep -rezz deep sub --include=*",
+            "rg --regexp=zz deep sub --glob=*",
+            "rg -ezz deep sub -g '*'",
+            "grep -r -fpats deep sub --include=*",
+            "grep -r --file=pats deep sub --include=*",
+            "rg --files deep sub -g '*'",
+        ],
+    )
+    def test_first_searched_directory_is_checked(self, project: Path, command: str) -> None:
+        assert _verdict(project, command) is Decision.DENY
+
+    def test_operand_after_end_of_options_is_checked(self, project: Path, dash_dir: Path) -> None:
+        assert _verdict(project, "grep -r zz sub -- -held --include=*") is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "words",
+        [
+            ["grep", "-r", "--regexp=zz", "deep", "sub", "--include=*"],
+            ["grep", "-r", "-ezz", "deep", "sub", "--include=*"],
+            ["rg", "--regexp=zz", "deep", "sub", "--glob=*"],
+            # GNU grep accepts any unambiguous abbreviation of a long option.
+            ["grep", "-r", "--reg=zz", "deep", "sub", "--include=*"],
+            ["grep", "-r", "--rege=zz", "deep", "sub", "--include=*"],
+            ["grep", "-r", "--regex=zz", "deep", "sub", "--include=*"],
+            ["grep", "-r", "--fil=pats", "deep", "sub", "--include=*"],
+        ],
+    )
+    def test_function_never_judges_attached_pattern_clean(
+        self, project: Path, words: list[str]
+    ) -> None:
+        index = index_project(project, SecretFileGuardHandler()._patterns())
+        assert not sfm._searched_paths_hold_no_protected_file(words, index, (str(project),))
 
 
 class TestGrepFilterValueIsScopedToSearchedPath:

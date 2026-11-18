@@ -93,7 +93,9 @@ def test_search_reaching_a_protected_file_is_reported(tree: Path, command: str) 
         "rg x clean",
         "find clean | xargs rg x",
         "find . -name '*.txt'",
-        "find . -exec cat {} +",
+        "find clean -exec cat {} +",
+        "find . -exec ls {} +",
+        "find . | xargs echo",
         "echo rg",
         "echo grep -r x .",
         "git commit -m 'grep -r x .'",
@@ -121,8 +123,79 @@ def test_piped_rg_without_a_root_reads_stdin(tree: Path) -> None:
     assert _reach("echo hi | rg x", tree) is None
 
 
-def test_xargs_after_a_non_find_producer_names_no_root(tree: Path) -> None:
-    assert _reach("echo a | xargs grep x", tree) is None
+def test_xargs_after_a_non_find_producer_judges_the_cwd(tree: Path) -> None:
+    """The producer's paths are unknown, so the tree xargs runs in is judged."""
+    assert _reach("echo a | xargs grep x", tree) == PROTECTED_GLOB
+    assert _reach("echo a | xargs grep x", tree / "clean", root=tree) is None
+
+
+def _roots(command: str, cwd: Path) -> list[str]:
+    return [read.root for read in rs.search_reads(command, str(cwd))]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("find sub -exec cat {} +", ["sub"]),
+        ("find sub clean -exec cat {} \\;", ["sub", "clean"]),
+        ("find sub -execdir sh -c 'cat $1' _ {} \\;", ["sub"]),
+        ("find sub -exec ls {} \\; -exec cat {} \\;", ["sub"]),
+        ("find sub -exec cat", ["sub"]),
+        ("find sub | xargs cat", ["sub"]),
+        ("find sub -print0 | xargs -0 -n 1 cat", ["sub"]),
+        ("find sub | sort | xargs cat", ["sub"]),
+        ("find sub | xargs sudo cat", ["sub"]),
+        ("find sub | xargs --max-args 1 cat", ["sub"]),
+        ("diff sub clean", ["sub", "clean"]),
+        ("diff -r sub clean", ["sub", "clean"]),
+        ("tar cf - sub", ["sub"]),
+        ("tar -C sub -cf - .", ["sub"]),
+        ("tar --directory=sub -cf - .", ["sub"]),
+        ("cp -r sub x", ["sub"]),
+        ("cp -rt x sub", ["sub"]),
+        ("rsync -a sub/ x", ["sub"]),
+        ("zip -r x.zip sub", ["sub"]),
+        ("git diff --no-index sub clean", ["sub", "clean"]),
+        ("git ls-files | xargs cat", ["."]),
+    ],
+)
+def test_directory_readers_name_the_roots_they_read(
+    tree: Path, command: str, expected: list[str]
+) -> None:
+    roots = _roots(command, tree)
+    for name in expected:
+        assert str(tree / name if name != "." else tree) in roots
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "find sub -exec ls {} +",
+        "find sub -exec echo {} +",
+        "find sub -type f -exec rm {} +",
+        "find sub -name x -print",
+        "find sub | xargs echo",
+        "find sub | xargs",
+        "find sub | xargs -n 1 ls",
+        "git diff",
+        "git diff HEAD~1",
+        "cp a b",
+        "cp -r clean sub",
+        "tar cf - clean",
+        "git ls-files | xargs echo",
+    ],
+)
+def test_content_free_or_unrelated_commands_reach_no_protected_file(
+    tree: Path, command: str
+) -> None:
+    assert _reach(command, tree) is None
+
+
+def test_a_root_reached_through_a_link_and_dotdot_is_judged_physically(tree: Path) -> None:
+    (tree / "hop").mkdir()
+    (tree / "hop" / "up").symlink_to(Path("..") / "sub", target_is_directory=True)
+    assert _reach("tar cf - hop/up/..", tree) == PROTECTED_GLOB
+    assert _reach("grep -r x hop/up/..", tree) == PROTECTED_GLOB
 
 
 def test_missing_cwd_leaves_relative_roots_unjudged(tree: Path) -> None:
@@ -257,6 +330,24 @@ def test_git_grep_does_not_read_an_untracked_file(repo: Path) -> None:
 def test_git_grep_no_index_reads_the_working_tree(repo: Path) -> None:
     _git(repo, "rm", "-q", "--cached", "-r", "tracked")
     assert _reach("git grep --no-index needle", repo) == PROTECTED_GLOB
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        "--no-after-context",
+        "--no-before-context",
+        "--no-context",
+        "--no-max-count",
+        "--no-threads",
+        "--no-cont",
+    ],
+)
+def test_git_grep_negation_does_not_hide_a_parent_root(repo: Path, option: str) -> None:
+    """A ``--no-*`` negation takes no value, so ``../tracked`` is the searched root."""
+    subdirectory = repo / "plain-dir"
+    subdirectory.mkdir()
+    assert _reach(f"git grep {option} needle ../tracked", subdirectory, repo) == PROTECTED_GLOB
 
 
 @pytest.fixture
@@ -444,3 +535,66 @@ class TestRgValueTakingOptions:
         (read,) = rs.search_reads("grep -rE x sub", str(tree))
 
         assert read.root == str(tree / "sub")
+
+
+class TestScanOptionsFailsClosed:
+    """What the option grammar cannot place keeps every operand and the default root."""
+
+    def test_certain_scan_drops_the_pattern_operand(self) -> None:
+        scan = rs.scan_options(["-r", "zz", "sub"], tool=rs.TOOL_GREP, command="grep")
+
+        assert scan.operands == ["sub"]
+        assert not scan.default_root_possible
+
+    def test_certain_scan_with_only_a_pattern_reads_the_default_root(self) -> None:
+        scan = rs.scan_options(["-r", "zz"], tool=rs.TOOL_GREP, command="grep")
+
+        assert scan.operands == []
+        assert scan.default_root_possible
+
+    def test_abbreviated_pattern_option_keeps_every_operand(self) -> None:
+        scan = rs.scan_options(["-r", "--reg=zz", "deep", "sub"], tool=rs.TOOL_GREP, command="grep")
+
+        assert scan.operands == ["deep", "sub"]
+
+    def test_valueless_color_word_does_not_eat_the_pattern(self) -> None:
+        scan = rs.scan_options(["-r", "--color", "x", "deep"], tool=rs.TOOL_GREP, command="grep")
+
+        assert scan.operands == ["deep"]
+
+    def test_unknown_option_keeps_all_operands_and_drops_exclusions(self) -> None:
+        scan = rs.scan_options(
+            ["-r", "--exclude-dir=deep", "--no-such-option", "x", "deep"],
+            tool=rs.TOOL_GREP,
+            command="grep",
+        )
+
+        assert scan.uncertain
+        assert scan.operands == ["x", "deep"]
+        assert scan.exclude_dirs == []
+        assert scan.default_root_possible
+
+    def test_unknown_option_with_enough_operands_has_no_default_root(self) -> None:
+        scan = rs.scan_options(
+            ["-r", "--no-such-option=1", "x", "deep"], tool=rs.TOOL_GREP, command="grep"
+        )
+
+        assert scan.uncertain
+        assert not scan.default_root_possible
+
+    def test_ug_is_recursive_and_uncertain(self) -> None:
+        scan = rs.scan_options(["x"], tool=rs.TOOL_GREP, command="ug")
+
+        assert scan.recursive
+        assert scan.uncertain
+        assert scan.default_root_possible
+
+    def test_rg_files_has_no_pattern_operand(self) -> None:
+        scan = rs.scan_options(["--files", "deep", "sub"], tool=rs.TOOL_RG, command="rg")
+
+        assert scan.operands == ["deep", "sub"]
+
+    def test_ug_is_a_search_command_that_reads_the_default_root(self, tree: Path) -> None:
+        roots = [read.root for read in rs.search_reads("ug x", str(tree))]
+
+        assert str(tree) in roots

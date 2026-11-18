@@ -53,6 +53,10 @@ handlers:
       enabled: true
       priority: 40
 
+    branch_pool_pressure_advisor:  # Plan 00619: warn as a branch pool fills; every tool call at 90 percent
+      enabled: true
+      priority: 20
+
     long_running_command_guard:  # Plan 00602: deny a long foreground Bash call in the main thread
       enabled: false  # opt-in
       priority: 40
@@ -871,6 +875,9 @@ handlers:
 
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:
+    branch_pool_pressure_prompt:  # Plan 00619: warn as a branch pool fills; every prompt at 90 percent
+      enabled: true
+      priority: 44
     evacuation_turn_marker:  # Plan 00558 Task 4.5: advances the main thread's turn so evacuation records expire
       enabled: true  # Silent bookkeeping; never terminal
       priority: 43

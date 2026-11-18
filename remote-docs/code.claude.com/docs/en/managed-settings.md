@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/managed-settings
-fetched_at: '2026-11-10T16:35:01.843063+00:00'
+fetched_at: '2026-11-16T21:15:35.097018+00:00'
 fidelity: converted
-source_sha256: a4c62e6cf3186beaa0101a9ba97bee3b9eaf90b46806377fd931f7663fabc5c3
+source_sha256: 581c138437f1d2505eae11950803069eb0c07eb5f7908dd344767a65010a7ace
 licence: unreviewed
-stale_after: '2027-02-08'
+stale_after: '2027-02-14'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -62,7 +62,7 @@ The file in the steps above is one of four ways to get managed settings onto a m
 * **Delivery controls**: [`policyHelper`](https://code.claude.com/docs/en/settings-reference#policyhelper), [`wslInheritsWindowsSettings`](https://code.claude.com/docs/en/settings-reference#wslinheritswindowssettings), and [`managedSourcesBehavior`](https://code.claude.com/docs/en/settings-reference#managedsourcesbehavior)
 * **Gateway login keys**: [`forceLoginGatewayUrl`](https://code.claude.com/docs/en/settings-reference#forcelogingatewayurl), [`gatewayInternalNetworks`](https://code.claude.com/docs/en/settings-reference#gatewayinternalnetworks), and the `"gateway"` value of [`forceLoginMethod`](https://code.claude.com/docs/en/settings-reference#forceloginmethod)
 
-A managed settings file, an MDM profile, or the claude.ai console applies one policy to everyone it reaches. To give one group of developers a different policy, deploy a different file or profile to that group; the claude.ai console [can't target a group yet](https://code.claude.com/docs/en/server-managed-settings.md#current-limitations), while a self-hosted [Claude apps gateway](https://code.claude.com/docs/en/claude-apps-gateway) delivers managed settings per IdP group.
+With a managed settings file or an MDM profile, everyone it reaches gets one policy. To give one group of developers a different policy, deploy a different file or profile to that group. On an Enterprise plan, you can also [give each group its own configuration](https://code.claude.com/docs/en/server-managed-settings.md#give-groups-different-settings) in server-managed settings. A self-hosted [Claude apps gateway](https://code.claude.com/docs/en/claude-apps-gateway) delivers managed settings per IdP group.
 
 When more than one mechanism delivers a policy to the same machine, Claude Code by default uses one and ignores the others. [How Claude Code combines managed sources](#how-claude-code-combines-managed-sources) gives the order and the opt-in that applies every source.
 
@@ -107,7 +107,7 @@ A deployed policy reaches the developer's sessions as follows:
 
 The keys are the same everywhere, but each mechanism stores them in a different place and shape:
 
-* **Server-managed**: Anthropic's servers, or your gateway, hold the policy. Claude Code keeps a local cache that it applies at startup and [replaces on each successful fetch](https://code.claude.com/docs/en/server-managed-settings.md#security-considerations).
+* **Server-managed**: Anthropic's servers, or your gateway, hold the policy. Claude Code keeps a local cache that it [can apply at startup](https://code.claude.com/docs/en/server-managed-settings.md#fetch-and-caching-behavior) and [replaces on each successful fetch](https://code.claude.com/docs/en/server-managed-settings.md#security-considerations).
 * **macOS configuration profile**: the `com.anthropic.claudecode` managed preferences domain. Use the same top-level keys as `managed-settings.json`, with nested settings as dictionaries and lists as plist arrays.
 * **Windows HKLM registry**: the JSON as a `REG_SZ` or `REG_EXPAND_SZ` value named `Settings` under `HKLM\SOFTWARE\Policies\ClaudeCode`.
 * **File-based**: `managed-settings.json`, an optional `managed-settings.d/` directory, and `managed-mcp.json` in the system directory: `/Library/Application Support/ClaudeCode/` on macOS, `/etc/claude-code/` on Linux and WSL, and `C:\Program Files\ClaudeCode\` on Windows. Claude Code doesn't read the legacy Windows path `C:\ProgramData\ClaudeCode\managed-settings.json`.

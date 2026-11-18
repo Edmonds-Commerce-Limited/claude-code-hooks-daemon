@@ -30,6 +30,7 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core import remote_branch_proof
 from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.daemon.branch_safety import (
     REFUSAL_CURRENT_BRANCH,
@@ -47,6 +48,7 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     delete_argv_for_tier,
     delete_branches,
 )
+from claude_code_hooks_daemon.utils.git_repo import GIT_TIMED_OUT
 
 _ENV = {
     "GIT_AUTHOR_NAME": "Test Author",
@@ -267,21 +269,37 @@ class TestProofTiers:
 
 
 class TestContentPreservedTier:
-    """Blob identity: every file version on the branch also exists in main.
+    """The default's history holds the branch's net change: the shape a squash merge leaves.
 
-    This is the tier that matters for real stale branches. Their files are
-    typically byte-identical to main's, merely sitting at paths main has since
-    moved away from — so a path-level comparison screams and a content-level
-    one correctly stays quiet.
+    Every byte on the branch must be reachable from a target (blob identity) AND
+    some first-parent commit of the target must hold the branch's per-path net
+    change against the merge base: each added or modified path at the same blob
+    and mode, each deleted path absent (Plan 00618 B-1). Bytes alone are not
+    enough, because a deletion and a revert to an older version add no new bytes.
     """
 
     @staticmethod
-    def _branch_duplicating_main_content(repo: Path, name: str) -> None:
-        """Build a branch that is NOT an ancestor and NOT patch-equivalent, yet
-        introduces no new bytes: it copies a file main already has.
+    def _squash_merged_branch(repo: Path, name: str) -> None:
+        """Build a branch that is NOT an ancestor and NOT patch-equivalent, whose
+        whole net change main holds: two commits squashed into one on main.
 
-        Ancestry and patch-id both fail here, so only blob identity can prove
+        Ancestry and patch-id both fail here, so only the content tier can prove
         this branch safe — which is exactly the tier under test.
+        """
+        _git(repo, "checkout", "-b", name)
+        _commit(repo, f"{name}-one.txt", "one\n", "First")
+        _commit(repo, f"{name}-two.txt", "two\n", "Second")
+        _git(repo, "checkout", "main")
+        _git(repo, "merge", "--squash", name)
+        _git(repo, "commit", "-m", f"Squash {name}")
+        _commit(repo, "later.txt", "later\n", "Diverge so the branch is no ancestor")
+
+    @staticmethod
+    def _branch_duplicating_main_content(repo: Path, name: str) -> None:
+        """A branch that copies a file main already has to a path main never had.
+
+        No new bytes, but the arrangement exists only here: main's history holds
+        no tree with ``copy.md``, so deleting the branch loses it.
         """
         _commit(repo, "doc.md", "durable content\n", "Add doc")
         _git(repo, "checkout", "-b", name)
@@ -290,18 +308,24 @@ class TestContentPreservedTier:
         _git(repo, "checkout", "main")
         _commit(repo, "later.txt", "later\n", "Diverge so the branch is no ancestor")
 
-    def test_branch_introducing_no_new_bytes_is_content_preserved(self, repo: Path) -> None:
-        self._branch_duplicating_main_content(repo, "dup")
-        result = classify_branch(repo, "dup")
+    def test_a_squash_merged_branch_is_content_preserved(self, repo: Path) -> None:
+        self._squash_merged_branch(repo, "sq")
+        result = classify_branch(repo, "sq")
         assert result.tier == TIER_CONTENT_PRESERVED
         assert result.is_safe is True
         assert result.unique_commits > 0
 
     def test_content_preserved_branch_deletes_without_flags(self, repo: Path) -> None:
-        self._branch_duplicating_main_content(repo, "dup")
-        report = delete_branches(repo, ["dup"])
+        self._squash_merged_branch(repo, "sq")
+        report = delete_branches(repo, ["sq"])
         assert report.refused is False
-        assert report.deleted == ("dup",)
+        assert report.deleted == ("sq",)
+
+    def test_known_bytes_at_a_path_main_never_held_are_unproven(self, repo: Path) -> None:
+        self._branch_duplicating_main_content(repo, "dup")
+        result = classify_branch(repo, "dup")
+        assert result.tier == TIER_UNPROVEN
+        assert result.is_safe is False
 
     def test_unproven_separates_path_uniqueness_from_content_uniqueness(self, repo: Path) -> None:
         """The distinction that stops a scary path count reading as data loss."""
@@ -1387,7 +1411,8 @@ class TestCleanupKeywords:
     def test_without_the_content_tier_a_content_preserved_branch_is_unproven(
         self, repo: Path
     ) -> None:
-        TestContentPreservedTier._branch_duplicating_main_content(repo, "dup")
+        TestContentPreservedTier._squash_merged_branch(repo, "dup")
+        assert classify_branch(repo, "dup").tier == TIER_CONTENT_PRESERVED
         result = classify_branch(repo, "dup", content_tier=False)
         assert result.tier == TIER_UNPROVEN
         assert "content tier was not run" in result.detail
@@ -1397,8 +1422,138 @@ class TestCleanupKeywords:
         assert classify_branch(repo, "feature", content_tier=False).tier == TIER_MERGED
 
     def test_delete_branches_passes_content_tier_through(self, repo: Path) -> None:
-        TestContentPreservedTier._branch_duplicating_main_content(repo, "dup")
+        TestContentPreservedTier._squash_merged_branch(repo, "dup")
         report = delete_branches(repo, ["dup"], content_tier=False)
         assert report.refused is True
         assert report.deleted == ()
         assert "dup" in _local_branches(repo)
+
+
+def _two_files_on_main(repo: Path) -> None:
+    """``a.txt`` at v1 and ``b.txt`` on main, the starting point of the B-1 reproduction."""
+    _commit(repo, "a.txt", "v1\n", "Add a at v1")
+    _commit(repo, "b.txt", "b\n", "Add b")
+
+
+def _remove_and_revert_after_v2(repo: Path, name: str) -> None:
+    """Main moves ``a.txt`` to v2; the branch, cut after that, deletes ``b.txt`` and puts v1 back.
+
+    Every blob the branch's tree holds is reachable from main, so a bytes-only
+    proof calls it preserved. Its net change (``b.txt`` gone, ``a.txt`` at v1)
+    is held by no commit on main, and it was never pushed.
+    """
+    _two_files_on_main(repo)
+    _commit(repo, "a.txt", "v2\n", "Main moves a to v2")
+    _git(repo, "checkout", "-b", name)
+    _git(repo, "rm", "-q", "b.txt")
+    (repo / "a.txt").write_text("v1\n", encoding="utf-8")
+    _git(repo, "add", "a.txt")
+    _git(repo, "commit", "-m", "Delete b, put a back to v1")
+    _git(repo, "checkout", "main")
+
+
+def _remove_cut_before_v2(repo: Path, name: str) -> None:
+    """The same work cut BEFORE main's v2 commit: the branch only deletes ``b.txt``."""
+    _two_files_on_main(repo)
+    _git(repo, "checkout", "-b", name)
+    _git(repo, "rm", "-q", "b.txt")
+    _git(repo, "commit", "-m", "Delete b")
+    _git(repo, "checkout", "main")
+    _commit(repo, "a.txt", "v2\n", "Main moves a to v2")
+
+
+class TestTheContentTierNeedsTheNetChange:
+    """Plan 00618 B-1: a branch whose net change main never held is never deleted."""
+
+    @pytest.mark.parametrize("build", [_remove_and_revert_after_v2, _remove_cut_before_v2])
+    def test_a_dry_run_refuses_it(self, repo: Path, build: Any) -> None:
+        build(repo, "feat")
+        report = delete_branches(repo, ["feat"], dry_run=True)
+        assert report.refused is True
+        classification = report.classifications[0]
+        assert classification.tier == TIER_UNPROVEN
+        assert classification.is_safe is False
+
+    @pytest.mark.parametrize("build", [_remove_and_revert_after_v2, _remove_cut_before_v2])
+    def test_a_real_run_leaves_the_branch(self, repo: Path, build: Any) -> None:
+        build(repo, "feat")
+        tip = _git(repo, "rev-parse", "refs/heads/feat").strip()
+        report = delete_branches(repo, ["feat"])
+        assert report.refused is True
+        assert report.deleted == ()
+        assert _git(repo, "rev-parse", "refs/heads/feat").strip() == tip
+
+    def test_a_squash_that_main_reverted_later_is_still_proven(self, repo: Path) -> None:
+        """Once a commit on main held the change, it is in main's history for good."""
+        TestContentPreservedTier._squash_merged_branch(repo, "sq")
+        _git(repo, "rm", "-q", "sq-one.txt")
+        _git(repo, "commit", "-m", "Main drops one file again")
+        assert classify_branch(repo, "sq").tier == TIER_CONTENT_PRESERVED
+
+    def test_a_failed_net_change_check_is_unproven(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        TestContentPreservedTier._squash_merged_branch(repo, "sq")
+        real = remote_branch_proof.run_git
+
+        def failing(directory: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if "diff" in args:
+                return subprocess.CompletedProcess(list(args), 128, "", "fatal: simulated")
+            return real(directory, *args, **kwargs)
+
+        monkeypatch.setattr(remote_branch_proof, "run_git", failing)
+        result = classify_branch(repo, "sq")
+        assert result.tier == TIER_UNPROVEN
+        assert "net change" in result.detail
+        assert delete_branches(repo, ["sq"]).deleted == ()
+
+    def test_a_timed_out_net_change_check_is_unproven(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        TestContentPreservedTier._squash_merged_branch(repo, "sq")
+        real = remote_branch_proof.run_git
+
+        def slow(directory: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if "merge-base" in args and "--is-ancestor" not in args:
+                return subprocess.CompletedProcess(list(args), GIT_TIMED_OUT, "", "timed out")
+            return real(directory, *args, **kwargs)
+
+        monkeypatch.setattr(remote_branch_proof, "run_git", slow)
+        assert classify_branch(repo, "sq").tier == TIER_UNPROVEN
+
+    def test_the_net_change_never_overrides_unique_bytes(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Differential: the new proof only ever narrows the old one, never widens it."""
+        _unproven_branch(repo, "novel")
+        monkeypatch.setattr(remote_branch_proof, "holds_net_change", lambda *_a, **_k: True)
+        result = classify_branch(repo, "novel")
+        assert result.tier == TIER_UNPROVEN
+        assert "novel-only.txt" in result.content_unique_paths
+
+    def test_the_net_change_proof_runs_on_the_load_scaled_git_budget(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every git call of the proof uses the budget the rest of branch_safety uses."""
+        TestContentPreservedTier._squash_merged_branch(repo, "sq")
+        budget = 123.5
+        monkeypatch.setattr(branch_safety, "scaled_timeout", lambda *_a, **_k: budget)
+        real = remote_branch_proof.run_git
+        seen: list[object] = []
+
+        def recording(
+            directory: Path, *args: str, **kwargs: Any
+        ) -> subprocess.CompletedProcess[str]:
+            seen.append(kwargs.get("timeout"))
+            return real(directory, *args, **kwargs)
+
+        monkeypatch.setattr(remote_branch_proof, "run_git", recording)
+        assert classify_branch(repo, "sq").tier == TIER_CONTENT_PRESERVED
+        assert seen
+        assert set(seen) == {budget}
+
+    def test_the_proof_runs_from_the_top_level_when_given_a_subdirectory(self, repo: Path) -> None:
+        TestContentPreservedTier._squash_merged_branch(repo, "sq")
+        sub = repo / "nested"
+        sub.mkdir()
+        assert classify_branch(sub, "sq").tier == TIER_CONTENT_PRESERVED
