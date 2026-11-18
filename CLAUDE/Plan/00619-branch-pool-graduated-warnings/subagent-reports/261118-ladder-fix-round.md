@@ -29,4 +29,4 @@ No finding was judged wrong. S4's reading differs only in the remedy: the filter
 - Targeted pytest: 835 passed (ladder, fail-open, both handlers, mixin, stop gate and stop handlers, session start). mypy clean on the four changed source modules; ruff clean.
 - `llm_qa.py changed --range main..HEAD --allow-unmapped`: see the QA line below.
 
-QA: pending at the time of writing, see the final reply.
+QA: NOT COMPLETE. `llm_qa.py changed --range main..HEAD --allow-unmapped` was still in its acceptance-test step when this round ended and had printed nothing (it writes its summary at the end), so there is no QA verdict from this round. Its output lands in `untracked/scratch/qa.txt` in the worktree; the coordinator should re-run it or the full gate. Targeted pytest, mypy and ruff are green as above.
