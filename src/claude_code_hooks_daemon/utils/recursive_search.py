@@ -173,16 +173,77 @@ def search_command(words: list[str]) -> tuple[str, int, bool] | None:
         if name in _RG_COMMANDS:
             return TOOL_RG, index + 1, False
         if name == TOOL_GIT:
-            position = index + 1
-            relocated = False
-            while position < len(words) and words[position].startswith("-"):
-                option = words[position].partition("=")[0]
-                relocated = relocated or option in _GIT_RELOCATING_OPTIONS
-                position += 2 if words[position] in _GIT_OPTIONS_TAKING_VALUE else 1
-            if position < len(words) and words[position] == "grep":
-                return TOOL_GIT, position + 1, relocated
-            return None
+            git_index = _running_git_index(words, index)
+            if git_index is None:
+                return None
+            options = _git_global_options(words, git_index)
+            relocated = any(
+                word.partition("=")[0] in _GIT_RELOCATING_OPTIONS for word, _value in options
+            )
+            return TOOL_GIT, _git_options_end(words, git_index) + 1, relocated
     return None
+
+
+def _git_options_end(words: list[str], git_index: int) -> int:
+    """The index of the first word after the global options of the git at ``git_index``."""
+    position = git_index + 1
+    while position < len(words) and words[position].startswith("-"):
+        position += 2 if words[position] in _GIT_OPTIONS_TAKING_VALUE else 1
+    return position
+
+
+def _running_git_index(words: list[str], start: int = 0) -> int | None:
+    """The index of the ``git`` (from ``start`` on) whose subcommand is ``grep``, else None.
+
+    A wrapper's value can be named ``git`` (``sudo -u git git -C .. grep``): that
+    word is not the git that runs, so each ``git``-named word is tried in turn.
+    """
+    for index in range(start, len(words)):
+        if posixpath.basename(words[index]) != TOOL_GIT:
+            continue
+        end = _git_options_end(words, index)
+        if end < len(words) and words[end] == "grep":
+            return index
+    return None
+
+
+def _git_global_options(words: list[str], git_index: int) -> list[tuple[str, str]]:
+    """``(word, value)`` for each global option of the git at ``git_index``.
+
+    ``word`` is the option as written (``--work-tree=x`` or ``-C``); ``value`` is
+    its value, from after the ``=`` or from the next word.
+    """
+    options: list[tuple[str, str]] = []
+    position = git_index + 1
+    end = _git_options_end(words, git_index)
+    while position < end:
+        word = words[position]
+        if word in _GIT_OPTIONS_TAKING_VALUE:
+            options.append((word, words[position + 1] if position + 1 < len(words) else ""))
+            position += 2
+        else:
+            _name, equals, value = word.partition("=")
+            options.append((word, value if equals else ""))
+            position += 1
+    return options
+
+
+def git_overrides_worktree(words: list[str]) -> bool:
+    """Does a ``git ... grep`` in ``words`` override ``core.worktree`` (``-c``/``--config-env``)?
+
+    Every global option is read, in any order: the override moves the tree git
+    greps to one a configuration value names, which no ``-C`` describes. A
+    relative ``core.worktree`` is resolved from the git dir, so ``..`` is the
+    repository root wherever ``-C`` points.
+    """
+    git_index = _running_git_index(words)
+    if git_index is None:
+        return False
+    return any(
+        word.partition("=")[0] in _GIT_CONFIG_OPTIONS
+        and value.partition("=")[0].lower() == _GIT_WORKTREE_KEY
+        for word, value in _git_global_options(words, git_index)
+    )
 
 
 @dataclass(frozen=True)
@@ -210,27 +271,17 @@ _UNPLACEABLE_GIT: Final[GitPlacement] = GitPlacement(None, foreign=True, unplace
 
 
 def git_placement(words: list[str], cwd: str | None) -> GitPlacement:
-    """Read the global options of the first ``git`` in ``words`` from ``cwd``."""
-    git_index = next(
-        (index for index, word in enumerate(words) if posixpath.basename(word) == TOOL_GIT), None
-    )
+    """Read the global options of the ``git`` that runs ``grep`` in ``words`` from ``cwd``."""
+    git_index = _running_git_index(words)
     if git_index is None:
         return GitPlacement(cwd)
+    if git_overrides_worktree(words):
+        return _UNPLACEABLE_GIT
     here = cwd
     work_trees: list[tuple[str, str | None]] = []
-    position = git_index + 1
-    while position < len(words) and words[position].startswith("-"):
-        word = words[position]
-        name, equals, value = word.partition("=")
-        if word in _GIT_OPTIONS_TAKING_VALUE:
-            name, value = word, words[position + 1] if position + 1 < len(words) else ""
-            position += 2
-        else:
-            value = value if equals else ""
-            position += 1
+    for word, value in _git_global_options(words, git_index):
+        name = word.partition("=")[0]
         if name == _GIT_DIR:
-            return _UNPLACEABLE_GIT
-        if name in _GIT_CONFIG_OPTIONS and value.partition("=")[0].lower() == _GIT_WORKTREE_KEY:
             return _UNPLACEABLE_GIT
         if name not in (_GIT_DASH_C, _GIT_WORK_TREE):
             continue

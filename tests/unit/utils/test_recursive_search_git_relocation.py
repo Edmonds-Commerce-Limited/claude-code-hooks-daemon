@@ -247,7 +247,7 @@ class TestTheFlaggableGuardSharesThePlacement:
 
     def test_search_command_finds_the_git_that_runs(self) -> None:
         words = shlex.split("sudo -u git git -C deep grep -e x")
-        assert rs.search_command(words) == (rs.TOOL_GIT, 6, True)
+        assert rs.search_command(words) == (rs.TOOL_GIT, words.index("grep") + 1, True)
 
     def test_a_later_grep_word_is_not_a_git_search(self) -> None:
         assert rs.search_command(shlex.split("git log grep")) is None

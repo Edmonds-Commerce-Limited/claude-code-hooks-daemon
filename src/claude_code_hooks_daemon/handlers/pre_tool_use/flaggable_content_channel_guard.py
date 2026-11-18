@@ -54,6 +54,7 @@ from claude_code_hooks_daemon.utils.recursive_search import (
     TOOL_RG,
     SearchArguments,
     command_segments,
+    git_overrides_worktree,
     git_search_directory,
     scan_options,
     search_command,
@@ -445,6 +446,12 @@ _NEGATION: Final[str] = "!"
 _GIT_EXCLUDE_MAGIC: Final[tuple[str, ...]] = (":(exclude)", ":!", ":^")
 _WILDCARD_CHARS: Final[str] = "*?[{"
 _SHELL_EXPANSION: Final[re.Pattern[str]] = re.compile(r"[$`]")
+_CORE_WORKTREE_REMEDY: Final[str] = (
+    "A `core.worktree` override (`-c` or `--config-env`) moves the tree `git grep` reads "
+    "to one a configuration value names (a relative value is resolved from the git dir), "
+    "so neither `-C` nor an exclusion places it. Drop the override and search named roots "
+    "outside the flagged directory."
+)
 
 
 @dataclass(frozen=True)
@@ -529,6 +536,9 @@ def _recursive_search_reaches(
     scan = scan_options(words[start:], tool=tool, command=words[start - 1])
     if not scan.recursive:
         return None
+    if tool == TOOL_GIT and git_overrides_worktree(words):
+        # The override names the tree git reads, so no `-C` or exclusion places it: fail closed.
+        return _Reach(globs[0], _CORE_WORKTREE_REMEDY)
     if relocated:
         # A literal `-C`, relative or absolute, is placed as the `cd` it equals (Plan 00618 S-1).
         cwd = git_search_directory(words, cwd)
