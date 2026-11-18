@@ -422,6 +422,91 @@ def a_rename_then_empty(r, n):
     empty(r, UNPARK)
 
 
+# --- round 2 (the loosening review): whitespace-only picks, orphans, replace refs, grafts.
+def _ws_pick(r, n, top):
+    br(r, n)
+    write(r, f"{n}.py", "def f():\n    return  1  \n", "fix f")
+    if top is not None:
+        empty(r, top)
+    main_write(r, f"{n}.py", "def f():\n    return 1\n", n)
+
+
+def r2_ws_pick_bare(r, n):
+    """Control: patch-ids ignore whitespace, an older weakness of patch-equivalence."""
+    _ws_pick(r, n, None)
+
+
+def r2_ws_pick_empty(r, n):
+    _ws_pick(r, n, "Unpark branch")
+
+
+def r2_ws_pick_writer_park(r, n):
+    """The park writer's own marker over a whitespace-only pick."""
+    _ws_pick(r, n, PARK)
+
+
+def _orphan_ws(r, n, top):
+    git(r, "checkout", "-q", "--orphan", n)
+    git(r, "rm", "-q", "-rf", ".")
+    write(r, "base.txt", "base  \n", "orphan root")
+    if top is not None:
+        empty(r, top)
+
+
+def r2_orphan_ws_bare(r, n):
+    """Control: no merge base, a whitespace twin of main's file."""
+    _orphan_ws(r, n, None)
+
+
+def r2_orphan_ws_empty(r, n):
+    _orphan_ws(r, n, "note")
+
+
+def _replace_content(r, n, message):
+    br(r, n)
+    write(r, f"{n}-secret.txt", "only here\n", "add secret")
+    content = git(r, "rev-parse", "HEAD")
+    parent = git(r, "rev-parse", "HEAD~1")
+    fake = git(
+        r, "commit-tree", git(r, "rev-parse", f"{parent}^{{tree}}"), "-p", parent, "-m", message
+    )
+    git(r, "replace", content, fake)
+
+
+def r2_replace_content_any_msg(r, n):
+    _replace_content(r, n, "note")
+
+
+def r2_replace_content_park_msg(r, n):
+    _replace_content(r, n, PARK)
+
+
+def r2_replace_main_tip(r, n):
+    """The default's tip replaced by a merge that appears to take the branch."""
+    br(r, n)
+    write(r, f"{n}-secret.txt", "only here\n", "add secret")
+    content = git(r, "rev-parse", "HEAD")
+    main_write(r, f"later-{n}.txt", "l\n", n)
+    tip = git(r, "rev-parse", "main")
+    fake = git(
+        r, "commit-tree", git(r, "rev-parse", "main^{tree}"), "-p", tip, "-p", content, "-m", "m"
+    )
+    git(r, "replace", tip, fake)
+
+
+def r2_graft_main_tip(r, n):
+    """A legacy info/grafts entry giving the default's tip the branch as a parent."""
+    br(r, n)
+    write(r, f"{n}-secret.txt", "only here\n", "add secret")
+    content = git(r, "rev-parse", "HEAD")
+    main_write(r, f"later-{n}.txt", "l\n", n)
+    tip = git(r, "rev-parse", "main")
+    parent = git(r, "rev-parse", "main~1")
+    grafts = Path(git(r, "rev-parse", "--absolute-git-dir")) / "info" / "grafts"
+    grafts.parent.mkdir(parents=True, exist_ok=True)
+    grafts.write_text(f"{tip} {parent} {content}\n", encoding="utf-8")
+
+
 SHAPES: list[tuple[str, Callable[[Path, str], None]]] = [
     ("Y", s_ff),
     ("Y", s_merge),
@@ -471,6 +556,15 @@ SHAPES: list[tuple[str, Callable[[Path, str], None]]] = [
     ("N", a_empty_forged_tree),
     ("N", a_mode_only_then_empty),
     ("N", a_rename_then_empty),
+    ("N", r2_ws_pick_bare),
+    ("N", r2_ws_pick_empty),
+    ("N", r2_ws_pick_writer_park),
+    ("N", r2_orphan_ws_bare),
+    ("N", r2_orphan_ws_empty),
+    ("N", r2_replace_content_any_msg),
+    ("N", r2_replace_content_park_msg),
+    ("N", r2_replace_main_tip),
+    ("N", r2_graft_main_tip),
 ]
 
 
@@ -545,7 +639,10 @@ def compare(before_path: Path, after_path: Path) -> int:
         for proof in PROOFS:
             if old["label"] == "N" and _allow(new[proof]):
                 bad += 1
-                print(f"ALLOW ON CONTENT NOT IN DEFAULT: {n} {proof} ({new[proof]})")
+                print(
+                    f"ALLOW ON CONTENT NOT IN DEFAULT: {n} {proof} "
+                    f"(before {old[proof]}, after {new[proof]})"
+                )
     print(f"shapes={len(before)} decisions={decisions}")
     for kind, rows in flips.items():
         print(f"{kind}: {len(rows)}")

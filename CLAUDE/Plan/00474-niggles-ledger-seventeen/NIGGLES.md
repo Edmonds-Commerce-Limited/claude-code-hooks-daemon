@@ -7824,3 +7824,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: Task 2.5 load-scaled only the playbook generator's subprocess bound (`ce15433cc`, `6d309904b`). The report says the harness errors seen under load were not otherwise identified, and the playbook harness gate was not run on the merged tip because no daemon served that worktree. The lint budget half is N632.
 
 **Status**: ⬜ Open. Run the playbook harness gate on a loaded host against main and record which probes, if any, still time out; fix each test-first.
+
+### N660 — the local patch-equivalent tier passes a branch whose only difference from the default is whitespace
+
+**Source**: Plan 00622 loosening review D1 (`subagent-reports/261118-loosening-review.md`) and the round 2 corpus (`corpus/p622-corpus-compare-r2.txt`).
+
+**Evidence**: a patch-id ignores whitespace, and with no merge base `git cherry` compares against the whole history. `classify_branch` (`delete-branch` and the hook-path cleanup) therefore proves `patch-equivalent` for the corpus shapes `r2-ws-pick-bare` (a pick that the default took reformatted), `r2-orphan-ws-bare` (an orphan whitespace twin) and `r2-ws-pick-writer-park` (the park writer's marker over such a pick, through the park drop from Plan 00617). The branch's blob is not in the default's history in any of them. The decision was the same before and after Plan 00622. The remote proofs refuse all three because they require the net change. Plan 00622 round 2 stopped other empty commits from widening this; the tier itself is unchanged.
+
+**Status**: ⬜ Open, medium priority. Make `patch-equivalent` stand only with the net-change proof (as the remote path does), or refuse it when there is no merge base. Write the tests first, using the three corpus shapes.

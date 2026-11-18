@@ -381,9 +381,7 @@ class TestReplaceRefsAndGraftsAreIgnored:
         _git(repo, "replace", content, fake)
         assert _verdicts(repo, "feat") == _all(False)
 
-    def test_a_content_commit_hidden_under_an_empty_commit_by_a_replace(
-        self, repo: Path
-    ) -> None:
+    def test_a_content_commit_hidden_under_an_empty_commit_by_a_replace(self, repo: Path) -> None:
         _branch(repo, "feat")
         _write(repo, "secret.txt", "only-here\n", "add secret")
         content = _git(repo, "rev-parse", "HEAD")
@@ -406,9 +404,7 @@ class TestReplaceRefsAndGraftsAreIgnored:
         assert _git(repo, "merge-base", "main", content) == content
         assert _verdicts(repo, "feat") == _all(False)
 
-    def test_a_legacy_graft_making_the_default_descend_from_the_branch(
-        self, repo: Path
-    ) -> None:
+    def test_a_legacy_graft_making_the_default_descend_from_the_branch(self, repo: Path) -> None:
         content, _parent = self._content_commit(repo)
         _write(repo, "later.txt", "later\n", "later on main")
         _git(repo, "push", "-q", "origin", "main")

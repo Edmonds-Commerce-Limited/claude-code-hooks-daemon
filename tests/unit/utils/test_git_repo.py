@@ -491,11 +491,14 @@ class TestGitReadsTheRealObjects:
         plain("commit", "-q", "-m", "a")
         tip = plain("rev-parse", "HEAD")
         parent = plain("rev-parse", "HEAD~1")
-        fake = plain("commit-tree", plain("rev-parse", f"{parent}^{{tree}}"), "-p", parent, "-m", "x")
+        fake = plain(
+            "commit-tree", plain("rev-parse", f"{parent}^{{tree}}"), "-p", parent, "-m", "x"
+        )
         plain("replace", tip, fake)
-        assert plain("rev-parse", "HEAD^{tree}") != run_git(
-            tmp_git_repo, "rev-parse", "HEAD^{tree}"
-        ).stdout.strip()
+        assert (
+            plain("rev-parse", "HEAD^{tree}")
+            != run_git(tmp_git_repo, "rev-parse", "HEAD^{tree}").stdout.strip()
+        )
         assert run_git(tmp_git_repo, "rev-parse", "HEAD^{tree}").stdout.strip() == plain(
             "--no-replace-objects", "rev-parse", "HEAD^{tree}"
         )

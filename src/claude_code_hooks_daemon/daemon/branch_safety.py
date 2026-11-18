@@ -616,10 +616,16 @@ def _protected_base_ref(repo: Path, protected_ref: str) -> str:
 def patch_equivalent(repo: Path, target: str, tip_ref: str) -> tuple[bool, int | None]:
     """Whether every patch of ``tip_ref`` is in ``target``, and the unique count.
 
-    An empty commit (``branch_park.walk_park_range``'s ``empties``: one parent and
-    that parent's tree, any message, the park writer's markers included) carries no
-    patch, so it is not counted as unique (Plan 00622); every other commit still
-    needs its patch in ``target``.
+    A park commit (``branch_park.walk_park_range``: the park writer's message on a
+    tree identical to its single parent) carries no patch, so it is not counted as
+    unique; every other commit still needs its patch in ``target``.
+
+    Other empty commits are NOT excused here (Plan 00622 D1). A patch-id ignores
+    whitespace, and with no merge base ``git cherry`` matches against the whole
+    history, so this tier can pass content the target lacks; excusing every empty
+    commit would extend that to any branch carrying one. An empty commit is proven
+    lossless only by ``empty-commits-only`` (the tip's tree is in the target's
+    history) or by the net-change proof.
 
     Fails CLOSED: a failed ``git cherry``, range walk or merge listing is never
     equivalent, and a range holding a merge commit is never equivalent.
@@ -631,7 +637,7 @@ def patch_equivalent(repo: Path, target: str, tip_ref: str) -> tuple[bool, int |
         walked = walk_park_range(repo, target, tip_ref, timeout=_safety_timeout())
         if walked is None:
             return False, len(unique)
-        unique = [sha for sha in unique if sha not in walked.empties]
+        unique = [sha for sha in unique if sha not in walked.parks]
     if unique:
         return False, len(unique)
     return _has_merge_commits(repo, target, tip_ref) is False, 0
