@@ -1188,3 +1188,38 @@ class TestGrepToolWithNoPathFromALinkedCwd:
 
     def test_a_cwd_with_nothing_protected_stays_allowed(self, tree: Tree) -> None:
         assert self._grep(tree.worktree / "clean") is Decision.ALLOW
+
+
+class TestADeeperRelativeWordAfterAComputedMove:
+    """Round 6 class sweep: a word of several components read after a computed cd.
+
+    The scan finds each directory that holds a link, but a computed cd may land
+    ABOVE it, and ``a/late`` read from there passes through the link. Allowed on
+    main and on the round-start tip.
+    """
+
+    @pytest.fixture()
+    def nested(self, tree: Tree) -> Tree:
+        holder = tree.worktree / "q" / "sub" / "a"
+        holder.mkdir(parents=True)
+        (holder / "late").symlink_to(os.path.relpath(tree.primary / _PROTECTED, holder))
+        (holder / "dl").symlink_to(os.path.relpath(tree.primary / "sub", holder))
+        (holder / "plain.txt").write_bytes(b"hello\n")
+        return tree
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd $(printf q/sub); cat a/late",
+            "cd $(printf q); cd sub; cat a/late",
+            "cd $(printf q); cat sub/a/late",
+            f"cd $(printf q/sub); cat a/dl/{_PROTECTED}",
+            "cd $(printf q); grep -r DUMMY sub/a/dl",
+            "cd $(printf q/sub) && grep -r DUMMY a",
+        ],
+    )
+    def test_denied(self, nested: Tree, command: str) -> None:
+        assert _decision(nested, command) is Decision.DENY
+
+    def test_a_plain_deeper_word_stays_allowed(self, nested: Tree) -> None:
+        assert _decision(nested, "cd $(printf q/sub); cat a/plain.txt") is Decision.ALLOW
