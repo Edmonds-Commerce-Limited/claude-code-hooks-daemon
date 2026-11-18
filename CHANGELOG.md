@@ -35,6 +35,8 @@ _Branch-pool work (Plan 00594): a proof that counts squash-merged and cherry-pic
 
 - **BREAKING (scripts):** `hooks-daemon branch-sweep --clean` is now a dry run that prints the plan; add `--apply` to delete, in resumable batches of 50. Scripts that ran `--clean` must add `--apply` (Plan 00594 Task 3.4).
 - **BREAKING (scripts):** `delete-branch` no longer accepts `--allow-unproven`, `--reason`, `--bundle` or `--no-bundle`; `--protected-ref` accepts only the default branch or a declared integration line. `worktree-reap --base-branch` has the same rule (Plan 00594).
+- The stop guard follows the pools' `warn` mode (a stop over the open-work cap or past the dormancy block stage warns and goes ahead; `block` still denies), and counts open branches on one tip once against `branches.wip.cap` (Plan 00618).
+- `omit_permission_surface` must be a YAML boolean and `ownership_text` may not contain a carriage return; `long_running_command_guard` judges each statement of a `;` list on its own and catches `tail -f`, `sleep infinity` and a long sleep in `bash -c` or a subshell; branch housekeeping logs an unparsable park record, re-checks a worktree before removal, clears a park record only after the delete happened, and keeps the post-merge and worktree-remove hooks off the remote (Plan 00618).
 - Branch-pool pressure lands at session start and stop; creation is a backstop (Plan 00594 Task 4.2). Branch cap exits: delete only on machine proof, parking is a bounded pause.
 - `branch-sweep` prints a remote delete only where the guard's proof would allow it (Plan 00594 Task 4.7); `branches.parked.cap` is 1 in this project's own config.
 - `branch-park` reports a refused push (`WARNING: parked locally, not pushed`, exit 3), keeps a remote-only park locally, and announces an ended park; the park commit is signed when `commit.gpgsign` is true (Plan 00594).
@@ -62,6 +64,10 @@ _Branch-pool work (Plan 00594): a proof that counts squash-merged and cherry-pic
 - `work-queue done` no longer lists the finished issue; `setup_worktree.sh` obeys the branch pools; acceptance socket discovery uses the daemon resolver (Plan 00606).
 - The venv start diagnosis ignores an ambient `PYTHONPATH` (Plan 00609).
 - A relay repair that cannot create its state file is logged (Plan 00608).
+- `delete-branch` no longer deletes a branch that deleted a file, set it back to an older version, copied content to a new path or changed only a file mode, and whose work no remote holds: its `content-preserved` proof now needs the per-path net-change proof, and a squash-merged branch still qualifies (Plan 00618).
+- The coordinator's stop guard judges a branch the main thread touched in a `.claude/worktrees/` worktree unless a running work-queue record names it or git has the worktree locked; such refusals have a separate budget of 3 blocks; `session-state --watch --interval` refuses zero, negative and non-finite values (Plan 00618).
+- A branch left with only empty park commits over merged work (park then unpark, squash-merged then parked) stays deletable: `branch-sweep --clean` deletes its local copy at a new `park-carried` tier, and one function, `branch_park.is_park_residue`, answers for the sweep, the creation guard, the delete-branch guard and the remote-delete guard (Plan 00617).
+- Smaller fixes: the plan-number guard waits at most 2 s for `.git/config.lock`; a relay repair cannot start while the daemon stops; the QA scope walk fails on a fatal git error; a failed `worktree add` never deletes a directory git still lists; `record-venv-tracking` refuses `--tracked-sha` or `--last-release-tag` without `--tracked-ref`; an unparsable version-check TTL falls back to the default; a failed events-dir write leaves no temp file (Plan 00618).
 - CI fixes: the relay build's redundant strip (N625), semgrep findings in `forwarder_generator` and `utils/git_repo`, pyright and bandit findings, caplog assertions scoped to the logger under test (N618), a timing test scaled to host load.
 
 ### Removed
@@ -73,6 +79,7 @@ _Branch-pool work (Plan 00594): a proof that counts squash-merged and cherry-pic
 
 - `secret_file_guard` no longer misses POSIX bracket classes or symlinked directories in a glob, two recursive reads that reached a protected file (Plan 00612).
 - `destructive_git` denies a written script fed to a shell and a `printf -v` variable later run (Plan 00596).
+- `secret_file_guard` denies `git grep -G <path>` and `git blame -S <path>` again, and no longer judges a grep or `rg` filter clean when the pattern is attached to its option (`-e<pattern>`, `--regexp=`, `-f`, after `--`, `rg --files`); the git search-value exemption applies only on the subcommands where the option takes a value (Plan 00618).
 - The daemon takes `SSH_AUTH_SOCK`, and no other variable, from the connecting hook process, only when it names a socket owned by the daemon's uid; it is never logged (Plan 00594).
 - `daemon.omit_permission_surface: true` (opt-in, default `false`) lowers defence in depth for sessions not in bypass mode (Plan 00474).
 
