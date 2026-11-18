@@ -34,7 +34,6 @@ import posixpath
 import re
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.utils import linear_shlex
@@ -258,16 +257,47 @@ class GitPlacement:
     describe what is read, so its tracked flags cannot narrow the read.
     ``unplaceable`` says where the search reads cannot be stated at all: a value
     needs an expansion, or ``--git-dir``/``core.worktree`` lets a configuration
-    file choose the work tree.
+    file choose the work tree. ``hidden`` narrows that to a ``-C`` directory
+    no expansion the caller can see names: a ``~-``/``~N`` tilde, an ``xargs``
+    replacement token. A caller that only warns on an expansion denies these.
     """
 
     directory: str | None
     work_trees: tuple[str, ...] = ()
     foreign: bool = False
     unplaceable: bool = False
+    hidden: bool = False
 
 
 _UNPLACEABLE_GIT: Final[GitPlacement] = GitPlacement(None, foreign=True, unplaceable=True)
+_HIDDEN_GIT: Final[GitPlacement] = GitPlacement(None, foreign=True, unplaceable=True, hidden=True)
+# The replacement token of `xargs -I R`/`-IR`/`--replace[=R]`/`-i[R]`, `{}` by default.
+_XARGS_REPLACE_SHORT: Final[str] = "-I"
+_XARGS_REPLACE_DEFAULTED: Final[tuple[str, ...]] = ("--replace", "-i")
+_DEFAULT_REPLACE_TOKEN: Final[str] = "{}"
+# A runner that substitutes into any word (`parallel`): no token can be ruled out.
+_SUBSTITUTING_RUNNERS: Final[frozenset[str]] = frozenset({"parallel"})
+
+
+def _replacement_tokens(words: list[str], git_index: int) -> list[str] | None:
+    """The tokens a runner before ``git_index`` replaces in git's words; None: any word."""
+    tokens: list[str] = []
+    for index, word in enumerate(words[:git_index]):
+        name = posixpath.basename(word)
+        if name in _SUBSTITUTING_RUNNERS:
+            return None
+        if name != _XARGS:
+            continue
+        options = words[index + 1 : git_index]
+        for position, option in enumerate(options):
+            if option == _XARGS_REPLACE_SHORT and position + 1 < len(options):
+                tokens.append(options[position + 1])
+            elif option.startswith(_XARGS_REPLACE_SHORT) and option != _XARGS_REPLACE_SHORT:
+                tokens.append(option[len(_XARGS_REPLACE_SHORT) :])
+            elif option.startswith(_XARGS_REPLACE_DEFAULTED):
+                prefix = next(p for p in _XARGS_REPLACE_DEFAULTED if option.startswith(p))
+                tokens.append(option[len(prefix) :].removeprefix("=") or _DEFAULT_REPLACE_TOKEN)
+    return tokens
 
 
 def git_placement(words: list[str], cwd: str | None) -> GitPlacement:
@@ -277,14 +307,19 @@ def git_placement(words: list[str], cwd: str | None) -> GitPlacement:
         return GitPlacement(cwd)
     if git_overrides_worktree(words):
         return _UNPLACEABLE_GIT
+    tokens = _replacement_tokens(words, git_index)
     here = cwd
     work_trees: list[tuple[str, str | None]] = []
-    for word, value in _git_global_options(words, git_index):
+    for word, raw_value in _git_global_options(words, git_index):
         name = word.partition("=")[0]
         if name == _GIT_DIR:
             return _UNPLACEABLE_GIT
         if name not in (_GIT_DASH_C, _GIT_WORK_TREE):
             continue
+        value = expand_tilde(raw_value)
+        substituted = tokens is None or any(token and token in raw_value for token in tokens)
+        if value is None or (substituted and name == _GIT_DASH_C):
+            return _HIDDEN_GIT
         if _UNPLACEABLE_ROOT.search(value):
             return _UNPLACEABLE_GIT
         if name == _GIT_WORK_TREE:
@@ -515,6 +550,30 @@ _MAX_WRAPPER_DEPTH: Final[int] = 4
 _DIRECTORY_CHANGERS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
 
 
+_POPD: Final[str] = "popd"
+# Words that open a group or negate before the command a segment runs: `( cd sub`, `{ cd sub`.
+_GROUP_OPENERS: Final[frozenset[str]] = frozenset({"(", "{", "!"})
+
+
+def shell_directory_after(words: list[str], current: str | None) -> str | None:
+    """Where the shell is after the segment ``words``, starting from ``current``.
+
+    A ``cd``/``pushd`` (also inside an opening ``(``/``{``) moves it; a ``popd``,
+    or a move whose target cannot be placed, leaves it unknown (None). Leaving a
+    subshell is not followed: a caller that also judges the payload cwd loses
+    nothing by it.
+    """
+    start = 0
+    while start < len(words) and words[start] in _GROUP_OPENERS:
+        start += 1
+    head = posixpath.basename(words[start]) if start < len(words) else ""
+    if head == _POPD:
+        return None
+    if head in _DIRECTORY_CHANGERS:
+        return _after_directory_change(words[start:], current)
+    return current
+
+
 def _after_directory_change(words: list[str], current: str | None) -> str | None:
     """The directory a ``cd``/``pushd`` leaves the command in; None when it cannot be told."""
     operands = [word for word in words[1:] if not word.startswith("-")]
@@ -529,6 +588,8 @@ def _reads(command: str, cwd: str | None, depth: int) -> Iterator[Read]:
         return
     feeder: tuple[str, ...] | None = None
     current = cwd
+    # A `cd ~-` (a tilde the hook cannot place) loses the directory: every later read fails closed.
+    lost = False
     for segment, piped_in in command_segments(command):
         words = _command_words(segment)
         fed_by = feeder if piped_in else None
@@ -538,7 +599,10 @@ def _reads(command: str, cwd: str | None, depth: int) -> Iterator[Read]:
             continue
         relocating_env = _assigns_a_relocating_variable(segment, words)
         head = posixpath.basename(words[0])
+        if lost and head not in _DIRECTORY_CHANGERS and _reads_files(words, head):
+            yield Read(_EVERYTHING, view=TreeView.ALL)
         if head in _DIRECTORY_CHANGERS:
+            lost = lost or any(unknown_tilde(word) for word in words[1:])
             current = _after_directory_change(words, current)
         elif head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
             inner = words[words.index(_SHELL_COMMAND_FLAG, 1) + 1]
@@ -563,6 +627,16 @@ def _reads(command: str, cwd: str | None, depth: int) -> Iterator[Read]:
             yield from _search_reads(
                 words, current, piped_in=piped_in, relocating_env=relocating_env
             )
+
+
+def _reads_files(words: list[str], head: str) -> bool:
+    """Could the segment ``words`` read a tree, by any of the routes :func:`_reads` judges?"""
+    return (
+        head in (_FIND, _XARGS, _EVAL)
+        or (head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1])
+        or _directory_reader_roots(words) is not None
+        or _is_search(words)
+    )
 
 
 def _assigns_a_relocating_variable(segment: str, words: list[str]) -> bool:
@@ -664,6 +738,10 @@ def _git_grep_reads(
     judged over the rest. ``foreign`` (a moved work tree) reads every file,
     because the project's index does not say what that tree tracks.
     """
+    if any(unknown_tilde(word) for word in arguments):
+        # A pathspec or path under `~-`/`~+` names a tree the hook cannot place: fail closed.
+        yield Read(_EVERYTHING, view=TreeView.ALL)
+        return
     # `--untracked` is really tracked plus non-ignored untracked files; ALL is the safe superset.
     view = (
         TreeView.ALL
@@ -920,11 +998,39 @@ def _place(
     return None if anchored is None else posixpath.normpath(anchored)
 
 
+_TILDE: Final[str] = "~"
+_TILDE_SHELL_STATE: Final[tuple[str, ...]] = ("+", "-")
+
+
+def expand_tilde(word: str) -> str | None:
+    """``word`` with a ``~`` or ``~user`` prefix expanded; None when the hook cannot place it.
+
+    Plan 00618 S-1 second review: ``Path('~+').expanduser()`` raises, reading
+    ``+`` as a user name. Bash expands ``~+``, ``~-``, ``~N``, ``~+N`` and
+    ``~-N`` from the shell's own state ($PWD, $OLDPWD, the directory stack),
+    and an unknown ``~user`` is left as written: every one of them fails closed.
+    """
+    if not word.startswith(_TILDE):
+        return word
+    name = word.partition("/")[0][1:]
+    if name.startswith(_TILDE_SHELL_STATE) or name.isdigit():
+        return None
+    expanded = posixpath.expanduser(word)
+    return None if expanded.startswith(_TILDE) else expanded
+
+
+def unknown_tilde(word: str) -> bool:
+    """Does ``word`` start with a tilde this hook cannot place (``~+``, ``~-``, ``~2``)?"""
+    return expand_tilde(word) is None
+
+
 def _anchored(root: str, cwd: str | None, unplaceable: re.Pattern[str]) -> str | None:
     """``root`` made absolute but not normalised (``a/link/..`` keeps its ``..``)."""
     if unplaceable.search(root):
         return None
-    expanded = str(Path(root).expanduser())
+    expanded = expand_tilde(root)
+    if expanded is None:
+        return None
     if not posixpath.isabs(expanded):
         if cwd is None or not posixpath.isabs(cwd):
             return None
@@ -976,6 +1082,9 @@ def _view_for(rules: _Rules) -> TreeView:
 def _reads_of_roots(
     roots: tuple[str, ...], cwd: str | None, rules: _Rules = _NO_RULES
 ) -> Iterator[Read]:
+    if any(unknown_tilde(root) for root in roots):
+        # `~-`/`~N` is a real directory this hook cannot see: judge every indexed file.
+        yield Read(_EVERYTHING, view=TreeView.ALL)
     for root in roots:
         glob_root = _place_directory_glob(root, cwd)
         if glob_root is not None:
