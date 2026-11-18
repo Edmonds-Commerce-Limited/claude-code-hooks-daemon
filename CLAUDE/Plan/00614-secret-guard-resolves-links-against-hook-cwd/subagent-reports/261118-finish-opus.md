@@ -42,7 +42,12 @@ Branch `agent-a13d7c8504105d4c9-aeae03b4`, pushed, not merged to main. Started a
   - At 3d25880d2: `llm_qa.py format lint type_check pyright error_hiding magic_values fail_open_inventory` passes 7/7.
   - At 72cd1081d: `format lint type_check error_hiding eacces_safe authored_path_stat british_english inline_suppressions declared_invariant_pairs fail_open_inventory magic_values` passes 11/11.
   - At 72cd1081d: all 38 targeted test files pass, as does the wall-clock invariant `tests/unit/test_wall_clock_bounds_are_load_scaled.py`.
-  - `changed_tests --base origin/main --allow-unmapped` is reported in the reply to the coordinator.
+  - `changed_tests --base origin/main --allow-unmapped` judged nothing. It selected 107 files: four broad modules are unmapped and the merge brings in docs. The single pytest process hit the 1800 s limit, so the result is 0 passed and 0 failed, not a verdict.
+  - In its place, the files it selected were run in parts:
+    - the 38 guard-related files, which pass;
+    - the plan, release-note and hygiene integration files (58 tests), which pass;
+    - the first 11 % of the other 71 files, stopped with no failure seen.
+  - What is left is for the coordinator's gate: the other 71 mapped files (CLI, docs QA, workspace helpers), none of which imports the guard modules.
 
 ## Corpus check (DENY to ALLOW must be 0)
 
