@@ -631,7 +631,6 @@ class TestUnplaceableRootsWarnInsteadOfBlocking:
         [
             "grep -rn foo $SOME_DIR",
             'rg foo "$S"',
-            "git -C elsewhere grep foo",
             "git -C $REPO grep foo",
             "git --git-dir=/x/.git grep foo",
             "git grep foo -- ':(top)x'",
@@ -679,6 +678,10 @@ class TestUnplaceableRootsWarnInsteadOfBlocking:
         [
             f"git -C {_ROOT} grep -n foo",
             f"git -C {_ROOT} grep -n foo -- tests",
+            # Plan 00618 S-1: a relative `-C` is placed from the payload cwd, cumulatively.
+            "git -C tests grep -n foo",
+            "git -C src -C ../tests grep -n foo",
+            "git -C src grep -n foo ../tests",
             "grep -rn foo tests --exclude-dir=$X",
             "rg foo $A tests | sort",
         ],
@@ -687,6 +690,79 @@ class TestUnplaceableRootsWarnInsteadOfBlocking:
         self, flagged_handler: FlaggableContentChannelGuardHandler, command: str
     ) -> None:
         assert flagged_handler.handle(_bash_in(command)).decision == Decision.DENY, command
+
+    def test_a_relative_git_dash_c_outside_the_flagged_tree_is_not_reached(
+        self, flagged_handler: FlaggableContentChannelGuardHandler
+    ) -> None:
+        assert flagged_handler.matches(_bash_in("git -C src grep foo")) is False
+
+
+class TestACoreWorktreeOverrideDenies:
+    """Plan 00618 S-1 review: a ``core.worktree`` override moves the tree git greps.
+
+    A relative ``core.worktree`` is resolved from the git dir, so ``..`` is the
+    repository root wherever ``-C`` points; real git printed a file from the
+    flagged directory. The release tip denied ``git -C <root> -c
+    core.worktree=.. grep``; no ``-C`` (``-C .`` included) may turn that into an
+    advisory allow, in either option order.
+    """
+
+    @pytest.mark.parametrize(
+        ("command", "cwd"),
+        [
+            ("git -c core.worktree=.. grep foo", _ROOT),
+            (f"git -C {_ROOT} -c core.worktree=.. grep foo", _ROOT),
+            (f"git -c core.worktree=.. -C {_ROOT} grep foo", _ROOT),
+            (f"git -c core.worktree=../tests -C {_ROOT} grep foo", _ROOT),
+            ("git -C . -c core.worktree=.. grep foo", _ROOT),
+            ("git -c core.worktree=.. -C . grep foo", _ROOT),
+            (f"git -C {_ROOT} -C . -c core.worktree=.. grep foo", _ROOT),
+            ("git -C src -C .. -c core.worktree=.. grep foo", _ROOT),
+            (f"git -C {_ROOT} -c core.worktree=x grep foo", f"{_ROOT}/src"),
+            ("git -c core.worktree=.. -C .. grep foo", f"{_ROOT}/src"),
+            (f"git --config-env=core.worktree=WT -C {_ROOT} grep foo", f"{_ROOT}/src"),
+            ("git --config-env=core.worktree=WT -C . grep foo", _ROOT),
+            ("git --config-env core.worktree=WT -C . grep foo", _ROOT),
+            ("git -c CORE.WORKTREE=.. -C . grep foo", _ROOT),
+            ("git -C $X -c core.worktree=.. grep foo", _ROOT),
+            ("git -c core.worktree=.. -C $X grep foo", _ROOT),
+            # An exclusion is judged against a tree the override has moved: no use.
+            ("git -c core.worktree=.. -C . grep foo -- ':!tests/fixtures/cyber-flag'", _ROOT),
+        ],
+    )
+    def test_denied(
+        self, flagged_handler: FlaggableContentChannelGuardHandler, command: str, cwd: str
+    ) -> None:
+        result = flagged_handler.handle(_bash_in(command, cwd=cwd))
+        assert result.decision == Decision.DENY, command
+        assert "core.worktree" in (result.reason or ""), command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -c core.pager=cat -C src grep foo",
+            "git -c color.ui=never -C src grep foo",
+            "git --config-env=core.pager=PG -C src grep foo",
+            "git -c core.worktree=.. -C src log --oneline",
+        ],
+    )
+    def test_other_configuration_keys_are_still_placed(
+        self, flagged_handler: FlaggableContentChannelGuardHandler, command: str
+    ) -> None:
+        assert flagged_handler.matches(_bash_in(command)) is False, command
+
+    @pytest.mark.parametrize(
+        ("command", "cwd"),
+        [
+            # A wrapper value named `git` is not the git that runs.
+            (f"sudo -u git git -C {_ROOT} grep foo", f"{_ROOT}/src"),
+            ("sudo -u git git -C .. grep foo", f"{_ROOT}/src"),
+        ],
+    )
+    def test_the_git_that_runs_is_the_one_placed(
+        self, flagged_handler: FlaggableContentChannelGuardHandler, command: str, cwd: str
+    ) -> None:
+        assert flagged_handler.handle(_bash_in(command, cwd=cwd)).decision == Decision.DENY
 
     def test_unanchored_glob_says_it_cannot_be_excluded(self, project_root: str) -> None:
         handler = FlaggableContentChannelGuardHandler()

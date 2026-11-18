@@ -9,8 +9,10 @@ protected-file index (:mod:`protected_file_index`) whether any of them is
 protected. The answer is a lookup in memory: nothing here walks the filesystem.
 
 The roots are placed from the directory the command runs in, which follows a
-literal ``cd`` earlier in the command. A root that cannot be placed (a variable,
-a glob, a ``cd`` whose target is computed) is not judged.
+literal ``cd`` earlier in the command, and a literal ``git -C`` for a ``git
+grep`` (:func:`git_placement`). A root that cannot be placed (a variable, a
+glob, a ``cd`` whose target is computed) is not judged; a ``git`` move that
+cannot be placed is judged over every indexed file instead.
 
 The option reader (:func:`search_command`, :func:`scan_options`) and the
 command splitter (:func:`command_segments`) live here because
@@ -37,8 +39,10 @@ from typing import Final
 
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
+from claude_code_hooks_daemon.utils.command_evasion import GIT_GLOBAL_OPTIONS_TAKING_SEPARATE_VALUE
 from claude_code_hooks_daemon.utils.command_position import SHELL_NAMES
 from claude_code_hooks_daemon.utils.find_expression import FIND_EXEC_ACTIONS, find_exec_end
+from claude_code_hooks_daemon.utils.git_repo import RELOCATING_VARIABLES
 from claude_code_hooks_daemon.utils.grep_option_grammar import (
     RG_CONFIG_ENV,
     grammar_for,
@@ -72,10 +76,19 @@ _GREP_COMMANDS: Final[frozenset[str]] = frozenset(
 # rg-like: recursive by default, and read piped stdin instead when given no root.
 _RG_COMMANDS: Final[frozenset[str]] = frozenset({"rg", "ag", "ack"})
 # Global git options that move the search somewhere the payload cwd does not describe.
-_GIT_RELOCATING_OPTIONS: Final[frozenset[str]] = frozenset({"-C", "--git-dir", "--work-tree"})
-_GIT_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
-    {"-c", "--namespace", "--exec-path"} | _GIT_RELOCATING_OPTIONS
-)
+_GIT_DASH_C: Final[str] = "-C"
+_GIT_WORK_TREE: Final[str] = "--work-tree"
+_GIT_DIR: Final[str] = "--git-dir"
+_GIT_RELOCATING_OPTIONS: Final[frozenset[str]] = frozenset({_GIT_DASH_C, _GIT_DIR, _GIT_WORK_TREE})
+# Global options whose value is the next word: read as the subcommand, it hides the search.
+_GIT_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = GIT_GLOBAL_OPTIONS_TAKING_SEPARATE_VALUE | {
+    "--attr-source"
+}
+# A configuration override naming this key moves the work tree as `--work-tree` does.
+_GIT_CONFIG_OPTIONS: Final[frozenset[str]] = frozenset({"-c", "--config-env"})
+_GIT_WORKTREE_KEY: Final[str] = "core.worktree"
+# The root of a read that cannot be placed: every indexed file is under it.
+_EVERYTHING: Final[str] = "/"
 _GLOB_OPTIONS: Final[frozenset[str]] = frozenset({"-g", "--glob", "--iglob"})
 _DIRECTORIES_OPTIONS: Final[frozenset[str]] = frozenset({"-d", "--directories"})
 _EXCLUDE_DIR_OPTION: Final[str] = "--exclude-dir"
@@ -160,16 +173,144 @@ def search_command(words: list[str]) -> tuple[str, int, bool] | None:
         if name in _RG_COMMANDS:
             return TOOL_RG, index + 1, False
         if name == TOOL_GIT:
-            position = index + 1
-            relocated = False
-            while position < len(words) and words[position].startswith("-"):
-                option = words[position].partition("=")[0]
-                relocated = relocated or option in _GIT_RELOCATING_OPTIONS
-                position += 2 if words[position] in _GIT_OPTIONS_TAKING_VALUE else 1
-            if position < len(words) and words[position] == "grep":
-                return TOOL_GIT, position + 1, relocated
-            return None
+            git_index = _running_git_index(words, index)
+            if git_index is None:
+                return None
+            options = _git_global_options(words, git_index)
+            relocated = any(
+                word.partition("=")[0] in _GIT_RELOCATING_OPTIONS for word, _value in options
+            )
+            return TOOL_GIT, _git_options_end(words, git_index) + 1, relocated
     return None
+
+
+def _git_options_end(words: list[str], git_index: int) -> int:
+    """The index of the first word after the global options of the git at ``git_index``."""
+    position = git_index + 1
+    while position < len(words) and words[position].startswith("-"):
+        position += 2 if words[position] in _GIT_OPTIONS_TAKING_VALUE else 1
+    return position
+
+
+def _running_git_index(words: list[str], start: int = 0) -> int | None:
+    """The index of the ``git`` (from ``start`` on) whose subcommand is ``grep``, else None.
+
+    A wrapper's value can be named ``git`` (``sudo -u git git -C .. grep``): that
+    word is not the git that runs, so each ``git``-named word is tried in turn.
+    """
+    for index in range(start, len(words)):
+        if posixpath.basename(words[index]) != TOOL_GIT:
+            continue
+        end = _git_options_end(words, index)
+        if end < len(words) and words[end] == "grep":
+            return index
+    return None
+
+
+def _git_global_options(words: list[str], git_index: int) -> list[tuple[str, str]]:
+    """``(word, value)`` for each global option of the git at ``git_index``.
+
+    ``word`` is the option as written (``--work-tree=x`` or ``-C``); ``value`` is
+    its value, from after the ``=`` or from the next word.
+    """
+    options: list[tuple[str, str]] = []
+    position = git_index + 1
+    end = _git_options_end(words, git_index)
+    while position < end:
+        word = words[position]
+        if word in _GIT_OPTIONS_TAKING_VALUE:
+            options.append((word, words[position + 1] if position + 1 < len(words) else ""))
+            position += 2
+        else:
+            _name, equals, value = word.partition("=")
+            options.append((word, value if equals else ""))
+            position += 1
+    return options
+
+
+def git_overrides_worktree(words: list[str]) -> bool:
+    """Does a ``git ... grep`` in ``words`` override ``core.worktree`` (``-c``/``--config-env``)?
+
+    Every global option is read, in any order: the override moves the tree git
+    greps to one a configuration value names, which no ``-C`` describes. A
+    relative ``core.worktree`` is resolved from the git dir, so ``..`` is the
+    repository root wherever ``-C`` points.
+    """
+    git_index = _running_git_index(words)
+    if git_index is None:
+        return False
+    return any(
+        word.partition("=")[0] in _GIT_CONFIG_OPTIONS
+        and value.partition("=")[0].lower() == _GIT_WORKTREE_KEY
+        for word, value in _git_global_options(words, git_index)
+    )
+
+
+@dataclass(frozen=True)
+class GitPlacement:
+    """Where git's global options move a ``git ... grep`` (Plan 00618 S-1).
+
+    ``directory`` is where git runs: the payload cwd moved by each literal ``-C``
+    in turn, exactly as a ``cd`` to the same path moves it (None when a relative
+    step has no absolute directory to start from, as for ``cd``). ``work_trees``
+    are the literal ``--work-tree`` values, placed both where they stand and
+    where git finally runs. ``foreign`` says the project's index does not
+    describe what is read, so its tracked flags cannot narrow the read.
+    ``unplaceable`` says where the search reads cannot be stated at all: a value
+    needs an expansion, or ``--git-dir``/``core.worktree`` lets a configuration
+    file choose the work tree.
+    """
+
+    directory: str | None
+    work_trees: tuple[str, ...] = ()
+    foreign: bool = False
+    unplaceable: bool = False
+
+
+_UNPLACEABLE_GIT: Final[GitPlacement] = GitPlacement(None, foreign=True, unplaceable=True)
+
+
+def git_placement(words: list[str], cwd: str | None) -> GitPlacement:
+    """Read the global options of the ``git`` that runs ``grep`` in ``words`` from ``cwd``."""
+    git_index = _running_git_index(words)
+    if git_index is None:
+        return GitPlacement(cwd)
+    if git_overrides_worktree(words):
+        return _UNPLACEABLE_GIT
+    here = cwd
+    work_trees: list[tuple[str, str | None]] = []
+    for word, value in _git_global_options(words, git_index):
+        name = word.partition("=")[0]
+        if name == _GIT_DIR:
+            return _UNPLACEABLE_GIT
+        if name not in (_GIT_DASH_C, _GIT_WORK_TREE):
+            continue
+        if _UNPLACEABLE_ROOT.search(value):
+            return _UNPLACEABLE_GIT
+        if name == _GIT_WORK_TREE:
+            work_trees.append((value, here))
+        elif value:
+            # `git -C ''` is a no-op, as git documents.
+            here = _place(value, here)
+    placed: list[str] = []
+    for value, standing in work_trees:
+        for base in (standing, here):
+            tree = _place(value, base)
+            if tree is not None and tree not in placed:
+                placed.append(tree)
+    return GitPlacement(here, tuple(placed), foreign=bool(work_trees))
+
+
+def git_search_directory(words: list[str], cwd: str | None) -> str | None:
+    """The directory a ``git ... grep`` searches from, or None when it cannot be stated.
+
+    None also for a search whose work tree is moved (``--work-tree``,
+    ``--git-dir``, ``core.worktree``): the directory alone does not describe it.
+    """
+    placement = git_placement(words, cwd)
+    if placement.unplaceable or placement.foreign:
+        return None
+    return placement.directory
 
 
 def scan_options(
@@ -395,6 +536,7 @@ def _reads(command: str, cwd: str | None, depth: int) -> Iterator[Read]:
         feeder = fed_by
         if not words:
             continue
+        relocating_env = _assigns_a_relocating_variable(segment, words)
         head = posixpath.basename(words[0])
         if head in _DIRECTORY_CHANGERS:
             current = _after_directory_change(words, current)
@@ -418,7 +560,26 @@ def _reads(command: str, cwd: str | None, depth: int) -> Iterator[Read]:
         elif (directory_roots := _directory_reader_roots(words)) is not None:
             yield from _reads_of_roots(directory_roots, current)
         elif _is_search(words):
-            yield from _search_reads(words, current, piped_in=piped_in)
+            yield from _search_reads(
+                words, current, piped_in=piped_in, relocating_env=relocating_env
+            )
+
+
+def _assigns_a_relocating_variable(segment: str, words: list[str]) -> bool:
+    """Does ``segment`` set ``GIT_DIR``/``GIT_WORK_TREE``/... before the command ``words`` run?
+
+    The assignments are the words :func:`_command_words` stripped: those the
+    segment holds before its command word, as a prefix or after ``env``.
+    """
+    try:
+        every_word = linear_shlex.split(segment)
+    except ValueError:
+        return False
+    stripped = every_word[: len(every_word) - len(words)]
+    return any(
+        _ASSIGNMENT.match(word) and word.partition("=")[0] in RELOCATING_VARIABLES
+        for word in stripped
+    )
 
 
 def _command_words(segment: str) -> list[str]:
@@ -447,21 +608,21 @@ def _is_search(words: list[str]) -> bool:
     return head in _GREP_COMMANDS or head in _RG_COMMANDS or head == TOOL_GIT
 
 
-def _search_reads(words: list[str], cwd: str | None, *, piped_in: bool) -> Iterator[Read]:
+def _search_reads(
+    words: list[str], cwd: str | None, *, piped_in: bool, relocating_env: bool = False
+) -> Iterator[Read]:
     """The trees one grep-family command reads, if it recurses."""
     found = search_command(words)
     if found is None:
         return
-    tool, start, relocated = found
-    if relocated:
-        return
+    tool, start, _relocated = found
     scan = scan_options(
         words[start:], tool=tool, command=words[start - 1], rg_config=_rg_config_named.get()
     )
     if not scan.recursive:
         return
     if tool == TOOL_GIT:
-        yield from _git_grep_reads(words[start:], scan, cwd)
+        yield from _relocated_git_grep_reads(words, start, scan, cwd, relocating_env)
         return
     roots = tuple(scan.operands)
     if scan.default_root_possible and not (tool == TOOL_RG and piped_in):
@@ -474,18 +635,39 @@ def _search_reads(words: list[str], cwd: str | None, *, piped_in: bool) -> Itera
     yield from _reads_of_roots(roots, cwd, rules)
 
 
-def _git_grep_reads(arguments: list[str], scan: SearchArguments, cwd: str | None) -> Iterator[Read]:
+def _relocated_git_grep_reads(
+    words: list[str], start: int, scan: SearchArguments, cwd: str | None, relocating_env: bool
+) -> Iterator[Read]:
+    """The trees a ``git grep`` reads once git's global options have moved it.
+
+    A literal ``-C`` is judged as the ``cd`` it equals. A move that cannot be
+    placed (an expansion, ``--git-dir``, ``core.worktree``, a relocating
+    environment variable) fails closed: every indexed file is read.
+    """
+    placement = git_placement(words, cwd)
+    if placement.unplaceable or relocating_env:
+        yield Read(_EVERYTHING, view=TreeView.ALL)
+        return
+    yield from _git_grep_reads(words[start:], scan, placement.directory, foreign=placement.foreign)
+    for tree in placement.work_trees:
+        yield Read(tree, view=TreeView.ALL)
+
+
+def _git_grep_reads(
+    arguments: list[str], scan: SearchArguments, cwd: str | None, *, foreign: bool = False
+) -> Iterator[Read]:
     """The trees ``git grep`` reads: tracked files, or the working tree with ``--no-index``.
 
     Operands before a ``--`` are revisions and pathspecs are the words after it;
     with no ``--`` an operand is a path only if it exists. A pathspec carrying
     magic (``:(exclude)``) cannot be placed and is left out, so the search is
-    judged over the rest.
+    judged over the rest. ``foreign`` (a moved work tree) reads every file,
+    because the project's index does not say what that tree tracks.
     """
     # `--untracked` is really tracked plus non-ignored untracked files; ALL is the safe superset.
     view = (
         TreeView.ALL
-        if any(word in _GIT_GREP_WORKING_TREE_FLAGS for word in arguments)
+        if foreign or any(word in _GIT_GREP_WORKING_TREE_FLAGS for word in arguments)
         else TreeView.TRACKED
     )
     if _END_OF_OPTIONS in arguments:

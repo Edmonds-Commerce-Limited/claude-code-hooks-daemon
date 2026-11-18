@@ -54,6 +54,8 @@ from claude_code_hooks_daemon.utils.recursive_search import (
     TOOL_RG,
     SearchArguments,
     command_segments,
+    git_overrides_worktree,
+    git_search_directory,
     scan_options,
     search_command,
 )
@@ -288,7 +290,8 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
             return unknown_verdict_allow(
                 "flaggable_content_channel_guard",
                 "a recursive search whose roots or exclusions could not be placed (a shell "
-                "expansion, unparseable quoting, a `git -C`, unknown pathspec magic, or a "
+                "expansion, unparseable quoting, a `git --git-dir`/`--work-tree`, unknown "
+                "pathspec magic, or a "
                 "relative root with no working directory), so it is not known whether it "
                 "reaches the flaggable directory",
                 "Name explicit roots that do not contain the flagged directory, or add the "
@@ -346,8 +349,9 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
             "directory). The deny message prints the exact flag. Searches "
             "whose roots lie off the flagged directory are allowed. A recursive "
             "search whose roots or exclusions CANNOT be placed (a shell expansion "
-            "such as `$DIR`, unparseable quoting, `git -C`, unknown pathspec magic, "
-            "a relative root with no working directory) is ALLOWED with an advisory, "
+            "such as `$DIR`, unparseable quoting, `git --git-dir`/`--work-tree`, unknown "
+            "pathspec magic, a relative root with no working directory) is ALLOWED with an "
+            "advisory; a literal `git -C <dir>` is placed as `cd <dir>` would be, "
             "because the guard has no verdict; one root that positively reaches the "
             "flagged directory still denies the whole command.\n\n"
             "**Why**: those shapes pull a flaggable file's content into "
@@ -442,8 +446,12 @@ _NEGATION: Final[str] = "!"
 _GIT_EXCLUDE_MAGIC: Final[tuple[str, ...]] = (":(exclude)", ":!", ":^")
 _WILDCARD_CHARS: Final[str] = "*?[{"
 _SHELL_EXPANSION: Final[re.Pattern[str]] = re.compile(r"[$`]")
-# git's global options (other than -C) whose value is the next word.
-_GIT_VALUE_OPTIONS: Final[frozenset[str]] = frozenset({"-c", "--namespace", "--exec-path"})
+_CORE_WORKTREE_REMEDY: Final[str] = (
+    "A `core.worktree` override (`-c` or `--config-env`) moves the tree `git grep` reads "
+    "to one a configuration value names (a relative value is resolved from the git dir), "
+    "so neither `-C` nor an exclusion places it. Drop the override and search named roots "
+    "outside the flagged directory."
+)
 
 
 @dataclass(frozen=True)
@@ -501,44 +509,15 @@ def _is_prefix(shorter: list[str], longer: list[str]) -> bool:
     return longer[: len(shorter)] == shorter
 
 
-def _git_working_directory(words: list[str], grep_index: int) -> str | None:
-    """The directory a ``git [-C <abs>]... grep`` runs in, or None when it cannot be placed.
-
-    Only a literal absolute ``-C`` value is placeable. ``--git-dir`` and
-    ``--work-tree`` move the tree somewhere this reader does not follow, and a
-    ``-C`` value that is relative or built by expansion has no known target.
-    """
-    git_index = next(
-        (i for i in range(grep_index - 1, -1, -1) if posixpath.basename(words[i]) == "git"),
-        None,
-    )
-    if git_index is None:
-        return None
-    directory: str | None = None
-    position = git_index + 1
-    while position < grep_index:
-        word = words[position]
-        if word == "-C":
-            value = words[position + 1] if position + 1 < grep_index else ""
-            if not posixpath.isabs(value) or _SHELL_EXPANSION.search(value):
-                return None
-            directory = value
-            position += 2
-        elif word.partition("=")[0] in ("--git-dir", "--work-tree"):
-            return None
-        else:
-            position += 2 if word in _GIT_VALUE_OPTIONS else 1
-    return directory
-
-
 def _recursive_search_reaches(
     segment: str, globs: tuple[str, ...], *, cwd: str | None, piped_in: bool
 ) -> _Reach | None:
     """The flaggable glob a recursive search in ``segment`` can read, else None.
 
     A search whose roots or exclusions cannot be placed (unparseable quoting, a
-    shell expansion, a relative path with no working directory, a relocated
-    ``git -C``, unknown pathspec magic) is reported as ``unplaced`` (Plan 00478):
+    shell expansion, a relative path with no working directory, a ``git -C``
+    built by expansion, ``--git-dir``/``--work-tree``, unknown pathspec magic)
+    is reported as ``unplaced`` (Plan 00478):
     no verdict, so the caller warns. A root that DOES reach a flagged directory
     is returned as a finding even when another root of the same search cannot
     be placed.
@@ -557,8 +536,12 @@ def _recursive_search_reaches(
     scan = scan_options(words[start:], tool=tool, command=words[start - 1])
     if not scan.recursive:
         return None
+    if tool == TOOL_GIT and git_overrides_worktree(words):
+        # The override names the tree git reads, so no `-C` or exclusion places it: fail closed.
+        return _Reach(globs[0], _CORE_WORKTREE_REMEDY)
     if relocated:
-        cwd = _git_working_directory(words, start - 1)
+        # A literal `-C`, relative or absolute, is placed as the `cd` it equals (Plan 00618 S-1).
+        cwd = git_search_directory(words, cwd)
         if cwd is None:
             return unplaceable
     pathspec_excludes: list[str] = []
