@@ -7587,7 +7587,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open. Reproduce first on `main` with a synthetic doc (two tables, long cells, an `Edit` of one cell). If it reproduces, fix test-first: the formatter must leave untouched rows byte-identical (or skip a table whose existing padding is not canonical), with a test that an already-canonical table is still aligned after an edit.
 
-### N634 — use `agent_id` and `agent_type` on compaction payloads (Claude Code 2.1.323)
+### N645 — use `agent_id` and `agent_type` on compaction payloads (Claude Code 2.1.323)
 
 **Source**: the Claude Code changelog review for release 3.75.0 (`subagent-reports/261116-claude-code-review-v3.75.0.md`), an adopt row.
 
@@ -7595,7 +7595,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open. Decide whether the signal should say which agent compacted; if so, read both fields with a default for older Claude Code versions, test-first.
 
-### N635 — check PreToolUse allow does not rely on surviving a permission-check error (Claude Code 2.1.323)
+### N646 — check PreToolUse allow does not rely on surviving a permission-check error (Claude Code 2.1.323)
 
 **Source**: the same review, a conflict row (a check, not a known break).
 
@@ -7603,7 +7603,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open. List the PreToolUse handlers that return allow, and confirm none depends on the allow surviving. The review found none on the PreToolUse side.
 
-### N636 — check the PermissionRequest auto-approve handler never rewrites tool input (Claude Code 2.1.323)
+### N647 — check the PermissionRequest auto-approve handler never rewrites tool input (Claude Code 2.1.323)
 
 **Source**: the same review, a conflict row (a check, not a known break).
 
@@ -7611,7 +7611,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open. Confirm the handler returns decisions only and never an updated input; add a test that pins it.
 
-### N637 — check WorktreeCreate prints a real path, not one through a project symlink (Claude Code 2.1.325)
+### N648 — check WorktreeCreate prints a real path, not one through a project symlink (Claude Code 2.1.325)
 
 **Source**: the same review, a conflict row (a check, not a known break).
 
