@@ -24,10 +24,14 @@ from claude_code_hooks_daemon.config.models import (
     fold_handler_aliases,
 )
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
-from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core import Decision, branch_ladder
 from claude_code_hooks_daemon.core.branch_creation import LABELS_RELATIVE_PATH, read_labels
 from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
-from claude_code_hooks_daemon.core.branch_park import park_branch, read_park_record
+from claude_code_hooks_daemon.core.branch_park import (
+    BranchParkError,
+    park_branch,
+    read_park_record,
+)
 from claude_code_hooks_daemon.handlers.session_start.branch_sweep import BranchSweepHandler
 
 _ROOT = "claude_code_hooks_daemon.handlers.session_start.branch_sweep.ProjectContext.project_root"
@@ -348,6 +352,20 @@ class TestPoolLadderAtSessionStart:
         assert "BRANCH POOL WARNING" in text
         assert "2 of 3" in text
         assert "BRANCH POOLS (same report" not in text
+
+    def test_a_failed_ladder_read_keeps_the_rest_of_the_summary(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(*_args: object, **_kwargs: object) -> object:
+            raise BranchParkError("git config --get-regexp failed: timed out")
+
+        _git(repo, "checkout", "-q", "-b", "lost")
+        _commit(repo, "lost")
+        _git(repo, "checkout", "-q", "main")
+        monkeypatch.setattr(branch_ladder, "work_pools", boom)
+        text = "\n".join(_run(self._handler(wip={"cap": 3}), repo, _new()))
+        assert "CONTAINED NOWHERE: lost" in text
+        assert "BRANCH POOL" not in text
 
     def test_a_resumed_session_is_told_too(self, repo: Path, tmp_path: Path) -> None:
         self._two_open(repo)
