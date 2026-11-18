@@ -80,6 +80,7 @@ _Branch-pool work (Plan 00594): a proof that counts squash-merged and cherry-pic
 - `secret_file_guard` no longer misses POSIX bracket classes or symlinked directories in a glob, two recursive reads that reached a protected file (Plan 00612).
 - `destructive_git` denies a written script fed to a shell and a `printf -v` variable later run (Plan 00596).
 - `secret_file_guard` denies `git grep -G <path>` and `git blame -S <path>` again, and no longer judges a grep or `rg` filter clean when the pattern is attached to its option (`-e<pattern>`, `--regexp=`, `-f`, after `--`, `rg --files`); the git search-value exemption applies only on the subcommands where the option takes a value (Plan 00618).
+- `secret_file_guard` and `quarantine_artefact_read_guard` judge a `git grep` moved by `-C`, `--work-tree` or `--git-dir`: a literal `-C <dir>` is judged as `cd <dir>` is, and a move that cannot be placed is judged over every protected file (Plan 00618).
 - The daemon takes `SSH_AUTH_SOCK`, and no other variable, from the connecting hook process, only when it names a socket owned by the daemon's uid; it is never logged (Plan 00594).
 - `daemon.omit_permission_surface: true` (opt-in, default `false`) lowers defence in depth for sessions not in bypass mode (Plan 00474).
 
