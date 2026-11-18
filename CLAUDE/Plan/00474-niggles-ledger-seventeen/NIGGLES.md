@@ -7832,3 +7832,35 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: a patch-id ignores whitespace, and with no merge base `git cherry` compares against the whole history. `classify_branch` (`delete-branch` and the hook-path cleanup) therefore proves `patch-equivalent` for the corpus shapes `r2-ws-pick-bare` (a pick that the default took reformatted), `r2-orphan-ws-bare` (an orphan whitespace twin) and `r2-ws-pick-writer-park` (the park writer's marker over such a pick, through the park drop from Plan 00617). The branch's blob is not in the default's history in any of them. The decision was the same before and after Plan 00622. The remote proofs refuse all three because they require the net change. Plan 00622 round 2 stopped other empty commits from widening this; the tier itself is unchanged.
 
 **Status**: ⬜ Open, medium priority. Make `patch-equivalent` stand only with the net-change proof (as the remote path does), or refuse it when there is no merge base. Write the tests first, using the three corpus shapes.
+
+### N663 — a relative word that fits PATH_MAX only relative to the hook cwd is never resolved, and is allowed
+
+**Source**: Plan 00614 second independent review, defect D-A (`subagent-reports/261118-independent-review-2.md`).
+
+**Evidence**: `_link_targets` places a relative word as `Path(cwd) / token`, and `_realpath_if_resolvable` calls `os.path.lexists` on it, which returns False on ENAMETOOLONG. Bash opens the word relative to its own cwd, so there is a window of `len(project_root) + 1` characters where the kernel resolves the path, the guard cannot place it, and the guard allows. `cat $(plain/../ x 449)flink` allows on the branch and on main; at 448 repeats it denies. No test uses a word near `PATH_MAX`.
+
+**Status**: ⬜ Open, low priority. Treat an `OSError` other than ENOENT from the placement stat as unresolvable so it denies, or resolve the word with `dir_fd` / `openat` semantics. Covered by Plan 00623.
+
+### N664 — a recursive search nested 5 or more `bash -c` levels deep is not seen
+
+**Source**: Plan 00614 second independent review, defect D-B (`subagent-reports/261118-independent-review-2.md`).
+
+**Evidence**: the branch denies `grep -r x olink` at nesting depths 3 and 4 and allows it at depths 5 and 6; main allows it at every depth. `cat flink` and `cat olink/i*` deny at every depth from 3 to 6. N662 records the depth limit only for a hidden chdir (`_MAX_DIRECTORY_CHANGE_DEPTH`); the same silent stop on the search side is not recorded.
+
+**Status**: ⬜ Open, low priority. Make the depth limit an incomplete signal that denies, in the same change as the N662 item. Covered by Plan 00623.
+
+### N665 — a hand-forged loose commit object makes a branch with content look empty to the delete proofs
+
+**Source**: Plan 00622 third independent loosening review, defect D1 (`CLAUDE/Plan/00622-remote-delete-proof-ignores-empty-and-park-marker-commits/subagent-reports/261118-loosening-review-3.md`).
+
+**Evidence**: git does not re-hash an object on read, so a loose commit object whose body claims the parent's tree, stored under another commit's name, makes a branch with content read as empty to the delete proofs. Threat model: it needs write access to the repository's object store, where an attacker could equally repoint refs, so it adds little.
+
+**Status**: ⬜ Open, low priority (hardening). Hash each commit body against its sha in `_stored_objects_agree`.
+
+### N666 — if `git log` exits 0 but omits the tip line, the local proof paths prove a branch with content at its tip
+
+**Source**: Plan 00622 third independent loosening review, defect D2 (same report as N665); pre-existing.
+
+**Evidence**: the local proof paths read the commit list from `git log`; when it exits 0 but omits the tip line, they treat the tip as proven. No repository state is known that makes git do this.
+
+**Status**: ⬜ Open, low priority (hardening). Require the tip line in the output and fail closed otherwise.
