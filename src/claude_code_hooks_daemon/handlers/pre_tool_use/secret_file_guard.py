@@ -1407,7 +1407,9 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         (review 614c P2): only the full scan can judge what those read.
         """
         try:
-            return self._evaluate(hook_input)
+            # The project's link scan is reused within this call only (review D5).
+            with sfm.link_scan_scope():
+                return self._evaluate(hook_input)
         except ResolutionFailedError:
             logger.exception("secret_file_guard: placing the command's words raised; denying")
             return self._unresolved_finding(hook_input)
@@ -1609,11 +1611,15 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             if absolute is None or not self._is_encrypted(absolute):
                 return (protecting, path, "read")
 
-        if tool_name == ToolName.GREP and path:
+        if tool_name == ToolName.GREP:
             # A Grep rooted at an ancestor of a protected file reads its
             # content without naming it. Every indexed file under the root
             # counts (the Grep tool's own ignore handling is not relied on).
-            return self._directory_reach(placed or path, patterns)
+            # With no path it searches the hook cwd, which may itself be a
+            # link out of the project (review D6).
+            root = placed or path or (cwd if cwd and Path(cwd).is_absolute() else "")
+            if root:
+                return self._directory_reach(root, patterns)
 
         if tool_name in (ToolName.WRITE, ToolName.EDIT):
             script_mention = self._script_content_mention(path, tool_input, patterns, cwd)

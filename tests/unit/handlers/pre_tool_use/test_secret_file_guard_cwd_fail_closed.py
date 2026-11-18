@@ -478,9 +478,9 @@ class TestAWideGlobbedDirectoryChange:
     ) -> None:
         decision, text = _result(wide, command)
         assert decision is Decision.DENY, text
-        # The search check itself, not a fallback after the scan gave up.
+        # Not the deadline or the advisory. The tree is past the link scan's cap, so
+        # the wide cd's computed move is a placement that could not finish (review D2).
         assert "could NOT fully judge" not in text
-        assert "could not be worked out" not in text
         assert "stopped before" not in text
 
     def test_the_walk_keeps_no_match_of_a_wide_cd(self, wide: Tree) -> None:
@@ -488,9 +488,13 @@ class TestAWideGlobbedDirectoryChange:
         assert len(cwds) <= 2 * sfm.LINK_DIRECTORY_CAP
         assert not any("/t/" in directory for directory in cwds)
 
-    def test_the_search_walk_keeps_no_match_of_a_wide_cd(self, wide: Tree) -> None:
+    def test_the_search_walk_keeps_no_match_of_a_wide_cd(
+        self, wide: Tree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from claude_code_hooks_daemon.utils import recursive_search
 
+        # A cap the whole tree fits under, so the computed move's scan completes.
+        monkeypatch.setattr(sfm, "LINK_SCAN_DIRECTORY_CAP", 20_000)
         reads = recursive_search.search_reads("cd t/*/*/*; grep -r x .", str(wide.worktree))
         assert len(reads) <= 2 * sfm.LINK_DIRECTORY_CAP
         assert not any("/t/" in read.root for read in reads)
@@ -523,7 +527,13 @@ class TestAWideGlobbedDirectoryChange:
 
 
 class TestAWideCdInAProjectWithNoLinkOut:
-    """Review 614c X1b: a harmless wide cd is not denied for the number of directories."""
+    """Review 614c X1b, revised by independent review D2.
+
+    The wide cd is judged as a computed move, and this tree is past the link
+    scan's cap: what the scan never reached may hold a link, so a word read
+    after it is denied. The move to git's top level is placed exactly and
+    needs no scan, so it stays allowed.
+    """
 
     @pytest.fixture()
     def plain(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
@@ -543,17 +553,37 @@ class TestAWideCdInAProjectWithNoLinkOut:
             yield project
         protected_file_index.reset_index_cache()
 
-    @pytest.mark.parametrize("command", ["cd t/*/*/*; ls", "cd t && cd */*/*; ls"])
-    def test_a_wide_cd_then_ls_allowed(self, plain: Path, command: str) -> None:
+    @staticmethod
+    def _decide(plain: Path, command: str) -> Decision:
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
             "tool_input": {"command": command},
             "cwd": str(plain),
         }
         handler = SecretFileGuardHandler()
-        assert not handler.matches(hook_input) or (
-            handler.handle(hook_input).decision is Decision.ALLOW
-        )
+        if not handler.matches(hook_input):
+            return Decision.ALLOW
+        return handler.handle(hook_input).decision
+
+    @pytest.mark.parametrize("command", ["cd t/*/*/*; ls", "cd t && cd */*/*; ls"])
+    def test_a_wide_cd_past_the_scan_cap_denied(self, plain: Path, command: str) -> None:
+        assert self._decide(plain, command) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cd "$(git rev-parse --show-toplevel)" && ls t',
+            "cd $(git rev-parse --show-toplevel) && make test",
+            "cd `git rev-parse --show-toplevel` && ls",
+            'cd t/d00 && cd "$(git rev-parse --show-toplevel)" && grep -r x t/d01',
+        ],
+    )
+    def test_a_move_to_the_top_level_needs_no_scan(self, plain: Path, command: str) -> None:
+        assert self._decide(plain, command) is Decision.ALLOW
+
+    def test_a_relocated_top_level_is_a_computed_move(self, plain: Path) -> None:
+        command = 'GIT_WORK_TREE=t; cd "$(git rev-parse --show-toplevel)" && ls'
+        assert self._decide(plain, command) is Decision.DENY
 
 
 class TestComputedDirectoryChangeIntoALink:

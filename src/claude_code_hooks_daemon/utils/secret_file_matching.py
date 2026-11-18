@@ -24,6 +24,7 @@ level — see the plan's RESEARCH-read-routes.md class-(d) rows.
 
 import contextlib
 import contextvars
+import errno
 import fnmatch
 import functools
 import itertools
@@ -63,7 +64,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 )
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.realpath import resolve_checking_loop
-from claude_code_hooks_daemon.utils.resolution_failure import fails_closed
+from claude_code_hooks_daemon.utils.resolution_failure import IncompleteScanError, fails_closed
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     COMMAND_WRAPPERS,
     UnplaceableSubstitutionError,
@@ -3424,8 +3425,66 @@ _CHDIR_OPTIONS: Final[dict[str, tuple[str, str | None]]] = {
     "tar": ("-C", "--directory"),
     "sudo": ("-D", "--chdir"),
 }
-#: Words bash reads past to a builtin such as ``cd``; ``command`` may carry options.
-_BUILTIN_PREFIXES: Final[frozenset[str]] = frozenset({"builtin", "command"})
+#: A short-option cluster holding each command's chdir letter (``-iC``, ``-nD``).
+_CLUSTER_HOLDING: Final[dict[str, re.Pattern[str]]] = {
+    name: re.compile(rf"(?<!\S)-[^\s-]*{re.escape(short[1:])}")
+    for name, (short, _long) in _CHDIR_OPTIONS.items()
+}
+#: Words bash reads past to the command they run; ``command`` and ``exec`` may carry
+#: options (review D4: ``exec env -C d`` runs env).
+_BUILTIN_PREFIXES: Final[frozenset[str]] = frozenset({"builtin", "command", "exec"})
+#: Options of those words that take the next word as their value (``exec -a NAME``).
+_PREFIX_OPTIONS_WITH_VALUE: Final[frozenset[str]] = frozenset({"-a"})
+#: A move to the work tree's top level, an ancestor of where the command is: placed
+#: exactly, so the common idiom needs no project-wide link scan.
+_TOPLEVEL_MOVES: Final[frozenset[str]] = frozenset(
+    {
+        "$(git rev-parse --show-toplevel)",
+        "`git rev-parse --show-toplevel`",
+        # As the text walker splits it, operators apart.
+        "$ ( git rev-parse --show-toplevel )",
+        "` git rev-parse --show-toplevel `",
+    }
+)
+_TOPLEVEL_MOVE_LENGTHS: Final[tuple[int, ...]] = (1, 3, 5, 6)
+#: Variables that move git's top level away from the command's own directory.
+_TOPLEVEL_RELOCATING_PREFIX: Final[str] = "GIT_"
+
+
+def toplevel_move_length(words: Sequence[str], command: str) -> int:
+    """How many of ``words`` spell a move to git's top level (0: none).
+
+    Quoted, the substitution is one word; unquoted, it is split into several.
+    A command that names a ``GIT_`` variable may relocate the top level, so
+    it is not read this way.
+    """
+    if _TOPLEVEL_RELOCATING_PREFIX in command:
+        return 0
+    for length in _TOPLEVEL_MOVE_LENGTHS:
+        if " ".join(words[:length]) in _TOPLEVEL_MOVES:
+            return length
+    return 0
+
+
+def directory_ancestors(directory: str, root: str | None) -> list[str]:
+    """``directory`` and every directory above it, nearest first, stopping at ``root``.
+
+    git's top level is the work tree holding the command's directory: inside
+    the project that is the project root or a checkout nested in it, so the
+    climb stops there. Outside the project it is not bounded.
+    """
+    path = Path(os.path.normpath(directory))
+    found = [str(path)]
+    stop = os.path.normpath(root) if root else None
+    if stop is not None and not (found[0] == stop or found[0].startswith(stop.rstrip("/") + "/")):
+        stop = None
+    for parent in path.parents:
+        if stop is not None and found[-1] == stop:
+            break
+        found.append(str(parent))
+    return found
+
+
 #: Words after which bash reads the next word as a command name (``eval cd x`` runs cd).
 _COMMAND_START_WORDS: Final[frozenset[str]] = frozenset(
     {"(", "{", "}", "!", "if", "then", "else", "elif", "do", "while", "until", "time", "eval"}
@@ -3453,10 +3512,81 @@ _ASSIGNMENT_SEGMENT: Final[re.Pattern[str]] = re.compile(
 )
 #: The project directories a computed ``cd`` is judged from are found by a scan this wide.
 LINK_SCAN_DIRECTORY_CAP: Final[int] = 512
-#: A scan is reused this long: one command can hold many computed moves.
-_LINK_SCAN_REUSE_SECONDS: Final[float] = 5.0
 _GIT_DIRECTORY: Final[str] = ".git"
-_link_scans: dict[str, tuple[float, tuple[str, ...]]] = {}
+
+
+@dataclass(frozen=True)
+class LinkScan:
+    """What :func:`scan_project_links` found, and whether it looked everywhere.
+
+    ``complete`` is False when the scan stopped at a cap or could not tell
+    what an entry is: what it did not reach is then unknown, never harmless.
+    """
+
+    directories: tuple[str, ...]
+    complete: bool
+
+
+#: The scans made during one tool call (:func:`link_scan_scope`); None outside one.
+_link_scan_scope: contextvars.ContextVar[dict[str, LinkScan] | None] = contextvars.ContextVar(
+    "link_scan_scope", default=None
+)
+
+
+@contextlib.contextmanager
+def link_scan_scope() -> Iterator[None]:
+    """Reuse a project's link scan for the rest of one tool call, and no longer.
+
+    Independent review D5: a scan kept for a wall-clock window missed a link
+    made by the previous call. Inside the scope one command's many computed
+    moves cost one scan; outside any scope nothing is reused.
+    """
+    token = _link_scan_scope.set({})
+    try:
+        yield
+    finally:
+        _link_scan_scope.reset(token)
+
+
+def reset_link_scans() -> None:
+    """Forget the scans held by the current scope (for tests that change the tree)."""
+    held = _link_scan_scope.get()
+    if held is not None:
+        held.clear()
+
+
+def _link_is_directory(entry: os.DirEntry[str]) -> bool | None:
+    """Does link ``entry`` lead to a directory: None when that cannot be told.
+
+    A link loop leads nowhere a ``cd`` can land, so it is no directory. Any
+    other refusal (a target under an unsearchable directory) leaves it unknown.
+    """
+    try:
+        return entry.is_dir()
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            return False
+        log_and_continue(
+            logger,
+            exc,
+            reason="a link whose target cannot be stat-ed may lead to a directory, so the scan is incomplete (fail closed)",
+            level=logging.DEBUG,
+        )
+        return None
+
+
+def _entry_may_be_directory(entry: os.DirEntry[str]) -> bool:
+    """Is non-link ``entry`` a directory: True when that cannot be told, so it is listed."""
+    try:
+        return entry.is_dir(follow_symlinks=False)
+    except OSError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="an entry that cannot be classified may be a directory, so the scan lists it (fail closed)",
+            level=logging.DEBUG,
+        )
+        return True
 
 
 def expand_directory_glob(base: str, pattern: str) -> list[str] | None:
@@ -3491,12 +3621,11 @@ def expand_directory_glob(base: str, pattern: str) -> list[str] | None:
             try:
                 with os.scandir(directory) as entries:
                     # The listing's own type answers, so a match costs no further stat.
-                    names = [
-                        entry.name
+                    candidates = [
+                        entry
                         for entry in entries
                         if (not entry.name.startswith(".") or component.startswith("."))
                         and fnmatch.fnmatchcase(entry.name, component)
-                        and entry.is_dir()
                     ]
             except OSError as exc:
                 log_and_continue(
@@ -3506,6 +3635,19 @@ def expand_directory_glob(base: str, pattern: str) -> list[str] | None:
                     level=logging.DEBUG,
                 )
                 continue
+            names: list[str] = []
+            for entry in candidates:
+                # Review D1: one entry that cannot be classified never drops its siblings.
+                kind = (
+                    _link_is_directory(entry)
+                    if entry.is_symlink()
+                    else _entry_may_be_directory(entry)
+                )
+                if kind is None:
+                    # A match that may be a directory cannot be placed: a computed move.
+                    return None
+                if kind:
+                    names.append(entry.name)
             following.extend(os.path.normpath(f"{directory.rstrip('/')}/{name}") for name in names)
             # Each directory kept is listed or probed next, or is a match: stop as soon as
             # either cap is certain to be passed, before the list grows any further.
@@ -3519,8 +3661,8 @@ def expand_directory_glob(base: str, pattern: str) -> list[str] | None:
     return current
 
 
-def computed_move_directories(root: str) -> tuple[str, ...]:
-    """Where a computed ``cd`` could leave a relative word dangerous, from a bounded scan.
+def scan_project_links(root: str) -> LinkScan:
+    """Where a computed ``cd`` could leave a relative word dangerous, and whether that is all.
 
     Two kinds of directory under ``root``, breadth first:
 
@@ -3531,32 +3673,36 @@ def computed_move_directories(root: str) -> tuple[str, ...]:
       from the link's target, which may be outside the project.
 
     ``.git`` is not entered and links are not followed. A directory that cannot
-    be listed is counted as holding a link (fail closed). The scan stops after
-    :data:`LINK_SCAN_DIRECTORY_CAP` directories, and keeps at most that many
-    directory links: a link past either limit, in a larger tree, is not found
-    here -- a residual recorded in the plan, never an error -- and the project
-    root is still read as before.
+    be listed is counted as holding a link (fail closed). An entry the scan
+    cannot classify does not end the listing (independent review D1). The scan
+    is incomplete when it stops after :data:`LINK_SCAN_DIRECTORY_CAP`
+    directories, finds more directory links than that, or meets a link whose
+    target cannot be told (independent review D2): a caller then denies.
+    Reused only within one :func:`link_scan_scope`.
     """
-    now = time.monotonic()
-    held = _link_scans.get(root)
-    if held is not None and now - held[0] < _LINK_SCAN_REUSE_SECONDS:
-        return held[1]
+    held_scans = _link_scan_scope.get()
+    if held_scans is not None and root in held_scans:
+        return held_scans[root]
     holding: list[str] = []
     directory_links: list[str] = []
     queue = [os.path.normpath(root)]
     visited = 0
+    complete = True
     while queue and visited < LINK_SCAN_DIRECTORY_CAP:
         directory = queue.pop(0)
         visited += 1
+        has_link = False
         try:
             with os.scandir(directory) as entries:
-                has_link = False
                 for entry in entries:
                     if entry.is_symlink():
                         has_link = True
-                        if len(directory_links) < LINK_SCAN_DIRECTORY_CAP and entry.is_dir():
+                        leads_to_directory = _link_is_directory(entry)
+                        if leads_to_directory is None:
+                            complete = False
+                        elif leads_to_directory:
                             directory_links.append(entry.path)
-                    elif entry.name != _GIT_DIRECTORY and entry.is_dir(follow_symlinks=False):
+                    elif entry.name != _GIT_DIRECTORY and _entry_may_be_directory(entry):
                         queue.append(entry.path)
         except OSError as exc:
             log_and_continue(
@@ -3568,16 +3714,17 @@ def computed_move_directories(root: str) -> tuple[str, ...]:
             has_link = True
         if has_link:
             holding.append(directory)
-    if queue:
-        logger.info(
-            "link scan of %s stopped after %d directories; deeper links are not "
-            "judged from a computed cd",
-            root,
-            visited,
-        )
-    found = tuple(dict.fromkeys((*holding, *directory_links)))
-    _link_scans[root] = (now, found)
-    return found
+    if queue or len(directory_links) > LINK_SCAN_DIRECTORY_CAP:
+        complete = False
+    scan = LinkScan(
+        directories=tuple(
+            dict.fromkeys((*holding, *directory_links[:LINK_SCAN_DIRECTORY_CAP]))
+        ),
+        complete=complete,
+    )
+    if held_scans is not None:
+        held_scans[root] = scan
+    return scan
 
 
 def _may_change_directory(segment: str) -> bool:
@@ -3589,11 +3736,23 @@ def _may_change_directory(segment: str) -> bool:
     unquoted = segment.translate(_SHLEX_REMOVED_CHARS)
     if any(name in unquoted for name in _DIRECTORY_CHANGE_COMMANDS):
         return True
+    # Review D3: the option may sit in a cluster (`-iC`) or be abbreviated (`--chd`).
     return any(
         name in unquoted
-        and (short in unquoted or (long is not None and long.removeprefix("--") in unquoted))
+        and (
+            short in unquoted
+            or (name != _GIT_EXECUTABLE and _CLUSTER_HOLDING[name].search(unquoted) is not None)
+            or (long is not None and long[: len("--") + 1] in unquoted)
+        )
         for name, (short, long) in _CHDIR_OPTIONS.items()
     )
+
+
+def _may_be_relative_path(token: str) -> bool:
+    """Could ``token`` be a relative path a link could lie on (not absolute, an option or computed)?"""
+    if not token or token.startswith(("/", "~", "-")) or "\0" in token or "$" in token:
+        return False
+    return any(part not in ("", ".") for part in token.split("/"))
 
 
 class CwdSet(tuple[str, ...]):
@@ -3609,13 +3768,18 @@ class CwdSet(tuple[str, ...]):
 
     link_dirs: tuple[str, ...]
     overflowed: bool
+    unscanned: bool
     _existing: tuple[str, ...]
     _listings: dict[str, dict[str, tuple[bool, bool]] | None]
 
-    def __new__(cls, lexical: Iterable[str], existing: Sequence[str]) -> "CwdSet":
+    def __new__(
+        cls, lexical: Iterable[str], existing: Sequence[str], *, unscanned: bool = False
+    ) -> "CwdSet":
         instance = super().__new__(cls, tuple(dict.fromkeys(lexical)))
         instance.link_dirs = tuple(existing[:LINK_DIRECTORY_CAP])
         instance.overflowed = len(existing) > LINK_DIRECTORY_CAP
+        # A computed move's link scan did not finish (review D2).
+        instance.unscanned = unscanned
         instance._existing = tuple(existing)
         instance._listings = {}
         return instance
@@ -3647,11 +3811,9 @@ class CwdSet(tuple[str, ...]):
         a deeper path whose real location differs from its spelling. A directory
         that cannot be listed counts for every word.
         """
-        if not token or token.startswith(("/", "~", "-")) or "\0" in token or "$" in token:
+        if not _may_be_relative_path(token):
             return False
         components = [part for part in token.split("/") if part not in ("", ".")]
-        if not components:
-            return False
         first = components[0]
         if first == "..":
             return True
@@ -3676,12 +3838,15 @@ class CwdSet(tuple[str, ...]):
 class _DirectoryWalk:
     """The directories a command moves through, gathered word by word (review F1)."""
 
-    def __init__(self, cwd: str | None, *, cdpath: bool = False) -> None:
+    def __init__(self, cwd: str | None, *, cdpath: bool = False, command: str = "") -> None:
+        self.command = command
         self.directories: list[str] = []
         self.existing: dict[str, None] = {}
         self.assigned: dict[str, str] = {}
         # The command names CDPATH: a relative cd may land in any directory it lists.
         self.cdpath = cdpath
+        # A computed move's link scan did not finish: where it lands is not known.
+        self.unscanned = False
         if cwd is not None and Path(cwd).is_absolute():
             self._add(cwd)
 
@@ -3698,14 +3863,28 @@ class _DirectoryWalk:
         """A move bash computes: read from the project root and every place it could land badly.
 
         Review 614b R4 and 614c N1: every project directory holding a link, and
-        every directory link, found by :func:`computed_move_directories`, a
-        bounded scan.
+        every directory link, found by :func:`scan_project_links`, a bounded
+        scan. A scan that did not finish marks the walk ``unscanned``: a
+        relative word read after the move is then denied (review D2).
         """
         root = resolve_project_root()
         if root:
             self._add(os.path.normpath(root))
-            for directory in computed_move_directories(root):
+            scan = scan_project_links(root)
+            self.unscanned = self.unscanned or not scan.complete
+            for directory in scan.directories:
                 self._add(directory, exists=True)
+
+    def to_toplevel(self) -> None:
+        """A move to git's top level: an ancestor of where the command is, each one kept."""
+        if not self.directories:
+            self.indeterminate()
+            return
+        bases = list(dict.fromkeys([self.directories[-1], *self.existing]))
+        root = resolve_project_root()
+        for base in bases[: LINK_DIRECTORY_CAP + 1]:
+            for ancestor in directory_ancestors(base, root):
+                self._add(ancestor)
 
     def assign(self, name: str, value: str) -> None:
         """Record ``name=value``; a value bash would expand is not known, so it is forgotten."""
@@ -3787,7 +3966,7 @@ class _DirectoryWalk:
                 self._add(joined, exists=True)
 
     def result(self) -> CwdSet:
-        return CwdSet(self.directories, list(self.existing))
+        return CwdSet(self.directories, list(self.existing), unscanned=self.unscanned)
 
 
 def _is_redirection(words: list[str], index: int) -> bool:
@@ -3833,19 +4012,32 @@ def chdir_wrapper_targets(name: str, words: list[str], start: int) -> list[str]:
     # Scanned to the next operator, not to the first operand: an option before
     # `-C` takes a value (`env -u HOME -C x`, `git -c k=v -C x`). A later `-C`
     # of the wrapped command is read as a move too, which only adds a directory.
+    # Review D3: getopt reads a short option inside a cluster (`env -iC d`, `sudo -nDd`)
+    # and a long one by any unambiguous prefix (`env --chd=d`). Every cluster holding
+    # the letter and every prefix is read as a move: a misreading only adds a directory.
     short, long = _CHDIR_OPTIONS[name]
-    glued = name != _GIT_EXECUTABLE
+    clustered = name != _GIT_EXECUTABLE
+    letter = short[1:]
     targets: list[str] = []
     index = start
     while index < len(words) and not all(char in _SHELL_OPERATOR_CHARS for char in words[index]):
         word = words[index]
-        if long is not None and word.startswith(long + "="):
-            targets.append(word.partition("=")[2])
-        elif word in (short, long) and index + 1 < len(words):
-            targets.append(words[index + 1])
-            index += 1
-        elif glued and word.startswith(short) and word != short:
-            targets.append(word[len(short) :])
+        following = words[index + 1] if index + 1 < len(words) else None
+        if word.startswith("--"):
+            option, equals, value = word.partition("=")
+            if long is not None and len(option) > len("--") and long.startswith(option):
+                if equals:
+                    targets.append(value)
+                elif following is not None:
+                    targets.append(following)
+                    index += 1
+        elif word == short or (clustered and word.startswith("-") and letter in word[1:]):
+            glued_value = word[word.index(letter, 1) + 1 :]
+            if glued_value:
+                targets.append(glued_value)
+            elif following is not None:
+                targets.append(following)
+                index += 1
         index += 1
     return targets
 
@@ -3876,6 +4068,7 @@ def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bo
     at_start = True
     prefixed = False
     redirect_file = False
+    prefix_value = False
     wrapped_at = -1
     for index, word in enumerate(words):
         if depth < _MAX_DIRECTORY_CHANGE_DEPTH and " " in word and _may_change_directory(word):
@@ -3891,7 +4084,12 @@ def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bo
         if word and all(char in _SHELL_OPERATOR_CHARS for char in word):
             at_start, prefixed = True, False
             continue
+        if prefix_value:
+            # The value of `exec -a NAME`: the command is the word after it.
+            prefix_value = False
+            continue
         if at_start and (word in _BUILTIN_PREFIXES or (prefixed and word.startswith("-"))):
+            prefix_value = prefixed and word in _PREFIX_OPTIONS_WITH_VALUE
             prefixed = True
             continue
         prefixed = False
@@ -3906,7 +4104,13 @@ def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bo
             # `/usr/bin/env -C d` is env: the command is named by its last component.
             name = Path(head).name
             if head in _DIRECTORY_CHANGE_COMMANDS:
-                moves.extend(_change_targets(words, index + 1))
+                operand = index + 1
+                while operand < len(words) and words[operand].startswith("-"):
+                    operand += 1
+                if toplevel_move_length(words[operand:], walk.command):
+                    walk.to_toplevel()
+                else:
+                    moves.extend(_change_targets(words, index + 1))
             elif name in _CHDIR_OPTIONS:
                 moves.extend(chdir_wrapper_targets(name, words, index + 1))
             for move in moves:
@@ -3944,14 +4148,14 @@ def effective_cwds(command: str, cwd: str | None) -> CwdSet:
     any other computed target (substitution, unknown variable, brace list,
     tilde, ``cd -``, no operand) adds the project root, every project
     directory holding a link and every directory link
-    (:func:`computed_move_directories`, a bounded scan whose limit is a
-    recorded residual).
+    (:func:`scan_project_links`, a bounded scan; past its bound, a relative
+    word read after the move is denied).
 
     Only a segment that could make such a move is tokenised
     (:func:`_may_change_directory`), not every line of a large authored script
     (ledger 00474 N465).
     """
-    walk = _DirectoryWalk(cwd, cdpath=CDPATH_VARIABLE in command)
+    walk = _DirectoryWalk(cwd, cdpath=CDPATH_VARIABLE in command, command=command)
     _walk_directory_changes(command, walk, 0)
     return walk.result()
 
@@ -4024,8 +4228,18 @@ def _overflow_mention(token: str, cwds: tuple[str, ...], patterns: tuple[str, ..
     that a word which could pass through a link in any of the rest is denied,
     never left unchecked. A positive finding, not an exception: an exception
     ends in the guard's allow-with-advisory path.
+
+    Review D2: after a computed move whose link scan did not finish, any
+    relative word may lie on a link the scan never reached, so it raises
+    :class:`IncompleteScanError`, which the guard denies.
     """
-    if not patterns or not isinstance(cwds, CwdSet) or not cwds.overflowed:
+    if not patterns or not isinstance(cwds, CwdSet):
+        return None
+    if cwds.unscanned and _may_be_relative_path(token):
+        raise IncompleteScanError(
+            "a computed directory change's link scan stopped before it finished"
+        )
+    if not cwds.overflowed:
         return None
     return patterns[0] if cwds.could_be_link(token) else None
 

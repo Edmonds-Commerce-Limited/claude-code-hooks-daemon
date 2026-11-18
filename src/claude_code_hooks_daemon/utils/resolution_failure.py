@@ -31,6 +31,15 @@ class ResolutionFailedError(Exception):
     """Where a command's words lead could not be worked out; the caller must deny."""
 
 
+class IncompleteScanError(ResolutionFailedError):
+    """A scan a placement depends on stopped before it finished; the caller must deny.
+
+    Independent review of Plan 00614 (D1, D2): a scan that stops early is not
+    evidence that what it did not reach is harmless, so it is never logged and
+    allowed.
+    """
+
+
 #: Raised on purpose by the scan, and judged by their own routes.
 _PASSED_THROUGH: tuple[type[BaseException], ...] = (
     TimeoutError,

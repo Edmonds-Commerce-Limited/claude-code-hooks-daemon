@@ -53,14 +53,16 @@ from claude_code_hooks_daemon.utils.protected_file_index import (
     ProtectedFileIndex,
     TreeView,
 )
-from claude_code_hooks_daemon.utils.resolution_failure import fails_closed
+from claude_code_hooks_daemon.utils.resolution_failure import IncompleteScanError, fails_closed
 from claude_code_hooks_daemon.utils.secret_file_matching import (
     CDPATH_VARIABLE,
     EXTGLOB_OPENERS,
     LINK_DIRECTORY_CAP,
     chdir_wrapper_targets,
-    computed_move_directories,
+    directory_ancestors,
     expand_directory_glob,
+    scan_project_links,
+    toplevel_move_length,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
@@ -514,7 +516,12 @@ def search_reads(command: str, cwd: str | None) -> list[Read]:
     try:
         reads = list(
             dict.fromkeys(
-                _reads(command, bases, 0, _SearchCwds(cwd, cdpath=CDPATH_VARIABLE in command))
+                _reads(
+                    command,
+                    bases,
+                    0,
+                    _SearchCwds(cwd, cdpath=CDPATH_VARIABLE in command, command=command),
+                )
             )
         )
     finally:
@@ -569,6 +576,9 @@ SEARCH_DIRECTORY_CAP: Final[int] = 64
 #: Wrappers with an option that runs the wrapped command elsewhere.
 _CHDIR_WRAPPERS: Final[frozenset[str]] = frozenset({"env", "sudo"})
 _BUILTIN: Final[str] = "builtin"
+_EXEC: Final[str] = "exec"
+#: ``exec -a NAME``: the option whose value is the next word.
+_EXEC_NAME_OPTION: Final[str] = "-a"
 _GLOB_CHARACTERS: Final[frozenset[str]] = frozenset("*?[")
 #: A redirection with its file glued on (``>/dev/null``, ``2>&1``), and one without (``2>``).
 _REDIRECTION_WORD: Final[re.Pattern[str]] = re.compile(r"\d*(?:&>>?|>>?|<>?|>&|<&)\S+")
@@ -630,6 +640,15 @@ def _directory_change(
     operands = _operands(words[start:])
     if not operands or operands[0] == "-":
         return cwds.indeterminate()
+    spelled = words[start:]
+    while spelled and spelled[0].startswith("-"):
+        spelled = spelled[1:]
+    if toplevel_move_length(spelled, cwds.command) and current:
+        # An ancestor of where the search is: each one kept, no project-wide scan.
+        root = path_exclusion.resolve_project_root()
+        return tuple(
+            dict.fromkeys(above for base in current for above in directory_ancestors(base, root))
+        )
     return cwds.moved(operands[0], current)
 
 
@@ -677,12 +696,19 @@ class _SearchCwds:
     overflowed: bool = False
     # The command names CDPATH: a relative cd may land in any directory it lists.
     cdpath: bool = False
+    # A computed move's link scan did not finish: a later reader is denied (review D2).
+    unscanned: bool = False
+    # The whole command, for what a move's spelling depends on (git's top level).
+    command: str = ""
 
     def indeterminate(self) -> tuple[str, ...]:
         """A move that cannot be placed: the project root, every named target and the hook cwd."""
         root = path_exclusion.resolve_project_root()
         # Reviews 614b R4, 614c N1: every project directory holding a link, and every directory link.
-        linked = computed_move_directories(root) if root else ()
+        scan = scan_project_links(root) if root else None
+        if scan is not None and not scan.complete:
+            self.unscanned = True
+        linked = scan.directories if scan is not None else ()
         found = [root, *self.targets, self.hook_cwd, *linked]
         return tuple(dict.fromkeys(path for path in found if path and posixpath.isabs(path)))
 
@@ -821,6 +847,9 @@ def _segment_reads(
         # started stays a base, so a move read twice never loses the real one.
         here = tuple(dict.fromkeys((*here, *current)))
     head = posixpath.basename(words[0])
+    if tracker.unscanned and head not in _DIRECTORY_CHANGERS and _reads_files(words, head):
+        # Review D2: the reader may run from a directory the unfinished scan never reached.
+        raise IncompleteScanError("a computed directory change's link scan stopped before it finished")
     if tracker.lost and head not in _DIRECTORY_CHANGERS and _reads_files(words, head):
         yield Read(_EVERYTHING, view=TreeView.ALL)
         # A directory link out of the project is under no indexed file: each place a
@@ -909,7 +938,12 @@ def _past_command_prefix(words: list[str]) -> list[str]:
     """
     while words:
         head = words[0]
-        if _ASSIGNMENT.match(head) or head == _BUILTIN or _REDIRECTION_WORD.fullmatch(head):
+        if head == _EXEC:
+            # Review D4: `exec [-cl] [-a NAME] cmd` runs cmd.
+            words = words[1:]
+            while words and words[0].startswith("-") and words[0] != "-":
+                words = words[2:] if words[0] == _EXEC_NAME_OPTION else words[1:]
+        elif _ASSIGNMENT.match(head) or head == _BUILTIN or _REDIRECTION_WORD.fullmatch(head):
             words = words[1:]
         elif _BARE_REDIRECTION.fullmatch(words[0]):
             words = words[2:]
