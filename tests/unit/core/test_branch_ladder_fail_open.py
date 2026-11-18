@@ -58,6 +58,40 @@ def failing_park_read(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(branch_creation, "read_park_records", _boom)
 
 
+class TestTypedReading:
+    """A failed read is a typed result, never None, and still never raises."""
+
+    def test_a_failed_read_is_flagged_unreadable_with_no_pressures(
+        self, repo: Path, failing_park_read: None
+    ) -> None:
+        reading = branch_ladder.try_pool_pressures(repo, CONFIG, {})
+        assert reading.unreadable is True
+        assert reading.pressures == ()
+
+    def test_a_good_read_is_readable_and_carries_the_pressures(self, repo: Path) -> None:
+        reading = branch_ladder.try_pool_pressures(repo, CONFIG, {})
+        assert reading.unreadable is False
+        assert len(reading.pressures) == 1
+
+    def test_a_failed_read_is_cached_for_the_failure_window(
+        self, repo: Path, failing_park_read: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cache = PressureCache(ttl=10.0, failure_ttl=60.0)
+        assert cache.get(repo, CONFIG, {}, clock=lambda: 0.0) == []
+        calls: list[int] = []
+        real = branch_ladder.try_pool_pressures
+
+        def counted(*args: Any, **kwargs: Any) -> Any:
+            calls.append(1)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(branch_ladder, "try_pool_pressures", counted)
+        assert cache.get(repo, CONFIG, {}, clock=lambda: 30.0) == []
+        assert calls == []
+        assert cache.get(repo, CONFIG, {}, clock=lambda: 61.0) == []
+        assert calls == [1]
+
+
 class TestLadderFailsOpen:
     def test_pool_pressures_is_silent_when_the_park_read_fails(
         self, repo: Path, failing_park_read: None
