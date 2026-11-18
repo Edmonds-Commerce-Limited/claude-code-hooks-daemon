@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/manifest-reference
-fetched_at: '2026-11-10T16:35:07.048508+00:00'
+fetched_at: '2026-11-16T21:15:39.428588+00:00'
 fidelity: converted
-source_sha256: e5b1637e31d580160fce53125e56900800e55a5b6f089a34c4407648cef48443
+source_sha256: f5d88a52b3bf6ef52b249dc230df025d4915701459a6947375e87740ffc75ffc
 licence: unreviewed
-stale_after: '2027-02-08'
+stale_after: '2027-02-14'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -14,7 +14,7 @@ fetch_method: agent-browser-lite-headless (accept-markdown)
 
 # Plugin manifest reference
 
-> Complete reference for plugin.json: every field with its type and default, accepted path forms, and the userConfig and environment variable schemas.
+> Complete reference for plugin.json: fields with types and defaults, accepted path forms, and the userConfig and environment variable schemas.
 
 A plugin manifest is the `plugin.json` file in a plugin's `.claude-plugin/` directory. It carries the plugin's metadata and the [`userConfig`](#user-configuration) values that Claude Code prompts the user for. It also declares any component that you define inline or keep outside its [default location](#standard-layout).
 
@@ -127,7 +127,7 @@ The command also checks each MCP server entry the plugin declares in `.mcp.json`
 
 ## Fields
 
-The table lists the top-level keys in `plugin.json`. `name` is the only required key. Where a field name is a link, the linked section has its full rules.
+The table lists top-level keys in `plugin.json`. `name` is the only required key. Where a field name is a link, the linked section has its full rules.
 
 For component keys such as `commands` and `hooks`, [Component path forms](#component-path-forms) shows each accepted shape with an example, and every path follows the [path rules](#path-rules) for the `./` prefix, extensions, and containment.
 
@@ -151,7 +151,6 @@ For component keys such as `commands` and `hooks`, [Component path forms](#compo
 | [`termsOfServiceUrl`](#directory-listing-fields) | String | Terms of service link for the plugin's listing in Anthropic's directory. Claude Code doesn't read it |
 | [`defaultEnabled`](#defaultenabled) | Boolean | Whether the plugin starts enabled when the user hasn't set it. Defaults to `true` |
 | [`dependencies`](#dependencies) | Array of strings or objects | Plugins that must be enabled for this one to work |
-| [`settings`](#settings) | Object | Settings Claude Code applies while the plugin is enabled. Only `agent` and `subagentStatusLine` take effect |
 | [`userConfig`](#user-configuration) | Object | Values Claude Code prompts the user for when the plugin is enabled |
 | `types` | Path | A `.d.ts` file that declares the `$.state` values and `$` nouns of a [mod](https://code.claude.com/docs/en/plugins/mods/reference.md#files) |
 | [`channels`](#channels) | Array of objects | Message channels the plugin provides, each bound to one of its MCP servers |
@@ -220,10 +219,6 @@ Once a user's `enabledPlugins` entry is written, it persists across plugin updat
 ### `dependencies`
 
 Plugins that must be enabled for this one to work. Each entry is `"name"`, `"name@marketplace"`, or `{ "name": "...", "marketplace": "...", "version": "..." }`. Bare names resolve against this plugin's own marketplace. See [dependency constraints](https://code.claude.com/docs/en/plugins/dependencies.md).
-
-### `settings`
-
-Settings Claude Code applies while the plugin is enabled. Only `agent` and `subagentStatusLine` take effect; other keys are dropped at load. A `settings.json` at the plugin root takes precedence over this key. See [Default settings](https://code.claude.com/docs/en/plugins/components.md#default-settings).
 
 ## Component path forms
 
@@ -321,8 +316,8 @@ An `mcpServers` value takes one of these shapes:
 | Shape | Example value | What Claude Code does |
 | :- | :- | :- |
 | `.json` file path | `"./mcp/servers.json"` | Reads the file as an `mcpServers` map |
-| MCP bundle path | `"./bundle.mcpb"` | Extracts the `.mcpb` or `.dxt` bundle into `.mcpb-cache/` under the plugin root and reads its server config |
-| MCP bundle URL | `"https://example.com/server.mcpb"` | Downloads the bundle into `.mcpb-cache/`, then reads it |
+| MCP bundle path | `"./bundle.mcpb"` | Extracts the `.mcpb` or `.dxt` bundle into `mcpb/` under the [plugins root](https://code.claude.com/docs/en/plugins/loading.md#find-plugins-on-disk) and reads its server config |
+| MCP bundle URL | `"https://example.com/server.mcpb"` | Downloads the bundle, then extracts and reads it the same way |
 | Inline map | `{ "deploy-api": { "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/server.js"] } }` | Uses the map as server configs keyed by name |
 
 A bundle path or URL must end in `.mcpb` or `.dxt`. Any other extension fails validation.
@@ -413,7 +408,7 @@ Every component path in a manifest is relative to the plugin root and must start
 
 Every component path must resolve inside the plugin root and must exist. `claude plugin validate` checks the paths under every component key:
 
-* **Containment**: a path that resolves outside the plugin root doesn't load, and the `/plugin` **Errors** tab shows `<component> path escapes plugin directory: <path>`. A path containing `..` is the usual case, and `claude plugin validate` reports the error `Path contains ".." which could be a path traversal attempt`
+* **Containment**: a path that resolves outside the plugin root doesn't load, and the `/plugin` **Errors** tab shows `<component> path escapes plugin directory: <path>`. A path containing `..` is the usual case, and `claude plugin validate` reports the error `Path contains ".." which could be a path traversal attempt`. For an `mcpServers` or `lspServers` file, a [`path not read`](https://code.claude.com/docs/en/errors#server-file-path-not-read) message means the path is absolute or contains `..`
 * **Existence**: a path that doesn't exist doesn't load, and the `/plugin` **Errors** tab shows `<component> path not found: <path>`. `claude plugin validate` reports the error `Path not found`
 
 For `outputStyles`, `lspServers`, `monitors`, and `themes` paths, the `claude plugin validate` check requires Claude Code v2.1.283 or later.
@@ -636,9 +631,8 @@ Each component type has a default location under the plugin root, used when the 
 | Themes | `themes/` | Theme JSON files |
 | Monitors | `monitors/monitors.json` | The monitors array |
 | Executables | `bin/` | Files here are on the Bash tool's `PATH` while the plugin is enabled, so Claude runs them as bare commands. claude.ai and Cowork don't install a plugin that has this directory, including one you [distribute through claude.ai organization settings](https://claude.com/docs/plugins/org-sync#keep-executables-out-of-the-top-level-bin-directory) |
-| Settings | `settings.json` | `agent` and `subagentStatusLine` defaults applied while the plugin is enabled |
 
-A plugin that uses every default location, plus a `scripts/` folder that its hooks call, is laid out like this:
+A plugin that uses default locations, plus a `scripts/` folder that its hooks call, is laid out like this:
 
 ```text theme={null}
 deploy-tools/
@@ -665,7 +659,6 @@ deploy-tools/
 │   └── deploy-tool
 ├── scripts/
 │   └── format.sh
-├── settings.json
 ├── .mcp.json
 └── .lsp.json
 ```

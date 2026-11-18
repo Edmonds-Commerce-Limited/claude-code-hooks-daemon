@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/events
-fetched_at: '2026-11-10T16:35:09.982870+00:00'
+fetched_at: '2026-11-16T21:15:41.700597+00:00'
 fidelity: converted
-source_sha256: 5913ffd8190f83b94bba5f8ae275d0dd9d03a916e7f9686fc9b81a750dfeb541
+source_sha256: dd50c7d1acbf12eec077dedfa3c4ae45de2e7225bcf75f34c10ff545c8ffac2c
 licence: unreviewed
-stale_after: '2027-02-08'
+stale_after: '2027-02-14'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -100,6 +100,16 @@ on('tool.call', { tool: /^mcp__github__/ }, hook)
 The event name can be a wildcard. `'classic.*'` matches every [settings hook event](#hook-the-settings-hook-events). `'*'` matches every event except the [telemetry events](https://code.claude.com/docs/en/plugins/mods/reference.md#telemetry), which take their own name and a `{ to: 'collector' }` filter.
 
 Register each event once per matcher. If you call `on` twice for `session.start` with no matcher, the module fails to load with `on("session.start") is registered twice without a matcher`. Put everything your mod does at session start in one hook.
+
+#### Hook other mods' drawings and controls
+
+To hook another mod's controls, panes, or row above the prompt, pass a matcher with `plugin`. Use the mod's name without its marketplace, as in `{ plugin: 'other-mod' }`, or `{ plugin: '*' }` for every mod. Without `plugin`, a hook on `ui.press`, `ui.input`, `ui.select`, or `ui.focus` doesn't run for other mods' controls, and a `ui.render` hook skips their panes and their rows above the prompt.
+
+A hook on a wildcard with no matcher, such as `on('*', hook)` or `on('ui.*', hook)`, still runs for every mod. A wildcard with a matcher needs `plugin` too.
+
+> [!NOTE]
+>
+> `{ plugin: '*' }` requires Claude Code v2.1.323 or later. Before v2.1.323, a hook with no `plugin` ran for every mod, and a hook with `{ plugin: '*' }` didn't run. To match every mod on both versions, use `{ plugin: /./ }` on `ui.press`, `ui.input`, and `ui.select`. For `ui.focus` and `ui.render`, use `on('ui.*', hook)` and check the event's name in `next.event`, as in `if (next.event !== 'ui.focus') return next(e)`.
 
 ## Hook what Claude is doing
 

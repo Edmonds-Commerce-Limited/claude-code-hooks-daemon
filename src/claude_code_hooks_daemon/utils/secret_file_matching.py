@@ -3420,6 +3420,9 @@ def _may_change_directory(segment: str) -> bool:
 def effective_cwds(command: str, cwd: str | None) -> tuple[str, ...]:
     """The directories ``command`` may run in: the hook's ``cwd``, then each literal ``cd`` target.
 
+    A literal ``git -C`` directory is included too (:func:`_git_dash_c_directories`),
+    read from where the shell is but without moving it.
+
     Ledger 00474 N221. A relative path in a command is read from where the
     command is, so ``cd vault && cat r.md`` reaches ``vault/r.md``. Every
     ``cd``/``pushd`` is tracked cumulatively and ALL the resulting directories
@@ -3434,24 +3437,73 @@ def effective_cwds(command: str, cwd: str | None) -> tuple[str, ...]:
     (ledger 00474 N465).
     """
     directories: list[str] = [cwd] if cwd is not None and Path(cwd).is_absolute() else []
+    # Where the shell is: a `git -C` directory is judged too but never moves the shell.
+    here = directories[-1] if directories else None
     for segment in _COMMAND_SEGMENT_SEPARATORS.split(command):
-        if not _may_change_directory(segment):
+        if not (_may_change_directory(segment) or _may_move_git(segment)):
             continue
         words = _shell_words(segment)
-        if words is None or len(words) < 2 or words[0] not in _DIRECTORY_CHANGE_COMMANDS:
+        if words is None or len(words) < 2:
+            continue
+        if Path(words[0]).name == _GIT:
+            directories.extend(_git_dash_c_directories(words, here))
+            continue
+        if words[0] not in _DIRECTORY_CHANGE_COMMANDS:
             continue
         operands = [word for word in words[1:] if not word.startswith("-") or word == "-"]
         if not operands:
             continue
-        target = operands[0]
-        if target == "-" or any(char in _WORD_EXPANDING_CHARACTERS for char in target):
-            continue
-        if not Path(target).is_absolute():
-            if not directories:
-                continue
-            target = str(Path(directories[-1]) / target)
-        directories.append(os.path.normpath(target))
+        target = _placed_directory(operands[0], here)
+        if target is not None:
+            directories.append(target)
+            here = target
     return tuple(dict.fromkeys(directories))
+
+
+_GIT_DASH_C: Final[str] = "-C"
+_GIT: Final[str] = "git"
+
+
+def _may_move_git(segment: str) -> bool:
+    """Could ``segment`` be a ``git -C`` command? Sound, as :func:`_may_change_directory` is."""
+    unquoted = segment.translate(_SHLEX_REMOVED_CHARS)
+    return _GIT in unquoted and _GIT_DASH_C in unquoted
+
+
+def _placed_directory(target: str, base: str | None) -> str | None:
+    """The absolute, normalised ``target`` read from ``base``; None when it cannot be placed."""
+    if target == "-" or any(char in _WORD_EXPANDING_CHARACTERS for char in target):
+        return None
+    if not Path(target).is_absolute():
+        if base is None:
+            return None
+        target = str(Path(base) / target)
+    return os.path.normpath(target)
+
+
+def _git_dash_c_directories(words: list[str], base: str | None) -> list[str]:
+    """Each directory a ``git -C`` chain moves git to, read cumulatively from ``base``.
+
+    Plan 00618 S-1: ``git -C vault show HEAD:x`` names ``x`` in ``vault`` exactly
+    as ``cd vault && git show HEAD:x`` does. An unplaceable step ends the chain.
+    """
+    directories: list[str] = []
+    position = 1
+    while position < len(words) and words[position].startswith("-"):
+        option = words[position]
+        if option not in _GIT_GLOBAL_OPTIONS_WITH_VALUE:
+            position += 1
+            continue
+        value = words[position + 1] if position + 1 < len(words) else ""
+        position += 2
+        if option != _GIT_DASH_C or not value:
+            continue
+        placed = _placed_directory(value, base)
+        if placed is None:
+            break
+        directories.append(placed)
+        base = placed
+    return directories
 
 
 def _anchored_spellings(form: str, cwds: tuple[str, ...]) -> list[str]:
