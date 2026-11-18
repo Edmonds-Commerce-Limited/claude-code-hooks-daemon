@@ -8,6 +8,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00619: branch pool graduated warnings](00619-branch-pool-graduated-warnings/PLAN.md) - Not Started (owner ruling: the pool cap stays a hard stop, so warn at 60, 80 and 90 percent of the cap; the 90 percent warning is never silenced)
+
 - [00618: release 3 75 0 code review findings](00618-release-3-75-0-code-review-findings/PLAN.md) - In Progress (Step 10 review of release 3.75.0 returned FAIL: 5 blocking fail-open or data-loss findings plus 20 non-blocking defects; release aborted at that gate; fix test-first, then the owner re-runs the release)
 
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
