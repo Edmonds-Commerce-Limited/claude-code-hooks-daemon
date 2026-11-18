@@ -55,6 +55,8 @@ from claude_code_hooks_daemon.utils.protected_file_index import (
 )
 from claude_code_hooks_daemon.utils.resolution_failure import fails_closed
 from claude_code_hooks_daemon.utils.secret_file_matching import (
+    CDPATH_VARIABLE,
+    EXTGLOB_OPENERS,
     LINK_DIRECTORY_CAP,
     chdir_wrapper_targets,
     computed_move_directories,
@@ -510,7 +512,11 @@ def search_reads(command: str, cwd: str | None) -> list[Read]:
     bases = (cwd,) if cwd is not None and posixpath.isabs(cwd) else ()
     reset = _rg_config_named.set(RG_CONFIG_ENV in command)
     try:
-        reads = list(dict.fromkeys(_reads(command, bases, 0, _SearchCwds(cwd))))
+        reads = list(
+            dict.fromkeys(
+                _reads(command, bases, 0, _SearchCwds(cwd, cdpath=CDPATH_VARIABLE in command))
+            )
+        )
     finally:
         _rg_config_named.reset(reset)
     if not any(read.glob for read in reads):
@@ -558,6 +564,8 @@ def _directories_read(read: Read, index: ProtectedFileIndex) -> list[Read]:
 # Nested wrappers (`bash -c "bash -c ..."`) end here rather than recursing for ever.
 _MAX_WRAPPER_DEPTH: Final[int] = 4
 _DIRECTORY_CHANGERS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
+#: How many directories a search is placed from before it is judged over every indexed file.
+SEARCH_DIRECTORY_CAP: Final[int] = 64
 #: Wrappers with an option that runs the wrapped command elsewhere.
 _CHDIR_WRAPPERS: Final[frozenset[str]] = frozenset({"env", "sudo"})
 _BUILTIN: Final[str] = "builtin"
@@ -665,6 +673,8 @@ class _SearchCwds:
     targets: list[str] = field(default_factory=list)
     # A `cd` to a tilde the hook cannot place (`~-`) was seen: later reads judge every file.
     lost: bool = False
+    # The command names CDPATH: a relative cd may land in any directory it lists.
+    cdpath: bool = False
 
     def indeterminate(self) -> tuple[str, ...]:
         """A move that cannot be placed: the project root, every named target and the hook cwd."""
@@ -675,6 +685,15 @@ class _SearchCwds:
         return tuple(dict.fromkeys(path for path in found if path and posixpath.isabs(path)))
 
     def moved(self, target: str, current: tuple[str, ...]) -> tuple[str, ...]:
+        if any(opener in target for opener in EXTGLOB_OPENERS):
+            # Review 614c N3: an extended glob names no directory this walk can list.
+            return tuple(dict.fromkeys((*self.indeterminate(), *current)))
+        if self.cdpath and not posixpath.isabs(target):
+            # Review 614c N3: bash may find a relative operand under a CDPATH entry instead.
+            return tuple(dict.fromkeys((*self._moved(target, current), *self.indeterminate())))
+        return self._moved(target, current)
+
+    def _moved(self, target: str, current: tuple[str, ...]) -> tuple[str, ...]:
         bases: tuple[str | None, ...] = current or (None,)
         if any(char in _GLOB_CHARACTERS for char in target):
             return self._globbed(target, bases)
@@ -740,6 +759,12 @@ def _reads(command: str, cwds: tuple[str, ...], depth: int, tracker: _SearchCwds
         for judged in dict.fromkeys((raw, segment)):
             yield from _segment_reads(judged, piped_in, fed_by, current, depth, tracker)
         feeder, current = _segment_state(segment, fed_by, current, tracker)
+        if len(current) > SEARCH_DIRECTORY_CAP:
+            # Each failed `cd` keeps its base beside its target, so the set can double
+            # per `cd`. Past the cap every later read is judged over every indexed file.
+            # Where a read is placed then makes no difference, so the set is cut.
+            tracker.lost = True
+            current = current[:SEARCH_DIRECTORY_CAP]
         for _ in range(min(closes, len(saved))):
             current = tuple(dict.fromkeys((*saved.pop(), *current)))
 
@@ -759,6 +784,9 @@ def _segment_state(
     if head in _DIRECTORY_CHANGERS:
         # A `cd ~-` (a tilde the hook cannot place) loses the directory: every later read fails closed.
         tracker.lost = tracker.lost or any(unknown_tilde(word) for word in words[1:])
+        if tracker.lost:
+            # Every later read is judged over every indexed file: the move is not followed.
+            return fed_by, current
         return fed_by, _directory_change(words, 1, current, tracker)
     if head == _FIND:
         return _find_roots(words), current

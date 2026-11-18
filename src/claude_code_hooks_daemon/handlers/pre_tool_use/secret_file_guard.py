@@ -169,7 +169,8 @@ _UNRESOLVED_CAUSE: Final[str] = (
 _GAVE_UP_TOKEN: Final[str] = "<gave-up>"
 _GAVE_UP_CAUSE: Final[str] = (
     "Denied because the scan of this command stopped before it finished (it reached a "
-    "size limit or its deadline), and the command holds a recursive search or a glob. "
+    "size limit or its deadline, met a word it could not read, or failed internally), "
+    "and the command holds a recursive search or a glob. "
     "Only the full scan can tell which files those read, so they are denied rather than "
     "allowed unchecked. Split the command into smaller ones, or drop the large brace "
     "expansion or wide pattern beside the search."
@@ -191,15 +192,19 @@ _PLACEHOLDER_CWD: Final[str] = "/"
 
 
 def _holds_search_or_glob(hook_input: dict[str, Any]) -> bool:
-    """Does this Bash call hold a recursive search or a glob? True when that cannot be told.
+    """Does this call hold a recursive search or a glob? True when that cannot be told.
 
-    Asked only after the full scan gave up (review 614c P2). A glob character
-    anywhere outside a quoted text-fed heredoc counts, and so does any search
+    Asked only after the full scan gave up (review 614c P2). The Grep tool is a
+    recursive search. In a Bash call, a glob character anywhere outside a quoted
+    text-fed heredoc counts, and so does any search
     :func:`recursive_search.search_reads` finds, which has no deadline or cap.
     """
+    tool_name = hook_input.get(HookInputField.TOOL_NAME)
+    if tool_name == ToolName.GREP:
+        return True
     tool_input = hook_input.get(HookInputField.TOOL_INPUT)
     command = tool_input.get(_FIELD_COMMAND) if isinstance(tool_input, dict) else None
-    if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH or not isinstance(command, str):
+    if tool_name != ToolName.BASH or not isinstance(command, str):
         return False
     raw_cwd = hook_input.get(HookInputField.CWD)
     cwd = raw_cwd if isinstance(raw_cwd, str) and Path(raw_cwd).is_absolute() else _PLACEHOLDER_CWD
@@ -1398,8 +1403,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         command the reader cannot parse or an internal error ends the full scan;
         the call is then judged on the literal paths in its text alone, and if
         none is found it is allowed with an advisory (the ``advisory`` route).
-        A cap or the deadline beside a recursive search or a glob is denied
-        instead (review 614c P2): only the full scan can judge what those read.
+        Any of those beside a recursive search or a glob is denied instead
+        (review 614c P2): only the full scan can judge what those read.
         """
         try:
             return self._evaluate(hook_input)
@@ -1408,7 +1413,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             return self._unresolved_finding(hook_input)
         except shell_expansion.UnresolvableBraceQuotingError as exc:
             logger.info("secret_file_guard: command not fully readable (%s)", type(exc).__name__)
-            return self._literal_finding_or_advisory(hook_input, "the command could not be parsed")
+            return self._gave_up_finding_or_advisory(hook_input, "the command could not be parsed")
         except TimeoutError:
             logger.info("secret_file_guard: scan deadline passed")
             return self._gave_up_finding_or_advisory(hook_input, "the scan deadline passed")
@@ -1417,7 +1422,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             return self._gave_up_finding_or_advisory(hook_input, "the scan reached a size limit")
         except Exception as exc:
             logger.exception("secret_file_guard: evaluation raised; allowing with an advisory")
-            return self._literal_finding_or_advisory(
+            return self._gave_up_finding_or_advisory(
                 hook_input, f"an internal error ({type(exc).__name__})"
             )
 
@@ -1456,7 +1461,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         if found[2] != _ADVISORY_ROUTE or not _holds_search_or_glob(hook_input):
             return found
         patterns = self._patterns()
-        return (patterns[0] if patterns else _NOT_JUDGED_PATTERN, _GAVE_UP_TOKEN, "bash")
+        route = "bash" if hook_input.get(HookInputField.TOOL_NAME) == ToolName.BASH else "read"
+        return (patterns[0] if patterns else _NOT_JUDGED_PATTERN, _GAVE_UP_TOKEN, route)
 
     def _unresolved_finding(self, hook_input: dict[str, Any]) -> tuple[str, str, str]:
         """A finding for a call whose words could not be placed (review 614b): it is denied."""

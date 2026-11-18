@@ -3426,10 +3426,14 @@ _CHDIR_OPTIONS: Final[dict[str, tuple[str, str | None]]] = {
 }
 #: Words bash reads past to a builtin such as ``cd``; ``command`` may carry options.
 _BUILTIN_PREFIXES: Final[frozenset[str]] = frozenset({"builtin", "command"})
-#: Words after which bash reads the next word as a command name.
+#: Words after which bash reads the next word as a command name (``eval cd x`` runs cd).
 _COMMAND_START_WORDS: Final[frozenset[str]] = frozenset(
-    {"(", "{", "}", "!", "if", "then", "else", "elif", "do", "while", "until", "time"}
+    {"(", "{", "}", "!", "if", "then", "else", "elif", "do", "while", "until", "time", "eval"}
 )
+#: The openers of bash's extended globs: a ``cd`` operand holding one is computed (review 614c N3).
+EXTGLOB_OPENERS: Final[tuple[str, ...]] = ("@(", "+(", "!(", "*(", "?(")
+#: The variable that makes bash look a relative ``cd`` operand up in other directories.
+CDPATH_VARIABLE: Final[str] = "CDPATH"
 #: A command substitution's opener, glued to the word that starts its body.
 _SUBSTITUTION_OPENERS: Final[tuple[str, ...]] = ("$(", "`")
 _ASSIGNMENT_WORD: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
@@ -3673,10 +3677,12 @@ class CwdSet(tuple[str, ...]):
 class _DirectoryWalk:
     """The directories a command moves through, gathered word by word (review F1)."""
 
-    def __init__(self, cwd: str | None) -> None:
+    def __init__(self, cwd: str | None, *, cdpath: bool = False) -> None:
         self.directories: list[str] = []
         self.existing: dict[str, None] = {}
         self.assigned: dict[str, str] = {}
+        # The command names CDPATH: a relative cd may land in any directory it lists.
+        self.cdpath = cdpath
         if cwd is not None and Path(cwd).is_absolute():
             self._add(cwd)
 
@@ -3753,9 +3759,17 @@ class _DirectoryWalk:
                 # reassignment this walk cannot read may have changed it.
                 self.indeterminate()
                 target = substituted
-        if not target or target == "-" or any(c in _COMPUTED_CHARACTERS for c in target):
+        if (
+            not target
+            or target == "-"
+            or any(c in _COMPUTED_CHARACTERS for c in target)
+            or any(opener in target for opener in EXTGLOB_OPENERS)
+        ):
             self.indeterminate()
             return
+        if self.cdpath and not Path(target).is_absolute():
+            # Review 614c N3: bash may find the operand under a CDPATH entry instead.
+            self.indeterminate()
         if any(char in _GLOB_CHARACTERS for char in target):
             self._expand(target)
             return
@@ -3806,7 +3820,10 @@ def _change_targets(words: list[str], start: int) -> list[str | None]:
         if word and all(char in _SHELL_OPERATOR_CHARS for char in word):
             break
         if word == "-" or not word.startswith("-"):
-            candidates.append(word)
+            # The split words carry `@(x)` as `@`, `(`, `x`, `)`: the opener is put
+            # back so the move is judged as the extended glob it is (review 614c N3).
+            glued = index + 1 < len(words) and words[index + 1] == "("
+            candidates.append(f"{word}(" if glued else word)
             return candidates
         index += 1
     return candidates or [None]
@@ -3932,7 +3949,7 @@ def effective_cwds(command: str, cwd: str | None) -> CwdSet:
     (:func:`_may_change_directory`), not every line of a large authored script
     (ledger 00474 N465).
     """
-    walk = _DirectoryWalk(cwd)
+    walk = _DirectoryWalk(cwd, cdpath=CDPATH_VARIABLE in command)
     _walk_directory_changes(command, walk, 0)
     return walk.result()
 
