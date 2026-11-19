@@ -73,11 +73,22 @@ def _is_upgrade_owned(path: str) -> bool:
     )
 
 
-def _status_paths(root: Path) -> list[str] | None:
-    """Paths ``git status`` reports dirty under ``root``; None when it cannot be read."""
+def _status_paths(root: Path, pathspecs: tuple[str, ...] = ()) -> list[str] | None:
+    """Paths ``git status`` reports dirty under ``root`` (limited to ``pathspecs``
+    when given, which keeps a session-start check cheap); None when unreadable."""
     try:
         result = subprocess.run(
-            ["git", "-C", str(root), "status", "--porcelain", "-z", "--untracked-files=all"],
+            [
+                "git",
+                "-C",
+                str(root),
+                "status",
+                "--porcelain",
+                "-z",
+                "--untracked-files=all",
+                "--",
+                *pathspecs,
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -111,7 +122,7 @@ def _status_paths(root: Path) -> list[str] | None:
 def _uncommitted_work_reasons(project_root: Path, daemon_dir: Path) -> list[str]:
     reasons: list[str] = []
     if (project_root / ".git").exists():
-        project_paths = _status_paths(project_root)
+        project_paths = _status_paths(project_root, UPGRADE_OWNED_PATHS)
         if project_paths is None:
             reasons.append("the project's git status cannot be read")
         else:

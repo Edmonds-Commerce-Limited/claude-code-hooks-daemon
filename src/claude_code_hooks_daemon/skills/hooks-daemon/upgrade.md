@@ -18,14 +18,15 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
    **`--unattended`** is the form the SessionStart version check tells you to
    run when the project's `daemon-auto-upgrade` standing authorisation is in
    force. It only adds refusals and a rollback; the steps below are the same,
-   and you finish them without asking. An exit `5` means the upgrade needs a
+   and you finish every one that does not need the user without asking (the
+   next paragraph covers those that do). An exit `5` means the upgrade needs a
    human: report the printed reason and stop there, and do NOT re-run it
    without `--unattended` on your own initiative. Exit `75` means another
    agent holds the upgrade lock: nothing changed, so there is nothing to do.
    What each refusal is, and the lock, are in "Unattended upgrades" in the
    daemon clone's `CLAUDE/LLM-UPDATE.md`.
 
-   **Under `--unattended`, never answer for the user.** Wherever a step below says to ask the user or to act on their confirmation (a post-upgrade task that says to ask, step 9's config-optimisation review, a Python only the user can install), do not carry out that step: never guess an answer. Before the deploy the script already stops by itself (exit `5`, nothing changed). After it, leave that step undone, still stage and commit the daemon upgrade (steps 7-8, so the tree is not left half-committed), then print exactly one line, `AUTO-UPGRADE PAUSED: <step> needs the user (<why>); nothing after it was done.`, and stop. Post-upgrade tasks carry no machine-readable "ask" marker, so read each one for it.
+   **Under `--unattended`, never answer for the user.** Wherever a step below says to ask the user or to act on their confirmation (a post-upgrade task that says to ask, step 9's config-optimisation review, a Python only the user can install), do not carry out that step: never guess an answer. Before the deploy the script already stops by itself (exit `5`, nothing changed). After it, leave that step undone and carry on with every other step that does not need the user (later post-upgrade tasks, and steps 7-8, so the tree is not left half-committed), but skip step 9. Then print exactly one line, `AUTO-UPGRADE PAUSED: <steps left undone> need the user (<why>); everything else is done and committed.`, and stop. Post-upgrade tasks carry no machine-readable "ask" marker, so read each one for it.
 
    **The pre-deploy gate (MANDATORY to act on).** Once the new version is
    checked out, and before anything is deployed into the project, the upgrade
