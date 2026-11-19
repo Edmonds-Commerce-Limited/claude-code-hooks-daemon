@@ -670,6 +670,13 @@ class TestFailuresAndEdges:
         _git(repo, "remote", "add", "origin", str(bare))
         _merged(repo, "feat")
         _git(repo, "push", "--quiet", "origin", "feat")
+        # Merged only into the LOCAL main, which the remote does not have: the remote
+        # copy is the only one there, so no delete line is printed (Plan 00626).
+        _git(repo, "fetch", "--quiet", "origin")
+        advice = branch_cleanup.remote_delete_advice(repo, _CONFIG, "main", "feat")
+        assert advice is not None
+        assert advice.startswith("remote delete of origin/feat is for the owner")
+        _git(repo, "push", "--quiet", "origin", "main")
         report = clean_sweep(repo, _CONFIG, dry_run=False)
         assert "git push origin --delete feat" in report.commands
 
