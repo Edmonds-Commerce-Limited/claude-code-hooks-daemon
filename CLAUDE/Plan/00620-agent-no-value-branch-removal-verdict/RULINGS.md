@@ -120,6 +120,9 @@ against a loss that the bundle already prevents. Two consequences:
 - After a second `keep` on a branch name, the route is closed for that name. The work is
   merged, parked, or left to the owner.
 - Disagreement between two reviewers counts as `keep`.
+- The keep history is keyed on the work, not only on the name. A request whose inventory
+  shares any unique commit with the inventory of an earlier `keep` verdict is a re-review of
+  that verdict whatever the branch is called, so renaming a branch earns no fresh start.
 - A verdict is valid for 24 hours from issue (`branches.reject.verdict_lifetime_hours`).
 - Rate, per repository, counted from the ledger over a rolling 7 days
   (`branches.reject.window_days`): above 3 removals (`two_reviewer_after`) every further
@@ -161,7 +164,10 @@ made, a rejected branch that has a remote copy keeps the copy.
 - Committer: the agent that ran the delete, in its next commit. An uncommitted ledger line
   leaves the worktree dirty, which the existing stop guard already refuses to leave behind.
 - Bundles: `untracked/branch-rejects/<branch-slug>-<tip12>.bundle`
-  (`branches.reject.bundle_dir`), ignored by git, never committed.
+  (`branches.reject.bundle_dir`), ignored by git, never committed. The directory is always
+  resolved against the repository's main checkout, never against the worktree the command
+  runs in: a linked worktree is removed when its work is done, and a bundle written inside
+  one would go with it. The guard refuses when it cannot resolve the main checkout.
 - This plan ships no command that deletes a bundle.
 - The builder must check how an append-only tracked file behaves when two branches each
   append a line and then merge, and choose the fix (a union merge attribute is the first
@@ -215,7 +221,8 @@ Slice 1 changes no delete behaviour:
    inventory computation; verdict validation (wrong tip, expired, consumed, inventory
    mismatch, unresolved citation, reviewer below Opus, downgraded reviewer, fork, resumed,
    reviewer is creator or toucher); bundle write and verify (missing file, failed verify,
-   tip absent from the bundle, sha256 mismatch); ledger append and the rate count.
+   tip absent from the bundle, sha256 mismatch, and a run from a linked worktree writing
+   into the main checkout); keep history across a rename; ledger append and the rate count.
 4. Red tests for the delete path, committed red as the security rules of this plan require:
    forged, reused, stale, wrong-tip and self-written verdicts, and a valid verdict with no
    verified bundle.
