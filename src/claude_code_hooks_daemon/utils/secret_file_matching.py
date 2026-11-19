@@ -3327,6 +3327,14 @@ def _token_mention(
                 realpath_cache[token] = reals
         return _link_mention(token, effective_cwds, patterns, project_root, reals)
     if expands_globs():
+        # Plan 00623 final review: a finite bracket glob (`zz/[l]ate`) is exactly its
+        # expansions, and bash reads each through any link on its path.
+        for raw_form in _normalised_token_forms(token):
+            for form in _expand_bracket_expressions(raw_form):
+                if form != raw_form and not _is_glob_shaped(form):
+                    found = _link_mention(form, effective_cwds, patterns, project_root)
+                    if found is not None:
+                        return found
         return _overflow_mention(token, effective_cwds, patterns)
     return None
 
