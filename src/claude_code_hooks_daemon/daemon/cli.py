@@ -995,10 +995,11 @@ def _start_under_launch_lock(
     daemon_config = config.daemon
 
     # Ensure paths are set (use getters if not set)
-    daemon_socket = daemon_config.socket_path or str(daemon_config.get_socket_path(project_path))
+    # Through the getters even when configured: they fit a configured path to
+    # the AF_UNIX limit as every other caller's is (Plan 00628).
+    daemon_socket = str(daemon_config.get_socket_path(project_path))
     daemon_config.socket_path = daemon_socket
-    if daemon_config.pid_file_path is None:
-        daemon_config.pid_file_path = str(daemon_config.get_pid_file_path(project_path))
+    daemon_config.pid_file_path = str(daemon_config.get_pid_file_path(project_path))
 
     # The socket discovery file tells bash hook forwarders (init.sh) where the
     # daemon listens when that differs from the default (the AF_UNIX length

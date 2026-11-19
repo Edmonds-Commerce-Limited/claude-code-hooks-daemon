@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from claude_code_hooks_daemon.daemon import paths as paths_module
 from claude_code_hooks_daemon.daemon.paths import (
     _HOSTNAME_FALLBACK,
     _UNIX_SOCKET_PATH_LIMIT,
@@ -960,7 +961,7 @@ class TestSocketPathLengthFallback(unittest.TestCase):
     def test_socket_path_over_limit_uses_tmp_fallback(self):
         """When neither XDG nor /run/user available, use this user's private /tmp subdir."""
         deep_path = "/home/user/projects/client/" + "a" * 80 + "/deep-nested-project"
-        private = Path(f"/tmp/hooks-daemon-{os.geteuid()}")
+        private = paths_module._SHARED_TMP / f"hooks-daemon-{os.geteuid()}"
 
         with patch.dict(os.environ, {"HOSTNAME": "h"}, clear=False):
             os.environ.pop("CLAUDE_HOOKS_SOCKET_PATH", None)

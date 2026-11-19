@@ -23,7 +23,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import DaemonConfig
 from claude_code_hooks_daemon.daemon.cli import cmd_start
+from claude_code_hooks_daemon.daemon.paths import _UNIX_SOCKET_PATH_LIMIT
 from claude_code_hooks_daemon.daemon.server import _SocketLiveness
 
 _HOST = "discovery-fixture"
@@ -34,7 +36,10 @@ def _discovery_file(project: Path) -> Path:
 
 
 def _run_daemon_child(
-    project: Path, run: Callable[[dict[str, Any]], None], monkeypatch: pytest.MonkeyPatch
+    project: Path,
+    run: Callable[[dict[str, Any]], None],
+    monkeypatch: pytest.MonkeyPatch,
+    daemon_config: DaemonConfig | None = None,
 ) -> int:
     """Run ``cmd_start``'s daemon-child branch; ``run`` stands in for the server's run.
 
@@ -49,8 +54,9 @@ def _run_daemon_child(
 
     mock_config = MagicMock()
     mock_config.model_dump.return_value = {}
-    mock_config.daemon.socket_path = str(sock_path)
-    mock_config.daemon.pid_file_path = str(project / "d.pid")
+    mock_config.daemon = daemon_config or DaemonConfig(
+        socket_path=str(sock_path), pid_file_path=str(project / "d.pid")
+    )
     built: dict[str, Any] = {}
 
     def _build_daemon(*_args: Any, **kwargs: Any) -> MagicMock:
@@ -150,3 +156,25 @@ def test_a_crash_after_binding_clears_the_file_it_published(
 
     assert _run_daemon_child(tmp_path, _binds_then_crashes, monkeypatch) == 1
     assert not _discovery_file(tmp_path).exists()
+
+
+def test_an_over_limit_configured_socket_is_fitted_before_the_daemon_binds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``daemon.socket_path`` / ``pid_file_path`` in the config go through the same fit."""
+    runtime_dir = tmp_path / "run"
+    runtime_dir.mkdir(mode=0o700)
+    runtime_dir.chmod(0o700)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime_dir))
+    over_limit = tmp_path / ("s" * _UNIX_SOCKET_PATH_LIMIT)
+    config = DaemonConfig(socket_path=f"{over_limit}.sock", pid_file_path=f"{over_limit}.pid")
+    bound: dict[str, str] = {}
+
+    def _binds(built: dict[str, Any]) -> None:
+        built["serving"]()
+        bound["socket"] = _discovery_file(tmp_path).read_text()
+
+    assert _run_daemon_child(tmp_path, _binds, monkeypatch, config) == 0
+    assert Path(bound["socket"]).parent == runtime_dir
+    assert config.socket_path == bound["socket"]
+    assert Path(str(config.pid_file_path)).parent == runtime_dir

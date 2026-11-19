@@ -2787,22 +2787,16 @@ start_daemon() {
     # only its parent meets, after the fork: the daemon keeps starting. Its
     # stdin is not the hook's, which carries the call to judge.
     #
-    # Only a socket or PID path the CALLER pinned is passed on (Plan 00628):
-    # the daemon decides its own paths (paths.fit_socket_path), and this hook
-    # follows the discovery file it publishes once bound. Forcing this hook's
-    # computation on it bound an over-limit path, so the start failed.
+    # A path over the AF_UNIX limit is fitted by the daemon
+    # (paths.fit_socket_path) to the same short fallback every other caller
+    # computes; the readiness poll below follows the discovery file it
+    # publishes once bound (Plan 00628).
     local launch_fd launch_output="" launch_done=false
-    local -a pinned_paths=()
-    if [[ -n "${CLAUDE_HOOKS_SOCKET_PATH:-}" ]]; then
-        pinned_paths+=("CLAUDE_HOOKS_SOCKET_PATH=$CLAUDE_HOOKS_SOCKET_PATH")
-    fi
-    if [[ -n "${CLAUDE_HOOKS_PID_PATH:-}" ]]; then
-        pinned_paths+=("CLAUDE_HOOKS_PID_PATH=$CLAUDE_HOOKS_PID_PATH")
-    fi
     exec {launch_fd}< <(export -fn _hooks_daemon_recovery_py
-        env ${pinned_paths[@]+"${pinned_paths[@]}"} \
+        CLAUDE_HOOKS_SOCKET_PATH="$SOCKET_PATH" \
+            CLAUDE_HOOKS_PID_PATH="$PID_PATH" \
             CLAUDE_HOOKS_DAEMON_CALLER_ROOT="$PROJECT_PATH" \
-            "$PYTHON_CMD" -m claude_code_hooks_daemon.daemon.cli \
+            $PYTHON_CMD -m claude_code_hooks_daemon.daemon.cli \
             --project-root "$physical_root" start < /dev/null 2>&1)
 
     # Wait for daemon to be ready (using deciseconds for integer arithmetic).

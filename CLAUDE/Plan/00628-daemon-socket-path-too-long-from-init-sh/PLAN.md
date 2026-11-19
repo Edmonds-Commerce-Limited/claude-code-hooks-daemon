@@ -32,9 +32,8 @@ says RUNNING on `/run/user/...`, the next hook's `SOCKET_PATH` is the long one.
 - One function decides the socket and PID path for every caller (default,
   env-forced, `--socket` flag, config), and never yields a socket path over the
   AF_UNIX limit.
-- `init.sh` stops forcing its computed paths on the daemon, and its readiness
-  poll follows the discovery file the daemon publishes, so the hook that starts
-  the daemon also reaches it.
+- `init.sh`'s readiness poll follows the discovery file the daemon publishes,
+  so the hook that starts the daemon also reaches it.
 - The discovery file is written only after a successful bind and removed only
   by the process that wrote it.
 - The short fallback directory keeps the protection the untracked directory
@@ -62,7 +61,7 @@ says RUNNING on `/run/user/...`, the next hook's `SOCKET_PATH` is the long one.
 - [x] ✅ **Task 2.1**: `paths.fit_socket_path` / `fit_pid_path`, used by `get_socket_path`, `get_pid_path`, the CLI flags, the config getters and `transport_verify.resolve_events_dir`
 - [x] ✅ **Task 2.2**: safe short-path root (`_is_private_dir`; `/tmp/hooks-daemon-<uid>` 0700 or `UnsafeRuntimeDirError`, reported by `cmd_start` before the fork)
 - [x] ✅ **Task 2.3**: discovery file published from the `serving` callback, cleaned only by its publisher
-- [x] ✅ **Task 2.4**: `init.sh` passes only caller-set paths and follows discovery in its poll
+- [x] ✅ **Task 2.4**: `init.sh` follows discovery in its readiness poll (its launcher still passes its computed paths; the daemon fits them)
 
 ### Phase 3: Release
 

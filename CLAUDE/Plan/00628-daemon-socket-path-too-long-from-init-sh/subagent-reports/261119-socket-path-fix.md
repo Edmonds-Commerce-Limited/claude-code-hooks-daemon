@@ -13,9 +13,10 @@ Reproduced in this worktree: see the journal finding entry; scripts `untracked/s
 
 - `paths.fit_socket_path(project, requested=None)` and `fit_pid_path` are the one decision. A requested path that fits 104 bytes is honoured verbatim; an over-limit one becomes the project's fallback, the same path a caller naming none computes. They are used by env overrides (`get_socket_path`/`get_pid_path`), CLI flags (`_resolve_socket_path`/`_resolve_pid_path`), config (`DaemonConfig.get_socket_path`/`get_pid_file_path`) and `transport_verify.resolve_events_dir`.
 - `init.sh`:
-  - Passes only caller-set socket/PID paths to the launcher.
+  - Still passes its computed paths to the launcher, unchanged, so in an ordinary install bash and Python never compute the socket independently. The daemon now fits an over-limit one.
   - `_hooks_daemon_follow_discovery` (the extracted discovery block) runs at source time and in every readiness-poll tick, so the starting hook reaches the daemon.
   - The PID-follows-socket rule is unchanged: follow only when the PID path itself is over 104.
+- The daemon child assigns `socket_path` and `pid_file_path` through the config getters unconditionally, so a configured over-limit path is fitted before the bind.
 - The discovery file is written from the `serving` callback (after bind) and cleaned only when this process wrote it.
 
 ## Security
@@ -33,13 +34,19 @@ Reproduced in this worktree: see the journal finding entry; scripts `untracked/s
   - `tests/unit/daemon/test_socket_path_fit.py`
   - `tests/unit/daemon/test_cli_start_discovery_after_bind.py`
   - `tests/integration/test_init_sh_long_project_path_reaches_its_daemon.py`
-- Each new test failed before the fix for the reported reason. The integration test hit "Daemon startup timeout".
+- RED before the fix:
+  - The fit file failed at import, since the new functions did not exist.
+  - Two of the four original discovery tests failed: the incumbent's file was deleted, and the file existed before the bind. The other two (no incumbent, and a crash after the bind) already passed and are kept as guards.
+  - The integration test failed with "Daemon startup timeout".
 - Updated existing tests (expectations that encoded the defect or the bare `/tmp`):
   - `tests/daemon/test_paths.py`: env override is now fitted; run_user and tmp rungs go through `_is_private_dir`; `TestPathGeneration` pins a private XDG dir.
   - `tests/unit/daemon/test_cli_start_reuse.py`: the owner test calls `serving`.
+- Host independence: the unit set was rerun with `paths._SHARED_TMP` pointed at a fresh empty directory (`untracked/scratch/00628/clean_tmp_plugin.py`). This container already holds `/tmp/hooks-daemon-0`, created by the first post-fix run; the sandbox denied removing it.
+- Also updated: `tests/unit/daemon/test_cli_cmd_start.py`. Configured paths now go through the getters, and a fitting one stays verbatim.
 - Targeted runs:
-  - 1172 unit tests (paths, cli start/reuse/discovery, event sockets, forwarder generator, transport probe, config) pass.
-  - 64 integration tests (init.sh discovery, boot race, live socket reuse, symlinked project, bash 3.2, hot path, relay guard, fallback events dir) pass, with 56 skipped by their own guards.
+  - 6460 unit tests pass: `tests/unit/daemon/`, `tests/daemon/test_paths.py`, `tests/unit/config`, `tests/unit/install` and the stale-checkouts test.
+  - 64 integration tests pass. They cover init.sh discovery, the boot race, live socket reuse, a symlinked project, bash 3.2 portability, the hot path, the relay guard and the fallback events dir.
+  - 56 integration tests are skipped, all in `test_relay_guard_fail_open.py`, because this machine has no built relay binary. The bash 3.2 tests ran.
 - ruff, black, mypy and shellcheck are clean on the touched files.
 
 ## Not fixed (niggle)
