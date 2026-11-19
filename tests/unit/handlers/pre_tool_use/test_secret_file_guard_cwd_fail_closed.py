@@ -32,7 +32,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as 
 from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
     SecretFileGuardHandler,
 )
-from claude_code_hooks_daemon.utils import path_exclusion, protected_file_index
+from claude_code_hooks_daemon.utils import link_index, path_exclusion, protected_file_index
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 
 # Assembled so this file never spells a protected name itself.
@@ -531,8 +531,10 @@ class TestAWideCdInAProjectWithNoLinkOut:
 
     The wide cd is judged as a computed move, and this tree is past the link
     scan's cap: what the scan never reached may hold a link, so a word read
-    after it is denied. The move to git's top level is placed exactly and
-    needs no scan, so it stays allowed.
+    after it is denied. The move to git's top level is placed at the ancestors
+    but still judged as computed: the command can move the top level in ways
+    the guard cannot read (Plan 00623 review F3), so past the cap it denies too
+    until the link index is built.
     """
 
     @pytest.fixture()
@@ -578,8 +580,33 @@ class TestAWideCdInAProjectWithNoLinkOut:
             'cd t/d00 && cd "$(git rev-parse --show-toplevel)" && grep -r x t/d01',
         ],
     )
-    def test_a_move_to_the_top_level_needs_no_scan(self, plain: Path, command: str) -> None:
-        assert self._decide(plain, command) is Decision.ALLOW
+    def test_a_move_to_the_top_level_past_the_scan_cap_denies(
+        self, plain: Path, command: str
+    ) -> None:
+        with patch.object(link_index, "link_scan_for", return_value=None):
+            assert self._decide(plain, command) is Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cd "$(git rev-parse --show-toplevel)" && ls t',
+            "cd $(git rev-parse --show-toplevel) && make test",
+            "cd `git rev-parse --show-toplevel` && ls",
+            'cd t/d00 && cd "$(git rev-parse --show-toplevel)" && grep -r x t/d01',
+        ],
+    )
+    def test_a_move_to_the_top_level_is_allowed_once_the_index_is_built(
+        self, plain: Path, command: str
+    ) -> None:
+        link_index.reset_link_indexes()
+        link_index.prewarm(str(plain))
+        link_index.wait_for_link_index(60.0)
+        # Listed long ago, so this freshly grown tree is not re-listed as racy (past the re-list cap).
+        link_index._indexes[str(plain)].age_for_tests(seconds=3600)
+        try:
+            assert self._decide(plain, command) is Decision.ALLOW
+        finally:
+            link_index.reset_link_indexes()
 
     def test_a_relocated_top_level_is_a_computed_move(self, plain: Path) -> None:
         command = 'GIT_WORK_TREE=t; cd "$(git rev-parse --show-toplevel)" && ls'

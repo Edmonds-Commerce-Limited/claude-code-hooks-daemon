@@ -217,7 +217,15 @@ Everything above was run again on the tree with F1 and F2 fixed, with the index 
 - **Cold counts:** a few rise, from the F1 tightening (p623 1,146 to 1,152; extra 108 to 110; flaggable 79 to 80; new probes 167 to 168).
 - **Fail-closed:** `failclosed.py` opens **0** denied probes under every forced stop, cold and built.
 
-**Targeted tests: 3,807 passed and 11 skipped, 0 failed.** The run covered every `test_secret_file_guard*` file, the flaggable and quarantine guard tests, `test_secret_file_matching*`, `test_recursive_search`, `test_link_index`, `test_bounded_walk`, `test_resolution_failure`, `test_payload_capture` and the hostile-input performance file.
+**Builder tests updated by F3 and F4.** These asserted the old fail-open behaviour:
+
+- `test_a_move_to_the_top_level_needs_no_scan` is now two tests: the idiom with a cold scan denies, and once the index is built it allows.
+- `TestPersistedWorktreeConfig`'s two cold ALLOW tests now assert `toplevel_relocated` directly.
+- `test_it_does_not_enter_git` is now `test_it_enters_git`.
+
+**A freshly built index is racy.** Every directory listed within 3 s of its ctime is listed again on each verify, so a fresh tree of more than 4,096 directories reads as stale (deny) for those 3 s.
+
+**Targeted tests: TARGETED_PLACEHOLDER.** On the F1/F2 tree the same set gave 3,807 passed, 11 skipped and 0 failed. The run covered every `test_secret_file_guard*` file, the flaggable and quarantine guard tests, `test_secret_file_matching*`, `test_recursive_search`, `test_link_index`, `test_bounded_walk`, `test_resolution_failure`, `test_payload_capture` and the hostile-input performance file.
 
 Ruff and black are clean on every changed file, and mypy is clean on the three changed modules. Pyright was not run.
 

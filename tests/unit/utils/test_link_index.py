@@ -59,12 +59,18 @@ class TestBuild:
         self, tree: Path
     ) -> None:
         holding, directory_links = _scan(_settled(build_link_index(str(tree))))
-        assert holding == {str(tree), str(tree / "a"), str(tree / "a" / "b")}
+        assert holding == {
+            str(tree),
+            str(tree / "a"),
+            str(tree / "a" / "b"),
+            str(tree / ".git" / "hooks"),
+        }
         assert directory_links == {str(tree / "a" / "dlink")}
 
-    def test_it_does_not_enter_git(self, tree: Path) -> None:
+    def test_it_enters_git(self, tree: Path) -> None:
+        """Plan 00623 review F4: bash can move into `.git`, so a link there is indexed."""
         holding, _ = _scan(_settled(build_link_index(str(tree))))
-        assert str(tree / ".git" / "hooks") not in holding
+        assert str(tree / ".git" / "hooks") in holding
 
     def test_a_tree_past_the_build_cap_is_overflowed_and_never_complete(
         self, tree: Path, monkeypatch: pytest.MonkeyPatch

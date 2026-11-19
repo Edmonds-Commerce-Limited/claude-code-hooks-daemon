@@ -403,8 +403,9 @@ class TestPersistedWorktreeConfig:
         subprocess.run(["git", "init", "-q", str(cold.root)], check=True)
         return cold
 
-    def test_without_it_the_idiom_is_placed_with_a_cold_index(self, repo: Project) -> None:
-        assert _decision(repo, f"{_TOPLEVEL} && make test") is Decision.ALLOW
+    def test_without_it_the_top_level_is_not_relocated(self, repo: Project) -> None:
+        """The predicate only: since review F3 a stopped scan denies the idiom anyway."""
+        assert not sfm.toplevel_relocated([str(repo.root)])
 
     @pytest.mark.parametrize("command", [f"{_TOPLEVEL} && cat r.md", f"{_TOPLEVEL} && grep -r x ."])
     def test_a_persisted_core_worktree_denies_with_a_cold_index(
@@ -421,7 +422,7 @@ class TestPersistedWorktreeConfig:
             ["git", "-C", str(repo.root), "config", "branch.main.route", "worktree_create"],
             check=True,
         )
-        assert _decision(repo, f"{_TOPLEVEL} && make test") is Decision.ALLOW
+        assert not sfm.toplevel_relocated([str(repo.root)])
 
     def test_a_git_work_tree_in_the_environment_denies(
         self, repo: Project, monkeypatch: pytest.MonkeyPatch
