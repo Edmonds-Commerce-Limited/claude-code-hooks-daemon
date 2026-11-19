@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 from typing import Final
 
+import pytest
+
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _UPGRADE_SH: Final[Path] = _REPO_ROOT / "scripts" / "upgrade.sh"
 _PROVISION_SH: Final[Path] = _REPO_ROOT / "provision.sh"
@@ -475,3 +477,23 @@ echo "rc=$rc"
         assert "rc=1" in result.stdout, result.stdout + result.stderr
         assert "fresh-holder" in lock.read_text(encoding="utf-8")
         assert not (tmp_path / "x.lock.takeover").exists()
+
+
+class TestWaitSecondsAreDecimal:
+    """Adversarial review: --lock-wait accepts any run of digits, and bash
+    arithmetic reads a leading zero as octal, so "08" crashed the acquire."""
+
+    @pytest.mark.parametrize("wait", ["08", "010", "0"])
+    def test_a_leading_zero_wait_is_read_as_decimal(self, tmp_path: Path, wait: str) -> None:
+        lock = tmp_path / "x.lock"
+        body = (
+            f'LOCK="{lock}"\n'
+            f'rc=0; _upgrade_lock_acquire "$LOCK" "upgrade" {wait} || rc=$?; echo "rc=$rc"\n'
+            '_upgrade_lock_release\necho "released"\n'
+        )
+
+        result = _bash(body)
+
+        assert result.returncode == 0, result.stderr
+        assert "rc=0" in result.stdout, result.stdout + result.stderr
+        assert "value too great for base" not in result.stderr

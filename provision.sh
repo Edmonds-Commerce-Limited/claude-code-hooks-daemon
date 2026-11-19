@@ -1189,6 +1189,8 @@ _upgrade_lock_try() {
 # $_UPGRADE_LOCK_HOLDER); 2 error (the reason is in $_UPGRADE_LOCK_HOLDER).
 _upgrade_lock_acquire() {
     local _lock="$1" _purpose="$2" _wait="${3:-0}" _deadline _rc _vanished=0
+    # 10#: a leading zero ("08") is decimal seconds, not an invalid octal number.
+    _wait=$((10#$_wait))
     _deadline=$(($(date +%s) + _wait))
     while :; do
         _rc=0

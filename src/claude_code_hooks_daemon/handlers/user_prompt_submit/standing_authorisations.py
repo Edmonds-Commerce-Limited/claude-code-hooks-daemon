@@ -337,19 +337,22 @@ class _EntryState(StrEnum):
 def _entry_state(authorisations: Sequence[Any] | None, entry_id: str) -> _EntryState:
     """Resolve one id against the project's ``authorisations`` list.
 
-    An explicit ``enabled: false`` always wins (the opt-out). ``enabled: true``
-    is a recorded request. Anything else (no entry, or a non-boolean value)
-    leaves the id's shipped default: on for ``_DEFAULT_ON_IDS``, off otherwise.
+    An entry that names the id is a recorded request only when every such
+    entry says exactly ``enabled: true``; any other value (``false``, a quoted
+    ``"false"``, ``0``, a missing key) is OFF, because a project that lists the
+    id was saying something about it and an opt-out must never fail open. With
+    no entry the id keeps its shipped default: on for ``_DEFAULT_ON_IDS``, off
+    otherwise.
     """
     values = [
         entry.get(_KEY_ENABLED)
         for entry in (authorisations or [])
         if isinstance(entry, dict) and str(entry.get(_KEY_ID)) == entry_id
     ]
-    if any(value is False for value in values):
+    if values:
+        if all(value is True for value in values):
+            return _EntryState.RECORDED
         return _EntryState.OFF
-    if any(value is True for value in values):
-        return _EntryState.RECORDED
     if entry_id in _DEFAULT_ON_IDS:
         return _EntryState.SHIPPED_DEFAULT
     return _EntryState.OFF
@@ -359,18 +362,24 @@ def auto_upgrade_authorised(handler_config: Mapping[str, Any] | None) -> bool:
     """Whether a project's config leaves automatic daemon upgrades authorised.
 
     ``handler_config`` is the ``handlers.user_prompt_submit.standing_authorisations``
-    block (None when absent). A disabled handler authorises nothing; otherwise
-    only an explicit ``enabled: false`` on the ``daemon-auto-upgrade`` entry
-    turns the shipped default off.
+    block (None when absent). It fails closed: a handler ``enabled`` that is
+    present and not exactly ``true``, an ``options`` or ``authorisations``
+    value of the wrong shape, or an entry naming ``daemon-auto-upgrade`` with
+    anything but ``enabled: true`` all mean NOT authorised, because an opt-out
+    may be written there in a form this reader does not understand.
     """
     if handler_config is None:
         return True
-    if handler_config.get(_KEY_ENABLED) is False:
+    if _KEY_ENABLED in handler_config and handler_config.get(_KEY_ENABLED) is not True:
         return False
     options = handler_config.get(_KEY_OPTIONS)
-    authorisations = options.get(_KEY_AUTHORISATIONS) if isinstance(options, Mapping) else None
-    if not isinstance(authorisations, list):
-        authorisations = None
+    if options is None:
+        return True
+    if not isinstance(options, Mapping):
+        return False
+    authorisations = options.get(_KEY_AUTHORISATIONS)
+    if authorisations is not None and not isinstance(authorisations, list):
+        return False
     return (
         _entry_state(authorisations, AUTHORISATION_DAEMON_AUTO_UPGRADE) is not _EntryState.OFF
     )

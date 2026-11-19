@@ -214,9 +214,17 @@ class TestDaemonAutoUpgrade:
         handler = self._handler([{"id": AUTHORISATION_DAEMON_AUTO_UPGRADE, "enabled": False}])
         assert self._text(handler) == ""
 
-    def test_non_boolean_enabled_leaves_the_default(self) -> None:
-        handler = self._handler([{"id": AUTHORISATION_DAEMON_AUTO_UPGRADE, "enabled": "no"}])
-        assert "shipped default" in self._text(handler)
+    @pytest.mark.parametrize("value", ["no", "false", "False", 0, None, "off"])
+    def test_listed_entry_not_exactly_true_turns_it_off(self, value: Any) -> None:
+        # A project that LISTS the default-on id with anything but `true` was
+        # trying to say something about it; an opt-out spelled "false" (quoted)
+        # must not leave automatic upgrades on. Fail closed.
+        handler = self._handler([{"id": AUTHORISATION_DAEMON_AUTO_UPGRADE, "enabled": value}])
+        assert self._text(handler) == ""
+
+    def test_listed_entry_without_enabled_turns_it_off(self) -> None:
+        handler = self._handler([{"id": AUTHORISATION_DAEMON_AUTO_UPGRADE}])
+        assert self._text(handler) == ""
 
     def test_other_entries_do_not_switch_it_off(self) -> None:
         handler = self._handler([{"id": AUTHORISATION_WORKFLOWS, "enabled": True}])
@@ -270,9 +278,24 @@ class TestAutoUpgradeAuthorised:
         config = {"options": {"authorisations": [{"id": "daemon-auto-upgrade", "enabled": True}]}}
         assert auto_upgrade_authorised(config) is True
 
-    def test_malformed_authorisations_leave_the_default(self) -> None:
-        assert auto_upgrade_authorised({"options": {"authorisations": "nope"}}) is True
-        assert auto_upgrade_authorised({"options": "nope"}) is True
+    @pytest.mark.parametrize("value", ["false", "False", 0, "no", None])
+    def test_listed_entry_not_exactly_true_is_not_authorised(self, value: Any) -> None:
+        config = {"options": {"authorisations": [{"id": "daemon-auto-upgrade", "enabled": value}]}}
+        assert auto_upgrade_authorised(config) is False
+
+    def test_handler_enabled_not_exactly_true_or_absent_is_not_authorised(self) -> None:
+        assert auto_upgrade_authorised({"enabled": "false"}) is False
+        assert auto_upgrade_authorised({"enabled": 0}) is False
+
+    def test_malformed_authorisations_are_not_authorised(self) -> None:
+        # The opt-out may be written in a shape this reader does not parse
+        # (e.g. a mapping instead of a list); that cannot be ruled out.
+        assert auto_upgrade_authorised({"options": {"authorisations": "nope"}}) is False
+        assert (
+            auto_upgrade_authorised({"options": {"authorisations": {"daemon-auto-upgrade": False}}})
+            is False
+        )
+        assert auto_upgrade_authorised({"options": "nope"}) is False
 
 
 class TestMatches:
