@@ -7955,3 +7955,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: a plain `printf` piped to `pingbus say` was denied because the message TEXT, a quoted argument, held the words for stopping a systemd unit. This repository has no handler named for Ansible enforcement (a search of `src/` finds only mentions), so the guard is most likely a project-level handler in that seat's own repository, not a shipped one. Unverified from here.
 
 **Status**: ⬜ Open, low priority; needs the reporting seat to name the handler. If it is a shipped handler, it must judge only command words, never the contents of a quoted argument to another program. If it is a project handler, the shared command-word parsing helpers already exist for the same purpose and it should use them.
+
+### N673 — playbook probe #125 (rsync from a worktree) fails whenever the acceptance harness runs inside a worktree
+
+**Source**: Plan 00623 acceptance-harness diagnosis (`tests/acceptance/test_playbook_harness.py`).
+
+**Evidence**: the probe's event `cwd` is `$MAIN_CHECKOUT_DIR` (the main checkout), but a worktree's daemon has the WORKTREE as its project root. The rsync target `src/` then resolves to the main checkout's `src`, outside that root, so `project_containment` (priority 14) denies with R-WRITE-OUTSIDE-PROJECT-ROOT before `worktree_file_copy` (priority 15) gives the expected reason. Main's own code makes the same call: run in-process with the worktree as project root, main's `project_containment` matches the #125 event exactly as the branch's does. It passes only from the main checkout, where the cwd and the root are the same directory. #124 (`cp` to a file under `src/`) is not matched by containment in either tree.
+
+**Status**: ⬜ Open, low priority. The fix belongs to the harness or the probe, not to either handler: give the probe a cwd that is the daemon's project root, or have the harness skip or report this probe when it runs in a worktree.

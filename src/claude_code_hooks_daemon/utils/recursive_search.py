@@ -950,8 +950,51 @@ def _reads_files(words: list[str], head: str) -> bool:
         head in (_FIND, _XARGS, _EVAL)
         or (head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1])
         or _directory_reader_roots(words) is not None
-        or _is_search(words)
+        or (_is_search(words) and not _git_reads_no_tree(words))
     )
+
+
+# Subcommands that read the index and lstat the work tree, never through a link,
+# and print no file content unless asked for a diff (Plan 00623 probes #350/#351).
+_GIT_TREELESS_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"commit", "status"})
+# Global options that change only how git prints.
+_GIT_PRINT_ONLY_OPTIONS: Final[frozenset[str]] = frozenset({"--no-pager", "-P"})
+# Long options that make commit/status print a diff or run an interactive patch
+# (git accepts any unambiguous prefix of each).
+_GIT_DIFF_PRINTING_LONG: Final[tuple[str, ...]] = ("verbose", "patch", "interactive")
+_GIT_DIFF_PRINTING_SHORT: Final[frozenset[str]] = frozenset({"v", "p"})
+
+
+def _git_reads_no_tree(words: list[str]) -> bool:
+    """Is ``words`` a ``git commit``/``git status`` that recurses into no tree and prints no file?
+
+    ``git`` is otherwise a possible reader after a computed move, so every
+    directory link is judged as a root of it. Only a literal subcommand, read
+    after print-only global options, is trusted: an expansion, ``-c`` or
+    ``--config-env`` (an alias or a moved work tree) and any other global option
+    keep it a reader. A diff-printing option (``-v``, ``-p``, ``--verbose``,
+    ``--patch``, ``--interactive``, or a prefix) keeps it a reader too: the diff
+    of a foreign repository the move may land in prints file content. A file
+    operand (``-F``, a pathspec) is a word the mention scan resolves through
+    every link from every effective cwd, which this does not change.
+    """
+    if posixpath.basename(words[0]) != TOOL_GIT:
+        return False
+    position = 1
+    while position < len(words) and words[position] in _GIT_PRINT_ONLY_OPTIONS:
+        position += 1
+    if position >= len(words) or words[position] not in _GIT_TREELESS_SUBCOMMANDS:
+        return False
+    for word in words[position + 1 :]:
+        if word == _END_OF_OPTIONS:
+            break
+        if word.startswith("--"):
+            name = word[2:].partition("=")[0]
+            if name and any(full.startswith(name) for full in _GIT_DIFF_PRINTING_LONG):
+                return False
+        elif word.startswith("-") and _GIT_DIFF_PRINTING_SHORT & set(word[1:]):
+            return False
+    return True
 
 
 def _assigns_a_relocating_variable(segment: str, words: list[str]) -> bool:
