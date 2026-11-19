@@ -1,5 +1,9 @@
 # Plan 00624 Phase 2 design: park without a branch commit
 
+> **NOT ADOPTED. Kept as a record only.** This was a coordinator's suggestion, not an
+> owner request. The owner wants no drift into new features, so it was never built and
+> is closed as not needed.
+
 Owner's design 1. Phase 1 (`subagent-reports/repro-findings.md`) shows #210 and #211
 already fixed on main; this phase removes the cause: the marker on the branch.
 

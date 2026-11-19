@@ -8,8 +8,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00624: branch park marker unsigned and reads unmerged](00624-branch-park-marker-unsigned-and-reads-unmerged/PLAN.md) - In Progress (issues #210, #211: confirm what main already fixes, then park without adding a commit to the branch via a signed `refs/parked/<name>` marker; old on-branch parks stay readable)
-
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - Not Started (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
 
 - [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - Not Started (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; draft, no code until the owner approves the design)
@@ -206,6 +204,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00624: branch park marker unsigned and reads unmerged](Completed/00624-branch-park-marker-unsigned-and-reads-unmerged/PLAN.md) - Complete at the archiving commit (GitHub #210 and #211, closed: both already fixed in v3.75.0, #210 by `d2e73d0e9` and #211 by Plans 00594 and 00622, confirmed by Phase 1 repro; the ref-based park design is not adopted and not built, kept as a record; docs only, no release note)
+
 - [00622: remote delete proof ignores empty and park marker commits](Completed/00622-remote-delete-proof-ignores-empty-and-park-marker-commits/PLAN.md) - Complete at merge `eba1de61f` + the archiving commit (empty commits over merged work no longer block a branch delete; reviews rounds 1 and 2 fixed, round 3 ledgered N665, N666; release note 002)
 
 - [00619: branch pool graduated warnings](Completed/00619-branch-pool-graduated-warnings/PLAN.md) - Complete at merge `1dc7ca3e0` + the archiving commit (each branch pool warns at 60, 80 and 90 percent of the point where creation is refused; the 90 percent warning shows on every tool call and prompt until usage drops; session start and the stop report share the ladder; the block and every guard decision are unchanged; release note 001)
@@ -264,8 +264,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00577: forwarder stubs shellcheck clean](Completed/00577-forwarder-stubs-shellcheck-clean/PLAN.md) - Complete at `43250b5fb` (CI run 42627973690 success) + the archiving commit (GitHub #163, closed: generated hook stubs export the relay-unused marker the sourced init.sh reads, so `shellcheck --severity=warning` is clean with no suppression; a test shellchecks the stub generated for every event; release note 015)
 
-- [00576: hotfix release fast path](Completed/00576-hotfix-release-fast-path/PLAN.md) - Complete at merge `8bfcad71f` (PR #190) + the archiving commit (owner request after v3.73.1: `/release hotfix` runs the RELEASING.md "Hotfix fast path" and the state file and `release_blocker` name the mode; advise-severity plan/docs QA findings never fail CI; a test pins the release gate's cancel-in-progress concurrency, which the journal shows did cancel the superseded v3.73.1 run; release note 013)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -319,9 +317,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 623 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 624 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 519 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 520 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
 - **Active**: 80 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
