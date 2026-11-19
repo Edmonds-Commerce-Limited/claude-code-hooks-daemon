@@ -8,6 +8,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - Not Started (owner request: a full scratch management system; every scratch entry has a 24-hour TTL and past it is filed, packed into a verified archive and removed after a hold, or kept only on a machine proof of unpushed or human work; a `scratch-sweep` command, a SessionStart report, caps that act before the link index overflows, a per-session scratch directory; design written, rulings by a delegated sub-agent, no code yet; takes over Plan 00560's sweep)
+
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - Not Started (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
 
 - [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - Not Started (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; open questions ruled under the owner's delegation in RULINGS.md: the verdict never unlocks alone, the guard must also verify a recovery bundle; local delete only; slice 1 ready to build)

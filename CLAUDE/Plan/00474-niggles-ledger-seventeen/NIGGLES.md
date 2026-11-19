@@ -7897,6 +7897,14 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open, low priority; needs the reporting seat to name the handler. If it is a shipped handler, it must judge only command words, never the contents of a quoted argument to another program. If it is a project handler, the shared command-word parsing helpers already exist for the same purpose and it should use them.
 
+### N673 — existing code and plans contradict the scratch TTL design (fourteen places)
+
+**Source**: Plan 00627 design pass, by a sub-agent under the owner's delegation.
+
+**Evidence**: the full table, with file and line for each, is `CLAUDE/Plan/00627-scratch-management-ttl-and-filing/DESIGN.md` section 15 (X1 to X14). The ones that can lose work or keep the sprawl going: `utils/stale_litter.py:193` prints `find ... -type f -mmin +N -delete`, removal on age alone that leaves every directory behind; that report rides `idle_housekeeping_advisory`, which is off by default; `project_containment` still calls scratch the place for durable work; `NEVER_REGENERABLE` makes a worktree with scratch content refuse removal with no sanctioned way to empty it; `DEFAULT_HANDOFF_GLOBS` accepts scratch as a handoff home; each agent worktree's own `untracked/scratch/` is read by nothing; the link index on the Plan 00623 branch fails whole at its cap with no warning below it. The Plan 00623 branch also uses the number N673 (for the playbook probe #125 niggle); that branch renumbers its own entries when it merges.
+
+**Status**: ⬜ Open; each row is closed by the Plan 00627 task named beside it (Task 8.4 closes this entry).
+
 ### N674 — a stale `refs/remotes/<remote>/HEAD` after a remote default rename misleads the remote-delete proof's default detection
 
 **Source**: Plan 00626 close-out (follow-up of its `auto` default detection, which reads only `refs/remotes/<remote>/HEAD`).
