@@ -352,6 +352,7 @@ leading zero as octal. As a result, `08` and `09` died with
   - The standing-authorisations, auto_upgrade and version_check auto-upgrade
     tests: 119 passed after F3.
   - `test_upgrade_lock.py`: 31 passed after F4 and F5.
-  - `test_provision_sh.py`, `test_upgrade_sh_unattended.py` and the
-    standing-authorisations tests together, on the final code: see the commit
-    message.
+  - `test_provision_sh.py` with `test_upgrade_lock.py`: no failure among the
+    117 tests that completed before the 590 s cap stopped the run. The suite was
+    NOT finished, so the coordinator should run `test_provision_sh.py` and
+    `test_upgrade_sh_unattended.py` in full.
