@@ -769,8 +769,11 @@ def _save_cache(path: Path, cache: _Cache, live_tips: set[str]) -> None:
 #: base and up to its tip, holds the branch's net change. v4: a tip whose every commit
 #: beyond the default is empty (one parent, its tree) is proven (Plan 00622). v5: that
 #: emptiness is read from the stored commit objects only, never through a replace ref,
-#: a graft or a commit-graph, so a v4 entry may record a forged object's answer.
-PROOF_ALGORITHM_VERSION: Final[str] = "v5"
+#: a graft or a commit-graph, so a v4 entry may record a forged object's answer. v6:
+#: patch equivalence with every changed path held at its exact blob by some commit
+#: proves (a v5 ``unproven`` would keep refusing it), and the only target is the
+#: remote-tracking default (Plan 00626).
+PROOF_ALGORITHM_VERSION: Final[str] = "v6"
 
 
 def merge_proof_key(tip: str, target_shas: Iterable[str]) -> str:

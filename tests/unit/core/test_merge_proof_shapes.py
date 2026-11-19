@@ -234,14 +234,14 @@ class TestCaching:
             for key, value in document["proofs"].items()
         )
 
-    def test_a_cached_proof_runs_no_walk_the_second_time(self, repo: Path) -> None:
+    def test_a_cached_positive_is_proven_again_never_trusted(self, repo: Path) -> None:
+        # The cache is a plain file anyone can write; a remote delete never rests on
+        # it, so a positive is re-proven (Plan 00626). A negative can only refuse.
         _topic(repo, "feat", ["a.txt", "b.txt"])
         _land_squash(repo, "feat")
         _prove(repo, ["feat"])
         subcommands = _git_subcommands_during(lambda: _prove(repo, ["feat"]))
-        assert "cherry" not in subcommands
-        assert "rev-list" not in subcommands
-        assert "ls-tree" not in subcommands
+        assert "diff" in subcommands  # the net change is read again
 
     def test_a_negative_result_is_cached_too(self, repo: Path) -> None:
         _topic(repo, "feat", ["a.txt", "b.txt"])
@@ -277,7 +277,9 @@ class TestGuardPathCost:
         cold = len(_git_subcommands_during(lambda: _prove(repo, names)))
         warm = len(_git_subcommands_during(lambda: _prove(repo, names)))
 
-        assert warm <= one  # a warm cache: the listings only, whatever the count
+        # Positives are never read from the cache (Plan 00626), so a warm run re-proves
+        # them: it costs no more than a cold one, and both stay bounded per branch.
+        assert warm <= cold
         assert cold <= one + _CALLS_PER_BRANCH * (len(names) - 1)
 
     def test_a_branch_over_the_path_ceiling_is_unproven_without_walking_main(
@@ -325,14 +327,34 @@ class TestCreationReadsTheProof:
         _land_squash(repo, "feat")
         prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
         tip = _git(repo, "rev-parse", "refs/heads/feat").strip()
-        main = _git(repo, "rev-parse", "refs/heads/main").strip()
+        main = _git(repo, "rev-parse", "refs/remotes/origin/main").strip()
         refs = [
-            _Ref("main", main, 0.0, True, "refs/heads/main"),
+            _Ref("main", main, 0.0, False, "refs/remotes/origin/main"),
             _Ref("feat", tip, 0.0, True, "refs/heads/feat"),
             _Ref("release/1", tip, 0.0, True, "refs/heads/release/1"),
         ]
-        proven = _proven_refnames(repo, config, refs, ["refs/heads/main"], set())
+        proven = _proven_refnames(repo, config, refs, ["refs/remotes/origin/main"], set())
         assert proven == {"refs/heads/feat"}
+
+    def test_a_proof_is_read_by_the_remote_default_sha_not_an_unpushed_local_one(
+        self, repo: Path
+    ) -> None:
+        # Plan 00626: the writer keys by the remote default alone, so a local default
+        # that is ahead (unpushed) must not stop the count from reading the proof.
+        _topic(repo, "feat", ["a.txt", "b.txt"])
+        _land_squash(repo, "feat")
+        prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
+        _commit(repo, "unpushed.txt")
+        tip = _git(repo, "rev-parse", "refs/heads/feat").strip()
+        local = _git(repo, "rev-parse", "refs/heads/main").strip()
+        remote = _git(repo, "rev-parse", "refs/remotes/origin/main").strip()
+        refs = [
+            _Ref("main", local, 0.0, True, "refs/heads/main"),
+            _Ref("main", remote, 0.0, False, "refs/remotes/origin/main"),
+            _Ref("feat", tip, 0.0, True, "refs/heads/feat"),
+        ]
+        targets = ["refs/remotes/origin/main", "refs/heads/main"]
+        assert _proven_refnames(repo, _CONFIG, refs, targets, set()) == {"refs/heads/feat"}
 
 
 def _on_branch(repo: Path, name: str) -> None:
