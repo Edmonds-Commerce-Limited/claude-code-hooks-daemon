@@ -38,15 +38,50 @@ from claude_code_hooks_daemon.utils import (
     recursive_search,
 )
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.resolution_failure import (
+    IncompleteScanError,
+    ResolutionFailedError,
+)
 
 _PROTECTED = "id_" + "rsa"
 
 NOT_READERS = [
     "cd - && git commit -m acceptance -- no-such-acceptance-path",
-    "git commit --dry-run && cd - && git commit --dry-run",
     "cd - && git status",
     "cd - && git commit -am 'a message'",
+    "cd - && git commit -a -q --message=done",
     "cd - && git --no-pager status --short",
+    "cd - && git status --porcelain=v2 -z -b",
+]
+
+# Review 3 (Plan 00623): each of these printed the dummy in real bash once the
+# literal-option check allowed it. An option word the guard cannot read
+# literally may expand to `-v`; a config git reads from the environment, the
+# landing repository or the home directory can make a dry run or an editor
+# print the diff, so a commit is trusted only with a literal message and no
+# dry-run, editor or verbose option, and only with no git-steering variable.
+HIDDEN_DIFF_OPTIONS = [
+    "V=-vv; cd - && git status $V",
+    "cd - && git status ${V:--vv}",
+    "cd - && git status $'-vv'",
+    "cd - && git status $'\\x2dvv'",
+    "cd - && git status {-v,-v}",
+    "cd - && git commit --dry-run -a $'-v'",
+    "cd - && git commit -m x $V",
+    "cd - && git commit -m $V",
+    "cd - && git commit --dry-run -a",
+    "git commit --dry-run && cd - && git commit --dry-run",
+    "cd - && git commit -a --long",
+    "cd - && git commit -a",
+    "cd - && git commit -a -m x -e",
+    "cd - && git commit -a -m x --edi",
+    "cd - && GIT_EDITOR=cat git commit -a -m x",
+    "cd - && GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.verbose GIT_CONFIG_VALUE_0=true"
+    " git commit --dry-run -a",
+    "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.verbose GIT_CONFIG_VALUE_0=true;"
+    " cd - && git commit -a -m x",
+    "cd - && GIT_CONFIG_PARAMETERS=\"'commit.verbose'='true'\" GIT_EDITOR=cat git commit -a",
+    "export HOME=/elsewhere; cd - && git status",
 ]
 
 READERS = [
@@ -144,6 +179,23 @@ def test_a_possible_reader_after_a_computed_cd_is_still_denied(
 ) -> None:
     _built(project)
     assert _decision(project, command) is Decision.DENY
+
+
+@pytest.mark.parametrize("command", HIDDEN_DIFF_OPTIONS)
+def test_a_git_command_that_may_print_a_diff_is_denied_after_a_computed_cd(
+    project: Project, command: str
+) -> None:
+    _built(project)
+    assert _decision(project, command) is Decision.DENY
+
+
+@pytest.mark.parametrize("command", HIDDEN_DIFF_OPTIONS)
+def test_a_git_command_that_may_print_a_diff_is_a_reader_while_the_scan_is_unfinished(
+    unscanned: Project, command: str
+) -> None:
+    # The search walk itself fails closed on it, not only the word scan.
+    with pytest.raises((IncompleteScanError, ResolutionFailedError)):
+        recursive_search.search_reads(command, str(unscanned.root))
 
 
 @pytest.mark.parametrize("command", READERS)

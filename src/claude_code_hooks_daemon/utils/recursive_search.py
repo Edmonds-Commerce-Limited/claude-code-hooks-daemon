@@ -78,6 +78,12 @@ from claude_code_hooks_daemon.utils.shell_snapshot import default_glob_semantics
 _rg_config_named: Final[contextvars.ContextVar[bool]] = contextvars.ContextVar(
     "rg_config_named", default=False
 )
+# Whether the command being read names a variable that steers git (its config, its
+# editor, its home): set by :func:`search_reads`. Unset, git is assumed steered.
+_git_environment_named: Final[contextvars.ContextVar[bool]] = contextvars.ContextVar(
+    "git_environment_named", default=True
+)
+_GIT_STEERING_VARIABLE: Final[re.Pattern[str]] = re.compile(r"GIT_|HOME|EDITOR|VISUAL")
 
 TOOL_GREP: Final[str] = "grep"
 TOOL_RG: Final[str] = "rg"
@@ -516,12 +522,14 @@ def search_reads(command: str, cwd: str | None) -> list[Read]:
     """
     bases = (cwd,) if cwd is not None and posixpath.isabs(cwd) else ()
     reset = _rg_config_named.set(RG_CONFIG_ENV in command)
+    git_reset = _git_environment_named.set(_GIT_STEERING_VARIABLE.search(command) is not None)
     tracker = _SearchCwds(cwd, cdpath=CDPATH_VARIABLE in command, command=command)
     try:
         # One link scan for the command's many computed moves, even outside a guard's scope.
         with link_scan_scope():
             reads = list(dict.fromkeys(_reads(command, bases, 0, tracker)))
     finally:
+        _git_environment_named.reset(git_reset)
         _rg_config_named.reset(reset)
     if not any(read.glob for read in reads):
         return reads
@@ -954,47 +962,164 @@ def _reads_files(words: list[str], head: str) -> bool:
     )
 
 
-# Subcommands that read the index and lstat the work tree, never through a link,
-# and print no file content unless asked for a diff (Plan 00623 probes #350/#351).
-_GIT_TREELESS_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"commit", "status"})
+@dataclass(frozen=True)
+class _GitOptionGrammar:
+    """The options of one subcommand trusted to print no file content.
+
+    An allowlist, not a denylist of diff options: an option this does not
+    name, an abbreviation included, keeps the command a reader.
+    """
+
+    flags: frozenset[str]
+    long_flags: frozenset[str]
+    long_valued: frozenset[str] = frozenset()
+    short_valued: frozenset[str] = frozenset()
+    # A short option whose value is the rest of its word only (`-uno`).
+    short_attached: frozenset[str] = frozenset()
+    message_options: frozenset[str] = frozenset()
+
+
+# Subcommands that read the index and lstat the work tree, never through a link
+# (Plan 00623 probes #350/#351). A commit is trusted only with a message
+# given, so no editor shows its template, and with no dry run, which under
+# `commit.verbose` from any config git reads prints the diff (review 3).
+_GIT_TREELESS_GRAMMARS: Final[dict[str, _GitOptionGrammar]] = {
+    "status": _GitOptionGrammar(
+        flags=frozenset("sbz"),
+        short_attached=frozenset("u"),
+        long_flags=frozenset(
+            {
+                "short",
+                "branch",
+                "porcelain",
+                "long",
+                "null",
+                "show-stash",
+                "ahead-behind",
+                "no-ahead-behind",
+                "untracked-files",
+                "ignored",
+                "ignore-submodules",
+                "column",
+                "no-column",
+                "renames",
+                "no-renames",
+                "find-renames",
+            }
+        ),
+    ),
+    "commit": _GitOptionGrammar(
+        flags=frozenset("aqsn"),
+        short_valued=frozenset("mF"),
+        long_flags=frozenset(
+            {
+                "all",
+                "quiet",
+                "signoff",
+                "no-signoff",
+                "no-verify",
+                "verify",
+                "allow-empty",
+                "allow-empty-message",
+                "amend",
+                "no-edit",
+                "include",
+                "only",
+                "reset-author",
+                "no-gpg-sign",
+            }
+        ),
+        long_valued=frozenset({"message", "file", "author", "date", "cleanup"}),
+        message_options=frozenset({"m", "F", "message", "file"}),
+    ),
+}
 # Global options that change only how git prints.
 _GIT_PRINT_ONLY_OPTIONS: Final[frozenset[str]] = frozenset({"--no-pager", "-P"})
-# Long options that make commit/status print a diff or run an interactive patch
-# (git accepts any unambiguous prefix of each).
-_GIT_DIFF_PRINTING_LONG: Final[tuple[str, ...]] = ("verbose", "patch", "interactive")
-_GIT_DIFF_PRINTING_SHORT: Final[frozenset[str]] = frozenset({"v", "p"})
+# Characters through which bash may turn a word into another (`$V`, `$'-v'`,
+# `{-v,-v}`, a glob): a word holding one may become a diff option.
+_GIT_NON_LITERAL: Final[re.Pattern[str]] = re.compile(r"[$`*?\[\]{}\\~()!]")
 
 
 def _git_reads_no_tree(words: list[str]) -> bool:
     """Is ``words`` a ``git commit``/``git status`` that recurses into no tree and prints no file?
 
     ``git`` is otherwise a possible reader after a computed move, so every
-    directory link is judged as a root of it. Only a literal subcommand, read
-    after print-only global options, is trusted: an expansion, ``-c`` or
-    ``--config-env`` (an alias or a moved work tree) and any other global option
-    keep it a reader. A diff-printing option (``-v``, ``-p``, ``--verbose``,
-    ``--patch``, ``--interactive``, or a prefix) keeps it a reader too: the diff
-    of a foreign repository the move may land in prints file content. A file
-    operand (``-F``, a pathspec) is a word the mention scan resolves through
-    every link from every effective cwd, which this does not change.
+    directory link is judged as a root of it. Only a literal subcommand, after
+    print-only global options, with every option in its allowlist and every
+    word literal, is trusted; and only in a command naming no variable that
+    steers git (``GIT_*``, ``HOME``, an editor). A file operand (``-F``, a
+    pathspec) is a word the mention scan resolves through every link from
+    every effective cwd, which this does not change.
     """
-    if posixpath.basename(words[0]) != TOOL_GIT:
+    if _git_environment_named.get() or posixpath.basename(words[0]) != TOOL_GIT:
         return False
     position = 1
     while position < len(words) and words[position] in _GIT_PRINT_ONLY_OPTIONS:
         position += 1
-    if position >= len(words) or words[position] not in _GIT_TREELESS_SUBCOMMANDS:
+    if position >= len(words):
         return False
-    for word in words[position + 1 :]:
+    grammar = _GIT_TREELESS_GRAMMARS.get(words[position])
+    if grammar is None:
+        return False
+    named = _git_options_named(words[position + 1 :], grammar)
+    if named is None:
+        return False
+    return not grammar.message_options or bool(named & grammar.message_options)
+
+
+def _git_options_named(arguments: list[str], grammar: _GitOptionGrammar) -> set[str] | None:
+    """The options ``arguments`` name, or ``None`` when one is outside ``grammar`` or not literal."""
+    named: set[str] = set()
+    expects_value = False
+    for word in arguments:
+        if _GIT_NON_LITERAL.search(word):
+            return None
+        if expects_value:
+            expects_value = False
+            continue
         if word == _END_OF_OPTIONS:
             break
         if word.startswith("--"):
-            name = word[2:].partition("=")[0]
-            if name and any(full.startswith(name) for full in _GIT_DIFF_PRINTING_LONG):
-                return False
-        elif word.startswith("-") and _GIT_DIFF_PRINTING_SHORT & set(word[1:]):
-            return False
-    return True
+            name, has_value, _value = word[2:].partition("=")
+            if name in grammar.long_valued:
+                expects_value = not has_value
+            elif name not in grammar.long_flags or (has_value and name not in _GIT_OPTIONAL_VALUED):
+                return None
+            named.add(name)
+        elif word.startswith("-") and len(word) > 1:
+            cluster = _git_short_cluster(word[1:], grammar)
+            if cluster is None:
+                return None
+            letters, expects_value = cluster
+            named.update(letters)
+    return None if expects_value else named
+
+
+# Long status options whose value is optional and attached (`--porcelain=v2`).
+_GIT_OPTIONAL_VALUED: Final[frozenset[str]] = frozenset(
+    {
+        "porcelain",
+        "untracked-files",
+        "ignored",
+        "ignore-submodules",
+        "column",
+        "find-renames",
+    }
+)
+
+
+def _git_short_cluster(cluster: str, grammar: _GitOptionGrammar) -> tuple[set[str], bool] | None:
+    """The letters of a short cluster and whether the next word is its value, or ``None``."""
+    letters: set[str] = set()
+    for index, letter in enumerate(cluster):
+        letters.add(letter)
+        if letter in grammar.short_attached:
+            return letters, False
+        if letter in grammar.short_valued:
+            return letters, index == len(cluster) - 1
+        if letter not in grammar.flags:
+            return None
+    return letters, False
 
 
 def _assigns_a_relocating_variable(segment: str, words: list[str]) -> bool:

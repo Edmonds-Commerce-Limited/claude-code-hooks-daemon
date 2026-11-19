@@ -7963,3 +7963,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: the probe's event `cwd` is `$MAIN_CHECKOUT_DIR` (the main checkout), but a worktree's daemon has the WORKTREE as its project root. The rsync target `src/` then resolves to the main checkout's `src`, outside that root, so `project_containment` (priority 14) denies with R-WRITE-OUTSIDE-PROJECT-ROOT before `worktree_file_copy` (priority 15) gives the expected reason. Main's own code makes the same call: run in-process with the worktree as project root, main's `project_containment` matches the #125 event exactly as the branch's does. It passes only from the main checkout, where the cwd and the root are the same directory. #124 (`cp` to a file under `src/`) is not matched by containment in either tree.
 
 **Status**: ⬜ Open, low priority. The fix belongs to the harness or the probe, not to either handler: give the probe a cwd that is the daemon's project root, or have the harness skip or report this probe when it runs in a worktree.
+
+### N674 — secret_file_guard: a `/proc` path that reaches the shell's own view without spelling `/proc/self` is placed as the daemon's
+
+**Source**: Plan 00623 review 3 (`CLAUDE/Plan/00623-secret-guard-structural-fail-closed-walks-and-link-index/subagent-reports/261119-review3-loosenings.md`).
+
+**Evidence**: with a project link `flink` to a protected dummy, these print the dummy in real bash and are allowed on main, on Plan 00623's earlier tip and after it: `cat /proc/$$/cwd/flink`, `cat /proc/$BASHPID/cwd/flink`, `cat /proc/[0-9]*/cwd/flink` (an expansion or glob as the pid), and, when the daemon's cwd is not the project root, `cat /proc/sys/../self/cwd/flink` and `cat /proc/1/../self/cwd/flink` (a `..` between `proc` and `self`, so `refuse_process_view`'s adjacent-pair test never sees `proc`,`self`). Not introduced by the plain-file carve-out (6c16ce510): the same rows are allowed before it.
+
+**Status**: ⬜ Open. Candidate fix in `refuse_process_view`: refuse any absolute `/proc/<x>/...` whose `<x>` is not a literal number, and any `/proc` path holding a `..`.
