@@ -181,7 +181,18 @@ Projects with more than 512 link-holding directories also stop in `_scan_from_in
 
 ## After the fixes
 
-RERUN_PLACEHOLDER
+Everything above was run again on the fixed tree, with the index both cold and built.
+
+- **Still 0 DENY-to-ALLOW** on every set.
+- **Built counts:** the A2D counts are unchanged, so usability with the index built is unchanged, including `big/` at 129 of 132 allowed.
+- **Cold counts:** a few rise, from the F1 tightening (p623 1,146 to 1,152; extra 108 to 110; flaggable 79 to 80; new probes 167 to 168).
+- **Fail-closed:** `failclosed.py` opens **0** denied probes under every forced stop, cold and built.
+
+**Targeted tests: 3,807 passed and 11 skipped, 0 failed.** The run covered every `test_secret_file_guard*` file, the flaggable and quarantine guard tests, `test_secret_file_matching*`, `test_recursive_search`, `test_link_index`, `test_bounded_walk`, `test_resolution_failure`, `test_payload_capture` and the hostile-input performance file.
+
+Ruff and black are clean on every changed file, and mypy is clean on the three changed modules. Pyright was not run.
+
+**Harness note:** the `np-*` key sets differ in content, not in count (217 each). The harness keys omit the tool input, so two Grep probes on different cwds collide. This is a harness artefact.
 
 ## Left
 
