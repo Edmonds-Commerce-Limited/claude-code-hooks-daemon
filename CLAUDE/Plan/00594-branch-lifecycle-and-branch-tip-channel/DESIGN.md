@@ -176,6 +176,84 @@ names, and the next revision folds them in.
   `deletable` but not `finished` is reported as "superseded or reverted:
   safe to delete, confirm intent".
 
-Status: a draft for review with the client test seat (Task 1.3). The seat
-will review the document itself after its production cut-over. Client
-counts and command sequences are still to come.
+## 7. Rulings on the second client seat and the release decision
+
+Settled by a fable sub-agent under the owner's delegation, 2026-11-19. These
+are NOT the owner's own words; a later owner message overturns any of them.
+No release was run or started, no remote and no client seat was touched, and
+nothing was deleted.
+
+### 7.1 The second client seat no longer blocks the plan
+
+The plan waited on a seat for three tasks. No seat can be reached from this
+repository, and waiting has held the plan since the design draft. Each task
+is re-cut so that it is provable here; a seat's report, when one comes, is
+evidence added afterwards and not a gate.
+
+- **Task 1.3 (design review): closed.** Round 1 of the seat's review is §6
+  and was folded into what was built. The built phases then ran on two client
+  seats through release candidates, which is a stronger review than reading
+  the document. Of the §4 questions, 1, 3, 4, 5 and 6 are answered in §6;
+  question 2 (how many of the zero-ahead branches are foreign) only sizes a
+  first run, and `branch-sweep --clean` prints that number as its preview;
+  question 7 is ruled below.
+- **Task 4.6 (stacks): count a stack as one stream, with a depth cap.** The
+  §4 item 7 recommendation is adopted as written. Rules for the builder:
+  - A stack is a chain of this owner's open branches where each tip is a
+    strict ancestor of the next. The chain's top is the group key. A fork
+    (one tip with two descendants) ends the chain: each arm is its own
+    stream and the shared base counts with the first arm.
+  - The grouping reads tips only, local or remote-tracking, with no forge
+    call, because the reported stacks are pushed as separate pull requests.
+  - `branches.wip.stack_max_depth`, default 5. A stack at or under the cap
+    counts 1 against `branches.wip.cap`. Each link past the cap counts 1
+    more, so a too-deep stack is pressed, never hidden and never denied
+    outright.
+  - Parked, merged, park-carried and unowned branches are classified before
+    grouping and never join a stack. The sweep, the preflight and the
+    creation guard read one count from one function, and a test compares
+    them (the class behind the park-carried defect).
+  - The sweep and the preflight print a stack as one line naming its depth
+    and its bottom branch, with "land the bottom first".
+- **Task 5.1 (branch tip channel): proven on the client-mode fixture.** The
+  proof is an end-to-end run in `scripts/dummy-client-repo.sh`'s fixture
+  against a local bare remote: track a branch, push a commit to it, see the
+  moved-ref report with the commit count, re-run the track, then
+  `upgrade.sh --release` returns to the recorded tag and clears the tracking
+  metadata. A sha pin reports no move, and a failed listing reports "not
+  checked". The release-candidate installs on client seats already exercise
+  the same path in real use. The stop/build/start handover stays with Plan
+  00535, as §3 already says; it is not a task of this plan and does not hold
+  this plan open.
+
+### 7.2 The release decision
+
+- **The question journalled on 15 November is overtaken.** It asked whether
+  to release over in-flight plans. Release 3.75.0 was cut after it and
+  carries this plan's notes 075 to 083.
+- **This plan does not ask for a release and does not hold one back.** What
+  is left (Tasks 3.8, 4.6, 5.1) is additive and each ships in whichever
+  release follows its merge.
+- **The next release stays where the owner put it.** The owner's own typed
+  conditional approval is recorded in Plan 00623's journal, with its own
+  conditions and its own lapse. This ruling does not extend, widen or start
+  it. Whether to release while this plan reads In Progress (`accept-wip`) is
+  still a human's call.
+- **The surviving-content remote-delete branch is ordinary work, Task 3.8.**
+  It was held "until the release is cut", and that has happened. It predates
+  Plan 00626, which changed the same proof code, so it is not mergeable as it
+  stands. The builder brings it up to `main`, reconciles it with Plan 00626
+  (one proof per question, judged against the remote's own default branch),
+  moves its release note into the pending holding area under a free number,
+  runs targeted QA and an adversarial security review, and only then merges
+  with `--no-ff`. It never merges while a release state file exists.
+
+### 7.3 Still needs the human
+
+- Starting any release, and `accept-wip` if the slate check names this plan.
+- A real seat's confirmation of Task 5.1, if the owner wants one on record
+  beyond the fixture proof. Safe default: the fixture proof closes the task.
+
+Status: reviewed in round 1 (§6) and closed for review by the §7.1 ruling.
+A seat's further review, counts or command sequences are added as evidence
+when they come.
