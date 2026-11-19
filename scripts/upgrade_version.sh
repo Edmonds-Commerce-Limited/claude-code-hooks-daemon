@@ -19,9 +19,24 @@
 # Exit codes:
 #   0 - Upgrade completed successfully
 #   1 - Upgrade failed (rollback attempted)
+#   3 - The pre-deploy gate stopped for the reading to be confirmed; nothing deployed
+#   5 - --unattended only: the gate lists a READ THIS FIRST reason, so a human must
+#       decide; nothing deployed, the daemon dir is back on the installed version
+#
+# Flags (after the three positionals):
+#   --skip-reading-confirmation=<digest>  The digest the exit-3 stop printed
+#   --unattended  Adds restrictions, never removes one: READ THIS FIRST stops the
+#                 upgrade (exit 5) whatever digest is given, and a daemon that
+#                 fails to start or validate after the deploy is rolled back to
+#                 the snapshot and the previous daemon restarted (exit 1).
 #
 
 set -euo pipefail
+
+# Layer 1 reads this line from the TARGET's copy of this script to learn that
+# the flag above is enforced here; a release without it cannot be run
+# unattended, because the flag would be ignored.
+readonly LAYER2_SUPPORTS_UNATTENDED=1
 
 # Plan 00376 fresh review BLOCKER 1: a function exported into the environment
 # (BASH_FUNC_*) would shadow the very tools the pre-deploy gate relies on, and
@@ -253,11 +268,33 @@ _take_acknowledgement() {
 }
 
 _take_acknowledgement "${@:4}"
+_LAYER1_FLAGS=()
 if [ "$UPGRADE_CALLER" = "layer1" ] && [ -n "${UPGRADE_FLAGS:-}" ]; then
     read -r -a _LAYER1_FLAGS <<< "$UPGRADE_FLAGS"
     if [ "${#_LAYER1_FLAGS[@]}" -gt 0 ]; then
         _take_acknowledgement "${_LAYER1_FLAGS[@]}"
     fi
+fi
+
+# --unattended: nobody is at the terminal. It only ever adds restrictions (a
+# READ THIS FIRST stop that no digest clears, and rollback instead of "fix it
+# manually" after the deploy), so honouring it from the argv of any caller is
+# safe; UPGRADE_FLAGS counts only from a genuine Layer 1, like the digest.
+UNATTENDED=false
+
+# _take_unattended() - Record --unattended among the given words.
+_take_unattended() {
+    local word
+    for word in "$@"; do
+        if [ "$word" = "--unattended" ]; then
+            UNATTENDED=true
+        fi
+    done
+}
+
+_take_unattended "${@:4}"
+if [ "$UPGRADE_CALLER" = "layer1" ] && [ "${#_LAYER1_FLAGS[@]}" -gt 0 ]; then
+    _take_unattended "${_LAYER1_FLAGS[@]}"
 fi
 
 # The uv that builds the venv, named for this run with `--uv <path>` (or
@@ -299,6 +336,8 @@ _take_uv_override "${@:4}"
 
 # The gate's stop codes (install/upgrade_gate.py GateVerdict.exit_code).
 GATE_NEEDS_ACKNOWLEDGEMENT=3
+# Layer 2's own exit for "an unattended run needs a human, nothing changed".
+UNATTENDED_NEEDS_HUMAN_EXIT=5
 # A gate that has not decided in this long has hung (a pathological Detect
 # pattern on a long line): the timeout is a crash, so it stops the upgrade.
 GATE_TIMEOUT_SECONDS=300
@@ -402,6 +441,31 @@ abort_before_deploy() {
     print_error "Upgrade $reason. Nothing was deployed into $PROJECT_ROOT; the installed daemon starts again on the next hook event."
     _warn_about_a_pre_gate_layer1
     exit "$exit_code"
+}
+
+# stop_unattended_for_a_human() - Stop an unattended upgrade whose gate verdict
+# lists READ THIS FIRST (or whose count cannot be read), with nothing deployed.
+# Arg: the verdict file's escalations= value. Returns when there are none.
+#
+# Exit 5 means "needs a human, nothing changed". It goes through
+# abort_before_deploy, so the daemon dir is put back on the installed version
+# exactly as for the exit-3 stop. A missing or non-numeric count is treated as a
+# reason to stop: an unattended run never proceeds on a verdict it cannot read.
+stop_unattended_for_a_human() {
+    local count="$1"
+    case "$count" in
+        '' | *[!0-9]*)
+            print_error "Unattended: the gate's verdict does not say whether it listed READ THIS FIRST (escalations='$count'), so a human must decide."
+            ;;
+        0)
+            return 0
+            ;;
+        *)
+            print_error "Unattended: the gate lists $count READ THIS FIRST reason(s) (printed above); this upgrade needs a human, and no --skip-reading-confirmation digest clears it."
+            ;;
+    esac
+    print_info "Unattended run (Layer 2 unattended contract $LAYER2_SUPPORTS_UNATTENDED): nothing was changed."
+    abort_before_deploy "$UNATTENDED_NEEDS_HUMAN_EXIT" "stopped: READ THIS FIRST needs a human"
 }
 
 # _target_release() - Print the release the checked-out target carries.
@@ -551,13 +615,14 @@ run_pre_deploy_phase() {
     # A zero exit counts only with the verdict file the gate wrote, headed by
     # this run's nonce: anything that exits 0 having decided nothing does not
     # wave the upgrade through.
-    local nonce_line="" line="" verdict=""
+    local nonce_line="" line="" verdict="" escalations=""
     if [ -f "$verdict_file" ] && [ ! -L "$verdict_file" ] && [ -O "$verdict_file" ]; then
         {
             IFS= read -r nonce_line || nonce_line=""
             while IFS= read -r line; do
                 case "$line" in
                     verdict=*) verdict="${line#verdict=}" ;;
+                    escalations=*) escalations="${line#escalations=}" ;;
                 esac
             done
         } < "$verdict_file"
@@ -566,6 +631,13 @@ run_pre_deploy_phase() {
     if [ "$gate_exit" -eq 0 ] && { [ "$nonce_line" != "nonce=$nonce" ] || [ "$verdict" != "proceed" ]; }; then
         print_error "The pre-deploy gate exited 0 without writing this run's verdict; $GATE_PYTHON did not run the gate."
         gate_exit=1
+    fi
+    # Unattended, READ THIS FIRST is a human's decision: the digest confirms the
+    # reading, it does not make a likely-breaking upgrade safe to run unseen. It
+    # is judged before the exit code is, so a digest (exit 0) cannot clear it.
+    # An ordinary reading stop (no escalations) stays exit 3 below.
+    if [ "$UNATTENDED" = true ] && { [ "$gate_exit" -eq 0 ] || [ "$gate_exit" -eq "$GATE_NEEDS_ACKNOWLEDGEMENT" ]; }; then
+        stop_unattended_for_a_human "$escalations"
     fi
     case "$gate_exit" in
         0) ;;
@@ -1626,6 +1698,14 @@ if ! restart_daemon_verified "$VENV_PYTHON"; then
         echo "  $DAEMON_DIR/bin/hooks-daemon restart"
     fi
 
+    if [ "$UNATTENDED" = true ]; then
+        # Nobody is there to fix the config: leave UPGRADE_STARTED true, so the
+        # EXIT trap restores the snapshot and restarts the previous daemon.
+        # The tracking record is not written, it still describes that install.
+        print_error "Unattended: rolling back to the pre-upgrade state instead of leaving a daemon that will not start."
+        exit 1
+    fi
+
     # Don't trigger rollback for daemon start failure - code is updated
     # User can fix config manually
     UPGRADE_STARTED=false
@@ -1645,7 +1725,13 @@ rm -f "$DAEMON_DIR/untracked/version_check_cache.json"
 # restart_daemon_verified so a failed upgrade leaves prior state intact
 # (rollback safety). Plain daemon start (non-upgrade) is unaffected; it
 # still uses lazy-rebuild-via-stamp inside ensure_venv.
-eager_cleanup_stale_venvs "$DAEMON_DIR" "$VENV_PATH"
+#
+# Unattended, the cleanup waits until Step 16 has passed: a post-upgrade
+# validation failure rolls back and restarts the previous daemon, which needs the
+# venv that daemon ran on (the venv a fingerprint-keyed upgrade replaced).
+if [ "$UNATTENDED" != true ]; then
+    eager_cleanup_stale_venvs "$DAEMON_DIR" "$VENV_PATH"
+fi
 
 # ============================================================
 # Step 16: Post-upgrade validation
@@ -1663,9 +1749,19 @@ if ! run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false
         echo "  $DAEMON_DIR/bin/hooks-daemon restart"
     fi
 
+    if [ "$UNATTENDED" = true ]; then
+        # As Step 15: roll back to the snapshot and restart the previous daemon.
+        print_error "Unattended: rolling back to the pre-upgrade state instead of leaving a daemon that failed validation."
+        exit 1
+    fi
+
     # Don't trigger rollback - code is updated, but user needs to investigate
     UPGRADE_STARTED=false
     exit 1
+fi
+
+if [ "$UNATTENDED" = true ]; then
+    eager_cleanup_stale_venvs "$DAEMON_DIR" "$VENV_PATH"
 fi
 
 # ============================================================
@@ -1827,7 +1923,14 @@ if [ "$LAYER2_SOURCE_CHANGED" = true ] && [ -z "${HOOKS_DAEMON_UPGRADE_SECOND_PA
     # "${@:4}" forwards only the trailing FLAGS. Plain "$@" would re-append the
     # three positionals that are already being passed explicitly, handing the
     # child each of them twice.
-    exec bash "$LAYER2_TARGET_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" "${@:4}"
+    #
+    # --unattended may have come from Layer 1's UPGRADE_FLAGS, which the second
+    # pass (no handoff) would not read again, so it is passed on explicitly.
+    _second_pass_flags=()
+    if [ "$UNATTENDED" = true ]; then
+        _second_pass_flags=(--unattended)
+    fi
+    exec bash "$LAYER2_TARGET_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" "${@:4}" "${_second_pass_flags[@]}"
 fi
 
 # Last command, and it always returns 0, so the script exits 0 without an

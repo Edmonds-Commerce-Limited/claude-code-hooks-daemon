@@ -353,13 +353,14 @@ def _assert_stopped_and_restored(
     current: str,
     *,
     exit_code: int | None = None,
+    stop_text: str = _STOPPED_MARKER,
 ) -> str:
     combined = result.stdout
     expected = verdict.exit_code if exit_code is None else exit_code
     assert (
         result.returncode == expected
     ), f"expected exit {expected}, got {result.returncode}:\n{combined[-6000:]}"
-    assert _STOPPED_MARKER in combined, combined[-6000:]
+    assert stop_text in combined, combined[-6000:]
     assert _FIRST_DEPLOY_MARKER not in combined, "a stopped upgrade must deploy nothing"
     assert not (project / ".claude" / "hooks").exists(), "no hook may reach the project"
     daemon_dir = _daemon_dir(project)
@@ -705,3 +706,59 @@ def test_a_pre_gate_layer1_cannot_turn_a_stop_into_a_partial_install(
     )
     warning = _section(combined, _PRE_GATE_WARNING)
     assert f"v{target}:scripts/upgrade.sh" in combined, warning
+
+
+#: What Layer 1 reads to know a target's Layer 2 can be run unattended.
+_UNATTENDED_CAPABILITY: Final[str] = "readonly LAYER2_SUPPORTS_UNATTENDED=1"
+_UNATTENDED_FLAG: Final[str] = "--unattended"
+#: The exit that means "needs a human, nothing changed" (Plan 00625).
+_NEEDS_A_HUMAN_EXIT: Final[int] = 5
+
+
+def test_layer2_declares_that_it_can_run_unattended() -> None:
+    text = (_REPO_ROOT / _LAYER2_REL).read_text(encoding="utf-8")
+    assert _UNATTENDED_CAPABILITY in text.splitlines()
+
+
+def _direct_layer2(
+    project: Path, env: dict[str, str], to: str, *flags: str
+) -> subprocess.CompletedProcess[str]:
+    daemon_dir = _daemon_dir(project)
+    _git(daemon_dir, "checkout", "-q", to)
+    return _run(
+        [_BASH, str(daemon_dir / _LAYER2_REL), str(project), str(daemon_dir), to, *flags],
+        project,
+        env,
+    )
+
+
+def test_unattended_stops_for_a_human_on_read_this_first_even_with_the_digest(
+    project: Path, versions: tuple[str, str, str]
+) -> None:
+    """A MAJOR bump is listed under READ THIS FIRST; the digest cannot wave it through."""
+    current, _target, major = versions
+    env = _env()
+    unread = _direct_layer2(project, env, f"v{major}")
+    _assert_stopped_and_restored(unread, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
+    result = _direct_layer2(project, env, f"v{major}", _UNATTENDED_FLAG, _confirm(unread.stdout))
+    combined = _assert_stopped_and_restored(
+        result,
+        GateVerdict.NEEDS_ACKNOWLEDGEMENT,
+        project,
+        current,
+        exit_code=_NEEDS_A_HUMAN_EXIT,
+        stop_text="needs a human",
+    )
+    assert "READ THIS FIRST" in combined
+
+
+def test_unattended_keeps_the_ordinary_reading_stop_at_exit_3(
+    project: Path, versions: tuple[str, str, str]
+) -> None:
+    """Guides and pre-upgrade tasks with no READ THIS FIRST are not a human stop."""
+    current, target, _major = versions
+    result = _direct_layer2(project, _env(), f"v{target}", _UNATTENDED_FLAG)
+    combined = _assert_stopped_and_restored(
+        result, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current
+    )
+    assert "READ THIS FIRST" not in combined
