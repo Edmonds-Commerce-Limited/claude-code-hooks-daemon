@@ -147,8 +147,8 @@ names, people or hashes appear here.
   answers to every decision above, each with its reason and the failure class
   it closes.
 - [x] ✅ **Task 1.3**: (Closed by delegated ruling, [DESIGN.md §7.1](DESIGN.md):
-  review round 1 is DESIGN §6 and the built phases ran on two client seats
-  through release candidates.) Review the design with the client test seat
+  review round 1 is DESIGN §6, and the design was then reviewed by use on
+  client seats through release candidates.) Review the design with the client test seat
   before any code is written.
 
 ### Phase 2: Stop the daemon making branches (class 1)
@@ -320,8 +320,8 @@ names, people or hashes appear here.
   caused it and to the change that closes it.
 - [ ] Each class has a regression test that failed before its fix.
 - [ ] A client-mode install runs a branch tip, observes a move, and returns to
-  the last tag in one step: proven end to end in the client-mode fixture
-  (delegated ruling, DESIGN §7.1); a client seat's report is recorded when
+  the last tag in one step: to be proven end to end in the client-mode
+  fixture, not yet run (delegated ruling, DESIGN §7.1); a client seat's report is recorded when
   one comes.
 - [ ] Release-bound consequences (config keys, truth changes, release notes)
   are recorded in `CLAUDE/UPGRADES/UNRELEASED/`.

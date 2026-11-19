@@ -191,9 +191,10 @@ is re-cut so that it is provable here; a seat's report, when one comes, is
 evidence added afterwards and not a gate.
 
 - **Task 1.3 (design review): closed.** Round 1 of the seat's review is §6
-  and was folded into what was built. The built phases then ran on two client
-  seats through release candidates, which is a stronger review than reading
-  the document. Of the §4 questions, 1, 3, 4, 5 and 6 are answered in §6;
+  and was folded into what was built. PLAN.md records live proof on client
+  seats through release candidates for Task 2.1 and the class 6 fix (Task
+  5.0), and client reports drove Tasks 3.5, 4.5, 4.7 and 4.9: the design has
+  been reviewed by use. Of the §4 questions, 1, 3, 4, 5 and 6 are answered in §6;
   question 2 (how many of the zero-ahead branches are foreign) only sizes a
   first run, and `branch-sweep --clean` prints that number as its preview;
   question 7 is ruled below.
@@ -215,7 +216,8 @@ evidence added afterwards and not a gate.
     them (the class behind the park-carried defect).
   - The sweep and the preflight print a stack as one line naming its depth
     and its bottom branch, with "land the bottom first".
-- **Task 5.1 (branch tip channel): proven on the client-mode fixture.** The
+- **Task 5.1 (branch tip channel): closes on a client-mode fixture proof,
+  which has NOT been run yet.** The task stays open until it is. The
   proof is an end-to-end run in `scripts/dummy-client-repo.sh`'s fixture
   against a local bare remote: track a branch, push a commit to it, see the
   moved-ref report with the commit count, re-run the track, then
@@ -223,14 +225,18 @@ evidence added afterwards and not a gate.
   metadata. A sha pin reports no move, and a failed listing reports "not
   checked". The release-candidate installs on client seats already exercise
   the same path in real use. The stop/build/start handover stays with Plan
-  00535, as §3 already says; it is not a task of this plan and does not hold
-  this plan open.
+  00535\. This overrides §3's sentence that the handover "must land before the
+  channel ships" and that this plan depends on it: the tracking pieces have
+  already shipped, so for closing this plan the handover is not a task and
+  not a gate. The risk that sentence names (an upgrade under a live daemon)
+  is unchanged and stays tracked in Plan 00535.
 
 ### 7.2 The release decision
 
 - **The question journalled on 15 November is overtaken.** It asked whether
   to release over in-flight plans. Release 3.75.0 was cut after it and
-  carries this plan's notes 075 to 083.
+  carries this plan's delete-gate, SSH-agent and park-carried notes (075,
+  076, 083).
 - **This plan does not ask for a release and does not hold one back.** What
   is left (Tasks 3.8, 4.6, 5.1) is additive and each ships in whichever
   release follows its merge.
@@ -242,7 +248,9 @@ evidence added afterwards and not a gate.
 - **The surviving-content remote-delete branch is ordinary work, Task 3.8.**
   It was held "until the release is cut", and that has happened. It predates
   Plan 00626, which changed the same proof code, so it is not mergeable as it
-  stands. The builder brings it up to `main`, reconciles it with Plan 00626
+  stands (a read-only trial merge into `main` conflicts in seven files,
+  among them `core/remote_branch_proof.py`, `core/branch_cleanup.py` and
+  `daemon/branch_safety.py`). The builder brings it up to `main`, reconciles it with Plan 00626
   (one proof per question, judged against the remote's own default branch),
   moves its release note into the pending holding area under a free number,
   runs targeted QA and an adversarial security review, and only then merges

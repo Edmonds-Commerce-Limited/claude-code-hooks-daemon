@@ -376,5 +376,8 @@ the seeding executor). What waits for the gate: the install-guide text that
 shows a project how to declare a protected seed and the human step for a
 hand-made worktree, and group C of section 8 run against a seeded link.
 
-Still needs the human: only Q0, and only if the owner wants the verb. The
-safe default, no verb, is what these rulings build.
+Still needs the human: Q0, if the owner wants the verb; and the owner's own
+confirmation of Q1 before Phase 3 advises anyone to link a protected file,
+because the provenance clause says a ruling that is not the owner's is not
+sufficient for Q1. Phase 2 needs neither. Safe default: no verb, and Phase 3
+waits.

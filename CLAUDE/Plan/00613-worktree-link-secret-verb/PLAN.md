@@ -29,14 +29,17 @@ own worktree files came from a peer and is not verified here.
 
 ## Goals
 
-- Decide, with the owner, whether a worktree link to a protected file is
-  acceptable at all, and under what conditions.
-- If yes, a verb that creates only that link and nothing else, with the guard
-  unchanged for every other mention.
+- Decide whether a worktree link to a protected file is acceptable at all,
+  and under what conditions (settled by delegated ruling,
+  [DESIGN.md Rulings](DESIGN.md#rulings); the owner can overturn it).
+- No agent-invocable verb. The shipped config seeding is made safe for a
+  protected source (copy refused, each link audited), and the link route is
+  documented once the guard resolves links (Plans 00614 and 00623).
 
 ## Non-Goals
 
-- Loosening `R-SECRET-BASH-MENTION` for any command other than the verb.
+- Loosening `R-SECRET-BASH-MENTION` for any command at all.
+- The verb of DESIGN sections 3 to 8, unless the owner's own typed yes reopens it.
 - Copying or printing a protected file, or any absolute link.
 
 ## Tasks
@@ -80,8 +83,9 @@ own worktree files came from a peer and is not verified here.
 
 ### Phase 3: Advise the link (gated)
 
-Gate: Plans 00614 and 00623 merged to `main`, and the three link routes
-verified denied through a live daemon socket.
+Gate: Plans 00614 and 00623 merged to `main`, the three link routes verified
+denied through a live daemon socket, and the owner's own confirmation of Q1
+journalled (a delegated ruling is not sufficient for it).
 
 - [ ] ⬜ **Task 3.1**: DESIGN section 8 group C, end to end against a seeded
   link in a client-mode fixture, through a live daemon.
