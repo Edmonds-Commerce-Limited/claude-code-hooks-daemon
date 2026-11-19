@@ -13,7 +13,9 @@ progress in and reads them back, for ``version_check`` to report.
 ``status`` (running | synced | failed | needs-reading), ``target``, ``from``,
 ``pid`` and ``detail``. The file existing is the marker that the target has been
 attempted, so a target is synced in the background at most once; ``provision.sh``
-also holds a lock while it runs, so two syncs never overlap.
+also holds the shared upgrade lock (the one ``upgrade.sh`` takes, a file in the git
+common directory) while it runs, so two syncs, or a sync and an upgrade, never
+overlap.
 """
 
 from __future__ import annotations

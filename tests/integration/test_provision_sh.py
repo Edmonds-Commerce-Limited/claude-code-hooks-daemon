@@ -1138,7 +1138,7 @@ class TestAnInterruptedSwitchIsRecoveredByTheNextRun:
         assert "put back" in state["detail"]
         assert fresh.box.resolves()
         assert _no_switch_left(fresh)
-        assert not (_sync_dir(fresh) / "lock.d").exists(), _out(result)
+        assert not _upgrade_lock(fresh).exists(), _out(result)
 
     def test_a_switch_another_live_process_is_making_is_left_alone(
         self, fresh: Provisioning
@@ -1208,6 +1208,45 @@ def _a_dead_pid() -> int:
     return int(Path("/proc/sys/kernel/pid_max").read_text()) + 1
 
 
+def _upgrade_lock(p: Provisioning) -> Path:
+    """The shared upgrade lock file: in the git common dir, else under .claude/."""
+    found = subprocess.run(
+        ["git", "-C", str(p.project), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if found.returncode == 0 and found.stdout.strip():
+        return Path(found.stdout.strip()) / "hooks-daemon-upgrade.lock"
+    return p.project / ".claude" / "hooks-daemon-upgrade.lock"
+
+
+def _hold_the_lock(
+    p: Provisioning, *, foreign: bool, age_seconds: int = 0, live: bool = False
+) -> Path:
+    """Write another holder's lock record; ``foreign`` puts it in another boot and PID namespace."""
+    lock = _upgrade_lock(p)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    boot = "foreign-boot-id" if foreign else Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    pidns = "pid:[foreign]" if foreign else str(Path("/proc/self/ns/pid").readlink())
+    pid = 4242 if foreign else (os.getpid() if live else _a_dead_pid())
+    pid_start = "1"
+    if live:
+        pid_start = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
+    fields = {
+        "token": "other-holder",
+        "host": "other-host",
+        "boot_id": boot,
+        "pidns": pidns,
+        "pid": str(pid),
+        "pid_start": pid_start,
+        "started": str(int(time.time()) - age_seconds),
+        "purpose": "upgrade",
+    }
+    lock.write_text("".join(f"{k}={v}\n" for k, v in fields.items()))
+    return lock
+
+
 class TestTheBackgroundSync:
     """Plan 00477 Tasks 5.2 and 5.4: ``--background`` is the sync version_check starts."""
 
@@ -1227,7 +1266,7 @@ class TestTheBackgroundSync:
         assert state["status"] == "synced"
         assert state["from"] == CLONE_VERSION
         assert state["target"] == MAIN_VERSION
-        assert not (_sync_dir(fresh) / "lock.d").exists(), "the lock is released"
+        assert not _upgrade_lock(fresh).exists(), "the lock is released"
 
     def test_a_sync_failure_keeps_the_old_daemon_and_records_why(self, fresh: Provisioning) -> None:
         _provisioned_at(fresh, CLONE_VERSION)
@@ -1244,7 +1283,7 @@ class TestTheBackgroundSync:
         state = _state(fresh, MAIN_VERSION)
         assert state["status"] == "failed"
         assert "venv" in state["detail"]
-        assert not (_sync_dir(fresh) / "lock.d").exists()
+        assert not _upgrade_lock(fresh).exists()
 
     def test_a_target_already_attempted_is_never_attempted_again(self, fresh: Provisioning) -> None:
         _provisioned_at(fresh, CLONE_VERSION)
@@ -1263,33 +1302,74 @@ class TestTheBackgroundSync:
     def test_a_sync_already_running_is_not_joined(self, fresh: Provisioning) -> None:
         _provisioned_at(fresh, CLONE_VERSION)
         fresh.expect(MAIN_VERSION)
-        lock = _sync_dir(fresh) / "lock.d"
-        lock.mkdir(parents=True)
-        (lock / "pid").write_text(f"{os.getpid()}\n")
+        lock = _hold_the_lock(fresh, foreign=False, live=True)
         before = fresh.clone_tracked_state()
 
         result = fresh.provision(args=BACKGROUND)
 
         assert result.returncode == 0, _out(result)
-        assert "already running" in _out(result)
+        assert "holds the upgrade lock" in _out(result)
         assert fresh.clone_tracked_state() == before
         assert not (
             _sync_dir(fresh) / f"v{MAIN_VERSION}.state"
         ).exists(), "not claimed, so a later session tries again"
-        assert lock.is_dir(), "another sync's lock is not taken from it"
+        assert "other-holder" in lock.read_text(), "another holder's lock is not taken from it"
+
+    def test_a_holder_in_a_foreign_boot_with_a_fresh_heartbeat_blocks_a_background_sync(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        lock = _hold_the_lock(fresh, foreign=True, age_seconds=30)
+        before = fresh.clone_tracked_state()
+
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode == 0, _out(result)
+        assert fresh.clone_version() == CLONE_VERSION
+        assert fresh.clone_tracked_state() == before
+        assert "other-holder" in lock.read_text()
+
+    def test_a_foreground_sync_stops_non_zero_naming_the_holder_and_changes_nothing(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        lock = _hold_the_lock(fresh, foreign=True, age_seconds=30)
+        before = fresh.clone_tracked_state()
+
+        result = fresh.provision()
+
+        assert result.returncode == 75, _out(result)
+        assert "host=other-host" in _out(result)
+        assert fresh.clone_version() == CLONE_VERSION
+        assert fresh.clone_tracked_state() == before
+        assert fresh.starts() == 1
+        assert "other-holder" in lock.read_text()
 
     def test_a_lock_whose_holder_is_gone_is_taken_over(self, fresh: Provisioning) -> None:
         _provisioned_at(fresh, CLONE_VERSION)
         fresh.expect(MAIN_VERSION)
-        lock = _sync_dir(fresh) / "lock.d"
-        lock.mkdir(parents=True)
-        (lock / "pid").write_text(f"{_a_dead_pid()}\n")
+        _hold_the_lock(fresh, foreign=False)
 
         result = fresh.provision(args=BACKGROUND)
 
         assert result.returncode == 0, _out(result)
         assert fresh.clone_version() == MAIN_VERSION
-        assert not lock.exists()
+        assert not _upgrade_lock(fresh).exists()
+
+    def test_a_foreign_holder_whose_heartbeat_expired_is_taken_over(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+        _hold_the_lock(fresh, foreign=True, age_seconds=3600)
+
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode == 0, _out(result)
+        assert fresh.clone_version() == MAIN_VERSION
+        assert not _upgrade_lock(fresh).exists()
 
     def test_a_refused_clone_is_recorded_as_a_failure(self, fresh: Provisioning) -> None:
         _provisioned_at(fresh, CLONE_VERSION)
@@ -1461,7 +1541,7 @@ class TestTheSessionStartHookStartsIt:
         assert "No daemon is running from the clone" in _out(result)
         assert fresh.clone_tracked_state() == before
         assert not (_sync_dir(fresh) / f"v{MAIN_VERSION}.state").exists()
-        assert not (_sync_dir(fresh) / "lock.d").exists()
+        assert not _upgrade_lock(fresh).exists()
 
 
 class TestTheGateConstantsAreUpgradesOwn:
