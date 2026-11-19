@@ -8,6 +8,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00626: remote delete proof cherry route and remote default ref](00626-remote-delete-proof-cherry-route-and-remote-default-ref/PLAN.md) - In Progress (client report: the remote-delete proof refuses a branch whose every patch is in the default when cherry-picks interleave, and proves remote deletes against the LOCAL default; restore the cherry route with exact per-path content, prove against the remote default's live tip only, never on a cached positive)
+
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - Not Started (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
 
 - [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - Not Started (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; draft, no code until the owner approves the design)
