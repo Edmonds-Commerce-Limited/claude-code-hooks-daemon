@@ -1,9 +1,19 @@
 # Plan 00625: the six points settled, and the threat model
 
-**Standing.** The owner asked for the automatic upgrade and delegated the
-settling of the open design points. Everything ruled here is settled by a
-fable sub-agent under the owner's delegation, 2026-11-19. None of it is the
-owner's own words, and a later owner message can overturn any of it.
+**Standing.** Everything ruled here is settled by a fable sub-agent under the
+owner's delegation, 2026-11-19. None of it is the owner's own words, and a
+later owner message can overturn any of it. The delegation and the six points
+reached this seat through the coordinator, which quoted the owner; this seat
+could not check the quotes. Rulings 1 and 5 loosen guards and should be shown
+to the owner first.
+
+**Corrections after a second review of the first commit.** The `started`
+record is written by Layer 1 under the lock, after its last refusal, so a
+dirty path or a held lock does not burn the version. The skill wrappers
+self-bootstrap from the latest release's downloadable assets (not from
+`main`, as written below), in every session, and an environment variable set
+by the entry does not reach the skill's later commands; DESIGN ruling 3 now
+says so and lists it as a residual risk that needs a niggles-ledger entry.
 
 **Where the rulings live.** DESIGN.md section 11a holds the rulings and their
 requirements (`R<ruling>.<n>`), section 12 the threat model, section 13 the

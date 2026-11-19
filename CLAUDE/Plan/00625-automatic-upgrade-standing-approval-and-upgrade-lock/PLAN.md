@@ -92,7 +92,7 @@ project, so every install fails closed until that key exists.
 - [x] ✅ **Task 8.1**: independent review of the branch (verdict FAIL; `subagent-reports/261119-p625-adversarial-review.md`)
 - [x] ✅ **Task 8.1a**: review fixes F1 (takeover generations) and F2 (Layer 2 holds the lock as writer) `d7acda90a`; M10 (example config leaves the entry unlisted) `b4ea0fe4a`; F3 to F5 by the reviewer
 - [x] ✅ **Task 8.1b**: the six open points settled by a fable sub-agent under the owner's delegation, with a threat model (DESIGN.md sections 11a, 12, 13; `subagent-reports/261119-fable-settle-and-threat-model.md`)
-- [ ] ⬜ **Task 8.2**: fresh independent re-review of the finished branch against DESIGN.md sections 11a to 13; full QA gate; merge
+- [ ] ⬜ **Task 8.2**: fresh independent re-review of the finished branch against DESIGN.md sections 11a to 13; full QA gate; the owner shown rulings 1 and 5 (they loosen guards, and the delegation reached the settling seat only through the coordinator); merge
 
 ### Phase 9: Build the rulings (requirement ids and test ids are DESIGN.md's)
 
@@ -105,12 +105,12 @@ dirty check, the skill's ask-stop text.
 - [ ] ⬜ **Task 9.4**: Layer 2 receives the verified commit id, refuses a mismatch and deploys by id (R3.4; V7)
 - [ ] ⬜ **Task 9.5**: the entry enforces the opt-out, `disable_tags` and self-install through the installed Python pre-check, failing closed (R1.5; V12)
 - [ ] ⬜ **Task 9.6**: soak period from a first-sighting record (R1.6; V13)
-- [ ] ⬜ **Task 9.7**: `started` attempt record before deploy; `needs-human` record for a signature mismatch; halt file when the rollback fails (R1.7, R2.5, R6t.3; V14, V27)
+- [ ] ⬜ **Task 9.7**: `started` attempt record written by Layer 1 under the lock, after its last refusal (a dirty path or a held lock leaves none); `needs-human` record for a signature mismatch; halt file when the rollback fails (R1.7, R2.5, R6t.3; V14, V27)
 - [ ] ⬜ **Task 9.8**: never-unattended fixes: release-state as a dangling symlink, MAJOR baseline from the clone and a stamp above it, strictly newer only (R1.3; V15, V16)
 - [ ] ⬜ **Task 9.9**: `hooks-daemon release-signers add|list|remove` (R2.3; V23)
 - [ ] ⬜ **Task 9.10**: built-in write guard on the signers path and denial of the key command to an agent's Bash (R2.4; V24)
 - [ ] ⬜ **Task 9.11**: `Requires human` field on post-upgrade tasks and guides, read by the gate, required by the release checks; pending-human file reported by `version_check` (R4.1, R4.2; V17, V18)
-- [ ] ⬜ **Task 9.12**: the unattended commit takes only the owned paths, says it was automatic, never pushes; one owned-path list held equal by a test (R5.2, R5.3, R1.2; V19, V20)
+- [ ] ⬜ **Task 9.12**: a commit script the skill calls, so the unattended commit takes only the owned paths, says it was automatic, never pushes; one owned-path list held equal by a test (R5.2, R5.3, R1.2; V19, V20)
 - [ ] ⬜ **Task 9.13**: `check_eligibility` mirrors every refusal it can judge offline (no key, dirty owned path, soak, records, halt) so no doomed run is invited (R1.1, R5.4; V1, V21)
 - [ ] ⬜ **Task 9.14**: once-only notice in both wordings; nothing injected without a key; the one-line injected text (R1.1, R1.2, ruling 6; V21)
 - [ ] ⬜ **Task 9.15**: Plan 00223 amendment in the handler docstring, tests, handler reference and example config; only one default-on id (R1.4; V22)

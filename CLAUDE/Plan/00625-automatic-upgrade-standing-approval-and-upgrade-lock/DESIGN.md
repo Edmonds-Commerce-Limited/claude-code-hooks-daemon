@@ -281,11 +281,13 @@ rule true if a client project ever adopts the same release workflow.
 
 ## 11a. The six rulings
 
-**Standing of this section.** The owner asked for the automatic upgrade and
-delegated the settling of the open points. Every ruling below is settled by a
-fable sub-agent under the owner's delegation, 2026-11-19. None is the owner's
-own words. A later owner message can overturn any of them. The six points
-themselves reached this plan through the coordinator, as the owner's intent.
+**Standing of this section.** Every ruling below is settled by a fable
+sub-agent under the owner's delegation, 2026-11-19. None is the owner's own
+words. A later owner message can overturn any of them. Both the delegation and
+the six points reached this seat through the coordinator, which quoted the
+owner; this seat could not check the quotes against their source. Rulings 1
+and 5 loosen guards (consent, and the dirty-tree refusal), so they are the
+two to show the owner first.
 
 Each requirement has an id (`R<ruling>.<n>`) that PLAN.md tasks and the tests
 in section 13 cite. "Refuse" always means exit 5 with nothing changed, unless
@@ -335,14 +337,18 @@ without the daemon asserting a consent nobody gave.
   obtained, and in the daemon's own repository.
 - **R1.6 Soak period.** A release is installed unattended only when this
   clone first saw it at least 24 hours ago. The first sighting is written by
-  `version_check` under the clone's `untracked/auto-upgrade/`. Removing the
-  record restarts the wait, so tampering only delays. Together with the
+  `version_check` under the clone's `untracked/auto-upgrade/`, timed by the
+  local clock. Removing the record restarts the wait. Backdating it, or moving
+  the clock, skips the wait; both need local write access, and the soak is a
+  defence against a bad release, not against a local attacker. Together with the
   must-be-on-origin check, a release withdrawn within a day reaches no
   unattended install.
-- **R1.7 One attempt per release.** The entry writes a `started` attempt
-  record before deploy and removes it on success. A leftover `started` record
-  counts as failed, so a run killed outright is not retried (review, "kill
-  -9, not verified").
+- **R1.7 One attempt per release.** Layer 1 writes a `started`
+  attempt record while it holds the lock, after its last refusal and
+  immediately before the checkout, and removes it on success. A leftover
+  `started` record counts as failed, so a run killed outright is not retried
+  (review, "kill -9, not verified"). A refusal before that point, a dirty
+  path or a held lock included, leaves no record and is retried (R5.4).
 
 **Residual risks.**
 
@@ -393,9 +399,10 @@ and fails closed.**
 - **R2.3 How the owner supplies a key.** One command, run by a human in their
   own terminal: `hooks-daemon release-signers add <public-key-file>`. It
 
-  - takes the key only from a local file or from standard input, never from a
+  - takes the key only from a local file, never from standard input or a
     URL, and makes no network call;
-  - refuses without an interactive terminal;
+  - refuses without an interactive terminal, from which it reads the
+    confirmation;
   - prints the key's SHA256 fingerprint and has the human type its last eight
     characters, which they compare with a copy obtained from somewhere other
     than the repository that publishes the tags;
@@ -426,8 +433,11 @@ and fails closed.**
   retried every session.
 
 - **R2.6 Revocation.** Revoking a key means removing its line (or listing it
-  in a revocation file). `valid-before` is NOT revocation: git checks it
-  against the tagger date, which whoever holds the key chooses. A release may
+  in a revocation file). `valid-before` is NOT revocation: as far as this seat knows, git
+  checks it against the tagger date, which whoever holds the key chooses. That
+  was not run here; test V25 settles it, and the rule stands either way. The
+  git 2.34 minimum in R2.2 is likewise from memory and is to be confirmed by
+  the builder. A release may
   only ever subtract trust; a release-shipped revoked-keys list is allowed as
   later work, a release-shipped new-keys list is never allowed.
 
@@ -472,8 +482,10 @@ version's or byte-identical to the verified tag's. Nothing is fetched from
   mode 0700, and runs it. It refuses when `HOOKS_DAEMON_UPGRADE_REF`,
   `HOOKS_DAEMON_UPGRADE_BASE_URL`, `HOOKS_DAEMON_BOOTSTRAP_BASE_URL`,
   `HOOKS_DAEMON_UNSAFE_TRACK_REF` or `HOOKS_DAEMON_CLONE_URL` is set, and it
-  sets `HOOKS_DAEMON_SKIP_BOOTSTRAP=1` so no skill script fetches itself from
-  `main` during the run.
+  sets `HOOKS_DAEMON_SKIP_BOOTSTRAP=1` for itself and its children. That
+  does not reach the skill's later steps, which are separate commands the
+  agent runs: under `--unattended` the skill text sets the variable on every
+  wrapper call it makes, and its acceptance test pins that.
 - **R3.3 The authoritative verification is Layer 1's, under the lock.** Layer
   1 verifies again after taking the lock, with the installed lib, requires
   itself to be byte-identical to `scripts/upgrade.sh` in the verified commit,
@@ -496,6 +508,14 @@ version's or byte-identical to the verified tag's. Nothing is fetched from
   the end of the run can change files under it. That process could already
   change the installed daemon.
 - The attended route is unchanged: it still runs Layer 1 from `main`.
+- **The skill wrappers' self-bootstrap is a second, unsigned update channel,
+  and it exists today in every session.** `daemon-cli.sh`, `health-check.sh`
+  and `init-handlers.sh` replace themselves from the latest release's
+  downloadable assets, checked only against checksums from the same place. No
+  tag signature covers those assets. R3.2 keeps it out of an unattended
+  upgrade only as far as the skill text is followed. Closing it for all
+  sessions is outside this plan and needs its own entry in the niggles
+  ledger.
 
 ### Ruling 4: a clean stop at any step that asks the user
 
@@ -541,9 +561,10 @@ work in the project does not block. Retry at the next SessionStart only.**
 - **R5.2 One list.** The owned-path list exists in Layer 1, in
   `auto_upgrade.py` and in skill step 7. A test holds the three equal.
 - **R5.3 The commit takes only the owned paths.** The unattended commit
-  names them as a pathspec (`git commit --only -- <paths>`), so nothing
-  another agent staged is swept in. It never pushes and never switches
-  branch.
+  is made by a script the skill calls, not by commands the agent composes. The
+  script names the owned paths as a pathspec (`git commit --only -- <paths>`),
+  so nothing another agent staged is swept in, writes the R1.2 line into the
+  message, and never pushes or switches branch.
 - **R5.4 No retry loop.** A dirty refusal writes no attempt record. The
   Python pre-check mirrors the refusal, so the next invitation comes only at
   a later SessionStart whose pre-check passes (review M3). Nothing waits,
@@ -655,7 +676,7 @@ throwaway keys and fake releases.
 | V11 | A release whose `upgrade.sh` differs from the one being run: refused; the shim with `--unattended` makes no network call                                                  | R3.1, R3.3     |
 | V12 | `enabled: false`, a malformed entry, `disable_tags`, and self-install: the ENTRY refuses, not only the notice                                                             | R1.5           |
 | V13 | A release first seen under 24 hours ago: refused; the same release a day later: proceeds; a deleted sighting record restarts the wait                                     | R1.6           |
-| V14 | A leftover `started` record: that version is not invited and is refused                                                                                                   | R1.7           |
+| V14 | A leftover `started` record: not invited, refused; a dirty-path or held-lock refusal leaves no record                                                                     | R1.7           |
 | V15 | Same version, older version, pre-release, and a tracked stamp above the clone's version: each refused                                                                     | R1.3           |
 | V16 | A release-state file that is a dangling symlink: refused                                                                                                                  | R1.3           |
 | V17 | A crossed task marked `Requires human: yes`: the gate escalates and nothing is deployed; the release check fails a new task with no field                                 | R4.1           |
