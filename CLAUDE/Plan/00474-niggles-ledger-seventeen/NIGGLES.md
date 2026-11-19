@@ -7939,3 +7939,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 - An unlistable directory anywhere in the project now stops the link scan (fix F2), so it denies every computed move followed by a reader.
 
 **Status**: ⬜ Open; recorded for the Plan 00623 merge.
+
+### N671 — `issue-report`'s version-currency check reads only the locally installed release notes, so it calls an old install the newest release
+
+**Source**: coordinator peer note, dogfood fault from another seat (not urgent).
+
+**Evidence**: a seat running 3.74.0 was told by `issue-report` that 3.74.0 was the newest release, because the check consults only the locally installed release notes. 3.75.0 had been published, and issues #210 and #211 were then filed for defects already fixed there, as duplicates. The numbering skips N669 and N670, which sit on the unmerged Plan 00623 branch.
+
+**Status**: ⬜ Open, low priority. Ask GitHub for the latest release, and fall back to the local notes with a stated "could not check" line when the network is unavailable, so the report never claims "newest" it did not verify.
