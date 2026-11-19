@@ -37,11 +37,20 @@ class TestPathGeneration(unittest.TestCase):
     """Test suite for daemon path generation functions."""
 
     def setUp(self):
-        """Mock Path.mkdir to prevent filesystem side effects in path generation tests."""
+        """Mock Path.mkdir to prevent filesystem side effects in path generation tests.
+
+        A path that falls back lands in a private runtime dir of the test's own,
+        so the result never depends on what this host's runtime dirs look like.
+        """
         self.mkdir_patcher = patch.object(Path, "mkdir")
         self.mkdir_patcher.start()
+        self.runtime_dir = tempfile.TemporaryDirectory()
+        self.env_patcher = patch.dict(os.environ, {"XDG_RUNTIME_DIR": self.runtime_dir.name})
+        self.env_patcher.start()
 
     def tearDown(self):
+        self.env_patcher.stop()
+        self.runtime_dir.cleanup()
         self.mkdir_patcher.stop()
 
     def test_get_socket_path_format(self):
@@ -927,7 +936,7 @@ class TestSocketPathLengthFallback(unittest.TestCase):
         runs deterministically regardless of what the host provides.
         """
         deep_path = "/home/user/projects/client/" + "a" * 80 + "/deep-nested-project"
-        uid = os.getuid()
+        uid = os.geteuid()
         run_user_dir = Path(f"/run/user/{uid}")
 
         with patch.dict(os.environ, {"HOSTNAME": "h"}, clear=False):
@@ -935,10 +944,11 @@ class TestSocketPathLengthFallback(unittest.TestCase):
             os.environ.pop("XDG_RUNTIME_DIR", None)
 
             # Whether this host has /run/user/{uid} must not decide whether the
-            # branch is tested: only that one directory exists, as far as the
-            # fallback can tell.
-            with patch.object(
-                Path, "is_dir", autospec=True, side_effect=lambda path: path == run_user_dir
+            # branch is tested: only that one directory is private, as far as
+            # the fallback can tell.
+            with patch(
+                "claude_code_hooks_daemon.daemon.paths._is_private_dir",
+                side_effect=lambda path: path == run_user_dir,
             ):
                 socket_path = get_socket_path(deep_path)
                 project_hash = get_project_hash(deep_path)
@@ -948,21 +958,25 @@ class TestSocketPathLengthFallback(unittest.TestCase):
             self.assertTrue(str(socket_path).endswith(".sock"))
 
     def test_socket_path_over_limit_uses_tmp_fallback(self):
-        """When neither XDG nor /run/user available, use /tmp fallback."""
+        """When neither XDG nor /run/user available, use this user's private /tmp subdir."""
         deep_path = "/home/user/projects/client/" + "a" * 80 + "/deep-nested-project"
+        private = Path(f"/tmp/hooks-daemon-{os.geteuid()}")
 
         with patch.dict(os.environ, {"HOSTNAME": "h"}, clear=False):
             os.environ.pop("CLAUDE_HOOKS_SOCKET_PATH", None)
             os.environ.pop("XDG_RUNTIME_DIR", None)
 
-            # Mock Path.is_dir to always return False (no XDG, no /run/user)
-            with patch.object(Path, "is_dir", return_value=False):
+            # Only the private /tmp subdirectory passes the check (no XDG, no
+            # /run/user); Path.mkdir is patched by setUp, so nothing is created.
+            with patch(
+                "claude_code_hooks_daemon.daemon.paths._is_private_dir",
+                side_effect=lambda path: path == private,
+            ):
                 socket_path = get_socket_path(deep_path)
                 project_hash = get_project_hash(deep_path)
 
-                self.assertTrue(
-                    str(socket_path).startswith("/tmp/"),
-                    f"Expected /tmp/ prefix, got: {socket_path}",
+                self.assertEqual(
+                    socket_path.parent, private, f"Expected {private}, got: {socket_path}"
                 )
                 self.assertIn(f"hooks-daemon-{project_hash}", str(socket_path))
                 self.assertTrue(str(socket_path).endswith(".sock"))
@@ -1005,18 +1019,20 @@ class TestSocketPathLengthFallback(unittest.TestCase):
                 self.assertIn(f"hooks-daemon-{project_hash}", str(log_path))
                 self.assertTrue(str(log_path).endswith(".log"))
 
-    def test_env_override_bypasses_length_check(self):
-        """CLAUDE_HOOKS_SOCKET_PATH env var still works regardless of length."""
+    def test_env_override_is_fitted_to_the_length_limit(self):
+        """An over-limit CLAUDE_HOOKS_SOCKET_PATH can never be bound (Plan 00628):
+        it is replaced by the project's fallback, like the default path is."""
         long_override = "/some/very/long/path/" + "x" * 200 + "/daemon.sock"
-        with patch.dict(
-            os.environ,
-            {"CLAUDE_HOOKS_SOCKET_PATH": long_override},
-            clear=False,
-        ):
-            socket_path = get_socket_path("/any/project")
+        with tempfile.TemporaryDirectory() as xdg_dir:
+            with patch.dict(
+                os.environ,
+                {"CLAUDE_HOOKS_SOCKET_PATH": long_override, "XDG_RUNTIME_DIR": xdg_dir},
+                clear=False,
+            ):
+                socket_path = get_socket_path("/any/project")
 
-            # Env override should be returned as-is, no length check
-            self.assertEqual(socket_path, Path(long_override))
+            self.assertTrue(str(socket_path).startswith(xdg_dir))
+            self.assertLessEqual(len(str(socket_path)), _UNIX_SOCKET_PATH_LIMIT)
 
 
 class TestSocketDiscoveryFile(unittest.TestCase):

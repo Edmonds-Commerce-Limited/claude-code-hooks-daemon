@@ -21,6 +21,7 @@ import platform
 import re
 import shutil
 import socket
+import stat
 import sys
 import time
 from collections.abc import Callable
@@ -1516,29 +1517,77 @@ def get_project_name(project_path: Path | str) -> str:
     return name[:20]
 
 
+class UnsafeRuntimeDirError(RuntimeError):
+    """No private short directory exists for an over-limit socket path."""
+
+
+# Module-level so tests can point them at a fixture tree.
+_RUN_USER_ROOT = Path("/run/user")
+_SHARED_TMP = Path("/tmp")  # nosec B108 - only ever used through a verified private subdir
+
+
+def _is_private_dir(path: Path) -> bool:
+    """``path`` is a real directory (not a link) owned by us and closed to others.
+
+    The same protection the untracked directory gives a socket placed in it:
+    nobody else can reach, replace or pre-plant anything inside.
+    """
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and info.st_uid == os.geteuid()
+        and stat.S_IMODE(info.st_mode) & 0o077 == 0
+    )
+
+
+def _private_tmp_subdir(warn_message: str) -> Path:
+    """This user's own 0700 directory under the shared ``/tmp``, or fail closed."""
+    private = _SHARED_TMP / f"hooks-daemon-{os.geteuid()}"
+    try:
+        private.mkdir(mode=0o700)
+    except FileExistsError:
+        logger.debug("Short-path directory %s already exists; verifying it", private)
+    if not _is_private_dir(private):
+        raise UnsafeRuntimeDirError(
+            f"The project path is too long for an AF_UNIX socket, no private runtime "
+            f"directory ($XDG_RUNTIME_DIR or /run/user/<uid>) is available, and {private} "
+            f"is not a directory owned by this user with mode 0700 (a link, another "
+            f"user's, or open to others). Refusing to place the daemon socket there. "
+            f"Remove {private}, set XDG_RUNTIME_DIR to a private directory, or set "
+            f"CLAUDE_HOOKS_SOCKET_PATH to a short path."
+        )
+    logger.warning(warn_message)
+    return private
+
+
 def _pick_short_path_root_dir(*, warn_message: str) -> Path:
     """Return the preferred short-path root for an AF_UNIX overflow fallback.
 
     Shared by every "project path is too long" fallback in this module (the
     legacy socket/PID/log fallback and the Plan 00290 per-event socket dir
     fallback): both need a directory GUARANTEED to be short, tried in the
-    same order of preference.
+    same order of preference. Each candidate must pass :func:`_is_private_dir`.
 
     Tries, in order:
     1. ``$XDG_RUNTIME_DIR`` (standard on modern Linux)
     2. ``/run/user/{uid}`` (common on Linux)
-    3. ``/tmp`` (last resort; logs ``warn_message``)
+    3. ``/tmp/hooks-daemon-{uid}``, created 0700 (last resort; logs ``warn_message``)
+
+    Raises:
+        UnsafeRuntimeDirError: when the last resort exists but is not private.
     """
     xdg_dir = os.environ.get("XDG_RUNTIME_DIR")
-    if xdg_dir and Path(xdg_dir).is_dir():
+    if xdg_dir and _is_private_dir(Path(xdg_dir)):
         return Path(xdg_dir)
 
-    run_user = Path(f"/run/user/{os.getuid()}")
-    if run_user.is_dir():
+    run_user = _RUN_USER_ROOT / str(os.geteuid())
+    if _is_private_dir(run_user):
         return run_user
 
-    logger.warning(warn_message)
-    return Path("/tmp")  # nosec B108 - /tmp is last resort fallback
+    return _private_tmp_subdir(warn_message)
 
 
 def _host_tag() -> str:
@@ -1572,8 +1621,9 @@ def _get_fallback_runtime_dir(project_dir: Path, filename: str) -> Path:
     base_name = f"hooks-daemon-{project_hash}-{_host_tag()}"
     root = _pick_short_path_root_dir(
         warn_message=(
-            "Socket path too long and no XDG_RUNTIME_DIR or /run/user available. "
-            "Using /tmp for runtime files. Set CLAUDE_HOOKS_SOCKET_PATH to override."
+            "Socket path too long and no private XDG_RUNTIME_DIR or /run/user/<uid> "
+            "(owned by this user, mode 0700). Using this user's private directory under "
+            "/tmp for runtime files. Set CLAUDE_HOOKS_SOCKET_PATH to override."
         )
     )
     return root / f"{base_name}.{filename}"
@@ -1647,7 +1697,7 @@ def socket_path_diagnosis(project_path: Path, *, self_install: bool) -> str | No
     return (
         f"The natural socket path is {len(str(path))} bytes, {overflow} over the "
         f"{_UNIX_SOCKET_PATH_LIMIT}-byte AF_UNIX limit, so a running daemon places its "
-        f"socket under /tmp instead and nothing appears here. A restart will NOT change "
+        f"socket in a short private runtime directory instead and nothing appears here. A restart will NOT change "
         f"this. Shorten the path by at least {overflow} characters — in a worktree the "
         f"branch name is the usual cause. Path: {path}"
     )
@@ -1784,27 +1834,52 @@ def get_socket_path(project_dir: Path | str) -> Path:
         >>> get_socket_path(Path('/home/dev/alpha'))
         Path('/home/dev/alpha/.claude/hooks-daemon/untracked/daemon.sock')
     """
-    # Allow environment variable override for testing
+    # An override (init.sh passes its own computation) is fitted like the default.
     if env_path := os.environ.get("CLAUDE_HOOKS_SOCKET_PATH"):
-        return Path(env_path)
+        return fit_socket_path(project_dir, Path(env_path))
+    _get_untracked_dir(Path(project_dir).resolve()).mkdir(parents=True, exist_ok=True)
+    return fit_socket_path(project_dir)
 
-    # Use daemon's untracked directory (secure, project-specific)
-    # Self-install mode uses shorter path: {project}/untracked/
-    # Normal mode uses: {project}/.claude/hooks-daemon/untracked/
-    project_path = Path(project_dir).resolve()
-    untracked_dir = _get_untracked_dir(project_path)
-    untracked_dir.mkdir(parents=True, exist_ok=True)
 
-    # Add hostname-based suffix for isolation
-    suffix = _get_hostname_suffix()
-    return _fitted_socket_path(project_path, untracked_dir / f"daemon{suffix}.sock")
+def fit_socket_path(project_dir: Path | str, requested: Path | str | None = None) -> Path:
+    """THE socket path for ``project_dir``'s daemon, whoever asks (Plan 00628).
+
+    ``requested`` is a path a caller names (``CLAUDE_HOOKS_SOCKET_PATH``, the
+    ``--socket`` flag, ``daemon.socket_path``); ``None`` means the natural one
+    in the untracked directory. A path over the AF_UNIX limit can never be
+    bound, so it is replaced by this project's short fallback, which is
+    exactly what every caller that did not name a path computes, so a daemon
+    started with a forced path and a CLI that names none agree on one socket.
+    """
+    if requested is None:
+        project_path = Path(project_dir).resolve()
+        path = _get_untracked_dir(project_path) / f"daemon{_get_hostname_suffix()}.sock"
+    else:
+        path = Path(requested)
+    if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:
+        return _get_fallback_runtime_dir(Path(project_dir).resolve(), "sock")
+    return path
+
+
+def fit_pid_path(project_dir: Path | str, requested: Path | str | None = None) -> Path:
+    """The PID file path paired with :func:`fit_socket_path`, by the same rule.
+
+    Decided on the PID path's OWN length: at exactly the limit the PID file
+    stays put while its one-character-longer socket falls back (``init.sh``
+    mirrors this boundary).
+    """
+    if requested is None:
+        path = _get_untracked_dir(Path(project_dir).resolve()) / pid_file_name()
+    else:
+        path = Path(requested)
+    if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:
+        return _get_fallback_runtime_dir(Path(project_dir).resolve(), "pid")
+    return path
 
 
 def _fitted_socket_path(project_path: Path, path: Path) -> Path:
     """``path``, or the fallback socket when it exceeds the AF_UNIX length limit."""
-    if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:
-        return _get_fallback_runtime_dir(project_path, "sock")
-    return path
+    return fit_socket_path(project_path, path)
 
 
 def socket_path_paired_with(project_dir: Path | str, pid_file: Path) -> Path:
@@ -1862,8 +1937,9 @@ def _get_event_socket_fallback_dir(untracked_dir: Path) -> Path:
     base_name = f"hooks-daemon-{dir_hash}-{_host_tag()}-events"
     root = _pick_short_path_root_dir(
         warn_message=(
-            "Event socket dir too long and no XDG_RUNTIME_DIR or /run/user available. "
-            "Using /tmp for per-event sockets. Set HOOKS_DAEMON_EVENTS_DIR to override."
+            "Event socket dir too long and no private XDG_RUNTIME_DIR or /run/user/<uid> "
+            "(owned by this user, mode 0700). Using this user's private directory under "
+            "/tmp for per-event sockets. Set HOOKS_DAEMON_EVENTS_DIR to override."
         )
     )
     return root / base_name
@@ -2053,9 +2129,9 @@ def get_pid_path(project_dir: Path | str) -> Path:
         >>> get_pid_path(Path('/home/dev/alpha'))
         Path('/home/dev/alpha/.claude/hooks-daemon/untracked/daemon.pid')
     """
-    # Allow environment variable override for testing
+    # An override (init.sh passes its own computation) is fitted like the default.
     if env_path := os.environ.get("CLAUDE_HOOKS_PID_PATH"):
-        return Path(env_path)
+        return fit_pid_path(project_dir, Path(env_path))
 
     # Use daemon's untracked directory (secure, project-specific)
     # Self-install mode uses shorter path: {project}/untracked/
@@ -2074,15 +2150,7 @@ def pid_path_for(project_dir: Path | str) -> Path:
     so a read-only scan finds the file a daemon with a long project path really
     wrote rather than the one in its untracked directory.
     """
-    project_path = Path(project_dir).resolve()
-    # Hostname-based suffix for isolation.
-    path = _get_untracked_dir(project_path) / pid_file_name()
-
-    # Fallback if path exceeds AF_UNIX socket length limit (consistency with socket)
-    if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:
-        return _get_fallback_runtime_dir(project_path, "pid")
-
-    return path
+    return fit_pid_path(project_dir)
 
 
 def get_log_path(project_dir: Path | str) -> Path:

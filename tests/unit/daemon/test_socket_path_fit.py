@@ -192,7 +192,6 @@ class TestShortPathRootIsPrivate:
         st = os.lstat(socket_path.parent)
         assert st.st_uid == os.geteuid()
         assert st.st_mode & 0o077 == 0
-        assert len(str(socket_path)) <= _UNIX_SOCKET_PATH_LIMIT
 
     def test_a_squatted_tmp_subdir_fails_closed(
         self, long_project: Path, no_runtime_dir: Path

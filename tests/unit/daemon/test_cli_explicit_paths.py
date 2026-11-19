@@ -247,18 +247,20 @@ class TestInitShPassesEnvVars:
                 return candidate.read_text()
         raise FileNotFoundError(f"init.sh not found in {self._PROJECT_ROOT}")
 
-    def test_init_sh_exports_socket_path_to_cli(self) -> None:
-        """init.sh start_daemon() must set CLAUDE_HOOKS_SOCKET_PATH before CLI call."""
+    def test_init_sh_passes_on_only_a_caller_pinned_socket_path(self) -> None:
+        """start_daemon() hands the CLI the caller's own CLAUDE_HOOKS_SOCKET_PATH,
+        never its computed SOCKET_PATH: forcing that bound an over-limit path in a
+        long project and every hook was denied (Plan 00628; behaviour pinned by
+        ``test_init_sh_long_project_path_reaches_its_daemon.py``)."""
         init_sh = self._read_init_sh()
-        assert "CLAUDE_HOOKS_SOCKET_PATH" in init_sh
-        # The env var should appear in the start_daemon function's CLI call
-        assert 'CLAUDE_HOOKS_SOCKET_PATH="$SOCKET_PATH"' in init_sh
+        assert 'CLAUDE_HOOKS_SOCKET_PATH="$SOCKET_PATH"' not in init_sh
+        assert 'pinned_paths+=("CLAUDE_HOOKS_SOCKET_PATH=$CLAUDE_HOOKS_SOCKET_PATH")' in init_sh
 
-    def test_init_sh_exports_pid_path_to_cli(self) -> None:
-        """init.sh start_daemon() must set CLAUDE_HOOKS_PID_PATH before CLI call."""
+    def test_init_sh_passes_on_only_a_caller_pinned_pid_path(self) -> None:
+        """As the socket path: only a caller-set CLAUDE_HOOKS_PID_PATH reaches the CLI."""
         init_sh = self._read_init_sh()
-        assert "CLAUDE_HOOKS_PID_PATH" in init_sh
-        assert 'CLAUDE_HOOKS_PID_PATH="$PID_PATH"' in init_sh
+        assert 'CLAUDE_HOOKS_PID_PATH="$PID_PATH"' not in init_sh
+        assert 'pinned_paths+=("CLAUDE_HOOKS_PID_PATH=$CLAUDE_HOOKS_PID_PATH")' in init_sh
 
     def test_init_sh_passes_project_root_to_cli(self) -> None:
         """init.sh start_daemon() must pass --project-root to CLI, resolved

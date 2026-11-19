@@ -65,6 +65,7 @@ from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler_bases import StatusLineSegmentHandler
 from claude_code_hooks_daemon.core.project_context import GitContextError, ProjectContext
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
+from claude_code_hooks_daemon.daemon import paths as daemon_paths
 from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
 
 # The daemon's untracked directory for the current install mode: the ONE rule,
@@ -539,7 +540,7 @@ def _resolve_pid_path(args: argparse.Namespace, project_path: Path) -> Path:
         Resolved PID file path
     """
     if hasattr(args, "pid_file") and args.pid_file is not None:
-        return Path(args.pid_file)
+        return daemon_paths.fit_pid_path(project_path, args.pid_file)
     return get_pid_path(project_path)
 
 
@@ -556,7 +557,7 @@ def _resolve_socket_path(args: argparse.Namespace, project_path: Path) -> Path:
         Resolved socket path
     """
     if hasattr(args, "socket") and args.socket is not None:
-        return Path(args.socket)
+        return daemon_paths.fit_socket_path(project_path, args.socket)
     return get_socket_path(project_path)
 
 
@@ -743,8 +744,14 @@ def cmd_start(args: argparse.Namespace) -> int:
         0 if daemon started successfully, 1 otherwise
     """
     project_path = get_project_path(getattr(args, "project_root", None))
-    socket_path = _resolve_socket_path(args, project_path)
-    pid_path = _resolve_pid_path(args, project_path)
+    # Resolved before the fork: the daemon child's stderr is /dev/null, so a
+    # path with no safe place to live is reported here, where the hook reads it.
+    try:
+        socket_path = _resolve_socket_path(args, project_path)
+        pid_path = _resolve_pid_path(args, project_path)
+    except daemon_paths.UnsafeRuntimeDirError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     # Load config for enforcement check
     config_path = project_path / ".claude" / "hooks-daemon.yaml"
@@ -988,55 +995,50 @@ def _start_under_launch_lock(
     daemon_config = config.daemon
 
     # Ensure paths are set (use getters if not set)
-    if daemon_config.socket_path is None:
-        daemon_config.socket_path = str(daemon_config.get_socket_path(project_path))
+    daemon_socket = daemon_config.socket_path or str(daemon_config.get_socket_path(project_path))
+    daemon_config.socket_path = daemon_socket
     if daemon_config.pid_file_path is None:
         daemon_config.pid_file_path = str(daemon_config.get_pid_file_path(project_path))
 
-    daemon = HooksDaemon(
-        daemon_config,
-        controller,
-        start_lock_waiting=reporter.start_lock_waiting,
-        serving=launch.release,
-        deferred_startup=controller.take_deferred_startup(),
-    )
-
-    # Write socket discovery file so bash hook forwarders (init.sh)
-    # can find the daemon when the socket path differs from the default
-    # (e.g., AF_UNIX path length fallback to XDG_RUNTIME_DIR)
+    # The socket discovery file tells bash hook forwarders (init.sh) where the
+    # daemon listens when that differs from the default (the AF_UNIX length
+    # fallback). It is SHARED by every start of this project's daemon, so it is
+    # written only once THIS process has bound its socket (the `serving`
+    # callback), and removed only by the process that wrote it (Plan 00628;
+    # Plan 00127 Finding 2). A start whose bind fails, or that loses the reuse
+    # race, never touches a live incumbent's file.
     from claude_code_hooks_daemon.daemon.paths import (
         cleanup_socket_discovery_file,
         write_socket_discovery_file,
     )
 
-    write_socket_discovery_file(project_path, daemon_config.socket_path)
+    published: list[bool] = []
 
-    # Plan 00127 (Finding 2): the socket-discovery file is SHARED between the
-    # incumbent and any losing same-root start (deterministic per untracked dir
-    # + hostname). It must be deleted ONLY by the process that actually OWNED
-    # the daemon, never by a reuse-race loser — on long-path (fallback-socket)
-    # setups init.sh relies on this file to find the live incumbent's socket,
-    # and the incumbent only writes it once at its own startup. Deleting it in a
-    # blanket `finally` would silently break the incumbent's hook forwarding.
-    i_owned_the_daemon = False
+    def _serving() -> None:
+        write_socket_discovery_file(project_path, daemon_socket)
+        published.append(True)
+        launch.release()
+
+    daemon = HooksDaemon(
+        daemon_config,
+        controller,
+        start_lock_waiting=reporter.start_lock_waiting,
+        serving=_serving,
+        deferred_startup=controller.take_deferred_startup(),
+    )
+
     try:
         asyncio.run(daemon.start())
-        # start() returned normally => this process owned and then shut the
-        # daemon down cleanly. Its discovery file is now stale and ours to clear.
-        i_owned_the_daemon = True
     except DaemonAlreadyRunningError as e:
         # A live incumbent won the race. This is a benign REUSE, NOT a crash —
         # the winning daemon already wrote the PID file the parent polls for, so
-        # overall start is a clean exit 0 with exactly one daemon. We did NOT own
-        # the daemon, so we must NOT delete the incumbent's discovery file.
+        # overall start is a clean exit 0 with exactly one daemon.
         print(
             f"Daemon already running on {daemon_config.socket_path}; reusing existing instance: {e}"
         )
         sys.exit(0)
     except Exception as e:
-        # A genuine crash AFTER we bound and published our own discovery file:
-        # we owned it, so clear it on the way out.
-        i_owned_the_daemon = True
+        # A crash, before the bind (nothing published) or after it.
         print(f"ERROR: Daemon crashed: {e}", file=sys.stderr)
         import traceback
 
@@ -1044,7 +1046,7 @@ def _start_under_launch_lock(
         sys.exit(1)
     finally:
         launch.release()
-        if i_owned_the_daemon:
+        if published:
             cleanup_socket_discovery_file(project_path)
 
     sys.exit(0)
