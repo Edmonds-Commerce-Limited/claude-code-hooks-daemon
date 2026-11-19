@@ -946,11 +946,14 @@ handlers:
             enabled: false
           - id: commit-push-cadence
             enabled: false
-          # Default ON. Any value but enabled: true switches it off. Never
-          # covers a MAJOR bump, a READ THIS FIRST gate escalation, a release
-          # in progress, a dirty tree, or a version whose attempt failed.
-          - id: daemon-auto-upgrade
-            enabled: true
+          # daemon-auto-upgrade is deliberately NOT listed: unlisted, it is the
+          # daemon's shipped default (ON) and its text says so. Listing it
+          # with enabled: true records it as this project's own request; any
+          # other value switches it off. Never covers a MAJOR bump, a READ
+          # THIS FIRST gate escalation, a release in progress, a dirty tree,
+          # or a version whose attempt failed. To switch it off:
+          # - id: daemon-auto-upgrade
+          #   enabled: false
 
     daemon_upgrade_detector:  # Notice the INSTALLED daemon version changing underneath a running process (Plan 00395)
       # Compares what this process loaded against `.daemon-metadata.json` in

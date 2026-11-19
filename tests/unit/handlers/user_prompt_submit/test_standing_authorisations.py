@@ -249,6 +249,20 @@ class TestDaemonAutoUpgrade:
         patterns = [p for t in tests for p in t.expected_message_patterns]
         assert any("STANDING AUTHORISATION" in p for p in patterns)
 
+    def test_a_fresh_install_from_the_example_config_says_shipped_default(self) -> None:
+        # Adversarial review M10: a fresh install copies the example config, so
+        # an `enabled: true` entry there made every new project's text claim a
+        # request "recorded in" its config that nobody made.
+        import yaml
+
+        example = Path(__file__).resolve().parents[4] / ".claude" / "hooks-daemon.yaml.example"
+        config = yaml.safe_load(example.read_text(encoding="utf-8"))
+        options = config["handlers"]["user_prompt_submit"]["standing_authorisations"]["options"]
+        handler = self._handler(options.get("authorisations"))
+        text = self._text(handler)
+        assert "shipped default" in text
+        assert "recorded in" not in text
+
     def test_claude_md_says_one_entry_is_default_on(self) -> None:
         guidance = StandingAuthorisationsHandler().get_claude_md()
         assert guidance is not None
