@@ -29,7 +29,7 @@ This plan is design only until the owner or coordinator starts Phase 1. No exist
 ## Goals
 
 - Every scratch entry past its TTL (24 hours by default, configurable) is filed, archived or removed, unless a machine test shows it is live or holds work that exists nowhere else.
-- Removal is only ever by machine proof or after a verified archive has been held and announced. A repository or worktree with unpushed commits or dirty tracked content is never packed or removed.
+- Removal is only ever by machine proof or after a verified archive has been held and announced. A repository or worktree that has somewhere to push (a remote, or shared history with the project) and holds unpushed commits or dirty tracked content is never packed or removed. A standalone repository with no remote and unrelated history is the stated exception: it is packed whole and removed after the long hold (DESIGN.md R6, R7), and the owner should confirm that.
 - `hooks-daemon scratch-sweep` reports by default and acts with `--apply`. It runs from the housekeeping pass, a must-do item and a routine.
 - A SessionStart report, and caps on directories, bytes and entries that warn and then block before the link index is affected. The link index excludes nothing.
 - Scratch is written inside a per-session directory the daemon creates and marks, so each entry has an owner and a birth time.
@@ -130,7 +130,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [ ] A failure injected after each step of the removal order leaves the original or a verified archive, and a second run converges.
 - [ ] No link is followed: the escape tests leave every outside dummy file untouched.
 - [ ] A dry run changes no inode.
-- [ ] A repository with unpushed commits or dirty tracked content is never packed or removed, including when its own remote refs claim otherwise.
+- [ ] A related repository (a remote, or shared history) with unpushed commits or dirty tracked content is never packed or removed, including when its own remote refs claim otherwise and when the remote cannot be reached. A standalone repository is only ever packed whole and held (DESIGN.md R7).
 - [ ] The cap guard denies a directory-creating command at the block cap and never denies a commit or journal body file.
 - [ ] No code path and no printed suggestion deletes on age alone.
 - [ ] After the dogfood run this repository's scratch is under the warn caps, or the report names each protected entry that keeps it above.
