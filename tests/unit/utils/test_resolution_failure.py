@@ -69,6 +69,18 @@ def test_with_nothing_protected_a_failed_placement_finds_nothing() -> None:
         "//proc//self/./cwd/x",
         "/tmp/../proc/self/cwd",
         "/proc/self",
+        "/proc/self/root/etc/passwd",
+        "/proc/self/fd/3",
+        "/proc/self/exe",
+        "/proc/self/task/1/cwd/x",
+        "/proc/self/map_files/x",
+        "/proc/self/*",
+        "/proc/self/c?d",
+        "/proc/self/status/../cwd/x",
+        "/proc/self/status/x",
+        "/proc/thread-self/root",
+        "/dev/fd/3",
+        "/dev/fd",
     ],
 )
 def test_a_path_through_the_daemons_own_process_view_cannot_be_placed(path: str) -> None:
@@ -79,7 +91,17 @@ def test_a_path_through_the_daemons_own_process_view_cannot_be_placed(path: str)
 
 
 @pytest.mark.parametrize(
-    "path", ["/proc/version", "/proc/1/status", "/dev/null", "src/selfish/proc"]
+    "path",
+    [
+        "/proc/version",
+        "/proc/1/status",
+        "/dev/null",
+        "src/selfish/proc",
+        "/proc/self/status",
+        "//proc//self/./cgroup",
+        "/proc/thread-self/status",
+        "/proc/self/mountinfo",
+    ],
 )
 def test_other_paths_are_placed(path: str) -> None:
     from claude_code_hooks_daemon.utils.resolution_failure import refuse_process_view

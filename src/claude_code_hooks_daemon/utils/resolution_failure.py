@@ -57,18 +57,62 @@ _PROCESS_VIEWS: frozenset[tuple[str, str]] = frozenset(
 )
 
 
+#: Plain files directly under ``/proc/self`` (and ``thread-self``) that hold no
+#: link onward, so naming one places nothing outside it. An allowlist, not a
+#: denylist of ``cwd``/``root``/``fd``/...: a link entry a kernel adds later
+#: stays unplaceable. ``/dev/fd`` has no such file; every entry is a descriptor.
+_PLAIN_PROCESS_FILES: frozenset[str] = frozenset(
+    {
+        "cgroup",
+        "cmdline",
+        "comm",
+        "io",
+        "limits",
+        "loginuid",
+        "maps",
+        "mountinfo",
+        "mounts",
+        "mountstats",
+        "oom_score",
+        "oom_score_adj",
+        "sched",
+        "schedstat",
+        "sessionid",
+        "smaps",
+        "smaps_rollup",
+        "stat",
+        "statm",
+        "status",
+        "wchan",
+    }
+)
+
+
+def _is_plain_process_file(parts: list[str], view_end: int) -> bool:
+    """Whether the ``/proc`` view ending at ``parts[view_end]`` is followed by one plain file and no more."""
+    return (
+        parts[view_end - 1] == "proc"
+        and len(parts) == view_end + 2
+        and parts[view_end + 1] in _PLAIN_PROCESS_FILES
+    )
+
+
 def refuse_process_view(path: str) -> None:
     """Raise :class:`ResolutionFailedError` when ``path`` passes through ``/proc/self`` and kin.
 
     ``//`` and ``.`` are collapsed; ``..`` is not, because after a link it
     climbs from where the link leads. ``path`` is the word as placed: a
-    relative word is joined to its base first by the caller.
+    relative word is joined to its base first by the caller. The one exception
+    is a single plain file directly under ``/proc/self`` (``status``,
+    ``cgroup``...), which leads nowhere else; a path that only ENDS at the view
+    (``/proc/self``) is still refused, since a later word may be placed under it.
     """
     parts = [part for part in path.split("/") if part not in ("", ".")]
-    if any(pair in _PROCESS_VIEWS for pair in itertools.pairwise(parts)):
-        raise ResolutionFailedError(
-            "a path through the calling process's own /proc view cannot be placed"
-        )
+    for index, pair in enumerate(itertools.pairwise(parts), start=1):
+        if pair in _PROCESS_VIEWS and not _is_plain_process_file(parts, index):
+            raise ResolutionFailedError(
+                "a path through the calling process's own /proc view cannot be placed"
+            )
 
 
 def fail_closed_finding(patterns: Sequence[str], detail: str) -> tuple[str, str] | None:

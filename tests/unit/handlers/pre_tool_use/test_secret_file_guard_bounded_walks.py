@@ -194,9 +194,33 @@ class TestProcSelf:
         }
         assert _decision(hook_input) is Decision.DENY
 
-    @pytest.mark.parametrize("command", ["cat /proc/self/status", "cat /proc/self/cgroup"])
-    def test_an_ordinary_proc_self_read_is_denied_too(self, project: Project, command: str) -> None:
-        """The rule is as specified: it cannot tell these from a read through ``cwd``."""
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat /proc/self/status",
+            "cat /proc/self/cgroup",
+            "grep -r foo /proc/self/status",
+        ],
+    )
+    def test_a_plain_proc_self_file_is_allowed(self, project: Project, command: str) -> None:
+        """A named /proc/self file holds no link onward, so it is placed (ordinary-command gate)."""
+        assert _bash_decision(project, command) is Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat /proc/self/root/flink",
+            "cat /proc/self/fd/3",
+            "grep -r x /proc/self/*",
+            "cat /proc/self/status/../cwd/flink",
+            "cat /proc/self/task/1/cwd/flink",
+            "cd /proc/self && cat cwd/flink",
+            "cd /proc/self/root && cat flink",
+        ],
+    )
+    def test_a_link_bearing_or_unnamed_proc_self_path_is_denied(
+        self, project: Project, command: str
+    ) -> None:
         assert _bash_decision(project, command) is Decision.DENY
 
     def test_a_proc_path_that_is_not_self_is_allowed(self, project: Project) -> None:
