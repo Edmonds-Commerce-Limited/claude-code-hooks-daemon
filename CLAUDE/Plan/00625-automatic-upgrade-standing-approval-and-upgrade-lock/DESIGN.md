@@ -56,8 +56,11 @@ request. To keep Decision 3's honesty without its default:
   daemon's **shipped default**, not a request the project recorded, and names
   the line that switches it off: `{id: daemon-auto-upgrade, enabled: false}`;
 - the other three ids still ship disabled, and their test still asserts it;
-- only an explicit `enabled: false` turns it off; an entry with any other
-  value, or none, leaves the default.
+- an entry that lists the id counts as a recorded request only when it says
+  exactly `enabled: true`; any other value turns it off (review F3, fail
+  closed). Unlisted, the shipped default applies. The example config a fresh
+  install copies leaves it unlisted (review M10), so a new project's text says
+  "shipped default", not "recorded".
 
 **Reverse it** by changing the one per-entry default in
 `standing_authorisations.py` to `False`; nothing else changes.
@@ -178,14 +181,40 @@ owner stops beating.
   holder's restart is then seen by the waiter's next session start as "up to
   date".
 
-**Takeover is serialised** by a second noclobber file, `<lock>.takeover`: the
-taker creates it, re-judges the lock under it (it may have been released or
-retaken meanwhile), removes the stale lock, creates its own, and removes the
-takeover file. A takeover file older than 60 s is itself stale (its creator
-died inside a few-millisecond window) and is removed.
+**Takeover is serialised by generation files** `<lock>.takeover.<N>` (review
+F1). A taker finds the highest generation N, judges it like a lock record
+(its creator provably dead, or silent for 60 s), creates N+1 with noclobber,
+and goes on only if it created N+1 and no higher generation has appeared. It
+then re-judges the lock (it may have been released or retaken meanwhile),
+removes the stale lock only if it still carries the token it judged, creates
+its own, and removes its OWN generation. **No process ever removes a takeover
+file it did not create.** The earlier single `<lock>.takeover` was broken by
+path after an age check, which could delete a fresh one another taker had just
+created and let two processes hold the lock (7 of 15 trials in the review, 6
+of 30 in this branch's RED run). A crashed taker's generation stays on disk and
+is passed over; it is a few bytes and only a crash inside the takeover window
+leaves one. Known limit: a taker SIGSTOPped inside the window for more than 60 s
+in another pid namespace or boot can be judged stale.
+
+**The writer holds the lock too** (review F2). Layer 1 owns the lock but Layer
+2 does the writing. Layer 1 runs Layer 2 through `_upgrade_lock_run_writer`: a
+subshell writes its own pid and start time into the record as `writer=` /
+`writer_start=` (one rename of the record) and then execs Layer 2 under that
+same pid. So:
+
+- the judge treats the lock as dead only when the owner AND the writer are
+  provably dead, so an outer SIGKILL or OOM kill leaves the lock held while
+  Layer 2 runs, and free as soon as it ends;
+- the heartbeat beats while either lives, so the cross-namespace expiry does
+  not run out under a live Layer 2;
+- Layer 1 traps TERM and HUP (`_upgrade_lock_hold_through_signals`). Bash runs
+  a trap only after the foreground child returns, so a signalled Layer 1 ends,
+  and its EXIT trap releases, after Layer 2 has finished. No process is
+  signalled, which keeps Layer 1's no-signal rule;
+- a release while the writer is still alive leaves the lock in place for it.
 
 **Release**: the EXIT trap removes the lock only if it still carries this
-run's token, and stops the heartbeat.
+run's token and its writer, if any, is gone, and stops the heartbeat.
 
 **Filesystems**: correct where `O_EXCL` create is atomic and all parties share
 one view of the file: a local filesystem, a bind mount or Docker volume shared
@@ -241,6 +270,31 @@ Never while `untracked/release-state.json` exists in the project root (section
 4). In practice that file exists only in the daemon's own repository, where
 auto-upgrade does not apply anyway; the check costs nothing and keeps the
 rule true if a client project ever adopts the same release workflow.
+
+## 11a. Owner ruling relayed by the coordinator (not yet applied)
+
+The coordinator relayed an owner ruling on these decisions on 19 Nov, 12:41Z.
+This seat could not check the quote against its source, so it is recorded as
+relayed and unverified. It supersedes the matching OWNER DECISION items in
+sections 2, 5 and 11 once it is applied:
+
+1. Default ON for existing installs as well as new ones, with a one-time
+   notice on the first upgrade under it (how to switch it off), recorded as
+   shown. This supersedes Plan 00223's ship-disabled rule for this one
+   authorisation only, and that rule's wording, tests and docs must say so.
+2. Unattended runs verify the release tag's signature and refuse, with a
+   notice, when it does not verify. No signature, no upgrade; fail closed.
+3. Unattended runs execute the upgrade script from the verified published
+   tag, never from `main`.
+4. At any step that asks the user, an unattended run stops cleanly, leaves the
+   current version running and prints a one-line notice. It never guesses.
+5. Dirty tree: refuse only when the daemon's own paths (`.claude/hooks-daemon/`
+   and the files the upgrade rewrites) are dirty. When blocked, retry at the
+   next opportunity, never in a loop.
+6. The injected authorisation text is ONE short line.
+
+Items 1 and 5 loosen guards (consent and the dirty-tree refusal), so they
+should be confirmed by the owner directly before merge.
 
 ## 11. Open after the build (for review and the owner)
 

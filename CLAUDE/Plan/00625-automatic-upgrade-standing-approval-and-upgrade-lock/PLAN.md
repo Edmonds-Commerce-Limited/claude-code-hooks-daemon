@@ -84,8 +84,10 @@ All design decisions, and the ones that need the owner, are in
 
 ### Phase 8: Review and gate (coordinator)
 
-- [ ] ⬜ **Task 8.1**: independent review of the branch
-- [ ] ⬜ **Task 8.2**: full QA gate; owner rulings on the DESIGN.md OWNER DECISION items; merge
+- [x] ✅ **Task 8.1**: independent review of the branch (verdict FAIL; `subagent-reports/261119-p625-adversarial-review.md`)
+- [x] ✅ **Task 8.1a**: review fixes F1 (takeover generations) and F2 (Layer 2 holds the lock as writer) `d7acda90a`; M10 (example config leaves the entry unlisted) `b4ea0fe4a`; F3 to F5 by the reviewer
+- [ ] 🔄 **Task 8.1b**: apply the relayed owner ruling (DESIGN.md section 11a, items 1 to 6), which also covers M1; then a fresh independent re-review
+- [ ] ⬜ **Task 8.2**: full QA gate; owner confirmation of DESIGN.md section 11a items 1 and 5; merge
 
 ## Success Criteria
 
