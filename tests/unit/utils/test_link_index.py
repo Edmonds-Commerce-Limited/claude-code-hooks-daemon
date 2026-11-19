@@ -177,8 +177,26 @@ class TestFailClosed:
             return real_scandir(path)
 
         monkeypatch.setattr(link_index.os, "scandir", refuse)
-        holding, _ = _scan(_settled(build_link_index(str(tree))))
-        assert str(tree / "plain") in holding
+        result = _settled(build_link_index(str(tree))).verify()
+        assert str(tree / "plain") in result.value.holding
+
+    def test_a_directory_that_cannot_be_listed_stops_the_verification(
+        self, tree: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plan 00623 adversarial review: what lies UNDER an unlistable directory is
+        unknown (a searchable but unreadable directory still lets bash `cd` through
+        it), so the index cannot say it found every link: the result is stopped."""
+        real_scandir = os.scandir
+
+        def refuse(path: str) -> Iterator[os.DirEntry[str]]:
+            if os.fspath(path) == str(tree / "plain"):
+                raise PermissionError(errno.EACCES, "refused")
+            return real_scandir(path)
+
+        monkeypatch.setattr(link_index.os, "scandir", refuse)
+        result = _settled(build_link_index(str(tree))).verify()
+        assert not result.complete
+        assert "listed" in result.reason
 
     def test_corrupt(self, tree: Path) -> None:
         index = _settled(build_link_index(str(tree)))

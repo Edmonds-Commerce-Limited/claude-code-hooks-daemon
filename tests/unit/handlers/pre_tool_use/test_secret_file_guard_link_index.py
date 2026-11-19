@@ -207,10 +207,20 @@ class TestMovesOutsideTheProjectArePlaced:
             'cd "$TMPDIR" && python3 x.py',
         ],
     )
-    def test_a_move_outside_the_project_is_allowed_with_a_cold_index(
+    def test_a_move_outside_the_project_is_allowed_once_the_index_is_built(
         self, home: Path, cold: Project, command: str
     ) -> None:
-        assert _decision(cold, command) is Decision.ALLOW, _COLD
+        """Placement never excuses a stopped scan (see the class below), so a cold
+        index past the cap still denies a reader; the built index allows these."""
+        with patch.object(link_index, "link_scan_for", wraps=_real_link_scan_for):
+            _built(cold)
+            assert _decision(cold, command) is Decision.ALLOW
+
+    @pytest.mark.parametrize("command", ["cd ~/vault && cat r.md", 'cd "$HOME/vault" && cat r.md'])
+    def test_a_move_outside_the_project_then_a_read_denies_with_a_cold_index(
+        self, home: Path, cold: Project, command: str
+    ) -> None:
+        assert _decision(cold, command) is Decision.DENY, _COLD
 
     @pytest.mark.parametrize(
         "command",
@@ -290,6 +300,76 @@ class TestPlacementIsRefusedWhereTheShellMayLandElsewhere:
         self, home: Path, cold: Project, target: str, command: str
     ) -> None:
         assert sfm.place_outside_project(target, command) != ()
+
+
+#: Each read the protected dummy in real bash; the guard must deny however the scan ended.
+#: The links sit under the LAST top-level directory, past where the per-call scan stops.
+_REACHING_AFTER_PLACEMENT = (
+    "cd w599; v=HO; getopts i ${v}ME -i; cd ~; cat late",
+    "cd w599; v=HO; let ${v}ME=7; cd ~; cat late",
+    "cd w599; v=HO; ((${v}ME=7)); cd ~; cat late",
+    "cd w599; v=HO; : $((${v}ME=7)); cd ~; cat late",
+    "cd w599; v=HO; x[${v}ME=7]=1; cd ~; cat late",
+    "cd w599; v=TMP; let ${v}DIR=7; cd $TMPDIR; cat late",
+    'ln -s "$PWD/w599/zz" ~/new && cd ~/new && cat late',
+    'cd -P "$TMPDIR/up/.." && cat proj/w599/zz/late',
+)
+
+
+class TestAStoppedScanIsNotOverriddenByPlacement:
+    """Plan 00623 adversarial review: placing ~, $HOME or $TMPDIR never excuses a scan
+    that stopped. The placement trusts the daemon's value, and the shell's can differ:
+    a builtin the placement does not list sets it (getopts, let, arithmetic), or a
+    link is made at the placed path by the same command. Each of these read the
+    protected dummy in real bash while the guard allowed it with the scan stopped."""
+
+    @pytest.fixture()
+    def reach(self, home: Path, cold: Project) -> Project:
+        last = cold.root / f"w{_DIRECTORIES - 1:03d}"
+        assert last.name == "w599"
+        for name in ("7", "i", "zz"):
+            (last / name).mkdir()
+            (last / name / "late").symlink_to(cold.outside / _PROTECTED)
+        (cold.outside / "up").symlink_to(cold.root)
+        return cold
+
+    @pytest.mark.parametrize("command", _REACHING_AFTER_PLACEMENT)
+    def test_a_cold_index_denies(self, reach: Project, command: str) -> None:
+        assert _decision(reach, command) is Decision.DENY
+
+    @pytest.mark.parametrize("command", _REACHING_AFTER_PLACEMENT)
+    def test_an_overflowed_index_denies(self, reach: Project, command: str) -> None:
+        overflowed = link_index.LinkIndex(str(reach.root), {}, overflowed=True)
+        # A context patch, not monkeypatch: it must unwind before `cold` restores the original.
+        with patch.object(link_index, "link_scan_for", lambda root: overflowed.verify()):
+            assert _decision(reach, command) is Decision.DENY
+
+    @pytest.mark.parametrize("command", _REACHING_AFTER_PLACEMENT)
+    def test_a_built_index_denies(self, reach: Project, command: str) -> None:
+        with patch.object(link_index, "link_scan_for", wraps=_real_link_scan_for):
+            _built(reach)
+            assert _decision(reach, command) is Decision.DENY
+
+    def test_an_unlistable_directory_stops_the_per_call_scan(
+        self, cold: Project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A searchable but unreadable directory: bash moves through it, the scan cannot list it."""
+        small = tmp_path.resolve() / "small"
+        (small / "a" / "b").mkdir(parents=True)
+        (small / "a" / "b" / "late").symlink_to(cold.outside / _PROTECTED)
+        assert sfm.scan_project_links(str(small)).complete
+        real_scandir = sfm.os.scandir
+
+        def refuse(path: Any) -> Any:
+            if str(path) == str(small / "a"):
+                raise PermissionError(13, "refused", str(path))
+            return real_scandir(path)
+
+        monkeypatch.setattr(sfm.os, "scandir", refuse)
+        assert not sfm.scan_project_links(str(small)).complete
+
+
+_real_link_scan_for = link_index.link_scan_for
 
 
 class TestPersistedWorktreeConfig:

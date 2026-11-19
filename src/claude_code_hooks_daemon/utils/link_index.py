@@ -30,7 +30,7 @@ Trust:
   (corrupt), or a link whose target cannot be told: each returns a stopped
   :class:`~claude_code_hooks_daemon.utils.bounded_walk.Bounded`, which every
   caller denies. A directory that cannot be listed is reported as holding a
-  link, as the per-call scan did.
+  link, and stops the result too: what lies under it is unknown (unlisted).
 """
 
 from __future__ import annotations
@@ -76,6 +76,7 @@ _DEADLINE: Final[str] = "the project link index could not be verified before its
 _UNREADABLE: Final[str] = "the project link index is unreadable: the project root cannot be stat-ed"
 _CORRUPT: Final[str] = "the project link index is corrupt"
 _UNCLASSIFIED: Final[str] = "the project link index holds a link whose target cannot be told"
+_UNLISTED: Final[str] = "the project link index holds a directory that cannot be listed"
 
 _Identity = tuple[int, int, int]
 
@@ -209,6 +210,7 @@ class LinkIndex:
         holding: list[str] = []
         directory_links: list[str] = []
         unclassified = False
+        unlisted = False
         relisted = 0
         seen: dict[str, _Listing] = {}
         queue: deque[str] = deque([self.root])
@@ -242,6 +244,9 @@ class LinkIndex:
                 return stopped(empty, _OVERFLOWED)
             if current.unlistable or current.links:
                 holding.append(path)
+            # What lies under a directory that cannot be listed is unknown, and bash
+            # can still move through it (Plan 00623 review): the result is stopped.
+            unlisted = unlisted or current.unlistable
             for link in current.links:
                 kind = _link_kind(link)
                 if kind is _LinkKind.UNKNOWN:
@@ -251,6 +256,8 @@ class LinkIndex:
             queue.extend(current.children)
         self._listings = seen
         result = LinkScanResult(tuple(holding), tuple(directory_links))
+        if unlisted:
+            return stopped(result, _UNLISTED)
         return stopped(result, _UNCLASSIFIED) if unclassified else finished(result)
 
     def age_for_tests(self, *, seconds: float) -> None:

@@ -720,12 +720,10 @@ class _SearchCwds:
     def moved(self, target: str, current: tuple[str, ...]) -> tuple[str, ...]:
         outside = place_outside_project(target, self.command)
         if outside:
-            # Plan 00623: ~, $HOME or $TMPDIR outside the project is placed there; the
-            # computed-move judgement still adds what it finds, and the bases stay.
+            # Plan 00623: ~, $HOME or $TMPDIR outside the project is placed there, and
+            # is still judged as computed, failing closed: the shell's value can differ.
             self.targets.extend(outside)
-            return tuple(
-                dict.fromkeys((*outside, *current, *self.indeterminate(fail_closed=False)))
-            )
+            return tuple(dict.fromkeys((*outside, *current, *self.indeterminate())))
         if any(opener in target for opener in EXTGLOB_OPENERS):
             # Review 614c N3: an extended glob names no directory this walk can list.
             return tuple(dict.fromkeys((*self.indeterminate(), *current)))

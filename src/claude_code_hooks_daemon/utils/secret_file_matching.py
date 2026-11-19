@@ -3669,7 +3669,10 @@ def place_outside_project(target: str, command: str) -> tuple[str, ...]:
     the project however it is resolved: logically, physically from the spelled
     path (``cd -P``), and through the project root's own links. Both the spelled
     and the physical places are returned.
-    Residual (ledgered): the shell's value can differ from the daemon's.
+    The shell's value can differ from the daemon's (``getopts``, ``let`` and
+    arithmetic set a computed name; a link can be made at the place by the same
+    command), so the place only ADDS bases: callers still judge the move as
+    computed and deny when the link scan stopped.
     """
     match = _PLACEABLE_MOVE.fullmatch(target)
     if match is None:
@@ -3898,6 +3901,7 @@ def expand_directory_glob(base: str, pattern: str) -> Bounded[list[str]]:
 #: Why :func:`scan_project_links` stopped.
 _SCAN_PAST_CAP: Final[str] = "the project link scan stopped at its directory cap"
 _SCAN_UNCLASSIFIED: Final[str] = "the project link scan met a link whose target cannot be told"
+_SCAN_UNLISTED: Final[str] = "the project link scan met a directory it cannot list"
 
 
 def scan_project_links(root: str) -> Bounded[LinkScan]:
@@ -3912,7 +3916,8 @@ def scan_project_links(root: str) -> Bounded[LinkScan]:
       from the link's target, which may be outside the project.
 
     ``.git`` is not entered and links are not followed. A directory that cannot
-    be listed is counted as holding a link (fail closed). An entry the scan
+    be listed is counted as holding a link and stops the scan, since what lies
+    under it is unknown (fail closed). An entry the scan
     cannot classify does not end the listing (independent review D1). The scan
     is incomplete when it stops after :data:`LINK_SCAN_DIRECTORY_CAP`
     directories, finds more directory links than that, or meets a link whose
@@ -3960,6 +3965,7 @@ def _walk_project_links(root: str) -> Bounded[LinkScan]:
     queue = [os.path.normpath(root)]
     visited = 0
     unclassified = False
+    unlisted = False
     while queue and visited < LINK_SCAN_DIRECTORY_CAP:
         directory = queue.pop(0)
         visited += 1
@@ -3984,6 +3990,9 @@ def _walk_project_links(root: str) -> Bounded[LinkScan]:
                 level=logging.DEBUG,
             )
             has_link = True
+            # What lies under it is unknown too: bash can move through a directory
+            # it cannot list, so the scan did not reach everything (Plan 00623 review).
+            unlisted = True
         if has_link:
             holding.append(directory)
     kept_links = tuple(directory_links[:LINK_SCAN_DIRECTORY_CAP])
@@ -3993,6 +4002,8 @@ def _walk_project_links(root: str) -> Bounded[LinkScan]:
     )
     if queue or len(directory_links) > LINK_SCAN_DIRECTORY_CAP:
         return stopped(found, _SCAN_PAST_CAP)
+    if unlisted:
+        return stopped(found, _SCAN_UNLISTED)
     if unclassified:
         return stopped(found, _SCAN_UNCLASSIFIED)
     return finished(found)
@@ -4252,10 +4263,11 @@ class _DirectoryWalk:
             outside = place_outside_project(target, self.command)
             if outside:
                 # Plan 00623: a move to ~, $HOME or $TMPDIR outside the project is
-                # placed there; the computed-move judgement still adds what it finds.
+                # placed there, and is still judged as computed, failing closed: the
+                # shell's value can differ (getopts, let, a link made by this command).
                 for directory in outside:
                     self._add(directory)
-                self.indeterminate(fail_closed=False)
+                self.indeterminate()
                 return
             substituted = self._substituted(target)
             if substituted != target:
