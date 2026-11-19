@@ -430,3 +430,48 @@ class TestConcurrentTakers:
 
         assert results.count("WON") == 1, results
         assert results.count("HELD") == 7, results
+
+
+class TestTakeoverNeverRemovesAFreshLock:
+    """The re-judge under the takeover file must not delete a lock it did not judge."""
+
+    def test_a_lock_that_vanished_at_rejudge_is_not_removed_when_a_fresh_one_appears(
+        self, tmp_path: Path
+    ) -> None:
+        lock = tmp_path / "x.lock"
+        _record(lock, pid=_dead_pid(), pid_start="1")
+        body = f"""
+LOCK="{lock}"
+_upgrade_lock_judge() {{
+    rm -f "$LOCK"
+    printf 'token=fresh-holder\\npid=1\\nstarted=%s\\n' "$(date +%s)" > "$LOCK"
+    return 2
+}}
+rc=0
+_upgrade_lock_takeover "$LOCK" "mine" "token=mine" || rc=$?
+echo "rc=$rc"
+"""
+        result = _bash(body)
+
+        assert "rc=0" not in result.stdout, result.stdout + result.stderr
+        assert "fresh-holder" in lock.read_text(encoding="utf-8")
+        assert not (tmp_path / "x.lock.takeover").exists()
+
+    def test_a_lock_replaced_between_judge_and_removal_is_left_alone(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        _record(lock, pid=_dead_pid(), pid_start="1")
+        body = f"""
+LOCK="{lock}"
+_upgrade_lock_judge() {{
+    printf 'token=fresh-holder\\npid=1\\nstarted=%s\\n' "$(date +%s)" > "$LOCK"
+    return 0
+}}
+rc=0
+_upgrade_lock_takeover "$LOCK" "mine" "token=mine" || rc=$?
+echo "rc=$rc"
+"""
+        result = _bash(body)
+
+        assert "rc=1" in result.stdout, result.stdout + result.stderr
+        assert "fresh-holder" in lock.read_text(encoding="utf-8")
+        assert not (tmp_path / "x.lock.takeover").exists()

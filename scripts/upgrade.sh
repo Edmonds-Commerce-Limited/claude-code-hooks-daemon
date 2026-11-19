@@ -394,10 +394,16 @@ _upgrade_lock_own() {
     _UPGRADE_LOCK_HEARTBEAT_PID="$!"
 }
 
+# _upgrade_lock_stored_token <lock> - print the token the lock file carries.
+_upgrade_lock_stored_token() {
+    _upgrade_lock_read "$1" || return 1
+    _upgrade_lock_rec_field token
+}
+
 # _upgrade_lock_takeover <lock> <token> <record> - replace a stale lock, under
 # the takeover file. 0 taken, 1 busy or lost, 3 the lock vanished (retry).
 _upgrade_lock_takeover() {
-    local _lock="$1" _token="$2" _rec="$3" _take="$1.takeover" _mtime _verdict=0
+    local _lock="$1" _token="$2" _rec="$3" _take="$1.takeover" _mtime _verdict=0 _judged _now_token
     if [ -e "$_take" ]; then
         _mtime="$(_upgrade_lock_mtime "$_take")" || return 3
         if [ $(($(date +%s) - _mtime)) -le "$_UPGRADE_LOCK_TAKEOVER_STALE_SECONDS" ]; then
@@ -406,12 +412,22 @@ _upgrade_lock_takeover() {
         rm -f "$_take"
     fi
     _upgrade_lock_create "$_take" "$_token" || return 1
+    _judged="$(_upgrade_lock_stored_token "$_lock")" || _judged=""
     _upgrade_lock_judge "$_lock" || _verdict=$?
     if [ "$_verdict" -eq 1 ]; then
         rm -f "$_take"
         return 1
     fi
-    rm -f "$_lock" "$_lock.beat"
+    if [ "$_verdict" -eq 0 ]; then
+        # Judged under the takeover file: remove the lock only if it is still
+        # the very record that was judged, never a fresh one that replaced it.
+        _now_token="$(_upgrade_lock_stored_token "$_lock")" || _now_token=""
+        if [ "$_judged" != "$_now_token" ]; then
+            rm -f "$_take"
+            return 1
+        fi
+        rm -f "$_lock" "$_lock.beat"
+    fi
     if _upgrade_lock_create "$_lock" "$_rec"; then
         rm -f "$_take"
         _upgrade_lock_own "$_lock" "$_token" || return 1
