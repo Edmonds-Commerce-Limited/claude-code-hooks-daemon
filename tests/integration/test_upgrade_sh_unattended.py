@@ -103,6 +103,8 @@ def _build(tmp_path: Path, *, installed: str = "1.0.0") -> Fixture:
     origin_work = tmp_path / "origin-work"
     origin_work.mkdir()
     _git(origin_work, "init", "-q", "-b", "main")
+    # The real daemon repo ignores untracked/, where attempt records live.
+    (origin_work / ".gitignore").write_text("untracked/\n", encoding="utf-8")
     for version, supported in _RELEASES.items():
         (origin_work / "scripts").mkdir(exist_ok=True)
         (origin_work / "pyproject.toml").write_text(
@@ -281,6 +283,19 @@ class TestUnattendedSuccess:
         assert later.exists()
         assert not fixture.lock_file().exists()
 
+    def test_unrelated_uncommitted_work_in_the_project_does_not_block(
+        self, tmp_path: Path
+    ) -> None:
+        """Ruling item 5: the upgrade never stages this file, so it proceeds."""
+        fixture = _build(tmp_path)
+        (fixture.project / "work-in-progress.txt").write_text("x", encoding="utf-8")
+        (fixture.project / ".claude" / "notes.md").write_text("x", encoding="utf-8")
+
+        result = fixture.run("--unattended", "v1.1.0")
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (fixture.project / "work-in-progress.txt").read_text(encoding="utf-8") == "x"
+
 
 class TestUnattendedRefusals:
     """Exit 5: needs a human. The clone is untouched and Layer 2 never runs."""
@@ -300,12 +315,41 @@ class TestUnattendedRefusals:
 
         self._assert_refused(fixture, fixture.run("--unattended", "v1.1.0"), head)
 
-    def test_uncommitted_changes_in_the_project(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        "daemon_path",
+        [
+            ".claude/settings.json",
+            ".claude/hooks-daemon.yaml",
+            ".claude/hooks/x.sh",
+            ".claude/skills/hooks-daemon/SKILL.md",
+        ],
+    )
+    def test_uncommitted_changes_in_a_path_the_upgrade_rewrites(
+        self, tmp_path: Path, daemon_path: str
+    ) -> None:
+        """Ruling item 5: only the paths the upgrade itself stages refuse."""
         fixture = _build(tmp_path)
-        (fixture.project / "work-in-progress.txt").write_text("x", encoding="utf-8")
+        target = fixture.project / daemon_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x", encoding="utf-8")
         head = fixture.head()
 
-        self._assert_refused(fixture, fixture.run("--unattended", "v1.1.0"), head)
+        result = fixture.run("--unattended", "v1.1.0")
+
+        self._assert_refused(fixture, result, head)
+        assert daemon_path in result.stderr
+
+    def test_uncommitted_changes_in_the_daemon_clone(self, tmp_path: Path) -> None:
+        """Review M11: the clone itself is ignored by the project, so its own
+        status is read."""
+        fixture = _build(tmp_path)
+        (fixture.daemon / "local-edit.txt").write_text("x", encoding="utf-8")
+        head = fixture.head()
+
+        result = fixture.run("--unattended", "v1.1.0")
+
+        self._assert_refused(fixture, result, head)
+        assert "daemon clone" in result.stderr
 
     def test_a_major_version_bump(self, tmp_path: Path) -> None:
         fixture = _build(tmp_path)

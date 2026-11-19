@@ -1,12 +1,15 @@
 """Tests for the automatic-upgrade eligibility pre-check (Plan 00625)."""
 
 import dataclasses
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from claude_code_hooks_daemon.install.auto_upgrade import (
     ATTEMPT_DIR_NAME,
+    UPGRADE_OWNED_PATHS,
     AttemptStatus,
     Eligibility,
     attempt_state_path,
@@ -193,3 +196,75 @@ class TestEligibility:
         result = self._check(tmp_path)
         with pytest.raises(dataclasses.FrozenInstanceError):
             result.__setattr__("eligible", False)
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@x.invalid", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull},
+    )
+
+
+class TestUncommittedWork:
+    """Ruling item 5: only the paths the upgrade rewrites, and the clone itself."""
+
+    def _project(self, tmp_path: Path) -> tuple[Path, Path]:
+        project = tmp_path / "project"
+        project.mkdir()
+        _git(project, "init", "-q", "-b", "main")
+        (project / ".gitignore").write_text(".claude/hooks-daemon/\n")
+        _git(project, "add", ".gitignore")
+        _git(project, "commit", "-q", "-m", "p")
+        daemon = project / ".claude" / "hooks-daemon"
+        daemon.mkdir(parents=True)
+        _git(daemon, "init", "-q", "-b", "main")
+        (daemon / "f").write_text("x")
+        _git(daemon, "add", "f")
+        _git(daemon, "commit", "-q", "-m", "d")
+        return project, daemon
+
+    def _check(self, project: Path, daemon: Path) -> Eligibility:
+        return check_eligibility(
+            installed="3.75.0",
+            latest="3.76.0",
+            authorised=True,
+            self_install=False,
+            project_root=project,
+            untracked_dir=daemon / "untracked",
+            daemon_dir=daemon,
+        )
+
+    def test_owned_paths_match_the_skill_commit_step(self) -> None:
+        assert UPGRADE_OWNED_PATHS == (
+            ".claude/hooks-daemon/",
+            ".claude/hooks-daemon.yaml",
+            ".claude/skills/hooks-daemon/",
+            ".claude/hooks/",
+            ".claude/settings.json",
+        )
+
+    def test_unrelated_uncommitted_work_is_eligible(self, tmp_path: Path) -> None:
+        project, daemon = self._project(tmp_path)
+        (project / "notes.txt").write_text("x")
+        assert self._check(project, daemon).eligible is True
+
+    @pytest.mark.parametrize(
+        "path", [".claude/settings.json", ".claude/hooks/h.sh", ".claude/skills/hooks-daemon/S.md"]
+    )
+    def test_uncommitted_work_in_an_owned_path_refuses(self, tmp_path: Path, path: str) -> None:
+        project, daemon = self._project(tmp_path)
+        (project / path).parent.mkdir(parents=True, exist_ok=True)
+        (project / path).write_text("x")
+        result = self._check(project, daemon)
+        assert result.eligible is False
+        assert any(path in r for r in result.reasons)
+
+    def test_uncommitted_work_in_the_clone_refuses(self, tmp_path: Path) -> None:
+        project, daemon = self._project(tmp_path)
+        (daemon / "f").write_text("changed")
+        result = self._check(project, daemon)
+        assert result.eligible is False
+        assert any("daemon clone" in r for r in result.reasons)

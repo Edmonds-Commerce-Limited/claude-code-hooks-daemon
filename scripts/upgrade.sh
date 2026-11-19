@@ -1031,14 +1031,47 @@ if [ -e "$PROJECT_ROOT/.git" ]; then
     fi
 fi
 
-# --unattended: uncommitted work in the project is a person's (exit 5). When the
-# snapshot could not be taken the tree cannot be shown clean, so that refuses too.
+# _is_upgrade_owned_path <path> - true when <path> (project-relative) is one the
+# upgrade rewrites and the skill's commit step stages. Keep in step with skill
+# step 7 (upgrade.md) and auto_upgrade.UPGRADE_OWNED_PATHS.
+_is_upgrade_owned_path() {
+    case "$1" in
+        .claude/hooks-daemon/* | .claude/hooks-daemon.yaml | .claude/skills/hooks-daemon/* | \
+            .claude/hooks/* | .claude/settings.json) return 0 ;;
+    esac
+    return 1
+}
+
+# --unattended: uncommitted work in a path the upgrade rewrites, or in the
+# daemon clone itself, is a person's (exit 5). Other uncommitted work in the
+# project is never staged by the upgrade, so it does not block (relayed ruling,
+# DESIGN 11a item 5). No attempt record is written: the next session retries.
+# A status that cannot be read cannot be shown clean, so that refuses too.
 if [ "$_UNATTENDED" = "true" ] && [ -e "$PROJECT_ROOT/.git" ]; then
-    if [ "$_PRE_UPGRADE_DIRTY_TAKEN" != "true" ]; then
-        _needs_human "the project's uncommitted changes could not be read, so the tree cannot be shown clean"
+    _owned_dirty_list="$(mktemp "${TMPDIR:-/tmp}/hooks_daemon_upgrade_paths_XXXXXX")"
+    if [ "$_PRE_UPGRADE_DIRTY_TAKEN" != "true" ] || ! _dirty_paths "$PROJECT_ROOT" "$_owned_dirty_list"; then
+        rm -f "$_owned_dirty_list"
+        _needs_human "the project's uncommitted changes could not be read, so the upgrade's paths cannot be shown clean"
     fi
-    if [ -n "$_PRE_UPGRADE_DIRTY" ]; then
-        _needs_human "the project has uncommitted changes"
+    _owned_dirty=""
+    while IFS= read -r -d '' _owned_path; do
+        if _is_upgrade_owned_path "$_owned_path"; then
+            _owned_dirty="$_owned_path"
+            break
+        fi
+    done < "$_owned_dirty_list"
+    rm -f "$_owned_dirty_list"
+    if [ -n "$_owned_dirty" ]; then
+        _needs_human "the project has uncommitted changes in a path the upgrade rewrites ($_owned_dirty)"
+    fi
+    _clone_dir="$PROJECT_ROOT/.claude/hooks-daemon"
+    if [ -e "$_clone_dir/.git" ]; then
+        if ! _clone_status="$(git -C "$_clone_dir" status --porcelain --untracked-files=normal)"; then
+            _needs_human "the daemon clone's status could not be read, so it cannot be shown clean"
+        fi
+        if [ -n "$_clone_status" ]; then
+            _needs_human "the daemon clone has uncommitted changes, which the upgrade's checkout would overwrite"
+        fi
     fi
 fi
 

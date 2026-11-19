@@ -352,6 +352,7 @@ class VersionCheckHandler(SessionStartHandlerBase):
                 self_install=ProjectContext.self_install_mode(),
                 project_root=ProjectContext.project_root(),
                 untracked_dir=ProjectContext.daemon_untracked_dir(),
+                daemon_dir=ProjectContext.project_root() / ".claude" / "hooks-daemon",
             )
         except (RuntimeError, OSError) as exc:
             log_and_continue(

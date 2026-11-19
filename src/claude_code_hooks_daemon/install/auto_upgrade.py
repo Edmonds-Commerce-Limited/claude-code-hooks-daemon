@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
+import subprocess
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -47,6 +48,85 @@ _EVENT_KEY: Final[str] = "user_prompt_submit"
 _HANDLER_KEY: Final[str] = "standing_authorisations"
 
 _VERSION_RE: Final[re.Pattern[str]] = re.compile(r"\A(\d+)\.(\d+)\.(\d+)\Z")
+
+#: Project-relative paths the upgrade rewrites and the skill's commit step
+#: stages (skill step 7). A trailing slash is a directory prefix. Uncommitted
+#: work under one of these refuses an unattended run; other uncommitted work in
+#: the project is never staged by the upgrade, so it does not (relayed ruling,
+#: Plan 00625 DESIGN 11a item 5). Mirrored in ``upgrade.sh``
+#: ``_is_upgrade_owned_path``.
+UPGRADE_OWNED_PATHS: Final[tuple[str, ...]] = (
+    ".claude/hooks-daemon/",
+    ".claude/hooks-daemon.yaml",
+    ".claude/skills/hooks-daemon/",
+    ".claude/hooks/",
+    ".claude/settings.json",
+)
+
+_GIT_STATUS_TIMEOUT_SECONDS: Final[float] = 10.0
+
+
+def _is_upgrade_owned(path: str) -> bool:
+    return any(
+        path.startswith(owned) if owned.endswith("/") else path == owned
+        for owned in UPGRADE_OWNED_PATHS
+    )
+
+
+def _status_paths(root: Path) -> list[str] | None:
+    """Paths ``git status`` reports dirty under ``root``; None when it cannot be read."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "-z", "--untracked-files=all"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GIT_STATUS_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unreadable git status cannot be shown clean, so it refuses",
+            level=logging.DEBUG,
+        )
+        return None
+    if result.returncode != 0:
+        return None
+    paths: list[str] = []
+    rename_source = False
+    for entry in result.stdout.split("\0"):
+        if not entry:
+            continue
+        if rename_source:
+            rename_source = False
+            paths.append(entry)
+            continue
+        if "R" in entry[:2] or "C" in entry[:2]:
+            rename_source = True
+        paths.append(entry[3:])
+    return paths
+
+
+def _uncommitted_work_reasons(project_root: Path, daemon_dir: Path) -> list[str]:
+    reasons: list[str] = []
+    if (project_root / ".git").exists():
+        project_paths = _status_paths(project_root)
+        if project_paths is None:
+            reasons.append("the project's git status cannot be read")
+        else:
+            owned = [p for p in project_paths if _is_upgrade_owned(p)]
+            if owned:
+                reasons.append(
+                    f"the project has uncommitted changes in a path the upgrade rewrites ({owned[0]})"
+                )
+    if (daemon_dir / ".git").exists():
+        clone_paths = _status_paths(daemon_dir)
+        if clone_paths is None:
+            reasons.append("the daemon clone's git status cannot be read")
+        elif clone_paths:
+            reasons.append("the daemon clone has uncommitted changes")
+    return reasons
 
 
 class AttemptStatus(StrEnum):
@@ -170,12 +250,14 @@ def check_eligibility(
     self_install: bool,
     project_root: Path,
     untracked_dir: Path,
+    daemon_dir: Path | None = None,
 ) -> Eligibility:
     """Judge whether an unattended upgrade from ``installed`` to ``latest`` may be invited.
 
     Every refusal that applies is listed, so the advisory can say all of them.
-    Pure over its arguments plus two file-existence reads (the release-in-flight
-    marker and the attempt record); no network.
+    Reads the release-in-flight marker and the attempt record and, when
+    ``daemon_dir`` is given, runs ``git status`` in the project and the clone
+    for uncommitted work the upgrade would collide with; no network.
     """
     reasons: list[str] = []
     if not authorised:
@@ -201,4 +283,6 @@ def check_eligibility(
             f"an unattended upgrade to v{latest} was already attempted "
             f"(status {record.status.value}: {record.detail or 'no detail recorded'})"
         )
+    if daemon_dir is not None and not self_install:
+        reasons.extend(_uncommitted_work_reasons(project_root, daemon_dir))
     return Eligibility(eligible=not reasons, reasons=reasons)
