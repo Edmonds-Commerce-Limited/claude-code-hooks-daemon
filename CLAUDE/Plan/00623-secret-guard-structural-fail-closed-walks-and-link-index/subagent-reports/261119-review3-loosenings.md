@@ -4,9 +4,24 @@ Scope: (A) 6c16ce510 (a plain file under `/proc/self` or `/proc/thread-self` is
 placed) and (B) fc3a2dc79 (`git commit`/`git status` after a computed `cd` is
 not a tree reader). The builders' reports were not relied on.
 
-**Verdict.** (A) passes. (B) failed as built: 14 commands leaked the dummy. It
-is fixed in this commit, RED then GREEN, and now passes with one accepted
-residual (below).
+**Verdict.** (A) PASS. (B) FAIL as built, and PASS after the fix.
+
+- As built, (B) let 16 distinct commands print the dummy that the previous tip
+  denied. It let 3 more through by running a `pre-commit` hook already in the
+  landing repo.
+- The fix is in this commit, RED then GREEN. After it:
+  - no non-hook escape remains;
+  - DENY-to-ALLOW against main is 0, comparing like for like.
+- Two things go to the owner:
+  1. **Playbook probe #350 is denied again.** It is
+     `git commit --dry-run && cd - && git commit --dry-run`. That command
+     prints a staged diff under an ambient `commit.verbose`, so the fix denies
+     it by design. The harness expects ALLOW, so the probe or its expectation
+     needs an owner decision.
+  2. **The hook residual.** On a commit the guard allows, a hook already in the
+     landing repo still runs. The previous tip and main also allow running that
+     hook directly (`cd - && .git/hooks/pre-commit`), so the residual adds no
+     new capability.
 
 ## Method
 
@@ -68,8 +83,15 @@ The only rows it newly allows are `cat /proc/self/status`,
 `cat /proc/thread-self/status`, `grep -r foo /proc/self/status` and
 `cd /proc && cat self/status`. None of them leaked.
 
-**(B) as built: 14 escapes against the prior tip.** All of these printed the
-dummy in real bash:
+**(B) as built: 16 non-hook escapes against the prior tip**, counted from the
+oracle over all four variants on the as-built tree (`out-cur*.json`):
+
+- 10 in the plain variant;
+- 6 more under ambient `commit.verbose`: `--dry-run -a`, `-a -m x --dry-run`,
+  `GIT_EDITOR=cat`/`EDITOR=cat`/exported `GIT_EDITOR` with `commit -a`, and
+  `-e`.
+
+Examples:
 
 - An option word the literal check cannot read:
   - `V=-vv; cd - && git status $V`
@@ -100,11 +122,29 @@ dummy in real bash:
 - The command must name no `GIT_*`, `HOME`, `EDITOR` or `VISUAL` (a context
   variable set per `search_reads`).
 - Anything else stays a reader.
-- Probes #350/#351 (`cd - && git commit -m acceptance -- no-such-acceptance-path`)
-  are still allowed.
+- Probe #351 (`cd - && git commit -m acceptance -- no-such-acceptance-path`)
+  is still allowed.
+- Probe #350 (`git commit --dry-run && cd - && git commit --dry-run`) is denied
+  again, by design (see the verdict). The acceptance harness was not rerun.
 - Tests: `tests/unit/handlers/pre_tool_use/test_secret_file_guard_git_after_computed_cd.py`
-  gained `HIDDEN_DIFF_OPTIONS` (19 rows). All 19 were RED before the fix and all
-  pass after it; the file passes 49/49.
+  gained `HIDDEN_DIFF_OPTIONS` (19 rows).
+  - The rows are judged twice: by the guard with the index built, and by
+    `search_reads` with the scan unfinished, which must fail closed.
+  - All 19 decision rows were RED before the fix.
+  - The unscanned variant's RED could not be run against the as-built code: the
+    conftest refuses a foreign `src` on `PYTHONPATH`.
+  - The file passes 68/68.
+- Targeted chunks pass: the `recursive_search`/`resolution_failure` utils
+  (294) and `-k secret_file_guard` over `pre_tool_use` (2526).
+- Cold-mode corpus runs are omitted: on this small fixture the fallback walk
+  finishes, so they do not exercise the unscanned gate. The unit test above
+  covers it.
+- Daemon cwd `/` is not a meaningful baseline for main, which allows even
+  `cat flink` there. The root-cwd comparison is the one that counts, and it
+  is 0.
+- Usability cost: after a computed `cd`, a message holding `(`, `!`, `$`, a
+  glob character, or the text `HOME`/`GIT_`/`EDITOR` makes the commit a reader
+  again. This only over-denies.
 
 ## Left open
 
@@ -112,10 +152,15 @@ dummy in real bash:
   the plain, repo-config and home-config rows are clean. In the hook variant,
   `cd - && git commit -a -q --message=done` and `git commit --amend -m x` run
   the landing repo's `pre-commit` hook, and that hook printed the dummy.
-  - This is the same class as running any script already on disk, which the
-    guard does not judge (`./script` is allowed). It needs a hook planted in
-    advance. `core.fsmonitor`/`core.hooksPath` in a landing repo's config are
-    the same class.
+  - This was probed, not assumed. Main, the prior tip and the fix all allow
+    running the hook directly, and it leaks every time:
+    - `cd - && .git/hooks/pre-commit`
+    - `sh sub/dl/.git/hooks/pre-commit`
+    - `./sub/dl/.git/hooks/pre-commit`
+  - The prior tip also allows `cd sub/dl && git commit -m x`, which runs the
+    hook.
+  - It needs a hook planted in advance. `core.fsmonitor`/`core.hooksPath` in a
+    landing repo's config are the same class.
   - Closing it means dropping `commit` from the carve-out, which costs probes
     #350/#351. That is the owner's call.
 - **Pre-existing `/proc` escapes, ledgered as N674 and not introduced by (A).**
