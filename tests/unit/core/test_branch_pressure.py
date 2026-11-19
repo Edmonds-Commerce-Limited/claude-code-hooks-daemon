@@ -193,7 +193,10 @@ class TestStopJudgesOwnOpenBranches:
         _open(repo, "others")
         decision = _stop(repo, untracked, _config(1))
         assert decision.reason is None
-        assert decision.context == ()
+        # Plan 00619's pool-wide ladder still warns at stop (context only, naming every
+        # pool branch); nothing holds this session to branches it never touched.
+        assert not any("left behind" in line for line in decision.context)
+        assert not any("over cap" in line for line in decision.context)
 
     def test_own_dormant_branch_denies(self, repo: Path, untracked: Path) -> None:
         _open(repo, "stale", days_ago=400, touched=True)
