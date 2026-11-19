@@ -946,7 +946,7 @@ handlers:
             enabled: false
           - id: commit-push-cadence
             enabled: false
-          # Default ON. Only an explicit enabled: false switches it off. Never
+          # Default ON. Any value but enabled: true switches it off. Never
           # covers a MAJOR bump, a READ THIS FIRST gate escalation, a release
           # in progress, a dirty tree, or a version whose attempt failed.
           - id: daemon-auto-upgrade

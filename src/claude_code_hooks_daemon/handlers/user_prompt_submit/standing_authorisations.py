@@ -44,8 +44,8 @@ restriction — this one removes one, and shipping that active would have the
 daemon fabricate the very consent the injected text claims. So the one
 default-on entry says so: while a project has not listed it, its text states
 that it is the daemon's shipped default, not a request the project recorded,
-and names the line that switches it off. Only an explicit ``enabled: false``
-turns it off. ``config-changes/`` with ``recommended: true`` is what carries
+and names the line that switches it off. Listing it with anything but
+``enabled: true`` turns it off (an opt-out never fails open). ``config-changes/`` with ``recommended: true`` is what carries
 the other options to existing installs.
 
 **The text is a recorded request, never a countermand** (Decision 2). Each
@@ -93,8 +93,8 @@ AUTHORISATION_COMMIT_PUSH_CADENCE: Final[str] = "commit-push-cadence"
 AUTHORISATION_DAEMON_AUTO_UPGRADE: Final[str] = "daemon-auto-upgrade"
 
 # Per-entry default (Plan 00625). The ONLY id that ships enabled; reverse the
-# owner's decision by emptying this set. Only an explicit `enabled: false`
-# in the project's config turns a default-on entry off.
+# owner's decision by emptying this set. Listing a default-on entry with
+# anything but `enabled: true` in the project's config turns it off.
 _DEFAULT_ON_IDS: Final[frozenset[str]] = frozenset({AUTHORISATION_DAEMON_AUTO_UPGRADE})
 
 # Config keys of the handler block, for `auto_upgrade_authorised`.

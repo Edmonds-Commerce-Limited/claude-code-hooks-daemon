@@ -1002,6 +1002,23 @@ _upgrade_lock_rec_field() {
     return 1
 }
 
+# _upgrade_lock_proc_is_ours - /proc describes this shell's pid namespace. Not
+# so in a pid namespace whose /proc was never remounted: there a pid of ours
+# names some other process (or none) in /proc, so a pid proves nothing.
+_upgrade_lock_proc_is_ours() {
+    local _self="" _rest
+    [ -r /proc/self/stat ] || return 1
+    read -r _self _rest < /proc/self/stat || return 1
+    [ "$_self" = "$BASHPID" ]
+}
+
+# _upgrade_lock_pidns - this process's pid namespace, or empty when /proc cannot
+# vouch for its pids (which sends every judge to the expiry rule).
+_upgrade_lock_pidns() {
+    _upgrade_lock_proc_is_ours || return 1
+    readlink /proc/self/ns/pid
+}
+
 # _upgrade_lock_record <token> <purpose> - the owner record of THIS process.
 _upgrade_lock_record() {
     local _host _boot _ns _start
@@ -1010,7 +1027,7 @@ _upgrade_lock_record() {
         _host="$(hostname 2>&1)" || _host="unknown"
     fi
     _boot="$(cat /proc/sys/kernel/random/boot_id 2>&1)" || _boot=""
-    _ns="$(readlink /proc/self/ns/pid 2>&1)" || _ns=""
+    _ns="$(_upgrade_lock_pidns 2>&1)" || _ns=""
     _start="$(_upgrade_lock_pid_start "$$")" || _start=""
     printf 'token=%s\nhost=%s\nboot_id=%s\npidns=%s\npid=%s\npid_start=%s\nstarted=%s\npurpose=%s\n' \
         "$1" "$_host" "$_boot" "$_ns" "$$" "$_start" "$(date +%s)" "$2"
@@ -1081,9 +1098,10 @@ _upgrade_lock_judge() {
 
     # Same kernel and same pid namespace: the pid means something, so a gone
     # pid, or one that now belongs to a different process, is a dead owner.
+    # Only when /proc vouches for pids here, and the record carries a start.
     _cur_boot="$(cat /proc/sys/kernel/random/boot_id 2>&1)" || _cur_boot=""
-    _cur_ns="$(readlink /proc/self/ns/pid 2>&1)" || _cur_ns=""
-    if [ -n "$_boot" ] && [ -n "$_ns" ] && [ "$_boot" = "$_cur_boot" ] && [ "$_ns" = "$_cur_ns" ]; then
+    _cur_ns="$(_upgrade_lock_pidns 2>&1)" || _cur_ns=""
+    if [ -n "$_boot" ] && [ -n "$_ns" ] && [ -n "$_pstart" ] && [ "$_boot" = "$_cur_boot" ] && [ "$_ns" = "$_cur_ns" ]; then
         _upgrade_lock_pid_alive "$_pid" || return 0
         _cur_start="$(_upgrade_lock_pid_start "$_pid")" || return 0
         if [ "$_cur_start" != "$_pstart" ]; then

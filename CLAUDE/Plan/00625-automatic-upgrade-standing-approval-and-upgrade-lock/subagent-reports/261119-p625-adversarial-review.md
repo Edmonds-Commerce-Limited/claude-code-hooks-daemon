@@ -11,13 +11,48 @@ checkout or a real remote. Python tests were run in targeted files only.
 Two defects in the lock (F1, F2) break the plan's central promise that no two
 processes ever modify the daemon checkout at once. Neither is a small patch. Each
 needs a design decision on a primitive that is carried byte-identical in two
-scripts, so I have reported them and not fixed them. I fixed two smaller defects
-(F3 and F4) test-first. Everything else is a minor finding, a residual risk, or
-an owner decision.
+scripts, so I have reported them and not fixed them. I fixed three smaller
+defects (F3, F4 and F5) test-first. F5 was a third way for two processes to hold
+the lock at once. Everything else is a minor finding, a residual risk, or an
+owner decision.
+
+**What "reproduced" means here.** A finding marked REPRODUCED was demonstrated
+by a run. Anything else marked "by reading" was reasoned from the code and was
+not run: M1, the two extra routes into F1, the SIGKILL and cross-namespace
+expiry routes in F2, M7, M11, M12 and the `lock.d` gap.
 
 ## Defects
 
-### F1 BLOCKER (not fixed): a stale takeover file lets two processes hold the lock
+### F5 MAJOR (fixed, RED then GREEN, REPRODUCED): two holders when /proc belongs to another pid namespace
+
+This happens in a pid namespace whose `/proc` was never remounted, such as
+`unshare -p` without `--mount-proc` and some container setups. There `$$` is a
+small pid of the new namespace, but `/proc` answers for the parent namespace.
+`readlink /proc/self/ns/pid` still reports the new namespace, so two processes
+in it judged each other "same boot, same namespace" and trusted `/proc/<pid>`.
+When the parent namespace had no process at the holder's pid, the record's
+`pid_start` was empty, and a second process judged the **live** holder dead and
+took the lock as well.
+
+- **Reproducer** (`same_ns_live.sh` under `unshare -U -r -p -f`): output
+  `GOT 4` and then `GOT 32` while 4 was still holding.
+- **Fix:** a new `_upgrade_lock_pidns` helper returns the namespace only when
+  `/proc/self/stat` names this shell's own `$BASHPID`, meaning `/proc` vouches
+  for pids here. Otherwise it returns empty, and the judge falls back to the
+  expiry rule.
+  - The same-namespace path also now requires a non-empty `pid_start`.
+  - The change is applied to both scripts, and the lockstep holds.
+- **Test:** `TestAProcThatIsNotThisNamespaces` in
+  `tests/integration/test_upgrade_lock.py`. It needs unprivileged pid
+  namespaces and skips otherwise. It failed before the fix (`second rc=0`).
+  The whole file passed after it, 31 tests.
+- **Real separate pid namespaces (REPRODUCED, holding):** a holder in its own
+  namespace caused `MISS` both from the host and from a second namespace. A
+  holder SIGKILLed in the same namespace was taken over at once, which is
+  correct. `--mount-proc` is not permitted on this host, so a properly remounted
+  namespace was not exercised.
+
+### F1 BLOCKER (not fixed, REPRODUCED): a stale takeover file lets two processes hold the lock
 
 `_upgrade_lock_takeover` breaks a `<lock>.takeover` file that is older than 60 s.
 It checks the file's mtime and then removes it by path (`rm -f "$_take"`). Take
@@ -35,24 +70,44 @@ creating its own. Each process believes it holds the lock.
   trials had two simultaneous holders.** With no stale takeover file, double
   holders were not reproduced in 10 trials. That is not proof that it cannot
   happen.
+
 - **The same hole has other routes:** an mtime that looks more than 60 s old
   because of clock or mtime skew (NFS), or a taker that is SIGSTOPped for more
   than 60 s while it holds the takeover file and then resumes.
+
 - **Fix direction (needs a design decision):** any scheme that judges a file by
   its content or mtime and then removes it by path keeps this hole. The only
   compare-and-swap primitive available here is the exclusive create.
+
   - A plausible route is generation-numbered takeover files
     (`<lock>.takeover.<N>`). A taker creates generation N+1 with O_EXCL. It
     proceeds only while its own generation is the highest that exists. It never
     removes another process's takeover file.
   - Whatever is chosen needs its own race test with a stale generation present.
+
 - **The current race test cannot catch this.**
   `test_exactly_one_of_many_takes_over_a_dead_holders_lock` never seeds a stale
   takeover file.
   `test_a_stale_takeover_file_is_cleared_and_a_fresh_one_is_respected` tests
   only one process.
 
-### F2 MAJOR (not fixed): the lock is released while Layer 2 is still writing
+- **Reproducer, as run.** `acq.sh` sources the block lifted from `upgrade.sh`:
+
+  ```bash
+  . lockblock.sh; rc=0
+  _upgrade_lock_acquire "$1" test 0 || rc=$?
+  if [ "$rc" -eq 0 ]; then echo "GOT $$ $(date +%s.%N)" >> "$3"; sleep "$2"
+      echo "REL $$ $(date +%s.%N)" >> "$3"; _upgrade_lock_release
+  else echo "MISS $$ rc=$rc" >> "$3"; fi
+  ```
+
+  Setup for each trial: write a record with `pid=999999`, this host's `boot_id`
+  and `pidns`, and `started=now`. Then run
+  `echo crashed > LOCK.takeover; touch -d '-120 seconds' LOCK.takeover`. Start
+  20 copies of `acq.sh LOCK 2 LOG &` and compute the maximum overlap of the
+  GOT/REL intervals.
+
+### F2 MAJOR (not fixed, REPRODUCED for SIGTERM): the lock is released while Layer 2 is still writing
 
 Liveness is keyed to the pid of Layer 1 (`upgrade.sh`). The writer is Layer 2
 (`upgrade_version.sh`), which runs as a child.
@@ -184,6 +239,32 @@ leading zero as octal. As a result, `08` and `09` died with
   No test shows the daemon checkout back on the old tag with the old daemon
   running after a real failure in Step 15 or Step 16. DESIGN section 11 says so
   honestly.
+- **M10, a fresh install's text claims a request nobody made (confirmed by
+  reading).** `.claude/hooks-daemon.yaml.example` lists
+  `{id: daemon-auto-upgrade, enabled: true}`, and `install_version.sh` copies
+  the example to make a fresh project's config (`cp "$EXAMPLE_CONFIG" "$TARGET_CONFIG"`). Every fresh install therefore gets the RECORDED wording,
+  "STANDING AUTHORISATION (on file for this project) ... This request is
+  recorded in ...", although the project recorded nothing. That contradicts the
+  honesty rule the plan wrote for itself (Decision 3).
+  - Fix options for the OWNER: drop the entry from the example, which leaves the
+    shipped-default wording; or ship it commented out; or ship it as
+    `enabled: false`.
+  - Config preservation on upgrade could carry the new example default into
+    existing configs too. That was not verified.
+- **M11, local changes in the daemon clone are discarded unattended (by
+  reading).** The dirty check reads only the project. Step 6 runs
+  `reset --hard` on the gitignored daemon clone, which discards any local edits
+  in it with no refusal. The attended route already does this, but unattended
+  nobody sees it.
+- **M12, the `FROM_VERSION` stamp lets Layer 1 accept a major jump (by
+  reading).** When the tracked `.claude/HOOKS-DAEMON.md` stamp is newer than
+  the clone (for example a teammate committed `(v4.0.0)` while this clone is on
+  3.x), Layer 1 takes FROM from the stamp. Its MAJOR check then passes for a 4.x
+  target.
+  - The Python pre-check compares the running `__version__`, so it still
+    refuses and the agent is not invited.
+  - This is a gap in defence in depth, and arguably the team already chose the
+    major version.
 
 ## Lock properties checked and holding (as far as tested)
 
@@ -199,9 +280,8 @@ leading zero as octal. As a result, `08` and `09` died with
     across hosts on shared storage (NFS). There the beat records the writer's
     own `date`, not a server-side mtime, so skew of more than 600 s across hosts
     could expire a live holder or keep a dead one.
-  - **Real separate pid namespaces** (`unshare -U -r -p -f`) are available on
-    this host but were not exercised. Fake identities in the builders' tests
-    cover that judging path.
+  - **Real separate pid namespaces** (`unshare -U -r -p -f`) were exercised;
+    see F5. `--mount-proc` was not permitted on this host.
 - **Crash between acquire and the first beat:** same namespace, the pid is gone
   and the lock is taken over. Foreign namespace, `started` is more than 600 s
   old and the lock is taken over. No stale lock blocks for ever, except a
@@ -257,5 +337,21 @@ leading zero as octal. As a result, `08` and `09` died with
 - **M1** (pinning the target to the remote tag) is a small change and worth
   doing in the same pass.
 - **M9:** an end-to-end rollback test with real Layer 2 on a scratch clone.
-- **Full QA** has not been run here. The coordinator's gate should run over F3
-  and F4.
+- **M10** (the example config makes fresh installs claim a recorded request)
+  needs an owner ruling before merge.
+- **Not verified:**
+  - scope 4 `kill -9` in the middle of a run (by reading, no attempt record is
+    written and the next session invites again)
+  - the M1 yanked-tag case
+  - a SIGSTOPped taker that holds the takeover file
+  - the `lock.d` and older provision.sh coexistence
+  - whether config preservation writes the new example entry into existing
+    configs
+- **Full QA** has not been run here. The coordinator's gate should run over F3,
+  F4 and F5. Targeted results:
+  - The standing-authorisations, auto_upgrade and version_check auto-upgrade
+    tests: 119 passed after F3.
+  - `test_upgrade_lock.py`: 31 passed after F4 and F5.
+  - `test_provision_sh.py`, `test_upgrade_sh_unattended.py` and the
+    standing-authorisations tests together, on the final code: see the commit
+    message.

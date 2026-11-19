@@ -497,3 +497,64 @@ class TestWaitSecondsAreDecimal:
         assert result.returncode == 0, result.stderr
         assert "rc=0" in result.stdout, result.stdout + result.stderr
         assert "value too great for base" not in result.stderr
+
+
+def _unshare_pidns_available() -> bool:
+    unshare = shutil.which("unshare")
+    if unshare is None:
+        return False
+    probe = subprocess.run(
+        [unshare, "-U", "-r", "-p", "-f", "true"], capture_output=True, check=False, timeout=30
+    )
+    return probe.returncode == 0
+
+
+class TestAProcThatIsNotThisNamespaces:
+    """Adversarial review F5: in a pid namespace whose /proc was not remounted
+    (``unshare -p`` without ``--mount-proc``, some container setups), ``$$`` is
+    a pid of THIS namespace but /proc answers for another one. The record then
+    named a pid /proc could not vouch for, and a second process in the same
+    namespace judged the LIVE holder dead and took the lock as well."""
+
+    @pytest.mark.skipif(not _unshare_pidns_available(), reason="needs unprivileged pid namespaces")
+    def test_a_live_holder_is_never_taken_over_in_that_namespace(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        block = _block(_UPGRADE_SH)
+        # The holder is its own bash process (as upgrade.sh is): its $$ is a
+        # small pid of the new namespace that the old /proc does not describe.
+        holder = tmp_path / "holder.sh"
+        holder.write_text(
+            "set -euo pipefail\n"
+            + block
+            + f'_upgrade_lock_acquire "{lock}" holder 0\necho HOLDER_GOT\nsleep 4\n'
+            + "_upgrade_lock_release\n",
+            encoding="utf-8",
+        )
+        # The old /proc vouches for nothing only when it has no process at the
+        # holder's pid; pick the first such pid and burn pids up to it.
+        target = next(n for n in range(3, 4096) if not Path(f"/proc/{n}").exists())
+        script = tmp_path / "inner.sh"
+        script.write_text(
+            "set -euo pipefail\n"
+            + block
+            + f'LOCK="{lock}"\n'
+            + f"while [ $(( $(sh -c 'echo $$') + 1 )) -lt {target} ]; do :; done\n"
+            + f'"{_BASH}" "{holder}" &\n'
+            + "h=$!\nsleep 1.5\n"
+            + 'rc=0; _upgrade_lock_acquire "$LOCK" second 0 || rc=$?\n'
+            + 'echo "second rc=$rc"\n'
+            + 'if [ "$rc" -eq 0 ]; then _upgrade_lock_release; fi\n'
+            + 'wait "$h"\n',
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            ["unshare", "-U", "-r", "-p", "-f", _BASH, str(script)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_TIMEOUT_SECONDS,
+        )
+
+        assert "HOLDER_GOT" in result.stdout, result.stdout + result.stderr
+        assert "second rc=1" in result.stdout, result.stdout + result.stderr
