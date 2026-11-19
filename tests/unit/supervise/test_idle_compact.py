@@ -38,7 +38,9 @@ def _internal_idle(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _policy(**overrides: object):
-    values: dict[str, object] = {"idle_compact_mode": "on"}
+    # A 60 s settle keeps the tick arithmetic below short; the shipped 600 s
+    # default is pinned in TestPolicyEnv and TestShippedSettle.
+    values: dict[str, object] = {"idle_compact_mode": "on", "idle_compact_settle_seconds": 60.0}
     values.update(overrides)
     return _mod.CompactPolicy(**values)
 
@@ -60,7 +62,7 @@ def _write_sidecar(
     *,
     pct: float = 35.0,
     window: int = _WINDOW,
-    tier: str = "ok",
+    tier: str = "orange",
     red: bool = False,
     ts: float = _NOW - 1.0,
     compacting: bool = False,
@@ -120,11 +122,12 @@ class TestFires:
         assert outcome.submit is True
         assert machine.state is _mod.SupervisorState.AWAIT_COMPACTING
 
-    def test_exactly_at_threshold_fires(self, tmp_path: Path) -> None:
-        machine = _mod.CompactStateMachine(_policy())
-        _write_sidecar(tmp_path, pct=30.0, ts=_NOW - 1.0)
+    def test_percentage_override_exactly_at_threshold_fires(self, tmp_path: Path) -> None:
+        """A set percentage REPLACES the tier gate: yellow at 30% fires at pct=30."""
+        machine = _mod.CompactStateMachine(_policy(idle_compact_pct=30.0))
+        _write_sidecar(tmp_path, pct=30.0, tier="yellow", ts=_NOW - 1.0)
         _decide(tmp_path, machine, now=_NOW)
-        _write_sidecar(tmp_path, pct=30.0, ts=_NOW + 59.0)
+        _write_sidecar(tmp_path, pct=30.0, tier="yellow", ts=_NOW + 59.0)
         assert _decide(tmp_path, machine, now=_NOW + 60.0).payload is not None
 
     def test_configurable_percentage(self, tmp_path: Path) -> None:
@@ -162,11 +165,11 @@ class TestHolds:
         _write_sidecar(tmp_path, ts=_NOW + 100.0)
         assert _decide(tmp_path, machine, now=_NOW + 101.0, true_idle=False).payload is None
 
-    def test_below_percentage(self, tmp_path: Path) -> None:
+    def test_below_the_tier(self, tmp_path: Path) -> None:
         machine = _mod.CompactStateMachine(_policy())
-        _write_sidecar(tmp_path, pct=29.0)
+        _write_sidecar(tmp_path, pct=29.0, tier="yellow")
         _decide(tmp_path, machine, now=_NOW)
-        _write_sidecar(tmp_path, pct=29.0, ts=_NOW + 59.0)
+        _write_sidecar(tmp_path, pct=29.0, tier="yellow", ts=_NOW + 59.0)
         assert _decide(tmp_path, machine, now=_NOW + 60.0).payload is None
 
     def test_token_floor_protects_a_small_window(self, tmp_path: Path) -> None:
@@ -263,17 +266,259 @@ class TestModes:
         assert other.export_state()["true_idle_since"] == _NOW
 
 
+class TestTierGate:
+    """The default gate is the daemon's own tier, so it follows the window size."""
+
+    def test_orange_on_a_million_token_window_fires(self, tmp_path: Path) -> None:
+        machine = _mod.CompactStateMachine(_policy())
+        assert _settled(tmp_path, machine).payload is not None
+
+    def test_red_or_critical_tier_also_counts(self, tmp_path: Path) -> None:
+        machine = _mod.CompactStateMachine(_policy())
+        reading = _mod.SidecarReading(
+            red=False,
+            critical=False,
+            compact_urgent=False,
+            tier="critical",
+            pct=35.0,
+            session_id=_SESSION,
+            ts=_NOW,
+            seq=1,
+            writer_pid=1,
+            compacting=False,
+            stale=False,
+            window_size=_WINDOW,
+        )
+        machine.note_true_idle(True, now=_NOW)
+        assert machine.idle_compact_due(reading, now=_NOW + 60.0) is not None
+
+    def test_yellow_on_a_small_window_holds_where_thirty_percent_would_not(
+        self, tmp_path: Path
+    ) -> None:
+        """35% of 200k is yellow (orange starts at 51% there): not compacted."""
+        machine = _mod.CompactStateMachine(_policy(idle_compact_min_tokens=1))
+        _write_sidecar(tmp_path, pct=35.0, window=200_000, tier="yellow")
+        _decide(tmp_path, machine, now=_NOW)
+        _write_sidecar(tmp_path, pct=35.0, window=200_000, tier="yellow", ts=_NOW + 59.0)
+        assert _decide(tmp_path, machine, now=_NOW + 60.0).payload is None
+
+    def test_orange_on_a_small_window_fires(self, tmp_path: Path) -> None:
+        machine = _mod.CompactStateMachine(_policy())
+        _write_sidecar(tmp_path, pct=55.0, window=200_000, tier="orange")
+        _decide(tmp_path, machine, now=_NOW)
+        _write_sidecar(tmp_path, pct=55.0, window=200_000, tier="orange", ts=_NOW + 59.0)
+        outcome = _decide(tmp_path, machine, now=_NOW + 60.0)
+        assert outcome.payload is not None
+        assert "orange" in outcome.reason
+
+    @pytest.mark.parametrize("tier", ["", "ok", "unknown", "green"])
+    def test_unknown_or_low_tier_fails_closed(self, tmp_path: Path, tier: str) -> None:
+        machine = _mod.CompactStateMachine(_policy())
+        _write_sidecar(tmp_path, tier=tier)
+        _decide(tmp_path, machine, now=_NOW)
+        _write_sidecar(tmp_path, tier=tier, ts=_NOW + 59.0)
+        assert _decide(tmp_path, machine, now=_NOW + 60.0).payload is None
+
+    def test_configured_tier_red_leaves_orange_alone(self, tmp_path: Path) -> None:
+        machine = _mod.CompactStateMachine(_policy(idle_compact_tier="red"))
+        assert _settled(tmp_path, machine).payload is None
+
+    def test_configured_tier_yellow_takes_yellow(self, tmp_path: Path) -> None:
+        machine = _mod.CompactStateMachine(_policy(idle_compact_tier="yellow"))
+        _write_sidecar(tmp_path, pct=20.0, tier="yellow")
+        _decide(tmp_path, machine, now=_NOW)
+        _write_sidecar(tmp_path, pct=20.0, tier="yellow", ts=_NOW + 59.0)
+        assert _decide(tmp_path, machine, now=_NOW + 60.0).payload is not None
+
+
+class TestShippedSettle:
+    """The shipped settle period is ten minutes of unbroken true idle."""
+
+    def test_nothing_before_600_seconds_then_fires(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("CCY_IDLE_COMPACT_SETTLE_SECONDS", raising=False)
+        machine = _mod.CompactStateMachine(_mod.CompactPolicy(idle_compact_mode="on"))
+        _write_sidecar(tmp_path)
+        assert _decide(tmp_path, machine, now=_NOW).payload is None
+        _write_sidecar(tmp_path, ts=_NOW + 598.0)
+        assert _decide(tmp_path, machine, now=_NOW + 599.0).payload is None
+        _write_sidecar(tmp_path, ts=_NOW + 599.0)
+        assert _decide(tmp_path, machine, now=_NOW + 600.0).payload is not None
+
+
+def _decide_with(sidecar_dir: Path, machine, *, now: float, **facts: object):
+    """`_decide` with arbitrary TickFacts overrides (each defaults to idle)."""
+    values: dict[str, object] = {
+        "now_wall": now,
+        "idle": True,
+        "input_line_empty": True,
+        "human_compact_submitted": False,
+        "work_idle": True,
+        "true_idle": True,
+    }
+    values.update(facts)
+    return _mod.decide_once(
+        machine,
+        sidecar_dir=sidecar_dir,
+        facts=_mod.TickFacts(**values),
+        dry_run=False,
+        freshness_seconds=_mod.CompactPolicy().freshness_seconds,
+    )
+
+
+class TestNeverMidTask:
+    """Every sign of work, at any tick in the settle period, restarts the clock."""
+
+    @pytest.mark.parametrize(
+        "busy",
+        [
+            {"true_idle": False},  # the screen footer shows a task, agent or turn
+            {"work_idle": False},  # the child is still producing output
+            {"idle": False},  # not at the prompt
+            {"input_line_empty": False},  # something typed in the box
+        ],
+    )
+    def test_any_busy_tick_restarts_the_settle(
+        self, tmp_path: Path, busy: dict[str, object]
+    ) -> None:
+        machine = _mod.CompactStateMachine(_policy())
+        _write_sidecar(tmp_path)
+        _decide_with(tmp_path, machine, now=_NOW)
+        _write_sidecar(tmp_path, ts=_NOW + 29.0)
+        assert _decide_with(tmp_path, machine, now=_NOW + 30.0, **busy).payload is None
+        _decide_with(tmp_path, machine, now=_NOW + 31.0)
+        _write_sidecar(tmp_path, ts=_NOW + 60.0)
+        assert _decide_with(tmp_path, machine, now=_NOW + 61.0).payload is None
+        _write_sidecar(tmp_path, ts=_NOW + 90.0)
+        assert _decide_with(tmp_path, machine, now=_NOW + 91.0).payload is not None
+
+    def test_claude_code_records_busy_mid_settle_restarts_the_clock(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A running sub-agent or background task (Claude Code's records) mid-settle."""
+        state = {"idle": True}
+        monkeypatch.setattr(
+            _mod, "session_internal_idle", lambda _sid: (state["idle"], "sub-agent running")
+        )
+        machine = _mod.CompactStateMachine(_policy())
+        _write_sidecar(tmp_path)
+        _decide_with(tmp_path, machine, now=_NOW)
+        state["idle"] = False
+        _write_sidecar(tmp_path, ts=_NOW + 29.0)
+        _decide_with(tmp_path, machine, now=_NOW + 30.0)
+        state["idle"] = True
+        _decide_with(tmp_path, machine, now=_NOW + 31.0)
+        _write_sidecar(tmp_path, ts=_NOW + 60.0)
+        assert _decide_with(tmp_path, machine, now=_NOW + 61.0).payload is None
+
+
+class TestPendingWorkWins:
+    """A pending injection or cron prompt goes first; idle compaction waits."""
+
+    def _settle(self, sidecar_dir: Path, machine, *, arrive=None, **facts: object):
+        """Settle, with ``arrive()`` making the pending work appear before the due tick."""
+        _write_sidecar(sidecar_dir)
+        _decide_with(sidecar_dir, machine, now=_NOW, **facts)
+        if arrive is not None:
+            arrive()
+        _write_sidecar(sidecar_dir, ts=_NOW + 59.0)
+        return _decide_with(sidecar_dir, machine, now=_NOW + 60.0, **facts)
+
+    def test_pending_session_actions_directive_goes_first(self, tmp_path: Path) -> None:
+        sidecar = tmp_path / "ctx"
+        machine = _mod.CompactStateMachine(_policy())
+
+        def arrive() -> None:
+            (sidecar / f"{_SESSION}.session-actions").write_text(
+                json.dumps({"session_id": _SESSION, "ts": _NOW + 50.0, "count": 2}),
+                encoding="utf-8",
+            )
+
+        outcome = self._settle(sidecar, machine, arrive=arrive)
+        assert outcome.decision_value == _mod.Decision.WOULD_SESSION_ACTIONS.value
+        assert not (outcome.payload or "").startswith("/compact")
+
+    def test_pending_standing_auth_reminder_goes_first(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sidecar = tmp_path / "ctx"
+        signal = sidecar / f"{_SESSION}.standing-auth"
+        machine = _mod.CompactStateMachine(_policy())
+
+        def arrive() -> None:
+            monkeypatch.setattr(
+                _mod,
+                "load_standing_auth_signal",
+                lambda *_a, **_k: (signal, "🤖 [ccy-supervisor] reminder", None),
+            )
+
+        outcome = self._settle(sidecar, machine, arrive=arrive)
+        assert outcome.decision_value == _mod.Decision.WOULD_STANDING_AUTH.value
+        assert not (outcome.payload or "").startswith("/compact")
+
+    def _write_cron_records(self, sidecar: Path, *, age: float) -> None:
+        sidecar.mkdir(parents=True, exist_ok=True)
+        (sidecar.parent / "cron-records.json").write_text(
+            json.dumps(
+                {
+                    "records": [
+                        {
+                            "session_id": _SESSION,
+                            "cron_id": "c1",
+                            "schedule": "7 * * * *",
+                            "prompt_hash": "h",
+                            "created_at": _NOW - age,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_pending_cron_reconcile_goes_first(self, tmp_path: Path) -> None:
+        sidecar = tmp_path / "ctx"
+        machine = _mod.CompactStateMachine(_policy())
+        outcome = self._settle(
+            sidecar,
+            machine,
+            arrive=lambda: self._write_cron_records(sidecar, age=8 * 24 * 3600.0),
+            output_quiet_seconds=3 * 3600.0,
+        )
+        assert outcome.decision_value == _mod.Decision.WOULD_CRON_RECONCILE.value
+        assert not (outcome.payload or "").startswith("/compact")
+
+    def test_live_crons_do_not_block_it(self, tmp_path: Path) -> None:
+        sidecar = tmp_path / "ctx"
+        self._write_cron_records(sidecar, age=3600.0)
+        machine = _mod.CompactStateMachine(_policy())
+        outcome = self._settle(sidecar, machine, output_quiet_seconds=3 * 3600.0)
+        assert (outcome.payload or "").startswith("/compact")
+
+    def test_a_capped_cron_reconcile_no_longer_blocks_it(self, tmp_path: Path) -> None:
+        """Otherwise a session whose reconcile prompts ran out could never compact."""
+        sidecar = tmp_path / "ctx"
+        self._write_cron_records(sidecar, age=8 * 24 * 3600.0)
+        machine = _mod.CompactStateMachine(_policy())
+        machine.import_state({"cron_reconcile_injections": _mod._MAX_CRON_RECONCILE_INJECTIONS})
+        outcome = self._settle(sidecar, machine, output_quiet_seconds=3 * 3600.0)
+        assert (outcome.payload or "").startswith("/compact")
+
+
 class TestPolicyEnv:
-    def test_defaults_are_dry_run_first(self) -> None:
+    def test_defaults_are_dry_run_orange_tier_and_ten_minutes(self) -> None:
+        """Plan 00603 owner decision: the orange tier and 600 s idle."""
         policy = _mod.CompactPolicy()
         assert policy.idle_compact_mode == "dry-run"
-        assert policy.idle_compact_pct == 30.0
-        assert policy.idle_compact_settle_seconds == 60.0
+        assert policy.idle_compact_tier == "orange"
+        assert policy.idle_compact_pct is None
+        assert policy.idle_compact_settle_seconds == 600.0
         assert policy.idle_compact_cooldown_seconds == 1800.0
         assert policy.idle_compact_min_tokens == 100_000
 
     def test_env_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("CCY_IDLE_COMPACT", "on")
+        monkeypatch.setenv("CCY_IDLE_COMPACT_TIER", "Yellow")
         monkeypatch.setenv("CCY_IDLE_COMPACT_PCT", "25")
         monkeypatch.setenv("CCY_IDLE_COMPACT_SETTLE_SECONDS", "10")
         monkeypatch.setenv("CCY_IDLE_COMPACT_COOLDOWN_SECONDS", "60")
@@ -281,22 +526,28 @@ class TestPolicyEnv:
         policy = _mod.CompactPolicy()
         assert (
             policy.idle_compact_mode,
+            policy.idle_compact_tier,
             policy.idle_compact_pct,
             policy.idle_compact_settle_seconds,
             policy.idle_compact_cooldown_seconds,
             policy.idle_compact_min_tokens,
-        ) == ("on", 25.0, 10.0, 60.0, 5000)
+        ) == ("on", "yellow", 25.0, 10.0, 60.0, 5000)
+
+    @pytest.mark.parametrize("raw", ["", "green", "purple", "critical"])
+    def test_bad_tier_falls_back_to_orange(self, monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+        monkeypatch.setenv("CCY_IDLE_COMPACT_TIER", raw)
+        assert _mod.CompactPolicy().idle_compact_tier == "orange"
 
     def test_unknown_mode_is_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("CCY_IDLE_COMPACT", "banana")
         assert _mod.CompactPolicy().idle_compact_mode == "off"
 
     @pytest.mark.parametrize("raw", ["", "abc", "0", "100", "-5"])
-    def test_bad_percentage_falls_back_to_default(
+    def test_bad_percentage_falls_back_to_the_tier(
         self, monkeypatch: pytest.MonkeyPatch, raw: str
     ) -> None:
         monkeypatch.setenv("CCY_IDLE_COMPACT_PCT", raw)
-        assert _mod.CompactPolicy().idle_compact_pct == 30.0
+        assert _mod.CompactPolicy().idle_compact_pct is None
 
     @pytest.mark.parametrize("raw", ["", "abc", "-1"])
     def test_bad_seconds_fall_back_to_default(
@@ -306,7 +557,7 @@ class TestPolicyEnv:
         monkeypatch.setenv("CCY_IDLE_COMPACT_COOLDOWN_SECONDS", raw)
         monkeypatch.setenv("CCY_IDLE_COMPACT_MIN_TOKENS", raw)
         policy = _mod.CompactPolicy()
-        assert policy.idle_compact_settle_seconds == 60.0
+        assert policy.idle_compact_settle_seconds == 600.0
         assert policy.idle_compact_cooldown_seconds == 1800.0
         assert policy.idle_compact_min_tokens == 100_000
 

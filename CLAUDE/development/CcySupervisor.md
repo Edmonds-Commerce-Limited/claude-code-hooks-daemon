@@ -383,24 +383,29 @@ up.
   tell this apart from a split `ESC b`, so the model holds, and the banner asks
   for one more Esc.
 
-## Idle compaction at a percentage (Plan 00603)
+## Idle compaction at a context tier (Plan 00603)
 
 Supplements Claude Code's own `idleCompaction` (about an hour idle, one-hour
 prompt cache, 200k-token default threshold; the daemon's optimal-config check
-and SessionStart sync keep it on). When the session is in a TRUE idle and the
-context is at or above `CCY_IDLE_COMPACT_PCT`, the supervisor injects ONE armed
-`/compact` and then the existing post-compaction `continue`. The RED and
+and SessionStart sync keep it on). When the session has been in a TRUE idle for
+the settle period (default 600 s) and the sidecar's context tier is at or above
+`CCY_IDLE_COMPACT_TIER` (default `orange`), the supervisor injects ONE armed
+`/compact` and then the existing post-compaction `continue`. The tier is the
+daemon's own classification (`context_tiers.py`), so the gate follows the window
+size: orange starts at 30% of a 1M window and 51% of a 200k one. Setting
+`CCY_IDLE_COMPACT_PCT` replaces the tier gate with a plain percentage. The RED and
 CRITICAL tiers and the status-line colours are untouched. The one place this
 lives is `CompactStateMachine.idle_compact_due` and the idle-compaction block in
 `decide_once` in `.claude/ccy/claude-supervise.py`.
 
-| Variable                            | Default   | Meaning                                                                    |
-| ----------------------------------- | --------- | -------------------------------------------------------------------------- |
-| `CCY_IDLE_COMPACT`                  | `dry-run` | `off`, `dry-run` (log only, nothing typed) or `on`; anything else is `off` |
-| `CCY_IDLE_COMPACT_PCT`              | `30`      | context percentage, exclusive of 0 and 100                                 |
-| `CCY_IDLE_COMPACT_SETTLE_SECONDS`   | `60`      | how long the true idle must hold unbroken                                  |
-| `CCY_IDLE_COMPACT_COOLDOWN_SECONDS` | `1800`    | after ANY compaction (this feature's, RED's, a human's)                    |
-| `CCY_IDLE_COMPACT_MIN_TOKENS`       | `100000`  | absolute floor: `pct * window_size`, so a small window is left alone       |
+| Variable                            | Default   | Meaning                                                                             |
+| ----------------------------------- | --------- | ----------------------------------------------------------------------------------- |
+| `CCY_IDLE_COMPACT`                  | `dry-run` | `off`, `dry-run` (log only, nothing typed) or `on`; anything else is `off`          |
+| `CCY_IDLE_COMPACT_TIER`             | `orange`  | `yellow`, `orange` or `red`; that tier or higher counts; anything else is `orange`  |
+| `CCY_IDLE_COMPACT_PCT`              | unset     | a percentage, exclusive of 0 and 100, that REPLACES the tier gate; invalid is unset |
+| `CCY_IDLE_COMPACT_SETTLE_SECONDS`   | `600`     | how long the true idle must hold unbroken                                           |
+| `CCY_IDLE_COMPACT_COOLDOWN_SECONDS` | `1800`    | after ANY compaction (this feature's, RED's, a human's)                             |
+| `CCY_IDLE_COMPACT_MIN_TOKENS`       | `100000`  | absolute floor: `pct * window_size`, so a small window is left alone                |
 
 A bad number falls back to its default. `dry-run` (and the supervisor's own
 dry-run, i.e. no `--arm`) writes a `would idle-compact` line to `decision.log`
@@ -413,7 +418,18 @@ task, sub-agent, shell, monitor or running turn; the input box is empty and the
 focus hold is clear (`can_inject`); the child has been quiet (`work_idle`); Claude Code's own records say idle (below); no
 compaction signal, goal or other injection is pending; the sidecar is fresh,
 not compacting, and the session is not BLOCKED; and all of that has held for
-the settle period, tracked by `note_true_idle` (any break restarts it).
+the settle period, tracked by `note_true_idle` (any break restarts it). An
+unknown sidecar tier (an older sidecar, or one this script does not rank)
+never fires.
+
+**Pending work goes first** (`_idle_compact_yields_to`). The standing-auth
+reminder, the session-actions directive and the cron-expiry reconcile prompt
+sit BELOW idle compaction in `decide_once`. On a tick where the compaction is
+due and any of them has work (an in-scope fresh signal, or the cron watchdog
+wanting to prompt with injections left), the compaction waits and that family
+goes. A cron tick Claude Code itself delivers turns the session busy (its
+`status`, the footer, `work_idle`), which restarts the settle clock; one that
+comes due while a compaction runs is queued by Claude Code and delivered after.
 
 **What can and cannot be detected.** The context sidecar carries `pct`,
 `window_size` and `tier` only; no sidecar field or daemon file reports a
