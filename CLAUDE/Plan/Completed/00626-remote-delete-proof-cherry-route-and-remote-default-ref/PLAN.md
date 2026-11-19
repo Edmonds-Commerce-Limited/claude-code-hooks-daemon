@@ -1,6 +1,6 @@
 # Plan 00626: remote delete proof cherry route and remote default ref
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-19
 **Owner**: joseph
 **Priority**: High
@@ -78,15 +78,23 @@ delete: a remote delete never rests on a cached positive.
 
 ### Phase 4: close-out
 
-- [ ] 🔄 **Task 4.1**: Rule text and docstrings; release note; report. Awaiting the
-  coordinator's full QA gate and security review.
+- [x] ✅ **Task 4.1**: Rule text and docstrings; release note; report. Independent
+  security review passed (`subagent-reports/261119-security-review.md`); full QA gate
+  45 of 46, the two failing tests also fail on main's code on this host (a stale
+  `test_branch_pressure` expectation, fixed on the Plan 00623 branch, and playbook probe
+  #125, ledgered N673). Merged at `201a17fae`.
 
 ## Success Criteria
 
 - [x] Both scratch repros flip (defect 1 proves, defect 2 refuses) and are pinned by tests.
 - [x] Targeted tests pass; no QA suppression.
-- [x] Release note under `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (the pending-release
-  holding area) records both fixes.
+- [x] Release note
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/003-remote-delete-proof-remote-default-and-cherry-route.md`
+  (the pending-release holding area) records both fixes.
+- [x] Independent security review PASS: 6 cherry-route loosenings justified, 6 unsafe
+  deletes now refused.
+- Follow-up ledgered as N674: a stale `origin/HEAD` after a remote default rename needs
+  a live `ls-remote --symref` check.
 
 ## Delivery & Milestones
 

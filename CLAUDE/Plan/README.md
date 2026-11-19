@@ -8,8 +8,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00626: remote delete proof cherry route and remote default ref](00626-remote-delete-proof-cherry-route-and-remote-default-ref/PLAN.md) - In Progress (client report: the remote-delete proof refuses a branch whose every patch is in the default when cherry-picks interleave, and proves remote deletes against the LOCAL default; restore the cherry route with exact per-path content, prove against the remote default's live tip only, never on a cached positive)
-
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - Not Started (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
 
 - [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - Not Started (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; draft, no code until the owner approves the design)
@@ -206,6 +204,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00626: remote delete proof cherry route and remote default ref](Completed/00626-remote-delete-proof-cherry-route-and-remote-default-ref/PLAN.md) - Complete at merge `201a17fae` + the archiving commit (client report: interleaved cherry-picks now prove a branch merged, and a remote delete is proven against the remote default's live tip only, never the local default or a cached positive; security review passed; release note 003; follow-up N674)
+
 - [00624: branch park marker unsigned and reads unmerged](Completed/00624-branch-park-marker-unsigned-and-reads-unmerged/PLAN.md) - Complete at the archiving commit (GitHub #210 and #211, closed: both already fixed in v3.75.0, #210 by `d2e73d0e9` and #211 by Plans 00594 and 00622, confirmed by Phase 1 repro; the ref-based park design is not adopted and not built, kept as a record; docs only, no release note)
 
 - [00622: remote delete proof ignores empty and park marker commits](Completed/00622-remote-delete-proof-ignores-empty-and-park-marker-commits/PLAN.md) - Complete at merge `eba1de61f` + the archiving commit (empty commits over merged work no longer block a branch delete; reviews rounds 1 and 2 fixed, round 3 ledgered N665, N666; release note 002)
@@ -264,8 +264,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00579: copy seeded files and worktree removal](Completed/00579-copy-seeded-files-and-worktree-removal/PLAN.md) - Complete at merge `a26be56b0` (main CI run 42762876632 green) + the archiving commit (#164, closed: a copy-mode seed byte-identical to its source in the main checkout no longer blocks a worktree removal; a diverged, missing or worktree-resolving source still blocks and is named; bounded comparison; release note 030)
 
-- [00577: forwarder stubs shellcheck clean](Completed/00577-forwarder-stubs-shellcheck-clean/PLAN.md) - Complete at `43250b5fb` (CI run 42627973690 success) + the archiving commit (GitHub #163, closed: generated hook stubs export the relay-unused marker the sourced init.sh reads, so `shellcheck --severity=warning` is clean with no suppression; a test shellchecks the stub generated for every event; release note 015)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -319,11 +317,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 624 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 627 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 520 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 521 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 80 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 81 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

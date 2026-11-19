@@ -7896,3 +7896,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: a plain `printf` piped to `pingbus say` was denied because the message TEXT, a quoted argument, held the words for stopping a systemd unit. This repository has no handler named for Ansible enforcement (a search of `src/` finds only mentions), so the guard is most likely a project-level handler in that seat's own repository, not a shipped one. Unverified from here.
 
 **Status**: ⬜ Open, low priority; needs the reporting seat to name the handler. If it is a shipped handler, it must judge only command words, never the contents of a quoted argument to another program. If it is a project handler, the shared command-word parsing helpers already exist for the same purpose and it should use them.
+
+### N674 — a stale `refs/remotes/<remote>/HEAD` after a remote default rename misleads the remote-delete proof's default detection
+
+**Source**: Plan 00626 close-out (follow-up of its `auto` default detection, which reads only `refs/remotes/<remote>/HEAD`).
+
+**Evidence**: after the remote renames its default branch, the local `refs/remotes/<remote>/HEAD` keeps pointing at the old name until someone runs `git remote set-head`. The proof then names the old branch as the default; the live-tip confirmation fails closed, so no unsafe delete results, but the refusal is the wrong reason and the owner cannot tell why.
+
+**Status**: ⬜ Open, low priority. Confirm the default with a live `git ls-remote --symref <remote> HEAD` and report a stale tracking HEAD by name, still failing closed.

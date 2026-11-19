@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00577: forwarder stubs shellcheck clean](00577-forwarder-stubs-shellcheck-clean/PLAN.md) - Complete at `43250b5fb` (CI run 42627973690 success) + the archiving commit (GitHub #163, closed: generated hook stubs export the relay-unused marker the sourced init.sh reads, so `shellcheck --severity=warning` is clean with no suppression; a test shellchecks the stub generated for every event; release note 015)
+
 - [00576: hotfix release fast path](00576-hotfix-release-fast-path/PLAN.md) - Complete at merge `8bfcad71f` (PR #190) + the archiving commit (owner request after v3.73.1: `/release hotfix` runs the RELEASING.md "Hotfix fast path" and the state file and `release_blocker` name the mode; advise-severity plan/docs QA findings never fail CI; a test pins the release gate's cancel-in-progress concurrency, which the journal shows did cancel the superseded v3.73.1 run; release note 013)
 
 - [00572: ci wall clock sharding arm and hygiene](00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - Complete at merge `f2d532f89` (PR #187) + the archiving commit (owner request: `qa.yml` reuses release-gate's shard matrix, so the nightly fell from 116 to 28.5 min; every `main` push gets a verdict; native and released aarch64 relay and hooks-screen, a non-blocking arm64 test leg, SHA-pinned actions; release notes 006, 012)
