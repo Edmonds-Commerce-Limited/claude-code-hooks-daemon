@@ -442,10 +442,13 @@ re-runs with the digest, as the skill says. Exit 5 is: report the reason and
 leave the upgrade to a human.
 
 **Rollback.** When the new daemon does not start (Step 15) or post-upgrade
-validation fails (Step 16), an unattended run rolls back to the snapshot and
-restarts the previous daemon, and exits 1. An attended run keeps the new code
-for a human to fix, as before. The rollback restores the checkout, config and
-hooks; the venv is the one built for the target, as in any rollback.
+validation fails (Step 16), an unattended run rolls back to the snapshot,
+tries to restart the previous daemon, and exits 1. An attended run keeps the
+new code for a human to fix, as before. The rollback restores the checkout,
+config and hooks; the venv is the one built for the target, as in any
+rollback, and a restart that fails there is not reported separately (the next
+hook starts the daemon, or `hooks-daemon status` shows it down). Check
+`hooks-daemon status` after an exit 1.
 
 **No upgrade loop.** An unattended run that ends in exit 5 or a failure
 records it in `.claude/hooks-daemon/untracked/auto-upgrade/v<version>.state`

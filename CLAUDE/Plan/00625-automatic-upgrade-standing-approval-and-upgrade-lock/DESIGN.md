@@ -214,8 +214,11 @@ to "fix the config manually". Attended runs keep today's behaviour.
 Layer 1 writes an attempt record per target,
 `.claude/hooks-daemon/untracked/auto-upgrade/v<version>.state` (key=value:
 `status` = `failed` | `needs-human`, `target`, `from`, `detail`; same shape
-as `background-sync/v<version>.state`), whenever an unattended run ends in a
-rollback, a failure or a needs-human stop. It is under the clone's
+as `background-sync/v<version>.state`), whenever the unattended run's Layer 2
+ends in a rollback, a failure or a needs-human stop (any exit but 0, 3 or 75).
+Layer 1's own refusals write no record: a dirty tree or a release in flight
+is transient, and a MAJOR bump or a missing Layer 2 capability is found again
+on every run. It is under the clone's
 gitignored `untracked/`, which neither the snapshot restore nor the rollback
 touches. While a record exists for the latest release, `version_check` does
 not invite an unattended upgrade, and reports the record instead; Layer 1
@@ -238,3 +241,33 @@ Never while `untracked/release-state.json` exists in the project root (section
 4). In practice that file exists only in the daemon's own repository, where
 auto-upgrade does not apply anyway; the check costs nothing and keeps the
 rule true if a client project ever adopts the same release workflow.
+
+## 11. Open after the build (for review and the owner)
+
+- **OWNER DECISION, skill confirmation steps.** The skill's step 9
+  (`/hooks-daemon optimise`) applies changes "on your confirmation", and some
+  post-upgrade tasks say to ask the user. The skill text tells an unattended
+  run to finish the steps without asking; it does not yet say what to do at
+  those two points. A likely ruling: unattended defers optimise and stops at a
+  task that says to ask.
+- **OWNER DECISION, Layer 1 source.** The skill's shim runs `upgrade.sh` from
+  `main`, not from the published tag. So an unattended run executes
+  unreleased Layer 1 code, as an attended one does. Pinning it to the target
+  tag is possible (the shim's offline recovery already shows how) but changes
+  the attended route too.
+- **OWNER DECISION, shared checkouts.** The dirty-tree refusal will often
+  block the many-agents-one-folder case, because one of the agents usually has
+  work in progress. The lock covers Layer 1 and Layer 2, not the skill's
+  later commit of the tracked files.
+- **OWNER DECISION, injected text.** Default-on means every project's
+  prompts now carry the authorisation text on the standing-authorisations
+  cadence.
+- **A waiter that takes the lock after the holder finished.** With
+  `--lock-wait` and no VERSION, it resolves the latest release, which is now
+  the installed one, and runs a same-version reinstall: wasteful, not
+  harmful. The session-start trigger does not cause it, because the next
+  version check reads "up to date". It is not tested.
+- **Unproven end to end.** The flag handoff is tested from Layer 1 into a
+  stub Layer 2, and Layer 2's refusal from a direct call; no test runs both
+  real layers on a `breaking: true` manifest. The unattended rollback is
+  tested against stubs of the snapshot restore and the daemon restart.
