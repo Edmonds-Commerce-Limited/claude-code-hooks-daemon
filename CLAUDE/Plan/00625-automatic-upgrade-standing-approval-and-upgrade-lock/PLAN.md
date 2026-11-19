@@ -1,4 +1,4 @@
-# Plan 00624: branch park marker unsigned and reads unmerged
+# Plan 00625: automatic upgrade standing approval and upgrade lock
 
 **Status**: Not Started
 **Created**: 2026-11-19
