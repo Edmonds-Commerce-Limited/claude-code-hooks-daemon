@@ -48,7 +48,11 @@ def main() -> None:
     tag, capmode, idx, out = sys.argv[1:5]
     out = str(Path(out).resolve())
     corpus = os.environ.get("CORPUS", "commands.txt")
-    commands = [c.replace("<NL>", "\n") for c in (R / corpus).read_text().splitlines() if c and not c.startswith("#")]
+    commands = [
+        c.replace("<NL>", "\n")
+        for c in (R / corpus).read_text().splitlines()
+        if c and not c.startswith("#")
+    ]
     base = R / "fx"
     root = build(base)
     os.chdir(str(root) if os.environ.get("DAEMON_CWD_ROOT") else "/")
@@ -67,8 +71,10 @@ def main() -> None:
         link_index = None
     if capmode == "cap" and hasattr(sfm, "LINK_SCAN_DIRECTORY_CAP"):
         sfm.LINK_SCAN_DIRECTORY_CAP = 8
-    patches = [patch.object(gm, "resolve_project_root", return_value=str(root)),
-               patch.object(path_exclusion, "resolve_project_root", return_value=str(root))]
+    patches = [
+        patch.object(gm, "resolve_project_root", return_value=str(root)),
+        patch.object(path_exclusion, "resolve_project_root", return_value=str(root)),
+    ]
     if hasattr(sfm, "resolve_project_root"):
         patches.append(patch.object(sfm, "resolve_project_root", return_value=str(root)))
     for p in patches:

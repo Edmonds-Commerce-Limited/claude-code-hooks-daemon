@@ -30,8 +30,12 @@ def main() -> None:
                 shutil.rmtree(work)
             shutil.copytree(R / "fx", work, symlinks=True)
             root = work / "proj"
-            env = {"PATH": "/usr/bin:/bin", "HOME": str(work / "home"), "TMPDIR": str(work / "outside"),
-                   "D": str(root / d) if d else str(root)}
+            env = {
+                "PATH": "/usr/bin:/bin",
+                "HOME": str(work / "home"),
+                "TMPDIR": str(work / "outside"),
+                "D": str(root / d) if d else str(root),
+            }
             # The fixture links are absolute into fx/: re-point them into the copy.
             for link in root.rglob("*"):
                 if link.is_symlink():
@@ -40,9 +44,16 @@ def main() -> None:
                     link.symlink_to(target)
             for prefix in ("", "shopt -s extglob\n"):
                 try:
-                    proc = subprocess.run(["bash", "-c", prefix + command], cwd=root, env=env,
-                                          capture_output=True, timeout=5, stdin=subprocess.DEVNULL,
-                                          text=True, errors="replace")
+                    proc = subprocess.run(
+                        ["bash", "-c", prefix + command],
+                        cwd=root,
+                        env=env,
+                        capture_output=True,
+                        timeout=5,
+                        stdin=subprocess.DEVNULL,
+                        text=True,
+                        errors="replace",
+                    )
                     output = proc.stdout + proc.stderr
                 except subprocess.TimeoutExpired:
                     output = "TIMEOUT"
