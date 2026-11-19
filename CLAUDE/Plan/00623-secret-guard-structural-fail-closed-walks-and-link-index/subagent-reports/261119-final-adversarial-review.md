@@ -106,4 +106,4 @@ Targeted regression on the fixed tree: every `test_secret_file_guard*`, flaggabl
 - **E6/E7:** extglob words split by the tokeniser.
 - **E8:** a link or `cp -s` made earlier in the same command.
 - **Usability:** this repository still denies every computed move until the review fixtures are pruned (an owner decision), and costs about 0.85 s per such command.
-- Remove `untracked/scratch/p623rev2-mainwt` (the baseline worktree) and `untracked/scratch/rv2/parentwt`.
+- The baseline and parent-tip worktrees used here have been removed. The probe fixtures remain in this worktree's `untracked/scratch/rv2/`; they hold links to a dummy and add to the directory-link count, so delete them before measuring usability again.
