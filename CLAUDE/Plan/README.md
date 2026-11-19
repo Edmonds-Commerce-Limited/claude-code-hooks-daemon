@@ -8,9 +8,9 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00625: automatic upgrade standing approval and upgrade lock](00625-automatic-upgrade-standing-approval-and-upgrade-lock/PLAN.md) - In Progress (owner request: a default-on `daemon-auto-upgrade` standing authorisation, `upgrade.sh --unattended` that only adds refusals and rolls back on a failed health check, and one cross-namespace-safe upgrade lock shared by upgrade and provision; owner decisions listed in DESIGN.md)
-
 - [00626: remote delete proof cherry route and remote default ref](00626-remote-delete-proof-cherry-route-and-remote-default-ref/PLAN.md) - In Progress (client report: the remote-delete proof refuses a branch whose every patch is in the default when cherry-picks interleave, and proves remote deletes against the LOCAL default; restore the cherry route with exact per-path content, prove against the remote default's live tip only, never on a cached positive)
+
+- [00625: automatic upgrade standing approval and upgrade lock](00625-automatic-upgrade-standing-approval-and-upgrade-lock/PLAN.md) - In Progress (owner request: a default-on `daemon-auto-upgrade` standing authorisation, `upgrade.sh --unattended` that only adds refusals and rolls back on a failed health check, and one cross-namespace-safe upgrade lock shared by upgrade and provision; design points settled under the owner's delegation in DESIGN.md)
 
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - Not Started (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
 
