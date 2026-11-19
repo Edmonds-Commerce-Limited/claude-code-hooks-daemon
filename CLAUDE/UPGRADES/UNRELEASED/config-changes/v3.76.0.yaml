@@ -60,3 +60,33 @@ config_changes:
         handlers:
           user_prompt_submit:
             branch_pool_pressure_prompt: {enabled: true, priority: 44}
+    - key: handlers.user_prompt_submit.standing_authorisations.options.authorisations.daemon-auto-upgrade
+      recommended: false
+      dormant: false
+      description: >-
+        NEW built-in standing authorisation (Plan 00625), and the only one that
+        is ON BY DEFAULT, at the daemon owner's request: with no entry for it in
+        the project config, the agent is told it may upgrade the hooks daemon
+        to the latest published release without asking, running the
+        hooks-daemon skill's upgrade with --unattended when the session-start
+        version check finds a newer release. The injected text says it is the
+        shipped default, not a request the project recorded. Unattended mode
+        only adds refusals: never across a MAJOR version, past READ THIS FIRST,
+        while untracked/release-state.json exists, with a dirty tree, or to a
+        version whose unattended attempt failed; it rolls back when the new
+        daemon does not start or fails validation. Tag signatures are not
+        verified.
+      migration_note: >-
+        This default reaches existing installs on this upgrade. To keep
+        upgrades human-triggered, add {id: daemon-auto-upgrade, enabled: false}
+        to the authorisations list. Every upgrade and provision sync also now
+        takes an upgrade lock at <git common dir>/hooks-daemon-upgrade.lock;
+        nothing to configure.
+      example_yaml: |
+        handlers:
+          user_prompt_submit:
+            standing_authorisations:
+              options:
+                authorisations:
+                  - id: daemon-auto-upgrade
+                    enabled: false
