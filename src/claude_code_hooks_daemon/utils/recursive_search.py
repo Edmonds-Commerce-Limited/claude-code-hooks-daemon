@@ -715,6 +715,11 @@ class _SearchCwds:
             self.unscanned = True
         if scan is not None:
             self.computed_links.extend(scan.value.directory_links)
+        if scan is not None and scan.value.named is not None:
+            # Past the scan cap (N669/N670) the holding directories are not listed as
+            # places: as past SEARCH_DIRECTORY_CAP, every later read is judged over
+            # every indexed file, and each directory link is read as a root.
+            self.lost = self.overflowed = True
         linked = scan.value.directories if scan is not None else ()
         found = [root, *self.targets, self.hook_cwd, *linked]
         return tuple(dict.fromkeys(path for path in found if path and posixpath.isabs(path)))

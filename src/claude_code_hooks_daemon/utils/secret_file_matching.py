@@ -3725,7 +3725,73 @@ _ASSIGNMENT_SEGMENT: Final[re.Pattern[str]] = re.compile(
 )
 #: The project directories a computed ``cd`` is judged from are found by a scan this wide.
 LINK_SCAN_DIRECTORY_CAP: Final[int] = 512
+#: Past LINK_SCAN_DIRECTORY_CAP, the index's directory links stay real bases up to this many.
+INDEXED_DIRECTORY_LINK_CAP: Final[int] = 512
+#: Past LINK_SCAN_DIRECTORY_CAP, at most this many link paths are judged by name.
+INDEXED_LINK_CAP: Final[int] = 65_536
 _GIT_DIRECTORY: Final[str] = ".git"
+_PARENT: Final[str] = ".."
+#: A component holding one of these is matched as any name (extglob, brace, escape).
+_UNREADABLE_PATTERN_CHARACTERS: Final[frozenset[str]] = frozenset("({\\")
+
+
+class LinkNames:
+    """Every link path in the project, judged by name (Plan 00623, N669/N670).
+
+    Past :data:`LINK_SCAN_DIRECTORY_CAP` link-holding directories the walkers
+    cannot judge a word from each one. A computed move lands in some project
+    directory ``X``, and a word ``w`` read there passes through a link only if
+    some leading part ``p`` of ``w`` makes ``X/p`` a link path. Then ``p``'s
+    components are the trailing components of that path, whatever ``X`` is.
+    So a word reaches a link when any leading part of it spells the tail of
+    one; a ``..`` anywhere is not followed and counts as reaching.
+    """
+
+    def __init__(self, links: Iterable[str]) -> None:
+        self._tails: dict[str, list[tuple[str, ...]]] = {}
+        for link in links:
+            parts = tuple(part for part in link.split("/") if part)
+            if parts:
+                self._tails.setdefault(parts[-1], []).append(parts[:-1])
+
+    @staticmethod
+    def _component_matches(name: str, component: str) -> bool:
+        if component == name:
+            return True
+        if any(char in _UNREADABLE_PATTERN_CHARACTERS for char in component):
+            return True
+        return any(char in _GLOB_CHARACTERS for char in component) and fnmatch.fnmatchcase(
+            name, component
+        )
+
+    def reaches(self, token: str) -> bool:
+        """Could relative ``token``, read from any project directory, pass through a link?"""
+        components = [part for part in token.split("/") if part not in ("", ".")]
+        if _PARENT in components:
+            return True
+        for depth, component in enumerate(components):
+            if any(
+                char in _GLOB_CHARACTERS or char in _UNREADABLE_PATTERN_CHARACTERS
+                for char in component
+            ):
+                names: Iterable[str] = [
+                    name for name in self._tails if self._component_matches(name, component)
+                ]
+            elif component in self._tails:
+                names = (component,)
+            else:
+                continue
+            leading = components[:depth]
+            for name in names:
+                for parents in self._tails[name]:
+                    if len(parents) >= len(leading) and all(
+                        self._component_matches(parent, spelled)
+                        for parent, spelled in zip(
+                            parents[len(parents) - len(leading) :], leading, strict=True
+                        )
+                    ):
+                        return True
+        return False
 
 
 @dataclass(frozen=True)
@@ -3739,6 +3805,8 @@ class LinkScan:
     directories: tuple[str, ...]
     #: The links among ``directories`` that lead to a directory.
     directory_links: tuple[str, ...] = ()
+    #: Past the cap: the index's link paths, judged by name instead of from each directory.
+    named: LinkNames | None = None
 
 
 #: The scans made during one tool call (:func:`link_scan_scope`); None outside one.
@@ -3938,10 +4006,12 @@ def scan_project_links(root: str) -> Bounded[LinkScan]:
 def _scan_from_index(root: str) -> Bounded[LinkScan] | None:
     """The scan read from the verified link index (Plan 00623); None while it is not built.
 
-    The index has no directory cap of its own below its build cap, but the
-    walkers judge each directory it names word by word, so more than
-    :data:`LINK_SCAN_DIRECTORY_CAP` of them is a stopped scan, as it was for
-    the per-call walk.
+    Up to :data:`LINK_SCAN_DIRECTORY_CAP` directories, each is a real base the
+    walkers judge a word from. Past it (N669/N670: ``node_modules/.bin`` in
+    every package) only the directory links stay bases, bounded by
+    :data:`INDEXED_DIRECTORY_LINK_CAP` since each is a place a ``cd`` can land
+    outside the index; every link path, bounded by :data:`INDEXED_LINK_CAP`,
+    judges a word by name (:class:`LinkNames`). Past either bound the scan stops.
     """
     indexed = link_index.link_scan_for(root)
     if indexed is None:
@@ -3953,9 +4023,13 @@ def _scan_from_index(root: str) -> Bounded[LinkScan] | None:
     )
     if not indexed.complete:
         return stopped(found, indexed.reason)
-    if len(found.directories) > LINK_SCAN_DIRECTORY_CAP:
+    if len(found.directories) <= LINK_SCAN_DIRECTORY_CAP:
+        return finished(found)
+    if len(links) > INDEXED_DIRECTORY_LINK_CAP or len(indexed.value.links) > INDEXED_LINK_CAP:
         return stopped(found, _SCAN_PAST_CAP)
-    return finished(found)
+    return finished(
+        LinkScan(directories=links, directory_links=links, named=LinkNames(indexed.value.links))
+    )
 
 
 def _walk_project_links(root: str) -> Bounded[LinkScan]:
@@ -4051,6 +4125,7 @@ class CwdSet(tuple[str, ...]):
     link_dirs: tuple[str, ...]
     overflowed: bool
     unscanned: bool
+    named: LinkNames | None
     _by_name: dict[str, list[str]]
     _existing: tuple[str, ...]
     _listings: dict[str, dict[str, tuple[bool, bool]] | None]
@@ -4062,10 +4137,14 @@ class CwdSet(tuple[str, ...]):
         *,
         unscanned: bool = False,
         scanned: Sequence[str] = (),
+        named: LinkNames | None = None,
     ) -> "CwdSet":
         instance = super().__new__(cls, tuple(dict.fromkeys(lexical)))
         instance.link_dirs = tuple(existing[:LINK_DIRECTORY_CAP])
-        instance.overflowed = len(existing) > LINK_DIRECTORY_CAP
+        # Past the scan cap the holding directories are judged by name, never one by
+        # one, so the set is past LINK_DIRECTORY_CAP whatever ``existing`` holds.
+        instance.overflowed = len(existing) > LINK_DIRECTORY_CAP or named is not None
+        instance.named = named
         # A computed move's link scan did not finish (review D2).
         instance.unscanned = unscanned
         instance._by_name = {}
@@ -4121,10 +4200,13 @@ class CwdSet(tuple[str, ...]):
         One listing per directory, not one call per word per directory. A first
         component that is ``..``, a link, or a glob matching a link counts; so does
         a deeper path whose real location differs from its spelling. A directory
-        that cannot be listed counts for every word.
+        that cannot be listed counts for every word. Past the scan cap, a word
+        that :meth:`LinkNames.reaches` a link counts too.
         """
         if not _may_be_relative_path(token):
             return False
+        if self.named is not None and self.named.reaches(token):
+            return True
         components = [part for part in token.split("/") if part not in ("", ".")]
         first = components[0]
         if first == "..":
@@ -4161,6 +4243,8 @@ class _DirectoryWalk:
         self.unscanned = False
         # What a computed move's scan found: a deeper word may pass through one of them.
         self.scanned: dict[str, None] = {}
+        # Past the scan cap: the project's link paths, judged by name (N669/N670).
+        self.named: LinkNames | None = None
         if cwd is not None and Path(cwd).is_absolute():
             self._add(cwd)
 
@@ -4188,6 +4272,8 @@ class _DirectoryWalk:
             self._add(os.path.normpath(root))
             scan = scan_project_links(root)
             self.unscanned = self.unscanned or not scan.complete
+            if scan.value.named is not None:
+                self.named = scan.value.named
             for directory in scan.value.directories:
                 self._add(directory, exists=True)
                 self.scanned[directory] = None
@@ -4237,7 +4323,7 @@ class _DirectoryWalk:
         else:
             bases = []
         found: dict[str, None] = {}
-        if len(bases) > LINK_DIRECTORY_CAP + 1:
+        if len(bases) > LINK_DIRECTORY_CAP + 1 or self.named is not None:
             # Plan 00623 item 6: the bases past the slice are not looked at, so
             # where the move lands from them is unknown (a later word denies).
             self.unscanned = True
@@ -4301,8 +4387,9 @@ class _DirectoryWalk:
         # The chain's last directory is a guess once a group's cd is in it, so the
         # step is joined to every existing directory too -- kept only where real,
         # which bounds the set by what exists rather than by the number of cds.
-        if len(self.existing) > LINK_DIRECTORY_CAP + 1:
-            # Plan 00623 item 6: the directories past the slice are not joined.
+        if len(self.existing) > LINK_DIRECTORY_CAP + 1 or self.named is not None:
+            # Plan 00623 item 6: the directories past the slice (or judged by name
+            # only) are not joined.
             self.unscanned = True
         for base in list(self.existing)[: LINK_DIRECTORY_CAP + 1]:
             joined = os.path.normpath(str(Path(base) / target))
@@ -4315,6 +4402,7 @@ class _DirectoryWalk:
             list(self.existing),
             unscanned=self.unscanned,
             scanned=tuple(self.scanned),
+            named=self.named,
         )
 
 

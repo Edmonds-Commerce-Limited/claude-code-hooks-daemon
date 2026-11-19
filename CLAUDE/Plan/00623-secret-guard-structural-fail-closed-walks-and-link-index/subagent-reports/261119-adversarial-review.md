@@ -225,7 +225,7 @@ Everything above was run again on the tree with F1 and F2 fixed, with the index 
 
 **A freshly built index is racy.** Every directory listed within 3 s of its ctime is listed again on each verify, so a fresh tree of more than 4,096 directories reads as stale (deny) for those 3 s.
 
-**Targeted tests: TARGETED_PLACEHOLDER.** On the F1/F2 tree the same set gave 3,807 passed, 11 skipped and 0 failed. The run covered every `test_secret_file_guard*` file, the flaggable and quarantine guard tests, `test_secret_file_matching*`, `test_recursive_search`, `test_link_index`, `test_bounded_walk`, `test_resolution_failure`, `test_payload_capture` and the hostile-input performance file.
+**Targeted tests: not recorded by this reviewer at the wind-down.** The follow-up agent re-ran the three files the WIP commit `aa5e3d0fe` touched (`test_secret_file_guard_cwd_fail_closed`, `test_secret_file_guard_link_index`, `test_link_index`): 642 passed, 0 failed. On the F1/F2 tree the same set gave 3,807 passed, 11 skipped and 0 failed. The run covered every `test_secret_file_guard*` file, the flaggable and quarantine guard tests, `test_secret_file_matching*`, `test_recursive_search`, `test_link_index`, `test_bounded_walk`, `test_resolution_failure`, `test_payload_capture` and the hostile-input performance file.
 
 Ruff and black are clean on every changed file, and mypy is clean on the three changed modules. Pyright was not run.
 

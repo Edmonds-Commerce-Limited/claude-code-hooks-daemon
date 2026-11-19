@@ -100,6 +100,8 @@ class LinkScanResult:
 
     holding: tuple[str, ...]
     directory_links: tuple[str, ...]
+    #: Every link entry of every listed directory, of any kind, as listed this verification.
+    links: tuple[str, ...] = ()
 
 
 def _identity(stat: os.stat_result) -> _Identity:
@@ -208,6 +210,7 @@ class LinkIndex:
             return stopped(empty, _UNREADABLE)
         holding: list[str] = []
         directory_links: list[str] = []
+        links: list[str] = []
         unclassified = False
         unlisted = False
         relisted = 0
@@ -246,6 +249,7 @@ class LinkIndex:
             # What lies under a directory that cannot be listed is unknown, and bash
             # can still move through it (Plan 00623 review): the result is stopped.
             unlisted = unlisted or current.unlistable
+            links.extend(current.links)
             for link in current.links:
                 kind = _link_kind(link)
                 if kind is _LinkKind.UNKNOWN:
@@ -254,7 +258,7 @@ class LinkIndex:
                     directory_links.append(link)
             queue.extend(current.children)
         self._listings = seen
-        result = LinkScanResult(tuple(holding), tuple(directory_links))
+        result = LinkScanResult(tuple(holding), tuple(directory_links), tuple(links))
         if unlisted:
             return stopped(result, _UNLISTED)
         return stopped(result, _UNCLASSIFIED) if unclassified else finished(result)
