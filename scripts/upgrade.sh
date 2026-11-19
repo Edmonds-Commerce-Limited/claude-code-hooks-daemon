@@ -16,6 +16,18 @@
 # Arguments:
 #   --project-root PATH  - REQUIRED: Project root directory
 #   VERSION              - Git tag to upgrade to (optional, defaults to latest)
+#   --unattended         - No human present; refuse what needs one (exit 5)
+#   --lock-wait=SECONDS  - Poll for the upgrade lock this long
+#
+# Exit codes of this script: Layer 2's own, plus 1 (refused argument
+# combination), 5 (--unattended: needs a human, nothing changed) and 75 (the
+# upgrade lock is held by another upgrade or sync, nothing changed).
+#
+# The upgrade lock (see the upgrade-lock block below) is taken right after the
+# project root is validated and held until this script exits, across Layer 2.
+# An --unattended run that Layer 2 ends other than by success, the reading stop
+# or a held lock leaves an attempt record at
+# <daemon dir>/untracked/auto-upgrade/v<version>.state.
 #
 
 set -euo pipefail
@@ -38,6 +50,11 @@ TARGET_VERSION=""
 UPGRADE_FLAGS=""
 UV_OVERRIDE=""
 _RELEASE_ROUTE="false"
+# --unattended: nobody is at the terminal. Forwarded to Layer 2, and it only
+# ever adds refusals (exit 5 = needs a human, nothing changed).
+_UNATTENDED="false"
+# --lock-wait=SECONDS: how long to poll for the upgrade lock before giving up.
+_LOCK_WAIT=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -57,6 +74,24 @@ while [ $# -gt 0 ]; do
             [ -n "${2:-}" ] || { echo "ERR --project-root requires a path argument" >&2; exit 1; }
             PROJECT_ROOT="$2"
             shift 2
+            ;;
+        --unattended)
+            _UNATTENDED="true"
+            UPGRADE_FLAGS="$UPGRADE_FLAGS --unattended"
+            shift
+            ;;
+        --lock-wait=*|--lock-wait)
+            if [ "$1" = "--lock-wait" ]; then
+                [ -n "${2:-}" ] || { echo "ERR --lock-wait requires a number of seconds" >&2; exit 1; }
+                _LOCK_WAIT="$2"
+                shift 2
+            else
+                _LOCK_WAIT="${1#--lock-wait=}"
+                shift
+            fi
+            case "$_LOCK_WAIT" in
+                '' | *[!0-9]*) echo "ERR --lock-wait $_LOCK_WAIT is not a number of seconds" >&2; exit 1 ;;
+            esac
             ;;
         --release)
             # Plan 00594 Task 5.1: back from a branch install to a release.
@@ -86,7 +121,7 @@ while [ $# -gt 0 ]; do
             fi
             ;;
         --help|-h)
-            echo "Usage: upgrade.sh --project-root PATH [--skip-reading-confirmation=DIGEST] [--skip-config-optimisation] [--uv PATH] [VERSION]"
+            echo "Usage: upgrade.sh --project-root PATH [--skip-reading-confirmation=DIGEST] [--skip-config-optimisation] [--unattended] [--lock-wait=SECONDS] [--uv PATH] [VERSION]"
             echo ""
             echo "  --project-root PATH        Project root directory (REQUIRED)"
             echo "  --uv PATH                  Absolute path to the uv that builds the venv, for this run,"
@@ -96,6 +131,9 @@ while [ $# -gt 0 ]; do
             echo "  --skip-reading-confirmation=DIGEST"
             echo "                             Confirm you have read what the pre-deploy gate listed;"
             echo "                             DIGEST is the value its stop printed for that listing"
+            echo "  --unattended               No human is present: refuse (exit 5) anything that needs one"
+            echo "  --lock-wait=SECONDS        Poll this long for the upgrade lock (default: do not wait;"
+            echo "                             a held lock exits 75)"
             echo "  --release                  Return to the release installed before an unreleased"
             echo "                             install (the latest release if none was recorded)"
             echo "  VERSION                    Git tag to upgrade to (default: latest)"
@@ -114,7 +152,7 @@ while [ $# -gt 0 ]; do
             ;;
         -*)
             echo "ERR Unknown option: $1" >&2
-            echo "Usage: upgrade.sh --project-root PATH [--skip-reading-confirmation=DIGEST] [--skip-config-optimisation] [--uv PATH] [VERSION]" >&2
+            echo "Usage: upgrade.sh --project-root PATH [--skip-reading-confirmation=DIGEST] [--skip-config-optimisation] [--unattended] [--lock-wait=SECONDS] [--uv PATH] [VERSION]" >&2
             exit 1
             ;;
         *)
@@ -138,6 +176,332 @@ _err()  { echo -e "${_RED}ERR${_NC} $1" >&2; }
 _warn() { echo -e "${_YELLOW}WARN${_NC} $1"; }
 _info() { echo -e "${_BLUE}>>>${_NC} $1"; }
 _fail() { _err "$1"; exit 1; }
+
+# BEGIN upgrade-lock
+# The shared upgrade lock. Every route that moves the daemon clone (upgrade.sh
+# and provision.sh, foreground and background) takes this ONE lock; the block is
+# carried byte-identical in both scripts (tests/integration/test_upgrade_lock.py
+# pins that), because each is fetched or deployed standalone and cannot source
+# the other. The functions print nothing: callers read the return code and
+# $_UPGRADE_LOCK_HOLDER.
+#
+# The lock is a file created with noclobber (O_CREAT|O_EXCL), never a directory,
+# holding the owner record (token, host, boot_id, pidns, pid, pid_start,
+# started, purpose). The owner rewrites <lock>.beat from a background loop that
+# ends when the owner process is gone. A lock is taken over only when its owner
+# is provably dead (same boot and pid namespace, pid gone or reused) or expired
+# (no sign of life for _UPGRADE_LOCK_EXPIRY_SECONDS), and the takeover itself is
+# serialised by <lock>.takeover. Release removes the lock only if it still
+# carries this run's token. No process is ever signalled.
+_UPGRADE_LOCK_HEARTBEAT_SECONDS="${_UPGRADE_LOCK_HEARTBEAT_SECONDS:-20}"
+_UPGRADE_LOCK_EXPIRY_SECONDS=600
+_UPGRADE_LOCK_TAKEOVER_STALE_SECONDS=60
+_UPGRADE_LOCK_FILE=""
+_UPGRADE_LOCK_TOKEN=""
+_UPGRADE_LOCK_HEARTBEAT_PID=""
+_UPGRADE_LOCK_HOLDER=""
+_UPGRADE_LOCK_REC=""
+_UPGRADE_LOCK_CREATE_ERR=""
+
+# _upgrade_lock_path <project-root> - the lock file: inside the git common
+# directory (shared by every worktree, never tracked, never in git status),
+# else <root>/.claude/ for a project that is not a repository.
+_upgrade_lock_path() {
+    local _root="$1" _common _resolved
+    if _common="$(git -C "$_root" rev-parse --git-common-dir 2>&1)"; then
+        case "$_common" in
+            /*) ;;
+            *) _common="$_root/$_common" ;;
+        esac
+        if _resolved="$(cd "$_common" && pwd -P)"; then
+            printf '%s/hooks-daemon-upgrade.lock\n' "$_resolved"
+            return 0
+        fi
+    fi
+    printf '%s/.claude/hooks-daemon-upgrade.lock\n' "$_root"
+}
+
+# _upgrade_lock_mtime <file> - the file's modification time in epoch seconds.
+_upgrade_lock_mtime() {
+    local _out
+    if _out="$(stat -c %Y "$1" 2>&1)"; then
+        printf '%s\n' "$_out"
+        return 0
+    fi
+    if _out="$(stat -f %m "$1" 2>&1)"; then
+        printf '%s\n' "$_out"
+        return 0
+    fi
+    return 1
+}
+
+# _upgrade_lock_pid_start <pid> - field 22 of /proc/<pid>/stat, which tells a
+# pid from a later process that reused the number.
+_upgrade_lock_pid_start() {
+    local _stat _fields
+    _stat="$(cat "/proc/$1/stat" 2>&1)" || return 1
+    _stat="${_stat##*) }"
+    read -r -a _fields <<< "$_stat"
+    [ -n "${_fields[19]:-}" ] || return 1
+    printf '%s\n' "${_fields[19]}"
+}
+
+# _upgrade_lock_pid_alive <pid> - the process exists and is not a zombie.
+_upgrade_lock_pid_alive() {
+    local _stat _out
+    if [ -r /proc/self/stat ]; then
+        _stat="$(cat "/proc/$1/stat" 2>&1)" || return 1
+        _stat="${_stat##*) }"
+        case "$_stat" in
+            Z* | X*) return 1 ;;
+        esac
+        return 0
+    fi
+    _out="$(ps -p "$1" 2>&1)" || return 1
+    return 0
+}
+
+# _upgrade_lock_read <file> - load the file into $_UPGRADE_LOCK_REC.
+_upgrade_lock_read() {
+    _UPGRADE_LOCK_REC=""
+    _UPGRADE_LOCK_REC="$(cat "$1" 2>&1)" || { _UPGRADE_LOCK_REC=""; return 1; }
+}
+
+# _upgrade_lock_rec_field <key> - a value from the loaded record.
+_upgrade_lock_rec_field() {
+    local _line
+    while IFS= read -r _line; do
+        case "$_line" in
+            "$1="*) printf '%s\n' "${_line#*=}"; return 0 ;;
+        esac
+    done <<< "$_UPGRADE_LOCK_REC"
+    return 1
+}
+
+# _upgrade_lock_record <token> <purpose> - the owner record of THIS process.
+_upgrade_lock_record() {
+    local _host _boot _ns _start
+    _host="${HOSTNAME:-}"
+    if [ -z "$_host" ]; then
+        _host="$(hostname 2>&1)" || _host="unknown"
+    fi
+    _boot="$(cat /proc/sys/kernel/random/boot_id 2>&1)" || _boot=""
+    _ns="$(readlink /proc/self/ns/pid 2>&1)" || _ns=""
+    _start="$(_upgrade_lock_pid_start "$$")" || _start=""
+    printf 'token=%s\nhost=%s\nboot_id=%s\npidns=%s\npid=%s\npid_start=%s\nstarted=%s\npurpose=%s\n' \
+        "$1" "$_host" "$_boot" "$_ns" "$$" "$_start" "$(date +%s)" "$2"
+}
+
+# _upgrade_lock_create <file> <content> - create the file, failing when it exists.
+_upgrade_lock_create() {
+    local _err
+    if _err="$( (set -C; printf '%s\n' "$2" > "$1") 2>&1 )"; then
+        return 0
+    fi
+    _UPGRADE_LOCK_CREATE_ERR="$_err"
+    return 1
+}
+
+# _upgrade_lock_beat <lock> - rewrite <lock>.beat with the current epoch.
+_upgrade_lock_beat() {
+    local _tmp="$1.beat.$$"
+    date +%s > "$_tmp" && mv -f "$_tmp" "$1.beat"
+}
+
+# _upgrade_lock_heartbeat <lock> <token> <owner-pid> - runs in the background:
+# rewrite the beat every _UPGRADE_LOCK_HEARTBEAT_SECONDS, and end as soon as the
+# owner is gone or the lock is no longer this owner's.
+_upgrade_lock_heartbeat() {
+    local _lock="$1" _token="$2" _owner="$3" _ticks=0 _stored
+    while :; do
+        sleep 1
+        _upgrade_lock_pid_alive "$_owner" || return 0
+        _upgrade_lock_read "$_lock" || return 0
+        _stored="$(_upgrade_lock_rec_field token)" || return 0
+        [ "$_stored" = "$_token" ] || return 0
+        _ticks=$((_ticks + 1))
+        if [ "$_ticks" -ge "$_UPGRADE_LOCK_HEARTBEAT_SECONDS" ]; then
+            _ticks=0
+            _upgrade_lock_beat "$_lock" || return 0
+        fi
+    done
+}
+
+# _upgrade_lock_judge <lock> - 0: the holder is provably dead or expired (takeable),
+# 1: held, 2: the lock is gone. Sets $_UPGRADE_LOCK_HOLDER to describe the holder.
+_upgrade_lock_judge() {
+    local _lock="$1" _now _mtime _host _boot _ns _pid _pstart _started _purpose
+    local _beat="" _newest _age _cur_boot _cur_ns _cur_start
+    _upgrade_lock_read "$_lock" || return 2
+    _now="$(date +%s)"
+    _host="$(_upgrade_lock_rec_field host)" || _host="?"
+    _boot="$(_upgrade_lock_rec_field boot_id)" || _boot=""
+    _ns="$(_upgrade_lock_rec_field pidns)" || _ns=""
+    _pid="$(_upgrade_lock_rec_field pid)" || _pid=""
+    _pstart="$(_upgrade_lock_rec_field pid_start)" || _pstart=""
+    _started="$(_upgrade_lock_rec_field started)" || _started=""
+    _purpose="$(_upgrade_lock_rec_field purpose)" || _purpose="?"
+    _mtime="$(_upgrade_lock_mtime "$_lock")" || return 2
+    case "$_pid" in '' | *[!0-9]*) _pid="" ;; esac
+    case "$_started" in '' | *[!0-9]*) _started="" ;; esac
+    _age=$((_now - ${_started:-$_mtime}))
+    _UPGRADE_LOCK_HOLDER="host=$_host pid=${_pid:-?} purpose=$_purpose age=${_age}s"
+
+    # A record that is empty or half written: held until its file is old.
+    if [ -z "$_pid" ] || [ -z "$_started" ]; then
+        if [ $((_now - _mtime)) -gt "$_UPGRADE_LOCK_EXPIRY_SECONDS" ]; then
+            return 0
+        fi
+        return 1
+    fi
+
+    # Same kernel and same pid namespace: the pid means something, so a gone
+    # pid, or one that now belongs to a different process, is a dead owner.
+    _cur_boot="$(cat /proc/sys/kernel/random/boot_id 2>&1)" || _cur_boot=""
+    _cur_ns="$(readlink /proc/self/ns/pid 2>&1)" || _cur_ns=""
+    if [ -n "$_boot" ] && [ -n "$_ns" ] && [ "$_boot" = "$_cur_boot" ] && [ "$_ns" = "$_cur_ns" ]; then
+        _upgrade_lock_pid_alive "$_pid" || return 0
+        _cur_start="$(_upgrade_lock_pid_start "$_pid")" || return 0
+        if [ "$_cur_start" != "$_pstart" ]; then
+            return 0
+        fi
+        return 1
+    fi
+
+    # Anywhere else a pid proves nothing: only silence for a long time does.
+    if [ -f "$_lock.beat" ]; then
+        _beat="$(cat "$_lock.beat" 2>&1)" || _beat=""
+    fi
+    case "$_beat" in '' | *[!0-9]*) _beat="" ;; esac
+    _newest="$_started"
+    if [ -n "$_beat" ] && [ "$_beat" -gt "$_newest" ]; then
+        _newest="$_beat"
+    fi
+    if [ $((_now - _newest)) -gt "$_UPGRADE_LOCK_EXPIRY_SECONDS" ]; then
+        return 0
+    fi
+    return 1
+}
+
+# _upgrade_lock_own <lock> <token> - this process now holds the lock: write the
+# first beat and start the heartbeat with its descriptors closed, so a caller
+# capturing this process's output never waits on the loop.
+_upgrade_lock_own() {
+    _UPGRADE_LOCK_FILE="$1"
+    _UPGRADE_LOCK_TOKEN="$2"
+    _upgrade_lock_beat "$1" || return 1
+    _upgrade_lock_heartbeat "$1" "$2" "$$" >&- 2>&- <&- &
+    _UPGRADE_LOCK_HEARTBEAT_PID="$!"
+}
+
+# _upgrade_lock_takeover <lock> <token> <record> - replace a stale lock, under
+# the takeover file. 0 taken, 1 busy or lost, 3 the lock vanished (retry).
+_upgrade_lock_takeover() {
+    local _lock="$1" _token="$2" _rec="$3" _take="$1.takeover" _mtime _verdict=0
+    if [ -e "$_take" ]; then
+        _mtime="$(_upgrade_lock_mtime "$_take")" || return 3
+        if [ $(($(date +%s) - _mtime)) -le "$_UPGRADE_LOCK_TAKEOVER_STALE_SECONDS" ]; then
+            return 1
+        fi
+        rm -f "$_take"
+    fi
+    _upgrade_lock_create "$_take" "$_token" || return 1
+    _upgrade_lock_judge "$_lock" || _verdict=$?
+    if [ "$_verdict" -eq 1 ]; then
+        rm -f "$_take"
+        return 1
+    fi
+    rm -f "$_lock" "$_lock.beat"
+    if _upgrade_lock_create "$_lock" "$_rec"; then
+        rm -f "$_take"
+        _upgrade_lock_own "$_lock" "$_token" || return 1
+        return 0
+    fi
+    rm -f "$_take"
+    _UPGRADE_LOCK_HOLDER="another process took the lock first"
+    return 1
+}
+
+# _upgrade_lock_try <lock> <purpose> - one attempt. 0 acquired, 1 held,
+# 2 error, 3 the lock vanished while it was judged (try again).
+_upgrade_lock_try() {
+    local _lock="$1" _purpose="$2" _token _rec _verdict=0 _rc=0
+    mkdir -p "$(dirname "$_lock")" || return 2
+    _token="$$.$(date +%s).$RANDOM.$RANDOM"
+    _rec="$(_upgrade_lock_record "$_token" "$_purpose")" || return 2
+    if _upgrade_lock_create "$_lock" "$_rec"; then
+        _upgrade_lock_own "$_lock" "$_token" || return 2
+        return 0
+    fi
+    _upgrade_lock_judge "$_lock" || _verdict=$?
+    case "$_verdict" in
+        0)
+            _upgrade_lock_takeover "$_lock" "$_token" "$_rec" || _rc=$?
+            return "$_rc"
+            ;;
+        1) return 1 ;;
+        *) return 3 ;;
+    esac
+}
+
+# _upgrade_lock_acquire <lock> <purpose> [wait-seconds] - take the lock, polling
+# for up to wait-seconds while it is held. 0 acquired; 1 held (the holder is in
+# $_UPGRADE_LOCK_HOLDER); 2 error (the reason is in $_UPGRADE_LOCK_HOLDER).
+_upgrade_lock_acquire() {
+    local _lock="$1" _purpose="$2" _wait="${3:-0}" _deadline _rc _vanished=0
+    _deadline=$(($(date +%s) + _wait))
+    while :; do
+        _rc=0
+        _upgrade_lock_try "$_lock" "$_purpose" || _rc=$?
+        case "$_rc" in
+            0) return 0 ;;
+            1)
+                if [ "$(date +%s)" -ge "$_deadline" ]; then
+                    return 1
+                fi
+                sleep 1
+                ;;
+            3)
+                _vanished=$((_vanished + 1))
+                if [ "$_vanished" -gt 5 ]; then
+                    _UPGRADE_LOCK_HOLDER="cannot create $_lock: $_UPGRADE_LOCK_CREATE_ERR"
+                    return 2
+                fi
+                ;;
+            *)
+                _UPGRADE_LOCK_HOLDER="cannot take $_lock: $_UPGRADE_LOCK_CREATE_ERR"
+                return 2
+                ;;
+        esac
+    done
+}
+
+# _upgrade_lock_release - give the lock up if it is still this run's, stop the
+# heartbeat (it ends by itself within a second once the lock is gone) and
+# remove the beat. Safe to call twice, and when the lock was never taken.
+_upgrade_lock_release() {
+    local _stored="" _removed="false" _status=0
+    if [ -z "$_UPGRADE_LOCK_TOKEN" ]; then
+        return 0
+    fi
+    if _upgrade_lock_read "$_UPGRADE_LOCK_FILE"; then
+        _stored="$(_upgrade_lock_rec_field token)" || _stored=""
+        if [ "$_stored" = "$_UPGRADE_LOCK_TOKEN" ]; then
+            rm -f "$_UPGRADE_LOCK_FILE"
+            _removed="true"
+        fi
+    fi
+    if [ -n "$_UPGRADE_LOCK_HEARTBEAT_PID" ]; then
+        wait "$_UPGRADE_LOCK_HEARTBEAT_PID" || _status=$?
+    fi
+    if [ "$_removed" = "true" ]; then
+        rm -f "$_UPGRADE_LOCK_FILE.beat"
+    fi
+    _UPGRADE_LOCK_TOKEN=""
+    _UPGRADE_LOCK_HEARTBEAT_PID=""
+    return 0
+}
+# END upgrade-lock
 
 #
 # _version_lt() - True when $1 sorts strictly before $2 (semver, no `v` prefix)
@@ -269,7 +633,7 @@ _PRESERVED_OLD_DEFAULT_TMP=""
 _PRESERVED_OLD_DEFAULT_SETTINGS_TMP=""
 # The private directory holding the one-shot handoff to Layer 2 (Step 8).
 _HANDOFF_DIR=""
-trap 'rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP" "$_PRESERVED_OLD_DEFAULT_TMP" "$_PRESERVED_OLD_DEFAULT_SETTINGS_TMP"; if [ -n "$_HANDOFF_DIR" ]; then rm -rf -- "$_HANDOFF_DIR"; fi' EXIT
+trap 'rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP" "$_PRESERVED_OLD_DEFAULT_TMP" "$_PRESERVED_OLD_DEFAULT_SETTINGS_TMP"; if [ -n "$_HANDOFF_DIR" ]; then rm -rf -- "$_HANDOFF_DIR"; fi; _upgrade_lock_release' EXIT
 
 _fetch_python_discovery_lib() {
     local ref base_url url tmp curl_path
@@ -370,6 +734,47 @@ echo "========================================"
 PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)" # Resolve to absolute path
 [ -d "$PROJECT_ROOT" ] || _fail "Project root does not exist: $PROJECT_ROOT"
 _ok "Project root: $PROJECT_ROOT"
+
+# --unattended refusals that depend on the arguments alone (exit 1): an
+# unattended run only ever installs the next release by the standard route.
+_NEEDS_HUMAN_EXIT=5
+_LOCK_HELD_EXIT=75
+_needs_human() {
+    echo "NEEDS-HUMAN: $1" >&2
+    echo "Nothing was changed. An unattended run does not go on from here; a person has to decide." >&2
+    exit "$_NEEDS_HUMAN_EXIT"
+}
+if [ "$_UNATTENDED" = "true" ]; then
+    if [ "$_RELEASE_ROUTE" = "true" ]; then
+        _fail "--unattended cannot be combined with --release: leaving a branch install is a decision for a person, refusing."
+    fi
+    if [ -n "$UV_OVERRIDE" ]; then
+        _fail "--unattended cannot be combined with --uv: the uv that builds the venv is a decision for a person, refusing."
+    fi
+    if [ -n "${HOOKS_DAEMON_UNSAFE_TRACK_REF:-}" ] || [ -n "${HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE:-}" ]; then
+        _fail "--unattended cannot be combined with a branch install (HOOKS_DAEMON_UNSAFE_TRACK_REF): that is a decision for a person, refusing."
+    fi
+fi
+
+# The upgrade lock: one holder at a time may move the daemon clone, so it is
+# taken before anything below fetches or checks anything out, and held across
+# Layer 2 until this script exits (the EXIT trap releases it).
+_LOCK_FILE="$(_upgrade_lock_path "$PROJECT_ROOT")"
+_LOCK_RC=0
+_upgrade_lock_acquire "$_LOCK_FILE" "upgrade" "$_LOCK_WAIT" || _LOCK_RC=$?
+if [ "$_LOCK_RC" -eq 1 ]; then
+    _err "Another upgrade or sync holds the upgrade lock ($_UPGRADE_LOCK_HOLDER): $_LOCK_FILE"
+    _info "Nothing was changed. Retry later, or pass --lock-wait=SECONDS to wait for it."
+    exit "$_LOCK_HELD_EXIT"
+elif [ "$_LOCK_RC" -ne 0 ]; then
+    _fail "Could not take the upgrade lock: $_UPGRADE_LOCK_HOLDER"
+fi
+_ok "Upgrade lock taken"
+
+# --unattended: a release in flight owns the repository (exit 5).
+if [ "$_UNATTENDED" = "true" ] && [ -e "$PROJECT_ROOT/untracked/release-state.json" ]; then
+    _needs_human "a release is in progress (untracked/release-state.json exists)"
+fi
 
 # Step 1b: Record which project files are ALREADY uncommitted (ledger 00474 N588)
 #
@@ -474,6 +879,17 @@ if [ -e "$PROJECT_ROOT/.git" ]; then
         _PRE_UPGRADE_DIRTY_TAKEN="true"
     else
         _warn "Could not record which project files were already uncommitted; modified_files will be empty, so name the files this upgrade changed yourself"
+    fi
+fi
+
+# --unattended: uncommitted work in the project is a person's (exit 5). When the
+# snapshot could not be taken the tree cannot be shown clean, so that refuses too.
+if [ "$_UNATTENDED" = "true" ] && [ -e "$PROJECT_ROOT/.git" ]; then
+    if [ "$_PRE_UPGRADE_DIRTY_TAKEN" != "true" ]; then
+        _needs_human "the project's uncommitted changes could not be read, so the tree cannot be shown clean"
+    fi
+    if [ -n "$_PRE_UPGRADE_DIRTY" ]; then
+        _needs_human "the project has uncommitted changes"
     fi
 fi
 
@@ -845,6 +1261,70 @@ else
     _ok "Target version: $TARGET_VERSION"
 fi
 
+# --unattended refusals that need the resolved target. They run before
+# anything is checked out, so a refusal leaves the clone exactly as it was.
+# The attempt record is how an unattended run that ended badly is remembered:
+# the same version is never tried unattended again (the daemon's version check
+# reads these records too).
+_ATTEMPT_DIR="$DAEMON_DIR/untracked/auto-upgrade"
+_ATTEMPT_FILE="$_ATTEMPT_DIR/${TARGET_VERSION}.state"
+_SEMVER_RE='^v?[0-9]+\.[0-9]+\.[0-9]+$'
+if [ "$_UNATTENDED" = "true" ]; then
+    if [[ ! "$TARGET_VERSION" =~ $_SEMVER_RE ]]; then
+        _needs_human "the target $TARGET_DISPLAY is not a plain X.Y.Z release"
+    fi
+    if [[ ! "$FROM_VERSION" =~ $_SEMVER_RE ]]; then
+        _needs_human "the installed version (${FROM_VERSION:-unknown}) cannot be read, so the size of the jump cannot be judged"
+    fi
+    if _version_lt "${TARGET_VERSION#v}" "${FROM_VERSION#v}"; then
+        _fail "--unattended never downgrades: $TARGET_VERSION is older than the installed $FROM_VERSION, refusing."
+    fi
+    _FROM_MAJOR="${FROM_VERSION#v}"
+    _FROM_MAJOR="${_FROM_MAJOR%%.*}"
+    _TARGET_MAJOR="${TARGET_VERSION#v}"
+    _TARGET_MAJOR="${_TARGET_MAJOR%%.*}"
+    if [ "$_TARGET_MAJOR" -gt "$_FROM_MAJOR" ]; then
+        _needs_human "$FROM_VERSION -> $TARGET_VERSION is a MAJOR version bump"
+    fi
+    if [ -f "$_ATTEMPT_FILE" ]; then
+        _needs_human "an earlier unattended attempt to reach $TARGET_VERSION ended badly (record: $_ATTEMPT_FILE)"
+    fi
+    # Only a target whose Layer 2 enforces the unattended rules may be installed
+    # unattended. Read from the object database, before the checkout.
+    _TARGET_LAYER2="$(git -C "$DAEMON_DIR" show "$TARGET_VERSION:scripts/upgrade_version.sh" 2>&1)" \
+        || _needs_human "the target's upgrade script cannot be read ($TARGET_VERSION)"
+    if ! grep -qx 'readonly LAYER2_SUPPORTS_UNATTENDED=1' <<< "$_TARGET_LAYER2"; then
+        _needs_human "$TARGET_VERSION predates --unattended, so its upgrade script cannot enforce the unattended rules"
+    fi
+fi
+
+# _write_attempt_record <status> <detail> - remember an unattended attempt that
+# did not succeed. Atomic (temp file, then rename); the directory is under the
+# clone's gitignored untracked/, which Layer 2's snapshot restore never touches.
+_write_attempt_record() {
+    local _status="$1" _detail="${2//[$'\r\n']/ }" _tmp
+    mkdir -p "$_ATTEMPT_DIR" || return 1
+    _tmp="$_ATTEMPT_FILE.tmp.$$"
+    printf 'status=%s\ntarget=%s\nfrom=%s\ndetail=%s\n' \
+        "$_status" "${TARGET_VERSION#v}" "${FROM_VERSION#v}" "$_detail" > "$_tmp" || return 1
+    mv -f "$_tmp" "$_ATTEMPT_FILE"
+}
+
+# _clear_attempt_records - after a success, forget the records for every version
+# up to and including the one just reached.
+_clear_attempt_records() {
+    local _record _name
+    [[ "$TARGET_VERSION" =~ $_SEMVER_RE ]] || return 0
+    for _record in "$_ATTEMPT_DIR"/v*.state; do
+        [ -f "$_record" ] || continue
+        _name="$(basename "$_record" .state)"
+        [[ "$_name" =~ $_SEMVER_RE ]] || continue
+        if ! _version_lt "${TARGET_VERSION#v}" "${_name#v}"; then
+            rm -f "$_record"
+        fi
+    done
+}
+
 # Step 6: Land the daemon dir on the target version FIRST (before Layer 2).
 #
 # The two modes get DIFFERENT commands because $DAEMON_DIR means two very
@@ -1055,8 +1535,20 @@ if [ -n "$UV_OVERRIDE" ]; then
 fi
 "${_LAYER2_LAUNCH[@]}" "$LAYER2_SCRIPT" "${_LAYER2_ARGS[@]}" || LAYER2_EXIT=$?
 if [ "$LAYER2_EXIT" -ne 0 ]; then
+    # Exit 0 is success; 3 is the reading stop (a person confirms and re-runs);
+    # 75 is a held lock. Anything else an unattended run ends with is
+    # remembered, so it is not tried again.
+    if [ "$_UNATTENDED" = "true" ] && [ "$LAYER2_EXIT" -ne 3 ] && [ "$LAYER2_EXIT" -ne "$_LOCK_HELD_EXIT" ]; then
+        if [ "$LAYER2_EXIT" -eq "$_NEEDS_HUMAN_EXIT" ]; then
+            _write_attempt_record "needs-human" "the upgrade script stopped for a person (exit 5)"
+        else
+            _write_attempt_record "failed" "the upgrade script ended with exit $LAYER2_EXIT and was rolled back or left for a person"
+        fi
+    fi
+    _upgrade_lock_release
     exit "$LAYER2_EXIT"
 fi
+_clear_attempt_records
 
 # ------------------------------------------------------------
 # Emit UPGRADE_METADATA (Plan 00109 Decision 2)
