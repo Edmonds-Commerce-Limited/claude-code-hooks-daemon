@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-R = Path("/workspace/untracked/scratch/00623-review2")
+R = Path(__file__).resolve().parent
 DS = ["", "w19", "w19/zz", "w00", "w19/.bin", "src"]
 
 

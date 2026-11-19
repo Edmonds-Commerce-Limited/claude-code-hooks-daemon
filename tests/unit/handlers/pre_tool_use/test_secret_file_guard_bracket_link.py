@@ -39,6 +39,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     deep.mkdir(parents=True)
     (deep / "late").symlink_to(outside / _PROTECTED)
     (deep / "dl").symlink_to(outside)
+    (root / "w" / ".bin").mkdir()
     (root / "r.md").write_bytes(b"hello\n")
     monkeypatch.chdir("/")
     protected_file_index.reset_index_cache()
@@ -76,6 +77,8 @@ def _decision(root: Path, command: str) -> Decision:
         "cd w && cat zz/[l]ate",
         "cd w/zz && cat [l]ate",
         "cat w/z[z]/dl/" + _PROTECTED,
+        'cd "$D" && cat zz/[l]ate',
+        'cd "$D" && cat zz/la[t]e',
     ],
 )
 def test_a_bracket_glob_spelling_a_link_to_a_protected_file_is_denied(
@@ -88,4 +91,25 @@ def test_a_bracket_glob_spelling_a_link_to_a_protected_file_is_denied(
 def test_a_bracket_glob_spelling_no_link_to_a_protected_file_is_allowed(
     project: Path, command: str
 ) -> None:
+    assert _decision(project, command) is Decision.ALLOW
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'cd "$D" && cat .bin/../zz/late',
+        'cd "$D" && cat .bin/./../zz/late',
+        'cd "$D" && cat .bin/../zz/dl/' + _PROTECTED[:3] + "*",
+        'cd "$D" && cat ../w/zz/late',
+    ],
+)
+def test_a_parent_step_after_a_computed_move_still_reaches_the_link(
+    project: Path, command: str
+) -> None:
+    """Under the scan cap: from ``w`` (no link of its own), ``.bin/..`` is ``w`` again."""
+    assert _decision(project, command) is Decision.DENY
+
+
+@pytest.mark.parametrize("command", ['cd "$D" && cat .bin/../r.md', 'cd "$D" && ls ../w'])
+def test_a_parent_step_reaching_no_link_is_allowed(project: Path, command: str) -> None:
     assert _decision(project, command) is Decision.ALLOW

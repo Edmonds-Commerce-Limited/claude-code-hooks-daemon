@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-R = Path("/workspace/untracked/scratch/00623-review2")
+R = Path(__file__).resolve().parent
 PROT = "id_" + "rsa"
 
 
@@ -30,6 +30,8 @@ def build(base: Path) -> Path:
     (root / "src").mkdir(parents=True)
     (root / "src" / "main.py").write_bytes(b"x\n")
     (root / "r.md").write_bytes(b"hello\n")
+    (root / "inner").mkdir()
+    (root / "inner" / PROT).write_bytes(b"DUMMY-INNER\n")
     for n in range(20):
         h = root / f"w{n:02d}" / ".bin"
         h.mkdir(parents=True)
@@ -45,14 +47,17 @@ def build(base: Path) -> Path:
 def main() -> None:
     tag, capmode, idx, out = sys.argv[1:5]
     out = str(Path(out).resolve())
-    commands = [c for c in (R / "commands.txt").read_text().splitlines() if c and not c.startswith("#")]
+    corpus = os.environ.get("CORPUS", "commands.txt")
+    commands = [c.replace("<NL>", "\n") for c in (R / corpus).read_text().splitlines() if c and not c.startswith("#")]
     base = R / "fx"
     root = build(base)
-    os.chdir("/")
+    os.chdir(str(root) if os.environ.get("DAEMON_CWD_ROOT") else "/")
     os.environ["TMPDIR"] = str(base / "outside")
     os.environ["HOME"] = str(base / "home")
     from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as gm
-    from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import SecretFileGuardHandler
+    from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
+        SecretFileGuardHandler,
+    )
     from claude_code_hooks_daemon.utils import path_exclusion, protected_file_index
     from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 

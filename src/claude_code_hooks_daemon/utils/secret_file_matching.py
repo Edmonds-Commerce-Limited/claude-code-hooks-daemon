@@ -4174,14 +4174,43 @@ class CwdSet(tuple[str, ...]):
             return []
         components = [part for part in token.split("/") if part not in ("", ".")]
         if ".." in components:
-            return []
+            # Plan 00623 final review: before the first `..` the spelled names are
+            # real directories the shell passes through, so a scanned one is met.
+            leading = components[: components.index("..")]
+            return self._bases_spelling(leading, len(leading))
+        return self._bases_spelling(components, len(components) - 1)
+
+    def _bases_spelling(self, spelled: list[str], deepest: int) -> list[str]:
+        """Each base from which ``spelled``'s first ``deepest`` components reach a scanned directory."""
         bases: list[str] = []
-        for depth in range(1, len(components)):
-            for directory in self._by_name.get(components[depth - 1], ()):
+        for depth in range(1, deepest + 1):
+            for directory in self._by_name.get(spelled[depth - 1], ()):
                 parts = directory.split("/")
-                if parts[-depth:] == components[:depth]:
+                if parts[-depth:] == spelled[:depth]:
                     bases.append("/".join(parts[:-depth]) or "/")
         return list(dict.fromkeys(bases))
+
+    def collapsed_above_scanned(self, token: str) -> list[str]:
+        """Where a ``token`` holding ``..`` lands past a scanned directory, read after a computed move.
+
+        Plan 00623 final review: bash takes ``..`` physically, so once the
+        spelled names before it are real directories the word goes on from its
+        collapsed spelling, read from wherever a leading ``..`` lands: another
+        project directory a computed move could equally have reached.
+        """
+        if not self._by_name or not _may_be_relative_path(token):
+            return []
+        components = [part for part in token.split("/") if part not in ("", ".")]
+        if ".." not in components:
+            return []
+        collapsed = [part for part in os.path.normpath("/".join(components)).split("/") if part]
+        while collapsed and collapsed[0] == "..":
+            collapsed.pop(0)
+        word = "/".join(collapsed)
+        return [
+            f"{base.rstrip('/')}/{word}"
+            for base in self._bases_spelling(collapsed, len(collapsed) - 1)
+        ]
 
     def _listing(self, directory: str) -> dict[str, tuple[bool, bool]] | None:
         """``name -> (is a link, is a directory)`` for ``directory``; None when it cannot be listed."""
@@ -4721,9 +4750,11 @@ def _link_targets(token: str, cwds: tuple[str, ...]) -> tuple[str, ...]:
     if not token.startswith(("/", "~")):
         # Only a directory that exists can hold a link (review F5).
         bases: Sequence[str] = cwds
+        collapsed: list[str] = []
         if isinstance(cwds, CwdSet):
             bases = [*cwds.link_dirs, *cwds.bases_above_scanned(token)]
-        candidates = [str(Path(cwd) / token) for cwd in bases if cwd] + candidates
+            collapsed = cwds.collapsed_above_scanned(token)
+        candidates = [str(Path(cwd) / token) for cwd in bases if cwd] + collapsed + candidates
     unique = list(dict.fromkeys(candidates))
     for candidate in unique:
         # N668: through /proc/self the daemon would read its own cwd, not the shell's.
