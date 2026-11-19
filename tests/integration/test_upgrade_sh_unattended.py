@@ -31,6 +31,11 @@ _TIMEOUT_SECONDS: Final[int] = 120
 _LAYER2_WITH_SUPPORT: Final[str] = """#!/bin/bash
 readonly LAYER2_SUPPORTS_UNATTENDED=1
 printf '%s\\n' "$UPGRADE_FLAGS" > "$FAKE_L2_FLAGS_OUT"
+if [ -n "${FAKE_L2_STARTED:-}" ]; then
+    echo "$$" > "$FAKE_L2_STARTED"
+    sleep "${FAKE_L2_SLEEP:-0}"
+    echo done > "$FAKE_L2_STARTED.done"
+fi
 exit "${FAKE_L2_EXIT:-0}"
 """
 _LAYER2_WITHOUT_SUPPORT: Final[str] = """#!/bin/bash
@@ -189,6 +194,43 @@ class TestLockHeldByAnotherUpgrade:
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert fixture.head() == _git(fixture.daemon, "rev-parse", "v1.1.0^{commit}")
+
+
+class TestASignalledLayer1KeepsTheLockForLayer2:
+    """Adversarial review F2, end to end: SIGTERM to Layer 1 released the lock
+    while Layer 2 was still writing the daemon clone."""
+
+    def test_sigterm_mid_layer_2_holds_the_lock_until_layer_2_ends(self, tmp_path: Path) -> None:
+        fixture = _build(tmp_path)
+        started = tmp_path / "l2.pid"
+        env = {
+            **os.environ,
+            "FAKE_L2_EXIT": "0",
+            "FAKE_L2_FLAGS_OUT": str(fixture.flags_out),
+            "FAKE_L2_STARTED": str(started),
+            "FAKE_L2_SLEEP": "4",
+            "HOOKS_DAEMON_PYTHON": sys.executable,
+        }
+        layer1 = subprocess.Popen(
+            [_BASH, str(_UPGRADE_SH), "--project-root", str(fixture.project), "v1.1.0"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        deadline = time.monotonic() + 60
+        while not started.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert started.exists(), "Layer 2 never started"
+
+        layer1.terminate()
+        time.sleep(1.0)
+        lock_while_writing = fixture.lock_file().exists()
+        layer1.communicate(timeout=_TIMEOUT_SECONDS)
+
+        assert lock_while_writing, "the lock was released while Layer 2 was still running"
+        assert Path(f"{started}.done").exists(), "Layer 2 was cut short"
+        assert not fixture.lock_file().exists(), "released once Layer 2 has finished"
 
 
 class TestAttendedRun:

@@ -327,15 +327,18 @@ _upgrade_lock_beat() {
 
 # _upgrade_lock_heartbeat <lock> <token> <owner-pid> - runs in the background:
 # rewrite the beat every _UPGRADE_LOCK_HEARTBEAT_SECONDS, and end as soon as the
-# owner is gone or the lock is no longer this owner's.
+# owner and its writer are both gone, or the lock is no longer this owner's.
 _upgrade_lock_heartbeat() {
-    local _lock="$1" _token="$2" _owner="$3" _ticks=0 _stored
+    local _lock="$1" _token="$2" _owner="$3" _ticks=0 _stored _wpid
     while :; do
         sleep 1
-        _upgrade_lock_pid_alive "$_owner" || return 0
         _upgrade_lock_read "$_lock" || return 0
         _stored="$(_upgrade_lock_rec_field token)" || return 0
         [ "$_stored" = "$_token" ] || return 0
+        if ! _upgrade_lock_pid_alive "$_owner"; then
+            _wpid="$(_upgrade_lock_rec_field writer)" || return 0
+            _upgrade_lock_pid_alive "$_wpid" || return 0
+        fi
         _ticks=$((_ticks + 1))
         if [ "$_ticks" -ge "$_UPGRADE_LOCK_HEARTBEAT_SECONDS" ]; then
             _ticks=0
@@ -344,11 +347,22 @@ _upgrade_lock_heartbeat() {
     done
 }
 
-# _upgrade_lock_judge <lock> - 0: the holder is provably dead or expired (takeable),
-# 1: held, 2: the lock is gone. Sets $_UPGRADE_LOCK_HOLDER to describe the holder.
+# _upgrade_lock_owner_dead <pid> <pid_start> - the pid is gone, or now belongs to
+# a later process. Only meaningful in the judge's own boot and pid namespace.
+_upgrade_lock_owner_dead() {
+    local _cur_start
+    _upgrade_lock_pid_alive "$1" || return 0
+    _cur_start="$(_upgrade_lock_pid_start "$1")" || return 0
+    [ "$_cur_start" != "$2" ]
+}
+
+# _upgrade_lock_judge <file> [expiry-seconds] - 0: the holder is provably dead or
+# expired (takeable), 1: held, 2: the file is gone. Sets $_UPGRADE_LOCK_HOLDER to
+# describe the holder. A record may name a second owner, the writer
+# (_upgrade_lock_run_writer); it is dead only when every owner it names is.
 _upgrade_lock_judge() {
-    local _lock="$1" _now _mtime _host _boot _ns _pid _pstart _started _purpose
-    local _beat="" _newest _age _cur_boot _cur_ns _cur_start
+    local _lock="$1" _expiry="${2:-$_UPGRADE_LOCK_EXPIRY_SECONDS}" _now _mtime _host _boot _ns _pid _pstart _started _purpose
+    local _beat="" _newest _age _cur_boot _cur_ns _wpid _wstart
     _upgrade_lock_read "$_lock" || return 2
     _now="$(date +%s)"
     _host="$(_upgrade_lock_rec_field host)" || _host="?"
@@ -358,15 +372,21 @@ _upgrade_lock_judge() {
     _pstart="$(_upgrade_lock_rec_field pid_start)" || _pstart=""
     _started="$(_upgrade_lock_rec_field started)" || _started=""
     _purpose="$(_upgrade_lock_rec_field purpose)" || _purpose="?"
+    _wpid="$(_upgrade_lock_rec_field writer)" || _wpid=""
+    _wstart="$(_upgrade_lock_rec_field writer_start)" || _wstart=""
     _mtime="$(_upgrade_lock_mtime "$_lock")" || return 2
     case "$_pid" in '' | *[!0-9]*) _pid="" ;; esac
+    case "$_wpid" in '' | *[!0-9]*) _wpid="" ;; esac
     case "$_started" in '' | *[!0-9]*) _started="" ;; esac
     _age=$((_now - ${_started:-$_mtime}))
     _UPGRADE_LOCK_HOLDER="host=$_host pid=${_pid:-?} purpose=$_purpose age=${_age}s"
+    if [ -n "$_wpid" ]; then
+        _UPGRADE_LOCK_HOLDER="$_UPGRADE_LOCK_HOLDER writer=$_wpid"
+    fi
 
     # A record that is empty or half written: held until its file is old.
     if [ -z "$_pid" ] || [ -z "$_started" ]; then
-        if [ $((_now - _mtime)) -gt "$_UPGRADE_LOCK_EXPIRY_SECONDS" ]; then
+        if [ $((_now - _mtime)) -gt "$_expiry" ]; then
             return 0
         fi
         return 1
@@ -375,15 +395,16 @@ _upgrade_lock_judge() {
     # Same kernel and same pid namespace: the pid means something, so a gone
     # pid, or one that now belongs to a different process, is a dead owner.
     # Only when /proc vouches for pids here, and the record carries a start.
+    # A named writer without a start cannot be proved dead: held.
     _cur_boot="$(cat /proc/sys/kernel/random/boot_id 2>&1)" || _cur_boot=""
     _cur_ns="$(_upgrade_lock_pidns 2>&1)" || _cur_ns=""
     if [ -n "$_boot" ] && [ -n "$_ns" ] && [ -n "$_pstart" ] && [ "$_boot" = "$_cur_boot" ] && [ "$_ns" = "$_cur_ns" ]; then
-        _upgrade_lock_pid_alive "$_pid" || return 0
-        _cur_start="$(_upgrade_lock_pid_start "$_pid")" || return 0
-        if [ "$_cur_start" != "$_pstart" ]; then
-            return 0
+        _upgrade_lock_owner_dead "$_pid" "$_pstart" || return 1
+        if [ -n "$_wpid" ]; then
+            [ -n "$_wstart" ] || return 1
+            _upgrade_lock_owner_dead "$_wpid" "$_wstart" || return 1
         fi
-        return 1
+        return 0
     fi
 
     # Anywhere else a pid proves nothing: only silence for a long time does.
@@ -395,7 +416,7 @@ _upgrade_lock_judge() {
     if [ -n "$_beat" ] && [ "$_beat" -gt "$_newest" ]; then
         _newest="$_beat"
     fi
-    if [ $((_now - _newest)) -gt "$_UPGRADE_LOCK_EXPIRY_SECONDS" ]; then
+    if [ $((_now - _newest)) -gt "$_expiry" ]; then
         return 0
     fi
     return 1
@@ -418,18 +439,54 @@ _upgrade_lock_stored_token() {
     _upgrade_lock_rec_field token
 }
 
-# _upgrade_lock_takeover <lock> <token> <record> - replace a stale lock, under
-# the takeover file. 0 taken, 1 busy or lost, 3 the lock vanished (retry).
+# _upgrade_lock_takeover_top <lock> - the highest takeover generation present
+# (<lock>.takeover.<N>), 0 when there is none.
+_upgrade_lock_takeover_top() {
+    local _f _g _top=0
+    for _f in "$1".takeover.*; do
+        if [ ! -e "$_f" ]; then
+            continue
+        fi
+        _g="${_f##*.takeover.}"
+        case "$_g" in '' | *[!0-9]*) continue ;; esac
+        _g=$((10#$_g))
+        if [ "$_g" -gt "$_top" ]; then
+            _top="$_g"
+        fi
+    done
+    printf '%s\n' "$_top"
+}
+
+# _upgrade_lock_takeover <lock> <token> <record> - replace a stale lock, under a
+# takeover generation. 0 taken, 1 busy or lost, 3 the lock vanished (retry).
+#
+# Takeover is serialised by generation files, and no process ever removes a
+# takeover file it did not create: a check of a file followed by a removal by
+# path can always remove a fresher file that replaced it, which let two takers
+# in at once. The taker judges the highest generation N like a lock record (its
+# creator provably dead, or silent for _UPGRADE_LOCK_TAKEOVER_STALE_SECONDS),
+# creates N+1 exclusively, and only the one creator of N+1 goes on. A crashed
+# taker's generation stays on disk, passed over, and costs nothing.
 _upgrade_lock_takeover() {
-    local _lock="$1" _token="$2" _rec="$3" _take="$1.takeover" _mtime _verdict=0 _judged _now_token
-    if [ -e "$_take" ]; then
-        _mtime="$(_upgrade_lock_mtime "$_take")" || return 3
-        if [ $(($(date +%s) - _mtime)) -le "$_UPGRADE_LOCK_TAKEOVER_STALE_SECONDS" ]; then
+    local _lock="$1" _token="$2" _rec="$3" _top _gen _take _tv=0 _verdict=0 _judged _now_token _holder
+    _holder="$_UPGRADE_LOCK_HOLDER"
+    _top="$(_upgrade_lock_takeover_top "$_lock")"
+    if [ "$_top" -gt 0 ]; then
+        _upgrade_lock_judge "$_lock.takeover.$_top" "$_UPGRADE_LOCK_TAKEOVER_STALE_SECONDS" || _tv=$?
+        _UPGRADE_LOCK_HOLDER="$_holder"
+        # 2, the generation vanished: its taker just finished, so busy too.
+        if [ "$_tv" -ne 0 ]; then
             return 1
         fi
-        rm -f "$_take"
     fi
-    _upgrade_lock_create "$_take" "$_token" || return 1
+    _gen=$((_top + 1))
+    _take="$_lock.takeover.$_gen"
+    _upgrade_lock_create "$_take" "$_rec" || return 1
+    # A generation above ours means a taker judged ours stale: not alone.
+    if [ "$(_upgrade_lock_takeover_top "$_lock")" -ne "$_gen" ]; then
+        rm -f "$_take"
+        return 1
+    fi
     _judged="$(_upgrade_lock_stored_token "$_lock")" || _judged=""
     _upgrade_lock_judge "$_lock" || _verdict=$?
     if [ "$_verdict" -eq 1 ]; then
@@ -518,18 +575,25 @@ _upgrade_lock_acquire() {
 # heartbeat (it ends by itself within a second once the lock is gone) and
 # remove the beat. Safe to call twice, and when the lock was never taken.
 _upgrade_lock_release() {
-    local _stored="" _removed="false" _status=0
+    local _stored="" _removed="false" _kept="false" _status=0 _wpid
     if [ -z "$_UPGRADE_LOCK_TOKEN" ]; then
         return 0
     fi
     if _upgrade_lock_read "$_UPGRADE_LOCK_FILE"; then
         _stored="$(_upgrade_lock_rec_field token)" || _stored=""
         if [ "$_stored" = "$_UPGRADE_LOCK_TOKEN" ]; then
-            rm -f "$_UPGRADE_LOCK_FILE"
-            _removed="true"
+            _wpid="$(_upgrade_lock_rec_field writer)" || _wpid=""
+            if [ -n "$_wpid" ] && _upgrade_lock_pid_alive "$_wpid"; then
+                # The writer outlives this process: the lock stays its, and
+                # its heartbeat goes on beating until the writer is gone.
+                _kept="true"
+            else
+                rm -f "$_UPGRADE_LOCK_FILE"
+                _removed="true"
+            fi
         fi
     fi
-    if [ -n "$_UPGRADE_LOCK_HEARTBEAT_PID" ]; then
+    if [ -n "$_UPGRADE_LOCK_HEARTBEAT_PID" ] && [ "$_kept" = "false" ]; then
         wait "$_UPGRADE_LOCK_HEARTBEAT_PID" || _status=$?
     fi
     if [ "$_removed" = "true" ]; then
@@ -538,6 +602,52 @@ _upgrade_lock_release() {
     _UPGRADE_LOCK_TOKEN=""
     _UPGRADE_LOCK_HEARTBEAT_PID=""
     return 0
+}
+
+# _upgrade_lock_add_writer <pid> - name <pid> in this run's lock record as its
+# writer, replacing the record in one rename. Fails when the lock is not ours.
+_upgrade_lock_add_writer() {
+    local _start _stored _line _body="" _tmp="$_UPGRADE_LOCK_FILE.rec.$1"
+    [ -n "$_UPGRADE_LOCK_TOKEN" ] || return 1
+    _upgrade_lock_read "$_UPGRADE_LOCK_FILE" || return 1
+    _stored="$(_upgrade_lock_rec_field token)" || return 1
+    [ "$_stored" = "$_UPGRADE_LOCK_TOKEN" ] || return 1
+    _start="$(_upgrade_lock_pid_start "$1")" || _start=""
+    while IFS= read -r _line; do
+        case "$_line" in
+            writer=* | writer_start=*) ;;
+            *) _body="$_body$_line"$'\n' ;;
+        esac
+    done <<< "$_UPGRADE_LOCK_REC"
+    printf '%swriter=%s\nwriter_start=%s\n' "$_body" "$1" "$_start" > "$_tmp" || return 1
+    mv -f "$_tmp" "$_UPGRADE_LOCK_FILE"
+}
+
+# _upgrade_lock_run_writer <command...> - run the command in the foreground as
+# the lock's writer. Its pid is in the record before it starts (the subshell
+# names itself, then execs the command under the same pid), so the lock is
+# held while the writer lives even when this process is killed outright, and
+# the heartbeat goes on for it. Exits 75, running nothing, when the lock is
+# not this run's. The pid is read in the subshell itself, never inside a
+# command substitution, which would be a further child.
+_upgrade_lock_run_writer() {
+    (
+        _me="${BASHPID:-}"
+        if [ -z "$_me" ]; then
+            _me="$(exec sh -c 'echo "$PPID"')"
+        fi
+        _upgrade_lock_add_writer "$_me" || exit 75
+        exec "$@"
+    )
+}
+
+# _upgrade_lock_hold_through_signals - a TERM or HUP ends this process only
+# after the foreground command (the writer) has returned: bash runs a trap
+# once the foreground child finishes, so the EXIT trap's release comes after
+# the writer, never under it.
+_upgrade_lock_hold_through_signals() {
+    trap 'exit 143' TERM
+    trap 'exit 129' HUP
 }
 # END upgrade-lock
 
@@ -807,6 +917,7 @@ if [ "$_LOCK_RC" -eq 1 ]; then
 elif [ "$_LOCK_RC" -ne 0 ]; then
     _fail "Could not take the upgrade lock: $_UPGRADE_LOCK_HOLDER"
 fi
+_upgrade_lock_hold_through_signals
 _ok "Upgrade lock taken"
 
 # --unattended: a release in flight owns the repository (exit 5).
@@ -1571,7 +1682,10 @@ _LAYER2_ARGS=("$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION")
 if [ -n "$UV_OVERRIDE" ]; then
     _LAYER2_ARGS+=(--uv "$UV_OVERRIDE")
 fi
-"${_LAYER2_LAUNCH[@]}" "$LAYER2_SCRIPT" "${_LAYER2_ARGS[@]}" || LAYER2_EXIT=$?
+# Layer 2 runs as the lock's writer: it holds the lock for as long as it lives,
+# so neither a signal to this process nor its outright death frees the lock
+# under a running Layer 2.
+_upgrade_lock_run_writer "${_LAYER2_LAUNCH[@]}" "$LAYER2_SCRIPT" "${_LAYER2_ARGS[@]}" || LAYER2_EXIT=$?
 if [ "$LAYER2_EXIT" -ne 0 ]; then
     # Exit 0 is success; 3 is the reading stop (a person confirms and re-runs);
     # 75 is a held lock. Anything else an unattended run ends with is

@@ -364,22 +364,41 @@ class TestStaleRule:
 
         assert "rc=0" in _bash(_acquire_body(lock)).stdout
 
-    def test_a_stale_takeover_file_is_cleared_and_a_fresh_one_is_respected(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_live_takers_generation_means_busy(self, tmp_path: Path) -> None:
         lock = tmp_path / "x.lock"
-        takeover = Path(f"{lock}.takeover")
+        _record(lock, pid=_dead_pid(), pid_start="1")
+        # A taker that is alive (this test process) holds generation 1.
+        _record(Path(f"{lock}.takeover.1"), token="taker")
+
+        assert "rc=1" in _bash(_acquire_body(lock)).stdout, "a live taker means busy"
+        assert lock.exists()
+
+    def test_a_half_written_generation_is_busy_until_it_is_old(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        takeover = Path(f"{lock}.takeover.1")
         _record(lock, pid=_dead_pid(), pid_start="1")
         takeover.write_text("someone\n", encoding="utf-8")
 
         assert "rc=1" in _bash(_acquire_body(lock)).stdout, "a fresh takeover file means busy"
-        assert lock.exists()
 
         old = time.time() - 120
         os.utime(takeover, (old, old))
 
         assert "rc=0" in _bash(_acquire_body(lock)).stdout
-        assert not takeover.exists()
+
+    def test_a_dead_takers_generation_is_passed_over_and_never_removed(
+        self, tmp_path: Path
+    ) -> None:
+        lock = tmp_path / "x.lock"
+        takeover = Path(f"{lock}.takeover.1")
+        _record(lock, pid=_dead_pid(), pid_start="1")
+        _record(takeover, token="crashed-taker", pid=_dead_pid(), pid_start="1")
+
+        result = _bash(_acquire_body(lock))
+
+        assert "rc=0" in result.stdout, result.stderr
+        assert takeover.exists(), "another process's takeover file is never removed"
+        assert not Path(f"{lock}.takeover.2").exists(), "the taker removes its own generation"
 
 
 _RACER = r"""
@@ -432,6 +451,199 @@ class TestConcurrentTakers:
 
         assert results.count("WON") == 1, results
         assert results.count("HELD") == 7, results
+
+
+_TIMED_RACER = r"""
+LOCK="{lock}"
+while [ ! -e "{go}" ]; do sleep 0.01; done
+rc=0; _upgrade_lock_acquire "$LOCK" upgrade 0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+    echo "GOT $(date +%s.%N)"
+    sleep {hold}
+    echo "REL $(date +%s.%N)"
+    _upgrade_lock_release
+else
+    echo "MISS rc=$rc"
+fi
+"""
+
+
+def _max_overlap(intervals: list[tuple[float, float]]) -> int:
+    events = sorted([(start, 1) for start, _ in intervals] + [(end, -1) for _, end in intervals])
+    current = peak = 0
+    for _, step in events:
+        current += step
+        peak = max(peak, current)
+    return peak
+
+
+def _seed_crashed_takeover(lock: Path) -> None:
+    """The state a taker leaves when it is killed inside its critical section:
+    a dead holder's lock and a takeover file nobody will remove, backdated
+    past the takeover staleness. Seeded under both the single-file name and
+    the first generation name, so the test means the same against either."""
+    _record(lock, pid=_dead_pid(), pid_start="1")
+    old = time.time() - 120
+    for name in (f"{lock}.takeover", f"{lock}.takeover.1"):
+        Path(name).write_text("crashed\n", encoding="utf-8")
+        os.utime(name, (old, old))
+
+
+class TestAStaleTakeoverNeverLetsTwoHold:
+    """Adversarial review F1: a contender broke a stale takeover file by path
+    after an age check, which could delete a fresh one another contender had
+    just created, so both went on to replace the lock and both held it (7 of
+    15 trials with 20 racers)."""
+
+    _RACERS: Final[int] = 20
+    _TRIALS: Final[int] = 30
+    _HOLD: Final[float] = 0.5
+
+    def _trial(self, tmp_path: Path) -> list[str]:
+        lock = tmp_path / "x.lock"
+        _seed_crashed_takeover(lock)
+        go = tmp_path / "go"
+        script = "\n".join(
+            [
+                "set -euo pipefail",
+                _block(_UPGRADE_SH),
+                _TIMED_RACER.format(lock=lock, go=go, hold=self._HOLD),
+            ]
+        )
+        procs = [
+            subprocess.Popen([_BASH, "-c", script], stdout=subprocess.PIPE, text=True)
+            for _ in range(self._RACERS)
+        ]
+        go.write_text("go", encoding="utf-8")
+        lines: list[str] = []
+        for proc in procs:
+            out, _ = proc.communicate(timeout=_TIMEOUT_SECONDS)
+            lines.extend(out.splitlines())
+        return lines
+
+    def test_never_two_holders_at_once_across_many_trials(self, tmp_path: Path) -> None:
+        peaks: list[int] = []
+        winners: list[int] = []
+        for trial in range(self._TRIALS):
+            trial_dir = tmp_path / f"t{trial}"
+            trial_dir.mkdir()
+            lines = self._trial(trial_dir)
+            got = [float(line.split()[1]) for line in lines if line.startswith("GOT ")]
+            rel = [float(line.split()[1]) for line in lines if line.startswith("REL ")]
+            peaks.append(_max_overlap(list(zip(sorted(got), sorted(rel), strict=True))))
+            winners.append(len(got))
+
+        assert max(peaks) == 1, f"peak holders per trial {peaks}, winners per trial {winners}"
+        assert min(winners) >= 1, f"a crashed takeover must not block for ever: {winners}"
+
+
+_OUTER = r"""
+LOCK="{lock}"
+_upgrade_lock_acquire "$LOCK" upgrade 0
+trap '_upgrade_lock_release' EXIT
+_upgrade_lock_hold_through_signals
+echo "OUTER $$"
+rc=0
+_upgrade_lock_run_writer "{bash}" -c 'echo "$$" > "{started}"; sleep {hold}; echo done > "{finished}"' > /dev/null 2>&1 || rc=$?
+echo "writer rc=$rc"
+"""
+
+
+def _second_acquire(lock: Path) -> str:
+    return _bash(
+        f'LOCK="{lock}"\nrc=0; _upgrade_lock_acquire "$LOCK" second 0 || rc=$?\n'
+        'echo "rc=$rc"\nif [ "$rc" -eq 0 ]; then _upgrade_lock_release; fi\n'
+    ).stdout
+
+
+class TestTheWriterHoldsTheLock:
+    """Adversarial review F2: Layer 1 owned the lock, but its child Layer 2 does
+    the writing. SIGTERM to Layer 1 ran its EXIT trap and released the lock
+    while Layer 2 went on writing, and a SIGKILL left a dead owner whose lock
+    a second upgrader took over at once."""
+
+    _HOLD: Final[int] = 4
+
+    def _start_outer(self, tmp_path: Path) -> tuple[subprocess.Popen[str], Path, Path, Path]:
+        lock = tmp_path / "x.lock"
+        started, finished = tmp_path / "writer.pid", tmp_path / "writer.done"
+        body = _OUTER.format(
+            lock=lock, bash=_BASH, started=started, finished=finished, hold=self._HOLD
+        )
+        outer = subprocess.Popen(
+            [_BASH, "-c", "\n".join(["set -euo pipefail", _block(_UPGRADE_SH), body])],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        deadline = time.monotonic() + 20
+        while not started.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert started.exists(), "the writer never started"
+        return outer, lock, started, finished
+
+    def test_the_record_names_the_writer(self, tmp_path: Path) -> None:
+        outer, lock, started, _ = self._start_outer(tmp_path)
+        writer = started.read_text(encoding="utf-8").strip()
+        record = lock.read_text(encoding="utf-8")
+        writer_start = _proc_start(int(writer))
+        outer.communicate(timeout=_TIMEOUT_SECONDS)
+
+        assert f"writer={writer}\n" in record
+        assert _proc_start_or_empty(record) == writer_start
+
+    def test_sigterm_to_the_owner_keeps_the_lock_until_the_writer_ends(
+        self, tmp_path: Path
+    ) -> None:
+        outer, lock, _, finished = self._start_outer(tmp_path)
+        outer.terminate()
+        time.sleep(1.0)
+
+        assert lock.exists(), "a signalled owner released the lock under a live writer"
+        assert "rc=1" in _second_acquire(lock)
+
+        outer.communicate(timeout=_TIMEOUT_SECONDS)
+        assert finished.exists(), "the writer was cut short"
+        assert outer.returncode == 143
+        assert not lock.exists(), "the lock is released once the writer has finished"
+
+    def test_sigkill_of_the_owner_leaves_the_lock_held_while_the_writer_lives(
+        self, tmp_path: Path
+    ) -> None:
+        outer, lock, _, finished = self._start_outer(tmp_path)
+        outer.kill()
+        outer.communicate(timeout=_TIMEOUT_SECONDS)
+        time.sleep(0.5)
+
+        assert not finished.exists()
+        assert "rc=1" in _second_acquire(lock), "the dead owner's live writer must hold the lock"
+
+        deadline = time.monotonic() + self._HOLD + 10
+        while not finished.exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        time.sleep(0.5)
+        assert "rc=0" in _second_acquire(lock), "once the writer is gone the lock is free"
+
+    def test_a_writer_whose_lock_is_not_ours_never_runs(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        ran = tmp_path / "ran"
+        body = (
+            f'LOCK="{lock}"\n_upgrade_lock_acquire "$LOCK" upgrade 0\n'
+            f"printf 'token=someone-else\\n' > \"$LOCK\"\n"
+            f'rc=0; _upgrade_lock_run_writer touch "{ran}" || rc=$?\necho "rc=$rc"\n'
+        )
+
+        result = _bash(body)
+
+        assert "rc=75" in result.stdout, result.stdout + result.stderr
+        assert not ran.exists()
+
+
+def _proc_start_or_empty(record: str) -> str:
+    for line in record.splitlines():
+        if line.startswith("writer_start="):
+            return line.split("=", 1)[1]
+    return "<missing>"
 
 
 class TestTakeoverNeverRemovesAFreshLock:
