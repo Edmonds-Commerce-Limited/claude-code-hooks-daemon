@@ -24,6 +24,12 @@ from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.daemon.metadata import read_daemon_metadata
+from claude_code_hooks_daemon.install.auto_upgrade import (
+    Eligibility,
+    check_eligibility,
+    project_authorises_auto_upgrade,
+    read_attempt_record,
+)
 from claude_code_hooks_daemon.install.background_sync import (
     SyncStatus,
     log_path,
@@ -320,23 +326,87 @@ class VersionCheckHandler(SessionStartHandlerBase):
                 # Up to date - no message
                 return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=[])
 
-            # Outdated - show upgrade notice
-            context = [
-                f"📦 Hooks daemon update available: v{current} → v{latest_version}",
-                "",
-                "To upgrade, use the hooks-daemon skill to upgrade "
-                "(Skill tool: skill=hooks-daemon, args=upgrade).",
-                "It fetches the latest upgrade script, runs it, reconciles project",
-                "docs, and commits the result atomically — no manual steps needed.",
-                "",
-                "💡 New features and fixes available in the latest version.",
-            ]
-
-            return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=context)
+            return AdvisoryResult(
+                decision=Decision.ALLOW,
+                reason=None,
+                context=self._outdated_context(current, latest_version),
+            )
 
         except Exception as e:
             logger.error("Version check failed: %s", e, exc_info=True)
             return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=[])
+
+    def _auto_upgrade_eligibility(self, current: str, latest: str) -> Eligibility | None:
+        """The pre-check verdict, or None when automatic upgrades are not authorised.
+
+        None also covers "cannot tell" (no project context, a config that cannot
+        be read): those keep today's wording, which invites nothing unattended.
+        """
+        try:
+            if not project_authorises_auto_upgrade(ProjectContext.config_path()):
+                return None
+            return check_eligibility(
+                installed=current,
+                latest=latest,
+                authorised=True,
+                self_install=ProjectContext.self_install_mode(),
+                project_root=ProjectContext.project_root(),
+                untracked_dir=ProjectContext.daemon_untracked_dir(),
+            )
+        except (RuntimeError, OSError) as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "without a project context there is nothing to judge an automatic "
+                    "upgrade against, so the advisory keeps its manual wording"
+                ),
+                level=logging.DEBUG,
+            )
+            return None
+
+    def _outdated_context(self, current: str, latest: str) -> list[str]:
+        """The advisory for a daemon older than the latest release (Plan 00625).
+
+        Authorised and eligible: tells the agent to run the unattended upgrade
+        now. Authorised but refused: today's wording plus why it is not
+        automatic. Not authorised: today's wording unchanged.
+        """
+        header = f"📦 Hooks daemon update available: v{current} → v{latest}"
+        verdict = self._auto_upgrade_eligibility(current, latest)
+        if verdict is not None and verdict.eligible:
+            return [
+                header,
+                "",
+                "AUTO-UPGRADE AUTHORISED: run the hooks-daemon skill upgrade with "
+                "--unattended now (Skill tool: skill=hooks-daemon, args=upgrade --unattended), "
+                "then finish the skill's steps.",
+                "This project's standing authorisation (daemon-auto-upgrade) covers it; the "
+                "upgrade stops and changes nothing if a person is needed. To switch it off, "
+                "list {id: daemon-auto-upgrade, enabled: false} under "
+                "handlers.user_prompt_submit.standing_authorisations.options.authorisations "
+                "in .claude/hooks-daemon.yaml.",
+                "",
+                "💡 New features and fixes available in the latest version.",
+            ]
+        context = [
+            header,
+            "",
+            "To upgrade, use the hooks-daemon skill to upgrade "
+            "(Skill tool: skill=hooks-daemon, args=upgrade).",
+            "It fetches the latest upgrade script, runs it, reconciles project",
+            "docs, and commits the result atomically — no manual steps needed.",
+            "",
+            "💡 New features and fixes available in the latest version.",
+        ]
+        if verdict is not None:
+            context += ["", f"Not automatic: {'; '.join(verdict.reasons)}."]
+            if read_attempt_record(ProjectContext.daemon_untracked_dir(), latest) is not None:
+                context.append(
+                    f"It is not retried until a newer release than v{latest} is published; "
+                    "a person can still upgrade to it with the command above."
+                )
+        return context
 
     def _expected_drift(self) -> str | None:
         """The version the project expects, when the running daemon is not it.
