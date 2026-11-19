@@ -1,0 +1,158 @@
+# baseline reaching (should deny)
+cd "$D" && cat late
+cd "$D" && cat zz/late
+cd "$D" && cat w19/zz/late
+# brace expansion with a slash inside the braces (component split defeats the name rule?)
+cd "$D" && cat w19/{q,zz/late}
+cd "$D" && cat w19/z{z/la,}te
+cd "$D" && cat w19/{zz/late,q}
+cd "$D" && cat {w19/zz/late,q}
+cd "$D" && cat zz/{late,q}
+cd "$D" && cat w19/zz/{q,late}
+cd "$D" && cat z{z/l,}ate
+cd "$D" && cat {zz,q}/late
+cd "$D" && cat w1{9/zz/late,}
+cd "$D" && cat {,w19/}zz/late
+cd "$D" && cat w19/zz/la{t,}e
+cd "$D" && cat w19/z{z,}/late
+# quoting inside a word
+cd "$D" && cat zz/'late'
+cd "$D" && cat zz/"late"
+cd "$D" && cat 'zz/late'
+cd "$D" && cat z"z/la"te
+cd "$D" && cat zz/la""te
+cd "$D" && cat zz/la''te
+cd "$D" && cat zz/$'late'
+cd "$D" && cat zz/$'\x6cate'
+cd "$D" && cat zz/la\te
+cd "$D" && cat w19/zz/l\ate
+# variables
+cd "$D" && X=zz/late && cat $X
+cd "$D" && X=late; cat zz/$X
+cd "$D" && cat zz/${X:-late}
+cd "$D" && cat zz/la${X}te
+cd "$D" && cat zz/late$X
+cd "$D" && cat ${D:+zz/late}
+# globs
+cd "$D" && cat zz/lat?
+cd "$D" && cat zz/[l]ate
+cd "$D" && cat z?/l*
+cd "$D" && cat */late
+cd "$D" && cat */*/late
+cd "$D" && cat w*/zz/late
+cd "$D" && cat zz/*
+cd "$D" && cat zz/dl/*
+cd "$D" && cat w19/zz/dl/*
+cd "$D" && cat zz/@(late)
+cd "$D" && cat zz/+(l)ate
+cd "$D" && cat zz/!(x)
+cd "$D" && cat zz/late*
+cd "$D" && cat zz/late?
+cd "$D" && cat zz/l[!x]te
+cd "$D" && cat zz/l[^x]te
+cd "$D" && cat zz/[[:alpha:]]ate
+cd "$D" && cat zz/l[a-z]te
+cd "$D" && cat zz/la[t]e
+# dot and slash spellings
+cd "$D" && cat ./zz/late
+cd "$D" && cat zz/./late
+cd "$D" && cat zz//late
+cd "$D" && cat zz/late/
+cd "$D" && cat zz/late/.
+cd "$D" && cat .//zz///late
+# option-attached words and redirects
+cd "$D" && cat < zz/late
+cd "$D" && cat <zz/late
+cd "$D" && cat<zz/late
+cd "$D" && echo $(<zz/late)
+cd "$D" && head -c100 zz/late
+cd "$D" && grep --file=zz/late x
+cd "$D" && grep -fzz/late x
+cd "$D" && diff zz/late r.md
+cd "$D" && cp zz/late o.txt && cat o.txt
+cd "$D" && ln zz/late h && cat h
+cd "$D" && cat -- zz/late
+cd "$D" && source zz/late
+cd "$D" && . zz/late
+cd "$D" && python3 -c 'print(open("zz/late").read())'
+cd "$D" && awk 1 zz/late
+cd "$D" && tar cf - zz | tar xOf -
+cd "$D" && base64 zz/late
+cd "$D" && dd if=zz/late
+cd "$D" && git show HEAD:zz/late
+cd "$D" && git diff --no-index /dev/null zz/late
+# recursive readers
+cd "$D" && grep -r DUMMY
+cd "$D" && grep -rR DUMMY zz
+cd "$D" && grep -R DUMMY .
+cd "$D" && grep -r DUMMY zz
+cd "$D" && find . -name late -exec cat {} \;
+cd "$D" && find -L . -name late -exec cat {} +
+cd "$D" && find zz -exec cat {} \;
+cd "$D" && find . -type l | xargs cat
+cd "$D" && ls zz | xargs -I{} cat zz/{}
+cd "$D" && rg -L DUMMY
+cd "$D" && cat $(find . -name late)
+cd "$D" && for f in zz/*; do cat "$f"; done
+cd "$D" && for f in *; do cat "$f/late"; done
+# cd chains after the computed move
+cd "$D" && cd zz && cat late
+cd "$D" && cd w19 && cat zz/late
+cd "$D" && pushd zz && cat late
+cd "$D" && cd ./zz/ && cat late
+cd "$D" && cd zz/dl && cat *
+cd "$D" && cd zz/dl && cat id*
+cd "$D"; cd zz; cat late
+cd "$D" && (cd zz && cat late)
+cd "$D" && cd z* && cat late
+cd "$D" && cd .. && cat w19/zz/late
+cd "$D" && cd ~ && cat late
+cd "$D" && cd - && cat zz/late
+cd "$D" && CDPATH=w19 cd zz && cat late
+cd "$D" && export CDPATH=.:w19 && cd zz && cat late
+# links made in the same command
+cd "$D" && ln -s zz/late n && cat n
+cd "$D" && ln -s w19/zz n && cat n/late
+cd "$D" && ln -s ../outside n2 && cat n2/id*
+ln -s "$TMPDIR" nn && cd "$D" && cat nn/*
+cd "$D" && mkdir -p q && ln -s "$TMPDIR" q/r && cat q/r/*
+cd "$D" && cp -s "$TMPDIR"/* . && cat i*
+cd "$D" && mv zz/late m && cat m
+cd "$D" && cat .bin/tool
+# names via a different directory (tail spelled through another parent)
+cd "$D" && cat w18/zz/late
+cd "$D" && cat x/zz/late
+cd "$D" && cat .bin/../zz/late
+# ordinary (should allow)
+cd "$D" && cat r.md
+cd "$D" && cat src/main.py
+cd "$D" && ls -la
+cd "$(mktemp -d)" && ls
+cd ~/x && cat f
+cd "$(git rev-parse --show-toplevel)" && cat r.md
+cd "$D" && grep -r hello src
+cd "$D" && cat late.txt
+cd "$D" && cat zzz/late
+# round 2
+shopt -s extglob; cd "$D" && cat zz/+(l)ate
+shopt -s extglob; cd "$D" && cat zz/!(x)
+shopt -s extglob
+ln -s w19/zz n && cat n/late
+ln -s w19/zz/late n && cat n
+cd w19 && cat zz/[l]ate
+cd w19 && cat .bin/../zz/late
+cat w19/.bin/../zz/late
+cat w19/zz/[l]ate
+cd "$D" && cat zz/l?te
+cd "$D" && cat zz/*ate
+cd "$D" && cat z[z]/late
+cd "$D" && cat zz/late[]
+cd "$D" && cat src/../w19/zz/late
+cd "$D" && cat .bin/./../zz/late
+cd "$D" && cat zz/${X-late}
+cd "$D" && cat zz/${X:=late}
+cd "$D" && cat zz/$X
+cd "$D" && cat $X
+cd "$D" && cat "$X"
+cd "$D" && cat zz/"${X:-late}"
+cd "$D" && cat zz/l${X}ate
