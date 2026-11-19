@@ -69,7 +69,7 @@ The only cap-path allows that leaked were E6, E7 and E8, which come from the tok
 
 ## Fail-closed (task 2)
 
-`untracked/scratch/00623-review/tools/failclosed.py` was re-run on the fixed tree, cold and built. Result: FAILCLOSED_RESULT.
+`untracked/scratch/00623-review/tools/failclosed.py` was re-run on the fixed tree, cold and built. It forces 11 stops (caps, deadlines, unreadable directories, link targets that cannot be told, depth 0), over 364 probes on 2 fixtures, cold and built: 44 runs, **0 deny-to-not-deny**. The flaggable and quarantine guards were not re-probed beyond their targeted unit tests, which pass.
 
 ## Cache forgery (task 3)
 
