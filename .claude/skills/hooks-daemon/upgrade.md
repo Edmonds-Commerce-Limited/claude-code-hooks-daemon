@@ -12,7 +12,18 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
    /hooks-daemon upgrade --skip-config-optimisation    # opt out of step 9
    /hooks-daemon upgrade --skip-reading-confirmation=<digest>   # after reading what the gate listed
    /hooks-daemon optimise                              # step 9 on its own
+   /hooks-daemon upgrade --unattended                  # under the daemon-auto-upgrade authorisation
    ```
+
+   **`--unattended`** is the form the SessionStart version check tells you to
+   run when the project's `daemon-auto-upgrade` standing authorisation is in
+   force. It only adds refusals and a rollback; the steps below are the same,
+   and you finish them without asking. An exit `5` means the upgrade needs a
+   human: report the printed reason and stop there, and do NOT re-run it
+   without `--unattended` on your own initiative. Exit `75` means another
+   agent holds the upgrade lock: nothing changed, so there is nothing to do.
+   What each refusal is, and the lock, are in "Unattended upgrades" in the
+   daemon clone's `CLAUDE/LLM-UPDATE.md`.
 
    **The pre-deploy gate (MANDATORY to act on).** Once the new version is
    checked out, and before anything is deployed into the project, the upgrade
