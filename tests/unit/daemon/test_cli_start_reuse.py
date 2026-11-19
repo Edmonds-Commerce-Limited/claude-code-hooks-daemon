@@ -14,6 +14,7 @@ import os
 import sys
 from contextlib import ExitStack
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -468,6 +469,11 @@ class TestCmdStartChildReuseExitZero:
 
         mock_devnull = MagicMock()
         mock_devnull.fileno.return_value = 99
+        built: dict[str, Any] = {}
+
+        def _build_daemon(*_args: Any, **kwargs: Any) -> MagicMock:
+            built.update(kwargs)
+            return MagicMock()
 
         patchers = [
             patch(
@@ -508,10 +514,11 @@ class TestCmdStartChildReuseExitZero:
             ),
             patch(
                 "claude_code_hooks_daemon.daemon.server.HooksDaemon",
-                return_value=MagicMock(),
+                side_effect=_build_daemon,
             ),
             patch("claude_code_hooks_daemon.daemon.paths.write_socket_discovery_file"),
-            patch("asyncio.run", return_value=None),  # owned + clean shutdown
+            # Bound (the server calls `serving`), then a clean shutdown.
+            patch("asyncio.run", side_effect=lambda _coro: built["serving"]()),
         ]
         with ExitStack() as stack:
             for p in patchers:
