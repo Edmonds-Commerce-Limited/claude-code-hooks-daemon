@@ -7896,3 +7896,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: a plain `printf` piped to `pingbus say` was denied because the message TEXT, a quoted argument, held the words for stopping a systemd unit. This repository has no handler named for Ansible enforcement (a search of `src/` finds only mentions), so the guard is most likely a project-level handler in that seat's own repository, not a shipped one. Unverified from here.
 
 **Status**: ⬜ Open, low priority; needs the reporting seat to name the handler. If it is a shipped handler, it must judge only command words, never the contents of a quoted argument to another program. If it is a project handler, the shared command-word parsing helpers already exist for the same purpose and it should use them.
+
+### N673 — existing code and plans contradict the scratch TTL design (fourteen places)
+
+**Source**: Plan 00627 design pass, by a sub-agent under the owner's delegation.
+
+**Evidence**: the full table, with file and line for each, is `CLAUDE/Plan/00627-scratch-management-ttl-and-filing/DESIGN.md` section 15 (X1 to X14). The ones that can lose work or keep the sprawl going: `utils/stale_litter.py:193` prints `find ... -type f -mmin +N -delete`, removal on age alone that leaves every directory behind; that report rides `idle_housekeeping_advisory`, which is off by default; `project_containment` still calls scratch the place for durable work; `NEVER_REGENERABLE` makes a worktree with scratch content refuse removal with no sanctioned way to empty it; `DEFAULT_HANDOFF_GLOBS` accepts scratch as a handoff home; each agent worktree's own `untracked/scratch/` is read by nothing; the link index on the Plan 00623 branch fails whole at its cap with no warning below it. The number N673 was taken on a branch and may need renumbering at merge.
+
+**Status**: ⬜ Open; each row is closed by the Plan 00627 task named beside it (Task 8.4 closes this entry).

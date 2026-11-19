@@ -8,6 +8,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
+- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - Not Started (owner request: a full scratch management system; every scratch entry has a 24-hour TTL and past it is filed, packed into a verified archive and removed after a hold, or kept only on a machine proof of unpushed or human work; a `scratch-sweep` command, a SessionStart report, caps that act before the link index overflows, a per-session scratch directory; design written, rulings by a delegated sub-agent, no code yet; takes over Plan 00560's sweep)
+
 - [00626: remote delete proof cherry route and remote default ref](00626-remote-delete-proof-cherry-route-and-remote-default-ref/PLAN.md) - In Progress (client report: the remote-delete proof refuses a branch whose every patch is in the default when cherry-picks interleave, and proves remote deletes against the LOCAL default; restore the cherry route with exact per-path content, prove against the remote default's live tip only, never on a cached positive)
 
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - Not Started (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
