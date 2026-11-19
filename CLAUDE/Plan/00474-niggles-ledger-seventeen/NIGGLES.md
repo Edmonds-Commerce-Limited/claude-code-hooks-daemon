@@ -7888,3 +7888,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: a seat running 3.74.0 was told by `issue-report` that 3.74.0 was the newest release, because the check consults only the locally installed release notes. 3.75.0 had been published, and issues #210 and #211 were then filed for defects already fixed there, as duplicates. The numbering skips N669 and N670, which sit on the unmerged Plan 00623 branch.
 
 **Status**: ⬜ Open, low priority. Ask GitHub for the latest release, and fall back to the local notes with a stated "could not check" line when the network is unavailable, so the report never claims "newest" it did not verify.
+
+### N672 — an Ansible-enforcement guard judged the words inside a quoted message argument as if they were a command
+
+**Source**: coordinator peer note, dogfood report from another seat (not urgent).
+
+**Evidence**: a plain `printf` piped to `pingbus say` was denied because the message TEXT, a quoted argument, held the words for stopping a systemd unit. This repository has no handler named for Ansible enforcement (a search of `src/` finds only mentions), so the guard is most likely a project-level handler in that seat's own repository, not a shipped one. Unverified from here.
+
+**Status**: ⬜ Open, low priority; needs the reporting seat to name the handler. If it is a shipped handler, it must judge only command words, never the contents of a quoted argument to another program. If it is a project handler, the shared command-word parsing helpers already exist for the same purpose and it should use them.
