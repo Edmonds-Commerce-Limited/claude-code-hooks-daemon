@@ -46,6 +46,15 @@ A move is placed only when the daemon's value is absolute, its realpath is outsi
 - **N663.** An `lstat` `OSError` other than `ENOENT`/`ENOTDIR`/`ELOOP` is unresolvable when the word alone fits `PATH_MAX` and each of its components fits `NAME_MAX`.
 - **N664.** Covered by item 1, nesting depth.
 
+## Corrections to the design above
+
+- **N667 is not "dropped".** The top-level idiom keeps its ancestor placement, but only when `toplevel_relocated` finds no `worktree` key in the repository, user or system config (includes followed, at most 16 files), no unreadable config and no relocating `GIT_` variable. Otherwise it is a plain computed move.
+- **`mktemp -d` is not placed specially.** `cd "$(mktemp -d)"` is a computed move judged from the link index; it is in the `USABILITY` list and allowed once the index is built.
+- **Placement refusals** (second build session): a quoted or escaped `~`/`$VAR`, a second mention of the variable, an indirect setter builtin in command position, and a place inside the project by its logical, physical or spelled-then-physical path (`cd -P "$TMPDIR/x/.."`).
+
 ## Results
 
-(filled in as phases land)
+- RED file `test_secret_file_guard_bounded_walks.py`: all 47 pass, unchanged apart from formatting. `test_secret_file_guard_link_index.py` covers the 5 review examples plus their cap513 forms and `mktemp -d`, in a 600-directory project with and without 516 harmless link directories.
+- Newly denied ordinary commands (accepted, listed for the review): `cat /proc/self/status`, any `/proc/self/*`, `/proc/thread-self/*` or `/dev/fd/*` word (including `2>/dev/fd/N` and `readlink /proc/self/exe`); a word whose stat fails with EACCES or another error than ENOENT/ENOTDIR/ELOOP while it fits PATH_MAX; a wildcard parent that exists but cannot be listed; a body nested past the depth limits that could read or move; a moved-from base list past the 513-base slice.
+- The DENY-to-ALLOW comparison against main must be run twice: with the link index cold (`link_scan_for` returning None) and built.
+- Residuals: ledger N669.

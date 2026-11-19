@@ -3509,8 +3509,11 @@ _GIT_INLINE_CONFIG_PREFIXES: Final[tuple[str, ...]] = (
     "GIT_CONFIG_KEY_",
     "GIT_CONFIG_VALUE_",
 )
-#: Config text that may move the top level, or pull in config this check does not read.
+#: Inline config text (``-c``, ``GIT_CONFIG_KEY_n``) that may move the top level.
 _GIT_RELOCATING_CONFIG: Final[str] = "worktree"
+#: A ``worktree`` key in a config file, in any section (a value such as a branch
+#: route named ``worktree_create`` is not one). A section header may share its line.
+_GIT_WORKTREE_KEY: Final[re.Pattern[str]] = re.compile(r"(?im)(?:^|\])\s*worktree\s*=")
 #: A ``path = ...`` line: in an ``[include]``/``[includeIf]`` section it names another config file.
 _GIT_INCLUDE_PATH: Final[re.Pattern[str]] = re.compile(r"(?im)^\s*path\s*=\s*(.+?)\s*$")
 #: How many config files (with includes) are read before the top level counts as relocated.
@@ -3570,13 +3573,14 @@ def toplevel_relocated(bases: Sequence[str]) -> bool:
             read = 0
             while queue:
                 config = queue.pop(0)
-                if not config.exists():
+                # A `path =` that names a directory (not an include) is no config git reads.
+                if not config.exists() or config.is_dir():
                     continue
                 read += 1
                 if read > _MAX_GIT_CONFIG_FILES:
                     return True
                 text = config.read_text(errors="replace")
-                if _GIT_RELOCATING_CONFIG in text.lower():
+                if _GIT_WORKTREE_KEY.search(text):
                     return True
                 queue.extend(
                     config.parent / Path(found.strip().strip('"')).expanduser()
@@ -3598,6 +3602,60 @@ _PLACEABLE_MOVE: Final[re.Pattern[str]] = re.compile(
     r"(?:~|\$(HOME|TMPDIR)|\$\{(HOME|TMPDIR)\})((?:/[^\s$`{}*?\[~\\\"']*)?)"
 )
 _HOME_VARIABLE: Final[str] = "HOME"
+_TILDE: Final[str] = "~"
+#: A builtin in command position that can set a variable it does not spell out.
+_INDIRECT_SETTER: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[;&|(){}\n!]|\b(?:then|do|else|elif|if|while|until)\b)\s*"
+    r"(?:(?:builtin|command)\s+)?"
+    r"(?:source|\.|eval|declare|typeset|export|local|readonly|read|mapfile|readarray|unset"
+    r"|printf\s+-v)(?=\s|$)"
+)
+#: The quoting state :func:`_quoting_at` reports.
+_UNQUOTED: Final[str] = "unquoted"
+_SINGLE_QUOTED: Final[str] = "single"
+_DOUBLE_QUOTED: Final[str] = "double"
+_ESCAPED: Final[str] = "escaped"
+
+
+def _quoting_at(command: str, index: int) -> str:
+    """How bash quotes the character at ``index`` of ``command``."""
+    single = double = escaped = False
+    for char in command[:index]:
+        if escaped:
+            escaped = False
+        elif char == "\\" and not single:
+            escaped = True
+        elif char == "'" and not double:
+            single = not single
+        elif char == '"' and not single:
+            double = not double
+    if escaped:
+        return _ESCAPED
+    if single:
+        return _SINGLE_QUOTED
+    return _DOUBLE_QUOTED if double else _UNQUOTED
+
+
+def _expanded_as_written(name: str, command: str) -> bool:
+    """Does bash expand the one spelling of ``~`` or ``$name`` in ``command``?
+
+    A quoted or escaped ``~`` and a single-quoted or escaped ``$`` are literal
+    text: ``cd "~"`` moves to a directory named ``~``.
+    """
+    if name == _TILDE:
+        return all(
+            _quoting_at(command, index) == _UNQUOTED
+            for index, char in enumerate(command)
+            if char == _TILDE
+        )
+    at = command.index(name)
+    if command[at - 1 : at] == "$":
+        dollar = at - 1
+    elif command[at - 2 : at] == "${":
+        dollar = at - 2
+    else:
+        return False
+    return _quoting_at(command, dollar) in (_UNQUOTED, _DOUBLE_QUOTED)
 
 
 def place_outside_project(target: str, command: str) -> tuple[str, ...]:
@@ -3605,9 +3663,12 @@ def place_outside_project(target: str, command: str) -> tuple[str, ...]:
 
     Plan 00623: such a move is computed, and judging it as one denied it past
     the link scan's cap. It is placed only when the daemon's value is absolute,
-    the command never names the variable anywhere else (so it does not reassign
-    it), and the place is outside the project: a link inside the project cannot
-    change where it is. Both the spelled and the physical place are returned.
+    bash expands the spelling (it is not quoted), the command never names the
+    variable anywhere else and runs no builtin that sets one by an indirect name
+    (``source``, ``eval``, ``declare``, ``read``, ...), and the place is outside
+    the project however it is resolved: logically, physically from the spelled
+    path (``cd -P``), and through the project root's own links. Both the spelled
+    and the physical places are returned.
     Residual (ledgered): the shell's value can differ from the daemon's.
     """
     match = _PLACEABLE_MOVE.fullmatch(target)
@@ -3615,17 +3676,21 @@ def place_outside_project(target: str, command: str) -> tuple[str, ...]:
         return ()
     name = match.group(1) or match.group(2) or _HOME_VARIABLE
     named = command.count(name)
-    if named != (0 if target.startswith("~") else 1):
+    tilde = target.startswith(_TILDE)
+    if named != (0 if tilde else 1) or _INDIRECT_SETTER.search(command):
+        return ()
+    if not _expanded_as_written(_TILDE if tilde else name, command):
         return ()
     value = os.environ.get(name, "")
     root = resolve_project_root()
     if not value.startswith("/") or not root:
         return ()
-    lexical = os.path.normpath(value + match.group(3))
+    spelled = value + match.group(3)
+    lexical = os.path.normpath(spelled)
     physical = os.path.realpath(lexical)
-    real_root = os.path.realpath(root)
-    for place in (lexical, physical):
-        if place == real_root or place.startswith(real_root.rstrip("/") + "/"):
+    roots = {os.path.normpath(root), os.path.realpath(root)}
+    for place in (lexical, physical, os.path.realpath(spelled)):
+        if any(place == top or place.startswith(top.rstrip("/") + "/") for top in roots):
             return ()
     return tuple(dict.fromkeys((lexical, physical)))
 

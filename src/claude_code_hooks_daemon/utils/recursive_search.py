@@ -926,7 +926,8 @@ def _could_read(command: str) -> bool:
             head = posixpath.basename(words[0])
             if head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
                 inner = words[words.index(_SHELL_COMMAND_FLAG, 1) + 1]
-                if len(inner) < len(command) and _could_read(inner):
+                # A body no shorter than its command is not looked into: it may read.
+                if len(inner) >= len(command) or _could_read(inner):
                     return True
                 continue
             if head == _EVAL:

@@ -7900,7 +7900,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Evidence**: the round-6 branch excuses the top-level idiom from the incomplete-scan deny and places it at the ancestors of the command's directory. It demotes the idiom only when the same command sets `core.worktree`, names a `GIT_` variable, defines a function or alias, or changes `PATH`. Repository config persisted by an EARLIER call (`core.worktree`) makes `git rev-parse --show-toplevel` print a non-ancestor, and `cd "$(git rev-parse --show-toplevel)" && cat late` (also `grep -r` and a glob form) is then allowed past the cap; under the cap the same commands deny. Main allows them too.
 
-**Status**: ✅ Fixed on the Plan 00623 branch. `toplevel_relocated` reads the repository, user and system git config at decision time and demotes the idiom to a plain computed move when any names a worktree or an include, cannot be read, or a `GIT_` relocating variable is set for the daemon. With the link index complete the computed judgement finds every link anyway. Pinned by `TestPersistedWorktreeConfig` (cold index). Residual: the SHELL's environment is not visible (N669).
+**Status**: ✅ Fixed on the Plan 00623 branch. `toplevel_relocated` reads the repository, user and system git config (and their includes) at decision time and demotes the idiom to a plain computed move when any sets a `worktree` key, holds more than 16 included files, cannot be read, or a `GIT_` relocating variable is set for the daemon. With the link index complete the computed judgement finds every link anyway. Pinned by `TestPersistedWorktreeConfig` (cold index). Residual: the SHELL's environment is not visible (N669).
 
 ### N668 — a path through `/proc/self/cwd` or `/dev/fd/..` is judged from the daemon's working directory
 
@@ -7921,5 +7921,8 @@ smaller than the add's, but at a load average near 70 they time out too.
 - More than 512 link-holding directories in the index (a pnpm-style tree) still denies a computed move.
 - A project link whose target is `/proc/self/cwd` is classified by the daemon (its own cwd), not refused as N668 is.
 - The quarantine guard's Read-tool route does not call `refuse_process_view`.
+- The `~`/`$HOME`/`$TMPDIR` placement trusts the command text: it refuses a quoted or escaped spelling, a second mention of the variable, and any `source`, `.`, `eval`, `declare`, `typeset`, `export`, `local`, `readonly`, `read`, `mapfile`, `readarray`, `unset` or `printf -v` in command position, but an alias or function named `cd` defined in an earlier call is not seen.
+- A wildcard word whose placed parent is longer than PATH_MAX (each component short) is now denied as unresolvable rather than read as matching nothing: over-deny for words over 4,096 bytes only.
+- `_could_read` (the depth-limit check) follows the same nesting forms as the search walk (`-c` as its own word, `eval`, substitutions); `bash -ec '...'` is not looked into at any depth by either, a gap that predates this plan.
 
 **Status**: ⬜ Open, low priority; recorded for the merge review.

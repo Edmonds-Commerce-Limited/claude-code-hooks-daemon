@@ -49,6 +49,7 @@ USABILITY = [
     'for d in w00*/; do (cd "$d" && make); done',
     'cd "$(dirname "$0")" && ./run.sh',
     'cd "$OLDPWD" && git status',
+    'cd "$(mktemp -d)" && ls',
 ]
 
 #: The same moves, then a read of the link that leads to the protected dummy.
@@ -244,6 +245,53 @@ class TestMovesOutsideTheProjectArePlaced:
         assert _decision(cold, "cd ~ && cat proj/w300/late") is Decision.DENY
 
 
+class TestPlacementIsRefusedWhereTheShellMayLandElsewhere:
+    """The daemon's value is used only where bash expands the variable and keeps it."""
+
+    @pytest.mark.parametrize(
+        ("target", "command"),
+        [
+            # Quoted: bash moves to a literal directory, not to the variable's value.
+            ("~", 'cd "~" && cat late'),
+            ("~/vault", "cd '~/vault' && cat late"),
+            ("~", "cd \\~ && cat late"),
+            ("$HOME", "cd '$HOME' && cat late"),
+            ("$HOME/vault", "cd '$HOME/vault' && cat late"),
+            ("$TMPDIR", "cd \\$TMPDIR && cat late"),
+            # A command that can set the variable without naming it.
+            ("~", ". ./env.sh && cd ~ && cat late"),
+            ("~", "source env.sh; cd ~ && cat late"),
+            ("$TMPDIR", 'eval "$V"; cd "$TMPDIR" && cat late'),
+            ("$HOME", 'declare "$N=x"; cd "$HOME" && cat late'),
+            ("$HOME", 'read -r "$N"; cd "$HOME" && cat late'),
+            ("$HOME", 'printf -v "$N" x; cd "$HOME" && cat late'),
+        ],
+    )
+    def test_it_is_not_placed(self, home: Path, cold: Project, target: str, command: str) -> None:
+        assert sfm.place_outside_project(target, command) == ()
+
+    def test_a_physical_move_through_a_link_into_the_project_is_not_placed(
+        self, home: Path, cold: Project
+    ) -> None:
+        (cold.root / "w300" / "deep").mkdir()
+        (cold.outside / "x").symlink_to(cold.root / "w300" / "deep")
+        command = 'cd -P "$TMPDIR/x/.." && cat late'
+        assert sfm.place_outside_project("$TMPDIR/x/..", command) == ()
+
+    @pytest.mark.parametrize(
+        ("target", "command"),
+        [
+            ("~/vault", "cd ~/vault && grep 'x' r.md"),
+            ("$HOME/vault", 'cd "$HOME/vault" && cat r.md'),
+            ("$TMPDIR", 'cd "$TMPDIR" && printf "%s" x'),
+        ],
+    )
+    def test_an_ordinary_move_is_still_placed(
+        self, home: Path, cold: Project, target: str, command: str
+    ) -> None:
+        assert sfm.place_outside_project(target, command) != ()
+
+
 class TestPersistedWorktreeConfig:
     """N667: the top-level idiom is not placed at an ancestor when git config may move it."""
 
@@ -264,6 +312,13 @@ class TestPersistedWorktreeConfig:
             check=True,
         )
         assert _decision(repo, command) is Decision.DENY
+
+    def test_a_value_that_merely_mentions_worktree_does_not_relocate(self, repo: Project) -> None:
+        subprocess.run(
+            ["git", "-C", str(repo.root), "config", "branch.main.route", "worktree_create"],
+            check=True,
+        )
+        assert _decision(repo, f"{_TOPLEVEL} && make test") is Decision.ALLOW
 
     def test_a_git_work_tree_in_the_environment_denies(
         self, repo: Project, monkeypatch: pytest.MonkeyPatch
