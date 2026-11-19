@@ -1371,6 +1371,12 @@ handlers:
           # push atomically and regularly. git is your primary backup".
           - id: commit-push-cadence
             enabled: true
+          # Self-install: this repository IS the daemon source, so there is
+          # nothing to upgrade to and Layer 2 refuses here. The shipped default
+          # (on) is switched off rather than left asserting something that
+          # cannot happen in this repo (Plan 00625).
+          - id: daemon-auto-upgrade
+            enabled: false
 
     # auto_continue:  # Auto-continues on 'continue' keyword
     #   enabled: false # Optional - enable for auto-continue behavior

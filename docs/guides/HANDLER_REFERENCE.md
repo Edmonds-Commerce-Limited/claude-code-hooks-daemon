@@ -5074,18 +5074,27 @@ handlers:
 
 It is a filing cabinet, not a countermand. A test asserts that no entry's text contains *ignore*, *disregard*, *override*, *overrule* or *bypass*, and that every entry attributes the request to the project and names the config key holding it — an authorisation that cannot be audited is not a request, and one that cannot be revoked is not one either.
 
-**Nothing is authorised by default.** The handler ships enabled so the options are discoverable; every built-in entry ships disabled. Every other default-on handler in this daemon *adds* a restriction — this one relaxes one, and shipping that active would have the daemon assert consent nobody gave.
+**Almost nothing is authorised by default.** The handler ships enabled so the options are discoverable; every built-in entry ships disabled except `daemon-auto-upgrade`, which ships **enabled** at the owner's request (Plan 00625). Every other default-on handler in this daemon *adds* a restriction — this one relaxes one, so the one default-on entry is honest about its source: while the project's config does not list it, its text says it is the daemon's shipped default, not a request the project recorded, and names the opt-out. Only an explicit `enabled: false` turns it off.
+
+**`daemon-auto-upgrade`** lets the agent upgrade the daemon to the latest *published* release without asking, by running the hooks-daemon skill's upgrade with `--unattended` and finishing the skill's steps. It never covers a MAJOR bump, anything the pre-deploy gate lists under READ THIS FIRST, a release in progress, a tree with uncommitted changes, or a version whose unattended attempt already failed; those need a human (the scripts enforce this, the text only states it). The session-start version check says `AUTO-UPGRADE AUTHORISED` when the local pre-check passes. To opt out:
+
+```yaml
+          - id: daemon-auto-upgrade
+            enabled: false
+```
+
+In the daemon's own repository (self-install) the entry is listed `enabled: false`: there is nothing to upgrade to.
 
 **Options:**
 
 | Option                       | Type  | Default | Description                                                                                                                                                                                                                           |
 | ---------------------------- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `authorisations`             | list  | `[]`    | List of `{id, enabled}` entries. Built-in ids: `subagent-delegation`, `workflow-orchestration`, `commit-push-cadence`. An unrecognised id is ignored, never fatal.                                                                    |
+| `authorisations`             | list  | `[]`    | List of `{id, enabled}` entries. Built-in ids: `subagent-delegation`, `workflow-orchestration`, `commit-push-cadence` (all default off), `daemon-auto-upgrade` (default **on**). An unrecognised id is ignored, never fatal.          |
 | `prompt_interval`            | int   | `5`     | Reinforce after this many HUMAN prompts since the last delivery (Plan 00283). Automated turns do not count.                                                                                                                           |
 | `interval_minutes`           | float | `15`    | Reinforce once this many minutes have elapsed since the last delivery, whichever fires first with `prompt_interval` (Plan 00283).                                                                                                     |
 | `supervisor_channel_enabled` | bool  | `false` | Opt-in (Plan 00283). When on AND a ccy supervisor is armed+live, a due reinforcement is typed by the supervisor as a real user-role line instead of folded hook-context; fails open to hook-context otherwise. See the caution below. |
 
-The two built-in ids are separate because the restrictions they answer are separate: authorising sub-agent delegation says nothing about authorising multi-agent workflow orchestration.
+The first two built-in ids are separate because the restrictions they answer are separate: authorising sub-agent delegation says nothing about authorising multi-agent workflow orchestration.
 
 **Delivery cadence (why UserPromptSubmit):** measured, not assumed. Against a real 37,475-record transcript spanning 18 compactions, `SessionStart` proved to be a different transport (`hook_system_message`, appearing zero times in `hook_additional_context`) whose full payload was delivered exactly **once** — the prevailing `is_resume_session` gate is a transcript-size heuristic that is true for every post-compaction session. `UserPromptSubmit` delivered **198** times, one per prompt. Since the instruction being answered lives in a system prompt re-sent on every request, only a per-prompt channel keeps pace with it.
 

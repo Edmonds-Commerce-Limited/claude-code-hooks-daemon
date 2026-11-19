@@ -928,9 +928,12 @@ handlers:
 
     standing_authorisations:  # Replay a standing request THIS project recorded (Plan 00223)
       # The HANDLER ships on so the options are discoverable; every
-      # AUTHORISATION below ships off, so this is inert until you opt in.
-      # Deliberate: every other default-on handler ADDS a restriction, this
-      # one relaxes one, and the daemon must never assert consent nobody gave.
+      # AUTHORISATION below ships off EXCEPT daemon-auto-upgrade, which ships
+      # ON at the owner's request (Plan 00625): the agent may upgrade the
+      # daemon to the latest published release via the hooks-daemon skill's
+      # `upgrade --unattended`. Its text says it is the daemon's shipped
+      # default until you list it here. Every other default-on handler ADDS a
+      # restriction; this one relaxes one, so it is honest about its source.
       enabled: true
       priority: 57
       options:
@@ -943,6 +946,11 @@ handlers:
             enabled: false
           - id: commit-push-cadence
             enabled: false
+          # Default ON. Only an explicit enabled: false switches it off. Never
+          # covers a MAJOR bump, a READ THIS FIRST gate escalation, a release
+          # in progress, a dirty tree, or a version whose attempt failed.
+          - id: daemon-auto-upgrade
+            enabled: true
 
     daemon_upgrade_detector:  # Notice the INSTALLED daemon version changing underneath a running process (Plan 00395)
       # Compares what this process loaded against `.daemon-metadata.json` in
