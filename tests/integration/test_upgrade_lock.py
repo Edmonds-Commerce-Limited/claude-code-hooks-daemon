@@ -1,0 +1,432 @@
+"""The shared upgrade lock (Plan 00625 Phase 3, DESIGN.md section 6).
+
+``scripts/upgrade.sh`` (Layer 1) and ``provision.sh`` each carry the lock as a
+block of functions between ``# BEGIN upgrade-lock`` and ``# END upgrade-lock``.
+Each script is fetched or deployed standalone, so neither can source the other;
+a lockstep test pins the two blocks identical. The behaviour tests lift the
+block verbatim out of ``upgrade.sh`` and run it in real bash against real lock
+files, with real processes standing in for owners.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import time
+from pathlib import Path
+from typing import Final
+
+_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
+_UPGRADE_SH: Final[Path] = _REPO_ROOT / "scripts" / "upgrade.sh"
+_PROVISION_SH: Final[Path] = _REPO_ROOT / "provision.sh"
+_BASH: Final[str] = shutil.which("bash") or "/bin/bash"
+_TIMEOUT_SECONDS: Final[int] = 60
+_BEGIN: Final[str] = "# BEGIN upgrade-lock"
+_END: Final[str] = "# END upgrade-lock"
+
+_NOW_FOREIGN: Final[str] = "foreign-boot-id-0000"
+
+
+def _block(script: Path) -> str:
+    """The lock block of ``script``, lifted verbatim, marker lines included."""
+    text = script.read_text(encoding="utf-8")
+    start = text.index(_BEGIN)
+    end = text.index(_END, start)
+    return text[start : text.index("\n", end) + 1]
+
+
+def _bash(body: str, *, lock_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    script = "\n".join(["set -euo pipefail", _block(_UPGRADE_SH), body])
+    return subprocess.run(
+        [_BASH, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_TIMEOUT_SECONDS,
+        env={**os.environ, **(lock_env or {})},
+    )
+
+
+def _proc_start(pid: int) -> str:
+    stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    return stat.rsplit(") ", 1)[1].split()[19]
+
+
+def _boot_id() -> str:
+    return Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+
+
+def _pidns() -> str:
+    return str(Path("/proc/self/ns/pid").readlink())
+
+
+def _dead_pid() -> int:
+    return int(Path("/proc/sys/kernel/pid_max").read_text(encoding="utf-8")) + 1
+
+
+def _record(lock: Path, **overrides: str | int) -> dict[str, str]:
+    """Write an owner record for a holder that looks like this very process."""
+    fields: dict[str, str] = {
+        "token": "other-token",
+        "host": "some-host",
+        "boot_id": _boot_id(),
+        "pidns": _pidns(),
+        "pid": str(os.getpid()),
+        "pid_start": _proc_start(os.getpid()),
+        "started": str(int(time.time())),
+        "purpose": "upgrade",
+    }
+    fields.update({key: str(value) for key, value in overrides.items()})
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("".join(f"{k}={v}\n" for k, v in fields.items()), encoding="utf-8")
+    return fields
+
+
+def _token_of(lock: Path) -> str:
+    for line in lock.read_text(encoding="utf-8").splitlines():
+        if line.startswith("token="):
+            return line.split("=", 1)[1]
+    raise AssertionError(f"no token in {lock}")
+
+
+_ACQUIRE = 'rc=0; _upgrade_lock_acquire "$LOCK" "{purpose}" {wait} || rc=$?; echo "rc=$rc"\n'
+
+
+def _acquire_body(lock: Path, *, purpose: str = "upgrade", wait: int = 0, then: str = "") -> str:
+    return (
+        f'LOCK="{lock}"\n'
+        + _ACQUIRE.format(purpose=purpose, wait=wait)
+        + then
+        + '_upgrade_lock_release\necho "released"\n'
+    )
+
+
+class TestLockstep:
+    def test_the_two_scripts_carry_identical_lock_blocks(self) -> None:
+        assert _block(_UPGRADE_SH) == _block(_PROVISION_SH)
+
+    def test_the_deployed_provision_copy_is_the_same_file(self) -> None:
+        deployed = _REPO_ROOT / ".claude" / "provision.sh"
+        assert deployed.read_bytes() == _PROVISION_SH.read_bytes()
+
+    def test_the_block_never_signals_a_process(self) -> None:
+        """Layer 1 signals no process (test_upgrade_sh_stop_bootstrap.py)."""
+        for line in _block(_UPGRADE_SH).splitlines():
+            if not line.lstrip().startswith("#"):
+                assert "kill" not in line.split(), line
+
+
+class TestLockPath:
+    def test_it_is_inside_the_git_common_dir(self, tmp_path: Path) -> None:
+        project = tmp_path / "proj"
+        project.mkdir()
+        subprocess.run(["git", "-C", str(project), "init", "-q"], check=True)
+
+        result = _bash(f'_upgrade_lock_path "{project}"')
+
+        assert result.stdout.strip() == f"{project.resolve()}/.git/hooks-daemon-upgrade.lock"
+
+    def test_a_worktree_shares_its_repositorys_lock(self, tmp_path: Path) -> None:
+        project = tmp_path / "proj"
+        project.mkdir()
+        git = ["git", "-C", str(project)]
+        subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
+        identity = ["-c", "user.name=t", "-c", "user.email=t@x.invalid"]
+        subprocess.run(
+            [*git, *identity, "commit", "-q", "--allow-empty", "-m", "x"], check=True
+        )
+        worktree = tmp_path / "wt"
+        subprocess.run([*git, "worktree", "add", "-q", str(worktree)], check=True)
+
+        main = _bash(f'_upgrade_lock_path "{project}"').stdout.strip()
+        other = _bash(f'_upgrade_lock_path "{worktree}"').stdout.strip()
+
+        assert main == other
+        assert Path(main).is_absolute()
+
+    def test_a_directory_that_is_not_a_repository_falls_back_to_dot_claude(
+        self, tmp_path: Path
+    ) -> None:
+        result = _bash(f'_upgrade_lock_path "{tmp_path}"')
+
+        assert result.stdout.strip() == f"{tmp_path}/.claude/hooks-daemon-upgrade.lock"
+
+
+class TestAcquireAndRelease:
+    def test_acquire_writes_the_owner_record_and_a_heartbeat(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        body = _acquire_body(
+            lock,
+            purpose="provision-sync",
+            then=f'cat "{lock}"; test -f "{lock}.beat" && echo beat-present\n',
+        )
+
+        result = _bash(body)
+
+        assert "rc=0" in result.stdout, result.stderr
+        assert "beat-present" in result.stdout
+        fields = dict(
+            line.split("=", 1)
+            for line in result.stdout.splitlines()
+            if "=" in line and not line.startswith("rc=")
+        )
+        assert fields["purpose"] == "provision-sync"
+        assert fields["boot_id"] == _boot_id()
+        assert fields["pidns"] == _pidns()
+        assert fields["pid"].isdigit() and fields["pid_start"].isdigit()
+        assert fields["host"] and fields["token"] and fields["started"].isdigit()
+
+    def test_release_leaves_no_lock_and_no_heartbeat_file(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+
+        result = _bash(_acquire_body(lock))
+
+        assert "rc=0" in result.stdout and "released" in result.stdout, result.stderr
+        assert list(tmp_path.iterdir()) == []
+
+    def test_a_lock_carrying_another_token_is_not_removed_by_our_release(
+        self, tmp_path: Path
+    ) -> None:
+        lock = tmp_path / "x.lock"
+        body = _acquire_body(
+            lock,
+            then=f'printf "token=somebody-else\\npid=1\\n" > "{lock}"\n',
+        )
+
+        result = _bash(body)
+
+        assert "released" in result.stdout, result.stderr
+        assert lock.read_text(encoding="utf-8").startswith("token=somebody-else")
+
+    def test_a_held_lock_is_reported_with_its_holder_and_left_alone(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        _record(lock, host="builder-7", purpose="provision-sync")
+        before = lock.read_text(encoding="utf-8")
+
+        result = _bash(_acquire_body(lock, then='echo "holder=$_UPGRADE_LOCK_HOLDER"\n'))
+
+        assert "rc=1" in result.stdout, result.stderr
+        assert "builder-7" in result.stdout and "provision-sync" in result.stdout
+        assert f"pid={os.getpid()}" in result.stdout
+        assert lock.read_text(encoding="utf-8") == before, "another owner's lock is never removed"
+
+    def test_wait_polls_until_the_holder_releases(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        _record(lock)
+        waiter = subprocess.Popen(
+            [_BASH, "-c", "\n".join(["set -euo pipefail", _block(_UPGRADE_SH),
+                                     _acquire_body(lock, wait=20)])],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        time.sleep(1.5)
+        lock.unlink()
+
+        out, _ = waiter.communicate(timeout=_TIMEOUT_SECONDS)
+
+        assert "rc=0" in out
+
+    def test_wait_gives_up_when_the_holder_never_releases(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        _record(lock)
+
+        started = time.monotonic()
+        result = _bash(_acquire_body(lock, wait=2))
+
+        assert "rc=1" in result.stdout
+        assert 1.5 <= time.monotonic() - started < 15
+
+
+class TestHeartbeat:
+    def test_the_beat_is_rewritten_while_the_owner_lives(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        body = _acquire_body(
+            lock,
+            then=(
+                f'first="$(cat "{lock}.beat")"; sleep 4; second="$(cat "{lock}.beat")"\n'
+                'echo "first=$first second=$second"\n'
+            ),
+        )
+
+        result = _bash("_UPGRADE_LOCK_HEARTBEAT_SECONDS=2\n" + body)
+
+        line = next(item for item in result.stdout.splitlines() if item.startswith("first="))
+        first, second = (int(part.split("=")[1]) for part in line.split())
+        assert second > first, result.stderr
+
+    def test_the_heartbeat_stops_when_its_owner_is_killed(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        body = (
+            f'LOCK="{lock}"\n_upgrade_lock_acquire "$LOCK" upgrade 0\n'
+            'echo "hb=$_UPGRADE_LOCK_HEARTBEAT_PID"\n'
+            'echo "owner=$$"\n'
+            "while :; do sleep 1; done\n"
+        )
+        owner = subprocess.Popen(
+            [_BASH, "-c", "\n".join(["set -euo pipefail", _block(_UPGRADE_SH), body])],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        assert owner.stdout is not None
+        heartbeat = int(owner.stdout.readline().split("=")[1])
+        assert Path(f"/proc/{heartbeat}").exists()
+
+        owner.kill()
+        owner.wait(timeout=_TIMEOUT_SECONDS)
+        deadline = time.monotonic() + 10
+        while Path(f"/proc/{heartbeat}").exists() and time.monotonic() < deadline:
+            time.sleep(0.2)
+
+        assert not Path(f"/proc/{heartbeat}").exists(), "a killed owner stops beating"
+
+
+class TestStaleRule:
+    """The same-kernel proof of death, and the expiry for everything else."""
+
+    def test_a_foreign_boot_with_a_fresh_beat_is_never_taken_over(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        _record(lock, boot_id=_NOW_FOREIGN, pid=_dead_pid(), started=int(time.time()) - 5000)
+        Path(f"{lock}.beat").write_text(f"{int(time.time())}\n", encoding="utf-8")
+
+        result = _bash(_acquire_body(lock))
+
+        assert "rc=1" in result.stdout, result.stderr
+        assert _token_of(lock) == "other-token"
+
+    def test_a_foreign_pid_namespace_with_a_fresh_beat_is_never_taken_over(
+        self, tmp_path: Path
+    ) -> None:
+        lock = tmp_path / "x.lock"
+        _record(lock, pidns="pid:[4026539999]", pid=_dead_pid(), started=int(time.time()) - 5000)
+        Path(f"{lock}.beat").write_text(f"{int(time.time())}\n", encoding="utf-8")
+
+        result = _bash(_acquire_body(lock))
+
+        assert "rc=1" in result.stdout, result.stderr
+
+    def test_a_foreign_holder_with_an_expired_beat_is_taken_over(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        old = int(time.time()) - 5000
+        _record(lock, boot_id=_NOW_FOREIGN, started=old)
+        Path(f"{lock}.beat").write_text(f"{old}\n", encoding="utf-8")
+
+        result = _bash(_acquire_body(lock, then=f'echo "mine=$(grep -c . "{lock}")"\n'))
+
+        assert "rc=0" in result.stdout, result.stderr
+        assert list(tmp_path.iterdir()) == [], "taken over, then released"
+
+    def test_a_foreign_holder_without_any_beat_is_judged_by_its_start_time(
+        self, tmp_path: Path
+    ) -> None:
+        lock = tmp_path / "x.lock"
+        _record(lock, boot_id=_NOW_FOREIGN, started=int(time.time()) - 60)
+
+        assert "rc=1" in _bash(_acquire_body(lock)).stdout
+
+    def test_a_same_namespace_holder_whose_pid_is_gone_is_taken_over_at_once(
+        self, tmp_path: Path
+    ) -> None:
+        lock = tmp_path / "x.lock"
+        _record(lock, pid=_dead_pid(), pid_start="12345", started=int(time.time()))
+
+        result = _bash(_acquire_body(lock))
+
+        assert "rc=0" in result.stdout, result.stderr
+
+    def test_a_same_namespace_pid_that_was_reused_is_taken_over(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        _record(lock, pid_start="1", started=int(time.time()))
+
+        result = _bash(_acquire_body(lock))
+
+        assert "rc=0" in result.stdout, result.stderr
+
+    def test_a_same_namespace_live_owner_is_held_even_with_an_old_start(
+        self, tmp_path: Path
+    ) -> None:
+        lock = tmp_path / "x.lock"
+        _record(lock, started=int(time.time()) - 5000)
+
+        assert "rc=1" in _bash(_acquire_body(lock)).stdout
+
+    def test_a_half_written_record_is_held_until_it_expires(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        lock.write_text("", encoding="utf-8")
+
+        assert "rc=1" in _bash(_acquire_body(lock)).stdout
+        assert lock.exists()
+
+        old = time.time() - 5000
+        os.utime(lock, (old, old))
+
+        assert "rc=0" in _bash(_acquire_body(lock)).stdout
+
+    def test_a_stale_takeover_file_is_cleared_and_a_fresh_one_is_respected(
+        self, tmp_path: Path
+    ) -> None:
+        lock = tmp_path / "x.lock"
+        takeover = Path(f"{lock}.takeover")
+        _record(lock, pid=_dead_pid(), pid_start="1")
+        takeover.write_text("someone\n", encoding="utf-8")
+
+        assert "rc=1" in _bash(_acquire_body(lock)).stdout, "a fresh takeover file means busy"
+        assert lock.exists()
+
+        old = time.time() - 120
+        os.utime(takeover, (old, old))
+
+        assert "rc=0" in _bash(_acquire_body(lock)).stdout
+        assert not takeover.exists()
+
+
+_RACER = r"""
+LOCK="{lock}"
+while [ ! -e "{go}" ]; do sleep 0.01; done
+rc=0; _upgrade_lock_acquire "$LOCK" upgrade 0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+    echo WON
+    while [ ! -e "{done}" ]; do sleep 0.05; done
+    _upgrade_lock_release
+else
+    echo HELD
+fi
+"""
+
+
+def _race(tmp_path: Path, lock: Path, racers: int) -> list[str]:
+    go, done = tmp_path / "go", tmp_path / "done"
+    script = "\n".join(
+        ["set -euo pipefail", _block(_UPGRADE_SH), _RACER.format(lock=lock, go=go, done=done)]
+    )
+    procs = [
+        subprocess.Popen([_BASH, "-c", script], stdout=subprocess.PIPE, text=True)
+        for _ in range(racers)
+    ]
+    go.write_text("go", encoding="utf-8")
+    deadline = time.monotonic() + 30
+    while sum(p.poll() is not None for p in procs) < racers - 1 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    done.write_text("done", encoding="utf-8")
+    results = []
+    for proc in procs:
+        out, _ = proc.communicate(timeout=_TIMEOUT_SECONDS)
+        results.append(out.strip())
+    return results
+
+
+class TestConcurrentTakers:
+    def test_exactly_one_of_many_wins_a_free_lock(self, tmp_path: Path) -> None:
+        results = _race(tmp_path, tmp_path / "x.lock", 8)
+
+        assert results.count("WON") == 1, results
+        assert results.count("HELD") == 7, results
+
+    def test_exactly_one_of_many_takes_over_a_dead_holders_lock(self, tmp_path: Path) -> None:
+        lock = tmp_path / "x.lock"
+        _record(lock, pid=_dead_pid(), pid_start="1")
+
+        results = _race(tmp_path, lock, 8)
+
+        assert results.count("WON") == 1, results
+        assert results.count("HELD") == 7, results
