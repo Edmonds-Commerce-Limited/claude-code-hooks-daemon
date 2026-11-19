@@ -57,6 +57,7 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import grep_input_for, grep_targets
 from claude_code_hooks_daemon.utils import (
     encrypted_at_rest,
+    link_index,
     protected_file_index,
     recursive_search,
     shell_expansion,
@@ -70,7 +71,11 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 )
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.protected_file_index import ProtectedFileIndex, TreeView
-from claude_code_hooks_daemon.utils.resolution_failure import ResolutionFailedError
+from claude_code_hooks_daemon.utils.resolution_failure import (
+    ResolutionFailedError,
+    fail_closed_finding,
+    refuse_process_view,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
 
 logger = logging.getLogger(__name__)
@@ -1483,11 +1488,17 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             route = "script"
         else:
             route = "read"
-        return (patterns[0] if patterns else _NOT_JUDGED_PATTERN, _UNRESOLVED_TOKEN, route)
+        finding = fail_closed_finding(patterns, _UNRESOLVED_TOKEN)
+        if finding is None:
+            return (_NOT_JUDGED_PATTERN, _UNRESOLVED_TOKEN, route)
+        return (*finding, route)
 
     def prewarm_index(self) -> None:
-        """Start building the protected-file index now; never waits for it."""
+        """Start building the protected-file and link indexes now; never waits for them."""
         self._index(self._patterns())
+        root = resolve_project_root()
+        if root is not None:
+            link_index.prewarm(root)
 
     def _index(self, patterns: tuple[str, ...]) -> ProtectedFileIndex | None:
         """The protected-file index for this project, or None while there is none."""
@@ -1608,6 +1619,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         # A relative path is judged from the hook's cwd too: the daemon's own
         # cwd is `/`, so a link resolved only from there leads nowhere (Plan 00614).
         placed = sfm.resolve_against_cwd(path, cwd) if path else None
+        # N668: through /proc/self the daemon would resolve its own cwd, not the agent's.
+        for spelled in (path, placed):
+            if spelled:
+                refuse_process_view(spelled)
         protecting = sfm.protecting_pattern(path, patterns)
         if protecting is None and placed is not None and placed != path:
             protecting = sfm.protecting_pattern(placed, patterns)

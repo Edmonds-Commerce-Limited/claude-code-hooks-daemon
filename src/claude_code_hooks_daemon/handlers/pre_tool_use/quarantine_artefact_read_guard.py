@@ -48,7 +48,12 @@ from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import grep_targets
 from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_relevance
-from claude_code_hooks_daemon.utils import protected_file_index, recursive_search, shell_expansion
+from claude_code_hooks_daemon.utils import (
+    link_index,
+    protected_file_index,
+    recursive_search,
+    shell_expansion,
+)
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
@@ -56,7 +61,10 @@ from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.protected_file_index import ProtectedFileIndex, TreeView
-from claude_code_hooks_daemon.utils.resolution_failure import ResolutionFailedError
+from claude_code_hooks_daemon.utils.resolution_failure import (
+    ResolutionFailedError,
+    fail_closed_finding,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 logger = logging.getLogger(__name__)
@@ -234,10 +242,7 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
             # Plan 00614 round 6: a placement or scan that could not finish is a
             # finding, as in the secret guard; it never reaches the advisory route.
             logger.exception("quarantine_artefact_read_guard: placing the command's words failed")
-            globs = self._effective_globs()
-            if not globs:
-                return None
-            return (globs[0], _UNPLACED_DETAIL)
+            return fail_closed_finding(self._effective_globs(), _UNPLACED_DETAIL)
         except shell_expansion.UnresolvableBraceQuotingError:
             return self._literal_finding_or_advisory(hook_input, "the command could not be parsed")
         except TimeoutError:
@@ -264,6 +269,13 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         if hook_input.get(HookInputField.TOOL_NAME) == ToolName.BASH and isinstance(command, str):
             try:
                 literal = sfm.find_protected_mention_strict(command, self._effective_globs())
+            except ResolutionFailedError:
+                # Plan 00623: a word the re-check cannot place is a finding, not "unjudged".
+                logger.exception("quarantine_artefact_read_guard: the literal re-check failed")
+                finding = fail_closed_finding(self._effective_globs(), _UNPLACED_DETAIL)
+                if finding is not None:
+                    return finding
+                literal = None
             except Exception as exc:
                 log_and_continue(
                     logger,
@@ -281,6 +293,9 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         patterns = self._effective_globs()
         if patterns:
             self._index(patterns)
+            root = resolve_project_root()
+            if root is not None:
+                link_index.prewarm(root)
 
     def _index(self, patterns: tuple[str, ...]) -> ProtectedFileIndex | None:
         """The index of quarantined artefacts for this project, or None while there is none."""

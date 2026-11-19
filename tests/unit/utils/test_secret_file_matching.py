@@ -2624,9 +2624,9 @@ class TestGrepPatternOnlyMentionDenies:
         calls: list[str] = []
         real_realpath_if_resolvable = sfm._realpath_if_resolvable
 
-        def counting_realpath_if_resolvable(token: str) -> str | None:
+        def counting_realpath_if_resolvable(token: str, word: str | None = None) -> str | None:
             calls.append(token)
-            return real_realpath_if_resolvable(token)
+            return real_realpath_if_resolvable(token, word)
 
         monkeypatch.setattr(sfm, "_realpath_if_resolvable", counting_realpath_if_resolvable)
         assert not sfm.is_grep_pattern_only_mention(

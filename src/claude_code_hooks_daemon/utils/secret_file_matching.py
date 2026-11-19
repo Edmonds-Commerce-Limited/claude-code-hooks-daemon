@@ -41,7 +41,8 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 
 import yaml
 
-from claude_code_hooks_daemon.utils import linear_shlex, shell_expansion
+from claude_code_hooks_daemon.utils import linear_shlex, link_index, shell_expansion
+from claude_code_hooks_daemon.utils.bounded_walk import Bounded, finished, stopped
 from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_GLOBAL_OPTIONS_TAKING_SEPARATE_VALUE,
     REGEX_PATTERN_ATTACHED_PREFIXES,
@@ -65,7 +66,12 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 )
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.realpath import resolve_checking_loop
-from claude_code_hooks_daemon.utils.resolution_failure import IncompleteScanError, fails_closed
+from claude_code_hooks_daemon.utils.resolution_failure import (
+    IncompleteScanError,
+    ResolutionFailedError,
+    fails_closed,
+    refuse_process_view,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     COMMAND_WRAPPERS,
     UnplaceableSubstitutionError,
@@ -3495,6 +3501,135 @@ def directory_ancestors(directory: str, root: str | None) -> list[str]:
     return found
 
 
+#: Environment variables that move where git's top level is (N667).
+_GIT_RELOCATING_ENVIRONMENT: Final[tuple[str, ...]] = ("GIT_WORK_TREE", "GIT_DIR", "GIT_CONFIG")
+#: Environment variables that carry config entries themselves (``-c``, ``GIT_CONFIG_KEY_n``).
+_GIT_INLINE_CONFIG_PREFIXES: Final[tuple[str, ...]] = (
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_KEY_",
+    "GIT_CONFIG_VALUE_",
+)
+#: Config text that may move the top level, or pull in config this check does not read.
+_GIT_RELOCATING_CONFIG: Final[str] = "worktree"
+#: A ``path = ...`` line: in an ``[include]``/``[includeIf]`` section it names another config file.
+_GIT_INCLUDE_PATH: Final[re.Pattern[str]] = re.compile(r"(?im)^\s*path\s*=\s*(.+?)\s*$")
+#: How many config files (with includes) are read before the top level counts as relocated.
+_MAX_GIT_CONFIG_FILES: Final[int] = 16
+_GIT_FILE_PREFIX: Final[str] = "gitdir:"
+
+
+def _git_config_files(base: str) -> list[Path]:
+    """The repository config files git reads for ``base``, and the global and system ones."""
+    files: list[Path] = []
+    for directory in directory_ancestors(base, None):
+        dot_git = Path(directory) / _GIT_DIRECTORY
+        if not os.path.lexists(dot_git):
+            continue
+        git_dir = dot_git
+        if not dot_git.is_dir():
+            # A worktree or submodule: `.git` is a file naming the real git directory.
+            text = dot_git.read_text(errors="replace").strip()
+            git_dir = Path(directory) / text.removeprefix(_GIT_FILE_PREFIX).strip()
+            common = git_dir / "commondir"
+            if common.exists():
+                files.append(git_dir / common.read_text().strip() / "config")
+        files.extend([git_dir / "config", git_dir / "config.worktree"])
+        break
+    # The global and system files, redirected as git redirects them.
+    home = Path(os.environ.get("HOME", "/"))
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    global_file = os.environ.get("GIT_CONFIG_GLOBAL")
+    files.extend(
+        [Path(global_file)] if global_file else [home / ".gitconfig", xdg / "git" / "config"]
+    )
+    if not os.environ.get("GIT_CONFIG_NOSYSTEM"):
+        files.append(Path(os.environ.get("GIT_CONFIG_SYSTEM") or "/etc/gitconfig"))
+    return files
+
+
+def toplevel_relocated(bases: Sequence[str]) -> bool:
+    """Could git's top level from any of ``bases`` be somewhere other than an ancestor (N667)?
+
+    Read at decision time, not from the command: ``core.worktree`` persisted by an
+    earlier call, or a ``GIT_`` variable in the daemon's environment, moves it.
+    Included files (``path =`` lines) are read too, up to
+    :data:`_MAX_GIT_CONFIG_FILES`. Fail closed: any config that names a worktree,
+    more included files than that, or a file that exists and cannot be read,
+    counts. The shell's own environment is not visible here (ledger N669).
+    """
+    if any(name in os.environ for name in _GIT_RELOCATING_ENVIRONMENT):
+        return True
+    if any(
+        name.startswith(_GIT_INLINE_CONFIG_PREFIXES) and _GIT_RELOCATING_CONFIG in value.lower()
+        for name, value in os.environ.items()
+    ):
+        return True
+    for base in bases:
+        try:
+            queue = _git_config_files(base)
+            read = 0
+            while queue:
+                config = queue.pop(0)
+                if not config.exists():
+                    continue
+                read += 1
+                if read > _MAX_GIT_CONFIG_FILES:
+                    return True
+                text = config.read_text(errors="replace")
+                if _GIT_RELOCATING_CONFIG in text.lower():
+                    return True
+                queue.extend(
+                    config.parent / Path(found.strip().strip('"')).expanduser()
+                    for found in _GIT_INCLUDE_PATH.findall(text)
+                )
+        except OSError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="git config that cannot be read may relocate the top level (fail closed)",
+                level=logging.DEBUG,
+            )
+            return True
+    return False
+
+
+#: Variables whose value the daemon shares with the shell, as a move may name them (Plan 00623).
+_PLACEABLE_MOVE: Final[re.Pattern[str]] = re.compile(
+    r"(?:~|\$(HOME|TMPDIR)|\$\{(HOME|TMPDIR)\})((?:/[^\s$`{}*?\[~\\\"']*)?)"
+)
+_HOME_VARIABLE: Final[str] = "HOME"
+
+
+def place_outside_project(target: str, command: str) -> tuple[str, ...]:
+    """Where a move to ``~``, ``$HOME`` or ``$TMPDIR`` lands, when that is outside the project.
+
+    Plan 00623: such a move is computed, and judging it as one denied it past
+    the link scan's cap. It is placed only when the daemon's value is absolute,
+    the command never names the variable anywhere else (so it does not reassign
+    it), and the place is outside the project: a link inside the project cannot
+    change where it is. Both the spelled and the physical place are returned.
+    Residual (ledgered): the shell's value can differ from the daemon's.
+    """
+    match = _PLACEABLE_MOVE.fullmatch(target)
+    if match is None:
+        return ()
+    name = match.group(1) or match.group(2) or _HOME_VARIABLE
+    named = command.count(name)
+    if named != (0 if target.startswith("~") else 1):
+        return ()
+    value = os.environ.get(name, "")
+    root = resolve_project_root()
+    if not value.startswith("/") or not root:
+        return ()
+    lexical = os.path.normpath(value + match.group(3))
+    physical = os.path.realpath(lexical)
+    real_root = os.path.realpath(root)
+    for place in (lexical, physical):
+        if place == real_root or place.startswith(real_root.rstrip("/") + "/"):
+            return ()
+    return tuple(dict.fromkeys((lexical, physical)))
+
+
 #: Words after which bash reads the next word as a command name (``eval cd x`` runs cd).
 _COMMAND_START_WORDS: Final[frozenset[str]] = frozenset(
     {"(", "{", "}", "!", "if", "then", "else", "elif", "do", "while", "until", "time", "eval"}
@@ -3527,21 +3662,20 @@ _GIT_DIRECTORY: Final[str] = ".git"
 
 @dataclass(frozen=True)
 class LinkScan:
-    """What :func:`scan_project_links` found, and whether it looked everywhere.
+    """What :func:`scan_project_links` found.
 
-    ``complete`` is False when the scan stopped at a cap or could not tell
-    what an entry is: what it did not reach is then unknown, never harmless.
+    Whether the scan looked everywhere is the :class:`Bounded` around it: what
+    an unfinished scan did not reach is unknown, never harmless.
     """
 
     directories: tuple[str, ...]
-    complete: bool
     #: The links among ``directories`` that lead to a directory.
     directory_links: tuple[str, ...] = ()
 
 
 #: The scans made during one tool call (:func:`link_scan_scope`); None outside one.
-_link_scan_scope: contextvars.ContextVar[dict[str, LinkScan] | None] = contextvars.ContextVar(
-    "link_scan_scope", default=None
+_link_scan_scope: contextvars.ContextVar[dict[str, Bounded[LinkScan]] | None] = (
+    contextvars.ContextVar("link_scan_scope", default=None)
 )
 
 
@@ -3613,15 +3747,24 @@ def _entry_may_be_directory(entry: os.DirEntry[str]) -> bool:
         return True
 
 
-def expand_directory_glob(base: str, pattern: str) -> list[str] | None:
-    """The directories ``pattern`` matches from ``base``, component by component; None past a cap.
+#: Why :func:`expand_directory_glob` stopped.
+_GLOB_TOO_WIDE: Final[str] = "a globbed directory change matches more than the walk follows"
+_GLOB_UNCLASSIFIED: Final[str] = (
+    "a globbed directory change matches an entry that cannot be classified"
+)
+
+
+def expand_directory_glob(base: str, pattern: str) -> Bounded[list[str]]:
+    """The directories ``pattern`` matches from ``base``, component by component.
 
     Read as bash reads it by default: ``**`` is ``*``, and a wildcard skips dot
     names unless the component starts with a dot. At most
     :data:`LINK_SCAN_DIRECTORY_CAP` directories are listed, so a glob that
     matches nothing is never followed through the whole tree, and more than
-    :data:`LINK_DIRECTORY_CAP` matches is None too (review 614c X1): bash
-    refuses a ``cd`` with several, and every match kept costs each later word.
+    :data:`LINK_DIRECTORY_CAP` matches stops the walk too (review 614c X1):
+    bash refuses a ``cd`` with several, and every match kept costs each later
+    word. A stopped walk is never read as "no match": callers judge the move
+    as computed instead.
     """
     current = ["/"] if pattern.startswith("/") else [base]
     listed = 0
@@ -3636,7 +3779,7 @@ def expand_directory_glob(base: str, pattern: str) -> list[str] | None:
             # Every listing and every probe counts, so the walk is bounded however deep.
             listed += 1
             if listed > LINK_SCAN_DIRECTORY_CAP:
-                return None
+                return stopped([], _GLOB_TOO_WIDE)
             if not any(char in _GLOB_CHARACTERS for char in component):
                 joined = f"{directory.rstrip('/')}/{component}"
                 if path_is_dir(joined, unreadable_means=True):
@@ -3671,23 +3814,28 @@ def expand_directory_glob(base: str, pattern: str) -> list[str] | None:
                 )
                 if kind is _LinkKind.UNKNOWN:
                     # A match that may be a directory cannot be placed: a computed move.
-                    return None
+                    return stopped([], _GLOB_UNCLASSIFIED)
                 if kind is _LinkKind.DIRECTORY:
                     names.append(entry.name)
             following.extend(os.path.normpath(f"{directory.rstrip('/')}/{name}") for name in names)
             # Each directory kept is listed or probed next, or is a match: stop as soon as
             # either cap is certain to be passed, before the list grows any further.
             if len(following) > limit:
-                return None
+                return stopped([], _GLOB_TOO_WIDE)
         if len(following) > limit:
-            return None
+            return stopped([], _GLOB_TOO_WIDE)
         current = following
         if not current:
-            return []
-    return current
+            return finished([])
+    return finished(current)
 
 
-def scan_project_links(root: str) -> LinkScan:
+#: Why :func:`scan_project_links` stopped.
+_SCAN_PAST_CAP: Final[str] = "the project link scan stopped at its directory cap"
+_SCAN_UNCLASSIFIED: Final[str] = "the project link scan met a link whose target cannot be told"
+
+
+def scan_project_links(root: str) -> Bounded[LinkScan]:
     """Where a computed ``cd`` could leave a relative word dangerous, and whether that is all.
 
     Two kinds of directory under ``root``, breadth first:
@@ -3709,11 +3857,44 @@ def scan_project_links(root: str) -> LinkScan:
     held_scans = _link_scan_scope.get()
     if held_scans is not None and root in held_scans:
         return held_scans[root]
+    scan = _scan_from_index(root)
+    if scan is None:
+        scan = _walk_project_links(root)
+    if held_scans is not None:
+        held_scans[root] = scan
+    return scan
+
+
+def _scan_from_index(root: str) -> Bounded[LinkScan] | None:
+    """The scan read from the verified link index (Plan 00623); None while it is not built.
+
+    The index has no directory cap of its own below its build cap, but the
+    walkers judge each directory it names word by word, so more than
+    :data:`LINK_SCAN_DIRECTORY_CAP` of them is a stopped scan, as it was for
+    the per-call walk.
+    """
+    indexed = link_index.link_scan_for(root)
+    if indexed is None:
+        return None
+    links = indexed.value.directory_links
+    found = LinkScan(
+        directories=tuple(dict.fromkeys((*indexed.value.holding, *links))),
+        directory_links=links,
+    )
+    if not indexed.complete:
+        return stopped(found, indexed.reason)
+    if len(found.directories) > LINK_SCAN_DIRECTORY_CAP:
+        return stopped(found, _SCAN_PAST_CAP)
+    return finished(found)
+
+
+def _walk_project_links(root: str) -> Bounded[LinkScan]:
+    """The bounded per-call walk, used until the link index is built."""
     holding: list[str] = []
     directory_links: list[str] = []
     queue = [os.path.normpath(root)]
     visited = 0
-    complete = True
+    unclassified = False
     while queue and visited < LINK_SCAN_DIRECTORY_CAP:
         directory = queue.pop(0)
         visited += 1
@@ -3725,7 +3906,7 @@ def scan_project_links(root: str) -> LinkScan:
                         has_link = True
                         kind = _link_kind(entry)
                         if kind is _LinkKind.UNKNOWN:
-                            complete = False
+                            unclassified = True
                         elif kind is _LinkKind.DIRECTORY:
                             directory_links.append(entry.path)
                     elif entry.name != _GIT_DIRECTORY and _entry_may_be_directory(entry):
@@ -3740,17 +3921,16 @@ def scan_project_links(root: str) -> LinkScan:
             has_link = True
         if has_link:
             holding.append(directory)
-    if queue or len(directory_links) > LINK_SCAN_DIRECTORY_CAP:
-        complete = False
     kept_links = tuple(directory_links[:LINK_SCAN_DIRECTORY_CAP])
-    scan = LinkScan(
+    found = LinkScan(
         directories=tuple(dict.fromkeys((*holding, *kept_links))),
-        complete=complete,
         directory_links=kept_links,
     )
-    if held_scans is not None:
-        held_scans[root] = scan
-    return scan
+    if queue or len(directory_links) > LINK_SCAN_DIRECTORY_CAP:
+        return stopped(found, _SCAN_PAST_CAP)
+    if unclassified:
+        return stopped(found, _SCAN_UNCLASSIFIED)
+    return finished(found)
 
 
 def _may_change_directory(segment: str) -> bool:
@@ -3932,7 +4112,7 @@ class _DirectoryWalk:
             self._add(os.path.normpath(root))
             scan = scan_project_links(root)
             self.unscanned = self.unscanned or (fail_closed and not scan.complete)
-            for directory in scan.directories:
+            for directory in scan.value.directories:
                 self._add(directory, exists=True)
                 self.scanned[directory] = None
 
@@ -3944,7 +4124,9 @@ class _DirectoryWalk:
         Past :data:`LINK_DIRECTORY_CAP` bases it is a plain computed move.
         """
         bases = list(dict.fromkeys([*self.directories[-1:], *self.existing]))
-        if not bases or len(bases) > LINK_DIRECTORY_CAP + 1:
+        if not bases or len(bases) > LINK_DIRECTORY_CAP + 1 or toplevel_relocated(bases):
+            # N667: persisted git config or the environment may put the top level
+            # elsewhere, so the move is not placed at an ancestor.
             self.indeterminate()
             return
         root = resolve_project_root()
@@ -3976,13 +4158,17 @@ class _DirectoryWalk:
         else:
             bases = []
         found: dict[str, None] = {}
+        if len(bases) > LINK_DIRECTORY_CAP + 1:
+            # Plan 00623 item 6: the bases past the slice are not looked at, so
+            # where the move lands from them is unknown (a later word denies).
+            self.unscanned = True
         for base in bases[: LINK_DIRECTORY_CAP + 1]:
             matches = expand_directory_glob(base, target)
-            if matches is None:
+            if not matches.complete:
                 # Too wide to follow: judged as a computed move instead.
                 self.indeterminate()
                 return
-            found.update(dict.fromkeys(matches))
+            found.update(dict.fromkeys(matches.value))
             if len(found) > LINK_DIRECTORY_CAP:
                 # Review 614c X1: none of them is kept; bash refuses a cd with
                 # several matches, and every one kept costs each later word.
@@ -3998,6 +4184,14 @@ class _DirectoryWalk:
         """Record a ``cd``-like move to ``target`` (None: no literal operand)."""
         if target is not None:
             target = target.rstrip("`)")
+            outside = place_outside_project(target, self.command)
+            if outside:
+                # Plan 00623: a move to ~, $HOME or $TMPDIR outside the project is
+                # placed there; the computed-move judgement still adds what it finds.
+                for directory in outside:
+                    self._add(directory)
+                self.indeterminate(fail_closed=False)
+                return
             substituted = self._substituted(target)
             if substituted != target:
                 # The literal value is the likely target, not a certain one: a
@@ -4027,6 +4221,9 @@ class _DirectoryWalk:
         # The chain's last directory is a guess once a group's cd is in it, so the
         # step is joined to every existing directory too -- kept only where real,
         # which bounds the set by what exists rather than by the number of cds.
+        if len(self.existing) > LINK_DIRECTORY_CAP + 1:
+            # Plan 00623 item 6: the directories past the slice are not joined.
+            self.unscanned = True
         for base in list(self.existing)[: LINK_DIRECTORY_CAP + 1]:
             joined = os.path.normpath(str(Path(base) / target))
             if joined not in self.existing and path_is_dir(joined, unreadable_means=True):
@@ -4143,7 +4340,13 @@ def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bo
     prefix_value = False
     wrapped_at = -1
     for index, word in enumerate(words):
-        if depth < _MAX_DIRECTORY_CHANGE_DEPTH and " " in word and _may_change_directory(word):
+        if " " in word and _may_change_directory(word):
+            if depth >= _MAX_DIRECTORY_CHANGE_DEPTH:
+                # N664 (Plan 00623): a move nested past the limit is not walked,
+                # so where the command runs is unknown, never "where it started".
+                raise IncompleteScanError(
+                    "a directory change is nested deeper than the walk follows"
+                )
             _walk_directory_changes(word, walk, depth + 1)
         # A redirection, its descriptor and its file leave the command position
         # as it was: `>/dev/null cd x` still runs cd (review 614b R3).
@@ -4256,18 +4459,58 @@ def _anchored_spellings(form: str, cwds: tuple[str, ...]) -> list[str]:
     return spellings
 
 
-def _realpath_if_resolvable(token: str) -> str | None:
+#: Linux's PATH_MAX and NAME_MAX, in bytes: past them the kernel resolves no word either.
+_PATH_MAX_BYTES: Final[int] = 4096
+_NAME_MAX_BYTES: Final[int] = 255
+#: What the placement stat may answer for a path that does not exist (or loops).
+_NO_SUCH_PATH_ERRNOS: Final[frozenset[int]] = frozenset({errno.ENOENT, errno.ENOTDIR, errno.ELOOP})
+
+
+def components_fit_name_max(path: str) -> bool:
+    """Does every component of ``path`` fit NAME_MAX (one past it names nothing)?"""
+    return all(
+        len(part) <= _NAME_MAX_BYTES for part in path.encode(errors="surrogateescape").split(b"/")
+    )
+
+
+def _kernel_could_resolve(word: str) -> bool:
+    """Could the shell open ``word`` as written: it fits PATH_MAX and each component NAME_MAX."""
+    return len(word.encode(errors="surrogateescape")) < _PATH_MAX_BYTES and (
+        components_fit_name_max(word)
+    )
+
+
+def _realpath_if_resolvable(token: str, word: str | None = None) -> str | None:
     """Realpath of ``token`` when a link on its path leads elsewhere, else None.
 
     Any component counts, not only the last: ``dlink/innocuous`` reaches what
     ``dlink`` points at. A relative ``token`` is placed from the PROCESS cwd;
     a caller holding the hook's cwd uses :func:`_link_targets` instead.
-    ``os.path.lexists`` answers False for a word that is no path (NUL-bearing
-    or over-long prose), so such a word costs one call and nothing raises;
-    a dangling final link still exists and is resolved.
+
+    N663: ``token`` may be a relative ``word`` joined to a directory. A stat
+    that fails for any reason other than "no such path" is unresolvable when
+    the shell could still open ``word`` itself (it fits PATH_MAX and NAME_MAX
+    relative to the shell's own cwd), so it raises
+    :class:`ResolutionFailedError`. A word the kernel could not resolve either
+    (over-long prose, a NUL) is no path, and costs one call.
     """
-    if not token or not os.path.lexists(token):
+    if not token:
         return None
+    try:
+        os.lstat(token)
+    except ValueError:
+        return None
+    except OSError as exc:
+        if (
+            exc.errno in _NO_SUCH_PATH_ERRNOS
+            or not _kernel_could_resolve(word or token)
+            # A base whose own name is past NAME_MAX cannot be one the shell is in.
+            or not components_fit_name_max(token)
+        ):
+            return None
+        raise ResolutionFailedError(
+            f"a word could not be placed: its stat failed ({errno.errorcode.get(exc.errno or 0, exc.errno)})"
+        ) from exc
     placed = Path.cwd() / token
     # `..` after a link climbs from where the link LEADS, so the physical
     # resolution starts from the path as spelled, never its normpath.
@@ -4293,7 +4536,11 @@ def _link_targets(token: str, cwds: tuple[str, ...]) -> tuple[str, ...]:
         if isinstance(cwds, CwdSet):
             bases = [*cwds.link_dirs, *cwds.bases_above_scanned(token)]
         candidates = [str(Path(cwd) / token) for cwd in bases if cwd] + candidates
-    found = (_realpath_if_resolvable(candidate) for candidate in dict.fromkeys(candidates))
+    unique = list(dict.fromkeys(candidates))
+    for candidate in unique:
+        # N668: through /proc/self the daemon would read its own cwd, not the shell's.
+        refuse_process_view(candidate)
+    found = (_realpath_if_resolvable(candidate, token) for candidate in unique)
     return tuple(dict.fromkeys(real for real in found if real is not None))
 
 

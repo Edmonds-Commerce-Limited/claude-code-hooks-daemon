@@ -18,7 +18,8 @@ keep their advisory routes.
 from __future__ import annotations
 
 import functools
-from collections.abc import Callable
+import itertools
+from collections.abc import Callable, Sequence
 from typing import ParamSpec, TypeVar
 
 from claude_code_hooks_daemon.utils.shell_expansion import TooManyToEnumerateError
@@ -46,6 +47,39 @@ _PASSED_THROUGH: tuple[type[BaseException], ...] = (
     TooManyToEnumerateError,
     ResolutionFailedError,
 )
+
+
+#: Adjacent components that name the CALLING process's own view (ledger N668):
+#: resolved by the daemon they lead through the daemon's cwd and descriptors,
+#: not the shell's, so a word through one cannot be placed.
+_PROCESS_VIEWS: frozenset[tuple[str, str]] = frozenset(
+    {("proc", "self"), ("proc", "thread-self"), ("dev", "fd")}
+)
+
+
+def refuse_process_view(path: str) -> None:
+    """Raise :class:`ResolutionFailedError` when ``path`` passes through ``/proc/self`` and kin.
+
+    ``//`` and ``.`` are collapsed; ``..`` is not, because after a link it
+    climbs from where the link leads. ``path`` is the word as placed: a
+    relative word is joined to its base first by the caller.
+    """
+    parts = [part for part in path.split("/") if part not in ("", ".")]
+    if any(pair in _PROCESS_VIEWS for pair in itertools.pairwise(parts)):
+        raise ResolutionFailedError(
+            "a path through the calling process's own /proc view cannot be placed"
+        )
+
+
+def fail_closed_finding(patterns: Sequence[str], detail: str) -> tuple[str, str] | None:
+    """The finding every guard returns for a :class:`ResolutionFailedError` (Plan 00623).
+
+    One handler for the secret, quarantine and flaggable guards and payload
+    capture: a placement that could not finish is reported against the first
+    protected pattern, with ``detail`` naming what could not be placed. With no
+    pattern nothing is protected, so there is nothing to find.
+    """
+    return (patterns[0], detail) if patterns else None
 
 
 def fails_closed(function: Callable[_Params, _Result]) -> Callable[_Params, _Result]:

@@ -195,9 +195,7 @@ class TestProcSelf:
         assert _decision(hook_input) is Decision.DENY
 
     @pytest.mark.parametrize("command", ["cat /proc/self/status", "cat /proc/self/cgroup"])
-    def test_an_ordinary_proc_self_read_is_denied_too(
-        self, project: Project, command: str
-    ) -> None:
+    def test_an_ordinary_proc_self_read_is_denied_too(self, project: Project, command: str) -> None:
         """The rule is as specified: it cannot tell these from a read through ``cwd``."""
         assert _bash_decision(project, command) is Decision.DENY
 

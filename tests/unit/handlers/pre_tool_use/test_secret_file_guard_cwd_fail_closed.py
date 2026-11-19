@@ -511,7 +511,7 @@ class TestAWideGlobbedDirectoryChange:
         _grow(tree.worktree / "t", 40, 1)
         cwds = sfm.effective_cwds("cd t/*; ls", str(tree.worktree))
         assert not any("/t/" in directory for directory in cwds)
-        assert sfm.expand_directory_glob(str(tree.worktree), "t/*") is None
+        assert not sfm.expand_directory_glob(str(tree.worktree), "t/*").complete
         from claude_code_hooks_daemon.utils import recursive_search
 
         reads = recursive_search.search_reads("cd t/*; grep -r x .", str(tree.worktree))
@@ -990,8 +990,8 @@ class TestALinkLoopDoesNotEndTheComputedMoveScan:
     def test_the_scan_still_finds_every_sibling_of_the_loop(self, looped: Tree) -> None:
         scan = sfm.scan_project_links(str(looped.worktree))
         assert scan.complete
-        assert str(looped.worktree / "zlate") in scan.directories
-        assert str(looped.worktree / "zlate" / "latedir") in scan.directories
+        assert str(looped.worktree / "zlate") in scan.value.directories
+        assert str(looped.worktree / "zlate" / "latedir") in scan.value.directories
 
     @pytest.mark.parametrize(
         "command",
@@ -1008,7 +1008,7 @@ class TestALinkLoopDoesNotEndTheComputedMoveScan:
         assert _decision(looped, "cd $(printf clean); cat plain.txt") is Decision.ALLOW
 
     def test_a_glob_cd_beside_a_loop_still_matches(self, looped: Tree) -> None:
-        assert sfm.expand_directory_glob(str(looped.worktree), "inn*") == [
+        assert sfm.expand_directory_glob(str(looped.worktree), "inn*").required() == [
             str(looped.worktree / "inner")
         ]
 

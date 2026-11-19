@@ -23,6 +23,7 @@ git worktree is a separate repository's business.
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import re
@@ -42,7 +43,11 @@ from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
-from claude_code_hooks_daemon.utils.resolution_failure import fails_closed
+from claude_code_hooks_daemon.utils.resolution_failure import (
+    ResolutionFailedError,
+    fails_closed,
+    refuse_process_view,
+)
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.utils.git_file_states import GitFileStates
@@ -190,20 +195,7 @@ class ProtectedFileIndex:
             return []
         # Resolved as :func:`_glob_parts` resolves the literal prefix.
         parent = os.path.realpath("/" + "/".join(parts[:first]))
-        # One the shell cannot stat it cannot list either, so it expands no link.
-        if not path_is_dir(parent, unreadable_means=False):
-            return []
-        try:
-            with os.scandir(parent) as listing:
-                names = [entry.name for entry in listing if entry.is_symlink()]
-        except OSError as exc:
-            log_and_continue(
-                logger,
-                exc,
-                reason="a directory that cannot be listed cannot be glob-expanded by the shell either, so the wildcard reads no link in it",
-                level=logging.DEBUG,
-            )
-            return []
+        names = [name for name, is_link in _listed_or_unresolvable(parent) if is_link]
         hits: list[tuple[str, str, bool]] = []
         for name in names:
             if not _segments_match([name], [parts[first]]):
@@ -271,6 +263,8 @@ class ProtectedFileIndex:
         files this index never listed (another checkout, Plan 00614), so the search
         is not vouched for: the first pattern is answered, as for a protected file.
         """
+        # N668: a root through /proc/self would be read from the daemon's view.
+        refuse_process_view(root)
         lexical = os.path.normpath(root)
         real = _realpath_or_lexical(root)
         # An unreadable target is not vouched for either: it fails closed.
@@ -411,11 +405,7 @@ class ProtectedFileIndex:
         # The literal parent is already a real path (:func:`_glob_parts`), its glob characters escaped.
         parent = re.sub(r"\\(.)", r"\1", "/" + "/".join(glob_parts[:-1]))
         real_files = [f"{root}/{entry.relpath}" for entry in self.files for root in self._roots()]
-        try:
-            with os.scandir(parent) as listing:
-                names = [item.name for item in listing if item.is_symlink()]
-        except OSError:
-            return []
+        names = [name for name, is_link in _listed_or_unresolvable(parent) if is_link]
         links: list[str] = []
         for name in names:
             if not _segments_match([name], [last]):
@@ -451,6 +441,35 @@ class ProtectedFileIndex:
             return True
         result = run_git(Path(self.project_root), "check-ignore", "-q", "--", base)
         return result.returncode == 0
+
+
+#: A directory the shell would also find absent: its glob expands to nothing.
+_ABSENT_ERRNOS: Final[frozenset[int]] = frozenset({errno.ENOENT, errno.ENOTDIR})
+#: Linux NAME_MAX in bytes.
+_NAME_MAX_BYTES: Final[int] = 255
+
+
+def _listed_or_unresolvable(parent: str) -> list[tuple[str, bool]]:
+    """``(name, is a link)`` for each entry of ``parent``; [] when it does not exist.
+
+    Plan 00623 item 6: a parent that exists but cannot be listed may hold the
+    link a wildcard reads through, so it is unresolvable
+    (:class:`ResolutionFailedError`), never "no link here".
+    """
+    try:
+        with os.scandir(parent) as listing:
+            return [(entry.name, entry.is_symlink()) for entry in listing]
+    except OSError as exc:
+        over_long = exc.errno == errno.ENAMETOOLONG and any(
+            len(part.encode(errors="surrogateescape")) > _NAME_MAX_BYTES
+            for part in parent.split("/")
+        )
+        if exc.errno in _ABSENT_ERRNOS or over_long:
+            # Absent, or a component past NAME_MAX: the shell finds nothing there either.
+            return []
+        raise ResolutionFailedError(
+            "a directory a wildcard is expanded in cannot be listed"
+        ) from exc
 
 
 def _realpath_or_lexical(path: str) -> str:
@@ -490,10 +509,18 @@ def _literal_directory(token: str, absolute_token: str) -> str | None:
 
 
 def _absolute_tokens(token: str, bases: Sequence[str]) -> list[str]:
-    """``token`` placed under each base (or as it is, when absolute), normalised."""
+    """``token`` placed under each base (or as it is, when absolute), normalised.
+
+    N668: a placement through ``/proc/self`` (or kin) raises, checked before
+    ``..`` is collapsed.
+    """
     if token.startswith("/"):
+        refuse_process_view(token)
         return [os.path.normpath(token)]
-    return [os.path.normpath(Path(base) / token) for base in dict.fromkeys(bases)]
+    placed = [str(Path(base) / token) for base in dict.fromkeys(bases)]
+    for path in placed:
+        refuse_process_view(path)
+    return [os.path.normpath(path) for path in placed]
 
 
 def _glob_parts(absolute_token: str, default_expansion: bool) -> tuple[list[str], int]:

@@ -46,3 +46,42 @@ def test_a_result_is_returned_unchanged() -> None:
         return value * 2
 
     assert resolve(21) == 42
+
+
+def test_a_failed_placement_is_a_finding_on_the_first_pattern() -> None:
+    from claude_code_hooks_daemon.utils.resolution_failure import fail_closed_finding
+
+    assert fail_closed_finding(("a/**", "b/**"), "unplaced") == ("a/**", "unplaced")
+
+
+def test_with_nothing_protected_a_failed_placement_finds_nothing() -> None:
+    from claude_code_hooks_daemon.utils.resolution_failure import fail_closed_finding
+
+    assert fail_closed_finding((), "unplaced") is None
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/proc/self/cwd/x",
+        "/proc/thread-self/cwd/x",
+        "/dev/fd/../cwd/x",
+        "//proc//self/./cwd/x",
+        "/tmp/../proc/self/cwd",
+        "/proc/self",
+    ],
+)
+def test_a_path_through_the_daemons_own_process_view_cannot_be_placed(path: str) -> None:
+    from claude_code_hooks_daemon.utils.resolution_failure import refuse_process_view
+
+    with pytest.raises(ResolutionFailedError):
+        refuse_process_view(path)
+
+
+@pytest.mark.parametrize(
+    "path", ["/proc/version", "/proc/1/status", "/dev/null", "src/selfish/proc"]
+)
+def test_other_paths_are_placed(path: str) -> None:
+    from claude_code_hooks_daemon.utils.resolution_failure import refuse_process_view
+
+    refuse_process_view(path)

@@ -62,8 +62,10 @@ from claude_code_hooks_daemon.utils.secret_file_matching import (
     directory_ancestors,
     expand_directory_glob,
     link_scan_scope,
+    place_outside_project,
     scan_project_links,
     toplevel_move_length,
+    toplevel_relocated,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
@@ -638,7 +640,7 @@ def _directory_change(
     spelled = words[start:]
     while spelled and spelled[0].startswith("-"):
         spelled = spelled[1:]
-    if toplevel_move_length(spelled, cwds.command) and current:
+    if toplevel_move_length(spelled, cwds.command) and current and not toplevel_relocated(current):
         # An ancestor of where the search is, each one kept, besides the computed-move
         # judgement; an unfinished scan does not deny, since the ancestors place the move.
         root = path_exclusion.resolve_project_root()
@@ -710,12 +712,20 @@ class _SearchCwds:
         if scan is not None and fail_closed and not scan.complete:
             self.unscanned = True
         if scan is not None:
-            self.computed_links.extend(scan.directory_links)
-        linked = scan.directories if scan is not None else ()
+            self.computed_links.extend(scan.value.directory_links)
+        linked = scan.value.directories if scan is not None else ()
         found = [root, *self.targets, self.hook_cwd, *linked]
         return tuple(dict.fromkeys(path for path in found if path and posixpath.isabs(path)))
 
     def moved(self, target: str, current: tuple[str, ...]) -> tuple[str, ...]:
+        outside = place_outside_project(target, self.command)
+        if outside:
+            # Plan 00623: ~, $HOME or $TMPDIR outside the project is placed there; the
+            # computed-move judgement still adds what it finds, and the bases stay.
+            self.targets.extend(outside)
+            return tuple(
+                dict.fromkeys((*outside, *current, *self.indeterminate(fail_closed=False)))
+            )
         if any(opener in target for opener in EXTGLOB_OPENERS):
             # Review 614c N3: an extended glob names no directory this walk can list.
             return tuple(dict.fromkeys((*self.indeterminate(), *current)))
@@ -751,9 +761,9 @@ class _SearchCwds:
             if placed is None:
                 continue
             found = expand_directory_glob("/", placed)
-            if found is not None:
-                matched.update(dict.fromkeys(found))
-            if found is None or len(matched) > LINK_DIRECTORY_CAP:
+            if found.complete:
+                matched.update(dict.fromkeys(found.value))
+            if not found.complete or len(matched) > LINK_DIRECTORY_CAP:
                 # Too wide to follow (reviews 614b, 614c X1): judged as a computed
                 # move, and bash refuses a cd with several matches, so the bases stay.
                 return tuple(dict.fromkeys((*self.indeterminate(), *stayed)))
@@ -774,6 +784,10 @@ def _reads(command: str, cwds: tuple[str, ...], depth: int, tracker: _SearchCwds
     a wrong guess must over-approximate (``(cd a && true); cd b && cat l``).
     """
     if depth > _MAX_WRAPPER_DEPTH:
+        # N664 (Plan 00623): a body past the limit is not walked, so one that could
+        # read a tree is unknown, never "no read"; a harmless body still ends here.
+        if _could_read(command):
+            raise IncompleteScanError("a search is nested deeper than the walk follows")
         return
     feeder: tuple[str, ...] | None = None
     current = cwds
@@ -893,6 +907,35 @@ def _segment_reads(
 def _reads_from_each(roots: tuple[str, ...], bases: tuple[str, ...]) -> Iterator[Read]:
     for base in bases or (None,):
         yield from _reads_of_roots(roots, base)
+
+
+def _could_read(command: str) -> bool:
+    """Could any command in ``command``, or in a body nested inside it, read a tree?
+
+    A ``bash -c`` or ``eval`` body is looked into rather than counted as a reader,
+    so a harmless body stays harmless however deep; each level is shorter text,
+    so this ends.
+    """
+    for raw, _piped_in in command_segments(command):
+        if any(_could_read(body) for body in _substitution_bodies(raw)):
+            return True
+        for text in dict.fromkeys((raw, _unwrapped(raw)[0])):
+            words = _command_words(text)
+            if not words:
+                continue
+            head = posixpath.basename(words[0])
+            if head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
+                inner = words[words.index(_SHELL_COMMAND_FLAG, 1) + 1]
+                if len(inner) < len(command) and _could_read(inner):
+                    return True
+                continue
+            if head == _EVAL:
+                if _could_read(" ".join(words[1:])):
+                    return True
+                continue
+            if _reads_files(words, head):
+                return True
+    return False
 
 
 def _reads_files(words: list[str], head: str) -> bool:

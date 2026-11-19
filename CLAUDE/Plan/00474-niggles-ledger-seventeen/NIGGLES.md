@@ -7868,7 +7868,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Evidence**: `_link_targets` places a relative word as `Path(cwd) / token`, and `_realpath_if_resolvable` calls `os.path.lexists` on it, which returns False on ENAMETOOLONG. Bash opens the word relative to its own cwd, so there is a window of `len(project_root) + 1` characters where the kernel resolves the path, the guard cannot place it, and the guard allows. `cat $(plain/../ x 449)flink` allows on the branch and on main; at 448 repeats it denies. No test uses a word near `PATH_MAX`.
 
-**Status**: ⬜ Open, low priority. Treat an `OSError` other than ENOENT from the placement stat as unresolvable so it denies, or resolve the word with `dir_fd` / `openat` semantics. Covered by Plan 00623.
+**Status**: ✅ Fixed on the Plan 00623 branch (merges with Plan 00614). The placement stat is an `lstat`; ENOENT, ENOTDIR and ELOOP are "no such path", and any other `OSError` raises `ResolutionFailedError` (deny) when the raw word fits PATH_MAX and every component of the placed path fits NAME_MAX. Pinned by `TestPlacementStat` in `test_secret_file_guard_bounded_walks.py`.
 
 ### N664 — a recursive search nested 5 or more `bash -c` levels deep is not seen
 
@@ -7876,7 +7876,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Evidence**: the branch denies `grep -r x olink` at nesting depths 3 and 4 and allows it at depths 5 and 6; main allows it at every depth. `cat flink` and `cat olink/i*` deny at every depth from 3 to 6. N662 records the depth limit only for a hidden chdir (`_MAX_DIRECTORY_CHANGE_DEPTH`); the same silent stop on the search side is not recorded.
 
-**Status**: ⬜ Open, low priority. Make the depth limit an incomplete signal that denies, in the same change as the N662 item. Covered by Plan 00623.
+**Status**: ✅ Fixed on the Plan 00623 branch. Past either depth limit a body that could read (`recursive_search`) or move (`secret_file_matching`) raises `IncompleteScanError`; a harmless body still allows at any depth. Pinned by `TestNestingDepth`.
 
 ### N665 — a hand-forged loose commit object makes a branch with content look empty to the delete proofs
 
@@ -7900,7 +7900,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Evidence**: the round-6 branch excuses the top-level idiom from the incomplete-scan deny and places it at the ancestors of the command's directory. It demotes the idiom only when the same command sets `core.worktree`, names a `GIT_` variable, defines a function or alias, or changes `PATH`. Repository config persisted by an EARLIER call (`core.worktree`) makes `git rev-parse --show-toplevel` print a non-ancestor, and `cd "$(git rev-parse --show-toplevel)" && cat late` (also `grep -r` and a glob form) is then allowed past the cap; under the cap the same commands deny. Main allows them too.
 
-**Status**: ⬜ Open, belongs to Plan 00623 (it must land before the Plan 00614 branch merges). Read `core.worktree` and `GIT_WORK_TREE` at decision time, or keep the exemption only when the computed top level equals the project root or a checkout nested in it.
+**Status**: ✅ Fixed on the Plan 00623 branch. `toplevel_relocated` reads the repository, user and system git config at decision time and demotes the idiom to a plain computed move when any names a worktree or an include, cannot be read, or a `GIT_` relocating variable is set for the daemon. With the link index complete the computed judgement finds every link anyway. Pinned by `TestPersistedWorktreeConfig` (cold index). Residual: the SHELL's environment is not visible (N669).
 
 ### N668 — a path through `/proc/self/cwd` or `/dev/fd/..` is judged from the daemon's working directory
 
@@ -7908,4 +7908,18 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Evidence**: `cat /proc/self/cwd/flink`, `cat /proc/self/cwd/olink/i*`, `grep -r x /proc/self/cwd/olink` and `cat /dev/fd/../cwd/flink` are allowed on main and on the branch: the daemon's `/proc/self/cwd` is `/`, while the shell's is the project. `cd /proc/self/cwd && cat flink` denies on the branch.
 
-**Status**: ⬜ Open, low priority; belongs to Plan 00623. Treat a `/proc/self/`, `/proc/thread-self/` or `/dev/fd/` prefix as unplaceable (fail closed).
+**Status**: ✅ Fixed on the Plan 00623 branch. `refuse_process_view` raises for adjacent `proc/self`, `proc/thread-self` or `dev/fd` components (`//` and `.` collapsed, `..` not) in Bash words, glob and search roots, and the Read/Grep tool path. Accepted cost: ordinary `cat /proc/self/status`, `ls /dev/fd` and `2>/dev/fd/N` words now deny. Residual: a project link whose TARGET is `/proc/self/cwd` (N669).
+
+### N669 — Plan 00623 residuals: placement trusts the daemon's environment, and the index has its own bounds
+
+**Source**: Plan 00623 build (`CLAUDE/Plan/00623-secret-guard-structural-fail-closed-walks-and-link-index/subagent-reports/261118-build-opus.md`).
+
+**Evidence**:
+
+- A move to `~`, `$HOME` or `$TMPDIR`, and the N667 check, use the DAEMON's values; a shell whose profile sets them differently lands elsewhere. Same class as D-C.
+- The link index is verified per call but bounded (200,000 directories, 4,096 re-lists, 2 s): past a bound the computed move denies, so very large or very busy trees still over-deny. Before the first background build finishes, the 512-directory per-call scan is used.
+- More than 512 link-holding directories in the index (a pnpm-style tree) still denies a computed move.
+- A project link whose target is `/proc/self/cwd` is classified by the daemon (its own cwd), not refused as N668 is.
+- The quarantine guard's Read-tool route does not call `refuse_process_view`.
+
+**Status**: ⬜ Open, low priority; recorded for the merge review.

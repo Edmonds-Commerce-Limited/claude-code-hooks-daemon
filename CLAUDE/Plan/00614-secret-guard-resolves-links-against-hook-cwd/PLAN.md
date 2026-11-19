@@ -81,4 +81,4 @@ project whose worktrees carry seeded links to protected files.
 
 ## Delivery & Milestones
 
-- Found by the 00613 Task 1.1 probe. Fixed on branch `agent-a13d7c8504105d4c9-aeae03b4`, not yet merged; release note `002-secret-guard-judges-links-from-the-hook-cwd.md` (renumbered after the v3.75.0 release emptied the holding area). Reports: `subagent-reports/261116-link-gaps.md`, `subagent-reports/261116-review-b-fixes.md`, `subagent-reports/261118-finish-opus.md`.
+- Found by the 00613 Task 1.1 probe. Fixed on branch `agent-a13d7c8504105d4c9-aeae03b4`, not yet merged; release note `003-secret-guard-judges-links-from-the-hook-cwd.md` (renumbered after the v3.75.0 release emptied the holding area, and again past main's 002). Reports: `subagent-reports/261116-link-gaps.md`, `subagent-reports/261116-review-b-fixes.md`, `subagent-reports/261118-finish-opus.md`.
