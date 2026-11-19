@@ -440,6 +440,35 @@ def resolve_default_branch(config: BranchesConfig, repo: Path) -> str | None:
     return None
 
 
+def resolve_remote_default_branch(config: BranchesConfig, repo: Path) -> str | None:
+    """The default branch a REMOTE delete is proven against (Plan 00626).
+
+    A named ``branches.default`` is returned as written. ``auto`` accepts only
+    ``refs/remotes/<remote>/HEAD``, the remote's own record of its default: never
+    :func:`resolve_default_branch`'s fallbacks to a local or remote-tracking
+    ``main``/``master``, which on a repository whose default has another name can be
+    a stale old branch, so work merged only into it would read as merged. ``None``
+    means the remote's default is not known here; the caller refuses the delete.
+    """
+    from claude_code_hooks_daemon.config.models import BRANCH_DEFAULT_AUTO
+
+    if config.default != BRANCH_DEFAULT_AUTO:
+        return config.default
+    result = _run_git(
+        repo,
+        "symbolic-ref",
+        "--quiet",
+        "--short",
+        f"refs/remotes/{config.remote}/HEAD",
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if result is None or result.returncode != 0:
+        return None
+    prefix = f"{config.remote}/"
+    ref = result.stdout.strip()
+    return ref.removeprefix(prefix) if ref.startswith(prefix) and ref != prefix else None
+
+
 def remotes(cwd: Path) -> list[str]:
     """Return configured remote names (empty on failure / no remotes).
 

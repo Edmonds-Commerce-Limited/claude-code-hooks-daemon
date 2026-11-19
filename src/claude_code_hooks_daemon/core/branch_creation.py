@@ -529,7 +529,13 @@ def _proven_refnames(
     feature tip would otherwise be taken for merged, and a line is only ever merged
     by ancestry.
     """
-    default_shas = [ref.tip for ref in refs if ref.refname in targets]
+    # The writer (the remote-delete proof) keys by the REMOTE-tracking default's sha
+    # alone (Plan 00626), so only that target's sha can find its entries.
+    default_shas = [
+        ref.tip for ref in refs if ref.refname in targets and ref.refname.startswith(_REMOTES)
+    ]
+    if not default_shas:
+        return set()
     proofs = read_merge_proofs(repo)
     if not proofs:
         return set()

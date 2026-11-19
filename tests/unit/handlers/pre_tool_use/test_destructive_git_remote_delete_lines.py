@@ -177,7 +177,9 @@ class _FakeGit:
         if args[0] == "rev-parse":
             return _done(0, f"{cwd}\n")
         if args[0] == "ls-remote":
-            return _done(0, "".join(f"{_TIP}\trefs/heads/{n}\n" for n in self._names))
+            # The remote default is live at its tracking tip (Plan 00626 confirms it).
+            live = [*self._names, "main"]
+            return _done(0, "".join(f"{_TIP}\trefs/heads/{n}\n" for n in live))
         if args[0] == "for-each-ref" and any(a.startswith("--merged") for a in args):
             if self._merged_fails:
                 return _done(128)
@@ -198,7 +200,7 @@ def install(monkeypatch: pytest.MonkeyPatch) -> Callable[[_FakeGit], _FakeGit]:
         monkeypatch.setattr(remote_branch_proof, "run_git", fake)
         monkeypatch.setattr(remote_refs, "run_git", fake)
         monkeypatch.setattr(
-            destructive_git, "resolve_default_branch", lambda _config, _directory: "main"
+            destructive_git, "resolve_remote_default_branch", lambda _config, _directory: "main"
         )
         return fake
 
@@ -219,8 +221,9 @@ def test_forty_branches_cost_one_ls_remote_and_one_for_each_ref_per_target(
     assert many.count("ls-remote") == 1
     assert many.count("merge-base") == 0
     assert many.count("rev-parse") == 1  # the top level, resolved once for all 40
-    # Targets: origin/main, local main, origin/release/x -- plus one listing call.
-    assert many.count("for-each-ref") == few.count("for-each-ref") == 4
+    # Targets: origin/main and origin/release/x (never the local main, Plan 00626) --
+    # plus one listing call.
+    assert many.count("for-each-ref") == few.count("for-each-ref") == 3
 
 
 def test_forty_branches_are_judged_within_the_dispatch_budget(

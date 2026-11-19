@@ -77,6 +77,8 @@ def repo(tmp_path: Path) -> Path:
     _write(path, "b.txt", "b0\n", "init b")
     _git(path, "remote", "add", "origin", str(bare))
     _git(path, "push", "--quiet", "-u", "origin", _DEFAULT)
+    # What a clone records: the guard's `branches.default: auto` reads the default here.
+    _git(path, "remote", "set-head", "origin", "--auto")
     return path
 
 
@@ -103,9 +105,13 @@ def _prove(repo: Path, name: str) -> tuple[dict[str, str], dict[str, str], dict[
     return proof.tips, proof.problems, proof.evidence
 
 
-def _guard(repo: Path, command: str) -> str:
+def _guard(repo: Path, command: str, *, by_proof: bool = True) -> str:
+    """The guard's decision; with ``by_proof`` a deny must be the proof's, not setup's."""
     hook_input = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(repo)}
-    return str(DestructiveGitHandler().handle(hook_input).decision)
+    result = DestructiveGitHandler().handle(hook_input)
+    if result.decision == "deny" and by_proof:
+        assert "Not deleted:" in str(result.reason)
+    return str(result.decision)
 
 
 class TestCherryRoute:
@@ -231,6 +237,40 @@ class TestRemoteDefaultOnly:
         tips, problems, _evidence = _prove(repo, "landed")
         assert problems == {}
         assert list(tips) == ["landed"]
+
+
+class TestRemoteDefaultDetection:
+    def test_auto_never_takes_a_stale_local_main_for_the_remote_default(self, repo: Path) -> None:
+        # The remote's default is trunk; an old `main` survives locally and on the remote,
+        # and origin/HEAD is unset. Work merged into `main` only is NOT on the default.
+        _git(repo, "checkout", "-q", "-b", "main", _DEFAULT)
+        _git(repo, "checkout", "-q", "-b", "old-work", "main")
+        _write(repo, "a.txt", "a0\nold work\n", "work merged into the old main only")
+        _git(repo, "push", "--quiet", "origin", "old-work")
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "merge", "-q", "--ff-only", "old-work")
+        _git(repo, "push", "--quiet", "origin", "main")
+        _git(repo, "checkout", "-q", _DEFAULT)
+        _git(repo, "remote", "set-head", "origin", "-d")
+        _git(repo, "fetch", "--quiet", "origin")
+        assert _guard(repo, "git push origin --delete old-work", by_proof=False) == "deny"
+        # Every caller of the one proof is held to it, not only the guard: a sweep that
+        # resolved `main` through the local fallback is refused by the proof itself.
+        proof = prove_remote_merged(repo, "origin", ["old-work"], "main", BranchesConfig())
+        assert proof.tips == {}
+        assert "not confirmed" in proof.problems["old-work"]
+
+    def test_auto_reads_the_remote_head_when_it_names_a_non_main_default(
+        self, repo: Path
+    ) -> None:
+        _git(repo, "checkout", "-q", "-b", "landed", _DEFAULT)
+        _write(repo, "a.txt", "a0\nlanded\n", "work")
+        _git(repo, "push", "--quiet", "origin", "landed")
+        _git(repo, "checkout", "-q", _DEFAULT)
+        _git(repo, "merge", "-q", "--ff-only", "landed")
+        _publish(repo)
+        proof = prove_remote_merged(repo, "origin", ["landed"], _DEFAULT, BranchesConfig())
+        assert list(proof.tips) == ["landed"]
 
 
 class TestCacheIsNeverAProof:
