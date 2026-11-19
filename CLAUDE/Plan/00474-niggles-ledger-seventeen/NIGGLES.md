@@ -7926,3 +7926,16 @@ smaller than the add's, but at a load average near 70 they time out too.
 - `_could_read` (the depth-limit check) follows the same nesting forms as the search walk (`-c` as its own word, `eval`, substitutions); `bash -ec '...'` is not looked into at any depth by either, a gap that predates this plan.
 
 **Status**: ⬜ Open, low priority; recorded for the merge review.
+
+### N670 — Plan 00623 adversarial review leftovers: this repository's link index always overflows, and the flaggable guard lets an expansion limit escape
+
+**Source**: Plan 00623 adversarial review (`CLAUDE/Plan/00623-secret-guard-structural-fail-closed-walks-and-link-index/subagent-reports/261119-adversarial-review.md`).
+
+**Evidence**:
+
+- `build_link_index('/workspace')` overflows the 200,000-directory cap in about 5 s, because the tree holds `.claude/worktrees/*` (about 69,000 directories each) and `untracked/scratch` fixtures. In this repository every computed move followed by a reader is therefore denied. Since the review's F1 and F3 fixes (a placed `~`/`$TMPDIR` move and the top-level idiom now fail closed on a stopped scan), that includes `cd ~/x && cat f` and `cd "$(git rev-parse --show-toplevel)" && cat f`. A candidate fix is to exclude other checkouts and scratch from the index; that needs its own fail-closed argument.
+- More than 512 link-holding directories (for example `node_modules/.bin`) still stop `_scan_from_index`. This one repeats N669.
+- `flaggable_content_channel_guard` lets `TooManyToEnumerateError` escape `handle` for commands nested 5 or more `bash -c` deep. It does so on main and on the branch alike.
+- An unlistable directory anywhere in the project now stops the link scan (fix F2), so it denies every computed move followed by a reader.
+
+**Status**: ⬜ Open; recorded for the Plan 00623 merge.

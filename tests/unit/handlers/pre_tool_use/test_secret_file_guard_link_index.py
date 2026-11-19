@@ -313,6 +313,15 @@ _REACHING_AFTER_PLACEMENT = (
     "cd w599; v=TMP; let ${v}DIR=7; cd $TMPDIR; cat late",
     'ln -s "$PWD/w599/zz" ~/new && cd ~/new && cat late',
     'cd -P "$TMPDIR/up/.." && cat proj/w599/zz/late',
+    # A recursive search: judged by recursive_search, not the directory walk.
+    "cd w599; v=HO; let ${v}ME=7; cd ~; grep -r x dl",
+    # git's top level, moved by config or environment the guard cannot read.
+    "printf '[co''re]\\n\\twork''tree = %s\\n' \"$PWD/w599/zz\" >> .g''it/conf''ig; "
+    'cd "$(git rev-parse --show-toplevel)" && cat late',
+    "trap 'export G\"\"IT_WORK_TREE=$PWD/w599/zz' DEBUG; "
+    'cd "$(git rev-parse --show-toplevel)" && cat late',
+    "trap 'export G\"\"IT_WORK_TREE=$PWD/w599/zz' DEBUG; "
+    'cd "$(git rev-parse --show-toplevel)" && grep -r x dl',
 )
 
 
@@ -330,8 +339,22 @@ class TestAStoppedScanIsNotOverriddenByPlacement:
         for name in ("7", "i", "zz"):
             (last / name).mkdir()
             (last / name / "late").symlink_to(cold.outside / _PROTECTED)
+            (last / name / "dl").symlink_to(cold.outside)
         (cold.outside / "up").symlink_to(cold.root)
+        subprocess.run(["git", "init", "-q", str(cold.root)], check=True)
         return cold
+
+    @pytest.mark.parametrize("name", ["gl", "sub/.git/gl"])
+    def test_a_link_inside_a_git_directory_is_indexed(self, reach: Project, name: str) -> None:
+        """Bash can move into `.git` like any directory; a built index that skipped it
+        reported complete while a link there led to the protected dummy."""
+        holder = reach.root / ".git" if name == "gl" else reach.root / "sub" / ".git"
+        holder.mkdir(parents=True, exist_ok=True)
+        (holder / "gl").symlink_to(reach.outside / _PROTECTED)
+        moved = ".git" if name == "gl" else "sub/.git"
+        with patch.object(link_index, "link_scan_for", wraps=_real_link_scan_for):
+            _built(reach)
+            assert _decision(reach, f"cd $(printf {moved}) && cat gl") is Decision.DENY
 
     @pytest.mark.parametrize("command", _REACHING_AFTER_PLACEMENT)
     def test_a_cold_index_denies(self, reach: Project, command: str) -> None:

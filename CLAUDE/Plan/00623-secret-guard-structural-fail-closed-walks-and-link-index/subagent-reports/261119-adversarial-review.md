@@ -4,12 +4,12 @@ Branch `agent-a13d7c8504105d4c9-aeae03b4`. Reviewed tip `6d65b0538`; fixes from 
 
 ## Verdict
 
-**PASS** on DENY-to-ALLOW, after the fixes below.
+**PASS** on DENY-to-ALLOW, after the fixes below. The plan's usability criterion is **not met in this repository**.
 
 - **0 DENY-to-ALLOW against main**, with the link index cold and built, on every corpus and probe set.
-- **2 fail-open defects** in the branch's own new code. Neither is a DENY-to-ALLOW against main, because main allows these commands anyway. Both read a protected dummy in real bash while the branch allowed them. Both are fixed here, each with a test written first (RED, then GREEN).
+- **4 fail-open defects (F1 to F4)** in the branch's own new code. None is a DENY-to-ALLOW against main, because main has no link scan and allows these commands anyway. Each one read a protected dummy in real bash while the branch allowed it. All four are fixed here, each with a test written first (RED, then GREEN).
 - **1 pre-existing test (Task 5)** is updated to the fail-closed verdict.
-- **Usability** holds in the synthetic large project once the index is built. It does **not** hold in this repository, whose index overflows its cap (see "Left").
+- **Usability** holds in the synthetic large projects once the index is built. It does **not** hold in this repository: the index here always overflows its cap. F1 and F3 also remove the carve-out for a cold or overflowed index, so here `cd ~/x && cat f` and `cd "$(git rev-parse --show-toplevel)" && cat f` are denied (see "Left", ledger N670).
 
 ## Harness
 
@@ -116,6 +116,33 @@ Tests:
 - `test_an_unlistable_directory_stops_the_per_call_scan`;
 - `test_a_directory_that_cannot_be_listed_stops_the_verification`.
 
+**Cost of F2.** One unlistable directory anywhere in the project now denies every computed move followed by a reader.
+
+### F3 (fixed): the top-level idiom waived a stopped scan
+
+`to_toplevel` (secret matching) and `_directory_change` (recursive search) placed `cd "$(git rev-parse --show-toplevel)"` at the ancestors and also judged it with `fail_closed=False`. `toplevel_relocated` reads config and environment at decision time. It cannot see what the command itself changes when the name is split:
+
+- `printf '[co''re]\n\twork''tree = %s\n' "$PWD/inner" >> .g''it/conf''ig; cd "$(git rev-parse --show-toplevel)" && cat rel`
+- `trap 'export G""IT_WORK_TREE=$PWD/inner' DEBUG; cd "$(git rev-parse --show-toplevel)" && cat rel`
+
+With the index overflowed, both were ALLOWED and read the dummy in real bash. They were denied while the scan was complete, or while it had only stopped early enough that `inner` was still found.
+
+**Fix.** Both sites fail closed. The `fail_closed` parameter is gone, since nothing passes False now.
+
+**Cost.** The idiom followed by a reader is denied while the index is cold or overflowed, which is always the case in this repository.
+
+Tests: 3 commands in `_REACHING_AFTER_PLACEMENT`, which were RED for cold and overflowed.
+
+### F4 (fixed): `.git` was never entered, yet the walk reported complete
+
+Neither the per-call walk nor the index listed `.git`. Bash can move into it, so with the index built `cd $(printf .git) && cat gl` was ALLOWED, with `.git/gl` a link to the dummy; so was `sub/.git/gl`. Both read the dummy in real bash.
+
+**Fix.** Both walks enter `.git`. The cost is that `.git` (about 270 directories) uses part of the 512-directory per-call budget before the index is built.
+
+Test: `test_a_link_inside_a_git_directory_is_indexed`.
+
+The recursive-search half of F1 (`_SearchCwds.moved`) has no test that fails without it: the directory-walk half already denies every probe tried through it. It is kept because it only tightens.
+
 ### Other stops
 
 - **Never open a denied probe:** the re-list cap, an overflowed index, the scan, directory and search caps, unreadable `inner`, depth 0 and the scan deadline.
@@ -147,7 +174,7 @@ What an earlier command can do to it, and what follows:
 
 **Limit.** The agent runs as uid 0. Root can reset ctime only by moving the system clock, and would have to hit the stored nanosecond. Root also does not need a link to read the file. This is outside the threat model.
 
-`.git` is not entered. The per-call walk on main skips it the same way, so this is no change.
+`.git` was not entered on the branch. That is F4, fixed above; main has no link scan at all.
 
 ## Task 4: usability
 
@@ -181,7 +208,9 @@ Projects with more than 512 link-holding directories also stop in `_scan_from_in
 
 ## After the fixes
 
-Everything above was run again on the fixed tree, with the index both cold and built.
+Everything above was run again on the tree with F1 and F2 fixed, with the index both cold and built. F3 and F4 came later and only remove allows: they drop `fail_closed=False` and list more directories. They are covered by their own tests and the targeted test run, not by a third corpus run.
+
+`fz/` gained `i/` and `7/` after the main baseline ran. The zero after the fixes therefore rests on the fixes only tightening, not on a matched baseline for those probes.
 
 - **Still 0 DENY-to-ALLOW** on every set.
 - **Built counts:** the A2D counts are unchanged, so usability with the index built is unchanged, including `big/` at 129 of 132 allowed.
@@ -205,3 +234,5 @@ Ruff and black are clean on every changed file, and mypy is clean on the three c
   - the shell's `HOME` or `TMPDIR` can differ from the daemon's. Since F1 this matters only when the scan is complete, and then every link directory is judged anyway;
   - an alias or a function named `cd`.
 - **The verify cost** is one lstat for every directory on every computed move (about 0.3 s per 69,000 directories).
+- **Release note.** The plan's holding-area release note (`004-…`) may now misdescribe the behaviour with a cold index: placed `~`/`$TMPDIR` moves and the top-level idiom no longer allow while the scan has stopped. This reviewer could not read it because its name matches a protected glob, so the coordinator should check it.
+- **Ledger.** The repository overflow, the flaggable exception and the cost of F2 are recorded as **N670** in ledger 00474. The >512 case repeats N669.

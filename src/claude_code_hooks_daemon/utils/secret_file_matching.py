@@ -3915,7 +3915,7 @@ def scan_project_links(root: str) -> Bounded[LinkScan]:
       can land INSIDE it, and a relative glob read there (``cat .e*``) is read
       from the link's target, which may be outside the project.
 
-    ``.git`` is not entered and links are not followed. A directory that cannot
+    ``.git`` is entered (bash can move into it) and links are not followed. A directory that cannot
     be listed is counted as holding a link and stops the scan, since what lies
     under it is unknown (fail closed). An entry the scan
     cannot classify does not end the listing (independent review D1). The scan
@@ -3980,7 +3980,7 @@ def _walk_project_links(root: str) -> Bounded[LinkScan]:
                             unclassified = True
                         elif kind is _LinkKind.DIRECTORY:
                             directory_links.append(entry.path)
-                    elif entry.name != _GIT_DIRECTORY and _entry_may_be_directory(entry):
+                    elif _entry_may_be_directory(entry):
                         queue.append(entry.path)
         except OSError as exc:
             log_and_continue(
@@ -4173,21 +4173,21 @@ class _DirectoryWalk:
         if exists if exists is not None else path_is_dir(directory, unreadable_means=True):
             self.existing[directory] = None
 
-    def indeterminate(self, *, fail_closed: bool = True) -> None:
+    def indeterminate(self) -> None:
         """A move bash computes: read from the project root and every place it could land badly.
 
         Review 614b R4 and 614c N1: every project directory holding a link, and
         every directory link, found by :func:`scan_project_links`, a bounded
         scan. A scan that did not finish marks the walk ``unscanned``: a
-        relative word read after the move is then denied (review D2). With
-        ``fail_closed`` False the caller has placed the move exactly too
-        (git's top level), so an unfinished scan only adds what it found.
+        relative word read after the move is then denied (review D2). A caller
+        that also placed the move (git's top level, ``~``) still fails closed:
+        its placement rests on state the command can change.
         """
         root = resolve_project_root()
         if root:
             self._add(os.path.normpath(root))
             scan = scan_project_links(root)
-            self.unscanned = self.unscanned or (fail_closed and not scan.complete)
+            self.unscanned = self.unscanned or not scan.complete
             for directory in scan.value.directories:
                 self._add(directory, exists=True)
                 self.scanned[directory] = None
@@ -4195,8 +4195,9 @@ class _DirectoryWalk:
     def to_toplevel(self) -> None:
         """A move to git's top level: an ancestor of where the command is, each one kept.
 
-        It only adds: the computed-move judgement is made too, but a scan that
-        did not finish does not deny, because the ancestors place the move.
+        It only adds: the computed-move judgement is made too, and a scan that
+        did not finish still denies (Plan 00623 review: the top level can be
+        moved by config or environment the guard cannot read).
         Past :data:`LINK_DIRECTORY_CAP` bases it is a plain computed move.
         """
         bases = list(dict.fromkeys([*self.directories[-1:], *self.existing]))
@@ -4209,7 +4210,9 @@ class _DirectoryWalk:
         for base in bases:
             for ancestor in directory_ancestors(base, root):
                 self._add(ancestor)
-        self.indeterminate(fail_closed=False)
+        # Still fails closed: config or environment the guard cannot read (a
+        # split-spelled GIT_WORK_TREE, a core.worktree this command writes) moves it.
+        self.indeterminate()
 
     def assign(self, name: str, value: str) -> None:
         """Record ``name=value``; a value bash would expand is not known, so it is forgotten."""

@@ -642,10 +642,11 @@ def _directory_change(
         spelled = spelled[1:]
     if toplevel_move_length(spelled, cwds.command) and current and not toplevel_relocated(current):
         # An ancestor of where the search is, each one kept, besides the computed-move
-        # judgement; an unfinished scan does not deny, since the ancestors place the move.
+        # judgement, which still fails closed: config or environment the guard cannot
+        # read (a split-spelled GIT_WORK_TREE, a written core.worktree) moves the top level.
         root = path_exclusion.resolve_project_root()
         above = (ancestor for base in current for ancestor in directory_ancestors(base, root))
-        return tuple(dict.fromkeys((*above, *cwds.indeterminate(fail_closed=False))))
+        return tuple(dict.fromkeys((*above, *cwds.indeterminate())))
     return cwds.moved(operands[0], current)
 
 
@@ -700,16 +701,17 @@ class _SearchCwds:
     # The directory links a computed move's scan found: a later reader may pass through one.
     computed_links: list[str] = field(default_factory=list)
 
-    def indeterminate(self, *, fail_closed: bool = True) -> tuple[str, ...]:
+    def indeterminate(self) -> tuple[str, ...]:
         """A move that cannot be placed: the project root, every named target and the hook cwd.
 
-        With ``fail_closed`` False the caller placed the move exactly too (git's
-        top level), so a scan that did not finish only adds what it found.
+        A scan that did not finish marks the search ``unscanned``, also when the
+        caller placed the move too (git's top level, ``~``): that placement rests
+        on state the command can change (Plan 00623 review).
         """
         root = path_exclusion.resolve_project_root()
         # Reviews 614b R4, 614c N1: every project directory holding a link, and every directory link.
         scan = scan_project_links(root) if root else None
-        if scan is not None and fail_closed and not scan.complete:
+        if scan is not None and not scan.complete:
             self.unscanned = True
         if scan is not None:
             self.computed_links.extend(scan.value.directory_links)

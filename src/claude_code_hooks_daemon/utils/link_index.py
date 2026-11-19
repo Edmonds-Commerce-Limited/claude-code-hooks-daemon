@@ -67,7 +67,6 @@ RETRY_AFTER_SECONDS: Final[float] = 30.0
 #: How many projects' indexes the daemon holds.
 MAX_INDEXES: Final[int] = 4
 
-_GIT_DIRECTORY: Final[str] = ".git"
 _NANOSECONDS: Final[int] = 1_000_000_000
 
 _OVERFLOWED: Final[str] = "the project link index overflowed its directory cap"
@@ -87,7 +86,7 @@ class _Listing:
 
     identity: _Identity | None
     listed_at_ns: int
-    #: Subdirectories (not links, not ``.git``), as absolute paths.
+    #: Subdirectories (not links; ``.git`` included, bash can move into it), as absolute paths.
     children: tuple[str, ...]
     #: Link entries, as absolute paths.
     links: tuple[str, ...]
@@ -116,7 +115,7 @@ def _list(path: str, stat: os.stat_result | None) -> _Listing:
             for entry in entries:
                 if entry.is_symlink():
                     links.append(entry.path)
-                elif entry.name != _GIT_DIRECTORY and _may_be_directory(entry):
+                elif _may_be_directory(entry):
                     children.append(entry.path)
     except OSError as exc:
         log_and_continue(
@@ -296,7 +295,7 @@ def _well_formed(path: str, listing: _Listing) -> bool:
 
 
 def build_link_index(root: str) -> LinkIndex:
-    """List every directory under ``root`` (not entering ``.git``, not following links)."""
+    """List every directory under ``root``, ``.git`` included, not following links."""
     root = os.path.normpath(root)
     deadline = time.monotonic() + BUILD_DEADLINE_SECONDS
     listings: dict[str, _Listing] = {}
