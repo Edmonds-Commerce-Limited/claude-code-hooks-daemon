@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
+from claude_code_hooks_daemon.core.branch_cleanup import clean_sweep
 from claude_code_hooks_daemon.core.branch_inventory import (
     CACHE_RELATIVE_PATH,
     merge_proof_key,
@@ -35,6 +36,7 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import (
     DestructiveGitHandler,
 )
+from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
 
 _DEFAULT = "trunk"
 _CONFIG = BranchesConfig(default=_DEFAULT)
@@ -239,7 +241,74 @@ class TestRemoteDefaultOnly:
         assert list(tips) == ["landed"]
 
 
+def _sweep_lines(repo: Path) -> list[str]:
+    report = clean_sweep(repo, _CONFIG, dry_run=True, remote=True)
+    return [line for line in report.commands if line.startswith("would delete remote")]
+
+
+class TestTheSweepUsesTheSameProof:
+    """`branch-sweep --clean --remote`, where defect 2 was reported (dry run only)."""
+
+    def test_the_sweep_never_lists_a_branch_merged_only_into_the_unpushed_local_default(
+        self, repo: Path
+    ) -> None:
+        _git(repo, "checkout", "-q", "-b", "release-ci", _DEFAULT)
+        _write(repo, "a.txt", "a0\nrelease\n", "release work")
+        _git(repo, "push", "--quiet", "origin", "release-ci")
+        _git(repo, "checkout", "-q", _DEFAULT)
+        _git(repo, "merge", "-q", "--ff-only", "release-ci")
+        _git(repo, "fetch", "--quiet", "origin")
+        assert not [line for line in _sweep_lines(repo) if "origin/release-ci" in line]
+        _publish(repo)
+        assert [line for line in _sweep_lines(repo) if "origin/release-ci" in line]
+
+    def test_the_sweep_lists_interleaved_cherry_picks_with_park_markers(self, repo: Path) -> None:
+        first, second = _branch_with_markers(repo, "feat")
+        _git(repo, "cherry-pick", first)
+        _write(repo, "a.txt", "a0\na1\na2\n", "the default edits a between the picks")
+        _git(repo, "cherry-pick", second)
+        _publish(repo)
+        assert [line for line in _sweep_lines(repo) if "origin/feat" in line]
+
+
 class TestRemoteDefaultDetection:
+    def test_resolution_reads_only_the_named_remotes_head(self, repo: Path) -> None:
+        assert resolve_remote_default_branch(BranchesConfig(), repo) == _DEFAULT
+        assert resolve_remote_default_branch(BranchesConfig(), repo, remote="other") is None
+        assert resolve_remote_default_branch(BranchesConfig(default="x"), repo) == "x"
+        _git(repo, "remote", "set-head", "origin", "-d")
+        _git(repo, "branch", "main")
+        assert resolve_remote_default_branch(BranchesConfig(), repo) is None
+
+    def test_a_delete_on_another_remote_is_judged_by_that_remotes_default(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        # `other` has no recorded default here: its deletes refuse, whatever origin says.
+        other = tmp_path / "other.git"
+        _git(tmp_path, "init", "--quiet", "--bare", "-b", _DEFAULT, str(other))
+        _git(repo, "remote", "add", "other", str(other))
+        _git(repo, "checkout", "-q", "-b", "landed", _DEFAULT)
+        _git(repo, "push", "--quiet", "other", "landed", f"{_DEFAULT}:{_DEFAULT}")
+        _git(repo, "checkout", "-q", _DEFAULT)
+        _git(repo, "fetch", "--quiet", "other")
+        proof = prove_remote_merged(repo, "other", ["landed"], _DEFAULT, BranchesConfig())
+        assert proof.tips == {}
+        assert "not confirmed" in proof.problems["landed"]
+
+    def test_a_locally_moved_integration_line_tracking_ref_proves_nothing(self, repo: Path) -> None:
+        config = BranchesConfig(default=_DEFAULT, integration_lines=["release/*"])
+        _git(repo, "checkout", "-q", "-b", "release/1", _DEFAULT)
+        _git(repo, "push", "--quiet", "origin", "release/1")
+        _git(repo, "checkout", "-q", "-b", "fix", _DEFAULT)
+        _write(repo, "a.txt", "a0\nfix\n", "fix")
+        _git(repo, "push", "--quiet", "origin", "fix")
+        _git(repo, "checkout", "-q", _DEFAULT)
+        _git(repo, "fetch", "--quiet", "origin")
+        _git(repo, "update-ref", "refs/remotes/origin/release/1", "refs/remotes/origin/fix")
+        proof = prove_remote_merged(repo, "origin", ["fix"], _DEFAULT, config)
+        assert proof.tips == {}
+        assert "fix" in proof.problems
+
     def test_auto_never_takes_a_stale_local_main_for_the_remote_default(self, repo: Path) -> None:
         # The remote's default is trunk; an old `main` survives locally and on the remote,
         # and origin/HEAD is unset. Work merged into `main` only is NOT on the default.
@@ -260,9 +329,7 @@ class TestRemoteDefaultDetection:
         assert proof.tips == {}
         assert "not confirmed" in proof.problems["old-work"]
 
-    def test_auto_reads_the_remote_head_when_it_names_a_non_main_default(
-        self, repo: Path
-    ) -> None:
+    def test_auto_reads_the_remote_head_when_it_names_a_non_main_default(self, repo: Path) -> None:
         _git(repo, "checkout", "-q", "-b", "landed", _DEFAULT)
         _write(repo, "a.txt", "a0\nlanded\n", "work")
         _git(repo, "push", "--quiet", "origin", "landed")

@@ -38,11 +38,34 @@ changed path's exact blob/mode (or absence) appears in some first-parent default
 after the merge base. What is not preserved is the exact combined tree state; every byte
 of the branch's result at each path is. Everything else tightens.
 
+Further audit verdicts (read, unchanged): `delete_branches(remote=...)` only supplies the
+listing for the LOCAL `remote-held` tier, it deletes nothing remote; `default_targets` /
+`cleanup_targets` are local-delete targets; the inventory's merged grouping and the merged
+pool only COUNT, and every remote delete they lead to goes through `prove_remote_merged`.
+The sweep path is pinned end to end (dry run, default `trunk`) for both defects. A delete
+on a remote other than `branches.remote` resolves THAT remote's `HEAD`.
+
 ## Behaviour changes worth knowing
 
 - A clone without `refs/remotes/<remote>/HEAD` and `branches.default: auto` now has
-  remote deletes refused (message names `git remote set-head <remote> --auto`).
-- Remote-delete proofs re-run their history walks each time (no cached positives).
+  remote deletes refused (message names `git remote set-head <remote> --auto`). This repo
+  has `origin/HEAD`, so its own deletes are unaffected.
+- Remote-delete proofs re-run their history walks each time (no cached positives); the
+  cost-bound test was relaxed from `warm <= one` to `warm <= cold`.
+- A missing tracking default now refuses branches merged into an integration line too.
+
+## Known residual
+
+- `refs/remotes/<remote>/HEAD` is a local ref: stale after a default rename, settable by
+  `git remote set-head`. The live check confirms the tip of the branch it names, not that
+  it IS the remote's default. Closing it needs `ls-remote --symref <remote> HEAD` in the
+  same call, which `utils/remote_refs.parse_listing` currently drops; not done here.
+
+## Process notes
+
+- The RED commit (`bc8336e20`) used `--no-verify`.
+- Commit trailer follows the session attribution (Opus 5.5), not the brief's Sonnet line.
+- The `branch_creation` reader test was written after its fix (would have been RED).
 
 ## Left
 

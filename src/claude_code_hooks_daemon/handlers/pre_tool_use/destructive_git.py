@@ -888,12 +888,12 @@ def _remote_delete_note(command: str, cwd: Path, branches: BranchesConfig) -> st
         directory = invocation_directory(run, cwd)
         if not path_is_dir(directory, unreadable_means=False):
             return _unverified(f"`{directory}` is not a directory")
-        default = resolve_remote_default_branch(branches, directory)
+        default = resolve_remote_default_branch(branches, directory, remote=remote)
         if default is None:
             return _unverified(
                 f"the remote's default branch could not be determined (no "
-                f"`refs/remotes/{branches.remote}/HEAD`; run `git remote set-head "
-                f"{branches.remote} --auto`, or set `branches.default`)"
+                f"`refs/remotes/{remote}/HEAD`; run `git remote set-head "
+                f"{remote} --auto`, or set `branches.default`)"
             )
         judged: list[str] = []
         for ref in refs:

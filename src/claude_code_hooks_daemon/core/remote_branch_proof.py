@@ -738,7 +738,7 @@ def prove_remote_merged(
             evidence={},
         )
     directory = Path(top.stdout.strip())
-    remote_default = resolve_remote_default_branch(branches, directory)
+    remote_default = resolve_remote_default_branch(branches, directory, remote=remote)
     if remote_default != default:
         known = f"`{remote_default}`" if remote_default else "unknown here"
         return RemoteProof(
