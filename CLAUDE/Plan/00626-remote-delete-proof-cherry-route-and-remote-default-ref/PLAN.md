@@ -59,30 +59,33 @@ delete: a remote delete never rests on a cached positive.
 
 ### Phase 2: defect 1, the cherry route (TDD)
 
-- [ ] 🔄 **Task 2.1**: RED tests: interleaved cherry-picks plus park markers prove;
+- [x] ✅ **Task 2.1**: RED tests: interleaved cherry-picks plus park markers prove;
   whitespace-only re-application, no merge base, and a branch path the default never
   held at that blob stay refused.
-- [ ] ⬜ **Task 2.2**: GREEN: per-path held state in `_net_change_state`, accepted only
+- [x] ✅ **Task 2.2**: GREEN: per-path held state in `_net_change_state`, accepted only
   with `patch_equivalent`; bump `PROOF_ALGORITHM_VERSION`.
 
 ### Phase 3: defect 2, the remote default only (TDD)
 
-- [ ] ⬜ **Task 3.1**: RED tests: merged only into an unpushed local default is refused;
+- [x] ✅ **Task 3.1**: RED tests: merged only into an unpushed local default is refused;
   stale or locally moved tracking default is refused; missing tracking default refused;
-  forged cache entry does not prove.
-- [ ] ⬜ **Task 3.2**: GREEN: tracking-only targets, live default check, no cached
-  positives on the delete path; keep `branch_creation`'s cache reader keyed alike.
-- [ ] ⬜ **Task 3.3**: Audit every remote-delete decision path and record verdicts.
+  forged cache entry does not prove; a stale `main` under `auto` is never the default.
+- [x] ✅ **Task 3.2**: GREEN: tracking-only targets, live default check, no cached
+  positives on the delete path; `auto` reads only `refs/remotes/<remote>/HEAD`;
+  `branch_creation`'s cache reader keyed alike.
+- [x] ✅ **Task 3.3**: Audit every remote-delete decision path and record verdicts
+  (`subagent-reports/261119-implementation.md`).
 
 ### Phase 4: close-out
 
-- [ ] ⬜ **Task 4.1**: Rule text and docstrings; release note; report.
+- [ ] 🔄 **Task 4.1**: Rule text and docstrings; release note; report. Awaiting the
+  coordinator's full QA gate and security review.
 
 ## Success Criteria
 
-- [ ] Both scratch repros flip (defect 1 proves, defect 2 refuses) and are pinned by tests.
-- [ ] Targeted tests pass; no QA suppression.
-- [ ] Release note under `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (the pending-release
+- [x] Both scratch repros flip (defect 1 proves, defect 2 refuses) and are pinned by tests.
+- [x] Targeted tests pass; no QA suppression.
+- [x] Release note under `CLAUDE/UPGRADES/UNRELEASED/release-notes/` (the pending-release
   holding area) records both fixes.
 
 ## Delivery & Milestones

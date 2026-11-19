@@ -92,6 +92,11 @@ def install(monkeypatch: pytest.MonkeyPatch) -> Callable[[_FakeGit], _FakeGit]:
         monkeypatch.setattr(
             destructive_git, "resolve_remote_default_branch", lambda _config, _directory: "main"
         )
+        monkeypatch.setattr(
+            remote_branch_proof,
+            "resolve_remote_default_branch",
+            lambda _config, _directory: "main",
+        )
         return fake
 
     return _install
