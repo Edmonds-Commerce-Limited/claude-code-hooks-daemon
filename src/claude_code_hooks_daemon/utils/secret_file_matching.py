@@ -4545,6 +4545,20 @@ def _kernel_could_resolve(word: str) -> bool:
     )
 
 
+#: The lone surrogates ``surrogateescape`` maps back to bytes; any other cannot be encoded.
+_ESCAPED_BYTE_SURROGATES: Final[tuple[str, str]] = ("\udc80", "\udcff")
+_SURROGATES: Final[tuple[str, str]] = ("\ud800", "\udfff")
+
+
+def _could_name_a_path(token: str) -> bool:
+    """Can ``token`` be handed to the kernel: no NUL, and every character encodable."""
+    low, high = _ESCAPED_BYTE_SURROGATES
+    first, last = _SURROGATES
+    return "\x00" not in token and all(
+        not first <= char <= last or low <= char <= high for char in token
+    )
+
+
 def _realpath_if_resolvable(token: str, word: str | None = None) -> str | None:
     """Realpath of ``token`` when a link on its path leads elsewhere, else None.
 
@@ -4559,12 +4573,10 @@ def _realpath_if_resolvable(token: str, word: str | None = None) -> str | None:
     :class:`ResolutionFailedError`. A word the kernel could not resolve either
     (over-long prose, a NUL) is no path, and costs one call.
     """
-    if not token:
+    if not token or not _could_name_a_path(token):
         return None
     try:
         os.lstat(token)
-    except ValueError:
-        return None
     except OSError as exc:
         if (
             exc.errno in _NO_SUCH_PATH_ERRNOS
