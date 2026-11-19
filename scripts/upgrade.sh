@@ -472,7 +472,9 @@ _upgrade_lock_acquire() {
         case "$_rc" in
             0) return 0 ;;
             1)
-                if [ "$(date +%s)" -ge "$_deadline" ]; then
+                # -gt, not -ge: the clock has whole seconds, so -ge could give
+                # up after barely more than wait-1 seconds.
+                if [ "$_wait" -le 0 ] || [ "$(date +%s)" -gt "$_deadline" ]; then
                     return 1
                 fi
                 sleep 1
