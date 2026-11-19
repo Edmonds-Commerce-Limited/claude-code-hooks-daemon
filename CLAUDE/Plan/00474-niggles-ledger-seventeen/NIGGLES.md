@@ -7904,3 +7904,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: after the remote renames its default branch, the local `refs/remotes/<remote>/HEAD` keeps pointing at the old name until someone runs `git remote set-head`. The proof then names the old branch as the default; the live-tip confirmation fails closed, so no unsafe delete results, but the refusal is the wrong reason and the owner cannot tell why.
 
 **Status**: ⬜ Open, low priority. Confirm the default with a live `git ls-remote --symref <remote> HEAD` and report a stale tracking HEAD by name, still failing closed.
+
+### N676 — the skill wrappers self-update from unsigned release assets in every session
+
+**Source**: Plan 00625's threat-model review (a Fable sub-agent, 2026-11-19), recorded in its DESIGN ruling 3. The numbering skips N675, which the Plan 00623 branch takes when it merges.
+
+**Evidence**: the skill wrappers refresh themselves from release assets fetched at the start of a session, and nothing verifies a signature on what they fetch. That is a trust gap on every install, whether or not automatic upgrades are on, and it sits outside Plan 00625's scope.
+
+**Status**: ⬜ Open, security-relevant, medium priority. Apply the Plan 00625 trust model (a human-added signers file, a verified tag, the script byte-identical to the verified copy) to the wrapper self-update path, or stop the self-update.
