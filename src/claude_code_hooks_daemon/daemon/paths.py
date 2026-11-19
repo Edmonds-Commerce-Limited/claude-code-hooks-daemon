@@ -48,6 +48,11 @@ logger = logging.getLogger(__name__)
 _UNIX_SOCKET_PATH_LIMIT = 104
 
 
+def _over_socket_limit(path: Path | str) -> bool:
+    """``path`` cannot be bound: the kernel limit counts BYTES, not characters."""
+    return len(os.fsencode(str(path))) > _UNIX_SOCKET_PATH_LIMIT
+
+
 # Stable last-resort hostname used when neither $HOSTNAME nor the OS hostname
 # is available. "localhost" degrades runtime-file isolation to the same
 # behaviour as a single unsuffixed daemon — which is correct for a host that
@@ -1579,8 +1584,10 @@ def _pick_short_path_root_dir(*, warn_message: str) -> Path:
     Raises:
         UnsafeRuntimeDirError: when the last resort exists but is not private.
     """
+    # A relative value (invalid per the XDG spec) would tie the socket to each
+    # caller's working directory, so callers would disagree on it.
     xdg_dir = os.environ.get("XDG_RUNTIME_DIR")
-    if xdg_dir and _is_private_dir(Path(xdg_dir)):
+    if xdg_dir and Path(xdg_dir).is_absolute() and _is_private_dir(Path(xdg_dir)):
         return Path(xdg_dir)
 
     run_user = _RUN_USER_ROOT / str(os.geteuid())
@@ -1856,7 +1863,7 @@ def fit_socket_path(project_dir: Path | str, requested: Path | str | None = None
         path = _get_untracked_dir(project_path) / f"daemon{_get_hostname_suffix()}.sock"
     else:
         path = Path(requested)
-    if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:
+    if _over_socket_limit(path):
         return _get_fallback_runtime_dir(Path(project_dir).resolve(), "sock")
     return path
 
@@ -1872,7 +1879,7 @@ def fit_pid_path(project_dir: Path | str, requested: Path | str | None = None) -
         path = _get_untracked_dir(Path(project_dir).resolve()) / pid_file_name()
     else:
         path = Path(requested)
-    if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:
+    if _over_socket_limit(path):
         return _get_fallback_runtime_dir(Path(project_dir).resolve(), "pid")
     return path
 

@@ -123,6 +123,20 @@ class TestEveryCallerGetsAFittedPath:
         if length <= _UNIX_SOCKET_PATH_LIMIT:
             assert fitted == requested
 
+    def test_the_limit_is_measured_in_bytes_not_characters(
+        self, runtime_dir: Path, long_project: Path
+    ) -> None:
+        # 78 characters but 148 bytes: the kernel counts bytes, so this
+        # cannot be bound and must be fitted like any other over-limit path.
+        requested = Path("/" + "é" * 70 + "/d.sock")
+        assert len(str(requested)) <= _UNIX_SOCKET_PATH_LIMIT
+        assert len(os.fsencode(requested)) > _UNIX_SOCKET_PATH_LIMIT
+
+        assert fit_socket_path(long_project, requested) == get_socket_path(long_project)
+        assert fit_pid_path(long_project, requested.with_suffix(".pid")) == pid_path_for(
+            long_project
+        )
+
     def test_pid_fit_decides_on_the_pid_paths_own_length(
         self, runtime_dir: Path, long_project: Path
     ) -> None:
@@ -181,6 +195,20 @@ class TestShortPathRootIsPrivate:
         monkeypatch.setenv("XDG_RUNTIME_DIR", str(link))
 
         assert link not in get_socket_path(long_project).parents
+
+    def test_a_relative_runtime_dir_is_not_used(
+        self, runtime_dir: Path, long_project: Path, no_runtime_dir: Path, monkeypatch
+    ) -> None:
+        # A relative $XDG_RUNTIME_DIR (invalid per the XDG spec) would make the
+        # socket path depend on each caller's working directory, so the daemon,
+        # the hook and the CLI could each compute a different socket.
+        monkeypatch.chdir(runtime_dir.parent)
+        monkeypatch.setenv("XDG_RUNTIME_DIR", runtime_dir.name)
+
+        socket_path = get_socket_path(long_project)
+
+        assert socket_path.is_absolute()
+        assert socket_path.parent.parent == no_runtime_dir
 
     def test_without_a_runtime_dir_a_private_subdir_of_tmp_is_used(
         self, long_project: Path, no_runtime_dir: Path

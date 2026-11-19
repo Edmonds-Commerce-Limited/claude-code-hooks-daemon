@@ -2271,6 +2271,9 @@ PID_PATH="${CLAUDE_HOOKS_PID_PATH:-$_untracked_dir/daemon${_hostname_suffix}.pid
 # here, and again by start_daemon's readiness poll, so the hook that starts
 # the daemon also reaches it (Plan 00628).
 _hooks_daemon_follow_discovery() {
+    # ${#var} counts BYTES only in the C locale; the AF_UNIX limit is in bytes,
+    # as paths._over_socket_limit measures it.
+    local LC_ALL=C
     [[ -S "$SOCKET_PATH" ]] && return 0
     if [[ -n "${CLAUDE_HOOKS_SOCKET_PATH:-}" ]] && ((${#SOCKET_PATH} <= 104)); then
         return 0
