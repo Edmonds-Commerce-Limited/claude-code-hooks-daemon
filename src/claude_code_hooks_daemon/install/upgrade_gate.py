@@ -113,6 +113,8 @@ _RULE: Final[str] = "=" * 70
 _UNKNOWN_FROM_PHRASE: Final[str] = "an unknown version"
 _VERDICT_PREFIX: Final[str] = "verdict="
 _NONCE_PREFIX: Final[str] = "nonce="
+#: The count of READ THIS FIRST reasons; Layer 2 stops an unattended run on it.
+_ESCALATIONS_PREFIX: Final[str] = "escalations="
 #: Only the gate's own user may read or write its verdict file.
 _VERDICT_FILE_MODE: Final[int] = 0o600
 _EARLIEST_RELEASE: Final[str] = "0.0.0"
@@ -807,7 +809,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _write_verdict(path: Path, nonce: str, report: GateReport) -> None:
-    lines = [f"{_NONCE_PREFIX}{nonce}", f"{_VERDICT_PREFIX}{report.verdict.value}"]
+    lines = [
+        f"{_NONCE_PREFIX}{nonce}",
+        f"{_VERDICT_PREFIX}{report.verdict.value}",
+        f"{_ESCALATIONS_PREFIX}{len(report.escalations)}",
+    ]
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, _VERDICT_FILE_MODE)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         handle.write("\n".join(lines) + "\n")

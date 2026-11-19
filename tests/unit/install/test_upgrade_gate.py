@@ -972,7 +972,73 @@ class TestMain:
         digest = capsys.readouterr().err.split("--skip-reading-confirmation=", 1)[1].split()[0]
         verdict_file.unlink()
         assert main([*argv, "--acknowledgement", digest]) == 0
-        assert verdict_file.read_text().splitlines() == ["nonce=n0nce", "verdict=proceed"]
+        assert verdict_file.read_text().splitlines() == [
+            "nonce=n0nce",
+            "verdict=proceed",
+            # The digest confirms the reading; it does not remove the reasons,
+            # which is what lets Layer 2 refuse an unattended run on them.
+            "escalations=1",
+        ]
+
+    def test_the_verdict_file_counts_the_read_this_first_reasons(
+        self,
+        tmp_path: Path,
+        daemon_dir: Path,
+        project: Path,
+        untracked: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Layer 2 tells a human stop from an ordinary reading stop by this count."""
+        verdict_file = tmp_path / "verdict"
+        argv = self._argv(
+            daemon_dir,
+            project,
+            untracked,
+            "--installed-stamp",
+            "v3.66.0",
+            "--to",
+            "4.0.0",
+            "--verdict-file",
+            str(verdict_file),
+            "--nonce",
+            "n0nce",
+        )
+        assert main(argv) == GateVerdict.NEEDS_ACKNOWLEDGEMENT.exit_code
+        err = capsys.readouterr().err
+        listed = [line for line in err.splitlines() if line.startswith("  ! ")]
+        assert listed, "a MAJOR bump is listed under READ THIS FIRST"
+        lines = verdict_file.read_text().splitlines()
+        assert lines[:2] == ["nonce=n0nce", "verdict=needs-acknowledgement"]
+        assert f"escalations={len(listed)}" in lines
+
+    def test_an_ordinary_reading_stop_has_no_escalations(
+        self,
+        tmp_path: Path,
+        daemon_dir: Path,
+        upgrades: Path,
+        project: Path,
+        untracked: Path,
+    ) -> None:
+        _guide(upgrades, "v3.64.0-to-v3.65.0")
+        verdict_file = tmp_path / "verdict"
+        main(
+            self._argv(
+                daemon_dir,
+                project,
+                untracked,
+                "--installed-stamp",
+                "v3.64.0",
+                "--to",
+                "3.66.0",
+                "--verdict-file",
+                str(verdict_file),
+                "--nonce",
+                "n0nce",
+            )
+        )
+        lines = verdict_file.read_text().splitlines()
+        assert "verdict=needs-acknowledgement" in lines
+        assert "escalations=0" in lines
 
     def test_a_verdict_file_already_there_is_never_reused(
         self, tmp_path: Path, daemon_dir: Path, project: Path, untracked: Path
