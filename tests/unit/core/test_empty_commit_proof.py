@@ -711,9 +711,14 @@ class TestContentFreeRule:
         monkeypatch.setattr(branch_park, "run_git", real)
         assert _verdicts(repo, "feat") == _all(True)
 
-    def test_a_cached_empty_commits_only_proof_runs_no_walk_the_second_time(
+    def test_a_cached_empty_commits_only_proof_is_walked_again_never_trusted(
         self, repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """A cached positive never authorises a remote delete: it is re-proven (Plan 00626).
+
+        The cache is a plain file in the working tree, so a delete resting on it could
+        be forged; the walk runs again and reads the stored objects again.
+        """
         _plain_unpark_over_merged(repo)
         config = BranchesConfig(default="main")
         first = prove_remote_merged(repo, "origin", ["feat"], "main", config)
@@ -725,15 +730,10 @@ class TestContentFreeRule:
             spawned.append(args)
             return real(directory, *args, **kwargs)
 
-        def no_object_read(*_args: Any, **_kwargs: Any) -> object:
-            raise AssertionError("a cached proof must read no commit objects")
-
         monkeypatch.setattr(branch_park, "run_git", spy)
-        monkeypatch.setattr(branch_park, "read_blobs", no_object_read)
         second = prove_remote_merged(repo, "origin", ["feat"], "main", config)
         assert second.evidence == {"feat": branch_safety.TIER_EMPTY_COMMITS_ONLY}
-        assert spawned
-        assert not [args for args in spawned if _is_walk(args)]
+        assert [args for args in spawned if _is_walk(args)]
 
     def test_an_integration_line_with_an_empty_commit_stays_refused(self, repo: Path) -> None:
         """A line is proven by ancestry of the default only; empty commits never prove one."""

@@ -54,7 +54,7 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
     placement_problem,
 )
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
-from claude_code_hooks_daemon.utils.git_sync import resolve_default_branch
+from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 
@@ -399,13 +399,17 @@ _PUSH_DELETE_VERBOSE: Final[str] = (
     "This command deletes a branch or tag on the REMOTE repository. Other people and other "
     "machines share that ref, and nothing in this checkout (reflog included) restores it.\n\n"
     "It is ALLOWED when every named branch's remote-tracking ref is already merged into the "
-    "default branch or an integration line (`branches.integration_lines`; one "
-    "`git for-each-ref --merged` per target), or its patches are all in the default branch "
-    "(`git cherry`), or every file version on it survives (byte-identical to one the default "
-    "branch holds) AND a commit on the default branch's first-parent history holds the "
-    "branch's net change (a squash merge or a renamed pull request), AND `git ls-remote` "
-    "shows the remote's live tip equal to it (a stale tracking ref is denied: run `git fetch` and retry), judged in the "
-    "repository the command runs in; nothing is lost then. An integration line itself is "
+    "REMOTE default branch (`refs/remotes/<remote>/<default>`, never the local branch, whose "
+    "commits may be unpushed) or an integration line's remote-tracking ref "
+    "(`branches.integration_lines`; one `git for-each-ref --merged` per target), or a commit "
+    "on the remote default's first-parent history holds the branch's net change (a squash "
+    "merge or a renamed pull request), or its patches are all in the remote default "
+    "(`git cherry`) AND every path it changes is held at its exact bytes by some commit there "
+    "(cherry-picks interleaved with other edits), AND `git ls-remote` shows the remote's live "
+    "tips of the branch and of the ref that proved it equal to the tracking refs (a stale "
+    "tracking ref is denied: run `git fetch` and retry), judged in the repository the command "
+    "runs in; nothing is lost then. With `branches.default: auto` the remote default is read "
+    "from `refs/remotes/<remote>/HEAD` only. An integration line itself is "
     "judged against the DEFAULT branch only (merged into another line does not count). "
     "Tags, the default branch, an exempt or protected name (`branches.exempt`, "
     "`branches.protected_names`), an unmerged branch (an integration line not yet merged "
@@ -884,9 +888,13 @@ def _remote_delete_note(command: str, cwd: Path, branches: BranchesConfig) -> st
         directory = invocation_directory(run, cwd)
         if not path_is_dir(directory, unreadable_means=False):
             return _unverified(f"`{directory}` is not a directory")
-        default = resolve_default_branch(branches, directory)
+        default = resolve_remote_default_branch(branches, directory, remote=remote)
         if default is None:
-            return _unverified("the default branch could not be determined")
+            return _unverified(
+                f"the remote's default branch could not be determined (no "
+                f"`refs/remotes/{remote}/HEAD`; run `git remote set-head "
+                f"{remote} --auto`, or set `branches.default`)"
+            )
         judged: list[str] = []
         for ref in refs:
             problem = named_ref_problem(remote, ref, default, branches)

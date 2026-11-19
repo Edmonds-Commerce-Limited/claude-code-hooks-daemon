@@ -132,7 +132,8 @@ class TestProveRemoteMerged:
             proof = prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
         assert proof.tips == {"feat": tip}
         assert spy.call_count == 1
-        assert spy.call_args.kwargs["patterns"] == ("refs/heads/feat",)
+        # The same one call confirms the remote default the proof read (Plan 00626).
+        assert spy.call_args.kwargs["patterns"] == ("refs/heads/feat", "refs/heads/main")
         assert spy.call_args.kwargs["timeout"] == remote_refs.Timeout.GIT_CONTEXT
 
     def test_a_failed_listing_proves_nothing(self, repo: Path) -> None:
