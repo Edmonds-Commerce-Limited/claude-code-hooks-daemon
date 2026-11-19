@@ -405,6 +405,87 @@ installed version can be told, as above. It also prints
 `THE UPGRADE DID NOT COMPLETE`, with the command that runs the target's own
 Layer 1 instead.
 
+### Unattended upgrades (the `daemon-auto-upgrade` authorisation)
+
+The standing authorisation `daemon-auto-upgrade`
+(`handlers.user_prompt_submit.standing_authorisations`) lets an agent upgrade
+the daemon to the latest published release without being asked. It is the
+one built-in authorisation that is **on by default**, at the daemon owner's
+request; with no entry for it in the project config, the injected text says
+it is the shipped default, not a request the project recorded. Switch it off
+with `{id: daemon-auto-upgrade, enabled: false}` in the `authorisations` list.
+
+**Trigger.** Only the SessionStart version check, on its existing daily
+`ls-remote`. When a newer release exists, the authorisation is in force and
+the local pre-check passes, its advisory says `AUTO-UPGRADE AUTHORISED` and
+asks the agent to run the hooks-daemon skill's upgrade with `--unattended`.
+Nothing runs an upgrade by itself: no cron, no hook, no background process.
+The agent then completes the skill's steps (truth changes, post-upgrade tasks,
+commit) as it would for an asked-for upgrade.
+
+**What `--unattended` refuses.** It only adds refusals; it never removes one.
+
+| Refused, unattended                                       | Where   | Exit |
+| --------------------------------------------------------- | ------- | ---- |
+| another upgrade or provision sync holds the upgrade lock  | Layer 1 | 75   |
+| `untracked/release-state.json` exists (release in flight) | Layer 1 | 5    |
+| uncommitted changes in the project                        | Layer 1 | 5    |
+| a MAJOR version bump                                      | Layer 1 | 5    |
+| a version whose earlier unattended attempt failed         | Layer 1 | 5    |
+| a target whose Layer 2 does not support unattended mode   | Layer 1 | 5    |
+| anything the gate lists under `READ THIS FIRST`           | Layer 2 | 5    |
+| combined with `--release`, `--uv` or an older VERSION     | Layer 1 | 1    |
+
+An ordinary reading stop (exit 3: upgrade guides, pre-upgrade tasks with
+hits, no `READ THIS FIRST`) is not a human stop: the agent reads, acts and
+re-runs with the digest, as the skill says. Exit 5 is: report the reason and
+leave the upgrade to a human.
+
+**Rollback.** When the new daemon does not start (Step 15) or post-upgrade
+validation fails (Step 16), an unattended run rolls back to the snapshot and
+restarts the previous daemon, and exits 1. An attended run keeps the new code
+for a human to fix, as before. The rollback restores the checkout, config and
+hooks; the venv is the one built for the target, as in any rollback.
+
+**No upgrade loop.** An unattended run that ends in exit 5 or a failure
+records it in `.claude/hooks-daemon/untracked/auto-upgrade/v<version>.state`
+(`status` = `needs-human` or `failed`, `target`, `from`, `detail`). While that
+record exists the version check does not invite an unattended upgrade to that
+version (it reports the record instead), and Layer 1 refuses it unattended. A
+newer release has no record and is tried. A successful upgrade removes the
+records for the versions it reached; a human can always run the upgrade
+attended.
+
+**Trust.** An unattended upgrade trusts what a manual one does: the tag
+fetched from the fixed origin URL over TLS, origin not rewritten to another
+repository, `version.py` naming the tag's version, and the target's own gate.
+Release tags are signed, but **no signature is verified**, and unattended
+mode removes the human step of reviewing the script before it runs.
+
+**The upgrade lock.** Every Layer 1 run (attended or not) and every
+`provision.sh` sync takes one lock before it changes the daemon clone:
+`<git common dir>/hooks-daemon-upgrade.lock` (`.git/hooks-daemon-upgrade.lock`
+in a plain checkout), never tracked and never in `git status`. It is created
+with an exclusive create, and records the owner's host, boot id, PID
+namespace, pid and that pid's start time. The owner refreshes
+`<lock>.beat` every 20 seconds. Another process takes it over only when the
+owner is **provably dead** (same boot id and PID namespace, and the pid is
+gone or now belongs to another process) or **expired** (no heartbeat for 600
+seconds). A holder in another container is never judged by its pid, which
+that container cannot see. Two takers are serialised through
+`<lock>.takeover`. While the lock is held, Layer 1 prints the holder and exits
+75 with nothing changed, or waits with `--lock-wait=SECONDS`; the background
+provision sync skips. The waiter's next session start sees the upgrade done.
+
+Filesystems: correct where an exclusive create is atomic and every party sees
+the same file: a local disk, a bind mount or volume shared by containers on
+one host, NFSv3 or later. Not on NFSv2 or mounts that do not honour exclusive
+create. Across hosts, expiry compares the writer's clock with the reader's,
+so the clocks must agree to well within 600 seconds.
+
+**The daemon's own repository** never auto-upgrades: Layer 2 and provision
+refuse in self-install mode, and its config lists the entry `enabled: false`.
+
 ### Why Fetch from GitHub?
 
 **Never use the local upgrade script** (`.claude/hooks-daemon/scripts/upgrade.sh`) because:
