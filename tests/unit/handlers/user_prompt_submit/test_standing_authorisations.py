@@ -26,10 +26,12 @@ from claude_code_hooks_daemon.handlers.user_prompt_submit.standing_authorisation
     _SIGNAL_SUFFIX,
     _SOURCE_REINFORCEMENT,
     AUTHORISATION_COMMIT_PUSH_CADENCE,
+    AUTHORISATION_DAEMON_AUTO_UPGRADE,
     AUTHORISATION_SUBAGENT_DELEGATION,
     AUTHORISATION_WORKFLOWS,
     SUPERVISOR_CHANNEL_HEADER,
     StandingAuthorisationsHandler,
+    auto_upgrade_authorised,
     write_standing_auth_signal,
 )
 
@@ -43,8 +45,16 @@ def _hook_input(prompt: str = _PROMPT) -> dict[str, Any]:
 
 
 def _enable(handler: StandingAuthorisationsHandler, *ids: str) -> None:
-    """Apply config options the way the registry does — via setattr."""
+    """Apply config options the way the registry does — via setattr.
+
+    The shipped-default auto-upgrade entry is switched off explicitly so each
+    test sees only the entries it names (it has its own test class below).
+    """
     handler._authorisations = [{"id": entry_id, "enabled": True} for entry_id in ids]
+    if AUTHORISATION_DAEMON_AUTO_UPGRADE not in ids:
+        handler._authorisations.append(
+            {"id": AUTHORISATION_DAEMON_AUTO_UPGRADE, "enabled": False}
+        )
 
 
 class TestInitialisation:
@@ -61,23 +71,25 @@ class TestInitialisation:
 class TestNothingIsAuthorisedByDefault:
     """Decision 3 — the mechanism ships on, every authorisation ships off."""
 
-    def test_fresh_handler_emits_no_context(self) -> None:
+    def test_fresh_handler_emits_only_the_auto_upgrade_default(self) -> None:
         result = StandingAuthorisationsHandler().handle(_hook_input())
-        assert result.context == []
+        assert len(result.context) == 1
+        assert "shipped default" in result.context[0]
 
     def test_fresh_handler_never_denies(self) -> None:
         result = StandingAuthorisationsHandler().handle(_hook_input())
         assert result.decision == Decision.ALLOW
 
-    def test_every_builtin_entry_ships_disabled(self) -> None:
+    def test_every_builtin_entry_but_auto_upgrade_ships_disabled(self) -> None:
         """The default set exists to be discoverable, not to be active."""
         handler = StandingAuthorisationsHandler()
-        assert handler._resolve_entries() == []
+        assert handler._enabled_ids() == {AUTHORISATION_DAEMON_AUTO_UPGRADE}
 
     def test_explicitly_disabled_entry_stays_silent(self) -> None:
         handler = StandingAuthorisationsHandler()
         handler._authorisations = [
             {"id": AUTHORISATION_SUBAGENT_DELEGATION, "enabled": False},
+            {"id": AUTHORISATION_DAEMON_AUTO_UPGRADE, "enabled": False},
         ]
         assert handler.handle(_hook_input()).context == []
 
@@ -142,6 +154,7 @@ class TestTextIsARecordedRequestNeverACountermand:
             AUTHORISATION_SUBAGENT_DELEGATION,
             AUTHORISATION_WORKFLOWS,
             AUTHORISATION_COMMIT_PUSH_CADENCE,
+            AUTHORISATION_DAEMON_AUTO_UPGRADE,
         ],
     )
     def test_no_entry_tells_the_agent_to_disregard_instructions(self, entry_id: str) -> None:
@@ -157,6 +170,7 @@ class TestTextIsARecordedRequestNeverACountermand:
             AUTHORISATION_SUBAGENT_DELEGATION,
             AUTHORISATION_WORKFLOWS,
             AUTHORISATION_COMMIT_PUSH_CADENCE,
+            AUTHORISATION_DAEMON_AUTO_UPGRADE,
         ],
     )
     def test_every_entry_attributes_the_request_to_the_project(self, entry_id: str) -> None:
@@ -164,6 +178,101 @@ class TestTextIsARecordedRequestNeverACountermand:
         _enable(handler, entry_id)
         text = " ".join(handler.handle(_hook_input()).context).lower()
         assert "project" in text
+
+
+class TestDaemonAutoUpgrade:
+    """Plan 00625: the one entry that ships enabled, at the owner's request."""
+
+    def _handler(self, authorisations: list[Any] | None) -> StandingAuthorisationsHandler:
+        handler = StandingAuthorisationsHandler()
+        handler._authorisations = authorisations
+        return handler
+
+    def _text(self, handler: StandingAuthorisationsHandler) -> str:
+        return " ".join(handler.handle(_hook_input()).context)
+
+    def test_absent_entry_delivers_text_marked_as_shipped_default(self) -> None:
+        text = self._text(self._handler(None))
+        assert "shipped default" in text
+        assert "{id: daemon-auto-upgrade, enabled: false}" in text
+        assert "--unattended" in text
+
+    def test_recorded_entry_uses_the_recorded_wording(self) -> None:
+        text = self._text(
+            self._handler([{"id": AUTHORISATION_DAEMON_AUTO_UPGRADE, "enabled": True}])
+        )
+        assert "shipped default" not in text
+        assert "recorded in" in text
+        assert "--unattended" in text
+
+    def test_text_states_what_it_does_not_cover(self) -> None:
+        text = self._text(self._handler(None))
+        for phrase in ("MAJOR", "READ THIS FIRST", "release in progress", "failed"):
+            assert phrase in text
+
+    def test_explicit_false_turns_it_off(self) -> None:
+        handler = self._handler([{"id": AUTHORISATION_DAEMON_AUTO_UPGRADE, "enabled": False}])
+        assert self._text(handler) == ""
+
+    def test_non_boolean_enabled_leaves_the_default(self) -> None:
+        handler = self._handler([{"id": AUTHORISATION_DAEMON_AUTO_UPGRADE, "enabled": "no"}])
+        assert "shipped default" in self._text(handler)
+
+    def test_other_entries_do_not_switch_it_off(self) -> None:
+        handler = self._handler([{"id": AUTHORISATION_WORKFLOWS, "enabled": True}])
+        assert len(handler.handle(_hook_input()).context) == 2
+
+    def test_short_form_names_the_default_and_the_opt_out(self) -> None:
+        handler = self._handler(None)
+        clock = _FakeClock()
+        handler._clock = clock
+        handler.handle(_hook_input())
+        clock.advance(handler._interval_minutes * 60 + 1)
+        later = " ".join(handler.handle(_hook_input()).context)
+        assert "shipped default" in later
+        assert "hooks-daemon.yaml" in later
+
+    def test_supervisor_channel_names_it(self) -> None:
+        lines = self._handler(None)._render_supervisor_lines()
+        assert "automatic daemon upgrades" in lines[1]
+
+    def test_acceptance_test_expects_the_default_text(self) -> None:
+        tests = StandingAuthorisationsHandler().get_acceptance_tests()
+        patterns = [p for t in tests for p in t.expected_message_patterns]
+        assert any("STANDING AUTHORISATION" in p for p in patterns)
+
+    def test_claude_md_says_one_entry_is_default_on(self) -> None:
+        guidance = StandingAuthorisationsHandler().get_claude_md()
+        assert guidance is not None
+        assert "Every entry ships disabled" not in guidance
+        assert AUTHORISATION_DAEMON_AUTO_UPGRADE in guidance
+
+
+class TestAutoUpgradeAuthorised:
+    def test_no_config_is_authorised(self) -> None:
+        assert auto_upgrade_authorised(None) is True
+
+    def test_empty_block_is_authorised(self) -> None:
+        assert auto_upgrade_authorised({}) is True
+
+    def test_handler_disabled_is_not_authorised(self) -> None:
+        assert auto_upgrade_authorised({"enabled": False}) is False
+
+    def test_entry_absent_is_authorised(self) -> None:
+        config = {"enabled": True, "options": {"authorisations": [{"id": "x", "enabled": True}]}}
+        assert auto_upgrade_authorised(config) is True
+
+    def test_explicit_false_is_not_authorised(self) -> None:
+        config = {"options": {"authorisations": [{"id": "daemon-auto-upgrade", "enabled": False}]}}
+        assert auto_upgrade_authorised(config) is False
+
+    def test_explicit_true_is_authorised(self) -> None:
+        config = {"options": {"authorisations": [{"id": "daemon-auto-upgrade", "enabled": True}]}}
+        assert auto_upgrade_authorised(config) is True
+
+    def test_malformed_authorisations_leave_the_default(self) -> None:
+        assert auto_upgrade_authorised({"options": {"authorisations": "nope"}}) is True
+        assert auto_upgrade_authorised({"options": "nope"}) is True
 
 
 class TestMatches:

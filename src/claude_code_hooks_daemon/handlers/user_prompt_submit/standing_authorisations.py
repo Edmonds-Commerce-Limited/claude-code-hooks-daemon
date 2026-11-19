@@ -36,12 +36,17 @@ UserPromptSubmit events too. None is a human prompt, so none advances the
 prompt counter or earns a reinforcement: that both removes the every-cron-tick
 spam and gives the supervisor-channel loop-guard for free.
 
-**Nothing is authorised by default** (Decision 3). The handler ships enabled
-so the options are discoverable; every built-in entry ships disabled. Every
-other default-on handler in this codebase ADDS a restriction — this one
-removes one, and shipping that active would have the daemon fabricate the very
-consent the injected text claims. ``config-changes/`` with ``recommended:
-true`` is what carries the option to existing installs.
+**Almost nothing is authorised by default** (Decision 3). The handler ships
+enabled so the options are discoverable; every built-in entry ships disabled
+EXCEPT ``daemon-auto-upgrade``, which ships enabled at the owner's request
+(Plan 00625). Every other default-on handler in this codebase ADDS a
+restriction — this one removes one, and shipping that active would have the
+daemon fabricate the very consent the injected text claims. So the one
+default-on entry says so: while a project has not listed it, its text states
+that it is the daemon's shipped default, not a request the project recorded,
+and names the line that switches it off. Only an explicit ``enabled: false``
+turns it off. ``config-changes/`` with ``recommended: true`` is what carries
+the other options to existing installs.
 
 **The text is a recorded request, never a countermand** (Decision 2). Each
 entry states that the PROJECT has authorised the behaviour and names the
@@ -54,8 +59,9 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Final
 
@@ -84,6 +90,16 @@ _KEY_ENABLED: Final[str] = "enabled"
 AUTHORISATION_SUBAGENT_DELEGATION: Final[str] = "subagent-delegation"
 AUTHORISATION_WORKFLOWS: Final[str] = "workflow-orchestration"
 AUTHORISATION_COMMIT_PUSH_CADENCE: Final[str] = "commit-push-cadence"
+AUTHORISATION_DAEMON_AUTO_UPGRADE: Final[str] = "daemon-auto-upgrade"
+
+# Per-entry default (Plan 00625). The ONLY id that ships enabled; reverse the
+# owner's decision by emptying this set. Only an explicit `enabled: false`
+# in the project's config turns a default-on entry off.
+_DEFAULT_ON_IDS: Final[frozenset[str]] = frozenset({AUTHORISATION_DAEMON_AUTO_UPGRADE})
+
+# Config keys of the handler block, for `auto_upgrade_authorised`.
+_KEY_OPTIONS: Final[str] = "options"
+_KEY_AUTHORISATIONS: Final[str] = "authorisations"
 
 # Where a reader can audit and revoke any of this. Named in every entry's
 # text: an authorisation that cannot be found is not auditable, and one that
@@ -129,6 +145,51 @@ _WORKFLOWS_TEXT: Final[str] = (
     "and withdrawn."
 )
 
+# ── daemon-auto-upgrade (Plan 00625) ───────────────────────────────────────
+# What the authorisation covers and, as much, what it does not. The scripts
+# enforce every exclusion; the text exists so the agent does not try.
+_AUTO_UPGRADE_BODY: Final[str] = (
+    "Automatic hooks-daemon upgrades are pre-requested here: when the "
+    "session-start notice says a newer PUBLISHED release exists, this project "
+    "asks that you upgrade without waiting to be asked, by running the "
+    "hooks-daemon skill's upgrade with --unattended (Skill tool: "
+    "skill=hooks-daemon, args=upgrade --unattended) and finishing the skill's "
+    "steps (truth changes, post-upgrade tasks, commit). It does not cover a "
+    "MAJOR version bump, anything the pre-deploy gate lists under READ THIS "
+    "FIRST, a release in progress, a tree with uncommitted changes, or a "
+    "version whose unattended attempt already failed: those need a human."
+)
+_AUTO_UPGRADE_OPT_OUT: Final[str] = "{id: daemon-auto-upgrade, enabled: false}"
+
+_AUTO_UPGRADE_TEXT: Final[str] = (
+    "STANDING AUTHORISATION (on file for this project). "
+    f"{_AUTO_UPGRADE_BODY} "
+    f"This request is recorded in {_CONFIG_LOCATION}, where it can be read "
+    "and withdrawn."
+)
+
+# Used while the project's config does not list the entry: the daemon, not the
+# project, is the source, and the text says so (Decision 3's honesty).
+_AUTO_UPGRADE_DEFAULT_TEXT: Final[str] = (
+    "STANDING AUTHORISATION (the daemon's shipped default; this project has "
+    f"not recorded this request itself). {_AUTO_UPGRADE_BODY} "
+    f"To switch it off, list `{_AUTO_UPGRADE_OPT_OUT}` in {_CONFIG_LOCATION}."
+)
+
+_AUTO_UPGRADE_SHORT: Final[str] = (
+    "STANDING AUTHORISATION (on file): automatic hooks-daemon upgrades to the "
+    "latest published release, via the hooks-daemon skill's upgrade with "
+    "--unattended; a human decides a MAJOR bump or anything under READ THIS "
+    "FIRST. Recorded in .claude/hooks-daemon.yaml."
+)
+_AUTO_UPGRADE_DEFAULT_SHORT: Final[str] = (
+    "STANDING AUTHORISATION (the daemon's shipped default, not recorded by "
+    "this project): automatic hooks-daemon upgrades via the hooks-daemon "
+    "skill's upgrade with --unattended; a human decides a MAJOR bump or "
+    f"anything under READ THIS FIRST. Switch off with `{_AUTO_UPGRADE_OPT_OUT}` "
+    "in .claude/hooks-daemon.yaml."
+)
+
 # ── Short forms, used for every reinforcement after the first delivery ──────
 # The short form still names where the request is recorded, because an
 # authorisation that cannot be audited is not a request.
@@ -150,19 +211,29 @@ _WORKFLOWS_SHORT: Final[str] = (
     "in .claude/hooks-daemon.yaml."
 )
 
-# The built-in set. Every entry ships DISABLED (Decision 3) — the set exists so
-# the options are discoverable and adopting one is a single flag, not so that
-# anything is authorised on a fresh install.
+# The built-in set. Every entry ships DISABLED (Decision 3) except the ids in
+# `_DEFAULT_ON_IDS` — the set exists so the options are discoverable and
+# adopting one is a single flag.
 _BUILTIN_TEXTS: Final[dict[str, str]] = {
     AUTHORISATION_SUBAGENT_DELEGATION: _SUBAGENT_DELEGATION_TEXT,
     AUTHORISATION_WORKFLOWS: _WORKFLOWS_TEXT,
     AUTHORISATION_COMMIT_PUSH_CADENCE: _COMMIT_PUSH_CADENCE_TEXT,
+    AUTHORISATION_DAEMON_AUTO_UPGRADE: _AUTO_UPGRADE_TEXT,
 }
 
 _BUILTIN_SHORT_TEXTS: Final[dict[str, str]] = {
     AUTHORISATION_SUBAGENT_DELEGATION: _SUBAGENT_DELEGATION_SHORT,
     AUTHORISATION_WORKFLOWS: _WORKFLOWS_SHORT,
     AUTHORISATION_COMMIT_PUSH_CADENCE: _COMMIT_PUSH_CADENCE_SHORT,
+    AUTHORISATION_DAEMON_AUTO_UPGRADE: _AUTO_UPGRADE_SHORT,
+}
+
+# Wording for a default-on entry the project's config does not list.
+_SHIPPED_DEFAULT_TEXTS: Final[dict[str, str]] = {
+    AUTHORISATION_DAEMON_AUTO_UPGRADE: _AUTO_UPGRADE_DEFAULT_TEXT,
+}
+_SHIPPED_DEFAULT_SHORT_TEXTS: Final[dict[str, str]] = {
+    AUTHORISATION_DAEMON_AUTO_UPGRADE: _AUTO_UPGRADE_DEFAULT_SHORT,
 }
 
 # ── Cadence defaults (Plan 00283) ──────────────────────────────────────────
@@ -248,10 +319,61 @@ _SUPERVISOR_CHANNEL_NAMES: Final[dict[str, str]] = {
     AUTHORISATION_SUBAGENT_DELEGATION: "sub-agent delegation",
     AUTHORISATION_WORKFLOWS: "multi-agent workflow orchestration",
     AUTHORISATION_COMMIT_PUSH_CADENCE: "frequent commit-and-push",
+    AUTHORISATION_DAEMON_AUTO_UPGRADE: "automatic daemon upgrades",
 }
 _SUPERVISOR_CHANNEL_BODY: Final[str] = (
     "On file and still in effect: {names}. Audit or revoke in .claude/hooks-daemon.yaml."
 )
+
+
+class _EntryState(StrEnum):
+    """How one built-in id stands in a project's config."""
+
+    OFF = "off"
+    RECORDED = "recorded"
+    SHIPPED_DEFAULT = "shipped-default"
+
+
+def _entry_state(authorisations: Sequence[Any] | None, entry_id: str) -> _EntryState:
+    """Resolve one id against the project's ``authorisations`` list.
+
+    An explicit ``enabled: false`` always wins (the opt-out). ``enabled: true``
+    is a recorded request. Anything else (no entry, or a non-boolean value)
+    leaves the id's shipped default: on for ``_DEFAULT_ON_IDS``, off otherwise.
+    """
+    values = [
+        entry.get(_KEY_ENABLED)
+        for entry in (authorisations or [])
+        if isinstance(entry, dict) and str(entry.get(_KEY_ID)) == entry_id
+    ]
+    if any(value is False for value in values):
+        return _EntryState.OFF
+    if any(value is True for value in values):
+        return _EntryState.RECORDED
+    if entry_id in _DEFAULT_ON_IDS:
+        return _EntryState.SHIPPED_DEFAULT
+    return _EntryState.OFF
+
+
+def auto_upgrade_authorised(handler_config: Mapping[str, Any] | None) -> bool:
+    """Whether a project's config leaves automatic daemon upgrades authorised.
+
+    ``handler_config`` is the ``handlers.user_prompt_submit.standing_authorisations``
+    block (None when absent). A disabled handler authorises nothing; otherwise
+    only an explicit ``enabled: false`` on the ``daemon-auto-upgrade`` entry
+    turns the shipped default off.
+    """
+    if handler_config is None:
+        return True
+    if handler_config.get(_KEY_ENABLED) is False:
+        return False
+    options = handler_config.get(_KEY_OPTIONS)
+    authorisations = options.get(_KEY_AUTHORISATIONS) if isinstance(options, Mapping) else None
+    if not isinstance(authorisations, list):
+        authorisations = None
+    return (
+        _entry_state(authorisations, AUTHORISATION_DAEMON_AUTO_UPGRADE) is not _EntryState.OFF
+    )
 
 
 def write_standing_auth_signal(
@@ -352,24 +474,34 @@ class StandingAuthorisationsHandler(UserPromptSubmitHandlerBase):
         self._clock: Callable[[], float] = time.time
 
     def _enabled_ids(self) -> set[str]:
-        """Return the ids a project has explicitly enabled.
+        """Return the ids in force: explicitly enabled, plus shipped defaults.
 
         An entry naming an id with no built-in text is ignored rather than
         raising: a config typo must not take the daemon down, and a silently
         absent advisory is the correct failure for an advisory handler.
         """
-        configured = self._authorisations or []
         return {
-            str(entry.get(_KEY_ID))
-            for entry in configured
-            if isinstance(entry, dict) and entry.get(_KEY_ENABLED) is True
+            entry_id
+            for entry_id in _BUILTIN_TEXTS
+            if _entry_state(self._authorisations, entry_id) is not _EntryState.OFF
         }
 
     def _resolve_entries(self, *, short: bool = False) -> list[str]:
-        """Return the text of every ENABLED authorisation, in built-in order."""
-        enabled = self._enabled_ids()
+        """Return the text of every authorisation in force, in built-in order.
+
+        A default-on entry the project's config does not list gets the
+        shipped-default wording, which says it is not a recorded request.
+        """
         texts = _BUILTIN_SHORT_TEXTS if short else _BUILTIN_TEXTS
-        return [text for entry_id, text in texts.items() if entry_id in enabled]
+        defaults = _SHIPPED_DEFAULT_SHORT_TEXTS if short else _SHIPPED_DEFAULT_TEXTS
+        resolved: list[str] = []
+        for entry_id, text in texts.items():
+            state = _entry_state(self._authorisations, entry_id)
+            if state is _EntryState.RECORDED:
+                resolved.append(text)
+            elif state is _EntryState.SHIPPED_DEFAULT:
+                resolved.append(defaults.get(entry_id, text))
+        return resolved
 
     @staticmethod
     def _is_automated_prompt(prompt: str) -> bool:
@@ -506,12 +638,20 @@ class StandingAuthorisationsHandler(UserPromptSubmitHandlerBase):
             "`handlers.user_prompt_submit.standing_authorisations.options.authorisations`, "
             "as a list of `{id, enabled}` entries. Built-in ids: "
             f"`{AUTHORISATION_SUBAGENT_DELEGATION}`, `{AUTHORISATION_WORKFLOWS}`, "
-            f"`{AUTHORISATION_COMMIT_PUSH_CADENCE}`.\n\n"
-            "**Every entry ships disabled.** The handler is enabled so the "
-            "options are discoverable, but nothing is authorised until the "
-            "project turns it on — the daemon must never assert consent that "
-            "was not given. Enabling one is a deliberate act by whoever owns "
-            "the repository, and removing it withdraws the authorisation.\n\n"
+            f"`{AUTHORISATION_COMMIT_PUSH_CADENCE}`, "
+            f"`{AUTHORISATION_DAEMON_AUTO_UPGRADE}`.\n\n"
+            "**One entry ships enabled: "
+            f"`{AUTHORISATION_DAEMON_AUTO_UPGRADE}`** (at the owner's request, "
+            "Plan 00625): the agent may upgrade the daemon to the latest "
+            "published release via the hooks-daemon skill's `--unattended` "
+            "upgrade. While the project's config does not list it, its text "
+            "says it is the daemon's shipped default, not a request the "
+            "project recorded; `{id: daemon-auto-upgrade, enabled: false}` "
+            "switches it off. The other entries ship disabled: nothing else "
+            "is authorised until the project turns it on — the daemon must "
+            "never assert consent that was not given. Enabling one is a "
+            "deliberate act by whoever owns the repository, and removing it "
+            "withdraws the authorisation.\n\n"
             "**Tuning the cadence**: `prompt_interval` (default 5) and "
             "`interval_minutes` (default 15) set when a reinforcement is due. "
             "**Supervisor channel** (`supervisor_channel_enabled`, default "
@@ -530,23 +670,23 @@ class StandingAuthorisationsHandler(UserPromptSubmitHandlerBase):
 
         return [
             AcceptanceTest(
-                title="Standing authorisations are silent until a project enables one",
+                title="Only the shipped-default auto-upgrade authorisation is injected",
                 command='echo "test"',
                 description=(
-                    "Default state check. With no authorisations enabled (the"
-                    " shipped default), submitting a prompt must inject NO"
-                    " standing-authorisation context. Verify by submitting a"
-                    " prompt and confirming no 'STANDING AUTHORISATION' text"
-                    " appears in the system-reminders."
+                    "Default state check. With no authorisations listed in"
+                    " config (the shipped default), submitting a prompt must"
+                    " inject ONLY the daemon-auto-upgrade text, marked as the"
+                    " daemon's shipped default. Verify the first prompt's"
+                    " system-reminders carry 'STANDING AUTHORISATION' once,"
+                    " mention 'shipped default', and carry no sub-agent,"
+                    " workflow or commit-push text."
                 ),
                 expected_decision=Decision.ALLOW,
-                # Deliberately empty: this test asserts that NOTHING is
-                # injected in the shipped default state.
-                expected_message_patterns=[],
+                expected_message_patterns=[r"STANDING AUTHORISATION", r"shipped default"],
                 safety_notes=(
-                    "Advisory only - never blocks. This test asserts ABSENCE, so"
-                    " it fails loudly if the daemon ever starts asserting an"
-                    " authorisation the project did not record."
+                    "Advisory only - never blocks. This test fails loudly if the"
+                    " daemon starts asserting any authorisation other than the"
+                    " one default-on entry, or asserts it as a recorded request."
                 ),
                 test_type=TestType.CONTEXT,
                 requires_event="UserPromptSubmit event (cannot be triggered by subagent)",
