@@ -18,7 +18,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00614: secret guard resolves links against hook cwd](00614-secret-guard-resolves-links-against-hook-cwd/PLAN.md) - Not Started (found by the 00613 probe: a relative Bash token such as `cat link` is resolved against the daemon's cwd `/`, so a link to a protected file passes; also a directory-link grep and a glob under a directory link; fix test-first and fail closed)
 
-- [00613: worktree link secret verb](00613-worktree-link-secret-verb/PLAN.md) - Not Started (peer report: the secret guard denies a relative symlink to a protected file made inside a worktree, which a peer workflow needs; design first, because a link is itself a route to the content and the owner instruction is unverified)
+- [00613: worktree link secret verb](00613-worktree-link-secret-verb/PLAN.md) - In Progress (peer report: the secret guard denies a relative symlink to a protected file made inside a worktree, which a peer workflow needs; design questions settled by delegated ruling: no agent-invocable verb, config seeding in link mode plus a human-run step, copy mode refused for a protected source; Phase 2 tightening ready to build, advising the link gated on Plans 00614 and 00623)
 
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
@@ -30,7 +30,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
-- [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - In Progress (DESIGN.md draft written, awaiting client-seat review; owner request via a client team: redesign the whole branch lifecycle (birth, finish, proof of merge, delete, park, owner) from nine failure classes seen in multi-agent client use, plus letting a client follow a daemon branch tip with a one-step return to the last tag; design first, no guard change ships before review)
+- [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - In Progress (unblocked by delegated ruling in DESIGN §7; open: Task 3.8 surviving-content remote delete, Task 4.6 stacks count as one stream, Task 5.1 fixture proof of the branch tip channel; owner request via a client team: redesign the whole branch lifecycle (birth, finish, proof of merge, delete, park, owner) from nine failure classes seen in multi-agent client use, plus letting a client follow a daemon branch tip with a one-step return to the last tag; design first, no guard change ships before review)
 
 ### Next (ordered; work top to bottom)
 

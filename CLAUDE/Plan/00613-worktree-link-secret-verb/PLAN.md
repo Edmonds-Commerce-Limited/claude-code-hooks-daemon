@@ -29,14 +29,17 @@ own worktree files came from a peer and is not verified here.
 
 ## Goals
 
-- Decide, with the owner, whether a worktree link to a protected file is
-  acceptable at all, and under what conditions.
-- If yes, a verb that creates only that link and nothing else, with the guard
-  unchanged for every other mention.
+- Decide whether a worktree link to a protected file is acceptable at all,
+  and under what conditions (settled by delegated ruling,
+  [DESIGN.md Rulings](DESIGN.md#rulings); the owner can overturn it).
+- No agent-invocable verb. The shipped config seeding is made safe for a
+  protected source (copy refused, each link audited), and the link route is
+  documented once the guard resolves links (Plans 00614 and 00623).
 
 ## Non-Goals
 
-- Loosening `R-SECRET-BASH-MENTION` for any command other than the verb.
+- Loosening `R-SECRET-BASH-MENTION` for any command at all.
+- The verb of DESIGN sections 3 to 8, unless the owner's own typed yes reopens it.
 - Copying or printing a protected file, or any absolute link.
 
 ## Tasks
@@ -54,24 +57,51 @@ own worktree files came from a peer and is not verified here.
   checks, how the protected set is read (never its content), and the owner
   question: is a link acceptable, and is the instruction from the owner
   verified in a human line of the team history.
-- [ ] ⬜ **Task 1.3**: Owner decision recorded in the plan journal before any code.
+- [x] ✅ **Task 1.3**: (Settled by a fable sub-agent under the owner's
+  delegation, 2026-11-19, not the owner's own words; see
+  [DESIGN.md Rulings](DESIGN.md#rulings) and the journal.) Decision recorded
+  in the plan journal before any code: no agent-invocable verb; config
+  seeding in link mode plus a human-run step; copy mode refused for a
+  protected source. The verb is reopened only by the owner's own typed yes.
 
-### Phase 2: Implementation (only after 1.3 says yes)
+### Phase 2: Tighten the seeding executor (may start now; it only tightens)
 
-- [ ] ⬜ **Task 2.1**: Test-first: the verb refuses a non-worktree target, an
-  absolute link, a copy, any path outside the primary checkout's protected set,
-  and an existing destination; it creates exactly one relative symlink otherwise.
-- [ ] ⬜ **Task 2.2**: The guard keeps denying every other mention; a test pins
-  that a hand-typed `ln -s` of a protected path is still denied.
-- [ ] ⬜ **Task 2.3**: Release note.
+- [ ] ⬜ **Task 2.1**: Test-first: `utils/worktree_seeding.py` refuses
+  `mode: copy` for a seed source the secret guard protects, using the guard's
+  own matcher over paths only (never content). The refusal names the check
+  and the seed by role. A config that cannot be read refuses the protected
+  decision rather than falling back. An unprotected seed and a protected seed
+  in link mode behave as today.
+- [ ] ⬜ **Task 2.2**: Test-first: each protected source seeded as a link
+  appends one audit line (DESIGN section 7 fields; never content, size or
+  digest) to a daemon-owned log under the primary checkout's daemon
+  `untracked/` directory.
+- [ ] ⬜ **Task 2.3**: A test pins that a hand-typed `ln -s`, `ln` or `cp`
+  naming a protected path is still denied by `R-SECRET-BASH-MENTION`.
+- [ ] ⬜ **Task 2.4**: Release note for 2.1 and 2.2 (a config that seeds a
+  protected file in copy mode now refuses; say what to change).
+
+### Phase 3: Advise the link (gated)
+
+Gate: Plans 00614 and 00623 merged to `main`, the three link routes verified
+denied through a live daemon socket, and the owner's own confirmation of Q1
+journalled (a delegated ruling is not sufficient for it).
+
+- [ ] ⬜ **Task 3.1**: DESIGN section 8 group C, end to end against a seeded
+  link in a client-mode fixture, through a live daemon.
+- [ ] ⬜ **Task 3.2**: Install-guide text: how a project declares a protected
+  seed in link mode, and the human-run step for a hand-made worktree. Reply to
+  the peer project with the route.
 
 ## Success Criteria
 
-- [ ] The owner decision is on record before any code.
-- [ ] If built: all the refusals above are tested and the guard is otherwise unchanged.
-- [ ] Release-bound consequences recorded in the pending release notes, or the
-  plan states there are none because nothing shipped.
+- [x] The decision is on record before any code (a delegated ruling, see Task 1.3).
+- [ ] The copy refusal and the audit line are tested, each test seen failing
+  first, and the guard denies every mention it denied before.
+- [ ] No text advising a protected seed or hand link ships before the Phase 3 gate.
+- [ ] Release-bound consequences recorded in the pending release notes.
 
 ## Delivery & Milestones
 
 - Filed from a peer report; no delivery yet.
+- Design questions Q0 to Q5 settled by delegated ruling; Phase 2 is ready to build.

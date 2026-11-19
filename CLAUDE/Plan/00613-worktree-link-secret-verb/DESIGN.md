@@ -331,3 +331,53 @@ a cron stand-in ruling is not sufficient for Q1.
 - **Q5. Gate:** confirm that nothing in Phase 2 ships before Plan 00614 is
   merged and its three routes are verified denied against a live daemon. yes /
   no.
+
+## Rulings
+
+Settled by a fable sub-agent under the owner's delegation, 2026-11-19. These
+are NOT the owner's own words; a later owner message overturns any of them.
+The delegation reached the sub-agent through the coordinating session, so the
+rulings are shaped to need no owner authority: none of them loosens the secret
+guard, and none creates a route an agent can invoke.
+
+- **Q0: not verified, treated as no.** No human line saying agents may link
+  protected files into their worktrees is cited anywhere in this plan, and a
+  sub-agent cannot answer for the owner on a fact about the owner. Nothing
+  below relies on such a line.
+- **Q1: yes, but only by a route a human owns.** A worktree link to a
+  protected file is acceptable when the project's own config declares it (B)
+  or a human types it (D). It is not acceptable by any route an agent can
+  invoke. Reason: the provenance clause above says a ruling that is not the
+  owner's cannot approve a guard exemption, and B and D need none. B already
+  ships, so this permits nothing new.
+- **Q2: B + D. The verb (A) is not built.** Config seed list in link mode for
+  harness-created worktrees; a documented human-run `ln -s` for a hand-made
+  worktree. Sections 3 to 8 stay as the record of how A would be built. A is
+  reopened only by the owner's own typed yes to Q0 and Q1, cited in a journal
+  entry.
+- **Q3: forbid.** The seeding executor refuses `mode: copy` for a source in
+  the protected set. Reason: a copy duplicates content under a path a
+  project-anchored glob may not cover, can be committed by `git add -A`, and
+  drifts. "Allow when the destination is protected" needs a second judgement
+  that can be wrong; link mode covers the need.
+- **Q4: moot while A is not built.** If the owner reopens A: yes, a per-project
+  config switch, default off.
+- **Q5: yes, and the gate is wider than written.** The Plan 00614 fix now
+  lands through Plan 00623, which merges its branch. Until both are on `main`
+  and the three routes are verified denied through a live daemon socket, no
+  document tells a project to seed or hand-link a protected path, and no code
+  that eases doing so is merged. Gap 1 is live on `main`, so a seeded link to
+  a protected file is readable by a relative Bash token today: the same gate
+  applies to advising D.
+
+What may be built before the gate, because it only tightens: the copy refusal
+(Q3), and the audit line for a seeded protected link (section 7, reduced to
+the seeding executor). What waits for the gate: the install-guide text that
+shows a project how to declare a protected seed and the human step for a
+hand-made worktree, and group C of section 8 run against a seeded link.
+
+Still needs the human: Q0, if the owner wants the verb; and the owner's own
+confirmation of Q1 before Phase 3 advises anyone to link a protected file,
+because the provenance clause says a ruling that is not the owner's is not
+sufficient for Q1. Phase 2 needs neither. Safe default: no verb, and Phase 3
+waits.
