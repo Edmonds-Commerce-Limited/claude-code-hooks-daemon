@@ -33,7 +33,9 @@ from claude_code_hooks_daemon.core.worktree_seed import (
 )
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.worktree_seeding import (
+    LinkAudit,
     WorktreeSeedError,
+    seed_link_audit_path,
     seed_worktree,
     validate_seed_sources,
 )
@@ -50,6 +52,12 @@ def _defaults() -> tuple[str, ...]:
 
 def _unreadable() -> tuple[str, ...]:
     raise sfm.ProtectedSetUnreadable("the test's protected set cannot be read")
+
+
+def _audit(root: Path) -> LinkAudit:
+    return LinkAudit(
+        log_path=seed_link_audit_path(root), protected_patterns=_defaults, session_id=None
+    )
 
 
 def _must_not_be_called() -> tuple[str, ...]:
@@ -269,13 +277,13 @@ class TestBehaviourThatIsUnchanged:
     def test_an_unprotected_copy_is_allowed_and_placed(self, root: Path, worktree: Path) -> None:
         entries = [SeedEntry(path=".env.local", mode=SEED_MODE_COPY)]
         validate_seed_sources(root, entries, protected_patterns=_defaults)
-        seed_worktree(root, worktree, entries)
+        seed_worktree(root, worktree, entries, audit=_audit(root))
         assert (worktree / ".env.local").read_text(encoding="utf-8") == "PLAIN=1\n"
 
     def test_a_protected_file_in_link_mode_is_allowed(self, root: Path, worktree: Path) -> None:
         entries = [SeedEntry(path=VAULT, mode=SEED_MODE_SYMLINK)]
         validate_seed_sources(root, entries, protected_patterns=_defaults)
-        seed_worktree(root, worktree, entries)
+        seed_worktree(root, worktree, entries, audit=_audit(root))
         assert (worktree / VAULT).is_symlink()
 
     def test_an_empty_protected_set_protects_nothing(self, root: Path) -> None:

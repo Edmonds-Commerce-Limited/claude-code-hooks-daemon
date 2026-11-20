@@ -59,7 +59,12 @@ from claude_code_hooks_daemon.utils.git_repo import (
 )
 from claude_code_hooks_daemon.utils.load_scaling import describe_load, scaled_timeout
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
-from claude_code_hooks_daemon.utils.worktree_seeding import seed_worktree, validate_seed_sources
+from claude_code_hooks_daemon.utils.worktree_seeding import (
+    LinkAudit,
+    seed_link_audit_path,
+    seed_worktree,
+    validate_seed_sources,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +228,18 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
                 WORKTREE_CREATE_ROUTE,
             )
 
-            seed_worktree(Path(root), path, entries)
+            # Each link to a protected source is audited in the MAIN checkout's
+            # daemon untracked dir before it is made (Plan 00613 Task 2.2).
+            seed_worktree(
+                Path(root),
+                path,
+                entries,
+                audit=LinkAudit(
+                    log_path=seed_link_audit_path(Path(root)),
+                    protected_patterns=sfm.load_protected_patterns_strict,
+                    session_id=str(session_id) if session_id else None,
+                ),
+            )
 
         return AdvisoryResult(worktree_path=str(path))
 

@@ -11,6 +11,7 @@ Tests run against a real temporary git repo — faithful to the production path.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -31,7 +32,7 @@ from claude_code_hooks_daemon.core.worktree_seed import (
 from claude_code_hooks_daemon.handlers.worktree_create.worktree_create_handler import (
     WorktreeCreateHandler,
 )
-from claude_code_hooks_daemon.utils.worktree_seeding import WorktreeSeedError
+from claude_code_hooks_daemon.utils.worktree_seeding import WorktreeSeedError, seed_link_audit_path
 
 
 def _init_repo(root: Path) -> None:
@@ -662,6 +663,36 @@ class TestProtectedCopyOnCreate:
             result = handler.handle(self._input(repo))
 
         assert (Path(result.worktree_path or "") / self._VAULT).is_symlink()
+
+    def test_a_protected_link_is_audited_in_the_main_checkout(
+        self, repo: Path, guard_config: Path
+    ) -> None:
+        """Plan 00613 Task 2.2: the handler wires the audit to the main checkout."""
+        (repo / self._VAULT).write_text("hush\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [self._VAULT]}
+
+        result = handler.handle(self._input(repo))
+
+        lines = seed_link_audit_path(repo).read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 1
+        record = json.loads(lines[0])
+        assert record["outcome"] == "linked"
+        assert record["path"] == self._VAULT
+        assert record["worktree"] == result.worktree_path
+        assert record["session_id"] == "sid-456"
+        assert "hush" not in lines[0]
+
+    def test_an_unreadable_config_audits_the_link_as_unclassified(self, repo: Path) -> None:
+        (repo / ".env.local").write_text("PLAIN=1\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [".env.local"]}
+
+        with patch.object(ProjectContext, "is_initialized", return_value=False):
+            handler.handle(self._input(repo))
+
+        lines = seed_link_audit_path(repo).read_text(encoding="utf-8").splitlines()
+        assert [json.loads(line)["outcome"] for line in lines] == ["linked-unclassified"]
 
 
 class TestSeedingGuidance:

@@ -139,9 +139,7 @@ class TestAProtectedLinkIsAudited:
         text = seed_link_audit_path(root).read_text(encoding="utf-8")
         assert _SECRET_CONTENT.strip() not in text
         # No numeric field exists at all, so no size can be carried.
-        assert not any(
-            isinstance(value, int | float) for value in _lines(root)[0].values()
-        )
+        assert not any(isinstance(value, int | float) for value in _lines(root)[0].values())
 
     def test_the_protected_file_is_never_opened(self, root: Path, worktree: Path) -> None:
         protected = str((root / VAULT).resolve())
@@ -214,7 +212,7 @@ class TestAProtectedLinkIsAudited:
         lines = _lines(root)
         assert [line["path"] for line in lines] == ["local"]
         assert lines[0]["outcome"] == "linked"
-        assert ED_KEY not in json.dumps(lines[0])
+        assert lines[0]["pattern"] in sfm.DEFAULT_PROTECTED_PATTERNS
 
     def test_a_project_anchored_glob_is_judged_at_the_seeding_root(
         self, root: Path, worktree: Path
