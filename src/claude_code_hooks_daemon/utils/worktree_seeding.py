@@ -343,6 +343,11 @@ class _LinkAuditor:
             self._patterns = self._audit.protected_patterns()
         except sfm.ProtectedSetUnreadable as exc:
             self._unreadable = f"the secret_file_guard protected set could not be read ({exc})"
+            logger.warning(
+                "worktree seed: %s; every link placed into %s is audited as unclassified",
+                self._unreadable,
+                self._worktree,
+            )
 
     def before_link(self, entry: SeedEntry, number: int) -> None:
         """Append the audit line for ``entry`` if it needs one.
