@@ -134,6 +134,56 @@ class TestMainCheckoutDir:
         assert probe.extra_hook_input == {"cwd": "/repo"}
 
 
+class TestMainCheckoutProbesNeedADaemonGuardingTheMainCheckout:
+    """A `$MAIN_CHECKOUT_DIR` probe states a verdict a daemon rooted at the main
+    checkout gives. A worktree's own daemon answers it with
+    `project_containment` first, so the harness skips it there instead of
+    scoring another handler's verdict against this one's expectation."""
+
+    _WORKTREE = _ROOT / ".claude" / "worktrees" / "w"
+
+    def _main_checkout_block(self) -> dict:
+        return _block(extra_hook_input={"cwd": "$MAIN_CHECKOUT_DIR"})
+
+    def test_a_daemon_guarding_the_main_checkout_runs_the_probe(self) -> None:
+        probe = plan_probe(self._main_checkout_block(), self._WORKTREE, daemon_root=_ROOT)
+        assert isinstance(probe, ExecutableProbe)
+
+    def test_a_daemon_guarding_the_worktree_skips_the_probe_and_names_both_roots(self) -> None:
+        probe = plan_probe(self._main_checkout_block(), self._WORKTREE, daemon_root=self._WORKTREE)
+        assert isinstance(probe, SkippedProbe)
+        assert str(self._WORKTREE) in probe.reason
+        assert "/repo" in probe.reason
+
+    def test_a_placeholder_in_the_payload_counts_too(self) -> None:
+        block = _block(
+            tool_payload={
+                "tool_name": "Bash",
+                "tool_input": {"command": "ls $MAIN_CHECKOUT_DIR/src"},
+            }
+        )
+        probe = plan_probe(block, self._WORKTREE, daemon_root=self._WORKTREE)
+        assert isinstance(probe, SkippedProbe)
+
+    def test_a_probe_without_the_placeholder_is_unaffected(self) -> None:
+        probe = plan_probe(_block(), self._WORKTREE, daemon_root=self._WORKTREE)
+        assert isinstance(probe, ExecutableProbe)
+
+    def test_in_the_main_checkout_the_probe_runs(self) -> None:
+        probe = plan_probe(self._main_checkout_block(), _ROOT, daemon_root=_ROOT)
+        assert isinstance(probe, ExecutableProbe)
+
+    def test_an_unknown_daemon_root_keeps_the_probe(self) -> None:
+        assert isinstance(plan_probe(self._main_checkout_block(), self._WORKTREE), ExecutableProbe)
+
+    def test_split_playbook_passes_the_daemon_root_through(self) -> None:
+        executable, skipped = split_playbook(
+            [self._main_checkout_block(), _block()], self._WORKTREE, daemon_root=self._WORKTREE
+        )
+        assert len(executable) == 1
+        assert len(skipped) == 1
+
+
 class TestPlanProbeExpandsThePayload:
     def test_the_file_path_reaching_the_probe_is_expanded(self) -> None:
         probe = plan_probe(_block(), _ROOT)

@@ -19,6 +19,8 @@ runs it. That is what makes it safe to probe a destructive command at all.
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -283,11 +285,12 @@ def main_checkout_root(project_root: Path) -> Path:
     """The checkout `project_root` was made from, when it is a worktree.
 
     A suite run from a worktree under `.claude/worktrees/` or
-    `untracked/worktrees/` has that worktree as its project root, while the
-    daemon the playbook harness talks to guards the checkout that holds it. A
-    probe that must be read from the main checkout names it with
-    `$MAIN_CHECKOUT_DIR` so its verdict does not depend on where QA runs.
-    Outside a worktree this is `project_root` itself.
+    `untracked/worktrees/` has that worktree as its project root. A probe that
+    must be read from the main checkout names it with `$MAIN_CHECKOUT_DIR` so
+    its verdict does not depend on where QA runs. That verdict also needs the
+    answering daemon to guard the main checkout; `plan_probe` skips the probe
+    when its `daemon_root` says otherwise. Outside a worktree this is
+    `project_root` itself.
     """
     for prefix in _WORKTREE_PREFIX_PARTS:
         width = len(prefix)
@@ -332,15 +335,47 @@ def _skip(block: PlaybookBlock, reason: str) -> SkippedProbe:
     )
 
 
-def plan_probe(block: PlaybookBlock, project_root: Path) -> ExecutableProbe | SkippedProbe:
+def _main_checkout_unguarded(
+    block: PlaybookBlock, project_root: Path, daemon_root: Path | None
+) -> str | None:
+    """Why a `$MAIN_CHECKOUT_DIR` block cannot be judged by this daemon, or None.
+
+    Such a probe states the verdict of a daemon whose project root is the main
+    checkout. A linked worktree's own daemon is rooted at the worktree, so
+    `project_containment` refuses the main-checkout path before the handler
+    under test answers, and no path inside the worktree can stand in: every
+    one of them reads as a worktree path. None when the daemon root is unknown.
+    """
+    if daemon_root is None:
+        return None
+    declared = json.dumps([block.get("tool_payload"), block.get("extra_hook_input")])
+    if _MAIN_CHECKOUT_PATTERN.search(declared) is None:
+        return None
+    main = main_checkout_root(project_root)
+    if os.path.realpath(main) == os.path.realpath(daemon_root):
+        return None
+    return (
+        f"its verdict needs a daemon guarding the main checkout {main}, and the daemon "
+        f"answering here guards {daemon_root}"
+    )
+
+
+def plan_probe(
+    block: PlaybookBlock, project_root: Path, daemon_root: Path | None = None
+) -> ExecutableProbe | SkippedProbe:
     """Decide what the harness does with one block: dispatch it, or skip it.
 
     Never guesses. A block that does not declare how to produce its input is
     skipped rather than reconstructed from its prose -- reconstructing it with
-    regexes is the failure this plan exists to remove.
+    regexes is the failure this plan exists to remove. `daemon_root` is the
+    project the answering daemon guards, when known.
     """
     if block.get("harness_cannot_produce"):
         return _skip(block, str(block["harness_cannot_produce"]))
+
+    unguarded = _main_checkout_unguarded(block, project_root, daemon_root)
+    if unguarded is not None:
+        return _skip(block, unguarded)
 
     if block.get("tools_available") is False:
         required = block.get("required_tools") or []
@@ -411,7 +446,7 @@ def plan_probe(block: PlaybookBlock, project_root: Path) -> ExecutableProbe | Sk
 
 
 def split_playbook(
-    blocks: list[PlaybookBlock], project_root: Path
+    blocks: list[PlaybookBlock], project_root: Path, daemon_root: Path | None = None
 ) -> tuple[list[ExecutableProbe], list[SkippedProbe]]:
     """Partition every block into exactly one of the two buckets.
 
@@ -423,7 +458,7 @@ def split_playbook(
     executable: list[ExecutableProbe] = []
     skipped: list[SkippedProbe] = []
     for block in blocks:
-        planned = plan_probe(block, project_root)
+        planned = plan_probe(block, project_root, daemon_root)
         if isinstance(planned, ExecutableProbe):
             executable.append(planned)
         else:
