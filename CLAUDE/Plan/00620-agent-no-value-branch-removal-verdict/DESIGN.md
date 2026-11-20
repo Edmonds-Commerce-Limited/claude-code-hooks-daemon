@@ -116,8 +116,10 @@ from the parent call to the agent reads `meta.json`'s camelCase `toolUseId`.
 
 Returns every problem found; an empty list is the only pass. Each check fails closed.
 
-01. Shape: schema 1, ids of the right form, `overall` and every `decision` in
-    `{no-value, keep}`, every reason non-empty.
+01. Shape: schema 1, ids of the right form, the verdict id EQUAL to its nonce, `overall`
+    and every `decision` in `{no-value, keep}`, every reason non-empty. Separately,
+    `verdicts_for` raises (so the route refuses) when any verdict file is not named by its
+    own id.
 02. Chain: the request with this nonce exists; the verdict's branch, tip, default sha and
     inventory equal the request's; the dispatch record for the nonce names the same
     session and agent as `reviewer`.
@@ -132,7 +134,11 @@ Returns every problem found; an empty list is the only pass. Each check fails cl
     the default's tree. The guard checks the citation resolves, never that it is apt.
 08. Expiry: `issued_at <= now < issued_at + verdict_lifetime_hours`. A verdict from the
     future is a problem too.
-09. Single use: the verdict id is absent from every ledger line.
+09. Single use: the verdict id, its nonce and its reviewer agent id are each absent from
+    every ledger line (removal or git-refused). `record_removal` re-checks ids and agents
+    at append time. These bindings refuse a used verdict that is re-filed under a fresh id,
+    or a used chain (request, dispatch and verdict) copied whole under a fresh nonce. A
+    forger who also writes a new agent id is the residue RULINGS Q1 accepts.
 10. Reviewer: at least one model, every model resolves to Opus or above, not downgraded,
     not a fork, exactly one human-text user turn, a 64-hex reply digest.
 11. Independence: `<session>:<agent>` of the reviewer is neither the branch's creator nor
