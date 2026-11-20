@@ -161,7 +161,10 @@ def resolve_sweep_root(
                 f"{root} is at or inside the repository {holder}: its parts would be judged "
                 "as loose entries; never swept"
             )
-    ttl = config.ttl_hours_for(key)
+    try:
+        ttl = config.ttl_hours_for(key)
+    except ValueError as exc:
+        return refused(f"untracked/{key} has a malformed TTL, so it is never swept: {exc}")
     if ttl is None:
         return refused(f'untracked/{key} has the TTL "*": never swept')
 
@@ -173,8 +176,7 @@ def resolve_sweep_root(
     ordered = tuple(sorted(skip))
     notes = tuple(f"entry {name} holds a never-swept path: not judged" for name in ordered)
     first_level = all(
-        any(form.parent == project / _UNTRACKED for project in project_forms)
-        for form in root_forms
+        any(form.parent == project / _UNTRACKED for project in project_forms) for form in root_forms
     )
     apply_refusal = (
         ""

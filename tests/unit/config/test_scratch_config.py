@@ -154,28 +154,44 @@ class TestUntrackedTtl:
         assert config.ttl_hours_for("anything") == 48
 
     @pytest.mark.parametrize("value", ["7 days", "36", "0h", "-1d", "", "1w", "1.5h", 36, None])
-    def test_a_malformed_scratch_value_falls_back_to_24h_never_to_star(
+    def test_a_malformed_scratch_value_loads_but_its_ttl_is_an_error(
         self, value: object, caplog: pytest.LogCaptureFixture
     ) -> None:
         config = ScratchConfig.model_validate({"untracked_ttl": {"scratch": value}})
-        assert config.ttl_hours_for("scratch") == 24
+        with pytest.raises(ValueError, match=r"scratch\.untracked_ttl\.scratch"):
+            config.ttl_hours_for("scratch")
+        assert config.ttl_hours_for("repos") is None
         assert "untracked_ttl" in caplog.text
 
-    def test_a_malformed_value_for_another_key_falls_back_to_the_fallthrough(
+    def test_a_malformed_value_for_another_key_is_an_error_for_that_key_only(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         config = ScratchConfig.model_validate(
             {"untracked_default_ttl": "36h", "untracked_ttl": {"briefs": "soon"}}
         )
-        assert config.ttl_hours_for("briefs") == 36
+        with pytest.raises(ValueError, match="'soon'"):
+            config.ttl_hours_for("briefs")
+        assert config.ttl_hours_for("scratch") == 24
+        assert config.ttl_hours_for("other") == 36
         assert "briefs" in caplog.text
 
-    def test_a_malformed_fallthrough_falls_back_to_never(
+    def test_a_malformed_fallthrough_is_an_error_for_unlisted_directories(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         config = ScratchConfig.model_validate({"untracked_default_ttl": "36 hours"})
-        assert config.untracked_default_ttl == "*"
+        with pytest.raises(ValueError, match=r"scratch\.untracked_default_ttl.*36 hours"):
+            config.ttl_hours_for("logs")
+        assert config.ttl_hours_for("scratch") == 24
         assert "untracked_default_ttl" in caplog.text
+
+    def test_a_non_string_value_that_would_print_as_a_ttl_stays_malformed(self) -> None:
+        class Sneaky:
+            def __str__(self) -> str:
+                return "24h"
+
+        config = ScratchConfig.model_validate({"untracked_ttl": {"scratch": Sneaky()}})
+        with pytest.raises(ValueError, match="untracked_ttl"):
+            config.ttl_hours_for("scratch")
 
     @pytest.mark.parametrize("key", ["a/b", ".", "..", "", "/abs"])
     def test_a_key_that_is_not_one_directory_name_is_dropped(
@@ -185,11 +201,13 @@ class TestUntrackedTtl:
         assert key not in config.untracked_ttl
         assert "untracked_ttl" in caplog.text
 
-    def test_a_map_that_is_not_a_mapping_keeps_the_defaults(
+    def test_a_map_that_is_not_a_mapping_makes_every_ttl_an_error(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         config = ScratchConfig.model_validate({"untracked_ttl": ["scratch"]})
-        assert config.untracked_ttl == {"repos": "*", "scratch": "24h"}
+        for directory in ("scratch", "briefs"):
+            with pytest.raises(ValueError, match="not a mapping"):
+                config.ttl_hours_for(directory)
         assert "untracked_ttl" in caplog.text
 
     def test_hours_and_days_are_parsed(self) -> None:

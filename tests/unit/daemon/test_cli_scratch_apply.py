@@ -373,6 +373,20 @@ class TestEndToEnd:
         assert _run(_parse(project, *second), now=later) == 1
         assert "cap of 1 keeps" in capsys.readouterr().err
 
+    def test_a_malformed_ttl_refuses_apply_and_creates_no_store(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        _old_entry(tree, now)
+        project = _project(tree)
+        (project / ".claude" / "hooks-daemon.yaml").write_text(
+            'version: "2.0"\nscratch:\n  untracked_ttl:\n    scratch: "7 days"\n'
+        )
+        assert _run(_parse(project, "--apply"), now=now) == 1
+        assert not _store(project).exists()
+        assert (tree.root / "old" / "a.txt").read_bytes() == b"alpha"
+        assert "7 days" in capsys.readouterr().err
+
     def test_a_live_entry_is_not_archived(
         self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
     ) -> None:
