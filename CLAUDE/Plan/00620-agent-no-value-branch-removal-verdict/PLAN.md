@@ -44,11 +44,32 @@ The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in 
 - [x] ✅ **Task 2.1**: Slice 1, no change to delete behaviour. The live dispatch probe (journalled, passed); [DESIGN.md](DESIGN.md) with the verdict record, ledger line, review prompt and state layout; a pure module for inventory, verdict validation, bundle write and verify, ledger append and rate count, tests first; failing tests for forged, reused, stale, wrong-tip and self-written verdicts and for a verdict with no verified bundle, committed red.
 - [x] ✅ **Task 2.2**: Slice 2. The reviewer agent definition, the `branch-reject request` command, the dispatch gate and the SubagentStop record, and the `delete-branch` wiring under the `rejected-bundled` tier. The red tests of Task 2.1 turn green.
 - [x] ✅ **Task 2.3**: Slice 3. The `branch-reject digest` command and the session-start count of undigested removals.
-- [ ] ⬜ **Task 2.4**: Slice 4. Independent loosening review, adversarial forge attempt, targeted QA, CI green, merge, release note.
+- [ ] ⬜ **Task 2.4**: Slice 4. Builder's share is done and ticked below; the independent loosening review, CI green and the merge are NOT done and stay unticked (a builder may not do them).
+  - [x] ✅ Adversarial forge tests (`tests/unit/core/test_branch_reject_forge.py`) and the verdict-reuse fixes.
+  - [x] ✅ Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/014-agent-no-value-branch-removal-verdict.md`.
+  - [x] ✅ Known gaps recorded (section below).
+  - [ ] ⬜ Independent loosening review.
+  - [ ] ⬜ CI green.
+  - [ ] ⬜ Merge.
 
 ### Phase 3: Follow-up
 
 - [ ] ⬜ **Task 3.1**: After the merge, file a follow-up plan to point `recovery_copy_advisory` at the reject route instead of `refs/archive/` (RULINGS.md Q6). Plan 00619 is not reopened.
+
+## Known gaps
+
+- A forger who also writes a NEW agent id into a copied dispatch and verdict is not caught. Accepted under RULINGS Q1 (the recovery bundle bounds the harm); DESIGN section 5 item 09.
+
+- **OPEN question for the owner or coordinator (RULINGS Q8).** The used-verdict ledger is per checkout, so a second worktree or checkout can re-delete a restored branch on the same already-used verdict. A test pins this as accepted residue (`test_accepted_residue_a_removal_in_one_checkout_is_unseen_by_another`). Options:
+
+  1. Keep the per-checkout ledger and accept the residue (bounded: the bundle exists and the other checkout's ledger names the removal).
+  2. Move the used-verdict ledger to a shared location such as the git common dir, so single use holds across worktrees.
+
+  Recommendation: option 2. A replay across worktrees defeats single use.
+
+- Slug collision: `a/b` and `a-b` at one tip share a bundle path; the second removal is refused (fails closed), so `a-b` cannot use the route while that bundle exists.
+
+- A killed reviewer keeps its verdict, an unreadable second-stop transcript cannot withdraw a verdict, and an agent can mark digest entries read (this hides them only). Not yet pinned by tests.
 
 ## Success Criteria
 
