@@ -459,7 +459,7 @@ class TestEscapes:
         _entry(root)
         _handle, record = _archived(root_fd, store, tar)
         claimed = root / (CLAIM_PREFIX + "e1")
-        real_verify = remove_mod.verify
+        real_verify = pack_mod.verify
 
         def verify_then_swap(*args: Any, **kwargs: Any) -> Any:
             result = real_verify(*args, **kwargs)

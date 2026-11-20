@@ -566,6 +566,55 @@ class TestSeparateGitDirectories:
         assert findings.protected == ()
         assert findings.standalone_roots == ("e/gd", "e/wt")
 
+    def test_a_separate_git_dir_named_dot_git_with_its_work_tree_outside_is_protected(
+        self, gp: GitProject
+    ) -> None:
+        # ``bare = false``, no core.worktree, no back-pointer: only the index says so.
+        self._separate(gp, "e/.git", gp.tree.outside / "wt")
+        findings = _classify(gp, "e")
+        assert findings.kinds == {"e/.git": RepoKind.OUTSIDE_POINTING}
+        reasons = " ".join(findings.protected)
+        assert "e/.git" in reasons
+        assert "tracked path(s) absent from the entry" in reasons
+        assert findings.standalone_roots == ()
+
+    def test_a_dot_git_dir_with_commits_and_an_empty_index_is_protected(
+        self, gp: GitProject
+    ) -> None:
+        gitdir = self._separate(gp, "e/.git", gp.tree.outside / "wt")
+        (gitdir / "index").unlink()
+        findings = _classify(gp, "e")
+        assert findings.kinds == {"e/.git": RepoKind.OUTSIDE_POINTING}
+        assert "HEAD's tree" in " ".join(findings.protected)
+        assert findings.standalone_roots == ()
+
+    def test_a_standalone_repository_with_a_deleted_tracked_file_is_protected(
+        self, gp: GitProject
+    ) -> None:
+        # Accepted false positive: a tracked file deleted is uncommitted work anyway.
+        repo = gp.standalone("e")
+        (repo / "notes.txt").unlink()
+        findings = _classify(gp, "e")
+        assert findings.kinds == {"e/.git": RepoKind.OUTSIDE_POINTING}
+        assert "notes.txt" in " ".join(findings.protected)
+
+    def test_a_core_worktree_setting_is_not_disposable(self, gp: GitProject) -> None:
+        repo = gp.standalone("e")
+        git(repo, "config", "core.worktree", str(gp.tree.outside / "wt"))
+        findings = _classify(gp, "e")
+        assert findings.stuck or findings.protected
+        assert RepoKind.STANDALONE not in findings.kinds.values()
+        assert findings.standalone_roots == ()
+
+    def test_a_complete_standalone_repository_stays_disposable(self, gp: GitProject) -> None:
+        repo = gp.standalone("e")
+        commit_file(repo, "sub/more.txt", "more\n")
+        findings = _classify(gp, "e")
+        assert findings.kinds == {"e/.git": RepoKind.STANDALONE}
+        assert findings.protected == ()
+        assert findings.stuck == ()
+        assert findings.standalone_roots == ("e",)
+
 
 class TestLinkedWorktreesOfANestedRepository:
     """F-BYPS 1 and 2: a nested repository's linked worktrees are part of its judgement."""
@@ -661,12 +710,13 @@ _SUBCOMMANDS = (
     "for-each-ref",
     "status",
     "ls-files",
+    "ls-tree",
     "worktree",
     "ls-remote",
 )
 
 #: Subcommands the standalone path never runs, so injecting into them changes nothing.
-_NOT_ON_THE_STANDALONE_PATH = frozenset({"status", "ls-files", "worktree", "ls-remote"})
+_NOT_ON_THE_STANDALONE_PATH = frozenset({"status", "worktree", "ls-remote"})
 
 #: Subcommands that decide whether a clone with a remote is pushed (``rev-list`` lists
 #: its reflog commits). ``worktree`` is not on that path.
@@ -694,6 +744,16 @@ class TestWrongVerdictControls:
         else:
             assert findings.stuck
             assert RepoKind.STANDALONE not in findings.kinds.values()
+
+    @pytest.mark.parametrize("subcommand", ["ls-files", "ls-tree"])
+    def test_an_unparseable_tracked_listing_makes_a_standalone_repository_stuck(
+        self, gp: GitProject, subcommand: str
+    ) -> None:
+        gp.standalone("e")
+        runner = _injecting(subcommand, "garbage")
+        findings = _classify(gp, "e", project=_project_git(gp, runner=runner), runner=runner)
+        assert findings.stuck
+        assert RepoKind.STANDALONE not in findings.kinds.values()
 
     @pytest.mark.parametrize("mode", ["fail", "timeout", "garbage"])
     @pytest.mark.parametrize("subcommand", _ON_THE_PUSHED_CLONE_PATH)
@@ -730,7 +790,9 @@ class TestWrongVerdictControls:
         def inventing(
             cwd: Path, *args: str, timeout: float = 30.0, env: Mapping[str, str] | None = None
         ) -> subprocess.CompletedProcess[str]:
-            if "ls-files" in args:
+            # Only the tagged coverage listing: an invented path in the plain listing
+            # is a tracked path absent from the entry, which protects the repository.
+            if "ls-files" in args and "-v" in args:
                 return subprocess.CompletedProcess(["git"], 0, "H invented.txt\x00", "")
             return run_git(cwd, *args, timeout=timeout, env=env)
 

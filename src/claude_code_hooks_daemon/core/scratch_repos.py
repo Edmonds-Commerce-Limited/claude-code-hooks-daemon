@@ -8,7 +8,10 @@ repository (a directory holding ``HEAD``, ``objects/`` and ``refs/``), is one of
 - OUTSIDE_POINTING: a ``.git`` file (or ``commondir``) whose target is outside the
   entry, or a git directory with no marker that is not provably bare (N2: its
   config lacks ``bare = true`` or it holds an ``index``, so its work tree may be
-  elsewhere). PROTECTED: it is part of another repository.
+  elsewhere), or any repository with a work tree whose index or ``HEAD`` tree
+  tracks a path the walk did not see (a ``.git`` directory made by
+  ``--separate-git-dir`` for a work tree elsewhere; a deleted tracked file reads
+  the same). PROTECTED: it is part of another repository.
 - RELATED: it has a remote, is shallow, borrows objects, or has a root commit or
   ref tip the project's object database holds. R6: it is PROTECTED unless it is
   clean (no staged change, every worktree change a remote-held blob), has no
@@ -824,6 +827,64 @@ def _linked_worktrees(
     return problems, heads
 
 
+def _nul_paths(output: str, what: str) -> list[str]:
+    """The paths of a ``-z`` listing; one that is not NUL-terminated records is BROKEN."""
+    if not output:
+        return []
+    records = output.split("\0")
+    if records[-1] or not all(records[:-1]):
+        raise _Broken(f"{what}: unparseable listing")
+    return records[:-1]
+
+
+def _require_work_tree_here(
+    repo: _Repo, project: ProjectGit, root: Path, nodes: frozenset[str]
+) -> None:
+    """N2 variant: every path the index or ``HEAD``'s tree tracks must be in the walk.
+
+    ``git init --separate-git-dir <entry>/.git <elsewhere>`` leaves a ``.git``
+    directory with ``bare = false``, no ``core.worktree`` and no back-pointer:
+    only its index (or, with an empty index, its commit) shows the work tree is
+    elsewhere. A tracked path the walk never saw protects the repository; a
+    tracked file deleted in the entry is protected alike (it is uncommitted work).
+    """
+    if repo.work_tree is None:
+        return
+    base = repo.work_tree.relative_to(root).as_posix()
+    elsewhere = "its work tree may be elsewhere (git init --separate-git-dir)"
+    indexed = _nul_paths(
+        _checked(_nested(repo, project, "ls-files", "-z"), f"{repo.marker}: ls-files"),
+        f"{repo.marker}: ls-files",
+    )
+    absent = [rel for rel in indexed if f"{base}/{rel}" not in nodes]
+    if absent:
+        raise _Decided(
+            RepoKind.OUTSIDE_POINTING,
+            f"{repo.marker}: {len(absent)} tracked path(s) absent from the entry, first "
+            f"{absent[0]}: {elsewhere}",
+        )
+    head = _nested(repo, project, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+    if head.returncode == 1 and not head.stdout.strip():
+        return  # an unborn HEAD: no commit to compare
+    shas = _shas(_checked(head, f"{repo.marker}: rev-parse HEAD"))
+    if shas is None or len(shas) != 1:
+        raise _Broken(f"{repo.marker}: unparseable HEAD")
+    committed = _nul_paths(
+        _checked(
+            _nested(repo, project, "ls-tree", "-r", "-z", "--name-only", shas[0]),
+            f"{repo.marker}: ls-tree",
+        ),
+        f"{repo.marker}: ls-tree",
+    )
+    missing = [rel for rel in committed if f"{base}/{rel}" not in nodes]
+    if missing:
+        raise _Decided(
+            RepoKind.OUTSIDE_POINTING,
+            f"{repo.marker}: {len(missing)} path(s) of HEAD's tree absent from the entry, "
+            f"first {missing[0]}: {elsewhere}",
+        )
+
+
 def _standalone_roots(repo: _Repo, root: Path) -> list[str]:
     """A standalone repository's work tree and git directory, from the scratch root."""
     places = [repo.gitdir]
@@ -984,6 +1045,7 @@ def _classify_one(
         if repo.work_tree is None:
             _require_bare(repo, config)
         _confirm_gitdir(repo, project)
+        _require_work_tree_here(repo, project, root, nodes)
         refs = _refs(repo, project)
         worktree_problems, worktree_heads = _linked_worktrees(repo, root, entry, nodes, refs)
         related = _is_related(repo, project, config, refs)
