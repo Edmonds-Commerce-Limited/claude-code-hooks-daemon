@@ -14,12 +14,16 @@ records file is the one empty answer: nothing has been backgrounded.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
+
+logger = logging.getLogger(__name__)
 
 _NANOSECONDS = 1_000_000_000
 _SECONDS_PER_MINUTE = 60
@@ -86,8 +90,14 @@ def read_process_cwds(
         pid = int(entry.name)
         try:
             cwds[pid] = (entry / "cwd").readlink().resolve()
-        except (FileNotFoundError, ProcessLookupError):
-            continue  # exited between listing and reading: it is in no entry now
+        except (FileNotFoundError, ProcessLookupError) as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"process {pid} exited between listing and reading, so it is in no entry",
+                level=logging.DEBUG,
+            )
+            continue
         except OSError:
             unreadable.append(pid)
     return ProcessCwdReading(cwds, tuple(sorted(unreadable)))

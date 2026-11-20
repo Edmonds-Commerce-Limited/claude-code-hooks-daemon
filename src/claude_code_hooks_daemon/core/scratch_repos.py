@@ -43,6 +43,7 @@ from __future__ import annotations
 import dataclasses
 import enum
 import hashlib
+import logging
 import os
 import re
 import shlex
@@ -59,13 +60,16 @@ from claude_code_hooks_daemon.core.branch_records import (
     ROUTE_KEY,
     TOUCHED_KEY,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     GitResult,
     parse_worktree_porcelain,
     run_git,
 )
-from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.remote_refs import parse_listing, remote_git_env
+
+logger = logging.getLogger(__name__)
 
 
 class GitRunner(Protocol):
@@ -326,30 +330,57 @@ def blob_id(path: Path, *, sha_length: int) -> str | None:
     factory = _HASHES.get(sha_length)
     if factory is None:
         return None
-    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
-    try:
-        descriptor = os.open(path, flags)
-    except OSError:
+    descriptor = _open_no_follow(path)
+    if descriptor is None:
         return None
+    found: str | None = None
     try:
-        info = os.fstat(descriptor)
-        if not stat.S_ISREG(info.st_mode):
-            return None
-        digest = factory(f"blob {info.st_size}\0".encode())
-        remaining = info.st_size
-        while remaining:
-            chunk = os.read(descriptor, min(_READ_CHUNK, remaining))
-            if not chunk:
-                return None
-            digest.update(chunk)
-            remaining -= len(chunk)
-        if os.read(descriptor, 1):
-            return None
-        return digest.hexdigest()
-    except OSError:
-        return None
+        found = _hash_open_file(descriptor, factory)
+    except OSError as exc:
+        log_and_continue(
+            logger, exc, reason=f"{path} could not be read, so it proves no blob (it is kept)"
+        )
     finally:
         os.close(descriptor)
+    return found
+
+
+def _open_no_follow(path: Path) -> int | None:
+    """A descriptor on ``path`` opened ``O_NOFOLLOW | O_NONBLOCK``; None when it will not open.
+
+    A link swapped in after the walk's ``lstat`` fails here, and the failure is
+    logged: None makes the caller's proof fail, so the path is kept.
+    """
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        log_and_continue(
+            logger, exc, reason=f"{path} could not be opened without following a link (kept)"
+        )
+    return descriptor
+
+
+def _hash_open_file(descriptor: int, factory: Callable[[bytes], hashlib._Hash]) -> str | None:
+    """The blob id of the regular file open on ``descriptor``; None for anything else.
+
+    Not a regular file, or a size that changes under the read, proves nothing.
+    """
+    info = os.fstat(descriptor)
+    if not stat.S_ISREG(info.st_mode):
+        return None
+    digest = factory(f"blob {info.st_size}\0".encode())
+    remaining = info.st_size
+    while remaining:
+        chunk = os.read(descriptor, min(_READ_CHUNK, remaining))
+        if not chunk:
+            return None
+        digest.update(chunk)
+        remaining -= len(chunk)
+    if os.read(descriptor, 1):
+        return None
+    return digest.hexdigest()
 
 
 def _tree_blobs(output: str) -> frozenset[str] | None:
@@ -406,20 +437,18 @@ def read_small_regular_file(path: Path, limit: int = _MAX_GIT_FILE_BYTES) -> byt
     """
     if not _regular_file(path):
         return None
-    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
-    try:
-        descriptor = os.open(path, flags)
-    except OSError:
+    descriptor = _open_no_follow(path)
+    if descriptor is None:
         return None
+    raw: bytes | None = None
     try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            return None
-        raw = os.read(descriptor, limit + 1)
-    except OSError:
-        return None
+        if stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raw = os.read(descriptor, limit + 1)
+    except OSError as exc:
+        log_and_continue(logger, exc, reason=f"{path} could not be read, so it is not trusted")
     finally:
         os.close(descriptor)
-    return raw if len(raw) <= limit else None
+    return raw if raw is not None and len(raw) <= limit else None
 
 
 def _read_pointer(path: Path, prefix: str) -> str:
@@ -482,10 +511,9 @@ def _locate(root: Path, entry: Path, marker: str, project: ProjectGit) -> _Repo:
 
 def _in_progress(repo: _Repo, root: Path, nodes: frozenset[str]) -> str:
     for directory in {repo.gitdir, repo.common}:
-        try:
-            rel = directory.relative_to(root).as_posix()
-        except ValueError:
+        if not path_is_relative_to(directory, root):
             continue
+        rel = path_relative_to(directory, root).as_posix()
         for node in nodes:
             if not node.startswith(f"{rel}/"):
                 continue
@@ -691,7 +719,7 @@ def _dirty_problems(repo: _Repo, project: ProjectGit, root: Path) -> list[str]:
         return [f"{len(to_hash)} edited tracked file(s) not proved held by the remote"]
     length = blob_length(project.remote_blobs)
     return [
-        f"an edited tracked file the remote does not hold ({path.relative_to(root).as_posix()})"
+        f"an edited tracked file the remote does not hold ({path_relative_to(path, root).as_posix()})"
         for path in to_hash
         if length is None or blob_id(path, sha_length=length) not in project.remote_blobs
     ]
@@ -788,7 +816,7 @@ def _linked_worktrees(
     otherwise the worktree is elsewhere or gone and the repository is protected.
     An unreadable admin dir is BROKEN. Each admin ``HEAD`` joins the tip set.
     """
-    common_rel = repo.common.relative_to(root).as_posix()
+    common_rel = path_relative_to(repo.common, root).as_posix()
     prefix = f"{common_rel}/worktrees/"
     ids = sorted({node[len(prefix) :].split("/")[0] for node in nodes if node.startswith(prefix)})
     problems: list[str] = []
@@ -806,7 +834,7 @@ def _linked_worktrees(
             problems.append(f"{admin_rel}: its linked worktree lies outside the entry")
         elif (
             target.name != _GIT_MARKER
-            or target.relative_to(root).as_posix() not in nodes
+            or path_relative_to(target, root).as_posix() not in nodes
             or not _points_back(target, admin)
         ):
             problems.append(
@@ -831,7 +859,7 @@ def _standalone_roots(repo: _Repo, root: Path) -> list[str]:
         places = [repo.work_tree]
         if not _inside(repo.gitdir, repo.work_tree):
             places.append(repo.gitdir)
-    return [place.relative_to(root).as_posix() for place in places]
+    return [path_relative_to(place, root).as_posix() for place in places]
 
 
 def _related_problems(
@@ -849,7 +877,7 @@ def _related_problems(
     tips = set(refs.values()) - ({refs[_STASH_REF]} if _STASH_REF in refs else set())
     tips.update(worktree_heads)
     for directory in dict.fromkeys((repo.gitdir, repo.common)):
-        tips.update(_pseudo_ref_tips(directory, directory.relative_to(root).as_posix()))
+        tips.update(_pseudo_ref_tips(directory, path_relative_to(directory, root).as_posix()))
     tips.update(_reflog_tips(repo, project))
     if head.returncode == 0:
         head_sha = _shas(head.stdout)
@@ -884,7 +912,7 @@ def _tracked(
     if repo.work_tree is None:
         return [], []
     output = _checked(_nested(repo, project, "ls-files", "-z", "-v"), f"{repo.marker}: ls-files")
-    base = repo.work_tree.relative_to(root).as_posix()
+    base = path_relative_to(repo.work_tree, root).as_posix()
     paths: list[str] = []
     flagged: list[str] = []
     for record in filter(None, output.split("\0")):
@@ -1012,7 +1040,7 @@ def _classify_one(
                 ],
                 [],
             )
-        return RepoKind.RELATED, [], [f"{repo.gitdir.relative_to(root).as_posix()}/", *tracked]
+        return RepoKind.RELATED, [], [f"{path_relative_to(repo.gitdir, root).as_posix()}/", *tracked]
     except _Decided as decided:
         return (
             decided.kind,
