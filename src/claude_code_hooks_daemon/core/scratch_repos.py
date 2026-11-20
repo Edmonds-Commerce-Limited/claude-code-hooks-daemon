@@ -854,7 +854,7 @@ def _require_work_tree_here(
     """
     if repo.work_tree is None:
         return
-    base = repo.work_tree.relative_to(root).as_posix()
+    base = path_relative_to(repo.work_tree, root).as_posix()
     elsewhere = "its work tree may be elsewhere (git init --separate-git-dir)"
     indexed = _nul_paths(
         _checked(_nested(repo, project, "ls-files", "-z"), f"{repo.marker}: ls-files"),

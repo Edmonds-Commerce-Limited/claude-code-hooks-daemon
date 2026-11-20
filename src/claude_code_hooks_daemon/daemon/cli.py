@@ -6951,7 +6951,7 @@ def _scratch_store_refusal(
 
 def _scratch_relative_root(sources: _ScratchSources, sweep_root: Any) -> tuple[Path, str]:
     resolved = Path(sweep_root.path).resolve()
-    return resolved, resolved.relative_to(sources.repo.resolve()).as_posix()
+    return resolved, path_relative_to(resolved, sources.repo.resolve()).as_posix()
 
 
 def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_root: Any) -> int:
