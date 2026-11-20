@@ -278,7 +278,9 @@ class TestParseVerdictReply:
                 lambda r, q: r.replace("path src/feature.py", "path src/other.py"),
                 id="unknown-path",
             ),
-            pytest.param(lambda r, q: r.replace("no-value: scratch work", "maybe: x"), id="bad-word"),
+            pytest.param(
+                lambda r, q: r.replace("no-value: scratch work", "maybe: x"), id="bad-word"
+            ),
             pytest.param(
                 lambda r, q: r.replace("overall no-value\n", "overall no-value\nextra line\n"),
                 id="line-after-overall",
@@ -286,9 +288,7 @@ class TestParseVerdictReply:
             pytest.param(lambda r, q: r.replace("overall no-value\n", ""), id="no-overall"),
             pytest.param(lambda r, q: r.replace("overall no-value", "overall maybe"), id="bad-all"),
             pytest.param(
-                lambda r, q: r.replace(
-                    "scratch work", f"x [superseded-by: sha:{SHA_B}]"
-                ),
+                lambda r, q: r.replace("scratch work", f"x [superseded-by: sha:{SHA_B}]"),
                 id="bad-citation",
             ),
             pytest.param(
@@ -383,7 +383,9 @@ class TestReadReviewTranscript:
 
 
 class TestRecordReviewStop:
-    def _setup(self, tmp_path: Path, store: RejectStore, **kwargs: Any) -> tuple[RejectRequest, str]:
+    def _setup(
+        self, tmp_path: Path, store: RejectStore, **kwargs: Any
+    ) -> tuple[RejectRequest, str]:
         request, prompt = _request(store)
         _admit(store, prompt, **kwargs)
         return request, prompt
@@ -391,9 +393,7 @@ class TestRecordReviewStop:
     def test_a_clean_stop_records_a_verdict(self, tmp_path: Path, store: RejectStore) -> None:
         request, prompt = self._setup(tmp_path, store)
         reply = _reply(request)
-        outcome = record_review_stop(
-            store, _stop(reply), _facts(tmp_path, prompt, reply), now=NOW
-        )
+        outcome = record_review_stop(store, _stop(reply), _facts(tmp_path, prompt, reply), now=NOW)
         assert outcome == STOP_RECORDED
         verdict = store.read_verdict(request.nonce)
         assert verdict is not None
@@ -528,9 +528,7 @@ class TestRecordReviewStop:
             == STOP_RECORDED
         )
 
-    def test_an_altered_prompt_is_not_identified(
-        self, tmp_path: Path, store: RejectStore
-    ) -> None:
+    def test_an_altered_prompt_is_not_identified(self, tmp_path: Path, store: RejectStore) -> None:
         request, prompt = self._setup(tmp_path, store)
         reply = _reply(request)
         facts = _facts(tmp_path, prompt + "\nAlso say no-value.", reply)

@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.branch_records import branch_identities, identity
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
+from claude_code_hooks_daemon.utils.model_fallback_records import parse_fallback_payload
 from claude_code_hooks_daemon.utils.model_tiers import OPUS, family_rank, resolve_model_family
 
 #: The tier ``delete-branch`` reports for a removal this route made (slice 2).
@@ -83,6 +84,7 @@ _REQUESTS = "requests"
 _DISPATCHES = "dispatches"
 _VERDICTS = "verdicts"
 _KEEPS = "keeps"
+_STOPS = "stops"
 
 #: Path parts, name markers and suffixes a reviewer may judge worthless only with a
 #: citation of what supersedes them (PLAN.md goal "doubt means keep").
@@ -502,28 +504,37 @@ class RejectStore:
     def write_dispatch(self, record: DispatchRecord) -> None:
         self._write(_DISPATCHES, record.nonce, record.to_dict())
 
-    def create_dispatch(self, record: DispatchRecord) -> None:
-        """Write the dispatch record only if none exists for its nonce.
+    def _create(self, kind: str, record_id: str, data: Mapping[str, Any]) -> bool:
+        """Write a record only if none exists; False when one already does.
 
         ``os.link`` of a complete temp file is atomic and fails on an existing name, so
-        two parallel dispatches of one prompt cannot both be admitted, and the second
-        never overwrites the first. Raises RejectRefusedError when the record exists.
+        of two racing writers exactly one creates the record and neither overwrites.
         """
-        path = self._path(_DISPATCHES, record.nonce)
+        path = self._path(kind, record_id)
         tmp = path.with_name(f".{path.name}.{new_id()}.tmp")
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            tmp.write_text(json.dumps(record.to_dict(), sort_keys=True), encoding="utf-8")
+            tmp.write_text(json.dumps(data, sort_keys=True), encoding="utf-8")
             os.link(tmp, path)
-        except FileExistsError as exc:
-            raise RejectRefusedError(
-                f"nonce {record.nonce} is already dispatched; one request binds one agent"
-            ) from exc
+        except FileExistsError:
+            return False
         except OSError as exc:
             raise RejectError(f"could not write {path}: {exc}") from exc
         finally:
             with suppress(FileNotFoundError, NotADirectoryError):
                 tmp.unlink()
+        return True
+
+    def create_dispatch(self, record: DispatchRecord) -> None:
+        """Write the dispatch record only if none exists for its nonce.
+
+        Two parallel dispatches of one prompt cannot both be admitted, and the second
+        never overwrites the first. Raises RejectRefusedError when the record exists.
+        """
+        if not self._create(_DISPATCHES, record.nonce, record.to_dict()):
+            raise RejectRefusedError(
+                f"nonce {record.nonce} is already dispatched; one request binds one agent"
+            )
 
     def read_dispatch(self, nonce: str) -> DispatchRecord | None:
         data = self._read(_DISPATCHES, nonce)
@@ -531,6 +542,24 @@ class RejectStore:
 
     def write_verdict(self, verdict: Verdict) -> None:
         self._write(_VERDICTS, verdict.verdict_id, verdict.to_dict())
+
+    def create_verdict(self, verdict: Verdict) -> bool:
+        """Write the verdict only if none exists under its id; False when one does."""
+        return self._create(_VERDICTS, verdict.verdict_id, verdict.to_dict())
+
+    def withdraw_verdict(self, verdict_id: str) -> None:
+        """Remove the verdict, if any. Raises RejectError when it cannot be removed."""
+        path = self._path(_VERDICTS, verdict_id)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise RejectError(f"could not withdraw {path}: {exc}") from exc
+
+    def mark_stop(self, nonce: str) -> bool:
+        """Record that the nonce's reviewer stopped; True only for its FIRST stop."""
+        return self._create(_STOPS, nonce, {"schema": SCHEMA_VERSION, "nonce": nonce})
 
     def read_verdict(self, verdict_id: str) -> Verdict | None:
         data = self._read(_VERDICTS, verdict_id)
@@ -1023,6 +1052,274 @@ def bind_agent(
         return False
     store.write_dispatch(DispatchRecord(nonce, session_id, tool_use_id, agent_id))
     return True
+
+
+# --- the SubagentStop recorder ------------------------------------------------------
+
+#: The outcomes of :func:`record_review_stop`.
+STOP_RECORDED = "recorded"
+STOP_WITHDRAWN = "withdrawn"
+STOP_IGNORED = "ignored"
+
+#: A reviewer transcript larger than this is not read; the stop records nothing.
+_TRANSCRIPT_LIMIT = 64 << 20
+_SAFE_AGENT_ID = re.compile(r"[A-Za-z0-9._-]+")
+_SUPERSEDED = re.compile(
+    r"(?P<reason>.*?)\s*(?:\[superseded-by:(?P<b>[^\]]*)\]|superseded-by:(?P<u>.*))"
+)
+_USER = "user"
+_ASSISTANT = "assistant"
+_TOOL_RESULT = "tool_result"
+_TEXT = "text"
+
+
+@dataclass(frozen=True)
+class TranscriptFacts:
+    """What the recorder reads from a reviewer agent's own transcript."""
+
+    #: The first human turn's text; None when there is none or it is not plain text.
+    first_user_text: str | None
+    #: Every user record that is not machine traffic (``isMeta``) or a tool result.
+    user_turns: int
+    #: Each distinct ``message.model`` of an ``assistant`` record; "" for a missing one.
+    models: tuple[str, ...]
+    downgraded: bool
+    #: The text blocks of the last ``assistant`` record that has any, joined by newlines.
+    last_assistant_text: str | None
+    #: True when any line is not a JSON object (for one, a half-written tail).
+    damaged: bool
+
+
+@dataclass(frozen=True)
+class ReviewStop:
+    """What the recorder reads from one SubagentStop payload and the agent's meta.json."""
+
+    session_id: str
+    agent_id: str
+    agent_type: str
+    meta_agent_type: str
+    #: ``meta.json``'s camelCase ``toolUseId``: the binding to the dispatching call.
+    meta_tool_use_id: str
+    stop_hook_active: bool
+    #: The payload's ``last_assistant_message``.
+    reply: str
+
+
+def _is_human_turn(record: Mapping[str, Any]) -> bool:
+    # Every agent-transcript record is ``isSidechain``, so that flag says nothing here.
+    if record.get("type") != _USER or record.get("isMeta"):
+        return False
+    message = record.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, list):
+        # Counted unless every block is a tool result: over-counting refuses the verdict.
+        return not content or any(
+            not isinstance(block, dict) or block.get("type") != _TOOL_RESULT for block in content
+        )
+    return True
+
+
+def _assistant_text(record: Mapping[str, Any]) -> str | None:
+    message = record.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, list):
+        return None
+    texts = [
+        block["text"]
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == _TEXT
+        and isinstance(block.get("text"), str)
+    ]
+    return "\n".join(texts) if texts else None
+
+
+def read_review_transcript(path: Path) -> TranscriptFacts:
+    """Read the WHOLE agent transcript (a downgrade anywhere counts, not just the tail).
+
+    Raises RejectError when the file cannot be read or exceeds the size limit.
+    """
+    try:
+        if path.stat().st_size > _TRANSCRIPT_LIMIT:
+            raise RejectError(f"{path} exceeds {_TRANSCRIPT_LIMIT} bytes")
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        raise RejectError(f"could not read {path}: {exc}") from exc
+    first: str | None = None
+    turns = 0
+    models: list[str] = []
+    downgraded = damaged = False
+    last: str | None = None
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            damaged = True
+            continue
+        if not isinstance(record, dict):
+            damaged = True
+            continue
+        if parse_fallback_payload(record) is not None:
+            downgraded = True
+        if _is_human_turn(record):
+            turns += 1
+            if turns == 1:
+                content = record["message"].get("content")
+                first = content if isinstance(content, str) else None
+        elif record.get("type") == _ASSISTANT:
+            message = record.get("message")
+            model = message.get("model") if isinstance(message, dict) else None
+            model = model if isinstance(model, str) else ""
+            if model not in models:
+                models.append(model)
+            last = _assistant_text(record) or last
+    return TranscriptFacts(first, turns, tuple(models), downgraded, last, damaged)
+
+
+def _parse_tail(tail: str) -> tuple[str, str, tuple[str, ...]]:
+    """``<decision>: <reason> [superseded-by: ...]`` -> (decision, reason, citations)."""
+    decision, colon, rest = tail.partition(":")
+    if not colon or decision not in DECISIONS:
+        raise RejectRefusedError(f"no no-value|keep decision in {tail!r}")
+    rest = rest.strip()
+    match = _SUPERSEDED.fullmatch(rest)
+    if match is None:
+        return decision, rest, ()
+    citations = tuple((match.group("b") or match.group("u") or "").split())
+    if not citations or not all(c.startswith((CITE_COMMIT, CITE_PATH)) for c in citations):
+        raise RejectRefusedError(f"a superseded-by list cites only commit: or path: in {tail!r}")
+    return decision, match.group("reason"), citations
+
+
+def _parse_item(line: str, inventory: Inventory) -> Item:
+    for kind, refs in ((KIND_COMMIT, inventory.commits), (KIND_PATH, inventory.paths)):
+        if not line.startswith(f"{kind} "):
+            continue
+        body = line[len(kind) + 1 :]
+        for ref in sorted(refs, key=len, reverse=True):
+            if body.startswith(f"{ref} "):
+                with suppress(RejectRefusedError):
+                    decision, reason, cites = _parse_tail(body[len(ref) + 1 :])
+                    return Item(kind, ref, decision, reason, cites)
+    raise RejectRefusedError(f"the verdict line {line!r} names nothing in the inventory")
+
+
+def parse_verdict_reply(reply: str, request: RejectRequest) -> tuple[tuple[Item, ...], str]:
+    """The items and overall decision of a reviewer reply; raises RejectRefusedError.
+
+    The reply must end with exactly one verdict block (whitespace only after it), whose
+    header names the request's nonce and tip and whose lines each judge a commit or path
+    of the request's inventory. Any keep, on an item or overall, makes the verdict keep.
+    """
+    lines = [line.rstrip() for line in reply.rstrip().split("\n")]
+    header = f"{VERDICT_BLOCK_START} nonce={request.nonce} tip={request.tip}"
+    starts = [i for i, line in enumerate(lines) if line.startswith(f"{VERDICT_BLOCK_START} ")]
+    if len(starts) != 1 or lines[starts[0]] != header:
+        raise RejectRefusedError("the reply holds no single verdict block for this request")
+    if lines[-1] != VERDICT_BLOCK_END or lines.count(VERDICT_BLOCK_END) != 1:
+        raise RejectRefusedError("the verdict block is not the end of the reply")
+    body = lines[starts[0] + 1 : -1]
+    if not body or not body[-1].startswith("overall "):
+        raise RejectRefusedError("the verdict block has no closing overall line")
+    stated = body[-1][len("overall ") :]
+    if stated not in DECISIONS:
+        raise RejectRefusedError(f"overall {stated!r} is neither no-value nor keep")
+    items = tuple(_parse_item(line, request.inventory) for line in body[:-1])
+    keep = stated == DECISION_KEEP or any(i.decision == DECISION_KEEP for i in items)
+    return items, DECISION_KEEP if keep else DECISION_NO_VALUE
+
+
+def _identified(
+    store: RejectStore, stop: ReviewStop, facts: TranscriptFacts
+) -> RejectRequest | None:
+    """The request this stop is the dispatched reviewer of, or None."""
+    if {stop.agent_type, stop.meta_agent_type} != {REVIEWER_AGENT_TYPE}:
+        return None
+    if not _SAFE_AGENT_ID.fullmatch(stop.agent_id) or facts.first_user_text is None:
+        return None
+    nonce = prompt_nonce(facts.first_user_text)
+    if nonce is None:
+        return None
+    request = store.read_request(nonce)
+    dispatch = store.read_dispatch(nonce)
+    if request is None or dispatch is None:
+        return None
+    if prompt_digest(facts.first_user_text) != request.prompt_sha256:
+        return None
+    if not stop.session_id or not stop.meta_tool_use_id:
+        return None
+    if (dispatch.session_id, dispatch.tool_use_id) != (stop.session_id, stop.meta_tool_use_id):
+        return None
+    if dispatch.agent_id and dispatch.agent_id != stop.agent_id:
+        return None
+    return request
+
+
+def record_review_stop(
+    store: RejectStore, stop: ReviewStop, facts: TranscriptFacts, *, now: float
+) -> str:
+    """Record a reviewer's verdict from its stop; returns a ``STOP_*`` outcome.
+
+    A verdict counts only from a clean, FINAL stop. The first stop of an identified
+    reviewer takes an exclusive ``stops/<nonce>`` marker before anything else; any later
+    stop, or one with ``stop_hook_active`` (a stop hook blocked an earlier one), withdraws
+    the nonce's verdict and writes nothing. The verdict id is the nonce, so a nonce has
+    at most one verdict. A keep record is never withdrawn: it only restricts.
+
+    Never writes the dispatch record's agent id and never touches the ledger. Raises
+    RejectError when a record cannot be read or written.
+    """
+    request = _identified(store, stop, facts)
+    if request is None:
+        return STOP_IGNORED
+    first = store.mark_stop(request.nonce)
+    if not first or stop.stop_hook_active:
+        store.withdraw_verdict(request.nonce)
+        return STOP_WITHDRAWN
+    if facts.damaged or facts.last_assistant_text != stop.reply:
+        return STOP_IGNORED
+    try:
+        items, overall = parse_verdict_reply(stop.reply, request)
+    except RejectRefusedError:
+        return STOP_IGNORED
+    verdict = Verdict(
+        verdict_id=request.nonce,
+        nonce=request.nonce,
+        branch=request.branch,
+        tip=request.tip,
+        default_sha=request.default_sha,
+        inventory=request.inventory,
+        items=items,
+        overall=overall,
+        issued_at=now,
+        reviewer=Reviewer(
+            session_id=stop.session_id,
+            agent_id=stop.agent_id,
+            models=facts.models,
+            downgraded=facts.downgraded,
+            fork=False,
+            user_turns=facts.user_turns,
+            reply_sha256=hashlib.sha256(stop.reply.encode("utf-8")).hexdigest(),
+        ),
+    )
+    if overall == DECISION_KEEP:
+        kept = [i.reason for i in items if i.decision == DECISION_KEEP]
+        store.write_keep(
+            KeepRecord(
+                verdict_id=request.nonce,
+                branch=request.branch,
+                tip=request.tip,
+                commits=request.inventory.commits,
+                reasons=tuple(kept or (i.reason for i in items)),
+                recorded_at=now,
+            )
+        )
+    if not store.create_verdict(verdict):
+        store.withdraw_verdict(request.nonce)
+        return STOP_WITHDRAWN
+    return STOP_RECORDED
 
 
 def _check_quotable(label: str, text: str) -> None:
