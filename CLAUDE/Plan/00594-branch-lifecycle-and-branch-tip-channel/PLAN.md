@@ -192,7 +192,9 @@ names, people or hashes appear here.
   stop guard, `BRANCH_LIMIT_PRINCIPLE`) says: finish (merge), or delete only on
   machine proof or human confirmation; parking is a short bounded pause. A test
   pins that `branches.wip.creation_grace` never lifts a full parked pool.
-- [ ] ⬜ **Task 3.8**: (owner request typed in session, journal 15 November;
+- [ ] 🔄 **Task 3.8**: (in progress: brought up to `main` and reconciled with
+  Plan 00626 on the branch, release note 010; open: adversarial security
+  review and the `--no-ff` merge) (owner request typed in session, journal 15 November;
   route set by delegated ruling, [DESIGN.md §7.2](DESIGN.md)) Land the
   surviving-content remote-delete tier and `delete-branch --remote-only` from
   branch `agent-a20c91c23eca4e56e-43e33957`. Bring it up to `main`, reconcile
