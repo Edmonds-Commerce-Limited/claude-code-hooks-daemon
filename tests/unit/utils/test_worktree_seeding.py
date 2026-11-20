@@ -30,8 +30,24 @@ from claude_code_hooks_daemon.core.worktree_seed import (
 from claude_code_hooks_daemon.utils.worktree_seeding import (
     WorktreeSeedError,
     seed_worktree,
-    validate_seed_sources,
 )
+from claude_code_hooks_daemon.utils.worktree_seeding import (
+    validate_seed_sources as _validate_seed_sources,
+)
+
+
+def _nothing_protected() -> tuple[str, ...]:
+    return ()
+
+
+def validate_seed_sources(root: Path, entries: list[SeedEntry]) -> None:
+    """The shape checks alone, with an empty protected set.
+
+    These tests are about where a seed may live, not about the secret guard;
+    the protected-set refusal has its own module
+    (``test_worktree_seed_protected_copy.py``).
+    """
+    _validate_seed_sources(root, entries, protected_patterns=_nothing_protected)
 
 
 @pytest.fixture

@@ -12,6 +12,7 @@ Tests run against a real temporary git repo — faithful to the production path.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
@@ -21,6 +22,7 @@ import pytest
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.worktree_seed import (
     SEED_MODE_COPY,
     SEED_MODE_SYMLINK,
@@ -48,6 +50,24 @@ def repo(tmp_path: Path) -> Path:
     root.mkdir()
     _init_repo(root)
     return root
+
+
+@pytest.fixture
+def guard_config(tmp_path: Path) -> Iterator[Path]:
+    """A readable daemon config, so a copy-mode seed can be judged (Plan 00613).
+
+    Without one the protected set cannot be read and every copy entry is
+    refused, which is the behaviour ``TestProtectedCopyOnCreate`` pins.
+    """
+    config_dir = tmp_path / "daemon-config" / ".claude"
+    config_dir.mkdir(parents=True)
+    config_path = config_dir / "hooks-daemon.yaml"
+    config_path.write_text("version: '2.0'\n", encoding="utf-8")
+    with (
+        patch.object(ProjectContext, "is_initialized", return_value=True),
+        patch.object(ProjectContext, "config_path", return_value=config_path),
+    ):
+        yield config_path
 
 
 class TestInitialisation:
@@ -315,7 +335,7 @@ class TestLinkedWorktreeCwd:
         }
 
     def test_worktree_is_created_under_the_main_checkout_and_seeded_from_it(
-        self, repo: Path, linked: Path
+        self, repo: Path, linked: Path, guard_config: Path
     ) -> None:
         (repo / ".env.local").write_text("SECRET=canonical\n", encoding="utf-8")
         assert not (linked / ".env.local").exists()
@@ -533,7 +553,7 @@ class TestSeedingOnCreate:
         assert seeded.is_symlink()
         assert seeded.read_text(encoding="utf-8") == "SECRET=canonical\n"
 
-    def test_copy_mode_is_honoured_end_to_end(self, repo: Path) -> None:
+    def test_copy_mode_is_honoured_end_to_end(self, repo: Path, guard_config: Path) -> None:
         (repo / ".env.local").write_text("SECRET=canonical\n", encoding="utf-8")
 
         handler = WorktreeCreateHandler()
@@ -560,7 +580,9 @@ class TestSeedingOnCreate:
         worktrees = repo / ".claude" / "worktrees"
         assert not worktrees.exists() or not any(worktrees.iterdir())
 
-    def test_refire_does_not_reseed_over_the_agents_own_edits(self, repo: Path) -> None:
+    def test_refire_does_not_reseed_over_the_agents_own_edits(
+        self, repo: Path, guard_config: Path
+    ) -> None:
         (repo / ".env.local").write_text("SECRET=canonical\n", encoding="utf-8")
 
         handler = WorktreeCreateHandler()
@@ -573,6 +595,73 @@ class TestSeedingOnCreate:
         handler.handle(self._input(repo))
 
         assert seeded.read_text(encoding="utf-8") == "SECRET=agent-edited\n"
+
+
+class TestProtectedCopyOnCreate:
+    """Plan 00613 Task 2.1: a copy of a protected source is refused before creation."""
+
+    _VAULT = "." + "vault" + "-pass"
+
+    def _input(self, cwd: Path) -> dict:
+        return {
+            "hook_event_name": EventType.WORKTREE_CREATE.value,
+            "cwd": str(cwd),
+            "name": "Protected Seed",
+            "prompt_id": "pid-123",
+            "session_id": "sid-456",
+        }
+
+    @staticmethod
+    def _assert_nothing_created(repo: Path) -> None:
+        worktrees = repo / ".claude" / "worktrees"
+        assert not worktrees.exists() or not any(worktrees.iterdir())
+        listed = subprocess.run(
+            ["git", "-C", str(repo), "worktree", "list", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert [line for line in listed.splitlines() if line.startswith("worktree ")] == [
+            f"worktree {repo.resolve()}"
+        ]
+
+    def test_a_protected_copy_aborts_before_the_worktree_exists(
+        self, repo: Path, guard_config: Path
+    ) -> None:
+        (repo / self._VAULT).write_text("hush\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [{"path": self._VAULT, "mode": SEED_MODE_COPY}]}
+
+        with pytest.raises(WorktreeSeedError, match="secret_file_guard"):
+            handler.handle(self._input(repo))
+
+        self._assert_nothing_created(repo)
+
+    def test_an_unreadable_config_refuses_a_copy_before_the_worktree_exists(
+        self, repo: Path
+    ) -> None:
+        """No readable protected set (here: no daemon context) refuses every copy."""
+        (repo / ".env.local").write_text("PLAIN=1\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [{"path": ".env.local", "mode": SEED_MODE_COPY}]}
+
+        with (
+            patch.object(ProjectContext, "is_initialized", return_value=False),
+            pytest.raises(WorktreeSeedError, match="could not be read"),
+        ):
+            handler.handle(self._input(repo))
+
+        self._assert_nothing_created(repo)
+
+    def test_a_link_only_config_needs_no_readable_protected_set(self, repo: Path) -> None:
+        (repo / self._VAULT).write_text("hush\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [self._VAULT]}
+
+        with patch.object(ProjectContext, "is_initialized", return_value=False):
+            result = handler.handle(self._input(repo))
+
+        assert (Path(result.worktree_path or "") / self._VAULT).is_symlink()
 
 
 class TestSeedingGuidance:
