@@ -347,21 +347,36 @@ brief; the sub-agent did not see the line itself):
 - **Q1: yes.** Linking a protected file into an agent's worktree is allowed and
   needed. Decided with it: **link mode only**; copy mode for a protected file
   stays forbidden (a copy makes a second file, a link does not).
-- **Q2: B + D, as recommended**: the config seed list owns WHAT is linked. The
-  human-run step for a hand-made worktree is `hooks-daemon seed-worktree <worktree>`, which re-applies that list and takes no path of its own, so no
-  agent can use it to link an arbitrary protected path. The verb (A) is not
-  built.
+- **Q2: B + D, as recommended.** The route is owned by the project config or
+  a human, never invocable by an agent to link an arbitrary protected path.
 - **Q3: forbid**, as the owner's constraint says.
-- **Q4: moot.** **Q5:** the read contract is unchanged and pinned (a seeded
-  link is refused for Read, Edit, Grep and relative Bash reads from inside the
-  worktree), so text describing the link route ships with this plan.
+- With it, from the coordinator's brief: the secret guard's read protections
+  stay intact; only the creation/link route changes.
 
-Small points settled on best practice, each journalled: the audit line records
-the route (`verb`); the command checks the worktree against git's own list by
-realpath and refuses the main checkout, a subdirectory and a prunable entry;
-the config is read strictly; and the config-edit route (an agent editing the
-seed list) is answered by visibility (the session-start drift report counts
-it), not by a circular deny.
+The owner's words do NOT address Q4 or Q5. What follows is the BUILDER's
+settlement (the implementing sub-agent, 2026-11-20), not the owner's, and the
+coordinator should treat Q5 as a merge gate.
+
+- **Q2 mechanism (builder).** The human-run step is `hooks-daemon seed-worktree <worktree>`: it re-applies the configured list and takes no
+  path of its own, so what is linked stays the config's decision. It is
+  agent-runnable; the authority is the config, not the invoker.
+- **Q4: moot** (no verb).
+- **Q5 (builder; a merge gate for the coordinator).** Evidence, through the
+  handler and not a live daemon socket: links placed by `seed_worktree`, hook
+  cwd in the worktree, are refused for Read, Edit, Grep and relative Bash
+  reads, including a file covered only by a project glob, with the daemon root
+  at the main checkout or at the worktree. One gap is known and pinned
+  strict-xfail: `grep -R` from the worktree descends a directory link to a
+  file only a project glob covers. It is allowed on main and on the Plan 00623
+  branch alike. Not done: the live-socket check, and a fix for that gap.
+- **Small points (builder), each journalled:** the audit line records the
+  route (`verb`); the command checks the worktree against git's own list by
+  realpath, refuses the main checkout, a subdirectory, a prunable entry, a
+  disabled `worktree_create`, and a destination parent inside the worktree
+  that is a symlink; the config is read strictly and fresh from disk
+  (`.yaml`, else `.yml`); and the config-edit route (an agent editing the seed
+  list) is answered by visibility (the session-start drift report counts it),
+  not by a circular deny.
 
 ## Rulings
 

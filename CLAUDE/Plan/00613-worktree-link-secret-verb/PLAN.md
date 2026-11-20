@@ -21,15 +21,16 @@ The owner decided (2026-11-20, quoted in
 into a worktree is allowed and needed, in link mode only. The route is owned by
 the project config (the `worktree_create` seed list) and run by the creation
 hook or by `hooks-daemon seed-worktree <worktree>` for a hand-made worktree;
-neither lets an agent name a path to link. The secret guard's read contract is
-unchanged: a read through the link is refused like a read of the file.
+neither lets an agent name a path to link. The secret guard's code is
+unchanged; a read through the link is judged as a read of the file, with one
+known gap recorded in the 261120 handoff.
 
 ## Goals
 
 - A protected file can be seeded into a worktree as a relative link, by the
   creation hook and, for a hand-made worktree, by `seed-worktree`.
 - Copy mode stays refused for a protected source; each protected link is audited.
-- Reads through a seeded link stay denied (pinned).
+- Reads through a seeded link stay denied (pinned; one known gap, open).
 
 ## Non-Goals
 
@@ -65,7 +66,8 @@ unchanged: a read through the link is refused like a read of the file.
 - [x] ✅ **Task 3.1**: (Done: a pin,
   `test_secret_file_guard_seeded_link_reads.py`.) DESIGN section 8 group C
   against links `seed_worktree` placed, hook cwd in the worktree: Read, Edit,
-  Grep and relative Bash reads all denied. Run through the handler, not a live
+  Grep and relative Bash reads denied, with one known gap pinned strict-xfail
+  (`grep -R`, project-glob-only file). Run through the handler, not a live
   daemon socket.
 - [x] ✅ **Task 3.2**: (Done.) Documentation: HANDLER_REFERENCE, the example
   config, the handler's CLAUDE.md guidance, callout 009 and task 01 now point
@@ -83,8 +85,11 @@ unchanged: a read through the link is refused like a read of the file.
   refusal and audit tests seen failing first. (Exceptions, journalled: the
   pins of Tasks 2.3 and 3.1, two handler wiring tests for 2.2, and the
   `seed-worktree` CLI wrapper test.)
-- [x] The guard denies every mention it denied before, and every read through a
-  seeded link.
+- [x] The guard denies every mention it denied before.
+- [ ] Every read through a seeded link is denied, verified through a live daemon
+  socket. (Through the handler: all denied but one known gap, `grep -R` into
+  a linked directory for a project-glob-only file, pinned strict-xfail; a
+  merge gate for the coordinator.)
 - [x] Release-bound consequences recorded in the pending release notes
   (`CLAUDE/UPGRADES/UNRELEASED/release-notes/009-*` and `016-*`) and the
   pre-upgrade tasks (`CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/01-*`).
