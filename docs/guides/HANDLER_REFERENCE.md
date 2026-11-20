@@ -313,7 +313,7 @@ Safety handlers protect against destructive or dangerous operations. Most are bl
 - `git push --force` / `git push <remote> +<refspec>` -- overwrites remote history (a leading `+` on a refspec forces the update exactly like `--force`)
 - `git branch -D` / `git update-ref -d refs/heads/<name>` -- force-deletes a branch without checking it is merged (lowercase `-d` is allowed; `update-ref` is the plumbing equivalent, scoped to `refs/heads/` targets)
 - `git commit --amend` -- rewrites the previous commit; create a new commit instead
-- `git push --delete <name>` / `git push -d <remote> <name>` / `git push <remote> :<name>` -- deletes a branch or tag on the **remote** (`R-GIT-PUSH-DELETE-REMOTE`). **Allowed when every named branch is already merged into the default branch** (its `refs/remotes/<remote>/<name>` is an ancestor of the default branch, and `git ls-remote` shows the remote's live tip equal to it, so a stale tracking ref is denied until `git fetch`). **Also allowed for an unmerged branch that holds nothing unique** (the `surviving-content` tier): every file it adds or changes, against its merge base with the default, has the same mode and blob at the same path on the default's tip or on an integration line's remote tip. A file the branch deletes is not content, a branch that adds or changes no file proves nothing, and a ref deleted by the same command (any of its `git push` calls) never counts as a surviving ref. The denial names the files whose content is found nowhere else. The proof is git's alone and never the agent's claim; it is judged afresh each time, never cached. Otherwise **human only**: a branch holding content found nowhere else, a tag, the default branch, a missing remote-tracking ref or any check failure is denied, and the denial tells the agent to stop and ask the human to run it. Deleting a **local** ref (`git tag -d`, `git branch -d`) and `git reset --keep` are not blocked.
+- `git push --delete <name>` / `git push -d <remote> <name>` / `git push <remote> :<name>` -- deletes a branch or tag on the **remote** (`R-GIT-PUSH-DELETE-REMOTE`). **Allowed when every named branch is already merged into the default branch** (its `refs/remotes/<remote>/<name>` is an ancestor of the default branch, or its patches are all upstream, or every file version survives AND a commit on the default branch's first-parent history holds the branch's net change; and `git ls-remote` shows the remote's live tip equal to it, so a stale tracking ref is denied until `git fetch`). **Also allowed for an unmerged branch that holds nothing unique** (the `surviving-content` tier): every file it adds or changes, against its merge base with the remote default, has the same mode and blob at the same path on the remote default's tip or on an integration line's remote tip, and `git ls-remote` confirms each of those tips is live. A file the branch deletes is not content, a branch that adds or changes no file proves nothing, and a ref deleted by the same command (any of its `git push` calls) never counts as a surviving ref. The denial names the files whose content is found nowhere else. The proof is git's alone and never the agent's claim; it is judged afresh each time, never cached. Otherwise **human only**: a branch holding content found nowhere else, a tag, the default branch, a missing remote-tracking ref or any check failure is denied, and the denial tells the agent to stop and ask the human to run it. Deleting a **local** ref (`git tag -d`, `git branch -d`) and `git reset --keep` are not blocked.
 
 **To delete a branch, always try `git branch -d` first (v3.52.0).** It is
 allowed, battle-tested, and refuses unless the branch is genuinely merged.
@@ -327,13 +327,13 @@ affected branch even though nothing would be lost. `delete-branch` fills that
 gap, refusing by default and deleting only what it can prove is recoverable,
 across these tiers, evaluated cheapest-first:
 
-| Tier                | Proof                                                                                 |
-| ------------------- | ------------------------------------------------------------------------------------- |
-| `merged`            | Tip is an ancestor of the protected ref (what `git branch -d` proves)                 |
-| `merged-unpushed`   | The same ancestry proof, but the branch is ahead of its OWN upstream                  |
-| `patch-equivalent`  | Every commit is already upstream by patch-id -- the shape a history rewrite produces  |
-| `content-preserved` | Every file version is byte-identical to a blob still reachable from the protected ref |
-| `unproven`          | Everything else -- refused, naming the files whose content exists nowhere else        |
+| Tier                | Proof                                                                                                                                                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `merged`            | Tip is an ancestor of the protected ref (what `git branch -d` proves)                                                                                                                          |
+| `merged-unpushed`   | The same ancestry proof, but the branch is ahead of its OWN upstream                                                                                                                           |
+| `patch-equivalent`  | Every commit is already upstream by patch-id -- the shape a history rewrite produces                                                                                                           |
+| `content-preserved` | Every file version is byte-identical to a blob still reachable from the protected ref, and a commit on the protected ref holds the branch's whole net change (the shape a squash merge leaves) |
+| `unproven`          | Everything else -- refused, naming the files whose content exists nowhere else                                                                                                                 |
 
 `merged-unpushed` exists because `git branch -d` enforces a **different
 predicate** from the `merged` proof: *merged into its upstream if it has one*,
@@ -1000,7 +1000,7 @@ handlers:
 
 **`source_disable` (opt-in, ships off):** for a project that never wants the Artifact tool at all. On the first PreToolUse event after a daemon start, the handler ensures the project's `.claude/settings.json` carries `"enableArtifact": false` — the documented Claude Code switch (honoured in project settings from Claude Code v2.1.242; once any file sets it false, no file can turn it back on) that removes the tool and its multi-thousand-token schema from every **new** session. The write is additive (other keys preserved), idempotent (no write when already `false`), atomic, and takes a one-shot backup at `settings.json.bak.pre-artifact-source-disable` before the first rewrite; failures are logged, never raised. The call-time deny stays as the in-session backstop, since settings are read only at session start. Note the trade: a new session also loses the allowed `list` action, because the whole tool is gone.
 
-**No escape hatch — by design.** Unlike [`git_stash`](#git_stash) and [`ancestry_preserving_merge`](#ancestry_preserving_merge), this handler accepts no `MUST_..._BECAUSE` declaration. Those hatches cover actions whose consequences stay inside the repository; publishing leaves it. An agent able to type its own justification would have self-authorised disclosure, which is the precise thing this guard exists to prevent — the same reasoning behind `delete-branch --allow-unproven` still requiring an interactive human.
+**No escape hatch — by design.** Unlike [`git_stash`](#git_stash) and [`ancestry_preserving_merge`](#ancestry_preserving_merge), this handler accepts no `MUST_..._BECAUSE` declaration. Those hatches cover actions whose consequences stay inside the repository; publishing leaves it. An agent able to type its own justification would have self-authorised disclosure, which is the precise thing this guard exists to prevent — the same reasoning behind `delete-branch` never deleting unproven work, whatever its caller declares.
 
 **Not covered:** a human publishing through the claude.ai UI. The daemon sees tool calls, not browser clicks — the same honest limitation [`ancestry_preserving_merge`](#ancestry_preserving_merge) records about the GitHub merge button. This handler also does not scan artefact **content**; that is [`sensitive_content`](#sensitive_content)'s job and it already ran when the file was written.
 
@@ -2191,7 +2191,7 @@ can only advise about: content-revealing git commands (`git diff`,
 `grep`/`rg`/`egrep`/`fgrep` family pull a flaggable file's content into
 context inside a routine command's output, with no deliberate `Read` at all.
 
-A recursive search whose roots or exclusions cannot be placed (a shell expansion, unparseable quoting, `git -C`, unknown pathspec magic, a relative root with no working directory) is allowed with an advisory; a root that positively reaches the flagged directory still denies the whole command.
+A recursive search whose roots or exclusions cannot be placed (a shell expansion, unparseable quoting, `git --git-dir`/`--work-tree`, unknown pathspec magic, a relative root with no working directory) is allowed with an advisory; a literal `git -C <dir>` is placed as `cd <dir>` would be; a root that positively reaches the flagged directory still denies the whole command.
 
 Denies a Bash command segment (statements and pipe/`&&`/`||` spans, quote-
 and heredoc-aware) whose SHAPE is content-revealing AND that references a
@@ -2605,6 +2605,27 @@ handlers:
     branch_creation_guard:
       enabled: true
       priority: 40
+```
+
+---
+
+#### branch_pool_pressure_advisor
+
+| Property       | Value                          |
+| -------------- | ------------------------------ |
+| **Config key** | `branch_pool_pressure_advisor` |
+| **Priority**   | 20                             |
+| **Type**       | Advisory                       |
+| **Event**      | PreToolUse                     |
+
+**Description:** Warns as a branch pool (open work, parked, merged) fills toward the point where creating a branch is refused (Plan 00619). The share used is measured against that block point: `branches.wip.cap` plus `branches.wip.creation_grace` for open work, the pool's cap for the others. At 60 percent it warns once per session, at 80 percent it warns more firmly once per session and says how a branch leaves the pool, and at 90 percent it warns on EVERY tool call, with no rate limit, until the pool drops below 90 percent. Each warning names the pool, its count against the block point, the first branch to finish or remove and its exact command. The percentages are `branches.wip.ladder` and `branches.parked.ladder` / `branches.merged.ladder` (`warn`, `strong`, `very_strong`). The same ladder is reported at session start and at the stop of the main thread; `branch_pool_pressure_prompt` says it on every prompt. Never denies, never terminal, and changes no guard's decision: the block at 100 percent stays, with no exemption. A pool whose `mode` is `off` is not counted; a pool in `mode: warn` still gets the ladder, worded as a limit that is not enforced rather than as a refusal. The ladder speaks by count only: parked and merged pools also refuse creation for a stale member whatever the count, so a small pool (a base of 9 or less never reaches the very strong level, and `branches.parked.cap: 1` goes straight from silent to the limit) can be refused while the ladder is quiet; `branch-preflight` is the authority on what is refused. A failed or unreadable branch read gives no ladder line, never a deny, in strict mode too.
+
+```yaml
+handlers:
+  pre_tool_use:
+    branch_pool_pressure_advisor:
+      enabled: true
+      priority: 20
 ```
 
 ---
@@ -4642,7 +4663,7 @@ These handlers run when Claude stops generating a response.
 | **Type**       | Blocking            |
 | **Event**      | Stop                |
 
-**Description:** Refuses a stop (rule `R-BRANCH-STOP-GUARD`) while a branch this session touched is dirty, holds commits no remote contains, or is merged but not deleted. The message lists the commands that finish, park or hand over each branch. It yields to the usage-pause and release gates and gives way after 3 blocks. `branches.stop_guard.mode: warn` only warns.
+**Description:** Refuses a stop (rule `R-BRANCH-STOP-GUARD`) while a branch this session touched is dirty, holds commits no remote contains, or is merged but not deleted. The message lists the commands that finish, park or hand over each branch. It yields to the usage-pause and release gates and gives way after 3 blocks; stops refused only on a branch the main thread touched in an unlocked `.claude/worktrees/` worktree with no work-queue record have a separate budget of 3, so they never spend the blocks owed to the session's other branches. `branches.stop_guard.mode: warn` only warns. A touched open branch past the dormancy block stage, or in an open pool over `branches.wip.cap` (branches on one tip counted once), refuses the stop only when `dormancy.mode` / `wip.mode` is `block`; `warn` reports it and allows the stop.
 
 **Config example:**
 
@@ -4967,6 +4988,27 @@ handlers:
 ```
 
 **On by default** (dogfooding purpose, Plan 00298). Set `enabled: false` to restore unconditional hourly cron delivery.
+
+---
+
+#### branch_pool_pressure_prompt
+
+| Property       | Value                         |
+| -------------- | ----------------------------- |
+| **Config key** | `branch_pool_pressure_prompt` |
+| **Priority**   | 44                            |
+| **Type**       | Advisory                      |
+| **Event**      | UserPromptSubmit              |
+
+**Description:** The prompt-side twin of `branch_pool_pressure_advisor` (Plan 00619): the same branch pool warning ladder, said on a prompt. At 90 percent of a pool's block point it warns on EVERY prompt until the pool drops below it; warn and strong levels are said once per session and are shared with the advisor, so one warning is not said twice. Never denies, never holds a prompt, never terminal.
+
+```yaml
+handlers:
+  user_prompt_submit:
+    branch_pool_pressure_prompt:
+      enabled: true
+      priority: 44
+```
 
 ---
 

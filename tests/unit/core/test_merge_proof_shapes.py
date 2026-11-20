@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
 from claude_code_hooks_daemon.core.remote_branch_proof import prove_remote_merged
 from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_CONTENT_PRESERVED,
+    TIER_EMPTY_COMMITS_ONLY,
     TIER_MERGED,
     TIER_PATCH_EQUIVALENT,
 )
@@ -52,8 +53,9 @@ _ENV = {
 }
 _CONFIG = BranchesConfig(default="main")
 
-#: Git calls one branch may cost the proof beyond the fixed per-call listings.
-_CALLS_PER_BRANCH = 5
+#: Git calls one branch may cost the proof beyond the fixed per-call listings. One of
+#: them is the ``cat-file --batch`` read confirming the range walk from stored objects.
+_CALLS_PER_BRANCH = 6
 
 #: Index of the subcommand in ``git -C <dir> <subcommand> ...``.
 _SUBCOMMAND_AT = 3
@@ -135,7 +137,10 @@ def _git_subcommands_during(action: Callable[[], Any]) -> list[str]:
     real_run = subprocess.run
 
     def spy(argv: list[str], *args: Any, **kwargs: Any) -> Any:
-        spawned.append(argv[_SUBCOMMAND_AT])
+        at = _SUBCOMMAND_AT
+        while argv[at] == "-c":  # a global ``-c key=value`` precedes the subcommand
+            at += 2
+        spawned.append(argv[at])
         return real_run(argv, *args, **kwargs)
 
     with patch("claude_code_hooks_daemon.utils.git_repo.subprocess.run", spy):
@@ -198,7 +203,13 @@ class TestShapes:
         assert "not merged" in problems["feat"]
         assert evidence == {}
 
-    def test_a_park_branch_of_empty_commits_stays_unproven(self, repo: Path) -> None:
+    def test_a_branch_of_only_empty_commits_is_proven_empty_commits_only(self, repo: Path) -> None:
+        """No file changes at all: the delete loses only the commit messages (Plan 00622).
+
+        Before Plan 00622 this was unproven, because an empty net change proves
+        nothing. It still proves nothing; what proves this branch is that EVERY commit
+        it has beyond main is empty (one parent, that parent's tree).
+        """
         _git(repo, "checkout", "-q", "-b", "parked", "main")
         _git(repo, "commit", "-q", "--allow-empty", "-m", "Park it")
         _git(repo, "push", "--quiet", "origin", "parked")
@@ -206,9 +217,9 @@ class TestShapes:
         _commit(repo, "later.txt")
         _publish_main(repo)
         tips, problems, evidence = _prove(repo, ["parked"])
-        assert tips == {}
-        assert "not merged" in problems["parked"]
-        assert evidence == {}
+        assert list(tips) == ["parked"]
+        assert problems == {}
+        assert evidence == {"parked": TIER_EMPTY_COMMITS_ONLY}
 
 
 class TestCaching:
@@ -223,14 +234,14 @@ class TestCaching:
             for key, value in document["proofs"].items()
         )
 
-    def test_a_cached_proof_runs_no_walk_the_second_time(self, repo: Path) -> None:
+    def test_a_cached_positive_is_proven_again_never_trusted(self, repo: Path) -> None:
+        # The cache is a plain file anyone can write; a remote delete never rests on
+        # it, so a positive is re-proven (Plan 00626). A negative can only refuse.
         _topic(repo, "feat", ["a.txt", "b.txt"])
         _land_squash(repo, "feat")
         _prove(repo, ["feat"])
         subcommands = _git_subcommands_during(lambda: _prove(repo, ["feat"]))
-        assert "cherry" not in subcommands
-        assert "rev-list" not in subcommands
-        assert "ls-tree" not in subcommands
+        assert "diff" in subcommands  # the net change is read again
 
     def test_a_negative_result_is_cached_too(self, repo: Path) -> None:
         _topic(repo, "feat", ["a.txt", "b.txt"])
@@ -266,7 +277,9 @@ class TestGuardPathCost:
         cold = len(_git_subcommands_during(lambda: _prove(repo, names)))
         warm = len(_git_subcommands_during(lambda: _prove(repo, names)))
 
-        assert warm <= one  # a warm cache: the listings only, whatever the count
+        # Positives are never read from the cache (Plan 00626), so a warm run re-proves
+        # them: it costs no more than a cold one, and both stay bounded per branch.
+        assert warm <= cold
         assert cold <= one + _CALLS_PER_BRANCH * (len(names) - 1)
 
     def test_a_branch_over_the_path_ceiling_is_unproven_without_walking_main(
@@ -314,14 +327,34 @@ class TestCreationReadsTheProof:
         _land_squash(repo, "feat")
         prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
         tip = _git(repo, "rev-parse", "refs/heads/feat").strip()
-        main = _git(repo, "rev-parse", "refs/heads/main").strip()
+        main = _git(repo, "rev-parse", "refs/remotes/origin/main").strip()
         refs = [
-            _Ref("main", main, 0.0, True, "refs/heads/main"),
+            _Ref("main", main, 0.0, False, "refs/remotes/origin/main"),
             _Ref("feat", tip, 0.0, True, "refs/heads/feat"),
             _Ref("release/1", tip, 0.0, True, "refs/heads/release/1"),
         ]
-        proven = _proven_refnames(repo, config, refs, ["refs/heads/main"], set())
+        proven = _proven_refnames(repo, config, refs, ["refs/remotes/origin/main"], set())
         assert proven == {"refs/heads/feat"}
+
+    def test_a_proof_is_read_by_the_remote_default_sha_not_an_unpushed_local_one(
+        self, repo: Path
+    ) -> None:
+        # Plan 00626: the writer keys by the remote default alone, so a local default
+        # that is ahead (unpushed) must not stop the count from reading the proof.
+        _topic(repo, "feat", ["a.txt", "b.txt"])
+        _land_squash(repo, "feat")
+        prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
+        _commit(repo, "unpushed.txt")
+        tip = _git(repo, "rev-parse", "refs/heads/feat").strip()
+        local = _git(repo, "rev-parse", "refs/heads/main").strip()
+        remote = _git(repo, "rev-parse", "refs/remotes/origin/main").strip()
+        refs = [
+            _Ref("main", local, 0.0, True, "refs/heads/main"),
+            _Ref("main", remote, 0.0, False, "refs/remotes/origin/main"),
+            _Ref("feat", tip, 0.0, True, "refs/heads/feat"),
+        ]
+        targets = ["refs/remotes/origin/main", "refs/heads/main"]
+        assert _proven_refnames(repo, _CONFIG, refs, targets, set()) == {"refs/heads/feat"}
 
 
 def _on_branch(repo: Path, name: str) -> None:
@@ -390,13 +423,32 @@ class TestNetChangeMustBeHeldByTheDefaultTip:
         _push_back_to_main(repo, "chmod")
         _assert_unproven(repo, "chmod")
 
-    def test_a_park_branch_is_unproven_while_main_has_an_empty_commit(self, repo: Path) -> None:
+    def test_an_empty_commit_on_main_never_proves_a_branch_by_net_change(self, repo: Path) -> None:
+        """Main's empty commit holds the (empty) net change trivially; that is no proof.
+
+        The branch is still deletable, but only as ``empty-commits-only`` (its own
+        commits are all empty, Plan 00622), never as ``content-preserved``.
+        """
         _on_branch(repo, "parked")
         _git(repo, "commit", "-q", "--allow-empty", "-m", "Park it")
         _push_back_to_main(repo, "parked")
         _git(repo, "commit", "-q", "--allow-empty", "-m", "An empty commit on main")
         _publish_main(repo)
-        _assert_unproven(repo, "parked")
+        assert not remote_branch_proof.holds_net_change(repo, "main", "refs/remotes/origin/parked")
+        _tips, _problems, evidence = _prove(repo, ["parked"])
+        assert evidence == {"parked": TIER_EMPTY_COMMITS_ONLY}
+
+    def test_an_empty_commit_over_a_branch_that_only_deletes_a_file_is_unproven(
+        self, repo: Path
+    ) -> None:
+        _commit(repo, "keep.txt")
+        _publish_main(repo)
+        _on_branch(repo, "rm")
+        _git(repo, "rm", "-q", "keep.txt")
+        _git(repo, "commit", "-q", "-m", "Remove keep")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "Unpark branch")
+        _push_back_to_main(repo, "rm")
+        _assert_unproven(repo, "rm")
 
     def test_branch_work_that_main_later_reverted_is_proven(self, repo: Path) -> None:
         """Round 1 called this a false positive; under the first-parent rule it is intended.

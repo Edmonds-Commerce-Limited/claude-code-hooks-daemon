@@ -1,0 +1,32 @@
+[squash=False local=True]: park pushed=True
+  inventory state: park-carried
+  prove_remote_merged: tips=['feat'] evidence={'feat': 'park-carried'} problems={}
+  R-GIT-PUSH-DELETE-REMOTE: ALLOW
+  delete-branch classify (content tier): tier=park-carried refusal=None
+  delete-branch classify (hook, no content tier): tier=park-carried
+  clean_sweep --remote dry: commands=('would delete feat (proven park-carried)', 'would delete remote origin/feat (tip 2435d3abab96, proven merged into main)') skipped=()
+  clean_sweep --remote apply: local=('feat',) remote=('origin/feat',) skipped=()
+  after apply: local left=False remote left=False
+[squash=False local=False]: park pushed=True
+  inventory state: park-carried
+  prove_remote_merged: tips=['feat'] evidence={'feat': 'park-carried'} problems={}
+  R-GIT-PUSH-DELETE-REMOTE: ALLOW
+  clean_sweep --remote dry: commands=('would delete remote origin/feat (tip 2435d3abab96, proven merged into main)',) skipped=()
+  clean_sweep --remote apply: local=() remote=('origin/feat',) skipped=()
+  after apply: local left=False remote left=False
+[squash=True local=True]: park pushed=True
+  inventory state: patch-equivalent
+  prove_remote_merged: tips=['feat'] evidence={'feat': 'patch-equivalent'} problems={}
+  R-GIT-PUSH-DELETE-REMOTE: ALLOW
+  delete-branch classify (content tier): tier=patch-equivalent refusal=None
+  delete-branch classify (hook, no content tier): tier=patch-equivalent
+  clean_sweep --remote dry: commands=('would delete feat (proven patch-equivalent)', 'would delete remote origin/feat (tip 9c41c3197d30, proven merged into main)') skipped=()
+  clean_sweep --remote apply: local=('feat',) remote=('origin/feat',) skipped=()
+  after apply: local left=False remote left=False
+[squash=True local=False]: park pushed=True
+  inventory state: patch-equivalent
+  prove_remote_merged: tips=['feat'] evidence={'feat': 'patch-equivalent'} problems={}
+  R-GIT-PUSH-DELETE-REMOTE: ALLOW
+  clean_sweep --remote dry: commands=('would delete remote origin/feat (tip ad80efbb3756, proven merged into main)',) skipped=()
+  clean_sweep --remote apply: local=() remote=('origin/feat',) skipped=()
+  after apply: local left=False remote left=False

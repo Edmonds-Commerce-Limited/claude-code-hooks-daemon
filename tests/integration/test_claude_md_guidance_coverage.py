@@ -568,6 +568,15 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "a Notification hook cannot inject context, and limit_rebrief delivers the "
         "re-brief it feeds"
     ),
+    "BranchPoolPressureAdvisorHandler": (
+        "never denies (T1 no); the warning is delivered in full at fire time, naming the "
+        "pool, its count and the branch to finish, and the standing branch policy is "
+        "already carried by branch_creation_guard"
+    ),
+    "BranchPoolPressurePromptHandler": (
+        "never denies (T1 no); the same fire-time warning as its PreToolUse twin, which "
+        "needs no resident guidance either"
+    ),
     "LimitRebriefHandler": (
         "never denies (T1 no); each message is a one-shot delivered in full at "
         "fire-time, naming the agent and the places to look, not a standing policy "

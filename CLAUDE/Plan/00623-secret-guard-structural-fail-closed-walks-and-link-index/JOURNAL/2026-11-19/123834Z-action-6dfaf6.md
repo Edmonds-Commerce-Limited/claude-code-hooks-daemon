@@ -1,0 +1,3 @@
+## 12:38 · action · —
+
+Packed untracked/scratch/rv614c into untracked/scratch/rv614c.tar.gz and removed the directory tree, on the coordinator's suggestion (a peer note, no authority of its own; the action loses nothing). Before: 168,449 directories, 122 non-directory entries, 2 nested .git entries, 1.3 MB. The archive (1.1 MB) lists 168,571 entries, equal to the 168,571 the tree held, and `tar --compare` against the tree reported no difference (exit 0, empty output) before the removal. Afterwards untracked/scratch holds 61,456 directories, down from 229,905, so the link index cap of 200,000 is no longer exceeded by scratch alone. Restore with `tar -xzf untracked/scratch/rv614c.tar.gz -C untracked/scratch`. The rest of scratch is left for the untracked-sprawl plan.

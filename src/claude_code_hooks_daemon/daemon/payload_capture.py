@@ -28,6 +28,10 @@ from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.repo_relative_path import normalise_repo_relative_path
+from claude_code_hooks_daemon.utils.resolution_failure import (
+    ResolutionFailedError,
+    fail_closed_finding,
+)
 from claude_code_hooks_daemon.utils.secret_redaction import redact_structure
 
 # The ``_system`` envelope is the CLI's own control channel (logs, status,
@@ -69,7 +73,14 @@ def _touches_protected_path(hook_input: dict[str, Any], patterns: tuple[str, ...
             return True
     command = tool_input.get(_COMMAND_KEY)
     if isinstance(command, str) and command:
-        return sfm.find_protected_mention(command, patterns, bash_tool_command=True) is not None
+        try:
+            mention = sfm.find_protected_mention(command, patterns, bash_tool_command=True)
+        except ResolutionFailedError:
+            # Plan 00623: where the words lead could not be worked out, so the
+            # event may touch a protected path and is kept out of the capture.
+            logger.debug("payload capture: a command's words could not be placed; not captured")
+            return fail_closed_finding(patterns, "unplaced") is not None
+        return mention is not None
     return False
 
 

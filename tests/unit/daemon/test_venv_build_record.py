@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.daemon.cli import _repair_venv_locked, cmd_status
 from claude_code_hooks_daemon.daemon.venv_lock import (
     BuildResult,
     build_log_path,
+    build_result_path,
     read_build_result,
     venv_lock,
     write_build_result,
@@ -67,7 +68,7 @@ class TestBuildResult:
     def test_write_then_read_round_trips(self, tmp_path: Path) -> None:
         (tmp_path / "untracked").mkdir()
         log = build_log_path(tmp_path, "fp1")
-        write_build_result(tmp_path, "failed", 2, log)
+        write_build_result(tmp_path, "fp1", "failed", 2, log)
 
         result = read_build_result(tmp_path)
 
@@ -76,21 +77,80 @@ class TestBuildResult:
             result="failed", finished_at=result.finished_at, exit=2, log=str(log)
         )
         assert result.finished_at.endswith("Z")
-        assert _kv(tmp_path / "untracked" / ".venv-bootstrap.result")["result"] == "failed"
+        assert _kv(build_result_path(tmp_path, "fp1"))["result"] == "failed"
+
+    def test_each_view_keeps_its_own_record(self, tmp_path: Path) -> None:
+        """Two views of one checkout (host and container) never overwrite each other."""
+        (tmp_path / "untracked").mkdir()
+        write_build_result(tmp_path, "host-py312-aaaa1111", "failed", 2, tmp_path / "host.log")
+        write_build_result(tmp_path, "box-py311-bbbb2222", "succeeded", 0, tmp_path / "box.log")
+
+        host = _kv(build_result_path(tmp_path, "host-py312-aaaa1111"))
+        box = _kv(build_result_path(tmp_path, "box-py311-bbbb2222"))
+
+        assert host["result"] == "failed"
+        assert box["result"] == "succeeded"
+        assert build_result_path(tmp_path, "host-py312-aaaa1111") != build_result_path(
+            tmp_path, "box-py311-bbbb2222"
+        )
+
+    def test_the_old_single_file_is_neither_written_nor_read(self, tmp_path: Path) -> None:
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        (untracked / ".venv-bootstrap.result").write_text(
+            "result=failed\nfinished_at=2026-10-31T01:02:03Z\nexit=2\nlog=/x/old.log\n"
+        )
+        write_build_result(tmp_path, "fp1", "succeeded", 0, build_log_path(tmp_path, "fp1"))
+
+        result = read_build_result(tmp_path)
+
+        assert result is not None and result.result == "succeeded"
+        assert "old.log" in (untracked / ".venv-bootstrap.result").read_text()
+
+    def test_the_newest_record_of_any_view_is_read(self, tmp_path: Path) -> None:
+        (tmp_path / "untracked").mkdir()
+        write_build_result(tmp_path, "a", "failed", 2, tmp_path / "a.log")
+        older = build_result_path(tmp_path, "a")
+        os.utime(older, (1, 1))
+        write_build_result(tmp_path, "b", "succeeded", 0, tmp_path / "b.log")
+
+        result = read_build_result(tmp_path)
+
+        assert result is not None and result.result == "succeeded"
 
     def test_the_log_names_the_verdict(self, tmp_path: Path) -> None:
         (tmp_path / "untracked").mkdir()
         log = build_log_path(tmp_path, "fp1")
-        write_build_result(tmp_path, "succeeded", 0, log)
+        write_build_result(tmp_path, "fp1", "succeeded", 0, log)
         assert "succeeded" in log.read_text()
 
     def test_no_record_reads_as_none(self, tmp_path: Path) -> None:
         assert read_build_result(tmp_path) is None
 
+    def test_a_record_that_vanishes_after_the_listing_is_skipped(self, tmp_path: Path) -> None:
+        """T-9: the glob lists a record another process removes before it is stat'ed."""
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        write_build_result(tmp_path, "kept", "failed", 2, tmp_path / "kept.log")
+        # A dangling link is listed by the glob and raises FileNotFoundError on stat.
+        (untracked / ".venv-bootstrap-gone.result").symlink_to(untracked / "nowhere")
+
+        result = read_build_result(tmp_path)
+
+        assert result is not None
+        assert result.result == "failed"
+
+    def test_only_vanished_records_read_as_none(self, tmp_path: Path) -> None:
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        (untracked / ".venv-bootstrap-gone.result").symlink_to(untracked / "nowhere")
+
+        assert read_build_result(tmp_path) is None
+
     def test_a_record_the_bash_writer_made_is_read(self, tmp_path: Path) -> None:
         untracked = tmp_path / "untracked"
         untracked.mkdir()
-        (untracked / ".venv-bootstrap.result").write_text(
+        (untracked / ".venv-bootstrap-fp1.result").write_text(
             "result=timed-out\nfinished_at=2026-10-31T01:02:03Z\nexit=143\nlog=/x/y.log\n"
         )
         assert read_build_result(tmp_path) == BuildResult(
@@ -100,7 +160,7 @@ class TestBuildResult:
     def test_a_malformed_record_is_an_error_not_a_guess(self, tmp_path: Path) -> None:
         untracked = tmp_path / "untracked"
         untracked.mkdir()
-        (untracked / ".venv-bootstrap.result").write_text("result=failed\n")
+        (untracked / ".venv-bootstrap-fp1.result").write_text("result=failed\n")
         with pytest.raises(ValueError, match="finished_at"):
             read_build_result(tmp_path)
 
@@ -165,7 +225,11 @@ class TestStatusNamesTheLastBuild:
         untracked = tmp_path / ".claude" / "hooks-daemon" / "untracked"
         untracked.mkdir(parents=True)
         write_build_result(
-            tmp_path / ".claude" / "hooks-daemon", "failed", 1, untracked / ".venv-bootstrap-a.log"
+            tmp_path / ".claude" / "hooks-daemon",
+            "a",
+            "failed",
+            1,
+            untracked / ".venv-bootstrap-a.log",
         )
 
         out = self._status(tmp_path, capsys)

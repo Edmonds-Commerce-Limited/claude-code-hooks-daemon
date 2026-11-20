@@ -68,7 +68,8 @@ class RuleID:
     #: git commit --amend — rewrites the previous commit.
     GIT_COMMIT_AMEND: str = "R-GIT-COMMIT-AMEND"
 
-    #: creating a branch while the open work branches are at ``branches.wip.cap``.
+    #: creating a branch while the open work branches are past ``branches.wip.cap`` plus
+    #: ``wip.creation_grace`` (at the cap itself it only warns).
     BRANCH_WIP_CAP: str = "R-BRANCH-WIP-CAP"
 
     #: creating a branch while an unmerged, unparked branch is at the dormancy block stage.

@@ -312,8 +312,21 @@ def write_plan_counter(repo_root: Path, value: int) -> None:
     FAIL FAST: propagates ``CalledProcessError`` if git rejects the write so
     the caller (a handler with its own error handling) surfaces the failure
     rather than silently losing the counter.
+
+    Runs on PreToolUse paths under the guard-chain deadline, so the wait for
+    ``config.lock`` is the fixed ``GIT_PLAN_COUNTER_LOCK_WAIT``, not the 30 s
+    load-scaled default.
+
+    Raises:
+        subprocess.CalledProcessError: If git rejects the write.
+        GitConfigLockError: If ``config.lock`` stays held past the short wait.
     """
-    GitRepo(repo_root).write_config(_PLAN_COUNTER_CONFIG_KEY, str(value))
+    GitRepo(repo_root).write_config(
+        _PLAN_COUNTER_CONFIG_KEY,
+        str(value),
+        lock_base=Timeout.GIT_PLAN_COUNTER_LOCK_WAIT,
+        lock_ceiling=Timeout.GIT_PLAN_COUNTER_LOCK_WAIT,
+    )
 
 
 def next_plan_number_for_target(

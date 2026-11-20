@@ -24,6 +24,7 @@ level — see the plan's RESEARCH-read-routes.md class-(d) rows.
 
 import contextlib
 import contextvars
+import errno
 import fnmatch
 import functools
 import itertools
@@ -34,13 +35,16 @@ import time
 import urllib.parse
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 import yaml
 
-from claude_code_hooks_daemon.utils import linear_shlex, shell_expansion
+from claude_code_hooks_daemon.utils import linear_shlex, link_index, shell_expansion
+from claude_code_hooks_daemon.utils.bounded_walk import Bounded, finished, stopped
 from claude_code_hooks_daemon.utils.command_evasion import (
+    GIT_GLOBAL_OPTIONS_TAKING_SEPARATE_VALUE,
     REGEX_PATTERN_ATTACHED_PREFIXES,
     REGEXP_LONG_OPTION,
     GitGrepRole,
@@ -50,15 +54,29 @@ from claude_code_hooks_daemon.utils.command_evasion import (
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.find_expression import find_regex_operand_indexes
+from claude_code_hooks_daemon.utils.grep_option_grammar import (
+    RG_CONFIG_ENV,
+    grammar_for,
+    parse_arguments,
+)
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
     literal_screen,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.realpath import resolve_checking_loop
+from claude_code_hooks_daemon.utils.resolution_failure import (
+    IncompleteScanError,
+    ResolutionFailedError,
+    fails_closed,
+    refuse_process_view,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    COMMAND_WRAPPERS,
     UnplaceableSubstitutionError,
     mask_quoted,
+    peel_command_wrappers,
     segment_command_chain,
     segment_command_word,
     shell_word_spans,
@@ -470,7 +488,8 @@ def _list_directory(
             if above is not None and above.is_symlink.get(name) is False:
                 real = f"{above.real.rstrip('/')}/{name}"
     result: _ListedDirectory | None = None
-    if real is not None or Path(directory or "/").is_dir():
+    # One that cannot be stat-ed is not listed: its files are judged one by one.
+    if real is not None or path_is_dir(directory or "/", unreadable_means=False):
         # `is_dir` is true only for a directory that resolves, so the strict
         # and non-strict `realpath` agree here.
         result = _scan_directory(real or os.path.realpath(directory or "/"))
@@ -2024,8 +2043,22 @@ _FILE_OPENING_COMMANDS: Final = frozenset(
     ]
 )
 _FILE_OPENING_PREFIXES: Final = ("python", "ansible")
-_PATTERN_FIRST_COMMANDS: Final = frozenset({"grep", "egrep", "fgrep", "rg", "ag", "ack"})
-_PATTERN_FILE_OPTIONS: Final = frozenset({"-f", "--file", "-e", "--regexp"})
+# ``ug`` reads a config of its own, so its grammar never proves a pattern operand.
+_PATTERN_FIRST_COMMANDS: Final = frozenset(
+    {"grep", "egrep", "fgrep", "zgrep", "ugrep", "ug", "rg", "ag", "ack"}
+)
+# Separators that end the segment a bare name sits in (``&`` stays inside it:
+# ``2>&1`` carries one, and reading on past it only judges more words).
+_SEGMENT_END_SEPARATORS: Final = ("||", "&&", ";", "|", "\n")
+_ASSIGNMENT_WORD: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+# ``NAME=value`` words in front of a command whose value holds nothing but plain characters.
+_PLAIN_LEADING_ASSIGNMENTS: Final = re.compile(
+    r"""\A\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s"'$`\\]*\s+)+"""
+)
+# Stands for a closed ``$(...)`` in a rebuilt segment: a word bash expands, so it names no command.
+_SUBSTITUTION_WORD: Final = "$SUBSTITUTION"
+# Stands for the bare name while the words around it are read as one command line.
+_TOKEN_WORD: Final = "token"
 # A module-name API whose first argument is a dotted module path, not a file.
 _MODULE_API_BEFORE_STRING: Final = re.compile(
     r"\b(?:import_module|find_spec|run_module|patch|getLogger)\(\s*$"
@@ -2091,9 +2124,114 @@ _GIT_SEARCH_ATTACHED_PREFIXES: Final = frozenset(
 )
 
 
-def _ends_in_git_search_option(words: list[str]) -> bool:
-    """Whether the words end in a git search option awaiting its value (``-S``)."""
-    return bool(words) and words[-1] in _GIT_SEARCH_VALUE_OPTIONS
+#: The subcommands on which each option takes a search VALUE, probed against git
+#: 2.47. Elsewhere the same letters read a file (``git blame -S <revs-file>``),
+#: take no value (``git grep -G``) or mean something else (``git commit -S``).
+_GIT_PICKAXE_SUBCOMMANDS: Final = frozenset(
+    {"log", "show", "whatchanged", "diff", "diff-tree", "diff-index", "format-patch"}
+)
+_GIT_COMMIT_FILTER_SUBCOMMANDS: Final = frozenset(
+    {"log", "show", "whatchanged", "rev-list", "format-patch"}
+)
+_GIT_SEARCH_VALUE_SUBCOMMANDS: Final[dict[str, frozenset[str]]] = {
+    "-S": _GIT_PICKAXE_SUBCOMMANDS,
+    "-G": _GIT_PICKAXE_SUBCOMMANDS,
+    **{
+        option: _GIT_COMMIT_FILTER_SUBCOMMANDS
+        for option in _GIT_SEARCH_VALUE_OPTIONS
+        if option.startswith("--")
+    },
+}
+#: git global options that take no value. Any other option word before the
+#: subcommand might consume the next word, so the subcommand is not trusted.
+_GIT_VALUELESS_GLOBAL_OPTIONS: Final = frozenset(
+    {
+        "-p",
+        "--paginate",
+        "-P",
+        "--no-pager",
+        "--no-replace-objects",
+        "--no-lazy-fetch",
+        "--no-optional-locks",
+        "--no-advice",
+        "--bare",
+        "--literal-pathspecs",
+        "--glob-pathspecs",
+        "--noglob-pathspecs",
+        "--icase-pathspecs",
+    }
+)
+_GIT_GLOBAL_OPTIONS_WITH_VALUE: Final = GIT_GLOBAL_OPTIONS_TAKING_SEPARATE_VALUE | {"--attr-source"}
+#: After either word every argument is a revision or pathspec, never an option.
+_GIT_END_OF_OPTIONS: Final = frozenset({"--", "--end-of-options"})
+#: log/diff option words that cannot consume the word after them as a value.
+_GIT_WORD_TAKES_NO_VALUE: Final = re.compile(
+    r"(?:-\d+|-n\d+|--[^=]+=.*|-[pusimcE]|--(?:patch|oneline|all|stat|raw|"
+    r"name-only|name-status|no-merges|merges|reverse|graph|first-parent|"
+    r"full-history|pickaxe-all|pickaxe-regex|regexp-ignore-case|all-match|"
+    r"invert-grep|extended-regexp|fixed-strings|no-patch|summary|shortstat|"
+    r"numstat|source|abbrev-commit|no-color|color|decorate|no-index|cached|"
+    r"staged|no-pager))"
+)
+
+
+def _git_subcommand_after(words: list[str]) -> tuple[int, str] | None:
+    """``(index, name)`` of the subcommand of the segment's first ``git`` word.
+
+    None when there is no git word, or a word before the subcommand is an
+    option this parser cannot vouch for (its value might be the "subcommand").
+    """
+    names = [word.rsplit("/", 1)[-1] for word in words]
+    if "git" not in names:
+        return None
+    index = names.index("git") + 1
+    while index < len(words):
+        word = words[index]
+        if not word.startswith("-"):
+            return index, word
+        if (word.startswith("--") and "=" in word) or word in _GIT_VALUELESS_GLOBAL_OPTIONS:
+            index += 1
+        elif word in _GIT_GLOBAL_OPTIONS_WITH_VALUE:
+            index += 2
+        else:
+            return None
+    return None
+
+
+def _git_option_takes_search_value(
+    segment: str, words: list[str], option: str, *, separate: bool
+) -> bool:
+    """Whether ``option``, placed after ``words`` (the split ``segment``), takes a search value.
+
+    Fails closed: the segment's command must be git, its subcommand one on
+    which the option takes a value, no end-of-options marker may precede the
+    option, and (separate spelling) the word before must not be an option that
+    could take ``option`` itself as its value (``--until -S <file>``).
+    """
+    chain = segment_command_chain(segment)
+    if not chain or chain[-1].rsplit("/", 1)[-1] != "git":
+        return False
+    found = _git_subcommand_after(words)
+    if found is None:
+        return False
+    sub_index, subcommand = found
+    if subcommand not in _GIT_SEARCH_VALUE_SUBCOMMANDS.get(option, frozenset()):
+        return False
+    after = words[sub_index + 1 :]
+    if any(word in _GIT_END_OF_OPTIONS for word in after):
+        return False
+    if separate and after and after[-1].startswith("-"):
+        return _GIT_WORD_TAKES_NO_VALUE.fullmatch(after[-1]) is not None
+    return True
+
+
+def _ends_in_git_search_option(segment: str, words: list[str]) -> bool:
+    """Whether the split ``segment`` ends in a git search option awaiting its value (``-S``)."""
+    return (
+        bool(words)
+        and words[-1] in _GIT_SEARCH_VALUE_OPTIONS
+        and _git_option_takes_search_value(segment, words[:-1], words[-1], separate=True)
+    )
 
 
 def _git_search_value_prefix_before(command: str, word_start: int, segment_start: int) -> bool:
@@ -2101,13 +2239,15 @@ def _git_search_value_prefix_before(command: str, word_start: int, segment_start
     start = word_start
     while start > segment_start and not command[start - 1].isspace():
         start -= 1
-    if command[start:word_start] not in _GIT_SEARCH_ATTACHED_PREFIXES:
+    prefix = command[start:word_start]
+    if prefix not in _GIT_SEARCH_ATTACHED_PREFIXES:
         return False
+    segment = command[segment_start:start]
     try:
-        words = linear_shlex.split(command[segment_start:start])
+        words = linear_shlex.split(segment)
     except ValueError:
         return False
-    return "git" in (word.rsplit("/", 1)[-1] for word in words)
+    return _git_option_takes_search_value(segment, words, prefix.rstrip("="), separate=False)
 
 
 def _is_git_search_word(word: str, command: str) -> bool:
@@ -2144,7 +2284,11 @@ _SEARCH_PATH_COMMANDS: Final = frozenset({"grep", "egrep", "fgrep", "rg"})
 
 
 def _searched_paths_hold_no_protected_file(
-    segment_words: list[str], index: "ProtectedFileIndex", cwds: tuple[str, ...]
+    segment_words: list[str],
+    index: "ProtectedFileIndex",
+    cwds: tuple[str, ...],
+    *,
+    rg_config: bool = False,
 ) -> bool:
     """Whether a grep/rg segment names searched paths and none holds a protected file.
 
@@ -2156,15 +2300,15 @@ def _searched_paths_hold_no_protected_file(
     if command is None:
         return False
     rest = segment_words[command + 1 :]
-    if any(word in _PATTERN_FILE_OPTIONS for word in rest):
+    parsed = parse_arguments(grammar_for(names[command], rg_config=rg_config), rest)
+    if parsed.uncertain or parsed.pattern_supplied or _END_OF_OPTIONS in rest:
+        # An option the grammar cannot place, a pattern given by option (or none at
+        # all), or ``--`` (a dash-led path after it): the first operand may be a
+        # searched path too, so never skip it and judge nothing clean.
         return False
     if any(_follows_links(word, names[command]) for word in rest):
         return False
-    filter_values = {i + 1 for i, word in enumerate(rest) if word in _FILTER_SEPARATE_OPTIONS}
-    operands = [
-        word for i, word in enumerate(rest) if not word.startswith("-") and i not in filter_values
-    ]
-    paths = operands[1:]
+    paths = [rest[position] for position in parsed.operands[1:]]
     if not paths or any(char in _WORD_EXPANDING_CHARACTERS for p in paths for char in p):
         return False
     bases = [cwd for cwd in cwds if cwd]
@@ -2299,19 +2443,25 @@ def _is_scoped_filter_value(
             words = linear_shlex.split(segment)
         except ValueError:
             return False
-        if not _searched_paths_hold_no_protected_file(words, index, cwds):
+        if not _searched_paths_hold_no_protected_file(
+            words, index, cwds, rg_config=RG_CONFIG_ENV in command
+        ):
             return False
     return True
 
 
-def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
-    """Whether the command in ``segment`` may open an operand placed after it.
+def _opens_files(segment: str, tail: str, *, rg_config: bool = False) -> bool:
+    """Whether the command in ``segment`` may open the bare name that follows it.
 
-    Fails closed: an unreadable segment, or one with no command word (the token
-    IS the command), opens files.
+    ``segment`` is the command text before the name and ``tail`` the rest of its
+    segment after it: a pattern option can come after the name. Fails closed: an
+    unreadable segment, or one with no command word (the name IS the command),
+    opens files.
     """
+    segment = _PLAIN_LEADING_ASSIGNMENTS.sub(" ", segment)
     chain = segment_command_chain(segment)
-    if not chain:
+    if not chain or any(_ASSIGNMENT_WORD.match(word) for word in chain):
+        # No command word, or an assignment with a value this reading cannot skip.
         return True
     try:
         words = linear_shlex.split(segment)
@@ -2319,15 +2469,22 @@ def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
         return True
     names = [word.rsplit("/", 1)[-1] for word in words]
     for name in (chain_word.rsplit("/", 1)[-1] for chain_word in chain):
+        if name == "eval":
+            # eval runs its words as a command line of its own, which no reading here follows.
+            return True
         if name == "git":
             rest = names[names.index("git") + 1 :] if "git" in names else []
             first = next((word for word in rest if not word.startswith("-")), "")
-            if first == "config" or _ends_in_git_search_option(words):
+            if first == "config" or _ends_in_git_search_option(segment, words):
                 continue
             return True
         elif name in _PATTERN_FIRST_COMMANDS:
-            rest = names[names.index(name) + 1 :] if name in names else []
-            if _grep_pattern_word_is_token(rest) and token_is_first_pattern_word:
+            before = words[names.index(name) + 1 :] if name in names else []
+            try:
+                after = linear_shlex.split(tail)
+            except ValueError:
+                return True
+            if _token_is_pattern_operand(name, before, after, rg_config=rg_config):
                 continue
             return True
         elif name in _FILE_OPENING_COMMANDS or name.startswith(_FILE_OPENING_PREFIXES):
@@ -2335,26 +2492,24 @@ def _opens_files(segment: str, token_is_first_pattern_word: bool) -> bool:
     return False
 
 
-def _grep_pattern_word_is_token(words_after_command: list[str]) -> bool:
-    """False when the grep-family words use an option that names files or patterns."""
-    return not any(word in _PATTERN_FILE_OPTIONS for word in words_after_command)
+def _token_is_pattern_operand(
+    command: str, before: list[str], after: list[str], *, rg_config: bool = False
+) -> bool:
+    """Whether a bare name between ``before`` and ``after`` is, provably, the pattern operand.
 
-
-def _first_positional_is_last(segment: str) -> bool:
-    """Whether the segment's last word is its command's first non-option operand."""
-    try:
-        words = linear_shlex.split(segment)
-    except ValueError:
-        return False
-    chain = segment_command_chain(segment)
-    if not chain or not words:
-        return False
-    command_name = chain[-1].rsplit("/", 1)[-1]
-    names = [word.rsplit("/", 1)[-1] for word in words]
-    if command_name not in names:
-        return False
-    operands = [w for w in words[names.index(command_name) + 1 :] if not w.startswith("-")]
-    return not operands
+    The words of the whole command line are read with the option grammar. Only
+    when it places every option (none unknown, none ambiguous), none of them
+    supplies the pattern, and the name is the first operand, is the name the
+    pattern grep searches for rather than a file it opens.
+    """
+    grammar = grammar_for(command, rg_config=rg_config)
+    parsed = parse_arguments(grammar, [*before, _TOKEN_WORD, *after])
+    return (
+        not parsed.uncertain
+        and not parsed.pattern_supplied
+        and bool(parsed.operands)
+        and parsed.operands[0] == len(before)
+    )
 
 
 def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
@@ -2382,10 +2537,62 @@ def _bash_occurrence_counts(command: str, start: int, end: int) -> bool:
         return not _git_search_value_prefix_before(command, word_start, segment_start)
     if after_char and after_char not in _AFTER_WORD_CHARS:
         return True
-    segment = command[segment_start:word_start]
-    if _REDIRECT_TAIL.search(segment):
+    segment = _outside_substitutions(command, segment_start, command[segment_start:word_start])
+    if segment is None or _REDIRECT_TAIL.search(segment):
         return True
-    return _opens_files(segment, _first_positional_is_last(segment))
+    return _opens_files(
+        segment, _segment_tail(command, word_end), rg_config=RG_CONFIG_ENV in command
+    )
+
+
+def _unquoted_close_paren(text: str) -> int:
+    """Index of the first ``)`` of ``text`` that sits outside quotes, else -1."""
+    quote = ""
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == "\\" and quote == '"':
+                index += 1
+            elif char == quote:
+                quote = ""
+        elif char == "\\":
+            index += 1
+        elif char in "'\"":
+            quote = char
+        elif char == ")":
+            return index
+        index += 1
+    return -1
+
+
+def _outside_substitutions(command: str, segment_start: int, segment: str) -> str | None:
+    """``segment`` as the command that really precedes the name, past closed substitutions.
+
+    A segment starts after the ``(`` of ``$(...)``, so in ``$(echo cat) name`` it
+    reads ``echo cat) `` and names ``echo``, while the command that runs is
+    whatever the substitution prints. Each closed substitution is replaced by a
+    word bash would expand (``$SUBSTITUTION``), which names no command, and the
+    segment is rebuilt from the text around it. None when a ``)`` closes
+    something this reading cannot place.
+    """
+    while (close := _unquoted_close_paren(segment)) >= 0:
+        if segment_start == 0 or command[segment_start - 1] != "(":
+            return None
+        outer_end = segment_start - 1
+        if command[:outer_end].endswith("$"):
+            outer_end -= 1
+        outer_start = _scan_shell_prefix(command[:outer_end])[0]
+        segment = f"{command[outer_start:outer_end]} {_SUBSTITUTION_WORD} {segment[close + 1 :]}"
+        segment_start = outer_start
+    return segment
+
+
+def _segment_tail(command: str, word_end: int) -> str:
+    """The text after ``word_end`` up to the next unquoted command separator."""
+    rest = command[word_end:]
+    spans = split_unquoted_spans(rest, _SEGMENT_END_SEPARATORS)
+    return rest[: spans[0][1]] if spans else ""
 
 
 def _is_quote(char: str) -> bool:
@@ -2928,7 +3135,7 @@ def _token_mention(
     project_root: str | None,
     *,
     context: MentionContext = "bash",
-    realpath_cache: dict[str, str | None] | None = None,
+    realpath_cache: dict[str, tuple[str, ...]] | None = None,
     expands_globs: Callable[[], bool] = lambda: True,
     effective_cwds: tuple[str, ...] = (),
     is_quoted_literal: Callable[[], bool] = lambda: False,
@@ -3113,13 +3320,22 @@ def _token_mention(
     # syscall per token for no security benefit).
     if not _is_glob_shaped(token):
         if realpath_cache is not None and token in realpath_cache:
-            real = realpath_cache[token]
+            reals = realpath_cache[token]
         else:
-            real = _realpath_if_resolvable(token)
+            reals = _link_targets(token, effective_cwds)
             if realpath_cache is not None:
-                realpath_cache[token] = real
-        if real is not None:
-            return first_matching_glob(real, patterns, project_root=project_root)
+                realpath_cache[token] = reals
+        return _link_mention(token, effective_cwds, patterns, project_root, reals)
+    if expands_globs():
+        # Plan 00623 final review: a finite bracket glob (`zz/[l]ate`) is exactly its
+        # expansions, and bash reads each through any link on its path.
+        for raw_form in _normalised_token_forms(token):
+            for form in _expand_bracket_expressions(raw_form):
+                if form != raw_form and not _is_glob_shaped(form):
+                    found = _link_mention(form, effective_cwds, patterns, project_root)
+                    if found is not None:
+                        return found
+        return _overflow_mention(token, effective_cwds, patterns)
     return None
 
 
@@ -3183,24 +3399,27 @@ def find_protected_mention_strict(
     if not command or not patterns:
         return None
     project_root = resolve_project_root()
-    unquoted = mask_quoted(command, keep_double=False)
-    bases = effective_cwds(command, cwd) if index is not None else ()
-    default_globs = _default_globs_for(command)
-    for token, start in _tokenise_with_offsets(command):
-        globbed = any(char in _GLOB_CHARACTERS for char in unquoted[start : start + len(token)])
+    tokens = _tokenise_with_offsets(command)
+    # Spelling first, over every word: this is the second opinion on a scan that
+    # gave up, so no filesystem failure it shares may hide a name (review 614b).
+    for token, _start in tokens:
         for form in _normalised_token_forms(token):
             matched = first_matching_glob(form, patterns, project_root=project_root)
             if matched is not None:
                 return matched
+    unquoted = mask_quoted(command, keep_double=False)
+    bases = effective_cwds(command, cwd)
+    default_globs = _default_globs_for(command)
+    for token, start in tokens:
+        globbed = any(char in _GLOB_CHARACTERS for char in unquoted[start : start + len(token)])
+        for form in _normalised_token_forms(token):
             if index is not None and globbed and _is_glob_shaped(form):
                 match = index.glob_matches(form, bases, default_expansion=default_globs())
                 if match is not None:
                     return match
-        real = _realpath_if_resolvable(token)
-        if real is not None:
-            matched = first_matching_glob(real, patterns, project_root=project_root)
-            if matched is not None:
-                return matched
+        matched = _link_mention(token, bases, patterns, project_root)
+        if matched is not None:
+            return matched
     return None
 
 
@@ -3213,51 +3432,1214 @@ _COMMAND_SEGMENT_SEPARATORS: Final[re.Pattern[str]] = re.compile(r"&&|\|\||[;|&\
 _SHLEX_REMOVED_CHARS: Final[dict[int, int | None]] = str.maketrans("", "", "'\"\\")
 
 
+#: Commands with an option that moves where they, or the command they run, work:
+#: ``name -> (short option, long option)``. Review 614b R3 added tar and sudo.
+_CHDIR_OPTIONS: Final[dict[str, tuple[str, str | None]]] = {
+    "env": ("-C", "--chdir"),
+    "git": ("-C", None),
+    "tar": ("-C", "--directory"),
+    "sudo": ("-D", "--chdir"),
+}
+#: A short-option cluster holding each command's chdir letter (``-iC``, ``-nD``).
+_CLUSTER_HOLDING: Final[dict[str, re.Pattern[str]]] = {
+    name: re.compile(rf"(?<!\S)-[^\s-]*{re.escape(short[1:])}")
+    for name, (short, _long) in _CHDIR_OPTIONS.items()
+}
+#: Words bash reads past to the command they run; ``command`` and ``exec`` may carry
+#: options (review D4: ``exec env -C d`` runs env).
+_BUILTIN_PREFIXES: Final[frozenset[str]] = frozenset({"builtin", "command", "exec"})
+#: Options of those words that take the next word as their value (``exec -a NAME``).
+_PREFIX_OPTIONS_WITH_VALUE: Final[frozenset[str]] = frozenset({"-a"})
+#: A move to the work tree's top level, an ancestor of where the command is: placed
+#: exactly, so the common idiom needs no project-wide link scan.
+_TOPLEVEL_MOVES: Final[frozenset[str]] = frozenset(
+    {
+        "$(git rev-parse --show-toplevel)",
+        "`git rev-parse --show-toplevel`",
+        # As the text walker splits it, operators apart.
+        "$ ( git rev-parse --show-toplevel )",
+        "` git rev-parse --show-toplevel `",
+    }
+)
+_TOPLEVEL_MOVE_LENGTHS: Final[tuple[int, ...]] = (1, 3, 5, 6)
+#: Text that may move git's top level away from the command's own directory, or
+#: make ``git`` another program: a ``GIT_`` variable, ``core.worktree``, a function,
+#: an alias or a ``PATH`` change.
+_TOPLEVEL_UNTRUSTED_MARKERS: Final[tuple[str, ...]] = (
+    "GIT_",
+    "core.worktree",
+    "()",
+    "function",
+    "alias",
+    "PATH",
+)
+
+
+def toplevel_move_length(words: Sequence[str], command: str) -> int:
+    """How many of ``words`` spell a move to git's top level (0: none).
+
+    Quoted, the substitution is one word; unquoted, it is split into several.
+    A command holding any of :data:`_TOPLEVEL_UNTRUSTED_MARKERS` may relocate
+    the top level or replace ``git``, so it is not read this way.
+    """
+    if any(marker in command for marker in _TOPLEVEL_UNTRUSTED_MARKERS):
+        return 0
+    for length in _TOPLEVEL_MOVE_LENGTHS:
+        if " ".join(words[:length]) in _TOPLEVEL_MOVES:
+            return length
+    return 0
+
+
+def directory_ancestors(directory: str, root: str | None) -> list[str]:
+    """``directory`` and every directory above it, nearest first, stopping at ``root``.
+
+    git's top level is the work tree holding the command's directory: inside
+    the project that is the project root or a checkout nested in it, so the
+    climb stops there. Outside the project it is not bounded.
+    """
+    path = Path(os.path.normpath(directory))
+    found = [str(path)]
+    stop = os.path.normpath(root) if root else None
+    if stop is not None and not (found[0] == stop or found[0].startswith(stop.rstrip("/") + "/")):
+        stop = None
+    for parent in path.parents:
+        if stop is not None and found[-1] == stop:
+            break
+        found.append(str(parent))
+    return found
+
+
+#: Environment variables that move where git's top level is (N667).
+_GIT_RELOCATING_ENVIRONMENT: Final[tuple[str, ...]] = ("GIT_WORK_TREE", "GIT_DIR", "GIT_CONFIG")
+#: Environment variables that carry config entries themselves (``-c``, ``GIT_CONFIG_KEY_n``).
+_GIT_INLINE_CONFIG_PREFIXES: Final[tuple[str, ...]] = (
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_KEY_",
+    "GIT_CONFIG_VALUE_",
+)
+#: Inline config text (``-c``, ``GIT_CONFIG_KEY_n``) that may move the top level.
+_GIT_RELOCATING_CONFIG: Final[str] = "worktree"
+#: A ``worktree`` key in a config file, in any section (a value such as a branch
+#: route named ``worktree_create`` is not one). A section header may share its line.
+_GIT_WORKTREE_KEY: Final[re.Pattern[str]] = re.compile(r"(?im)(?:^|\])\s*worktree\s*=")
+#: A ``path = ...`` line: in an ``[include]``/``[includeIf]`` section it names another config file.
+_GIT_INCLUDE_PATH: Final[re.Pattern[str]] = re.compile(r"(?im)^\s*path\s*=\s*(.+?)\s*$")
+#: How many config files (with includes) are read before the top level counts as relocated.
+_MAX_GIT_CONFIG_FILES: Final[int] = 16
+_GIT_FILE_PREFIX: Final[str] = "gitdir:"
+
+
+def _git_config_files(base: str) -> list[Path]:
+    """The repository config files git reads for ``base``, and the global and system ones."""
+    files: list[Path] = []
+    for directory in directory_ancestors(base, None):
+        dot_git = Path(directory) / _GIT_DIRECTORY
+        if not os.path.lexists(dot_git):
+            continue
+        git_dir = dot_git
+        if not dot_git.is_dir():
+            # A worktree or submodule: `.git` is a file naming the real git directory.
+            text = dot_git.read_text(errors="replace").strip()
+            git_dir = Path(directory) / text.removeprefix(_GIT_FILE_PREFIX).strip()
+            common = git_dir / "commondir"
+            if common.exists():
+                files.append(git_dir / common.read_text().strip() / "config")
+        files.extend([git_dir / "config", git_dir / "config.worktree"])
+        break
+    # The global and system files, redirected as git redirects them.
+    home = Path(os.environ.get("HOME", "/"))
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    global_file = os.environ.get("GIT_CONFIG_GLOBAL")
+    files.extend(
+        [Path(global_file)] if global_file else [home / ".gitconfig", xdg / "git" / "config"]
+    )
+    if not os.environ.get("GIT_CONFIG_NOSYSTEM"):
+        files.append(Path(os.environ.get("GIT_CONFIG_SYSTEM") or "/etc/gitconfig"))
+    return files
+
+
+def toplevel_relocated(bases: Sequence[str]) -> bool:
+    """Could git's top level from any of ``bases`` be somewhere other than an ancestor (N667)?
+
+    Read at decision time, not from the command: ``core.worktree`` persisted by an
+    earlier call, or a ``GIT_`` variable in the daemon's environment, moves it.
+    Included files (``path =`` lines) are read too, up to
+    :data:`_MAX_GIT_CONFIG_FILES`. Fail closed: any config that names a worktree,
+    more included files than that, or a file that exists and cannot be read,
+    counts. The shell's own environment is not visible here (ledger N669).
+    """
+    if any(name in os.environ for name in _GIT_RELOCATING_ENVIRONMENT):
+        return True
+    if any(
+        name.startswith(_GIT_INLINE_CONFIG_PREFIXES) and _GIT_RELOCATING_CONFIG in value.lower()
+        for name, value in os.environ.items()
+    ):
+        return True
+    for base in bases:
+        try:
+            queue = _git_config_files(base)
+            read = 0
+            while queue:
+                config = queue.pop(0)
+                # A `path =` that names a directory (not an include) is no config git reads.
+                if not config.exists() or config.is_dir():
+                    continue
+                read += 1
+                if read > _MAX_GIT_CONFIG_FILES:
+                    return True
+                text = config.read_text(errors="replace")
+                if _GIT_WORKTREE_KEY.search(text):
+                    return True
+                queue.extend(
+                    config.parent / Path(found.strip().strip('"')).expanduser()
+                    for found in _GIT_INCLUDE_PATH.findall(text)
+                )
+        except OSError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="git config that cannot be read may relocate the top level (fail closed)",
+                level=logging.DEBUG,
+            )
+            return True
+    return False
+
+
+#: Variables whose value the daemon shares with the shell, as a move may name them (Plan 00623).
+_PLACEABLE_MOVE: Final[re.Pattern[str]] = re.compile(
+    r"(?:~|\$(HOME|TMPDIR)|\$\{(HOME|TMPDIR)\})((?:/[^\s$`{}*?\[~\\\"']*)?)"
+)
+_HOME_VARIABLE: Final[str] = "HOME"
+_TILDE: Final[str] = "~"
+#: A builtin in command position that can set a variable it does not spell out.
+_INDIRECT_SETTER: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[;&|(){}\n!]|\b(?:then|do|else|elif|if|while|until)\b)\s*"
+    r"(?:(?:builtin|command)\s+)?"
+    r"(?:source|\.|eval|declare|typeset|export|local|readonly|read|mapfile|readarray|unset"
+    r"|printf\s+-v)(?=\s|$)"
+)
+#: The quoting state :func:`_quoting_at` reports.
+_UNQUOTED: Final[str] = "unquoted"
+_SINGLE_QUOTED: Final[str] = "single"
+_DOUBLE_QUOTED: Final[str] = "double"
+_ESCAPED: Final[str] = "escaped"
+
+
+def _quoting_at(command: str, index: int) -> str:
+    """How bash quotes the character at ``index`` of ``command``."""
+    single = double = escaped = False
+    for char in command[:index]:
+        if escaped:
+            escaped = False
+        elif char == "\\" and not single:
+            escaped = True
+        elif char == "'" and not double:
+            single = not single
+        elif char == '"' and not single:
+            double = not double
+    if escaped:
+        return _ESCAPED
+    if single:
+        return _SINGLE_QUOTED
+    return _DOUBLE_QUOTED if double else _UNQUOTED
+
+
+def _expanded_as_written(name: str, command: str) -> bool:
+    """Does bash expand the one spelling of ``~`` or ``$name`` in ``command``?
+
+    A quoted or escaped ``~`` and a single-quoted or escaped ``$`` are literal
+    text: ``cd "~"`` moves to a directory named ``~``.
+    """
+    if name == _TILDE:
+        return all(
+            _quoting_at(command, index) == _UNQUOTED
+            for index, char in enumerate(command)
+            if char == _TILDE
+        )
+    at = command.index(name)
+    if command[at - 1 : at] == "$":
+        dollar = at - 1
+    elif command[at - 2 : at] == "${":
+        dollar = at - 2
+    else:
+        return False
+    return _quoting_at(command, dollar) in (_UNQUOTED, _DOUBLE_QUOTED)
+
+
+def place_outside_project(target: str, command: str) -> tuple[str, ...]:
+    """Where a move to ``~``, ``$HOME`` or ``$TMPDIR`` lands, when that is outside the project.
+
+    Plan 00623: such a move is computed, and judging it as one denied it past
+    the link scan's cap. It is placed only when the daemon's value is absolute,
+    bash expands the spelling (it is not quoted), the command never names the
+    variable anywhere else and runs no builtin that sets one by an indirect name
+    (``source``, ``eval``, ``declare``, ``read``, ...), and the place is outside
+    the project however it is resolved: logically, physically from the spelled
+    path (``cd -P``), and through the project root's own links. Both the spelled
+    and the physical places are returned.
+    The shell's value can differ from the daemon's (``getopts``, ``let`` and
+    arithmetic set a computed name; a link can be made at the place by the same
+    command), so the place only ADDS bases: callers still judge the move as
+    computed and deny when the link scan stopped.
+    """
+    match = _PLACEABLE_MOVE.fullmatch(target)
+    if match is None:
+        return ()
+    name = match.group(1) or match.group(2) or _HOME_VARIABLE
+    named = command.count(name)
+    tilde = target.startswith(_TILDE)
+    if named != (0 if tilde else 1) or _INDIRECT_SETTER.search(command):
+        return ()
+    if not _expanded_as_written(_TILDE if tilde else name, command):
+        return ()
+    value = os.environ.get(name, "")
+    root = resolve_project_root()
+    if not value.startswith("/") or not root:
+        return ()
+    spelled = value + match.group(3)
+    lexical = os.path.normpath(spelled)
+    physical = os.path.realpath(lexical)
+    roots = {os.path.normpath(root), os.path.realpath(root)}
+    for place in (lexical, physical, os.path.realpath(spelled)):
+        if any(place == top or place.startswith(top.rstrip("/") + "/") for top in roots):
+            return ()
+    return tuple(dict.fromkeys((lexical, physical)))
+
+
+#: Words after which bash reads the next word as a command name (``eval cd x`` runs cd).
+_COMMAND_START_WORDS: Final[frozenset[str]] = frozenset(
+    {"(", "{", "}", "!", "if", "then", "else", "elif", "do", "while", "until", "time", "eval"}
+)
+#: The openers of bash's extended globs: a ``cd`` operand holding one is computed (review 614c N3).
+EXTGLOB_OPENERS: Final[tuple[str, ...]] = ("@(", "+(", "!(", "*(", "?(")
+#: The variable that makes bash look a relative ``cd`` operand up in other directories.
+CDPATH_VARIABLE: Final[str] = "CDPATH"
+#: A command substitution's opener, glued to the word that starts its body.
+_SUBSTITUTION_OPENERS: Final[tuple[str, ...]] = ("$(", "`")
+#: Nested ``bash -c`` / quoted ``$( )`` bodies are walked this deep, no further.
+_MAX_DIRECTORY_CHANGE_DEPTH: Final[int] = 4
+#: How many existing directories a relative word is resolved from (review F5).
+LINK_DIRECTORY_CAP: Final[int] = 16
+#: Characters that make a ``cd`` target computed rather than literal or globbed.
+_COMPUTED_CHARACTERS: Final[frozenset[str]] = frozenset("$`{~")
+#: ``$NAME`` or ``${NAME}``, as a literal assignment in the command can supply.
+_VARIABLE_REFERENCE: Final[re.Pattern[str]] = re.compile(
+    r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))"
+)
+#: A segment that only assigns: ``D=x``, ``export D="x"`` (quotes kept, removed later).
+_ASSIGNMENT_SEGMENT: Final[re.Pattern[str]] = re.compile(
+    r"\s*(?:(?:export|local|declare|readonly|typeset)\s+)?"
+    r"([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|[^\s\"']*)\s*"
+)
+#: The project directories a computed ``cd`` is judged from are found by a scan this wide.
+LINK_SCAN_DIRECTORY_CAP: Final[int] = 512
+#: Past LINK_SCAN_DIRECTORY_CAP, the index's directory links stay real bases up to this many.
+INDEXED_DIRECTORY_LINK_CAP: Final[int] = 512
+#: Past LINK_SCAN_DIRECTORY_CAP, at most this many link paths are judged by name.
+INDEXED_LINK_CAP: Final[int] = 65_536
+_GIT_DIRECTORY: Final[str] = ".git"
+_PARENT: Final[str] = ".."
+#: A component holding one of these is matched as any name (extglob, brace, escape).
+_UNREADABLE_PATTERN_CHARACTERS: Final[frozenset[str]] = frozenset("({\\")
+
+
+class LinkNames:
+    """Every link path in the project, judged by name (Plan 00623, N669/N670).
+
+    Past :data:`LINK_SCAN_DIRECTORY_CAP` link-holding directories the walkers
+    cannot judge a word from each one. A computed move lands in some project
+    directory ``X``, and a word ``w`` read there passes through a link only if
+    some leading part ``p`` of ``w`` makes ``X/p`` a link path. Then ``p``'s
+    components are the trailing components of that path, whatever ``X`` is.
+    So a word reaches a link when any leading part of it spells the tail of
+    one; a ``..`` anywhere is not followed and counts as reaching.
+    """
+
+    def __init__(self, links: Iterable[str]) -> None:
+        self._tails: dict[str, list[tuple[str, ...]]] = {}
+        for link in links:
+            parts = tuple(part for part in link.split("/") if part)
+            if parts:
+                self._tails.setdefault(parts[-1], []).append(parts[:-1])
+
+    @staticmethod
+    def _component_matches(name: str, component: str) -> bool:
+        if component == name:
+            return True
+        if any(char in _UNREADABLE_PATTERN_CHARACTERS for char in component):
+            return True
+        return any(char in _GLOB_CHARACTERS for char in component) and fnmatch.fnmatchcase(
+            name, component
+        )
+
+    def reaches(self, token: str) -> bool:
+        """Could relative ``token``, read from any project directory, pass through a link?"""
+        components = [part for part in token.split("/") if part not in ("", ".")]
+        if _PARENT in components:
+            return True
+        for depth, component in enumerate(components):
+            if any(
+                char in _GLOB_CHARACTERS or char in _UNREADABLE_PATTERN_CHARACTERS
+                for char in component
+            ):
+                names: Iterable[str] = [
+                    name for name in self._tails if self._component_matches(name, component)
+                ]
+            elif component in self._tails:
+                names = (component,)
+            else:
+                continue
+            leading = components[:depth]
+            for name in names:
+                for parents in self._tails[name]:
+                    if len(parents) >= len(leading) and all(
+                        self._component_matches(parent, spelled)
+                        for parent, spelled in zip(
+                            parents[len(parents) - len(leading) :], leading, strict=True
+                        )
+                    ):
+                        return True
+        return False
+
+
+@dataclass(frozen=True)
+class LinkScan:
+    """What :func:`scan_project_links` found.
+
+    Whether the scan looked everywhere is the :class:`Bounded` around it: what
+    an unfinished scan did not reach is unknown, never harmless.
+    """
+
+    directories: tuple[str, ...]
+    #: The links among ``directories`` that lead to a directory.
+    directory_links: tuple[str, ...] = ()
+    #: Past the cap: the index's link paths, judged by name instead of from each directory.
+    named: LinkNames | None = None
+
+
+#: The scans made during one tool call (:func:`link_scan_scope`); None outside one.
+_link_scan_scope: contextvars.ContextVar[dict[str, Bounded[LinkScan]] | None] = (
+    contextvars.ContextVar("link_scan_scope", default=None)
+)
+
+
+@contextlib.contextmanager
+def link_scan_scope() -> Iterator[None]:
+    """Reuse a project's link scan for the rest of one tool call, and no longer.
+
+    Independent review D5: a scan kept for a wall-clock window missed a link
+    made by the previous call. Inside the scope one command's many computed
+    moves cost one scan; outside any scope nothing is reused.
+    """
+    if _link_scan_scope.get() is not None:
+        # Already inside one call's scope: its scans are reused.
+        yield
+        return
+    token = _link_scan_scope.set({})
+    try:
+        yield
+    finally:
+        _link_scan_scope.reset(token)
+
+
+def reset_link_scans() -> None:
+    """Forget the scans held by the current scope (for tests that change the tree)."""
+    held = _link_scan_scope.get()
+    if held is not None:
+        held.clear()
+
+
+class _LinkKind(Enum):
+    """Where a link leads, as far as a stat can tell."""
+
+    DIRECTORY = "directory"
+    OTHER = "other"
+    UNKNOWN = "unknown"
+
+
+def _link_kind(entry: os.DirEntry[str]) -> _LinkKind:
+    """Does link ``entry`` lead to a directory; UNKNOWN when that cannot be told.
+
+    A link loop leads nowhere a ``cd`` can land, so it is no directory. Any
+    other refusal (a target under an unsearchable directory) leaves it unknown.
+    """
+    try:
+        return _LinkKind.DIRECTORY if entry.is_dir() else _LinkKind.OTHER
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            return _LinkKind.OTHER
+        log_and_continue(
+            logger,
+            exc,
+            reason="a link whose target cannot be stat-ed may lead to a directory, so the scan is incomplete (fail closed)",
+            level=logging.DEBUG,
+        )
+        return _LinkKind.UNKNOWN
+
+
+def _entry_may_be_directory(entry: os.DirEntry[str]) -> bool:
+    """Is non-link ``entry`` a directory: True when that cannot be told, so it is listed."""
+    try:
+        return entry.is_dir(follow_symlinks=False)
+    except OSError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="an entry that cannot be classified may be a directory, so the scan lists it (fail closed)",
+            level=logging.DEBUG,
+        )
+        return True
+
+
+#: Why :func:`expand_directory_glob` stopped.
+_GLOB_TOO_WIDE: Final[str] = "a globbed directory change matches more than the walk follows"
+_GLOB_UNCLASSIFIED: Final[str] = (
+    "a globbed directory change matches an entry that cannot be classified"
+)
+
+
+def expand_directory_glob(base: str, pattern: str) -> Bounded[list[str]]:
+    """The directories ``pattern`` matches from ``base``, component by component.
+
+    Read as bash reads it by default: ``**`` is ``*``, and a wildcard skips dot
+    names unless the component starts with a dot. At most
+    :data:`LINK_SCAN_DIRECTORY_CAP` directories are listed, so a glob that
+    matches nothing is never followed through the whole tree, and more than
+    :data:`LINK_DIRECTORY_CAP` matches stops the walk too (review 614c X1):
+    bash refuses a ``cd`` with several, and every match kept costs each later
+    word. A stopped walk is never read as "no match": callers judge the move
+    as computed instead.
+    """
+    current = ["/"] if pattern.startswith("/") else [base]
+    listed = 0
+    components = [part for part in pattern.split("/") if part not in ("", ".")]
+    for depth, component in enumerate(components):
+        if component == "**":
+            component = "*"
+        last = depth == len(components) - 1
+        limit = LINK_DIRECTORY_CAP if last else LINK_SCAN_DIRECTORY_CAP - listed - len(current)
+        following: list[str] = []
+        for directory in current:
+            # Every listing and every probe counts, so the walk is bounded however deep.
+            listed += 1
+            if listed > LINK_SCAN_DIRECTORY_CAP:
+                return stopped([], _GLOB_TOO_WIDE)
+            if not any(char in _GLOB_CHARACTERS for char in component):
+                joined = f"{directory.rstrip('/')}/{component}"
+                if path_is_dir(joined, unreadable_means=True):
+                    following.append(os.path.normpath(joined))
+                continue
+            try:
+                with os.scandir(directory) as entries:
+                    # The listing's own type answers, so a match costs no further stat.
+                    candidates = [
+                        entry
+                        for entry in entries
+                        if (not entry.name.startswith(".") or component.startswith("."))
+                        and fnmatch.fnmatchcase(entry.name, component)
+                    ]
+            except OSError as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="a directory the shell cannot list expands no glob in it",
+                    level=logging.DEBUG,
+                )
+                continue
+            names: list[str] = []
+            for entry in candidates:
+                # Review D1: one entry that cannot be classified never drops its siblings.
+                kind = (
+                    _link_kind(entry)
+                    if entry.is_symlink()
+                    else (
+                        _LinkKind.DIRECTORY if _entry_may_be_directory(entry) else _LinkKind.OTHER
+                    )
+                )
+                if kind is _LinkKind.UNKNOWN:
+                    # A match that may be a directory cannot be placed: a computed move.
+                    return stopped([], _GLOB_UNCLASSIFIED)
+                if kind is _LinkKind.DIRECTORY:
+                    names.append(entry.name)
+            following.extend(os.path.normpath(f"{directory.rstrip('/')}/{name}") for name in names)
+            # Each directory kept is listed or probed next, or is a match: stop as soon as
+            # either cap is certain to be passed, before the list grows any further.
+            if len(following) > limit:
+                return stopped([], _GLOB_TOO_WIDE)
+        if len(following) > limit:
+            return stopped([], _GLOB_TOO_WIDE)
+        current = following
+        if not current:
+            return finished([])
+    return finished(current)
+
+
+#: Why :func:`scan_project_links` stopped.
+_SCAN_PAST_CAP: Final[str] = "the project link scan stopped at its directory cap"
+_SCAN_UNCLASSIFIED: Final[str] = "the project link scan met a link whose target cannot be told"
+_SCAN_UNLISTED: Final[str] = "the project link scan met a directory it cannot list"
+
+
+def scan_project_links(root: str) -> Bounded[LinkScan]:
+    """Where a computed ``cd`` could leave a relative word dangerous, and whether that is all.
+
+    Two kinds of directory under ``root``, breadth first:
+
+    - Review 614b R4: each directory that holds a link. A link is read through
+      only from the directory holding it.
+    - Review 614c N1: each link whose target is a directory. A computed ``cd``
+      can land INSIDE it, and a relative glob read there (``cat .e*``) is read
+      from the link's target, which may be outside the project.
+
+    ``.git`` is entered (bash can move into it) and links are not followed. A directory that cannot
+    be listed is counted as holding a link and stops the scan, since what lies
+    under it is unknown (fail closed). An entry the scan
+    cannot classify does not end the listing (independent review D1). The scan
+    is incomplete when it stops after :data:`LINK_SCAN_DIRECTORY_CAP`
+    directories, finds more directory links than that, or meets a link whose
+    target cannot be told (independent review D2): a caller then denies.
+    Reused only within one :func:`link_scan_scope`.
+    """
+    held_scans = _link_scan_scope.get()
+    if held_scans is not None and root in held_scans:
+        return held_scans[root]
+    scan = _scan_from_index(root)
+    if scan is None:
+        scan = _walk_project_links(root)
+    if held_scans is not None:
+        held_scans[root] = scan
+    return scan
+
+
+def _scan_from_index(root: str) -> Bounded[LinkScan] | None:
+    """The scan read from the verified link index (Plan 00623); None while it is not built.
+
+    Up to :data:`LINK_SCAN_DIRECTORY_CAP` directories, each is a real base the
+    walkers judge a word from. Past it (N669/N670: ``node_modules/.bin`` in
+    every package) only the directory links stay bases, bounded by
+    :data:`INDEXED_DIRECTORY_LINK_CAP` since each is a place a ``cd`` can land
+    outside the index; every link path, bounded by :data:`INDEXED_LINK_CAP`,
+    judges a word by name (:class:`LinkNames`). Past either bound the scan stops.
+    """
+    indexed = link_index.link_scan_for(root)
+    if indexed is None:
+        return None
+    links = indexed.value.directory_links
+    found = LinkScan(
+        directories=tuple(dict.fromkeys((*indexed.value.holding, *links))),
+        directory_links=links,
+    )
+    if not indexed.complete:
+        return stopped(found, indexed.reason)
+    if len(found.directories) <= LINK_SCAN_DIRECTORY_CAP:
+        return finished(found)
+    if len(links) > INDEXED_DIRECTORY_LINK_CAP or len(indexed.value.links) > INDEXED_LINK_CAP:
+        return stopped(found, _SCAN_PAST_CAP)
+    return finished(
+        LinkScan(directories=links, directory_links=links, named=LinkNames(indexed.value.links))
+    )
+
+
+def _walk_project_links(root: str) -> Bounded[LinkScan]:
+    """The bounded per-call walk, used until the link index is built."""
+    holding: list[str] = []
+    directory_links: list[str] = []
+    queue = [os.path.normpath(root)]
+    visited = 0
+    unclassified = False
+    unlisted = False
+    while queue and visited < LINK_SCAN_DIRECTORY_CAP:
+        directory = queue.pop(0)
+        visited += 1
+        has_link = False
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    if entry.is_symlink():
+                        has_link = True
+                        kind = _link_kind(entry)
+                        if kind is _LinkKind.UNKNOWN:
+                            unclassified = True
+                        elif kind is _LinkKind.DIRECTORY:
+                            directory_links.append(entry.path)
+                    elif _entry_may_be_directory(entry):
+                        queue.append(entry.path)
+        except OSError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a directory that cannot be listed may hold a link, so it is judged as one that does (fail closed)",
+                level=logging.DEBUG,
+            )
+            has_link = True
+            # What lies under it is unknown too: bash can move through a directory
+            # it cannot list, so the scan did not reach everything (Plan 00623 review).
+            unlisted = True
+        if has_link:
+            holding.append(directory)
+    kept_links = tuple(directory_links[:LINK_SCAN_DIRECTORY_CAP])
+    found = LinkScan(
+        directories=tuple(dict.fromkeys((*holding, *kept_links))),
+        directory_links=kept_links,
+    )
+    if queue or len(directory_links) > LINK_SCAN_DIRECTORY_CAP:
+        return stopped(found, _SCAN_PAST_CAP)
+    if unlisted:
+        return stopped(found, _SCAN_UNLISTED)
+    if unclassified:
+        return stopped(found, _SCAN_UNCLASSIFIED)
+    return finished(found)
+
+
 def _may_change_directory(segment: str) -> bool:
-    """Could ``segment``'s first shell word be ``cd``/``pushd``?
+    """Could ``segment`` change directory: ``cd``/``pushd``, or a :data:`_CHDIR_OPTIONS` option?
 
     The cheap, sound gate in front of :func:`_shell_words`: a False here is
-    a segment the tokeniser would also have found no directory change in.
+    a segment the walker would also have found no directory change in.
     """
     unquoted = segment.translate(_SHLEX_REMOVED_CHARS)
-    return any(name in unquoted for name in _DIRECTORY_CHANGE_COMMANDS)
+    if any(name in unquoted for name in _DIRECTORY_CHANGE_COMMANDS):
+        return True
+    # Review D3: the option may sit in a cluster (`-iC`) or be abbreviated (`--chd`).
+    return any(
+        name in unquoted
+        and (
+            short in unquoted
+            or (name != _GIT_EXECUTABLE and _CLUSTER_HOLDING[name].search(unquoted) is not None)
+            or (long is not None and long[: len("--") + 1] in unquoted)
+        )
+        for name, (short, long) in _CHDIR_OPTIONS.items()
+    )
 
 
-def effective_cwds(command: str, cwd: str | None) -> tuple[str, ...]:
-    """The directories ``command`` may run in: the hook's ``cwd``, then each literal ``cd`` target.
+def _may_be_relative_path(token: str) -> bool:
+    """Could ``token`` be a relative path a link could lie on (not absolute, an option or computed)?"""
+    if not token or token.startswith(("/", "~", "-")) or "\0" in token or "$" in token:
+        return False
+    return any(part not in ("", ".") for part in token.split("/"))
 
-    Ledger 00474 N221. A relative path in a command is read from where the
-    command is, so ``cd vault && cat r.md`` reaches ``vault/r.md``. Every
-    ``cd``/``pushd`` is tracked cumulatively and ALL the resulting directories
-    are returned, because a word is judged against each: the over-approximation
-    errs towards denying and needs no per-word ordering. A target bash computes
-    (a variable, substitution, glob, brace list, tilde) or that cannot be
-    placed (``cd -``, a relative step with no absolute directory to start
-    from) is not tracked -- out of scope, as before.
 
-    Only a segment that could start with one of those commands is tokenised
-    (:func:`_may_change_directory`), not every line of a large authored script
-    (ledger 00474 N465).
+class CwdSet(tuple[str, ...]):
+    """The directories a command may run in, and which of them really exist.
+
+    The tuple itself is every directory, placed lexically (Ledger 00474 N221),
+    and is what a spelling or glob is matched from. ``link_dirs`` are the first
+    :data:`LINK_DIRECTORY_CAP` that exist: a link can only be met in a directory
+    that exists, so only these cost a filesystem call per word. ``overflowed``
+    says more existed than that; a relative word that :meth:`could_be_link`
+    in one of the rest is then a finding rather than an unchecked word.
     """
-    directories: list[str] = [cwd] if cwd is not None and Path(cwd).is_absolute() else []
-    for segment in _COMMAND_SEGMENT_SEPARATORS.split(command):
+
+    link_dirs: tuple[str, ...]
+    overflowed: bool
+    unscanned: bool
+    named: LinkNames | None
+    _by_name: dict[str, list[str]]
+    _existing: tuple[str, ...]
+    _listings: dict[str, dict[str, tuple[bool, bool]] | None]
+
+    def __new__(
+        cls,
+        lexical: Iterable[str],
+        existing: Sequence[str],
+        *,
+        unscanned: bool = False,
+        scanned: Sequence[str] = (),
+        named: LinkNames | None = None,
+    ) -> "CwdSet":
+        instance = super().__new__(cls, tuple(dict.fromkeys(lexical)))
+        instance.link_dirs = tuple(existing[:LINK_DIRECTORY_CAP])
+        # Past the scan cap the holding directories are judged by name, never one by
+        # one, so the set is past LINK_DIRECTORY_CAP whatever ``existing`` holds.
+        instance.overflowed = len(existing) > LINK_DIRECTORY_CAP or named is not None
+        instance.named = named
+        # A computed move's link scan did not finish (review D2).
+        instance.unscanned = unscanned
+        instance._by_name = {}
+        for directory in scanned:
+            instance._by_name.setdefault(Path(directory).name, []).append(directory)
+        instance._existing = tuple(existing)
+        instance._listings = {}
+        return instance
+
+    def bases_above_scanned(self, token: str) -> list[str]:
+        """Where a computed move could leave ``token`` passing through a scanned directory.
+
+        Round 6 class sweep: the scan names each directory holding a link, but
+        the shell may be ABOVE one, and ``a/late`` read there reaches the link
+        in ``a``. For each scanned ``.../x/a`` whose trailing components spell
+        the word's leading ones, the directory they hang from is a base.
+        """
+        if not self._by_name or not _may_be_relative_path(token):
+            return []
+        components = [part for part in token.split("/") if part not in ("", ".")]
+        if ".." in components:
+            # Plan 00623 final review: before the first `..` the spelled names are
+            # real directories the shell passes through, so a scanned one is met.
+            leading = components[: components.index("..")]
+            return self._bases_spelling(leading, len(leading))
+        return self._bases_spelling(components, len(components) - 1)
+
+    def _bases_spelling(self, spelled: list[str], deepest: int) -> list[str]:
+        """Each base from which ``spelled``'s first ``deepest`` components reach a scanned directory."""
+        bases: list[str] = []
+        for depth in range(1, deepest + 1):
+            for directory in self._by_name.get(spelled[depth - 1], ()):
+                parts = directory.split("/")
+                if parts[-depth:] == spelled[:depth]:
+                    bases.append("/".join(parts[:-depth]) or "/")
+        return list(dict.fromkeys(bases))
+
+    def collapsed_above_scanned(self, token: str) -> list[str]:
+        """Where a ``token`` holding ``..`` lands past a scanned directory, read after a computed move.
+
+        Plan 00623 final review: bash takes ``..`` physically, so once the
+        spelled names before it are real directories the word goes on from its
+        collapsed spelling, read from wherever a leading ``..`` lands: another
+        project directory a computed move could equally have reached.
+        """
+        if not self._by_name or not _may_be_relative_path(token):
+            return []
+        components = [part for part in token.split("/") if part not in ("", ".")]
+        if ".." not in components:
+            return []
+        collapsed = [part for part in os.path.normpath("/".join(components)).split("/") if part]
+        while collapsed and collapsed[0] == "..":
+            collapsed.pop(0)
+        word = "/".join(collapsed)
+        return [
+            f"{base.rstrip('/')}/{word}"
+            for base in self._bases_spelling(collapsed, len(collapsed) - 1)
+        ]
+
+    def _listing(self, directory: str) -> dict[str, tuple[bool, bool]] | None:
+        """``name -> (is a link, is a directory)`` for ``directory``; None when it cannot be listed."""
+        if directory not in self._listings:
+            try:
+                with os.scandir(directory) as entries:
+                    self._listings[directory] = {
+                        entry.name: (entry.is_symlink(), entry.is_dir()) for entry in entries
+                    }
+            except OSError as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="a directory the command moves to that cannot be listed may hold a link, so a relative word read there is a finding (fail closed)",
+                    level=logging.DEBUG,
+                )
+                self._listings[directory] = None
+        return self._listings[directory]
+
+    @fails_closed
+    def could_be_link(self, token: str) -> bool:
+        """Could relative ``token`` pass through a link in some existing directory?
+
+        One listing per directory, not one call per word per directory. A first
+        component that is ``..``, a link, or a glob matching a link counts; so does
+        a deeper path whose real location differs from its spelling. A directory
+        that cannot be listed counts for every word. Past the scan cap, a word
+        that :meth:`LinkNames.reaches` a link counts too.
+        """
+        if not _may_be_relative_path(token):
+            return False
+        if self.named is not None and self.named.reaches(token):
+            return True
+        components = [part for part in token.split("/") if part not in ("", ".")]
+        first = components[0]
+        if first == "..":
+            return True
+        globbed = any(char in _GLOB_CHARACTERS for char in first)
+        for directory in self._existing:
+            listing = self._listing(directory)
+            if listing is None:
+                return True
+            if globbed:
+                hits = [kind for name, kind in listing.items() if fnmatch.fnmatchcase(name, first)]
+            else:
+                hits = [listing[first]] if first in listing else []
+            for is_link, is_dir in hits:
+                if is_link:
+                    return True
+                if is_dir and len(components) > 1:
+                    if globbed or _realpath_if_resolvable(f"{directory}/{token}") is not None:
+                        return True
+        return False
+
+
+class _DirectoryWalk:
+    """The directories a command moves through, gathered word by word (review F1)."""
+
+    def __init__(self, cwd: str | None, *, cdpath: bool = False, command: str = "") -> None:
+        self.command = command
+        self.directories: list[str] = []
+        self.existing: dict[str, None] = {}
+        self.assigned: dict[str, str] = {}
+        # The command names CDPATH: a relative cd may land in any directory it lists.
+        self.cdpath = cdpath
+        # A computed move's link scan did not finish: where it lands is not known.
+        self.unscanned = False
+        # What a computed move's scan found: a deeper word may pass through one of them.
+        self.scanned: dict[str, None] = {}
+        # Past the scan cap: the project's link paths, judged by name (N669/N670).
+        self.named: LinkNames | None = None
+        if cwd is not None and Path(cwd).is_absolute():
+            self._add(cwd)
+
+    def _add(self, directory: str, *, exists: bool | None = None) -> None:
+        self.directories.append(directory)
+        if directory in self.existing:
+            return
+        # A directory that cannot be stat-ed (over-long, unreadable) may still
+        # be one: it is kept, and nothing read through it is resolved (review 614b).
+        if exists if exists is not None else path_is_dir(directory, unreadable_means=True):
+            self.existing[directory] = None
+
+    def indeterminate(self) -> None:
+        """A move bash computes: read from the project root and every place it could land badly.
+
+        Review 614b R4 and 614c N1: every project directory holding a link, and
+        every directory link, found by :func:`scan_project_links`, a bounded
+        scan. A scan that did not finish marks the walk ``unscanned``: a
+        relative word read after the move is then denied (review D2). A caller
+        that also placed the move (git's top level, ``~``) still fails closed:
+        its placement rests on state the command can change.
+        """
+        root = resolve_project_root()
+        if root:
+            self._add(os.path.normpath(root))
+            scan = scan_project_links(root)
+            self.unscanned = self.unscanned or not scan.complete
+            if scan.value.named is not None:
+                self.named = scan.value.named
+            for directory in scan.value.directories:
+                self._add(directory, exists=True)
+                self.scanned[directory] = None
+
+    def to_toplevel(self) -> None:
+        """A move to git's top level: an ancestor of where the command is, each one kept.
+
+        It only adds: the computed-move judgement is made too, and a scan that
+        did not finish still denies (Plan 00623 review: the top level can be
+        moved by config or environment the guard cannot read).
+        Past :data:`LINK_DIRECTORY_CAP` bases it is a plain computed move.
+        """
+        bases = list(dict.fromkeys([*self.directories[-1:], *self.existing]))
+        if not bases or len(bases) > LINK_DIRECTORY_CAP + 1 or toplevel_relocated(bases):
+            # N667: persisted git config or the environment may put the top level
+            # elsewhere, so the move is not placed at an ancestor.
+            self.indeterminate()
+            return
+        root = resolve_project_root()
+        for base in bases:
+            for ancestor in directory_ancestors(base, root):
+                self._add(ancestor)
+        # Still fails closed: config or environment the guard cannot read (a
+        # split-spelled GIT_WORK_TREE, a core.worktree this command writes) moves it.
+        self.indeterminate()
+
+    def assign(self, name: str, value: str) -> None:
+        """Record ``name=value``; a value bash would expand is not known, so it is forgotten."""
+        if any(char in _WORD_EXPANDING_CHARACTERS for char in value):
+            self.assigned.pop(name, None)
+        else:
+            self.assigned[name] = value
+
+    def _substituted(self, target: str) -> str:
+        """``target`` with each ``$NAME``/``${NAME}`` the command assigned literally put in."""
+        return _VARIABLE_REFERENCE.sub(
+            lambda found: self.assigned.get(found.group(1) or found.group(2), found.group(0)),
+            target,
+        )
+
+    def _expand(self, target: str) -> None:
+        """A globbed move: each directory it matches from where the command may be (review 614b R4)."""
+        if Path(target).is_absolute():
+            bases: list[str] = ["/"]
+        elif self.directories:
+            bases = list(dict.fromkeys([self.directories[-1], *self.existing]))
+        else:
+            bases = []
+        found: dict[str, None] = {}
+        if len(bases) > LINK_DIRECTORY_CAP + 1 or self.named is not None:
+            # Plan 00623 item 6: the bases past the slice are not looked at, so
+            # where the move lands from them is unknown (a later word denies).
+            self.unscanned = True
+        for base in bases[: LINK_DIRECTORY_CAP + 1]:
+            matches = expand_directory_glob(base, target)
+            if not matches.complete:
+                # Too wide to follow: judged as a computed move instead.
+                self.indeterminate()
+                return
+            found.update(dict.fromkeys(matches.value))
+            if len(found) > LINK_DIRECTORY_CAP:
+                # Review 614c X1: none of them is kept; bash refuses a cd with
+                # several matches, and every one kept costs each later word.
+                self.indeterminate()
+                return
+        if not found:
+            # No match leaves the word as written, which then names no directory.
+            self.indeterminate()
+        for match in found:
+            self._add(match, exists=True)
+
+    def change(self, target: str | None) -> None:
+        """Record a ``cd``-like move to ``target`` (None: no literal operand)."""
+        if target is not None:
+            target = target.rstrip("`)")
+            outside = place_outside_project(target, self.command)
+            if outside:
+                # Plan 00623: a move to ~, $HOME or $TMPDIR outside the project is
+                # placed there, and is still judged as computed, failing closed: the
+                # shell's value can differ (getopts, let, a link made by this command).
+                for directory in outside:
+                    self._add(directory)
+                self.indeterminate()
+                return
+            substituted = self._substituted(target)
+            if substituted != target:
+                # The literal value is the likely target, not a certain one: a
+                # reassignment this walk cannot read may have changed it.
+                self.indeterminate()
+                target = substituted
+        if (
+            not target
+            or target == "-"
+            or any(c in _COMPUTED_CHARACTERS for c in target)
+            or any(opener in target for opener in EXTGLOB_OPENERS)
+        ):
+            self.indeterminate()
+            return
+        if self.cdpath and not Path(target).is_absolute():
+            # Review 614c N3: bash may find the operand under a CDPATH entry instead.
+            self.indeterminate()
+        if any(char in _GLOB_CHARACTERS for char in target):
+            self._expand(target)
+            return
+        if Path(target).is_absolute():
+            self._add(os.path.normpath(target))
+            return
+        if not self.directories:
+            return
+        self._add(os.path.normpath(str(Path(self.directories[-1]) / target)))
+        # The chain's last directory is a guess once a group's cd is in it, so the
+        # step is joined to every existing directory too -- kept only where real,
+        # which bounds the set by what exists rather than by the number of cds.
+        if len(self.existing) > LINK_DIRECTORY_CAP + 1 or self.named is not None:
+            # Plan 00623 item 6: the directories past the slice (or judged by name
+            # only) are not joined.
+            self.unscanned = True
+        for base in list(self.existing)[: LINK_DIRECTORY_CAP + 1]:
+            joined = os.path.normpath(str(Path(base) / target))
+            if joined not in self.existing and path_is_dir(joined, unreadable_means=True):
+                self._add(joined, exists=True)
+
+    def result(self) -> CwdSet:
+        return CwdSet(
+            self.directories,
+            list(self.existing),
+            unscanned=self.unscanned,
+            scanned=tuple(self.scanned),
+            named=self.named,
+        )
+
+
+def _is_redirection(words: list[str], index: int) -> bool:
+    """Is ``words[index]`` a redirection operator, or the file descriptor glued before one?"""
+    word = words[index]
+    if word in _REDIRECTION_OPERATORS:
+        return True
+    return word.isdigit() and index + 1 < len(words) and words[index + 1] in _REDIRECTION_OPERATORS
+
+
+def _change_targets(words: list[str], start: int) -> list[str | None]:
+    """The operand of a ``cd``/``pushd`` whose name is ``words[start - 1]`` ([None]: none).
+
+    A redirection and its file are passed over wherever they sit (review 614b R3).
+    The split words cannot tell ``cd 2>f x`` from ``cd 2 >f x``, so a number before
+    a redirection is a candidate as well as the operand after it.
+    """
+    candidates: list[str | None] = []
+    index = start
+    while index < len(words):
+        word = words[index]
+        if word.isdigit() and _is_redirection(words, index):
+            candidates.append(word)
+            index += 1
+            continue
+        if word in _REDIRECTION_OPERATORS:
+            index += 2
+            continue
+        if word and all(char in _SHELL_OPERATOR_CHARS for char in word):
+            break
+        if word == "-" or not word.startswith("-"):
+            # The split words carry `@(x)` as `@`, `(`, `x`, `)`: the opener is put
+            # back so the move is judged as the extended glob it is (review 614c N3).
+            glued = index + 1 < len(words) and words[index + 1] == "("
+            candidates.append(f"{word}(" if glued else word)
+            return candidates
+        index += 1
+    return candidates or [None]
+
+
+def chdir_wrapper_targets(name: str, words: list[str], start: int) -> list[str]:
+    """The directories a :data:`_CHDIR_OPTIONS` command at ``words[start - 1]`` moves to."""
+    # Scanned to the next operator, not to the first operand: an option before
+    # `-C` takes a value (`env -u HOME -C x`, `git -c k=v -C x`). A later `-C`
+    # of the wrapped command is read as a move too, which only adds a directory.
+    # Review D3: getopt reads a short option inside a cluster (`env -iC d`, `sudo -nDd`)
+    # and a long one by any unambiguous prefix (`env --chd=d`). Every cluster holding
+    # the letter and every prefix is read as a move: a misreading only adds a directory.
+    short, long = _CHDIR_OPTIONS[name]
+    clustered = name != _GIT_EXECUTABLE
+    letter = short[1:]
+    targets: list[str] = []
+    index = start
+    while index < len(words) and not all(char in _SHELL_OPERATOR_CHARS for char in words[index]):
+        word = words[index]
+        following = words[index + 1] if index + 1 < len(words) else None
+        if word.startswith("--"):
+            option, equals, value = word.partition("=")
+            if long is not None and len(option) > len("--") and long.startswith(option):
+                if equals:
+                    targets.append(value)
+                elif following is not None:
+                    targets.append(following)
+                    index += 1
+        elif word == short or (clustered and word.startswith("-") and letter in word[1:]):
+            glued_value = word[word.index(letter, 1) + 1 :]
+            if glued_value:
+                targets.append(glued_value)
+            elif following is not None:
+                targets.append(following)
+                index += 1
+        index += 1
+    return targets
+
+
+def _walk_directory_changes(text: str, walk: _DirectoryWalk, depth: int) -> None:
+    """Feed every directory change in ``text`` to ``walk``, wherever bash runs it."""
+    for segment in _COMMAND_SEGMENT_SEPARATORS.split(text):
+        assignment = _ASSIGNMENT_SEGMENT.fullmatch(segment)
+        if assignment is not None:
+            # `D=inner; cd "$D"` moves to inner (review 614b R4).
+            value = assignment.group(2)
+            if value[:1] in ("'", '"'):
+                value = value[1:-1]
+            walk.assign(assignment.group(1), value)
+            # The value is still walked: `x="$(env -C d cat l)"` moves inside it.
         if not _may_change_directory(segment):
             continue
         words = _shell_words(segment)
-        if words is None or len(words) < 2 or words[0] not in _DIRECTORY_CHANGE_COMMANDS:
+        loose = words is None
+        if words is None:
+            # Unbalanced here (a quoted body split at an operator): read without
+            # quotes, count a change anywhere in it, and read from the root too.
+            words = _shell_words(segment.translate(_SHLEX_REMOVED_CHARS)) or []
+        _walk_words(words, walk, depth, loose=loose)
+
+
+def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bool) -> None:
+    at_start = True
+    prefixed = False
+    redirect_file = False
+    prefix_value = False
+    wrapped_at = -1
+    for index, word in enumerate(words):
+        if " " in word and _may_change_directory(word):
+            if depth >= _MAX_DIRECTORY_CHANGE_DEPTH:
+                # N664 (Plan 00623): a move nested past the limit is not walked,
+                # so where the command runs is unknown, never "where it started".
+                raise IncompleteScanError(
+                    "a directory change is nested deeper than the walk follows"
+                )
+            _walk_directory_changes(word, walk, depth + 1)
+        # A redirection, its descriptor and its file leave the command position
+        # as it was: `>/dev/null cd x` still runs cd (review 614b R3).
+        if redirect_file:
+            redirect_file = False
             continue
-        operands = [word for word in words[1:] if not word.startswith("-") or word == "-"]
-        if not operands:
+        if _is_redirection(words, index):
+            redirect_file = word in _REDIRECTION_OPERATORS
             continue
-        target = operands[0]
-        if target == "-" or any(char in _WORD_EXPANDING_CHARACTERS for char in target):
+        if word and all(char in _SHELL_OPERATOR_CHARS for char in word):
+            at_start, prefixed = True, False
             continue
-        if not Path(target).is_absolute():
-            if not directories:
-                continue
-            target = str(Path(directories[-1]) / target)
-        directories.append(os.path.normpath(target))
-    return tuple(dict.fromkeys(directories))
+        if prefix_value:
+            # The value of `exec -a NAME`: the command is the word after it.
+            prefix_value = False
+            continue
+        if at_start and (word in _BUILTIN_PREFIXES or (prefixed and word.startswith("-"))):
+            prefix_value = prefixed and word in _PREFIX_OPTIONS_WITH_VALUE
+            prefixed = True
+            continue
+        prefixed = False
+        head, opened = word, False
+        for opener in _SUBSTITUTION_OPENERS:
+            if opener in head:
+                head, opened = head.rsplit(opener, 1)[1], True
+        if index == wrapped_at:
+            at_start = True
+        if at_start or opened or loose:
+            moves: list[str | None] = []
+            # `/usr/bin/env -C d` is env: the command is named by its last component.
+            name = Path(head).name
+            if head in _DIRECTORY_CHANGE_COMMANDS:
+                operand = index + 1
+                while operand < len(words) and words[operand].startswith("-"):
+                    operand += 1
+                if toplevel_move_length(words[operand:], walk.command):
+                    walk.to_toplevel()
+                else:
+                    moves.extend(_change_targets(words, index + 1))
+            elif name in _CHDIR_OPTIONS:
+                moves.extend(chdir_wrapper_targets(name, words, index + 1))
+            for move in moves:
+                walk.change(move)
+                if loose:
+                    walk.indeterminate()
+            if name in COMMAND_WRAPPERS:
+                # `sudo tar -C d`, `nice git -C d`: the wrapped command is at start too.
+                _names, offset = peel_command_wrappers([name, *words[index + 1 :]])
+                wrapped_at = index + offset
+                # A chdir wrapper inside the chain (`nohup env -C d`) moves too.
+                for inner in range(index + 1, wrapped_at):
+                    inner_name = Path(words[inner]).name
+                    if inner_name in _CHDIR_OPTIONS and inner_name in COMMAND_WRAPPERS:
+                        for move in chdir_wrapper_targets(inner_name, words, inner + 1):
+                            walk.change(move)
+        if not (word in _COMMAND_START_WORDS or (at_start and _ASSIGNMENT_WORD.match(word))):
+            at_start = opened and not head
+
+
+@fails_closed
+def effective_cwds(command: str, cwd: str | None) -> CwdSet:
+    """The directories ``command`` may run in: the hook's ``cwd``, then each literal move.
+
+    Ledger 00474 N221. A relative path in a command is read from where the
+    command is, so ``cd vault && cat r.md`` reaches ``vault/r.md``. Every
+    ``cd``/``pushd``, ``env -C``/``--chdir`` and ``git -C`` is tracked
+    cumulatively and ALL the resulting directories are returned, because a word
+    is judged against each: the over-approximation errs towards denying and
+    needs no per-word ordering. Review F1: a move counts wherever bash runs it
+    -- in a subshell, a brace group, after ``if``/``while``/``then``, in a
+    command substitution or a quoted ``bash -c`` body, behind ``builtin``,
+    ``command`` or a redirection. Review 614b R4: a globbed target adds each
+    directory it matches; a variable the command assigned literally is put in;
+    any other computed target (substitution, unknown variable, brace list,
+    tilde, ``cd -``, no operand) adds the project root, every project
+    directory holding a link and every directory link
+    (:func:`scan_project_links`, a bounded scan; past its bound, a relative
+    word read after the move is denied).
+
+    Only a segment that could make such a move is tokenised
+    (:func:`_may_change_directory`), not every line of a large authored script
+    (ledger 00474 N465).
+    """
+    walk = _DirectoryWalk(cwd, cdpath=CDPATH_VARIABLE in command, command=command)
+    # One scan for the command's many computed moves, even outside a guard's scope.
+    with link_scan_scope():
+        _walk_directory_changes(command, walk, 0)
+    return walk.result()
 
 
 def _anchored_spellings(form: str, cwds: tuple[str, ...]) -> list[str]:
@@ -3282,17 +4664,143 @@ def _anchored_spellings(form: str, cwds: tuple[str, ...]) -> list[str]:
     return spellings
 
 
-def _realpath_if_resolvable(token: str) -> str | None:
-    """Realpath of ``token`` when it names an existing symlink, else None."""
+#: Linux's PATH_MAX and NAME_MAX, in bytes: past them the kernel resolves no word either.
+_PATH_MAX_BYTES: Final[int] = 4096
+_NAME_MAX_BYTES: Final[int] = 255
+#: What the placement stat may answer for a path that does not exist (or loops).
+_NO_SUCH_PATH_ERRNOS: Final[frozenset[int]] = frozenset({errno.ENOENT, errno.ENOTDIR, errno.ELOOP})
+
+
+def components_fit_name_max(path: str) -> bool:
+    """Does every component of ``path`` fit NAME_MAX (one past it names nothing)?"""
+    return all(
+        len(part) <= _NAME_MAX_BYTES for part in path.encode(errors="surrogateescape").split(b"/")
+    )
+
+
+def _kernel_could_resolve(word: str) -> bool:
+    """Could the shell open ``word`` as written: it fits PATH_MAX and each component NAME_MAX."""
+    return len(word.encode(errors="surrogateescape")) < _PATH_MAX_BYTES and (
+        components_fit_name_max(word)
+    )
+
+
+#: The lone surrogates ``surrogateescape`` maps back to bytes; any other cannot be encoded.
+_ESCAPED_BYTE_SURROGATES: Final[tuple[str, str]] = ("\udc80", "\udcff")
+_SURROGATES: Final[tuple[str, str]] = ("\ud800", "\udfff")
+
+
+def _could_name_a_path(token: str) -> bool:
+    """Can ``token`` be handed to the kernel: no NUL, and every character encodable."""
+    low, high = _ESCAPED_BYTE_SURROGATES
+    first, last = _SURROGATES
+    return "\x00" not in token and all(
+        not first <= char <= last or low <= char <= high for char in token
+    )
+
+
+def _realpath_if_resolvable(token: str, word: str | None = None) -> str | None:
+    """Realpath of ``token`` when a link on its path leads elsewhere, else None.
+
+    Any component counts, not only the last: ``dlink/innocuous`` reaches what
+    ``dlink`` points at. A relative ``token`` is placed from the PROCESS cwd;
+    a caller holding the hook's cwd uses :func:`_link_targets` instead.
+
+    N663: ``token`` may be a relative ``word`` joined to a directory. A stat
+    that fails for any reason other than "no such path" is unresolvable when
+    the shell could still open ``word`` itself (it fits PATH_MAX and NAME_MAX
+    relative to the shell's own cwd), so it raises
+    :class:`ResolutionFailedError`. A word the kernel could not resolve either
+    (over-long prose, a NUL) is no path, and costs one call.
+    """
+    if not token or not _could_name_a_path(token):
+        return None
     try:
-        is_symlink = Path(token).is_symlink()
-    except OSError:
-        # A token that cannot be stat-ed (over-long path from prose text) is
-        # not a symlink to resolve; matching proceeds on the raw token, so
-        # nothing is hidden. Registered in error_hiding_exclusions.json.
-        is_symlink = False
-    if is_symlink:
-        return os.path.realpath(token)
+        os.lstat(token)
+    except OSError as exc:
+        if (
+            exc.errno in _NO_SUCH_PATH_ERRNOS
+            or not _kernel_could_resolve(word or token)
+            # A base whose own name is past NAME_MAX cannot be one the shell is in.
+            or not components_fit_name_max(token)
+        ):
+            return None
+        raise ResolutionFailedError(
+            f"a word could not be placed: its stat failed ({errno.errorcode.get(exc.errno or 0, exc.errno)})"
+        ) from exc
+    placed = Path.cwd() / token
+    # `..` after a link climbs from where the link LEADS, so the physical
+    # resolution starts from the path as spelled, never its normpath.
+    real = os.path.realpath(placed)
+    return real if real != os.path.normpath(placed) else None
+
+
+@fails_closed
+def _link_targets(token: str, cwds: tuple[str, ...]) -> tuple[str, ...]:
+    """Where ``token`` really leads, read from each of ``cwds`` and from the process cwd.
+
+    Plan 00614: the daemon runs from ``/``, so a relative word resolved only
+    against the process cwd judged ``cat link`` from the wrong directory. The
+    hook's cwds (:func:`effective_cwds`) are tried first; the process cwd is
+    kept, so nothing judged before is judged less.
+    """
+    if not token or "\0" in token:
+        return ()
+    candidates = [token]
+    if not token.startswith(("/", "~")):
+        # Only a directory that exists can hold a link (review F5).
+        bases: Sequence[str] = cwds
+        collapsed: list[str] = []
+        if isinstance(cwds, CwdSet):
+            bases = [*cwds.link_dirs, *cwds.bases_above_scanned(token)]
+            collapsed = cwds.collapsed_above_scanned(token)
+        candidates = [str(Path(cwd) / token) for cwd in bases if cwd] + collapsed + candidates
+    unique = list(dict.fromkeys(candidates))
+    for candidate in unique:
+        # N668: through /proc/self the daemon would read its own cwd, not the shell's.
+        refuse_process_view(candidate)
+    found = (_realpath_if_resolvable(candidate, token) for candidate in unique)
+    return tuple(dict.fromkeys(real for real in found if real is not None))
+
+
+def _overflow_mention(token: str, cwds: tuple[str, ...], patterns: tuple[str, ...]) -> str | None:
+    """A finding for a relative word past the directory cap that could be a link (review F5).
+
+    Only :data:`LINK_DIRECTORY_CAP` directories are resolved word by word; beyond
+    that a word which could pass through a link in any of the rest is denied,
+    never left unchecked. A positive finding, not an exception: an exception
+    ends in the guard's allow-with-advisory path.
+
+    Review D2: after a computed move whose link scan did not finish, any
+    relative word may lie on a link the scan never reached, so it raises
+    :class:`IncompleteScanError`, which the guard denies.
+    """
+    if not patterns or not isinstance(cwds, CwdSet):
+        return None
+    if cwds.unscanned and _may_be_relative_path(token):
+        raise IncompleteScanError(
+            "a computed directory change's link scan stopped before it finished"
+        )
+    if not cwds.overflowed:
+        return None
+    return patterns[0] if cwds.could_be_link(token) else None
+
+
+def _link_mention(
+    token: str,
+    cwds: tuple[str, ...],
+    patterns: tuple[str, ...],
+    project_root: str | None,
+    reals: tuple[str, ...] | None = None,
+) -> str | None:
+    """The protected glob ``token`` reaches through a link from one of ``cwds``, else None."""
+    overflow = _overflow_mention(token, cwds, patterns)
+    if overflow is not None:
+        return overflow
+    for real in _link_targets(token, cwds) if reals is None else reals:
+        matched = first_matching_glob(real, patterns, project_root=project_root)
+        if matched is not None:
+            return matched
     return None
 
 
@@ -3367,6 +4875,7 @@ def is_exempt_invocation(
     patterns: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS,
     *,
     deadline: float | None = None,
+    cwd: str | None = None,
 ) -> bool:
     """True when ``command`` is one of the two sanctioned path-mention shapes.
 
@@ -3395,7 +4904,9 @@ def is_exempt_invocation(
     command is never judged as the single command this exemption requires.
 
     ``deadline`` (Plan 00466 review 8 L1) is forwarded to
-    :func:`_paths_only_in_flag_position`'s per-word mention checks.
+    :func:`_paths_only_in_flag_position`'s per-word mention checks. ``cwd`` is
+    the hook's: a positional word that is a relative link to a protected file
+    is resolved from it (Plan 00614) and voids the exemption.
     """
     stripped = command.strip()
     if not stripped:
@@ -3427,7 +4938,9 @@ def is_exempt_invocation(
             continue
         if _denied_subcommand_used(words, consumer):
             return False
-        return _paths_only_in_flag_position(words, consumer, patterns, deadline=deadline)
+        return _paths_only_in_flag_position(
+            words, consumer, patterns, deadline=deadline, cwds=effective_cwds(command, cwd)
+        )
     return False
 
 
@@ -3570,6 +5083,7 @@ def _paths_only_in_flag_position(
     patterns: tuple[str, ...],
     *,
     deadline: float | None = None,
+    cwds: tuple[str, ...] = (),
 ) -> bool:
     """True when no bare word other than a flag VALUE looks path-mention-risky.
 
@@ -3582,8 +5096,10 @@ def _paths_only_in_flag_position(
     ``deadline`` (Plan 00466 review 8 L1) is forwarded to
     :func:`find_protected_mention` per word -- this loop's own total cost
     across many words is otherwise unbounded the same way B1 found for
-    :func:`iter_protected_mentions`.
+    :func:`iter_protected_mentions`. ``cwds`` place a relative word that is a
+    link (:func:`_link_targets`), which the text check alone cannot see through.
     """
+    project_root = resolve_project_root()
     flag_value_positions: set[int] = set()
     for index, word in enumerate(words):
         bare = word.strip("\"'")
@@ -3607,7 +5123,11 @@ def _paths_only_in_flag_position(
             if not bare.startswith("--"):
                 candidates.append(bare[2:])
         if any(
-            candidate and find_protected_mention(candidate, patterns, deadline=deadline) is not None
+            candidate
+            and (
+                find_protected_mention(candidate, patterns, deadline=deadline) is not None
+                or _link_mention(candidate, cwds, patterns, project_root) is not None
+            )
             for candidate in candidates
         ):
             return False
@@ -3774,7 +5294,7 @@ def is_encrypted_target_invocation(
         return False
     if not _is_encrypted_target_reader(words):
         return False
-    mentions = list(iter_protected_mentions(command, patterns, deadline=deadline))
+    mentions = list(iter_protected_mentions(command, patterns, deadline=deadline, cwd=cwd))
     if not mentions:
         return False
     literal_words = frozenset(words)
@@ -3962,6 +5482,7 @@ def is_grep_pattern_only_mention(
     patterns: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS,
     *,
     deadline: float | None = None,
+    cwd: str | None = None,
 ) -> bool:
     """True when EVERY protected mention in ``command`` sits only in a
     grep-family command's PATTERN argument, never in a FILE-TARGET argument
@@ -4006,7 +5527,8 @@ def is_grep_pattern_only_mention(
     id_rsa`` (the second, file-target occurrence) from slipping through.
 
     ``deadline`` (Plan 00466 review 8 L1) is forwarded to
-    :func:`iter_protected_mentions`.
+    :func:`iter_protected_mentions`. ``cwd`` is the hook's: a relative
+    file-target link is resolved from it (Plan 00614), not from the daemon's.
     """
     normalised = _newlines_as_statement_separators(command)
     if normalised is None:
@@ -4017,9 +5539,10 @@ def is_grep_pattern_only_mention(
     if statements is None:
         return False
 
-    mentions = list(iter_protected_mentions(normalised, patterns, deadline=deadline))
+    mentions = list(iter_protected_mentions(normalised, patterns, deadline=deadline, cwd=cwd))
     if not mentions:
         return False
+    cwds = effective_cwds(normalised, cwd)
 
     project_root = resolve_project_root()
     stem_pairs = _pattern_literal_stems(patterns)
@@ -4028,7 +5551,7 @@ def is_grep_pattern_only_mention(
     # `mention_cache`, so a file-target word repeated across several
     # arguments would otherwise pay for a fresh `os.path.realpath` syscall
     # every occurrence. LOCAL to this one call, never module-level (N23).
-    realpath_cache: dict[str, str | None] = {}
+    realpath_cache: dict[str, tuple[str, ...]] = {}
     for text, words in statements:
         if words[0] in _GREP_FAMILY_COMMANDS:
             targets = _grep_file_target_words(words)
@@ -4036,13 +5559,21 @@ def is_grep_pattern_only_mention(
                 return False
             if any(
                 _token_mention(
-                    target, patterns, stem_pairs, project_root, realpath_cache=realpath_cache
+                    target,
+                    patterns,
+                    stem_pairs,
+                    project_root,
+                    realpath_cache=realpath_cache,
+                    effective_cwds=cwds,
                 )
                 is not None
                 for target in targets
             ):
                 return False
-        elif next(iter_protected_mentions(text, patterns, deadline=deadline), None) is not None:
+        elif (
+            next(iter_protected_mentions(text, patterns, deadline=deadline, cwds=cwds), None)
+            is not None
+        ):
             return False
     return True
 

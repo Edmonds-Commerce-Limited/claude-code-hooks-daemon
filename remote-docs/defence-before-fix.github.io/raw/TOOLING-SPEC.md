@@ -1,10 +1,10 @@
 ---
 source_url: https://defence-before-fix.github.io/raw/TOOLING-SPEC.md
-fetched_at: '2026-11-10T16:35:24.035453+00:00'
+fetched_at: '2026-11-16T21:15:52.939542+00:00'
 fidelity: converted
 source_sha256: e88f22b57336cb341c062e9f9dc306576d6faa20c6efcc8934a5a77e7588a27a
 licence: CC-BY-4.0
-stale_after: '2027-02-08'
+stale_after: '2027-02-14'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 

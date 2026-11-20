@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from claude_code_hooks_daemon.utils.git_branch_creation import (
+    ROUTE_SETUP_WORKTREE,
     created_branches,
     worktree_add_path,
 )
@@ -104,3 +105,84 @@ def test_worktree_add_path_reads_the_target_directory(
     arguments: tuple[str, ...], expected: str | None
 ) -> None:
     assert worktree_add_path(arguments) == expected
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "scripts/setup_worktree.sh worktree-feat",
+        "./scripts/setup_worktree.sh worktree-feat",
+        "bash scripts/setup_worktree.sh worktree-feat",
+        "bash ./scripts/setup_worktree.sh worktree-feat main",
+        "sh /workspace/scripts/setup_worktree.sh worktree-feat",
+        "/workspace/scripts/setup_worktree.sh worktree-feat",
+        "FOO=1 ./scripts/setup_worktree.sh worktree-feat",
+        "cd /repo && ./scripts/setup_worktree.sh worktree-feat",
+        "timeout 600 ./scripts/setup_worktree.sh worktree-feat",
+        "timeout -s KILL 600 bash scripts/setup_worktree.sh worktree-feat",
+        "env FOO=1 ./scripts/setup_worktree.sh worktree-feat",
+        "nohup ./scripts/setup_worktree.sh worktree-feat",
+        "sudo -u dev ./scripts/setup_worktree.sh worktree-feat",
+        "bash --norc scripts/setup_worktree.sh worktree-feat",
+        "bash --login scripts/setup_worktree.sh worktree-feat",
+        "bash -o pipefail scripts/setup_worktree.sh worktree-feat",
+        "bash -eo pipefail scripts/setup_worktree.sh worktree-feat",
+        "bash +o history scripts/setup_worktree.sh worktree-feat",
+        "bash --rcfile rc scripts/setup_worktree.sh worktree-feat",
+        "bash -x -- scripts/setup_worktree.sh worktree-feat",
+    ],
+)
+def test_setup_worktree_script_creates_the_named_branch(command: str) -> None:
+    (creation,) = created_branches(command)
+    assert (creation.name, creation.route, creation.dwim) == (
+        "worktree-feat",
+        ROUTE_SETUP_WORKTREE,
+        False,
+    )
+
+
+def test_setup_worktree_script_acts_in_the_repository_that_holds_it() -> None:
+    (creation,) = created_branches("cd /a && /workspace/scripts/setup_worktree.sh worktree-x")
+    assert creation.invocation.directory == ("/a", "/workspace")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat scripts/setup_worktree.sh",
+        "echo scripts/setup_worktree.sh worktree-feat",
+        'echo "run ./scripts/setup_worktree.sh worktree-feat"',
+        "grep -n branch scripts/setup_worktree.sh",
+        "bash -n scripts/setup_worktree.sh worktree-feat",
+        "bash -xn scripts/setup_worktree.sh worktree-feat",
+        "bash --noexec scripts/setup_worktree.sh worktree-feat",
+        "bash -c 'true' scripts/setup_worktree.sh worktree-feat",
+        "bash scripts/other.sh worktree-feat",
+        "scripts/setup_worktree.sh",
+        "./setup_worktree.sh worktree-feat",
+        "scripts/setup_worktree.sh $NAME",
+        "scripts/setup_worktree.sh --help",
+    ],
+)
+def test_setup_worktree_script_mentions_that_create_nothing(command: str) -> None:
+    assert created_branches(command) == []
+
+
+@pytest.mark.parametrize(
+    ("command", "directory"),
+    [
+        ("cd scripts && ./setup_worktree.sh worktree-feat", ("scripts", "..")),
+        ("cd /ws/scripts && bash setup_worktree.sh worktree-feat", ("/ws/scripts", "..")),
+    ],
+)
+def test_setup_worktree_script_run_from_inside_scripts_creates_the_branch(
+    command: str, directory: tuple[str, ...]
+) -> None:
+    (creation,) = created_branches(command)
+    assert creation.name == "worktree-feat"
+    assert creation.invocation.directory == directory
+
+
+def test_setup_worktree_script_carries_only_its_leading_assignments() -> None:
+    (creation,) = created_branches("FOO=1 ./scripts/setup_worktree.sh worktree-feat GIT_DIR=x")
+    assert creation.invocation.assignments == ("FOO=1",)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -102,6 +103,62 @@ class TestWalkFiles:
         monkeypatch.setattr(os, "scandir", deny_sub)
         with pytest.raises(WalkError, match="sub"):
             walk_files(tmp_path, "*.py")
+
+
+class TestGitFatalExit:
+    """N-20: git exits 128 for EVERY fatal error, not only for 'not a repository'."""
+
+    @staticmethod
+    def _git_says(monkeypatch: pytest.MonkeyPatch, stderr: str, returncode: int = 128) -> None:
+        def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(argv, returncode, "", stderr)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+    def test_a_fatal_error_that_is_not_a_missing_repository_fails_the_walk(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _touch(tmp_path / "a.py")
+        self._git_says(monkeypatch, "fatal: index file corrupt")
+
+        with pytest.raises(WalkError, match="index file corrupt"):
+            walk_files(tmp_path, "*.py")
+
+    def test_not_a_repository_means_no_ignore_rules(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _touch(tmp_path / "a.py")
+        self._git_says(monkeypatch, "fatal: not a git repository (or any parent): .git")
+
+        assert walk_files(tmp_path, "*.py") == [tmp_path / "a.py"]
+
+    def test_a_git_file_naming_no_repository_means_no_ignore_rules(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Git 2.47 says 'not a git repository: <dir>' here; newer git says this."""
+        _touch(tmp_path / "a.py")
+        self._git_says(
+            monkeypatch,
+            f"fatal: gitfile does not point to a valid repository: {tmp_path / '.git'}",
+        )
+
+        assert walk_files(tmp_path, "*.py") == [tmp_path / "a.py"]
+
+    def test_git_is_asked_in_the_c_locale_so_its_message_can_be_recognised(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: dict[str, str] = {}
+
+        def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            env = kwargs["env"]
+            assert isinstance(env, dict)
+            seen.update(env)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        walk_files(tmp_path, "*.py")
+
+        assert seen["LC_ALL"] == "C"
 
 
 class TestRelativeParts:

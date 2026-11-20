@@ -30,6 +30,10 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.quarantine_artefact_read_gua
     QuarantineArtefactReadGuardHandler,
 )
 from claude_code_hooks_daemon.utils import protected_file_index
+from claude_code_hooks_daemon.utils.resolution_failure import (
+    IncompleteScanError,
+    ResolutionFailedError,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -241,6 +245,10 @@ class TestBashRecursiveSearch:
             "find . | xargs rg x",
             "find . -name '*.md' -exec grep x {} +",
             "bash -c 'grep -r x .'",
+            # Plan 00618 S-1: a git search moved by `-C` reads the tree it is moved to.
+            "git -C reports grep --no-index -e x",
+            "git -C other -C ../reports grep --no-index -e x",
+            "git -C $D grep --no-index -e x",
         ],
     )
     def test_search_over_a_tree_holding_an_artefact_matches(
@@ -250,8 +258,81 @@ class TestBashRecursiveSearch:
         assert handler.matches(payload) is True
         assert handler.handle(payload).decision == Decision.DENY
 
-    @pytest.mark.parametrize("command", ["grep -r x other", "rg x other", "grep x ."])
+    @pytest.mark.parametrize(
+        "command",
+        ["grep -r x other", "rg x other", "grep x .", "git -C other grep --no-index -e x"],
+    )
     def test_search_over_a_clean_tree_does_not_match(
+        self, handler: QuarantineArtefactReadGuardHandler, holding_dir: Path, command: str
+    ) -> None:
+        payload = _hook_input("Bash", {"command": command}, cwd=holding_dir)
+        assert handler.matches(payload) is False
+
+
+class TestBashDirectoryReaders:
+    """Plan 00618 Task 2.1: handing a directory to a reader reads its DETAIL artefact.
+
+    The quarantine guard shares ``recursive_search.search_reads`` with the secret
+    guard, so it tightens with it: this is deliberate.
+    """
+
+    @pytest.fixture
+    def holding_dir(
+        self,
+        tmp_path: Path,
+        handler: QuarantineArtefactReadGuardHandler,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> Path:
+        (tmp_path / "reports").mkdir()
+        (tmp_path / "reports" / "topic-opus-security-DETAIL.md").write_text("raw")
+        (tmp_path / "other").mkdir()
+        (tmp_path / "other" / "ordinary.md").write_text("fine")
+        (tmp_path / "other2").mkdir()
+        (tmp_path / "other2" / "ordinary.md").write_text("fine")
+        _indexed(handler, tmp_path, monkeypatch)
+        return tmp_path
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "find reports -exec cat {} +",
+            "find reports -exec cat {} \\;",
+            "find reports | xargs cat",
+            "find reports -print0 | xargs -0 cat",
+            "find reports -exec sh -c 'cat \"$1\"' _ {} \\;",
+            "tar cf - reports",
+            "tar -C reports -cf - .",
+            "cp -r reports x",
+            "zip -r x.zip reports",
+            "rsync -a reports/ x",
+            "diff -r reports other",
+            "git diff --no-index reports other",
+            "cd reports && find . -exec cat {} +",
+            "sudo find reports -exec cat {} +",
+        ],
+    )
+    def test_directory_reader_over_the_holding_directory_matches(
+        self, handler: QuarantineArtefactReadGuardHandler, holding_dir: Path, command: str
+    ) -> None:
+        payload = _hook_input("Bash", {"command": command}, cwd=holding_dir)
+        assert handler.matches(payload) is True
+        assert handler.handle(payload).decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "find other -exec cat {} +",
+            "find other | xargs cat",
+            "tar cf - other",
+            "cp -r other x",
+            "diff -r other other2",
+            "git diff --no-index other other2",
+            "find reports -exec ls {} +",
+            "find reports | xargs echo",
+            "git diff",
+        ],
+    )
+    def test_clean_directory_or_content_free_action_does_not_match(
         self, handler: QuarantineArtefactReadGuardHandler, holding_dir: Path, command: str
     ) -> None:
         payload = _hook_input("Bash", {"command": command}, cwd=holding_dir)
@@ -951,3 +1032,33 @@ class TestPrewarmIndex:
         handler.prewarm_index()
 
         assert protected_file_index.cached_index("/nowhere", ()) is None
+
+
+class TestAPlacementThatCannotFinishDenies:
+    """Plan 00614 round 6: a ResolutionFailedError (an unfinished link scan) is a finding.
+
+    The secret guard denies it; this guard sent it to the A1 advisory route, so a
+    computed cd in a project past the link scan's cap left a later read unjudged.
+    """
+
+    @pytest.mark.parametrize(
+        "error", [ResolutionFailedError("unplaceable"), IncompleteScanError("scan stopped")]
+    )
+    @pytest.mark.parametrize("tool", ["Bash", "Grep"])
+    def test_denied(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        monkeypatch: pytest.MonkeyPatch,
+        error: Exception,
+        tool: str,
+    ) -> None:
+        def _raise(self: Any, hook_input: dict[str, Any]) -> str | None:
+            raise error
+
+        monkeypatch.setattr(QuarantineArtefactReadGuardHandler, "_evaluate_matched_pattern", _raise)
+        tool_input = (
+            {"command": "cd $(echo x) && grep -r x ."} if tool == "Bash" else {"pattern": "x"}
+        )
+        payload = _hook_input(tool, tool_input, Path("/p"))
+        assert handler.matches(payload) is True
+        assert handler.handle(payload).decision == Decision.DENY

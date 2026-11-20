@@ -1,0 +1,16 @@
+[park, unpark]: inventory=park-carried
+  proof tips=[] evidence={} problems={'feat': '`feat` is not merged into `main`'}
+  guard: DENY
+  creation pools: {'open': [['feat']], 'parked': [], 'merged': []}
+[park, repark]: inventory=park-carried
+  proof tips=['feat'] evidence={'feat': 'park-carried'} problems={}
+  guard: ALLOW
+  creation pools: {'open': [], 'parked': [], 'merged': []}
+[remote-only park]: inventory=park-carried
+  proof tips=['feat'] evidence={'feat': 'park-carried'} problems={}
+  guard: ALLOW
+  creation pools: {'open': [], 'parked': [], 'merged': []}
+[remote-only park, unpark]: inventory=park-carried
+  proof tips=[] evidence={} problems={'feat': '`feat` is not merged into `main`'}
+  guard: DENY
+  creation pools: {'open': [['feat']], 'parked': [], 'merged': []}

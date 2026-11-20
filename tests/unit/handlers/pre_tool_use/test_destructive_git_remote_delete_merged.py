@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.support.git_fixtures import run_git
+from tests.support.git_fixtures import commit_content, run_git
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
@@ -47,7 +47,7 @@ def clone(tmp_path: Path) -> Path:
     # merged: same tip as main (ancestor of it); unmerged: carries a commit main lacks.
     run_git(work, "push", "origin", "main:refs/heads/merged")
     run_git(work, "checkout", "-b", "unmerged")
-    run_git(work, "commit", "--allow-empty", "-m", "only on unmerged")
+    commit_content(work, "only on unmerged")
     run_git(work, "push", "-u", "origin", "unmerged")
     run_git(work, "checkout", "main")
     run_git(work, "fetch", "origin")
@@ -187,7 +187,7 @@ def _push_from_second_clone(clone: Path, branch: str) -> None:
     run_git(other, "config", "user.name", "Tester")
     run_git(other, "config", "commit.gpgsign", "false")
     run_git(other, "checkout", branch)
-    run_git(other, "commit", "--allow-empty", "-m", "pushed after our last fetch")
+    commit_content(other, "pushed after our last fetch")
     run_git(other, "push", "origin", branch)
 
 

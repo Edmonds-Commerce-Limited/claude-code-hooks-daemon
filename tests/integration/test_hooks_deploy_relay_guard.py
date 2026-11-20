@@ -243,7 +243,9 @@ def test_f2_contaminated_source_deploy_with_relay_enabled_uses_client_paths(
     deployed = (project_root / ".claude" / "hooks" / "pre-tool-use").read_text()
     assert "/some/other/project/untracked" not in deployed
     assert "relay hot path" in deployed
-    assert str(project_root / ".claude" / "hooks-daemon" / "untracked") in deployed
+    # Machine independent (Plan 00609): the layout is written, the root never is.
+    assert '_rl_dir="$_rl_root/.claude/hooks-daemon/untracked"' in deployed
+    assert str(project_root) not in deployed
 
 
 def test_f4_flipping_relay_off_strips_guard_from_previously_generated_deploy(

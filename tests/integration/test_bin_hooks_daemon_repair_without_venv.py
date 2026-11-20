@@ -190,7 +190,7 @@ class TestOtherVerbsStillRefuse:
         sandbox.wait_for_build()
         record = dict(
             line.split("=", 1)
-            for line in (sandbox.clone / "untracked" / ".venv-bootstrap.result")
+            for line in next((sandbox.clone / "untracked").glob(".venv-bootstrap-*.result"))
             .read_text()
             .splitlines()
             if "=" in line

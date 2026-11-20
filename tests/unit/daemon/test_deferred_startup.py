@@ -67,7 +67,12 @@ def _initialise(project: Path, *, defer: bool) -> tuple[DaemonController, dict[s
     With ``defer`` the held-back steps are taken and run, after checking that
     none of them ran inside ``initialise``.
     """
-    spies = {"inject": MagicMock(), "agents": MagicMock(), "rules": MagicMock()}
+    spies = {
+        "inject": MagicMock(),
+        "agents": MagicMock(),
+        "rules": MagicMock(),
+        "relay": MagicMock(),
+    }
     injector = MagicMock()
     injector.return_value.inject = spies["inject"]
     controller = DaemonController()
@@ -76,6 +81,7 @@ def _initialise(project: Path, *, defer: bool) -> tuple[DaemonController, dict[s
         patch.object(DaemonController, "prewarm_indexes"),
         patch.object(DaemonController, "_sync_agent_assets", spies["agents"]),
         patch.object(DaemonController, "_sync_directory_role_rules", spies["rules"]),
+        patch.object(DaemonController, "_start_relay_repair", spies["relay"]),
     ):
         controller.initialise(
             handler_config={},
@@ -96,13 +102,14 @@ class TestControllerDefersNonessentialStartup:
     def test_default_runs_every_step_inside_initialise(self, project: Path) -> None:
         """Without the flag, behaviour is unchanged: the steps run in initialise."""
         controller, spies = _initialise(project, defer=False)
-        assert [spy.call_count for spy in spies.values()] == [1, 1, 1]
+        # The relay repair spawns a build, so only the serving daemon starts it.
+        assert [spy.call_count for spy in spies.values()] == [1, 1, 1, 0]
         assert controller.take_deferred_startup() == []
 
     def test_deferred_steps_run_when_taken(self, project: Path) -> None:
         """Held back by initialise, each step runs exactly once when it is run."""
         _controller, spies = _initialise(project, defer=True)
-        assert [spy.call_count for spy in spies.values()] == [1, 1, 1]
+        assert [spy.call_count for spy in spies.values()] == [1, 1, 1, 1]
 
     def test_config_validation_is_not_deferred(self, project: Path) -> None:
         """Degraded mode changes how requests are answered, so it is set before serving."""
@@ -134,6 +141,7 @@ class TestControllerDefersNonessentialStartup:
             "CLAUDE.md guidance injection",
             "agent-asset sync",
             "directory-role-rules sync",
+            "relay repair",
         ]
 
 

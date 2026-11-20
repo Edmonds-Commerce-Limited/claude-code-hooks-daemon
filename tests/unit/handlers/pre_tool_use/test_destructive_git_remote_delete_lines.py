@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.support.git_fixtures import run_git
+from tests.support.git_fixtures import commit_content, run_git
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants import Timeout
@@ -59,7 +59,7 @@ def clone(tmp_path: Path) -> Path:
     run_git(work, "push", "-u", "origin", "main")
     run_git(work, "remote", "set-head", "origin", "main")
     run_git(work, "checkout", "-b", "release/x")
-    run_git(work, "commit", "--allow-empty", "-m", "only on the release line")
+    commit_content(work, "only on the release line")
     run_git(work, "push", "-u", "origin", "release/x")
     run_git(work, "push", "origin", "release/x:refs/heads/feature")
     run_git(work, "push", "origin", "release/x:refs/heads/keep/me")
@@ -105,7 +105,7 @@ def test_a_line_merged_into_the_default_branch_is_allowed(merged_line_clone: Pat
 
 def test_a_merged_line_is_still_held_to_the_live_remote_tip(merged_line_clone: Path) -> None:
     run_git(merged_line_clone, "checkout", "release/x")
-    run_git(merged_line_clone, "commit", "--allow-empty", "-m", "pushed since the last fetch")
+    commit_content(merged_line_clone, "pushed since the last fetch")
     run_git(merged_line_clone, "push", "origin", "release/x")
     run_git(merged_line_clone, "update-ref", "refs/remotes/origin/release/x", "release/x~1")
     run_git(merged_line_clone, "checkout", "main")
@@ -116,7 +116,7 @@ def test_a_merged_line_is_still_held_to_the_live_remote_tip(merged_line_clone: P
 
 def test_a_line_merged_only_into_another_line_is_denied(clone: Path) -> None:
     run_git(clone, "checkout", "-b", "release/y", "release/x")
-    run_git(clone, "commit", "--allow-empty", "-m", "only on release/y")
+    commit_content(clone, "only on release/y")
     run_git(clone, "push", "-u", "origin", "release/y")
     run_git(clone, "checkout", "main")
     run_git(clone, "fetch", "origin")
@@ -177,7 +177,9 @@ class _FakeGit:
         if args[0] == "rev-parse":
             return _done(0, f"{cwd}\n")
         if args[0] == "ls-remote":
-            return _done(0, "".join(f"{_TIP}\trefs/heads/{n}\n" for n in self._names))
+            # The remote default is live at its tracking tip (Plan 00626 confirms it).
+            live = [*self._names, "main"]
+            return _done(0, "".join(f"{_TIP}\trefs/heads/{n}\n" for n in live))
         if args[0] == "for-each-ref" and any(a.startswith("--merged") for a in args):
             if self._merged_fails:
                 return _done(128)
@@ -198,7 +200,14 @@ def install(monkeypatch: pytest.MonkeyPatch) -> Callable[[_FakeGit], _FakeGit]:
         monkeypatch.setattr(remote_branch_proof, "run_git", fake)
         monkeypatch.setattr(remote_refs, "run_git", fake)
         monkeypatch.setattr(
-            destructive_git, "resolve_default_branch", lambda _config, _directory: "main"
+            destructive_git,
+            "resolve_remote_default_branch",
+            lambda _config, _directory, **_remote: "main",
+        )
+        monkeypatch.setattr(
+            remote_branch_proof,
+            "resolve_remote_default_branch",
+            lambda _config, _directory, **_remote: "main",
         )
         return fake
 
@@ -219,8 +228,9 @@ def test_forty_branches_cost_one_ls_remote_and_one_for_each_ref_per_target(
     assert many.count("ls-remote") == 1
     assert many.count("merge-base") == 0
     assert many.count("rev-parse") == 1  # the top level, resolved once for all 40
-    # Targets: origin/main, local main, origin/release/x -- plus one listing call.
-    assert many.count("for-each-ref") == few.count("for-each-ref") == 4
+    # Targets: origin/main and origin/release/x (never the local main, Plan 00626) --
+    # plus one listing call.
+    assert many.count("for-each-ref") == few.count("for-each-ref") == 3
 
 
 def test_forty_branches_are_judged_within_the_dispatch_budget(

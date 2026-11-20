@@ -256,6 +256,51 @@ class TestDoneNamesTheNextWorkableIssue:
         assert cache is not None and cache.numbers == (9, 12)
         assert listing.calls == 1
 
+    def _seed_issue(self, project: Path, worktree: Path, name: str, branch: str) -> None:
+        _run(project, "add", name, "--worktree", str(worktree), "--branch", branch, "--brief", "x")
+
+    def test_the_finished_issue_is_not_cached_while_github_still_lists_it_open(
+        self, project: Path, worktree: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._seed_issue(project, worktree, "p605", "worktree-issue-203-fix")
+        capsys.readouterr()
+        with _use_listing(_Listing([_issue(203), _issue(204)])):
+            assert _run(project, "done", "p605") == 0
+        out = capsys.readouterr().out
+        assert "next workable issue: #204 - start it now" in out
+        cache = read_workable(self._cache(project))
+        assert cache is not None and cache.numbers == (204,)
+
+    def test_the_issue_number_may_come_from_the_entry_name(
+        self, project: Path, worktree: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._seed_issue(project, worktree, "issue-203-fix", "b")
+        capsys.readouterr()
+        with _use_listing(_Listing([_issue(203)])):
+            assert _run(project, "done", "issue-203-fix") == 0
+        assert "no workable issue" in capsys.readouterr().out
+        cache = read_workable(self._cache(project))
+        assert cache is not None and cache.numbers == ()
+
+    def test_the_finished_issue_is_removed_from_a_cache_the_lookup_could_not_refresh(
+        self, project: Path, worktree: Path
+    ) -> None:
+        self._seed_issue(project, worktree, "p605", "worktree-issue-203-fix")
+        write_workable(self._cache(project), [203, 9], now=1.0)
+        with _use_listing(_Listing(GhError("rate limited"))):
+            assert _run(project, "done", "p605") == 0
+        cache = read_workable(self._cache(project))
+        assert cache is not None and cache.numbers == (9,) and cache.recorded_at == 1.0
+
+    def test_an_entry_without_an_issue_number_keeps_every_listed_issue(
+        self, project: Path, worktree: Path
+    ) -> None:
+        self._seed_issue(project, worktree, "p605", "worktree-plan-605-x")
+        with _use_listing(_Listing([_issue(203)])):
+            assert _run(project, "done", "p605") == 0
+        cache = read_workable(self._cache(project))
+        assert cache is not None and cache.numbers == (203,)
+
     def test_it_says_so_when_nothing_is_workable(
         self, project: Path, worktree: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

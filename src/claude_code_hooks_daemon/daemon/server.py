@@ -1289,6 +1289,11 @@ class HooksDaemon:
         self.deferred_startup_done = asyncio.Event()
         self._active_requests = 0
         self._shutdown_requested = False
+        # A new daemon lifetime may own repairs again (a stop refuses new ones).
+        # Imported here: the install package imports this module at load time.
+        from claude_code_hooks_daemon.install.relay_repair import resume_owned_spawns
+
+        resume_owned_spawns()
         self._shutdown_task: asyncio.Task[None] | None = None
         self._idle_check_interval = idle_check_interval
         self._is_new_controller = isinstance(controller, Controller)
@@ -1560,6 +1565,10 @@ class HooksDaemon:
     def _run_deferred_steps(self) -> None:
         """Run each deferred step, logging one that fails and carrying on with the rest."""
         for description, step in self._deferred_startup:
+            if self._shutdown_requested:
+                # A step started now could spawn work the stop has already ended.
+                logger.info("Skipping deferred start-up step '%s': shutting down", description)
+                continue
             try:
                 step()
             except Exception as exc:
@@ -1776,6 +1785,7 @@ class HooksDaemon:
         from claude_code_hooks_daemon.daemon.paths import (
             get_event_socket_dir_from_untracked,
             get_event_socket_path_in_dir,
+            publish_events_dir_location,
         )
 
         events_dir = get_event_socket_dir_from_untracked(legacy_socket_path.parent)
@@ -1814,6 +1824,18 @@ class HooksDaemon:
                     level=logging.ERROR,
                 )
         events_dir.mkdir(parents=True, mode=0o750, exist_ok=True)
+        try:
+            publish_events_dir_location(legacy_socket_path.parent, events_dir)
+        except OSError as e:
+            log_and_continue(
+                logger,
+                e,
+                reason=(
+                    "without the events-dir location file a forwarder cannot find a fallback "
+                    "events dir and uses the legacy socket; the daemon itself is unaffected"
+                ),
+                level=logging.ERROR,
+            )
 
         bound: dict[str, asyncio.Server] = {}
         skipped: dict[str, str] = {}
@@ -2250,6 +2272,16 @@ class HooksDaemon:
         # Pending debounced triggers are dropped, not flushed: they live in
         # memory only and the next event for each key re-triggers it.
         shutdown_debouncer()
+
+        # The relay repair this daemon started is its child: end it and its
+        # processes and wait, so nothing writes under the project once stop
+        # returns (Plan 00608). Blocking (bounded), so off the event loop.
+        # Imported here: the install package imports this module at load time.
+        from claude_code_hooks_daemon.install.relay_repair import stop_owned_repairs
+
+        stopped = await asyncio.get_running_loop().run_in_executor(None, stop_owned_repairs)
+        if stopped:
+            logger.info("Stopped relay repair process(es) %s", stopped)
 
         # Close server
         if self.server:

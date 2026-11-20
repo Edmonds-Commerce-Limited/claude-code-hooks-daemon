@@ -17,6 +17,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.core.branch_inventory import issue_number_in_name
 from claude_code_hooks_daemon.utils.github_issue_validity import (
     AuthorWhitelistCheck,
     GhError,
@@ -38,6 +39,7 @@ from claude_code_hooks_daemon.utils.work_queue import (
 from claude_code_hooks_daemon.utils.workable_issues import (
     WORKABLE_ISSUES_FILENAME,
     refresh_workable_cache,
+    remove_workable,
 )
 
 
@@ -123,19 +125,40 @@ def _issue_service(project_root: Path) -> tuple[IssueValidityService, tuple[str,
     return IssueValidityService(make_gh_runner(cwd=project_root)), approved
 
 
-def _next_issue_line(args: argparse.Namespace) -> str:
+def _finished_issue(record: WorkRecord) -> int | None:
+    """The issue the closed entry worked on, read from its branch then its name."""
+    for label in (record.branch, record.name):
+        number = issue_number_in_name(label or "")
+        if number is not None:
+            return number
+    return None
+
+
+def _next_issue_line(args: argparse.Namespace, finished: int | None) -> str:
     """Name the next workable issue and refresh the Stop gate's cache; never raises.
+
+    ``finished`` is the issue the closed entry worked on. The runbook closes the
+    entry before the issue, so GitHub still lists it open here: it is kept out of
+    the cache, and dropped from an older cache even when the lookup fails.
 
     A lookup that fails for any reason is reported as unknown, because the
     queue entry is already closed and that must not be undone by a GitHub error.
     """
     try:
         project_root = _project_root_of(args)
+        cache = untracked_dir_for(args.project_root) / WORKABLE_ISSUES_FILENAME
+        if finished is not None:
+            remove_workable(cache, finished)
         service, approved = _issue_service(project_root)
         if not AuthorWhitelistCheck(approved).is_configured:
             return "next issue is unknown: no approved_issue_authors configured"
-        cache = untracked_dir_for(args.project_root) / WORKABLE_ISSUES_FILENAME
-        numbers = refresh_workable_cache(cache, service, approved, now=time.time())
+        numbers = refresh_workable_cache(
+            cache,
+            service,
+            approved,
+            now=time.time(),
+            exclude=frozenset() if finished is None else frozenset({finished}),
+        )
     except (GhError, ValueError, RuntimeError, OSError) as exc:
         return f"next issue is unknown: {exc}"
     if not numbers:
@@ -146,7 +169,7 @@ def _next_issue_line(args: argparse.Namespace) -> str:
 def _cmd_done(args: argparse.Namespace, path: Path) -> int:
     record = update_record(path, args.name, now=time.time(), last_sha=args.sha, status=STATUS_DONE)
     print(f"Closed '{record.name}' (done) at {record.last_sha}")
-    print(_next_issue_line(args))
+    print(_next_issue_line(args, _finished_issue(record)))
     return 0
 
 

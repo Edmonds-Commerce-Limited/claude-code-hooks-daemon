@@ -56,6 +56,20 @@ GitResult = subprocess.CompletedProcess[str]
 _OPTIONAL_LOCKS_VAR: Final[str] = "GIT_OPTIONAL_LOCKS"
 _OPTIONAL_LOCKS_DECLINED: Final[str] = "0"
 
+#: A replace ref or a legacy ``info/grafts`` entry makes git show a commit that is
+#: not the one stored: a content commit can read as empty, or the default can read
+#: as descending from a branch. Delete proofs read through these would delete real
+#: content (Plan 00622 D2), so no daemon git call reads through either.
+#: ``GIT_NO_REPLACE_OBJECTS`` does not disable grafts, so the graft file is pointed
+#: beneath ``/dev/null``, where no file can exist and git reads none, silently.
+#: This does NOT cover the commit-graph, a cache git may fill a walked commit's tree
+#: and parents from (and which ``GIT_NO_REPLACE_OBJECTS`` re-enables). A proof that
+#: must not trust it turns it off and confirms against ``cat-file`` (``branch_park``).
+_REAL_OBJECTS_ENV: Final[Mapping[str, str]] = {
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_GRAFT_FILE": "/dev/null/no-grafts",
+}
+
 #: Each of these points git at a repository, work tree or index other than the
 #: one ``-C <cwd>`` names. Shared with ``git_invocation_directory``, which denies
 #: an agent's git command that sets one.
@@ -187,10 +201,16 @@ def _child_environment(env: Mapping[str, str] | None) -> dict[str, str]:
 
     The optional index lock is declined LAST, so a caller passing a whole
     ``os.environ`` copy cannot reinstate an inherited ``GIT_OPTIONAL_LOCKS`` and
-    undo the one property this runner exists to guarantee.
+    undo the one property this runner exists to guarantee. The real-objects pin
+    (:data:`_REAL_OBJECTS_ENV`) is applied last for the same reason.
     """
     inherited = {k: v for k, v in os.environ.items() if k not in RELOCATING_VARIABLES}
-    return {**inherited, **(env or {}), _OPTIONAL_LOCKS_VAR: _OPTIONAL_LOCKS_DECLINED}
+    return {
+        **inherited,
+        **(env or {}),
+        **_REAL_OBJECTS_ENV,
+        _OPTIONAL_LOCKS_VAR: _OPTIONAL_LOCKS_DECLINED,
+    }
 
 
 def run_git(
@@ -596,7 +616,14 @@ class GitRepo:
         urls = (line.partition(" ")[2].strip() for line in output.splitlines())
         return tuple(url for url in urls if url)
 
-    def write_config(self, key: str, value: str) -> None:
+    def write_config(
+        self,
+        key: str,
+        value: str,
+        *,
+        lock_base: float | None = None,
+        lock_ceiling: float | None = None,
+    ) -> None:
         """Set a ``--local`` config value.
 
         FAIL FAST: raises ``CalledProcessError`` if git rejects the write, so
@@ -604,11 +631,21 @@ class GitRepo:
         failure being silently lost. Goes through :func:`run_git` like every
         other invocation and re-raises here, rather than keeping its own
         ``check=True`` spawn outside the one bounded home.
+
+        The wait for ``config.lock`` defaults to the load-scaled
+        ``GIT_CONFIG_LOCK_WAIT`` pair (up to 30 s); a caller on a deadline-bound
+        hook path passes a short ``lock_base``/``lock_ceiling``.
+
+        Raises:
+            subprocess.CalledProcessError: If git rejects the write.
+            GitConfigLockError: If ``config.lock`` stays held for the whole wait.
         """
         # Local import: git_config_write itself builds on run_git from this module.
         from claude_code_hooks_daemon.utils.git_config_write import run_git_config_write
 
-        result = run_git_config_write(self.root, "--local", key, value)
+        result = run_git_config_write(
+            self.root, "--local", key, value, base_wait=lock_base, ceiling=lock_ceiling
+        )
         if result.returncode != 0:
             raise subprocess.CalledProcessError(
                 result.returncode, result.args, result.stdout, result.stderr

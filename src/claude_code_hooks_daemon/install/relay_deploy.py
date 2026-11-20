@@ -755,11 +755,31 @@ def provision_relay_for_install(
     )
 
 
+def _check_relay(project_root: Path, transport: TransportConfig) -> int:
+    """Read-only ``--check``: print the relay's state and return the exit code.
+
+    0 when the relay is disabled or its binary is usable; the provision-failed
+    code when it is enabled and the binary is missing or defective. Nothing is
+    built, downloaded or written.
+    """
+    if not transport.relay_enabled:
+        print("Relay disabled (daemon.transport.relay_enabled is false); nothing to do")
+        return 0
+    missing = missing_configured_relay_binary(project_root, transport)
+    if missing is None:
+        print(f"Relay binary in place: {resolve_relay_binary_path(project_root, transport)}")
+        return 0
+    print(f"Relay binary is {relay_binary_defect(missing) or 'unusable'}: {missing}")
+    return RELAY_PROVISION_FAILED_EXIT_CODE
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI used by the install and upgrade scripts.
 
     Exit codes: 0 = disabled or provisioned, 2 = bad arguments (argparse),
-    :data:`RELAY_PROVISION_FAILED_EXIT_CODE` (3) = relay enabled but not provisioned.
+    :data:`RELAY_PROVISION_FAILED_EXIT_CODE` (3) = relay enabled but not
+    provisioned. With ``--check`` nothing is provisioned: 0 means no
+    provisioning is needed, 3 means the binary is missing or defective.
     """
     parser = argparse.ArgumentParser(
         prog="python -m claude_code_hooks_daemon.install.relay_deploy",
@@ -767,10 +787,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--daemon-dir", type=Path, required=True)
     parser.add_argument("--project-root", type=Path, required=True)
-    parser.add_argument("--version-tag", required=True)
+    parser.add_argument("--version-tag")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="only report whether the relay binary is usable; build and download nothing",
+    )
     args = parser.parse_args(argv)
+    if not args.check and not args.version_tag:
+        parser.error("--version-tag is required unless --check is given")
 
     transport = load_transport_config(args.project_root)
+    if args.check:
+        return _check_relay(args.project_root, transport)
     result = provision_relay_for_install(
         args.daemon_dir, args.project_root, transport, version_tag=args.version_tag
     )

@@ -17,6 +17,8 @@ A park with no commit is local to this clone: no other checkout can see it.
 
 from __future__ import annotations
 
+import logging
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,8 +28,11 @@ from claude_code_hooks_daemon.utils.git_config_write import (
     GitConfigLockError,
     run_git_config_write,
 )
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import read_blobs, run_git
+from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.remote_refs import remote_git_env
+
+logger = logging.getLogger(__name__)
 
 _HEADS = "refs/heads/"
 _REMOTES = "refs/remotes/"
@@ -50,6 +55,9 @@ _REASON_KEY = "hooksDaemonParkedReason"
 _AT_KEY = "hooksDaemonParkedAt"
 _BY_KEY = "hooksDaemonParkedBy"
 _RECORD_KEYS = (_SHA_KEY, _REASON_KEY, _AT_KEY, _BY_KEY)
+#: A parked-at epoch: an optional sign, then at most 18 ASCII digits, which
+#: ``int()`` always reads (it refuses a string past 4300 digits).
+_INTEGER = re.compile(r"[+-]?[0-9]{1,18}")
 
 
 class BranchParkError(Exception):
@@ -102,15 +110,47 @@ def write_park_record(repo: Path, name: str, record: ParkRecord) -> None:
 
 def read_park_record(repo: Path, name: str) -> ParkRecord | None:
     """The park record of ``name``; None when it has none (or an incomplete one)."""
-    values: dict[str, str] = {}
-    for key in _RECORD_KEYS:
-        result = run_git(repo, "config", "--get", _record_key(name, key))
-        if result.returncode == _CONFIG_KEY_ABSENT:
-            return None
-        if result.returncode != 0:
-            raise BranchParkError(f"git config {_record_key(name, key)} failed: {result.stderr}")
-        values[key] = result.stdout.strip()
-    return ParkRecord(values[_SHA_KEY], values[_REASON_KEY], int(values[_AT_KEY]), values[_BY_KEY])
+    return read_park_records(repo).get(name)
+
+
+def read_park_records(repo: Path) -> dict[str, ParkRecord]:
+    """Every complete, readable park record in ``repo``, by branch name, in ONE git process.
+
+    A branch with an incomplete record, or one whose ``ParkedAt`` is not an integer,
+    is left out: an unreadable record is not a park, so every guard judges that
+    branch as unparked, which is never laxer than the record it could not read.
+    """
+    pattern = rf"^branch\..+\.({'|'.join(k.lower() for k in _RECORD_KEYS)})$"
+    result = run_git(repo, "config", "-z", "--get-regexp", pattern)
+    if result.returncode == _CONFIG_KEY_ABSENT:
+        return {}
+    if result.returncode != 0:
+        raise BranchParkError(f"git config --get-regexp failed: {result.stderr.strip()}")
+    fields: dict[str, dict[str, str]] = {}
+    for entry in result.stdout.split("\0"):
+        key, _sep, value = entry.partition("\n")
+        if not key.startswith("branch."):
+            continue
+        name, _dot, leaf = key[len("branch.") :].rpartition(".")
+        fields.setdefault(name, {})[leaf] = value
+    records: dict[str, ParkRecord] = {}
+    for name, found in fields.items():
+        record = _record_from_fields(name, found)
+        if record is not None:
+            records[name] = record
+    return records
+
+
+def _record_from_fields(name: str, found: dict[str, str]) -> ParkRecord | None:
+    """The record held by the lower-cased config leaves in ``found``, or None."""
+    leaves = [key.lower() for key in _RECORD_KEYS]
+    if any(leaf not in found for leaf in leaves):
+        return None
+    sha, reason, at, by = (found[leaf] for leaf in leaves)
+    if _INTEGER.fullmatch(at.strip()) is None:
+        logger.warning("park record of %s has a non-integer %s; ignored", name, _AT_KEY)
+        return None
+    return ParkRecord(sha.strip(), reason.strip(), int(at.strip()), by.strip())
 
 
 def clear_park_record(repo: Path, name: str) -> ParkRecord | None:
@@ -179,8 +219,280 @@ def _git_out(repo: Path, *args: str) -> str:
 
 def _message(reason: str | None, user: str, *, clear: bool) -> str:
     if clear:
-        return f"Unpark branch\n\nUnparked: {user}\n"
-    return f"Park branch: {reason}\n\nParked-Reason: {reason}\nParked-By: {user}\n"
+        return f"{_UNPARK_SUBJECT}\n\n{_UNPARKED_BY}{user}\n"
+    return f"{_PARK_SUBJECT}{reason}\n\nParked-Reason: {reason}\n{_PARKED_BY}{user}\n"
+
+
+_PARK_SUBJECT = "Park branch: "
+_UNPARK_SUBJECT = "Unpark branch"
+_PARKED_BY = "Parked-By: "
+_UNPARKED_BY = "Unparked: "
+
+
+def is_park_message(message: str) -> bool:
+    """Whether ``message`` is exactly what :func:`_message` writes for a park or an unpark.
+
+    The reason and user are read back out of the message and the writer's own text is
+    rebuilt from them, so any other wording, line or trailer is not a park message.
+    """
+    text = message.strip()
+    lines = text.split("\n")
+    if lines[0].startswith(_PARK_SUBJECT) and lines[-1].startswith(_PARKED_BY):
+        reason = lines[0].removeprefix(_PARK_SUBJECT)
+        user = lines[-1].removeprefix(_PARKED_BY)
+        return text == _message(reason, user, clear=False).strip()
+    if lines[0] == _UNPARK_SUBJECT and lines[-1].startswith(_UNPARKED_BY):
+        user = lines[-1].removeprefix(_UNPARKED_BY)
+        return text == _message(None, user, clear=True).strip()
+    return False
+
+
+# --- the park-commit classifier (Plan 00617) ------------------------------------------
+
+_WALK_UNIT = "\x1f"
+_WALK_FIELDS = 4
+_BOUNDARY_MARK = "-"
+_WALK_FORMAT = "--format=%m%x1f%H%x1f%T%x1f%P"
+#: Tip trailers that can mark a park commit; only a ref carrying one can be residue.
+_TIP_MARK_FORMAT = (
+    "--format=%(refname)%00%(trailers:key=Parked-Reason,valueonly,unfold)"
+    "%(trailers:key=Unparked,valueonly,unfold)"
+)
+
+
+@dataclass(frozen=True)
+class ParkWalk:
+    """The commits of ``target..tip``, which of them are park commits, and the merge count.
+
+    ``empties`` are the commits that change nothing: ONE parent and that parent's
+    tree, whatever their message (Plan 00622). Every park commit is one of them.
+    """
+
+    commits: tuple[str, ...]
+    parks: frozenset[str]
+    merges: int
+    empties: frozenset[str] = frozenset()
+
+    @property
+    def is_residue(self) -> bool:
+        """Every commit is a park commit, and there is at least one (:func:`is_park_residue`)."""
+        return bool(self.parks) and len(self.commits) == len(self.parks)
+
+    @property
+    def is_content_free(self) -> bool:
+        """Every commit is empty, and there is at least one (:func:`is_content_free`)."""
+        return bool(self.commits) and len(self.commits) == len(self.empties)
+
+
+@dataclass(frozen=True)
+class _RangeShape:
+    """``target..tip`` read structurally: each commit with its parents, and the empty ones."""
+
+    in_range: tuple[tuple[str, tuple[str, ...]], ...]
+    empties: tuple[str, ...]
+
+
+#: The commit-graph is a cache git fills a commit's tree and parents from when it
+#: reaches that commit through a parent, so a forged graph (the repository's or an
+#: alternate store's) can make a content commit read as empty or drop it from the
+#: range (Plan 00622 R2-1). The walk turns it off; ``GIT_TEST_COMMIT_GRAPH`` would
+#: override the config, so it is pinned off too. The stored objects decide anyway.
+_NO_COMMIT_GRAPH: tuple[str, ...] = ("-c", "core.commitGraph=false")
+_NO_COMMIT_GRAPH_ENV: dict[str, str] = {"GIT_TEST_COMMIT_GRAPH": "0"}
+_HEADER_END = b"\n\n"
+_TREE_HEADER = b"tree "
+_PARENT_HEADER = b"parent "
+
+
+def _stored_header(body: bytes) -> tuple[str, tuple[str, ...]] | None:
+    """The ``tree`` and ``parent`` headers of a raw commit object; None if it has no tree.
+
+    Only the header block is read (up to the first blank line), so a message line that
+    starts with ``parent`` is never taken for one, and a continuation line (a signature)
+    starts with a space and matches neither.
+    """
+    header = body.split(_HEADER_END, 1)[0]
+    tree: str | None = None
+    parents: list[str] = []
+    for line in header.split(b"\n"):
+        if line.startswith(_TREE_HEADER) and tree is None:
+            tree = line[len(_TREE_HEADER) :].decode("ascii", "replace")
+        elif line.startswith(_PARENT_HEADER):
+            parents.append(line[len(_PARENT_HEADER) :].decode("ascii", "replace"))
+    return None if tree is None else (tree, tuple(parents))
+
+
+def _stored_objects_agree(
+    repo: Path,
+    trees: dict[str, str],
+    candidates: list[tuple[str, tuple[str, ...]]],
+    timeout: float,
+) -> bool:
+    """Whether the STORED commits back every tree the walk reported and each empty candidate.
+
+    One ``cat-file --batch`` read of the raw commit objects, which no commit-graph,
+    replace ref or graft can change. Every walked commit's stored tree must be the
+    walk's; each empty candidate's stored parents must be exactly the walk's one
+    parent, so a forged parent cannot hide a commit beneath it. A commit that is not
+    a candidate already counts as content, so its parents are not compared: a shallow
+    clone's cut commit reads as parentless while its stored header names a parent.
+    A failed read or a missing object is a no.
+    """
+    stored = read_blobs(repo, list(trees), timeout=timeout)
+    if stored is None:
+        return False
+    headers: dict[str, tuple[str, tuple[str, ...]]] = {}
+    for sha in trees:
+        body = stored.get(sha)
+        parsed = None if body is None else _stored_header(body)
+        if parsed is None or parsed[0] != trees[sha]:
+            return False
+        headers[sha] = parsed
+    return all(headers[sha][1] == parents for sha, parents in candidates)
+
+
+def _walk_shape(repo: Path, target: str, tip: str, timeout: float) -> _RangeShape | None:
+    """Shas, trees and parents of ``target..tip`` (no free text); None on any git failure.
+
+    A commit is empty when it has exactly one parent and that parent's tree. A merge
+    is never empty, even with its first parent's tree (``-s ours`` carries a whole
+    side history), and a root commit has nothing to be empty against. Every tree and
+    parent the walk reports is confirmed against the stored commit objects before any
+    commit is called empty (:func:`_stored_objects_agree`).
+    """
+    log = run_git(
+        repo,
+        *_NO_COMMIT_GRAPH,
+        "log",
+        "--boundary",
+        _WALK_FORMAT,
+        f"{target}..{tip}",
+        timeout=timeout,
+        env=_NO_COMMIT_GRAPH_ENV,
+    )
+    if log.returncode != 0:
+        return None
+    trees: dict[str, str] = {}
+    in_range: list[tuple[str, str, tuple[str, ...]]] = []
+    for line in log.stdout.split("\n"):
+        if not line:
+            continue
+        parts = line.split(_WALK_UNIT)
+        if len(parts) != _WALK_FIELDS:
+            return None
+        mark, sha, tree, parents = parts
+        trees[sha] = tree
+        if mark != _BOUNDARY_MARK:
+            in_range.append((sha, tree, tuple(parents.split())))
+    candidates: list[tuple[str, tuple[str, ...]]] = [
+        (sha, parents)
+        for sha, tree, parents in in_range
+        if len(parents) == 1 and parents[0] in trees and trees[parents[0]] == tree
+    ]
+    if trees and not _stored_objects_agree(repo, trees, candidates, timeout):
+        return None
+    empties = tuple(sha for sha, _parents in candidates)
+    return _RangeShape(
+        in_range=tuple((sha, parents) for sha, _tree, parents in in_range), empties=empties
+    )
+
+
+def is_content_free(
+    repo: Path, tip: str, target: str, *, timeout: float = Timeout.GIT_CONTEXT
+) -> bool | None:
+    """Whether every commit ``tip`` has beyond ``target`` is empty (at least one); None on failure.
+
+    Then ``tip``'s tree is a tree ``target``'s history holds, and a delete loses only
+    those commits' messages. The message plays no part: an empty commit of any wording
+    qualifies, and a commit that changes a file never does, whatever it is called.
+    None when git cannot say, which every caller reads as unproven (fail closed).
+    """
+    shape = _walk_shape(repo, target, tip, timeout)
+    if shape is None:
+        return None
+    return bool(shape.in_range) and len(shape.empties) == len(shape.in_range)
+
+
+def _park_bodies_match(repo: Path, shas: list[str], timeout: float) -> set[str] | None:
+    """Which of ``shas`` carry exactly the park writer's message; None when git cannot say.
+
+    One ``git log --no-walk=unsorted -z`` call. Each NUL-separated record must start
+    with the sha asked for, in order, and the count must match, so a message holding a
+    NUL (or anything else) can never pass itself off as another commit's record.
+    """
+    if not shas:
+        return set()
+    log = run_git(
+        repo, "log", "--no-walk=unsorted", "-z", "--format=%H%n%B", *shas, timeout=timeout
+    )
+    if log.returncode != 0:
+        return None
+    records = log.stdout.removesuffix("\0").split("\0")
+    if len(records) != len(shas):
+        return None
+    matched: set[str] = set()
+    for sha, record in zip(shas, records, strict=True):
+        head, _, body = record.partition("\n")
+        if head != sha:
+            return None
+        if is_park_message(body):
+            matched.add(sha)
+    return matched
+
+
+def walk_park_range(repo: Path, target: str, tip: str, *, timeout: float) -> ParkWalk | None:
+    """Walk ``target..tip`` and name its park commits; None on any git failure.
+
+    A park commit is one the park writer wrote: its message is exactly the writer's
+    (:func:`is_park_message`), it has ONE parent, and its tree is that parent's tree,
+    so it changes nothing. The structural walk carries no free text (shas only); the
+    messages of the few tree-identical candidates are then read in one framed call.
+    """
+    shape = _walk_shape(repo, target, tip, timeout)
+    if shape is None:
+        return None
+    parks = _park_bodies_match(repo, list(shape.empties), timeout)
+    if parks is None:
+        return None
+    return ParkWalk(
+        commits=tuple(sha for sha, _parents in shape.in_range),
+        parks=frozenset(parks),
+        merges=sum(1 for _sha, parents in shape.in_range if len(parents) > 1),
+        empties=frozenset(shape.empties),
+    )
+
+
+def is_park_residue(
+    repo: Path, tip: str, target: str, *, timeout: float = Timeout.GIT_CONTEXT
+) -> bool:
+    """Whether ``tip`` differs from ``target`` ONLY by park commits (at least one).
+
+    The one test every branch consumer asks: then the work is in ``target`` and a
+    delete loses nothing but the park markers. False on any git failure (fail closed),
+    for a tip with no park commit, and when any commit beyond ``target`` is not a
+    park commit (:func:`walk_park_range`).
+    """
+    walked = walk_park_range(repo, target, tip, timeout=timeout)
+    return walked is not None and walked.is_residue
+
+
+def park_marked_refs(repo: Path, refnames: list[str], *, timeout: float) -> set[str]:
+    """Which of ``refnames`` have a tip carrying a park or unpark trailer: one call.
+
+    Only those can be park residue, so the walk is paid for no other ref. A failed
+    listing marks nothing, which leaves the ref to the other proofs: the safe direction.
+    """
+    if not refnames:
+        return set()
+    listing = run_git(repo, "for-each-ref", _TIP_MARK_FORMAT, *refnames, timeout=timeout)
+    if listing.returncode != 0:
+        return set()
+    marked: set[str] = set()
+    for line in listing.stdout.split("\n"):
+        refname, _, trailers = line.partition("\0")
+        if refname and trailers.strip():
+            marked.add(refname)
+    return marked
 
 
 def _refuse_same_reason(repo: Path, tip: str, name: str, reason: str) -> None:
@@ -259,6 +571,23 @@ def _record_park(repo: Path, name: str, sha: str, reason: str, *, clear: bool) -
     write_park_record(repo, name, ParkRecord(sha, reason, int(time.time()), user))
 
 
+def _restore_tip(
+    repo: Path, ref: str, name: str, old: str, new: str, cause: BranchParkError
+) -> BranchParkError:
+    """Move ``ref`` back to ``old`` after its record could not be written; the error to raise.
+
+    The park commit has already moved the branch; without a record the park does
+    not stand, so the error's "nothing changed" has to be made true.
+    """
+    back = run_git(repo, "update-ref", ref, old, new)
+    if back.returncode != 0:
+        return BranchParkError(
+            f"{name} was moved to the park commit {new} but its record could not be written "
+            f"({cause}) and the branch could not be moved back: {back.stderr.strip()}"
+        )
+    return BranchParkError(f"{cause}; the branch was put back, nothing changed")
+
+
 def _park_remote_only(
     repo: Path,
     name: str,
@@ -284,7 +613,7 @@ def _park_remote_only(
         "push",
         remote,
         f"{new}:{_HEADS}{name}",
-        timeout=Timeout.GIT_FETCH_SESSION,
+        timeout=scaled_timeout(Timeout.GIT_FETCH_SESSION, Timeout.GIT_FETCH_SESSION_MAX),
         env=remote_git_env(),
     )
     if pushed.returncode != 0:
@@ -380,12 +709,20 @@ def park_branch(
         raise BranchParkError(
             f"{name} moved while parking; nothing changed: {moved.stderr.strip()}"
         )
-    _record_park(repo, name, new, stripped, clear=clear)
+    try:
+        _record_park(repo, name, new, stripped, clear=clear)
+    except BranchParkError as exc:
+        raise _restore_tip(repo, ref, name, old, new, exc) from exc
     if not push:
         return ParkResult(new, False, None, None, local_only=True)
     retry = f"git push {remote} {name}"
     pushed = run_git(
-        repo, "push", remote, name, timeout=Timeout.GIT_FETCH_SESSION, env=remote_git_env()
+        repo,
+        "push",
+        remote,
+        name,
+        timeout=scaled_timeout(Timeout.GIT_FETCH_SESSION, Timeout.GIT_FETCH_SESSION_MAX),
+        env=remote_git_env(),
     )
     if pushed.returncode != 0:
         return ParkResult(new, False, pushed.stderr.strip() or "git push failed", retry)

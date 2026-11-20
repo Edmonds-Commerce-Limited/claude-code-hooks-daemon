@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/llms.txt
-fetched_at: '2026-11-10T16:35:20.840608+00:00'
+fetched_at: '2026-11-16T21:15:50.317718+00:00'
 fidelity: converted
-source_sha256: fe04a609e137986ef60ff7fc649beebc563902b81150b81151f5b6092e6c4e54
+source_sha256: 9995497df7b5967ce5ab4aa8e3d6cecfef74c2803165fad72c432e480fc8f43d
 licence: unreviewed
-stale_after: '2027-02-08'
+stale_after: '2027-02-14'
 fetch_method: agent-browser-lite-headless (text)
 ---
 
@@ -28,7 +28,7 @@ fetch_method: agent-browser-lite-headless (text)
 - [Extend Claude Code](https://code.claude.com/docs/en/features-overview.md): Understand when to use CLAUDE.md, Skills, subagents, hooks, MCP, and plugins.
 - [Explore the .claude directory](https://code.claude.com/docs/en/claude-directory.md): Where Claude Code reads CLAUDE.md, settings.json, hooks, skills, commands, subagents, workflows, rules, and auto memory. Explore the .claude directory in your project and ~/.claude in your home directory.
 - [Explore the context window](https://code.claude.com/docs/en/context-window.md): An interactive simulation of how Claude Code's context window fills during a session. See what loads automatically, what each file read costs, and when rules and hooks fire.
-- [How Claude Code uses prompt caching](https://code.claude.com/docs/en/prompt-caching.md): Claude Code manages prompt caching automatically. See why a model switch triggers a slow uncached turn, what `/compact` costs, why CLAUDE.md edits don't apply mid-session, and how to check your cache hit rate.
+- [How Claude Code uses prompt caching](https://code.claude.com/docs/en/prompt-caching.md): See why a model switch triggers a slow uncached turn in Claude Code, what `/compact` costs, and how to check your prompt cache hit rate.
 
 #### Use Claude Code
 
@@ -201,7 +201,7 @@ fetch_method: agent-browser-lite-headless (text)
 #### Create plugins
 
 - [Create a Claude Code plugin](https://code.claude.com/docs/en/plugins/create.md): Build your first Claude Code plugin from an empty directory, test it without a marketplace, and convert an existing .claude/ setup.
-- [Add components to a plugin](https://code.claude.com/docs/en/plugins/components.md): Add skills, hooks, MCP servers, and every other component type to a Claude Code plugin, with an example that validates for each.
+- [Add components to a plugin](https://code.claude.com/docs/en/plugins/components.md): Add skills, hooks, MCP servers, and other component types to a Claude Code plugin, with an example that validates for each.
 - [Plugin dependencies](https://code.claude.com/docs/en/plugins/dependencies.md): Declare the plugins your plugin depends on, with version ranges such as ^1.2, and see how Claude Code installs, resolves, and prunes them.
 - [Test plugins with evals](https://code.claude.com/docs/en/plugin-evals.md): Write eval cases for your Claude Code plugin, run them with claude plugin eval, grade the results, compare against a no-plugin baseline, and gate CI on the score.
 - [Publish and distribute a plugin](https://code.claude.com/docs/en/plugins/publish.md): Publish a Claude Code plugin through your own marketplace or Anthropic's directory, with a pre-release checklist and how users get updates.
@@ -244,7 +244,7 @@ fetch_method: agent-browser-lite-headless (text)
 
 #### Reference
 
-- [Plugin manifest reference](https://code.claude.com/docs/en/plugins/manifest-reference.md): Complete reference for plugin.json: every field with its type and default, accepted path forms, and the userConfig and environment variable schemas.
+- [Plugin manifest reference](https://code.claude.com/docs/en/plugins/manifest-reference.md): Complete reference for plugin.json: fields with types and defaults, accepted path forms, and the userConfig and environment variable schemas.
 - [Marketplace reference](https://code.claude.com/docs/en/plugins/marketplace-reference.md): Complete reference for marketplace.json fields, plugin entries, and the plugin and marketplace source objects, with where each is valid.
 - [Plugin commands reference](https://code.claude.com/docs/en/plugins/cli-reference.md): Reference for the claude plugin shell commands, /plugin and /reload-plugins in a session, and the flags that load a plugin for one session.
 
@@ -274,7 +274,7 @@ fetch_method: agent-browser-lite-headless (text)
 
 ### Reference
 
-- [Plugin manifest reference](https://code.claude.com/docs/en/plugins/manifest-reference.md): Complete reference for plugin.json: every field with its type and default, accepted path forms, and the userConfig and environment variable schemas.
+- [Plugin manifest reference](https://code.claude.com/docs/en/plugins/manifest-reference.md): Complete reference for plugin.json: fields with types and defaults, accepted path forms, and the userConfig and environment variable schemas.
 
 ## Administration
 
@@ -293,9 +293,10 @@ fetch_method: agent-browser-lite-headless (text)
 #### Deployment
 
 - [Enterprise deployment overview](https://code.claude.com/docs/en/third-party-integrations.md): Learn how Claude Code can integrate with various third-party services and infrastructure to meet enterprise deployment requirements.
-- [Feature availability](https://code.claude.com/docs/en/feature-availability.md): Compare which Claude Code features are available across Anthropic subscription plans, the Anthropic Console, Amazon Bedrock, Claude Platform on AWS, Google Cloud's Agent Platform, and Microsoft Foundry.
+- [Feature availability](https://code.claude.com/docs/en/feature-availability.md): Compare which Claude Code features work on each Anthropic subscription plan, the Anthropic Console, and cloud providers such as Amazon Bedrock and Google Cloud.
 - [Claude Code on Amazon Bedrock](https://code.claude.com/docs/en/amazon-bedrock.md): Learn about configuring Claude Code through Amazon Bedrock, including setup, IAM configuration, and troubleshooting.
 - [Claude Code on Claude Platform on AWS](https://code.claude.com/docs/en/claude-platform-on-aws.md): Configure Claude Code to use the Anthropic-operated Claude API with AWS authentication, IAM access control, and AWS Marketplace billing.
+- [Claude Code with Claude Models on Google Cloud (Anthropic managed)](https://code.claude.com/docs/en/claude-models-on-google-cloud-anthropic-managed.md): Configure Claude Code to use the Claude API that Anthropic runs through your Google Cloud project, with Google Cloud credentials, IAM, and Marketplace billing.
 - [Claude Code on Google Cloud's Agent Platform](https://code.claude.com/docs/en/google-vertex-ai.md): Learn about configuring Claude Code through Google Cloud's Agent Platform, formerly Vertex AI, including setup, IAM configuration, and troubleshooting.
 - [Claude Code on Microsoft Foundry](https://code.claude.com/docs/en/microsoft-foundry.md): Learn about configuring Claude Code through Microsoft Foundry, including setup, configuration, and troubleshooting.
 - [Enterprise network configuration](https://code.claude.com/docs/en/network-config.md): Configure Claude Code for enterprise environments with proxy servers, custom Certificate Authorities (CA), and mutual Transport Layer Security (mTLS) authentication.
@@ -397,6 +398,7 @@ fetch_method: agent-browser-lite-headless (text)
 - [Model configuration](https://code.claude.com/docs/en/model-config.md): Configure which model Claude Code uses, effort levels, extended context, and the auto-compact window
 - [Speed up responses with fast mode](https://code.claude.com/docs/en/fast-mode.md): Get faster Opus and Fable responses in Claude Code by toggling fast mode with `/fast`.
 - [Escalate hard decisions with the advisor tool](https://code.claude.com/docs/en/advisor.md): Pair your main model with a stronger advisor model that Claude consults at key moments during a task.
+- [Run tool calls from code with Code Mode](https://code.claude.com/docs/en/code-mode.md): Try Code Mode, an experimental feature in which Claude writes JavaScript that makes several tool calls in one step.
 - [Output styles](https://code.claude.com/docs/en/output-styles.md): Change Claude Code's role, tone, and response format with a built-in output style such as Concise or Explanatory, or write a custom style.
 
 #### Interface
@@ -456,7 +458,7 @@ fetch_method: agent-browser-lite-headless (text)
 - [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview.md): Build production AI agents with Claude Code as a library
 - [Quickstart](https://code.claude.com/docs/en/agent-sdk/quickstart.md): Get started with the Python or TypeScript Agent SDK to build AI agents that work autonomously
 - [Migrate to Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/migration-guide.md): Guide for migrating the Claude Code TypeScript and Python SDKs to the Claude Agent SDK
-- [Troubleshoot the Agent SDK](https://code.claude.com/docs/en/agent-sdk/troubleshooting.md): Fix Agent SDK errors when the Claude Code CLI fails to start, the CLI process exits, or a successful result arrives without structured output.
+- [Troubleshoot the Agent SDK](https://code.claude.com/docs/en/agent-sdk/troubleshooting.md): Fix Agent SDK errors: the Claude Code CLI fails to start or exits, a tool message is too large, or a result arrives without structured output.
 
 #### Build agents
 
@@ -542,36 +544,6 @@ fetch_method: agent-browser-lite-headless (text)
 
 - [Agent SDK reference - TypeScript](https://code.claude.com/docs/en/agent-sdk/typescript.md): Complete API reference for the TypeScript Agent SDK, including all functions, types, and interfaces.
 
-## What's New
-
-### What's New
-
-- [What's new](https://code.claude.com/docs/en/whats-new/index.md): A weekly digest of notable Claude Code features, with code snippets, demos, and context on why they matter.
-- [Week 37 · September 7–11, 2026](https://code.claude.com/docs/en/whats-new/2026-w37.md): Test your plugins with claude plugin eval and pop Claude Code Desktop panes out into their own windows.
-- [Week 36 · August 31 – September 4, 2026](https://code.claude.com/docs/en/whats-new/2026-w36.md): Switch to Claude Fable 5.1, let computer use run in the background on Desktop, and watch Claude's edits in a live /diff panel.
-- [Week 35 · August 24–28, 2026](https://code.claude.com/docs/en/whats-new/2026-w35.md): Resume terminal sessions in the Claude Code Desktop app, review feedback reports that Claude drafts for you, and start a session in restricted mode.
-- [Week 34 · August 17–21, 2026](https://code.claude.com/docs/en/whats-new/2026-w34.md): Draft editable UI artboards with the /design skill, set the Concise output style, and start a Claude Code session on your machine from your phone.
-- [Week 33 · August 10–14, 2026](https://code.claude.com/docs/en/whats-new/2026-w33.md): Claude Code Desktop auto-continues after a usage limit resets, fork mode turns on by default, and GitLab merge requests and marketplaces join GitHub.
-- [Week 32 · August 3–7, 2026](https://code.claude.com/docs/en/whats-new/2026-w32.md): Claude Code sessions message each other, self-hosted environments run cloud sessions on your infrastructure, and auto mode becomes the default permission mode.
-- [Week 30 · July 20–24, 2026](https://code.claude.com/docs/en/whats-new/2026-w30.md): Opus 5 becomes the default Opus model, Claude Code Desktop adds an iOS Simulator pane, and the Claude Security plugin scans your code for vulnerabilities.
-- [Week 29 · July 13–17, 2026](https://code.claude.com/docs/en/whats-new/2026-w29.md): Pull live data into published artifacts through MCP connectors, and use Claude Code with a screen reader in the new screen reader mode.
-- [Week 28 · July 6–10, 2026](https://code.claude.com/docs/en/whats-new/2026-w28.md): Browse external sites from the Desktop app's built-in browser, run a full setup checkup with /doctor, and pick up auto mode transcript protections and agent view upgrades.
-- [Week 27 · June 29 – July 3, 2026](https://code.claude.com/docs/en/whats-new/2026-w27.md): Claude Sonnet 5 becomes the default model, Claude in Chrome reaches general availability, subagents run in the background by default, Claude Desktop arrives on Linux in beta, and /radio tunes into Claude FM.
-- [Week 26 · June 22–26, 2026](https://code.claude.com/docs/en/whats-new/2026-w26.md): Authenticate MCP servers from your shell with claude mcp login, get a response to shell mode command output with the ! prefix, and resume a conversation from before /clear with /rewind.
-- [Week 25 · June 15–19, 2026](https://code.claude.com/docs/en/whats-new/2026-w25.md): Publish a live, shareable page from your session with Artifacts, match tool parameters in deny and ask rules, and set any setting from the prompt with /config.
-- [Week 24 · June 8–12, 2026](https://code.claude.com/docs/en/whats-new/2026-w24.md): Move a session to a new directory with /cd, let subagents spawn their own subagents, and troubleshoot a broken configuration with safe mode.
-- [Week 23 · June 1–5, 2026](https://code.claude.com/docs/en/whats-new/2026-w23.md): Run auto mode on Amazon Bedrock, Google Cloud's Agent Platform, and Microsoft Foundry, prompt before writing files that can run code in acceptEdits mode, list installed plugins with /plugin list, and require an approved version range for managed deployments.
-- [Week 22 · May 25–29, 2026](https://code.claude.com/docs/en/whats-new/2026-w22.md): Run Claude Code on Claude Opus 4.8, orchestrate large tasks with dynamic workflows, catch security issues with the security-guidance plugin, and use fast mode on Opus 4.8 at a lower price.
-- [Week 21 · May 18–22, 2026](https://code.claude.com/docs/en/whats-new/2026-w21.md): Use auto mode on the Pro plan and with Sonnet 4.6, see which skills, subagents, and MCP servers drive your plan limits in /usage, and review diffs with the new /code-review command.
-- [Week 20 · May 11–15, 2026](https://code.claude.com/docs/en/whats-new/2026-w20.md): Manage every Claude Code session from one screen with agent view, keep Claude working toward a goal until a condition holds, and run fast mode on Opus 4.7 by default.
-- [Week 19 · May 4–8, 2026](https://code.claude.com/docs/en/whats-new/2026-w19.md): Load plugins from .zip archives and URLs, search command history across every project with Ctrl+R, branch new worktrees from local HEAD or the remote default, and block actions unconditionally with auto mode hard deny rules.
-- [Week 18 · April 27 – May 1, 2026](https://code.claude.com/docs/en/whats-new/2026-w18.md): Claude Code on Windows runs without Git Bash, claude auth login accepts a pasted OAuth code when the browser callback can't reach localhost, claude project purge cleans up local state per project, and pasting a PR URL into /resume finds the session that created it.
-- [Week 17 · April 20–24, 2026](https://code.claude.com/docs/en/whats-new/2026-w17.md): /ultrareview opens as a research preview, automatic session recaps when you return to a terminal, custom color themes you can build and ship in plugins, and a redesigned Claude Code on the web.
-- [Week 16 · April 13–17, 2026](https://code.claude.com/docs/en/whats-new/2026-w16.md): Claude Opus 4.7 with the new xhigh effort level, Routines on Claude Code on the web, mobile push notifications that ping your phone when Claude needs you, a /usage breakdown that shows what's driving your limits, and native binaries replacing the bundled JavaScript.
-- [Week 15 · April 6–10, 2026](https://code.claude.com/docs/en/whats-new/2026-w15.md): Ultraplan cloud planning, the Monitor tool with self-pacing /loop, /team-onboarding for packaging your setup, and /autofix-pr from your terminal.
-- [Week 14 · March 30 – April 3, 2026](https://code.claude.com/docs/en/whats-new/2026-w14.md): Computer use in the CLI, interactive in-product lessons, flicker-free rendering, per-tool MCP result-size overrides, and plugin executables on PATH.
-- [Week 13 · March 23–27, 2026](https://code.claude.com/docs/en/whats-new/2026-w13.md): Auto mode for hands-off permissions, computer use built in, PR auto-fix in the cloud, transcript search, and a PowerShell tool for Windows.
-
 ## Resources
 
 ### Resources
@@ -582,14 +554,14 @@ fetch_method: agent-browser-lite-headless (text)
 
 ## Indexes
 
-- [French (228 pages)](https://code.claude.com/docs/_llms/fr.txt): Documentation for French.
-- [German (228 pages)](https://code.claude.com/docs/_llms/de.txt): Documentation for German.
-- [Italian (228 pages)](https://code.claude.com/docs/_llms/it.txt): Documentation for Italian.
-- [Japanese (228 pages)](https://code.claude.com/docs/_llms/jp.txt): Documentation for Japanese.
-- [Spanish (228 pages)](https://code.claude.com/docs/_llms/es.txt): Documentation for Spanish.
-- [Korean (228 pages)](https://code.claude.com/docs/_llms/ko.txt): Documentation for Korean.
-- [Simplified Chinese (228 pages)](https://code.claude.com/docs/_llms/zh-cn.txt): Documentation for Simplified Chinese.
-- [Traditional Chinese (228 pages)](https://code.claude.com/docs/_llms/zh-tw.txt): Documentation for Traditional Chinese.
-- [Russian (228 pages)](https://code.claude.com/docs/_llms/ru.txt): Documentation for Russian.
-- [Indonesian (228 pages)](https://code.claude.com/docs/_llms/id.txt): Documentation for Indonesian.
-- [Brazilian Portuguese (228 pages)](https://code.claude.com/docs/_llms/pt-br.txt): Documentation for Brazilian Portuguese.
+- [French (205 pages)](https://code.claude.com/docs/_llms/fr.txt): Premiers pas, Développer avec Claude Code, Plugins, Administration, Configuration, Référence, SDK Agent, Ressources.
+- [German (205 pages)](https://code.claude.com/docs/_llms/de.txt): Erste Schritte, Mit Claude Code entwickeln, Plugins, Administration, Konfiguration, Referenz, Agent SDK, Ressourcen.
+- [Italian (205 pages)](https://code.claude.com/docs/_llms/it.txt): Per iniziare, Crea con Claude Code, Plugin, Amministrazione, Configurazione, Riferimento, Agent SDK, Risorse.
+- [Japanese (205 pages)](https://code.claude.com/docs/_llms/jp.txt): はじめに, Claude Code で構築, プラグイン, 管理, 設定, リファレンス, Agent SDK, リソース.
+- [Spanish (205 pages)](https://code.claude.com/docs/_llms/es.txt): Primeros pasos, Crea con Claude Code, Plugins, Administración, Configuración, Referencia, Agent SDK, Recursos.
+- [Korean (205 pages)](https://code.claude.com/docs/_llms/ko.txt): 시작하기, Claude Code로 만들기, 플러그인, 관리, 구성, 레퍼런스, Agent SDK, 리소스.
+- [Simplified Chinese (205 pages)](https://code.claude.com/docs/_llms/zh-cn.txt): 快速入门, 使用 Claude Code 构建, 插件, 管理, 配置, 参考, Agent SDK, 资源.
+- [Traditional Chinese (205 pages)](https://code.claude.com/docs/_llms/zh-tw.txt): 快速入門, 使用 Claude Code 打造, 外掛, 管理, 設定, 參考資料, Agent SDK, 資源.
+- [Russian (205 pages)](https://code.claude.com/docs/_llms/ru.txt): Начало работы, Разработка с Claude Code, Плагины, Администрирование, Конфигурация, Справочник, Agent SDK, Ресурсы.
+- [Indonesian (205 pages)](https://code.claude.com/docs/_llms/id.txt): Memulai, Membangun dengan Claude Code, Plugin, Administrasi, Konfigurasi, Referensi, Agent SDK, Sumber Daya.
+- [Brazilian Portuguese (205 pages)](https://code.claude.com/docs/_llms/pt-br.txt): Primeiros passos, Desenvolva com Claude Code, Plugins, Administração, Configuração, Referência, Agent SDK, Recursos.

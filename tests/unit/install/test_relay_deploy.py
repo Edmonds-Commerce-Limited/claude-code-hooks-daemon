@@ -964,3 +964,60 @@ class TestProvisionMainCli:
         with pytest.raises(SystemExit) as excinfo:
             main(["--daemon-dir", "x"])
         assert excinfo.value.code == 2
+
+
+class TestCheckModeCli:
+    """``--check``: report whether the relay binary is usable, change nothing."""
+
+    def _write_config(self, project_root: Path, transport_yaml: str) -> None:
+        config_dir = project_root / ".claude"
+        config_dir.mkdir(parents=True)
+        (config_dir / "hooks-daemon.yaml").write_text(
+            f'version: "1.0"\ndaemon:\n  transport:\n{transport_yaml}'
+        )
+
+    def _argv(self, project_root: Path) -> list[str]:
+        return ["--check", "--daemon-dir", str(project_root), "--project-root", str(project_root)]
+
+    def test_needs_no_version_tag(self, tmp_path: Path) -> None:
+        self._write_config(tmp_path, "    relay_enabled: false\n")
+
+        assert main(self._argv(tmp_path)) == 0
+
+    def test_without_check_the_version_tag_is_still_required(self, tmp_path: Path) -> None:
+        with pytest.raises(SystemExit) as excinfo:
+            main(["--daemon-dir", str(tmp_path), "--project-root", str(tmp_path)])
+        assert excinfo.value.code == 2
+
+    def test_disabled_relay_exits_zero(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._write_config(tmp_path, "    relay_enabled: false\n")
+
+        assert main(self._argv(tmp_path)) == 0
+        assert "disabled" in capsys.readouterr().out.lower()
+
+    def test_usable_binary_exits_zero(self, tmp_path: Path) -> None:
+        binary = tmp_path / "hooks-relay"
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        binary.chmod(0o755)
+        self._write_config(tmp_path, f"    relay_enabled: true\n    relay_binary: {binary}\n")
+
+        assert main(self._argv(tmp_path)) == 0
+
+    def test_missing_binary_exits_with_the_failed_code_and_builds_nothing(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        binary = tmp_path / "hooks-relay"
+        self._write_config(
+            tmp_path,
+            f"    relay_enabled: true\n    relay_source: download\n    relay_binary: {binary}\n",
+        )
+        monkeypatch.setattr(relay_deploy, "_default_fetch", _failing_fetch)
+
+        assert main(self._argv(tmp_path)) == RELAY_PROVISION_FAILED_EXIT_CODE
+        assert str(binary) in capsys.readouterr().out
+        assert not binary.exists()

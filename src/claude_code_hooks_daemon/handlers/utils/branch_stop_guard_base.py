@@ -6,6 +6,11 @@ base is abstract. :class:`BranchStopGuardBase` judges the branches the stopping
 identity touched with :func:`core.branch_stop_gate.decide_stop`; the concrete
 ``branch_stop_guard`` and ``branch_subagent_stop_guard`` name the event, scope
 and agent handling.
+
+The repository judged is the project root, never a directory a command ran in: the
+creation guard follows ``cd`` and ``-C`` because it judges that command, while this
+guard judges the branches the session itself touched, which are recorded in the
+project's repository (Plan 00619 Task 2.1; pinned by a test).
 """
 
 from __future__ import annotations

@@ -1,0 +1,3 @@
+## 11:17 · decision · —
+
+Owner answered in session: D-1 yes, D-2 yes, D-3 no, D-4 option A, D-5 the owner asked for the release to run once ready. D-1 and D-2 are implemented test-first and merged to main (CI green on the branch tip, independent loosening review PASS; report 261117-d1-d2-review.md). D-3 stays as documented (false positive accepted, no bypass opened). D-4: leave the lint budget as is; the PostToolUse three-layer event budget (option B) is a follow-up plan. Review nits: the dormancy half of the warn path is unreachable today because the inventory only reports dormancy at the block stage; the new docs wording about "reported" dormant branches refers to the existing noisy line.

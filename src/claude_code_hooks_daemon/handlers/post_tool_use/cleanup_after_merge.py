@@ -198,7 +198,9 @@ class CleanupAfterMergeHandler(PostToolUseHandlerBase):
             "branch checked out in a worktree is never removed here (the worktree "
             "removal is printed for you to run), and a patch-equivalent branch is left "
             f"to `{daemon_cli_command_for_docs('branch-sweep', '--clean')}`, which deletes only what "
-            "its proof shows loses nothing. The remote delete is printed, never run.\n"
+            "its proof shows loses nothing. The remote delete is never run here: the "
+            f"line points at `{daemon_cli_command_for_docs('branch-sweep', '--clean', '--remote')}`, "
+            "which proves it against the remote and deletes it.\n"
         )
 
     def get_acceptance_tests(self) -> list[Any]:

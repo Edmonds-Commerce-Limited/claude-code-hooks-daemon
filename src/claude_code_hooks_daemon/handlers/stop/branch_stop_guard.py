@@ -3,7 +3,9 @@
 Judges the branches this session touched (and the unpushed or merged leftovers
 of its sub-agents) with :func:`core.branch_stop_gate.decide_stop`: a dirty
 worktree, commits no remote holds, a merged branch not yet deleted. Denies at
-most three times, then gives way and records the branches as abandoned. Also
+most three times, then gives way and records the branches as abandoned; stops
+refused only on its own unheld ``.claude/worktrees/`` branches have a second,
+separate budget of three. Also
 adds, at most hourly, a non-blocking line naming branches idle at the noisy
 dormancy stage. Non-terminal at priority 9, below ``cron_stop_enforcer`` (7)
 and ahead of the terminal ``auto_continue_stop`` so its deny is never shadowed.
@@ -49,7 +51,10 @@ class BranchStopGuardHandler(BranchStopGuardBase):
             "Stopping (main thread or sub-agent) with a dirty worktree, commits no remote "
             "holds, or a merged branch not deleted is denied up to three times, naming the "
             "branch, the check and the exact commands; then the guard gives way and records "
-            "the branches as abandoned. The coordinator also answers for its sub-agents' "
+            "the branches as abandoned. A main-thread stop refused only on a branch it "
+            "touched in an unlocked `.claude/worktrees/` worktree with no work-queue record "
+            "has a separate budget of three, so those never spend the other branches' "
+            "blocks. The coordinator also answers for its sub-agents' "
             "unpushed and merged leftovers. Configure with `branches.stop_guard` "
             "(`mode`, `unpushed_subagent`, `include_default`).\n\n"
             "IDs: R-BRANCH-STOP-GUARD, R-BRANCH-SUBAGENT-STOP-GUARD"
@@ -69,7 +74,8 @@ class BranchStopGuardHandler(BranchStopGuardBase):
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BRANCHES LEFT BEHIND"],
-                safety_notes="Gives way after three blocks, so no session is stranded.",
+                safety_notes="Gives way after three blocks per budget, so no session is "
+                "stranded.",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 harness_cannot_produce=(

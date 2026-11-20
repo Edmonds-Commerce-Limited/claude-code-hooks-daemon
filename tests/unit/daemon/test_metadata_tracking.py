@@ -87,6 +87,24 @@ class TestRecordTracking:
         assert meta is not None
         assert (meta.tracked_ref, meta.tracked_sha, meta.last_release_tag) == (None, None, None)
 
+    @pytest.mark.parametrize(
+        "extra",
+        [{"tracked_sha": _SHA}, {"last_release_tag": "v3.8.0"}],
+    )
+    def test_a_sha_or_tag_without_a_ref_is_refused_not_dropped(
+        self, tmp_path: Path, extra: dict[str, str]
+    ) -> None:
+        """T-12: with no ref the record is cleared, so a value passed alongside would vanish."""
+        venv = _venv(tmp_path, tracked_ref="rc/1.2.3", tracked_sha=_SHA)
+        values: dict[str, str | None] = {"tracked_sha": None, "last_release_tag": None}
+        values.update(extra)
+
+        with pytest.raises(ValueError, match="tracked_ref"):
+            record_tracking(venv, tracked_ref=None, **values)
+
+        meta = read_daemon_metadata(venv)
+        assert meta is not None and meta.tracked_ref == "rc/1.2.3"
+
     def test_missing_metadata_raises(self, tmp_path: Path) -> None:
         venv = tmp_path / "venv-bare"
         venv.mkdir()

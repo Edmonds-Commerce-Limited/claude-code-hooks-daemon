@@ -104,8 +104,10 @@ def read_permission_surface_setting(settings_path: Path) -> SwitchSetting:
     rules the daemon removed earlier. An absent key leaves a client's
     ``permissions`` exactly as it was, so a config without the key behaves as it
     did before the switch existed. An unreadable or malformed config is
-    ``UNREADABLE``, logged once at WARNING, and is not ``OFF``: it must not
-    restore anything, nor omit anything.
+    ``UNREADABLE``, logged once at WARNING, and is not ``OFF``: it restores no
+    deny rule and omits nothing. It does not freeze the settings either: the
+    merge treats it like an absent key, so a missing PermissionRequest forwarder
+    is added back (the protective direction) and existing deny rules are kept.
     """
     config_path = settings_path.parent / CONFIG_FILE_NAME
     if not config_path.is_file():

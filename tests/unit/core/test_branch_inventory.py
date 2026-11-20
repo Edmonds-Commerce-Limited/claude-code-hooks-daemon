@@ -75,13 +75,14 @@ def _branch_from(repo: Path, name: str, start: str = "main") -> None:
 
 
 def _park(repo: Path, days_ago: float) -> None:
+    """The park writer's exact message (``branch_park._message``) on an empty commit."""
     _git(
         repo,
         "commit",
         "-q",
         "--allow-empty",
         "-m",
-        "Park branch",
+        "Park branch: waiting on review",
         "-m",
         "Parked-Reason: waiting on review\nParked-By: t",
         days_ago=days_ago,
@@ -382,8 +383,10 @@ class TestParkCommits:
     def test_park_commit_does_not_make_a_merged_branch_unique(
         self, inventory: BranchInventory
     ) -> None:
+        # Only the empty park marker is ahead: the work is in the default, so the
+        # branch is in no pool (park-carried), and it is never unique work.
         record = inventory.records["parked-merged"]
-        assert record.state == BranchState.MERGED_DEFAULT
+        assert record.state == BranchState.PARK_CARRIED
         assert record.ahead == 0
 
 
@@ -746,9 +749,10 @@ class TestEdges:
         assert inventory.records["merged-line"].state == BranchState.MERGED_LINE
         assert inventory.records["live"].ahead is None
 
-    def test_malformed_log_is_no_facts(self, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        assert branch_inventory._park_shas("only\x1ftwo\n") is None
-        monkeypatch.setattr(branch_inventory, "_park_shas", lambda _out: None)
+    def test_an_unreadable_park_walk_is_no_facts(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(branch_inventory, "walk_park_range", lambda *_args, **_kwargs: None)
         assert branch_inventory._pair_facts(repo, "live", "main", want_lines=True) is None
 
     def test_an_empty_listing_has_no_rows(self) -> None:

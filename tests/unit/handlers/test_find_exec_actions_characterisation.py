@@ -98,7 +98,7 @@ class TestRecursiveSearch:
         words = ["find", ".", action, "grep", "-r", "x", "{}"]
         if end is not None:
             words.append(end)
-        assert recursive_search._find_execs_a_search(words) is True
+        assert recursive_search._find_execs_a_reader(words) is True
 
     @pytest.mark.parametrize(
         ("words", "expected"),
@@ -114,7 +114,7 @@ class TestRecursiveSearch:
     def test_each_action_is_read_up_to_its_own_terminator(
         self, words: list[str], expected: bool
     ) -> None:
-        assert recursive_search._find_execs_a_search(words) is expected
+        assert recursive_search._find_execs_a_reader(words) is expected
 
 
 class TestSubagentFullQaBlocker:

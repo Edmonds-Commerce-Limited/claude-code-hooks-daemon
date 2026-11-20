@@ -159,14 +159,17 @@ def refresh_workable_cache(
     approved: Sequence[str] | None,
     *,
     now: float,
+    exclude: frozenset[int] = frozenset(),
 ) -> list[int]:
-    """List open issues once, write the workable ones, return them.
+    """List open issues once, write the workable ones (less ``exclude``), return them.
+
+    ``exclude`` names issues known to be finished though GitHub still lists them open.
 
     Raises:
         GhError: The listing failed; the cache is left as it was.
         OSError: The cache could not be written.
     """
     reports = service.check_open_issues([AuthorWhitelistCheck(approved)])
-    numbers = workable_numbers(reports)
+    numbers = [n for n in workable_numbers(reports) if n not in exclude]
     write_workable(path, numbers, now=now)
     return numbers

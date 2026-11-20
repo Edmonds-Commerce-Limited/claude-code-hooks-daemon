@@ -28,6 +28,10 @@ from typing import Any, Final
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.install.forwarder_generator import (
+    strip_relay_guard_block,
+    strip_status_fast_path_block,
+)
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 BASH: Final[str] = shutil.which("bash") or "/bin/bash"
@@ -85,7 +89,16 @@ def _fresh_clone(
     hooks.mkdir(parents=True)
     shutil.copy2(REPO_ROOT / "init.sh", claude / "init.sh")
     for name in FORWARDERS:
-        shutil.copy2(REPO_ROOT / ".claude" / "hooks" / name, hooks / name)
+        # This client's config does not enable the relay, so its wrappers carry
+        # no generated relay/status block. This repo's own wrappers do, and
+        # since Plan 00609 they name no checkout path, so a verbatim copy would
+        # take the relay fast path (and report a missing relay) instead of
+        # reaching the init.sh provisioning checks under test.
+        stock = strip_status_fast_path_block(
+            strip_relay_guard_block((REPO_ROOT / ".claude" / "hooks" / name).read_text())
+        )
+        (hooks / name).write_text(stock)
+        (hooks / name).chmod(0o755)
     (claude / "provision.sh").write_text("#!/bin/bash\n")
     if config is not None:
         (claude / "hooks-daemon.yaml").write_text(config)

@@ -48,6 +48,9 @@ _PRODUCT_FAKES = frozenset(
         # Spies on ``claude_code_hooks_daemon.core.claude_md_injector.run_git``;
         # two assert the timeouts the product passes for add and commit.
         "unit/core/test_claude_md_injector.py",
+        # Recording wrapper around ``claude_md_injector.run_git`` that keeps the
+        # product default so it can see which calls the product scales.
+        "unit/core/test_hard_failure_calls_load_scaling.py",
         # ``loaded_host`` stands in for ``git_file_states._git_paths``'s runner and
         # fails a call that drops its explicit timeout.
         "unit/utils/test_protected_file_index.py",

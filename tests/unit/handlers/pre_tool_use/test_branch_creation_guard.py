@@ -117,7 +117,8 @@ class TestHandle:
     ) -> None:
         tree = _git(repo, "rev-parse", "main^{tree}").strip()
         message = "park\n\nParked-Reason: waiting\nParked-By: t\n"
-        sha = _git(repo, "commit-tree", tree, "-p", "main", "-m", message).strip()
+        work = _git(repo, "commit-tree", tree, "-p", "main", "-m", "unmerged work").strip()
+        sha = _git(repo, "commit-tree", tree, "-p", work, "-m", message).strip()
         _git(repo, "update-ref", "refs/heads/held", sha)
         handler._branches = handler._branches.model_copy(
             update={
@@ -317,3 +318,41 @@ def test_rules_guidance_and_acceptance_tests(handler: BranchCreationGuardHandler
     guidance = handler.get_claude_md()
     assert guidance is not None and "wip.cap" in guidance
     assert handler.get_acceptance_tests()
+
+
+class TestSetupWorktreeScript:
+    """Plan 00606 Task 1.3: the script runs `git worktree add` itself."""
+
+    def test_script_invocation_matches(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        assert handler.matches(_bash("./scripts/setup_worktree.sh worktree-fresh", repo)) is True
+
+    def test_script_invocation_is_denied_at_the_cap(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        result = handler.handle(_bash("bash scripts/setup_worktree.sh worktree-fresh", repo))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert result.reason.startswith("BLOCKED [R-BRANCH-WIP-CAP]")
+
+    def test_script_invocation_is_allowed_when_creation_is_allowed(
+        self, handler: BranchCreationGuardHandler, repo: Path
+    ) -> None:
+        handler._branches = BranchesConfig(
+            default="main", wip=BranchWipConfig(cap=9, mode="block", creation_grace=0)
+        )
+        result = handler.handle(_bash("./scripts/setup_worktree.sh worktree-fresh", repo))
+        assert result.decision == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat scripts/setup_worktree.sh",
+            'echo "./scripts/setup_worktree.sh worktree-fresh"',
+        ],
+    )
+    def test_a_mention_does_not_match(
+        self, handler: BranchCreationGuardHandler, repo: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, repo)) is False

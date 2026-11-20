@@ -342,6 +342,19 @@ boundaries:
     trace: "logger.error; nothing in-band. Same contract as _sync_agent_assets."
 
   - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: _start_relay_repair
+    construct: "except (OSError, ValueError, TypeError)"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "an unreadable transport config, or a state directory that cannot be created, at startup"
+    caller_controlled: false
+    trace: >-
+      logger.error; nothing in-band. The relay repair is not started, so a
+      missing relay binary stays missing and hooks keep running on the fallback
+      transport, which enforces every rule. The SessionStart checker reports
+      the unusable binary at the next session start.
+
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
     scope: _persist_project_handler_health
     construct: "except RuntimeError"
     ordinal: 0
@@ -456,14 +469,15 @@ boundaries:
     reason: "The BSD half of the stat pair above."
 
   - surface: init.sh
-    scope: <toplevel>
+    scope: _hooks_daemon_follow_discovery
     construct: "2>/dev/null"
     ordinal: 0
     verdict: not-fail-open
     reason: >-
-      Reading the socket-discovery file, whose absence is the ordinary case --
-      the next line tests the value for emptiness and for being a socket
-      before using it.
+      Reading the socket-discovery file, which the line above has just tested
+      for existence. The next line tests the value for emptiness and for being
+      a socket before using it, so a file that cannot be read leaves
+      SOCKET_PATH at its default, exactly as when no discovery file exists.
 
   - surface: init.sh
     scope: validate_venv

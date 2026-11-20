@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-code-hooks-daemon"
-version = "3.74.0"
+version = "3.75.0"
 description = "High-performance daemon for Claude Code hooks using front controller architecture"
 readme = "README.md"
 authors = [
@@ -50,26 +50,33 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    # Held at 7.13.5: under 7.17.3 the forwarder socket tests run ~3x slower with
+    # coverage on (28.4s vs 9.5s for tests/integration/test_forwarder_socket_stdin.py),
+    # enough to push the py3.13 coverage CI shard past the forwarder's socket timing so
+    # two tests failed. Lift the hold once a newer release is measured no slower.
+    "coverage==7.13.5",
     "pytest-mock>=3.11",
+    # The `anyio` pytest plugin runs every `@pytest.mark.anyio` test. It was only
+    # ever present as a transitive of semgrep (via mcp/httpx); when Plan 00607
+    # moved semgrep out of the lock the plugin vanished and the async daemon tests
+    # errored in CI. Declared directly so no tool move can drop it again.
+    "anyio>=4.16",
     "black>=23.0",
     "ruff>=0.1.0",
     "mypy>=1.0",
     "bandit>=1.7",
-    "safety>=2.3",
     "build>=1.0",
     "twine>=4.0",
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.0",
     "types-psutil>=5.9",
     "deptry>=0.20",
-    # Custom static-analysis rules (Plan 00231). Ruff has no plugin mechanism,
-    # so project-specific "ban this code shape" rules previously meant a
-    # bespoke AST scanner per rule. Benchmarked against an 11-shape probe of
-    # one defect class, a hand-written checker caught 1 and these rules caught
-    # 9, for a fraction of the code and no test suite of their own. Dev-only:
-    # the client installer runs `uv pip install -e <dir>` with no [dev] extra,
-    # so this never reaches a client project (scripts/install/venv.sh).
-    "semgrep>=1.100",
+    # semgrep (the custom-rules gate, Plan 00231) is deliberately NOT here: it
+    # pins mcp and opentelemetry-api, which held the project lock below their
+    # patched versions (Plan 00607). scripts/qa/run_semgrep_check.sh runs it
+    # from uv's isolated tool environment at the exact version in
+    # scripts/qa/semgrep-version.txt. `safety` was removed for the same reason
+    # (it pinned filelock) and nothing ran it.
     # The pyright QA gate (Plan 00368). The PyPI package wraps the npm
     # release and needs a `node` on PATH; pinned exactly because the gate
     # is zero-errors and a new pyright release can add diagnostics, which

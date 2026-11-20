@@ -10,11 +10,12 @@ the shared primitives use, with expectations read from markers IN the fixture.
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 from typing import Final
 
 import pytest
+
+from tests.support.semgrep_tool import semgrep_argv
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
 _RULE_FILE: Final[Path] = _REPO_ROOT / "scripts" / "qa" / "semgrep" / "unlocked-eviction.yaml"
@@ -48,26 +49,16 @@ def _marked_lines(marker: str) -> set[int]:
     return tagged
 
 
-def _semgrep_executable() -> Path:
-    """The semgrep binary from the same venv running these tests."""
-    return Path(sys.executable).parent / "semgrep"
-
-
 @pytest.fixture(scope="module")
 def reported_lines() -> set[int]:
     """Run the rule over the fixture once; return the reported 1-based lines.
 
-    SECURITY: fixed argv, no shell, invoking a declared dev-dependency binary
-    resolved from this venv.
+    SECURITY: fixed argv, no shell, invoking the pinned semgrep
+    from uv's tool environment (tests.support.semgrep_tool).
     """
-    if not _semgrep_executable().exists():
-        pytest.fail(
-            "semgrep is not installed in this venv. It is a declared dev "
-            "dependency; install with: uv pip install -e '.[dev]'"
-        )
     completed = subprocess.run(
         [
-            str(_semgrep_executable()),
+            *semgrep_argv(),
             "scan",
             "--config",
             str(_RULE_FILE),

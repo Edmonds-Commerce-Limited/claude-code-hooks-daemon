@@ -24,9 +24,12 @@ holds:
 
 ``content-preserved``
     Every file version on the branch is byte-identical to a blob still
-    reachable from the protected ref. Commits and paths differ; bytes do not.
-    This is the common shape of a genuinely stale branch, and neither of the
-    tiers above detects it.
+    reachable from the protected ref, AND a first-parent commit of the protected
+    ref holds the branch's per-path net change (each added or changed path at the
+    same blob and mode, each deleted path absent). This is the shape a squash
+    merge leaves, and neither of the tiers above detects it. Bytes alone are not
+    enough: a deletion, or a file set back to an older version, adds no new bytes
+    and exists only on the branch (Plan 00618 B-1).
 
 ``unproven``
     Everything else. Reported with the files whose CONTENT exists nowhere else,
@@ -50,7 +53,9 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.branch_park import walk_park_range
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
+from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.remote_refs import (
     LazyRemoteRefs,
     RemoteRefs,
@@ -66,10 +71,17 @@ TIER_CONTENT_PRESERVED = "content-preserved"
 TIER_UNPROVEN = "unproven"
 #: REMOTE-delete evidence only (``core/remote_branch_proof``): an unmerged branch whose
 #: every added or changed file already has the same mode and blob at the SAME path on
-#: the default's tip or a declared integration line's remote tip, so deleting it loses
-#: no file content. Never cached and never a local-delete tier; the deleting agent's
-#: own claim is not an input to it.
+#: the remote default's tip or a declared integration line's remote tip, so deleting it
+#: loses no file content. Never cached and never a local-delete tier; the deleting
+#: agent's own claim is not an input to it.
 TIER_SURVIVING_CONTENT = "surviving-content"
+#: Only park markers (empty ``Parked-*`` commits) are ahead of the default: the work is in
+#: the default and the ref holds nothing else. Decided by ``branch_park.is_park_residue``.
+TIER_PARK_CARRIED = "park-carried"
+#: Every commit ahead of the default is empty (one parent, that parent's tree), whatever
+#: its message: the tip's tree is in the default's history and a delete loses only
+#: those commits' messages (Plan 00622). Decided by ``branch_park.is_content_free``.
+TIER_EMPTY_COMMITS_ONLY = "empty-commits-only"
 #: The remote holds the tip, or a descendant of it, under a ref this clone does not
 #: fetch (an archive namespace). Proved by ONE ``ls-remote`` the explicit command
 #: makes; never reached from a hook path (issue #166).
@@ -263,9 +275,19 @@ _TIER_DETAIL = {
     TIER_PATCH_EQUIVALENT: (
         "every commit is already upstream by patch-id — the shape a history rewrite produces"
     ),
+    TIER_PARK_CARRIED: (
+        "every commit the default branch lacks is an empty park commit the park writer "
+        "made — the work is in the default, only the park markers go"
+    ),
+    TIER_EMPTY_COMMITS_ONLY: (
+        "every commit the default branch lacks changes no file (one parent, the same "
+        "tree) — the work is in the default, only those empty commits and their "
+        "messages go"
+    ),
     TIER_CONTENT_PRESERVED: (
-        "every file version on this branch is byte-identical to one still "
-        "reachable from the protected ref — only the arrangement differs"
+        "a commit on the protected ref holds this branch's whole net change — every "
+        "added or changed file at the same bytes, every deleted file absent — the "
+        "shape a squash merge leaves"
     ),
 }
 
@@ -299,6 +321,8 @@ class BranchClassification:
             TIER_MERGED_UNPUSHED,
             TIER_MERGED_NOT_IN_HEAD,
             TIER_PATCH_EQUIVALENT,
+            TIER_PARK_CARRIED,
+            TIER_EMPTY_COMMITS_ONLY,
             TIER_REMOTE_HELD,
             TIER_CONTENT_PRESERVED,
         )
@@ -318,8 +342,8 @@ class DeletionReport:
         """One ``git branch <name> <sha>`` per deleted branch, from the tip the proof named.
 
         The machine-written record of what each delete removed. A proven delete
-        keeps the branch's content on the protected ref, a remote or as identical
-        files, so this is a pointer back to the exact tip, valid while git still
+        keeps the branch's content on the protected ref (its commits, its patches or
+        its net change) or on a remote, so this is a pointer back to the exact tip, valid while git still
         holds the commit, and not a recovery copy a delete may lean on.
         """
         tips = {c.name: c.tip for c in self.classifications}
@@ -330,7 +354,7 @@ def _git(
     repo: Path,
     *args: str,
     check: bool = True,
-    timeout: float = Timeout.GIT_BRANCH_SAFETY,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run git in ``repo`` on a budget sized for object walks.
 
@@ -342,9 +366,12 @@ def _git(
     ``cherry`` computes a patch-id per commit, ``rev-list --objects`` and
     ``ls-tree -r`` enumerate every tree and blob in a ref — so the cost scales
     with the repository, and a five-second hook-context budget turns a large repo
-    into a ``CalledProcessError`` (Plan 00248 F1). ``timeout`` is overridable per
-    call so a heavier call can have more.
+    into a ``CalledProcessError`` (Plan 00248 F1). The default is the base scaled
+    by host load up to ``Timeout.GIT_BRANCH_SAFETY_MAX``, because a timeout is a
+    hard failure here (Plan 00474 N622). ``timeout`` is overridable per call.
     """
+    if timeout is None:
+        timeout = _safety_timeout()
     result = run_git(repo, *args, timeout=timeout)
     if check and result.returncode != 0:
         raise subprocess.CalledProcessError(
@@ -471,7 +498,7 @@ def matches_any_glob(name: str, patterns: Sequence[str]) -> bool:
 
 
 def cherry_unique_shas(
-    repo: Path, upstream: str, head: str, *, timeout: float = Timeout.GIT_BRANCH_SAFETY
+    repo: Path, upstream: str, head: str, *, timeout: float | None = None
 ) -> list[str] | None:
     """Commits on ``head`` whose patch-id is absent from ``upstream``; None when git fails.
 
@@ -550,8 +577,9 @@ def content_unique_paths_of(repo: Path, tip_ref: str, reachable: set[str]) -> tu
     """Paths of ``tip_ref``'s tree whose blob is absent from ``reachable`` (sorted).
 
     Empty means every file version on the branch is byte-identical to one still
-    reachable from the protected refs (the ``content-preserved`` tier): nothing is
-    lost by deleting the branch, which is what a squash merge looks like afterwards.
+    reachable from the protected refs. That is necessary for the ``content-preserved``
+    tier but not sufficient: a deletion or a revert to an older version adds no
+    bytes, so the tier also needs the per-path net change (:func:`_net_change_held`).
     ``reachable`` is :func:`reachable_object_shas` of every base, computed once by
     the caller so a batch of branches shares one walk.
 
@@ -594,15 +622,36 @@ def _protected_base_ref(repo: Path, protected_ref: str) -> str:
 def patch_equivalent(repo: Path, target: str, tip_ref: str) -> tuple[bool, int | None]:
     """Whether every patch of ``tip_ref`` is in ``target``, and the unique count.
 
-    Fails CLOSED: a failed ``git cherry`` or merge listing is never equivalent,
-    and a range holding a merge commit is never equivalent.
+    A park commit (``branch_park.walk_park_range``: the park writer's message on a
+    tree identical to its single parent) carries no patch, so it is not counted as
+    unique; every other commit still needs its patch in ``target``.
+
+    Other empty commits are NOT excused here (Plan 00622 D1). A patch-id ignores
+    whitespace, and with no merge base ``git cherry`` matches against the whole
+    history, so this tier can pass content the target lacks; excusing every empty
+    commit would extend that to any branch carrying one. An empty commit is proven
+    lossless only by ``empty-commits-only`` (the tip's tree is in the target's
+    history) or by the net-change proof.
+
+    Fails CLOSED: a failed ``git cherry``, range walk or merge listing is never
+    equivalent, and a range holding a merge commit is never equivalent.
     """
     unique = cherry_unique_shas(repo, target, tip_ref)
     if unique is None:
         return False, None
     if unique:
+        walked = walk_park_range(repo, target, tip_ref, timeout=_safety_timeout())
+        if walked is None:
+            return False, len(unique)
+        unique = [sha for sha in unique if sha not in walked.parks]
+    if unique:
         return False, len(unique)
     return _has_merge_commits(repo, target, tip_ref) is False, 0
+
+
+def _safety_timeout() -> float:
+    """The object-walk budget of :func:`_git`, scaled by host load."""
+    return scaled_timeout(Timeout.GIT_BRANCH_SAFETY, Timeout.GIT_BRANCH_SAFETY_MAX)
 
 
 def _remote_unchecked_note(listing: RemoteRefs | None) -> str:
@@ -612,6 +661,35 @@ def _remote_unchecked_note(listing: RemoteRefs | None) -> str:
     return (
         f"; the remote could not be checked (`git ls-remote {listing.remote}` failed: "
         f"{listing.failure}), so only local refs were considered"
+    )
+
+
+def _net_change_held(repo: Path, bases: Sequence[str], tip_ref: str) -> tuple[bool, str]:
+    """Whether some base's history holds the branch's per-path net change, and why not.
+
+    The proof is ``remote_branch_proof.holds_net_change``, the one every remote delete
+    rests on. Imported here, not at module level, because that module imports this one.
+    It reads root-relative paths, so it runs from the repository top level, on the
+    same load-scaled git budget as :func:`_git`. Every failure (no top level, a git
+    error or timeout) is a reason, never a pass.
+    """
+    from claude_code_hooks_daemon.core import remote_branch_proof
+
+    top = _git(repo, "rev-parse", "--show-toplevel", check=False)
+    top_level = top.stdout.strip() if top.returncode == 0 else ""
+    if not top_level:
+        return False, "the repository top level could not be read, so the net change is unchecked"
+    budget = scaled_timeout(Timeout.GIT_BRANCH_SAFETY, Timeout.GIT_BRANCH_SAFETY_MAX)
+    try:
+        for base in bases:
+            if remote_branch_proof.holds_net_change(Path(top_level), base, tip_ref, timeout=budget):
+                return True, ""
+    except remote_branch_proof.ProofUnavailableError as exc:
+        return False, f"the net change could not be checked ({exc})"
+    return False, (
+        f"every byte exists in {', '.join(bases)}, but no commit there holds this "
+        "branch's net change (a deleted file, or a file set back to an older version, "
+        "exists only here)"
     )
 
 
@@ -723,6 +801,29 @@ def classify_branch(
             detail=f"is an integration line not yet merged into the default branch ({', '.join(bases)})",
         )
 
+    # Only park commits beyond the DEFAULT (never another line, as in the inventory):
+    # the work is in the default and the delete loses nothing but the markers.
+    default_refs = (protected_ref,) if line_targets is None else line_targets
+    # Then any other empty commits (one parent, its tree, any message): the same walk
+    # answers both (Plan 00622). A failed walk is None and proves nothing here.
+    for base in (_protected_base_ref(repo, ref) for ref in default_refs):
+        walked = walk_park_range(repo, base, tip, timeout=_safety_timeout())
+        if walked is None:
+            continue
+        free_tier = (
+            TIER_PARK_CARRIED
+            if walked.is_residue
+            else TIER_EMPTY_COMMITS_ONLY if walked.is_content_free else None
+        )
+        if free_tier is not None:
+            return BranchClassification(
+                name=name,
+                tier=free_tier,
+                detail=_TIER_DETAIL[free_tier],
+                tip=tip,
+                proven_against=base,
+            )
+
     known_counts: list[int] = []
     for base in bases:
         equivalent, count = patch_equivalent(repo, base, tip_ref)
@@ -765,20 +866,31 @@ def classify_branch(
             detail=f"{patch_summary}; the content tier was not run{remote_note}",
         )
 
-    # Commit-level uniqueness does not imply content loss: a stale branch is
-    # usually byte-identical to a target and merely arranged differently.
-    # Compare blob shas, which ARE content identity in git.
+    # Two proofs, BOTH required. Blob identity says every byte on the branch
+    # survives somewhere; it cannot see a deletion or a revert to an older version,
+    # which add no bytes. The per-path net change says a target's history once held
+    # exactly the branch's result (Plan 00618 B-1). Requiring both keeps this tier
+    # strictly narrower than the blob-only proof it replaces.
     reachable: set[str] = set()
     for base in bases:
         reachable |= reachable_object_shas(repo, base)
     content_unique_paths = content_unique_paths_of(repo, tip_ref, reachable)
     if not content_unique_paths:
+        net_held, net_note = _net_change_held(repo, bases, tip_ref)
+        if net_held:
+            return BranchClassification(
+                name=name,
+                tier=TIER_CONTENT_PRESERVED,
+                unique_commits=unique_commits,
+                detail=_TIER_DETAIL[TIER_CONTENT_PRESERVED],
+                tip=tip,
+            )
         return BranchClassification(
             name=name,
-            tier=TIER_CONTENT_PRESERVED,
+            tier=TIER_UNPROVEN,
             unique_commits=unique_commits,
-            detail=_TIER_DETAIL[TIER_CONTENT_PRESERVED],
             tip=tip,
+            detail=f"{patch_summary}; {net_note}{remote_note}",
         )
 
     history: set[str] = set()

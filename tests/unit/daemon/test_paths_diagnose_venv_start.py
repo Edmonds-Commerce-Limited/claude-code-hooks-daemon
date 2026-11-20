@@ -51,6 +51,26 @@ class TestHealthyVenv:
         assert "repair" not in text
 
 
+class TestAmbientPythonpath:
+    def test_pythonpath_cannot_make_a_package_less_venv_look_importable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The probe judges the venv itself, not the caller's PYTHONPATH.
+
+        A developer (or a harness worktree) runs with ``PYTHONPATH=<checkout>/src``
+        so the daemon package imports; that must not turn a venv that lacks the
+        package into a healthy one.
+        """
+        shadow = tmp_path / "shadow"
+        (shadow / "claude_code_hooks_daemon").mkdir(parents=True)
+        (shadow / "claude_code_hooks_daemon" / "__init__.py").write_text("")
+        monkeypatch.setenv("PYTHONPATH", str(shadow))
+        venv = _venv(tmp_path / "v", _RUNNING, with_package=False)
+        result = diagnose_venv_start(venv, tmp_path / "daemon")
+        assert result.healthy is False
+        assert "claude_code_hooks_daemon importable: no" in "\n".join(result.lines)
+
+
 class TestDriftedVenv:
     def test_names_both_versions_and_reports_site_packages_absent(self, tmp_path: Path) -> None:
         venv = _venv(tmp_path / "v", _OTHER, with_package=True)

@@ -7510,8 +7510,7 @@ which `init.sh` mirrors as a 70 s client wait, so scaling the call alone would c
 killed at 30 s leaves a half-deleted `prunable` worktree, the N464 shape. `check_fixed_worktree_budget.py`
 lists the function in its allowlist against this entry.
 
-**Status**: ⬜ Open. Give the event the same treatment as WorktreeCreate: a load-scaled ceiling for the
-removal, the event tables and `init.sh` re-derived from it, and the allowlist row deleted.
+**Status**: ✅ Fixed. Class: a hard failure gated on a fixed wall-clock budget for a git call whose duration follows host load, inside an event whose total budget is pinned (same class as N623). `worktree remove` now runs on `scaled_timeout(Timeout.GIT_WORKTREE, Timeout.GIT_WORKTREE_REMOVE_EVENT_MAX)` (30 s base, 120 s ceiling) and the handler's other git calls (worktree list, containment, creator record, merge probe, prune) on `load_scaling.branch_metadata_timeout()`. `EVENT_HANDLER_BUDGET[WORKTREE_REMOVE]` is re-derived as the removal ceiling plus `GIT_WORKTREE_REMOVE_METADATA_CALLS` metadata ceilings (60 s to 170 s, `init.sh` client wait 70 s to 180 s), and the `check_fixed_worktree_budget.py` allowlist row is deleted. Defence: `tests/unit/handlers/worktree_remove/test_worktree_remove_load_scaling.py` (the removal and metadata calls are scaled under a saturated host, and the budget arithmetic is pinned) and the detector itself, which now passes with an empty allowlist. Release note 087.
 
 ### N622 — git calls that gate a hard failure on a fixed budget that scales with host load
 
@@ -7525,8 +7524,9 @@ and the proof walks on `GIT_BRANCH_SAFETY` (120 s), both of which scale with rep
 file index build uses `INDEX_BUILD_GIT` (120 s). The detector covers only `worktree add` and `remove`, so
 none of these is flagged.
 
-**Status**: ⬜ Open. Wrap each in `scaled_timeout` with a ceiling its own caller can afford, and widen the
-detector's verb list to match as each is fixed.
+**Status**: ✅ Fixed. Class: a hard failure gated on a fixed wall-clock budget for a git call whose duration follows host load or repository size, with no retry (same class as N621 and N623). Each site now runs on `scaled_timeout(<base>, <ceiling>)` with a ceiling its caller can afford, none of them inside a pinned event budget: the auto-commit `add` and `commit` (`GIT_COMMIT` to `GIT_COMMIT_MAX` 120 s), the park and keep fetches and pushes and the `branch-sweep` lease push (`GIT_FETCH_SESSION` to `GIT_FETCH_SESSION_MAX` 120 s), the branch-safety object walks (`_git` and `cherry_unique_shas` default to `GIT_BRANCH_SAFETY` scaled to `GIT_BRANCH_SAFETY_MAX` 480 s; an explicit `timeout=` is still honoured), and the protected-file index build (`INDEX_BUILD_GIT` to `INDEX_BUILD_GIT_MAX` 480 s). The entry's `GIT_BUNDLE_CREATE` recovery-bundle call does not exist in the tree, so there was nothing to wrap. The detector now also checks every `commit`, `fetch` and `push` runner call (per call, not per function); two reviewed exceptions are allowlisted with their reason, the status-line background fetch (a failure only leaves counts stale) and `plan_numbering.remote_highest_plan_number` (a failed fetch reports the remote unchecked, and its budget is pinned to `mkplan.bash`). Defence: `tests/unit/core/test_hard_failure_calls_load_scaling.py` (each call is scaled to its ceiling under a saturated host, keeps its base on an idle one) and the widened `scripts/qa/check_fixed_worktree_budget.py`. Release note 087.
+
+**Seen once, not reproduced (CI run 43838243803, tip a562a47a9)**: seven playbook probes expected allow and got an `R-PLAN-QA-COMMIT` deny: #38, #140, #326, #349, #350, #356, #357. The branch then carried a Plan README with 31 completed rows against a window of 30 (the plan-index test failed in the same run); main already held the fix, and the re-run on the merged tip `c9b1f0291` (run 43843588719) passed all seven. The link between the over-long index and the probes was never shown, because the probes skip locally without a live daemon. If any of these seven goes red again, match it against this entry before treating it as new.
 
 ### N623 — the branch-cap and creator-record calls around WorktreeCreate stay on the 5 s default
 
@@ -7546,3 +7546,470 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: `core/branch_records._set` runs `git config` once per key and reports a held `config.lock` as a logged False, so a creator record is silently lost under contention. It was left out of the N621 fix because it runs inside the WorktreeCreate event, whose budget is pinned in `EVENT_HANDLER_BUDGET` (`GIT_BRANCH_RECORD_CALLS` x `GIT_WORKTREE_CLEANUP`); a lock wait of up to `GIT_CONFIG_LOCK_WAIT_MAX` per key would need that budget, the event tables and `init.sh` re-derived.
 
 **Status**: ✅ Fixed. Class: a multi-step write to a shared single-writer file that fails on first contention instead of waiting (same class as N621). `branch_records._set` now goes through `run_git_config_write`, which gained a `timeout` argument. A creator-record key waits for the lock from the `GIT_CONFIG_LOCK_WAIT` base up to `Timeout.GIT_CREATOR_LOCK_WAIT_MAX` (10 s), and a lock held past that is a logged False, never a raise. The event budget carries `GIT_BRANCH_RECORD_CALLS x (GIT_CREATOR_LOCK_WAIT_MAX + GIT_BRANCH_METADATA_MAX)`. The sibling touch-record writes (`record_touch`, guard path) wait a fixed `GIT_TOUCH_LOCK_WAIT` of 2 s so they stay inside the 20 s chain deadline. Defence: `tests/unit/core/test_worktree_create_metadata_load_scaling.py` (held lock waited out, lock held past the wait is False) and the budget pin in `tests/unit/constants/test_event_budgets.py`. Release note 066.
+
+### N625 — `relay/build.sh` aborts the CI relay build when the redundant `strip` fails on the musl binary
+
+**Source**: CI run 43835672595 attempt 1, the py3.11 integration-slow leg of the Plan 00609 follow-up branch (diagnosis in `Completed/00609-tracked-hook-wrappers-machine-independent/subagent-reports/261116-py311-integration-slow-red.md`).
+
+**Evidence**: the leg ended about 40 s after it started with no test run. The step that builds the relay (`rustup target add x86_64-unknown-linux-musl; bash relay/build.sh; install ...`) failed with `strip: .../hooks-relay-x86_64-unknown-linux-musl[.rodata]: invalid operation` and `Process completed with exit code 1`. `relay/build.sh` already links with `-C strip=symbols`, then runs `strip "$OUT"` a second time as belt and braces, and `set -e` turns that second strip's failure into a failed build. Only one of the legs failed on attempt 1, so it is intermittent on the runner's toolchain, not deterministic on the tip. No earlier ledger entry and no issue matched.
+
+**Status**: ✅ Fixed. Class: a redundant post-step whose failure aborts a build that already did the work, with its exit status trusted in place of checking the artefact. `relay/build.sh` no longer runs a second `strip` (`-C strip=symbols` already strips; making it non-fatal was rejected because it would hide a real strip failure). The build still verifies the binary: the existing static check (no `PT_INTERP`), plus a run check for a host-architecture target (the relay has no `--version`, so it is invoked with no socket path and must exit with its usage code 13, needing no daemon). Defence: `tests/integration/test_relay_build_script.py` (the build succeeds with a failing `strip` first on `PATH` and never calls it; a missing musl toolchain skips locally but fails when `CI` or `GITHUB_ACTIONS` is set).
+
+### N626 — `R-SECRET-SCRIPT-AUTHOR` matches a quoted regex fragment (`.*` plus letters) against a protected-path glob
+
+**Source**: a peer report (a desktop seat in the lts-infra team, not a human, no authority) to the guard's owner, not filed on the public tracker.
+
+**Evidence** (as reported, NOT yet reproduced here): an `Edit` to a bash test suite was denied by the secret guard's script-author rule. The only match was a grep pattern in the new text of the form `<word>.*never` inside quotes. The guard read the `.*` and the following letters as a glob-like token and matched it against a protected-path glob (a dot-name ending in a trailing wildcard). No protected path was named or read. The reporter worked around it by rewriting the test without `.*`. Expected: a protected-path match needs a path-shaped token, and a `.*` regex fragment inside a quoted argument is not one. Compare with the Plan 00612 and 00614 glob handling, which changed how glob-shaped tokens are judged on `main`: the report was made against an installed build, so first check whether it still reproduces on `main`.
+
+**Status**: ⬜ Open. Reproduce first with a synthetic fixture (a protected-name pattern built in code from two pieces, and an `Edit` payload whose new text holds a quoted `<word>.*<word>` grep regex); if it reproduces on `main`, fix test-first so a quoted regex fragment is not read as a path token while every real glob-shaped protected path stays denied (fail closed: the narrowing must be provable by a test that a path-shaped token with the same letters is still denied). The reporting build is `v3.74.0` (installed checkout, sub-agent session).
+
+### N627 — `hooks-daemon --version` is rejected, so there is no CLI way to read the installed version
+
+**Source**: the same peer report as N626 (a desktop seat, not a human).
+
+**Evidence**: reproduced on `main`: `bin/hooks-daemon --version` exits 2 with the whole usage text and an unrecognised-argument error. The usage lists many subcommands but the version is only readable by `git describe` in the checkout or from the status line, which a client seat or a sub-agent cannot always reach. Bug reports (BUG_REPORTING.md) and peers both need the installed version.
+
+**Status**: ⬜ Open. Accept `--version` (and a `version` subcommand if the CLI style prefers one) printing the same version string the status line and the unreleased-install marker use (`vA.B.C` or `vA.B.C+rc-X.Y.Z.<sha>`), exit 0, no daemon needed. Defence: a CLI test that runs it with no daemon and asserts exit 0 and the string, for a released and an unreleased install.
+
+### N628 — the bash safe-mode prelude rule denies a brace group whose steps are each already `&&`-gated
+
+**Source**: a peer report (a desktop seat in the lts-infra team, not a human, no authority), made against `v3.74.0` and met by a sub-agent. No file contents involved.
+
+**Evidence** (as reported, NOT yet reproduced here): R-BASH-SAFE-MODE-PRELUDE-MISSING denied a command holding a brace group `{ a && b && c; }` whose steps are all `&&`-gated, so the group cannot continue past a failure. Expected: an all-`&&`-gated group needs no prelude.
+
+**Status**: ⬜ Open. Reproduce first on `main` with a synthetic command; if it reproduces, fix test-first so an all-`&&`-gated group is allowed while a group with an ungated step (`;` or newline between steps) is still denied (the narrowing must be proven by a test for that ungated twin).
+
+### N629 — the markdown table formatter re-pads rows an edit never touched
+
+**Source**: a peer report (a desktop seat in the lts-infra team, not a human, no authority), made against `v3.74.0`.
+
+**Evidence** (as reported, NOT yet reproduced here): an `Edit` that changes one cell of a large markdown table, in a doc with many tables whose rows hold cells over 1500 characters, makes `markdown_table_formatter` re-pad every row of that table and of other tables in the same file. Harm: the diff no longer shows the change, and every re-padded row counts as an added line to commit-time scanners (the sensitive-content scan), so old content is re-flagged and re-reviewed as new. Expected: only rows the edit touched change, or a table is re-padded only when it was already canonically padded. The reporter's workaround is rebuilding the file by script at the original widths.
+
+**Status**: ⬜ Open. Reproduce first on `main` with a synthetic doc (two tables, long cells, an `Edit` of one cell). If it reproduces, fix test-first: the formatter must leave untouched rows byte-identical (or skip a table whose existing padding is not canonical), with a test that an already-canonical table is still aligned after an edit.
+
+### N645 — use `agent_id` and `agent_type` on compaction payloads (Claude Code 2.1.323)
+
+**Source**: the Claude Code changelog review for release 3.75.0 (`subagent-reports/261116-claude-code-review-v3.75.0.md`), an adopt row.
+
+**Evidence**: from 2.1.323, PreCompact, PostCompact and the post-compaction SessionStart hooks receive `agent_id` and `agent_type` when a subagent compacts. The compaction signal handler (`handlers/pre_compact/compaction_signal.py`) does not read them.
+
+**Status**: ⬜ Open. Decide whether the signal should say which agent compacted; if so, read both fields with a default for older Claude Code versions, test-first.
+
+### N646 — check PreToolUse allow does not rely on surviving a permission-check error (Claude Code 2.1.323)
+
+**Source**: the same review, a conflict row (a check, not a known break).
+
+**Evidence**: from 2.1.323 an allow from a PreToolUse hook no longer sticks when the permission check errors afterwards; Claude Code decides as if no hook had answered. Any daemon handler that answers allow to skip a prompt would then prompt again.
+
+**Status**: ⬜ Open. List the PreToolUse handlers that return allow, and confirm none depends on the allow surviving. The review found none on the PreToolUse side.
+
+### N647 — check the PermissionRequest auto-approve handler never rewrites tool input (Claude Code 2.1.323)
+
+**Source**: the same review, a conflict row (a check, not a known break).
+
+**Evidence**: from 2.1.323 a rewritten PermissionRequest input is re-asked or refused when the check fails afterwards. The overlap is `handlers/permission_request/auto_approve_reads.py`.
+
+**Status**: ⬜ Open. Confirm the handler returns decisions only and never an updated input; add a test that pins it.
+
+### N648 — check WorktreeCreate prints a real path, not one through a project symlink (Claude Code 2.1.325)
+
+**Source**: the same review, a conflict row (a check, not a known break).
+
+**Evidence**: from 2.1.325 EnterWorktree refuses a worktree path that goes through a symlink. The overlap is `handlers/worktree_create/worktree_create_handler.py`.
+
+**Status**: ⬜ Open. Confirm the printed path is the resolved real path, with a test whose project directory is reached through a link.
+
+### N630 — playbook test #379 (guard config drift) drives `echo "test"`, which cannot show its notice
+
+**Source**: Plan 00618 Phase 2 (the release 3.75.0 acceptance run), recorded by the Phase 2 sub-agent.
+
+**Evidence**: the generated acceptance playbook's Test 379, "guard config drift - reports an uncommitted guard weakening", is typed as an observable context test whose command is `echo "test"` and whose expected pattern is `GUARD CONFIG DRIFT|uncommitted`. The drift report is a session-start notice computed from the working-tree config against the committed one; a Bash `echo` neither starts a session nor changes the config, so the pattern can never appear and the test can only fail or be waved through by hand.
+
+**Status**: ⬜ Open. Fix the handler's acceptance-test definition: either declare it a session-start test with a setup step that writes a synthetic weakening into a scratch config, or mark it as not drivable by a tool call (prose a human runs), so the playbook stops carrying a test that cannot pass.
+
+### N631 — the Plan 00609 proof script hard-codes `REPO = Path("/workspace")`
+
+**Source**: Plan 00618 Phase 2, recorded by the Phase 2 sub-agent (the script was reformatted in Plan 00618 Task 2.3 after it failed the release gate's `format` check).
+
+**Evidence**: `CLAUDE/Plan/Completed/00609-tracked-hook-wrappers-machine-independent/subagent-reports/prove-two-root-two-host.py` sets `REPO = Path("/workspace")`, so it proves the main checkout whatever checkout runs it: from a worktree it silently tests main's code, and on a host whose checkout lives elsewhere it fails. The same literal is in the archived Plan 00243 prototype, which is historical and not run.
+
+**Status**: ⬜ Open. Derive the repository root from the script's own location (or `git rev-parse --show-toplevel`), so the proof runs against the checkout that holds it.
+
+### N632 — a `lint_on_edit` timeout above about 15 s is cut by the 20 s PostToolUse chain deadline
+
+**Source**: Plan 00618 Phase 2 (Task 2.5), by reading `constants/timeout.py` and `config/models.py` `deadline_for`.
+
+**Evidence**: PostToolUse has no `EVENT_CHAIN_DEADLINE` entry, so it gets `CHAIN_DEADLINE_DEFAULT` (20 s). `lint_on_edit` defaults to 15 s and documents `options.timeouts` values such as `PHP: 30`, which the chain deadline cuts first, replying "skipped" rather than the handler's own lint-timeout notice. The same constraint is why the lint budget could not be load-scaled for the playbook harness's Kotlin probe.
+
+**Status**: ⬜ Open (owner decision recorded in Plan 00618). Fix with the three-layer event budget the Worktree events use (PostToolUse handler budget, chain deadline, client wait, the `init.sh` mirror and the registered hook timeout), then load-scale the lint base under the new ceiling.
+
+### N633 — `test_relay_binary_checker.py` fails 9 tests under `--cov` and passes without it
+
+**Source**: Plan 00618 Phase 2 sub-agent, seen while running targeted tests. Not investigated.
+
+**Status**: ⬜ Open. Reproduce with and without `--cov` on `main`; find which test depends on import or timing state that coverage changes.
+
+### N634 — the search guards do not read a search inside a `{ ...; }` brace group
+
+**Source**: Plan 00618 S-1 second independent review (finding F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix and does not depend on `-C`.
+
+**Evidence**: in a synthetic project with a protected file under `deep/`, `{ git -C deep grep --no-index -e .; }` and `{ grep -r . deep; }` are ALLOWED by `secret_file_guard`, while the bare `grep -r . deep` is DENIED. The brace group's words reach the reader with `{` as the command word, so no search is recognised.
+
+**Status**: ⬜ Open. Peel a leading `{` (and the closing `}` segment) before the command word is read, in `recursive_search._command_words` and its callers.
+
+### N635 — the search guards do not read a search inside an `if ... then ... fi` body
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: `if true; then git -C deep grep --no-index -e .; fi` (and the plain `grep -r . deep` form) is ALLOWED by `secret_file_guard`; the `then` keyword is read as the command word.
+
+**Status**: ⬜ Open. Treat the compound-command keywords (`if`, `then`, `elif`, `else`, `do`, `while`, `until`) as words to peel before the command word.
+
+### N636 — the search guards do not read a search run through `exec`
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: `exec git -C deep grep --no-index -e .` (and `exec grep -r . deep`) is ALLOWED by `secret_file_guard`; `exec` is not one of the peeled command wrappers.
+
+**Status**: ⬜ Open. Add `exec` (with its `-a NAME`, `-c`, `-l` options) to the wrappers `peel_command_wrappers` removes.
+
+### N637 — the search guards do not read a search run through the `time` keyword
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: `time git -C deep grep --no-index -e .` (and `time grep -r . deep`) is ALLOWED by `secret_file_guard`; `time` (and `time -p`) is not peeled.
+
+**Status**: ⬜ Open. Peel the `time` keyword and `/usr/bin/time` with its options.
+
+### N638 — the search guards do not read a search inside `bash -lc '...'`
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: `bash -lc 'git -C deep grep --no-index -e .'` (and `bash -lc 'grep -r . deep'`) is ALLOWED by `secret_file_guard`, while `bash -c '...'` is DENIED: the reader looks for a separate `-c` word, and a clustered flag (`-lc`, `-ec`, `-xc`) does not match.
+
+**Status**: ⬜ Open. Recognise any short-option cluster that contains `c` as the shell's command flag.
+
+### N639 — the search guards place a search under `sudo -D <dir>` from the payload cwd
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. Predates the S-1 fix.
+
+**Evidence**: from a sub-directory with no protected file, `sudo -D <project root> git -C deep grep --no-index -e .` (and `sudo -D <root> grep -r . deep`) is ALLOWED by `secret_file_guard`. `sudo -D`/`--chdir` changes the directory the command runs in, as `cd` does, but the wrapper is peeled without moving the cwd.
+
+**Status**: ⬜ Open. Treat `sudo -D`/`--chdir` (and `env -C`/`--chdir`) as a directory change when peeling the wrapper; fail closed when the value cannot be placed.
+
+### N640 — a `core.worktree` set through `GIT_CONFIG_PARAMETERS` or `GIT_CONFIG_COUNT/KEY/VALUE` is not recognised
+
+**Source**: Plan 00618 S-1 second independent review (F3), recorded by the S-1b fix sub-agent.
+
+**Evidence**: `GIT_CONFIG_PARAMETERS="'core.worktree'='..'" git -C <root>/sub grep -e r` and `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.worktree GIT_CONFIG_VALUE_0=.. git -C <root>/sub grep -e r` are ALLOWED by both `secret_file_guard` and `flaggable_content_channel_guard`; the same `core.worktree` given as `-c core.worktree=..` is DENIED by both. They deny with `-C .` only because that searches the project root. The review's real-git runs read nothing in the combinations tested, but those were not exhaustive.
+
+**Status**: ⬜ Open. Add `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` and `GIT_CONFIG_KEY_*` to the relocating variables (`git_repo.RELOCATING_VARIABLES`), or read their keys and fail closed on `core.worktree`.
+
+### N641 — the secret guard does not follow a `cd` inside a `( ... )` subshell
+
+**Source**: Plan 00618 S-1 second independent review (F4), recorded by the S-1b fix sub-agent. The flaggable guard was fixed for this shape in the S-1b fix; the secret guard was not.
+
+**Evidence**: `( cd sub; git -C ../deep grep --no-index -e . )` is ALLOWED by `secret_file_guard`, while `cd sub && git -C ../deep grep --no-index -e .` is DENIED. The first segment's command word is `(`, so the `cd` is not tracked, and the trailing `)` is read as a pathspec.
+
+**Status**: ⬜ Open. In `recursive_search._reads`, peel a leading `(`/`{` before testing for `cd`/`pushd` (the flaggable guard's `shell_directory_after` does this) and drop a trailing unquoted `)` word.
+
+### N642 — the flaggable guard skips a relocating environment variable when `-C` is also given
+
+**Source**: Plan 00618 S-1 second independent review (F3), recorded by the S-1b fix sub-agent.
+
+**Evidence**: `GIT_WORK_TREE=flagdir git -C sub grep -e r` (also `sudo GIT_WORK_TREE=...`, `env -i GIT_WORK_TREE=...`, `export GIT_WORK_TREE=...;`) is ALLOWED by `flaggable_content_channel_guard`; it was an advisory allow before the S-1 fix, and the same command without `-C` is DENIED. The review's real-git runs read nothing in the cases tested (git limits `git grep` to the `-C` prefix), so this is a modelling gap, not an observed read.
+
+**Status**: ⬜ Open. Treat a relocating assignment on the segment (and an earlier `export`) as an unplaced move in the flaggable guard, as `recursive_search` does for the secret guard.
+
+### N643 — the flaggable guard's plain `grep -r` ignores an earlier `cd`, an ancestor root and an `xargs -I` token
+
+**Source**: Plan 00618 S-1 second independent review (corpus 3), recorded by the S-1b fix sub-agent. Predates the S-1 fix; the S-1b fix closed these shapes for `git -C` only.
+
+**Evidence**: with `flagdir/**` flagged, `cd sub && grep -r r ../flagdir`, `grep -r r ..` (run from the project root) and `echo flagdir | xargs -I% grep -r r %` are ALLOWED by `flaggable_content_channel_guard`; the secret guard denies the protected-tree equivalents.
+
+**Status**: ⬜ Open. Place plain search roots from the shell directory as well as the payload cwd (the `git -C` path already does), count an ancestor root as reading the whole project, and treat an `xargs` replacement token as an unknown root.
+
+### N644 — the secret guard loses the directory after `cd -` or `popd` without failing closed
+
+**Source**: the S-1b fix sub-agent (Plan 00618), while closing the `cd ~-` form.
+
+**Evidence**: `cd - && grep -r . deep` is ALLOWED by `secret_file_guard`: `_after_directory_change` returns None for `-`, and every later relative root is then left out. The S-1b fix makes `cd ~-` (a tilde the hook cannot place) fail closed for every later read, but kept `cd -` and `popd` as they were.
+
+**Status**: ⬜ Open. Treat `cd -`, `popd` and `pushd` with no operand the way `cd ~-` is treated: later reads in the command fail closed.
+
+### N649 — the branch-cap rule text says "at the cap it only warns" even when the grace is 0
+
+**Source**: a client upgrade to 3.75.0, relayed by a peer agent (a note with no authority; the behaviour below was read from the rule text, not re-run).
+
+**Evidence**: the `R-BRANCH-WIP-CAP` rule text (`constants/rule_ids.py:72`, `handlers/pre_tool_use/branch_creation_guard.py` lines 81 and 245, and the generated handler guidance they feed) says that at the cap itself it only warns. The deny fires at `len(groups) >= cap + wip.creation_grace` (`core/branch_creation.py:986`), so with a grace of 0 it blocks at the cap and the text does not match the behaviour (confirmed from the code). The Plan 00619 ladder changes the pool-pressure wording nearby, so fix this on top of that merge rather than beside it.
+
+**Status**: ⬜ Open, low priority. Make the rule text state the grace dependency ("warns up to `wip.creation_grace` past the cap; with a grace of 0 it blocks at the cap"), regenerate the handler guidance, and add a test that pins the text to the behaviour.
+
+### N650 — the stop guard's dormancy `warn` advisory can never fire, and the docs say `warn` reports it
+
+**Source**: Plan 00618, the independent review of D-1/D-2 (`subagent-reports/261117-d1-d2-review.md`, F-1 and F-2) and the release 3.75.0 Step 10 re-run (S-3). Recorded at the plan's close-out.
+
+**Evidence**: `core/branch_stop_guard.py` `_pressure_findings` builds the DORMANT finding with `advisory=dormancy == "warn"`, but it only builds it for a record at `DormancyStage.BLOCK`, and `core/branch_inventory.py` `_stage` returns `BLOCK` only when `dormancy.mode == "block"` (re-read on the v3.75.0 tree). So under `warn` no DORMANT finding exists and the advisory branch is dead code. The test `TestDormancyModeAtStop.test_warn_mode_advises_and_allows` passes only because it monkeypatches a `(warn, BLOCK)` record the inventory cannot produce. `docs/guides/CONFIGURATION.md` (the `branches.dormancy` paragraph) says such a branch "is only reported in `warn` mode", and `docs/guides/HANDLER_REFERENCE.md` (the branch stop guard entry) says `warn` "reports it"; the only report is the existing rate-limited noisy-stage line, not a stop finding. Behaviour matches the previous release, so nothing is loosened.
+
+**Status**: ⬜ Open, low priority. Either remove the dead branch and the impossible-state test, or replace that test with one driven by a real inventory asserting no DORMANT line under `warn`; reword both docs to point at the noisy-stage line.
+
+### N651 — stop guard pool-mode test gaps, and its over-cap count ignores `creation_grace`
+
+**Source**: Plan 00618, the D-1/D-2 review's test-gap section and the D-1/D-2 fix report's "Where this could loosen" section (`subagent-reports/261117-d1-d2-review.md`, `261117-d1-d2.md`). Recorded at the plan's close-out.
+
+**Evidence**: `tests/unit/core/test_branch_stop_gate_pool_modes.py` pins only two same-tip cases (two names on one pushed tip count once; distinct tips over the cap still deny). Not pinned: a same-tip pair over the raw cap still denies when the shared tip is on no remote, or when one touched name's worktree is dirty (the obvious regression risk of D-2); mixed modes (`wip: warn` with `dormancy: block`, or `wip: block` with `stop_guard.mode: warn`). Two behaviour notes from the fix report: the `warn` advisory repeats on every stop with no throttle, and the stop guard denies at `open > cap` while the creation guard denies only at `cap + wip.creation_grace`, so with a grace above 0 a session can create a branch the stop guard then refuses the stop over.
+
+**Status**: ⬜ Open. Add the missing tests first. Then decide whether the stop guard's over-cap test should follow `creation_grace` (a loosening, so an owner decision) and whether the `warn` advisory needs the noisy line's hourly throttle.
+
+### N652 — stop guard: a mixed stop after the main counter is spent never refuses a newly judged branch, and four fail-open paths predate B-2
+
+**Source**: Plan 00618 Task 1.2 (B-2) fix reports `261116-fix-b2-rework.md` (residual risk) and `261116-fix-b2-counter.md` (known gap). Not re-verified at the close-out.
+
+**Evidence**: once an ordinary own branch has used up the session's stop blocks and stays unresolved, every later stop that also holds a newly judged branch (an own branch in an unlocked harness worktree with no queue record) counts on the spent main counter, so it is allowed and the newly judged branch is recorded as abandoned without drawing on its own capped counter. The previous release never refused that branch at all, so this is not a loosening. The rework report also lists fail-open paths the B-2 fix left unchanged: unreadable touch records, an inventory failure, `judgement.incomplete` being ignored, and an exception in `decide_stop`.
+
+**Status**: ⬜ Open. Decide whether a mixed stop should fall through to the harness counter, and whether each listed fail-open path is intended (a stop guard that cannot judge may be meant to allow); pin whichever is chosen with a test.
+
+### N653 — the secret guard anchors `git -C` for a mention only when `git` is the segment's first word
+
+**Source**: Plan 00618 S-1 fix report (`subagent-reports/261118-s1-fix.md`, "Known limits"). Not re-verified at the close-out.
+
+**Evidence**: `secret_file_matching.effective_cwds` follows `git -C <dir>` only when `git` is the first word, so `sudo git -C d show HEAD:x` is not anchored at `d` (the recursive-search path does peel wrappers). Same report: `git -C <nested-repo> grep x` is judged in the tracked view of this project's index, so a file tracked only in the nested repository is not seen; that matches the `cd <nested-repo> && git grep x` verdict.
+
+**Status**: ⬜ Open. Peel command wrappers before reading `git -C` in `effective_cwds`, with a deny test for the wrapped form; decide whether the nested-repository view needs its own handling.
+
+### N654 — secret guard over-deny residuals in the git search-option code
+
+**Source**: Plan 00618 Tasks 1.3 and 1.4 fix report (`subagent-reports/261116-fix-b3-b5.md`, "Residual, not fixed").
+
+**Evidence**: the list of valueless options allowed as the word before a separate `-S` is hand-written, so a real valueless log option missing from it causes an over-deny; and `secret_file_matching.py` still locates the git word with `names.index("git")` (two call sites on the v3.75.0 tree), which can pick a wrapper argument spelled `git` (`sudo -u git git ...`). Both err toward deny, never allow.
+
+**Status**: ⬜ Open, low priority. Derive the valueless set from git's own option list (or pin it against `git log -h`), and locate the git word through the wrapper peeler instead of `index`.
+
+### N655 — the long-running classifier still treats a compound backgrounded whole as exempt
+
+**Source**: Plan 00618 Phase 2 long-running/config group (`subagent-reports/261117-phase2-lr-config-group.md`, owner notes on N-11 and N-14). The handler ships disabled.
+
+**Evidence**: a compound closed by `done`/`fi`/`)`/`}` and then backgrounded (`until ...; do sleep 5; done &`, `( a; b ) &`) is read as backgrounded whole and stays exempt, as on the previous release; `sleep 300; (echo x) &` is a known miss of that rule. Separately, a bad regex in any long-running policy list still drops every `exempt_patterns` entry (kept deliberately: keeping them would allow what the previous release denied).
+
+**Status**: ⬜ Open, low priority. Judge the statements inside a backgrounded compound that are not themselves the backgrounded job, test-first, before the handler is enabled by default.
+
+### N656 — the remote-delete proof may print a credentialed remote URL from `ls-remote` stderr
+
+**Source**: release 3.75.0 Step 10 code review (`subagent-reports/261116-step10-code-review.md`, "Speculative, not counted"). Not reproduced.
+
+**Evidence**: `core/remote_branch_proof.py` joins `git ls-remote` failure text verbatim into the problem message ("git ls-remote said: ..."). If git does not redact a URL carrying a token, the token reaches the transcript.
+
+**Status**: ⬜ Open. Reproduce with a scratch remote whose URL carries a dummy credential; if it appears, redact the userinfo part of any URL before the text is shown.
+
+### N657 — N-19's test-gap check did not confirm coverage of the `workable_issues` and `cron_hosts` change
+
+**Source**: Plan 00618 Phase 2 defects report (`subagent-reports/261117-phase2-defects.md`, N-19 row).
+
+**Evidence**: `tests/unit/utils/test_workable_issues.py` and `test_cron_hosts.py` exist, but whether they cover the change made in `d696d45cc` was not checked line by line; the review's checklist item was "tests exist for every handler change".
+
+**Status**: ⬜ Open, low priority. Read `d696d45cc`'s diff against the two test files and add a test for any changed branch that no test drives.
+
+### N658 — the secret guard's fail-closed git relocation is broader than needed
+
+**Source**: Plan 00618 S-1 first review (`subagent-reports/261118-s1-review.md`, "Over-block").
+
+**Evidence**: any `git grep` relocated by `--work-tree`, `--git-dir`, `-c core.worktree`, `GIT_DIR` or `GIT_WORK_TREE` denies whenever the project holds any protected file, even when the named tree holds none: `git --work-tree=sub grep -e hello` denies (pinned as a deliberate denial in `test_secret_file_guard_git_relocation.py`), and `git --git-dir=.git grep -e x`, equivalent to the allowed `git grep -e x`, denies too. A quoted literal `git -C "~" grep` is judged like an unquoted `~`. All err toward deny.
+
+**Status**: ⬜ Open, low priority. For a literal `--work-tree=<dir>`, judge only the placed work tree, keeping the fail-closed default for values that cannot be placed; update the deliberate-denial pin in the same change.
+
+### N659 — the playbook harness errors under load were not identified, and its gate was not confirmed on the Task 2.5 fix
+
+**Source**: Plan 00618 Phase 2 defects report (`subagent-reports/261117-phase2-defects.md`, Task 2.5).
+
+**Evidence**: Task 2.5 load-scaled only the playbook generator's subprocess bound (`ce15433cc`, `6d309904b`). The report says the harness errors seen under load were not otherwise identified, and the playbook harness gate was not run on the merged tip because no daemon served that worktree. The lint budget half is N632.
+
+**Status**: ⬜ Open. Run the playbook harness gate on a loaded host against main and record which probes, if any, still time out; fix each test-first.
+
+### N660 — the local patch-equivalent tier passes a branch whose only difference from the default is whitespace
+
+**Source**: Plan 00622 loosening review D1 (`subagent-reports/261118-loosening-review.md`) and the round 2 corpus (`corpus/p622-corpus-compare-r2.txt`).
+
+**Evidence**: a patch-id ignores whitespace, and with no merge base `git cherry` compares against the whole history. `classify_branch` (`delete-branch` and the hook-path cleanup) therefore proves `patch-equivalent` for the corpus shapes `r2-ws-pick-bare` (a pick that the default took reformatted), `r2-orphan-ws-bare` (an orphan whitespace twin) and `r2-ws-pick-writer-park` (the park writer's marker over such a pick, through the park drop from Plan 00617). The branch's blob is not in the default's history in any of them. The decision was the same before and after Plan 00622. The remote proofs refuse all three because they require the net change. Plan 00622 round 2 stopped other empty commits from widening this; the tier itself is unchanged.
+
+**Status**: ⬜ Open, medium priority. Make `patch-equivalent` stand only with the net-change proof (as the remote path does), or refuse it when there is no merge base. Write the tests first, using the three corpus shapes.
+
+### N661 — secret-guard link residuals left by Plan 00614
+
+**Source**: the Plan 00614 review 614c fix round (`../00614-secret-guard-resolves-links-against-hook-cwd/subagent-reports/261118-finish-opus.md`), measured with the review probe over synthetic fixtures. Each shape below is allowed on main, on the round-start tip and on the Plan 00614 tip alike: none is a regression. (Filed on the branch as N650; renumbered on merging main, whose close-out of Plan 00618 took N650 to N659; N660 is taken by Plan 00622.)
+
+**Evidence**:
+
+- A physical `..` through a directory link (`cat dlink/../*`, `head -n1 dlink/../i*`, `cd -P dlink/.. && cat *`, `grep -r x deep/idlink/..`). Paths are normalised lexically, and main's `_physical_root` resolves the search form to a target outside the project, where the index does not reach.
+- A glob matching a file link (`cat lin[k]1.txt`): the "wildcard names the link" rule covers directory links only.
+- An absolute glob outside the project (`cat /other/checkout/sub/*`).
+- `CDPATH` inherited from the environment rather than named in the command.
+
+**Status**: ⬜ Open. Apply the link-out rule to a physical root and honour `cd -P` in the text walker; judge a glob's matches that are file links; decide whether an absolute glob outside the project is in scope.
+
+### N662 — "stopped early, so allowed" routes left in and beside the secret guard after Plan 00614 round 6
+
+**Source**: the Plan 00614 round-6 fix of the independent review (`../00614-secret-guard-resolves-links-against-hook-cwd/subagent-reports/261118-fix-round-6.md`, class sweep). Every allow below is allowed on main and on the round-start tip too: none is a regression. (The quarantine guard's advisory route for a `ResolutionFailedError` was one, and was fixed in the same round.)
+
+**Evidence**:
+
+- A `..`-led relative word after a computed `cd` (`cd $(printf q/sub/a/x); cat ../late`, `cat ../../a/late`) is not resolved from the directories above the scanned link, unlike a deeper word without `..`.
+- A chdir hidden more than `_MAX_DIRECTORY_CHANGE_DEPTH` (4) nested `bash -c` bodies deep (`env -C inner cat rel` wrapped 5 or 7 times) is not followed; the walk stops silently.
+- A pathless Grep tool call whose hook `cwd` passes through no link is judged as on main (not at all), so from a directory holding a protected file it is allowed where `path=<that dir>` is denied.
+- The secret guard's Plan 00483 A1 route still allows with an advisory when the full scan gives up on a command holding no search or glob (a cap, the deadline, an unreadable word or an internal error).
+- A hook payload with no `cwd` or a relative one: relative words, globs, searches and a pathless Grep tool call are not placed and are allowed.
+- In a project past the link-scan cap, `cd "$D" && make test` and any other computed `cd` before a relative word is denied (accepted over-deny, release note 002); only the `git rev-parse --show-toplevel` idiom is placed without a scan. The unquoted `$( )` form before a recursive search is still denied. The text walker's segment split is not quote-aware, so a quoted body holding an operator (`bash -c 'cd sub && cat f'`) is read loosely as a computed move, and is denied in such a project too.
+- Suspected, not probed: `_DirectoryWalk.change` and `_expand` follow a relative or globbed `cd` from the first `LINK_DIRECTORY_CAP + 1` existing directories only (a `[:CAP]` slice with no incomplete signal).
+
+**Status**: ⬜ Open. Resolve a `..`-led word from above the scanned links; make the nested-body depth limit an incomplete signal that denies. Decide (owner) whether the A1 no-search advisory and a missing `cwd` should deny. Consider an off-hot-path link index, built like the protected-file index and denying until built, so a large project's computed `cd` is judged instead of denied; make the text walker's segment split quote-aware.
+
+### N663 — a relative word that fits PATH_MAX only relative to the hook cwd is never resolved, and is allowed
+
+**Source**: Plan 00614 second independent review, defect D-A (`subagent-reports/261118-independent-review-2.md`).
+
+**Evidence**: `_link_targets` places a relative word as `Path(cwd) / token`, and `_realpath_if_resolvable` calls `os.path.lexists` on it, which returns False on ENAMETOOLONG. Bash opens the word relative to its own cwd, so there is a window of `len(project_root) + 1` characters where the kernel resolves the path, the guard cannot place it, and the guard allows. `cat $(plain/../ x 449)flink` allows on the branch and on main; at 448 repeats it denies. No test uses a word near `PATH_MAX`.
+
+**Status**: ✅ Fixed on the Plan 00623 branch (merges with Plan 00614). The placement stat is an `lstat`; ENOENT, ENOTDIR and ELOOP are "no such path", and any other `OSError` raises `ResolutionFailedError` (deny) when the raw word fits PATH_MAX and every component of the placed path fits NAME_MAX. Pinned by `TestPlacementStat` in `test_secret_file_guard_bounded_walks.py`.
+
+### N664 — a recursive search nested 5 or more `bash -c` levels deep is not seen
+
+**Source**: Plan 00614 second independent review, defect D-B (`subagent-reports/261118-independent-review-2.md`).
+
+**Evidence**: the branch denies `grep -r x olink` at nesting depths 3 and 4 and allows it at depths 5 and 6; main allows it at every depth. `cat flink` and `cat olink/i*` deny at every depth from 3 to 6. N662 records the depth limit only for a hidden chdir (`_MAX_DIRECTORY_CHANGE_DEPTH`); the same silent stop on the search side is not recorded.
+
+**Status**: ✅ Fixed on the Plan 00623 branch. Past either depth limit a body that could read (`recursive_search`) or move (`secret_file_matching`) raises `IncompleteScanError`; a harmless body still allows at any depth. Pinned by `TestNestingDepth`.
+
+### N665 — a hand-forged loose commit object makes a branch with content look empty to the delete proofs
+
+**Source**: Plan 00622 third independent loosening review, defect D1 (`CLAUDE/Plan/00622-remote-delete-proof-ignores-empty-and-park-marker-commits/subagent-reports/261118-loosening-review-3.md`).
+
+**Evidence**: git does not re-hash an object on read, so a loose commit object whose body claims the parent's tree, stored under another commit's name, makes a branch with content read as empty to the delete proofs. Threat model: it needs write access to the repository's object store, where an attacker could equally repoint refs, so it adds little.
+
+**Status**: ⬜ Open, low priority (hardening). Hash each commit body against its sha in `_stored_objects_agree`.
+
+### N666 — if `git log` exits 0 but omits the tip line, the local proof paths prove a branch with content at its tip
+
+**Source**: Plan 00622 third independent loosening review, defect D2 (same report as N665); pre-existing.
+
+**Evidence**: the local proof paths read the commit list from `git log`; when it exits 0 but omits the tip line, they treat the tip as proven. No repository state is known that makes git do this.
+
+**Status**: ⬜ Open, low priority (hardening). Require the tip line in the output and fail closed otherwise.
+
+### N667 — past the scan cap, the `cd "$(git rev-parse --show-toplevel)"` idiom is placed by an assumption that persisted git config breaks
+
+**Source**: Plan 00614 second independent review (round-6 tip), defect D-C (Low-Medium; the branch is not merged, so main is unaffected until it is).
+
+**Evidence**: the round-6 branch excuses the top-level idiom from the incomplete-scan deny and places it at the ancestors of the command's directory. It demotes the idiom only when the same command sets `core.worktree`, names a `GIT_` variable, defines a function or alias, or changes `PATH`. Repository config persisted by an EARLIER call (`core.worktree`) makes `git rev-parse --show-toplevel` print a non-ancestor, and `cd "$(git rev-parse --show-toplevel)" && cat late` (also `grep -r` and a glob form) is then allowed past the cap; under the cap the same commands deny. Main allows them too.
+
+**Status**: ✅ Fixed on the Plan 00623 branch. `toplevel_relocated` reads the repository, user and system git config (and their includes) at decision time and demotes the idiom to a plain computed move when any sets a `worktree` key, holds more than 16 included files, cannot be read, or a `GIT_` relocating variable is set for the daemon. With the link index complete the computed judgement finds every link anyway. Pinned by `TestPersistedWorktreeConfig` (cold index). Residual: the SHELL's environment is not visible (N669).
+
+### N668 — a path through `/proc/self/cwd` or `/dev/fd/..` is judged from the daemon's working directory
+
+**Source**: Plan 00614 second independent review, defect D-D (Low, no worse than main).
+
+**Evidence**: `cat /proc/self/cwd/flink`, `cat /proc/self/cwd/olink/i*`, `grep -r x /proc/self/cwd/olink` and `cat /dev/fd/../cwd/flink` are allowed on main and on the branch: the daemon's `/proc/self/cwd` is `/`, while the shell's is the project. `cd /proc/self/cwd && cat flink` denies on the branch.
+
+**Status**: ✅ Fixed on the Plan 00623 branch. `refuse_process_view` raises for adjacent `proc/self`, `proc/thread-self` or `dev/fd` components (`//` and `.` collapsed, `..` not) in Bash words, glob and search roots, and the Read/Grep tool path. Accepted cost: ordinary `cat /proc/self/status`, `ls /dev/fd` and `2>/dev/fd/N` words now deny. Residual: a project link whose TARGET is `/proc/self/cwd` (N669).
+
+### N669 — Plan 00623 residuals: placement trusts the daemon's environment, and the index has its own bounds
+
+**Source**: Plan 00623 build (`CLAUDE/Plan/00623-secret-guard-structural-fail-closed-walks-and-link-index/subagent-reports/261118-build-opus.md`).
+
+**Evidence**:
+
+- A move to `~`, `$HOME` or `$TMPDIR`, and the N667 check, use the DAEMON's values; a shell whose profile sets them differently lands elsewhere. Same class as D-C.
+- The link index is verified per call but bounded (200,000 directories, 4,096 re-lists, 2 s): past a bound the computed move denies, so very large or very busy trees still over-deny. Before the first background build finishes, the 512-directory per-call scan is used.
+- More than 512 link-holding directories in the index (a pnpm-style tree) still denies a computed move. **Addressed on the branch** (`subagent-reports/261119-many-link-directories.md`): past 512, words are judged by link name (`LinkNames`). Still denied: more than 512 directory links (pnpm's `node_modules/<pkg>` links are directory links, so a pnpm tree usually still denies) or more than 65,536 links.
+- A project link whose target is `/proc/self/cwd` is classified by the daemon (its own cwd), not refused as N668 is.
+- The quarantine guard's Read-tool route does not call `refuse_process_view`.
+- The `~`/`$HOME`/`$TMPDIR` placement trusts the command text: it refuses a quoted or escaped spelling, a second mention of the variable, and any `source`, `.`, `eval`, `declare`, `typeset`, `export`, `local`, `readonly`, `read`, `mapfile`, `readarray`, `unset` or `printf -v` in command position, but an alias or function named `cd` defined in an earlier call is not seen.
+- A wildcard word whose placed parent is longer than PATH_MAX (each component short) is now denied as unresolvable rather than read as matching nothing: over-deny for words over 4,096 bytes only.
+- `_could_read` (the depth-limit check) follows the same nesting forms as the search walk (`-c` as its own word, `eval`, substitutions); `bash -ec '...'` is not looked into at any depth by either, a gap that predates this plan.
+
+**Status**: ⬜ Open, low priority; recorded for the merge review. The >512 link-holding-directory bullet is addressed on the branch (pending independent review); the rest stay open.
+
+### N670 — Plan 00623 adversarial review leftovers: this repository's link index always overflows, and the flaggable guard lets an expansion limit escape
+
+**Source**: Plan 00623 adversarial review (`CLAUDE/Plan/00623-secret-guard-structural-fail-closed-walks-and-link-index/subagent-reports/261119-adversarial-review.md`).
+
+**Evidence**:
+
+- `build_link_index('/workspace')` overflows the 200,000-directory cap in about 5 s, because the tree holds `.claude/worktrees/*` (about 69,000 directories each) and `untracked/scratch` fixtures. In this repository every computed move followed by a reader is therefore denied. Since the review's F1 and F3 fixes (a placed `~`/`$TMPDIR` move and the top-level idiom now fail closed on a stopped scan), that includes `cd ~/x && cat f` and `cd "$(git rev-parse --show-toplevel)" && cat f`. A candidate fix is to exclude other checkouts and scratch from the index; that needs its own fail-closed argument.
+- More than 512 link-holding directories (for example `node_modules/.bin`) still stop `_scan_from_index`. This one repeats N669. **Addressed on the branch**, see N669.
+- `flaggable_content_channel_guard` lets `TooManyToEnumerateError` escape `handle` for commands nested 5 or more `bash -c` deep. It does so on main and on the branch alike.
+- An unlistable directory anywhere in the project now stops the link scan (fix F2), so it denies every computed move followed by a reader.
+
+**Status**: ⬜ Open; recorded for the Plan 00623 merge. The >512 bullet is addressed on the branch (pending independent review); the 200,000-directory overflow needs an owner decision (scratch size or the cap), and the flaggable escape and the F2 cost are open.
+
+### N671 — `issue-report`'s version-currency check reads only the locally installed release notes, so it calls an old install the newest release
+
+**Source**: coordinator peer note, dogfood fault from another seat (not urgent).
+
+**Evidence**: a seat running 3.74.0 was told by `issue-report` that 3.74.0 was the newest release, because the check consults only the locally installed release notes. 3.75.0 had been published, and issues #210 and #211 were then filed for defects already fixed there, as duplicates. The numbering skips N669 and N670, which sit on the unmerged Plan 00623 branch.
+
+**Status**: ⬜ Open, low priority. Ask GitHub for the latest release, and fall back to the local notes with a stated "could not check" line when the network is unavailable, so the report never claims "newest" it did not verify.
+
+### N672 — an Ansible-enforcement guard judged the words inside a quoted message argument as if they were a command
+
+**Source**: coordinator peer note, dogfood report from another seat (not urgent).
+
+**Evidence**: a plain `printf` piped to `pingbus say` was denied because the message TEXT, a quoted argument, held the words for stopping a systemd unit. This repository has no handler named for Ansible enforcement (a search of `src/` finds only mentions), so the guard is most likely a project-level handler in that seat's own repository, not a shipped one. Unverified from here.
+
+**Status**: ⬜ Open, low priority; needs the reporting seat to name the handler. If it is a shipped handler, it must judge only command words, never the contents of a quoted argument to another program. If it is a project handler, the shared command-word parsing helpers already exist for the same purpose and it should use them.
+
+### N673 — existing code and plans contradict the scratch TTL design (fourteen places)
+
+**Source**: Plan 00627 design pass, by a sub-agent under the owner's delegation.
+
+**Evidence**: the full table, with file and line for each, is `CLAUDE/Plan/00627-scratch-management-ttl-and-filing/DESIGN.md` section 15 (X1 to X14). The ones that can lose work or keep the sprawl going: `utils/stale_litter.py:193` prints `find ... -type f -mmin +N -delete`, removal on age alone that leaves every directory behind; that report rides `idle_housekeeping_advisory`, which is off by default; `project_containment` still calls scratch the place for durable work; `NEVER_REGENERABLE` makes a worktree with scratch content refuse removal with no sanctioned way to empty it; `DEFAULT_HANDOFF_GLOBS` accepts scratch as a handoff home; each agent worktree's own `untracked/scratch/` is read by nothing; the link index on the Plan 00623 branch fails whole at its cap with no warning below it. The Plan 00623 branch also uses the number N673 (for the playbook probe #125 niggle); that branch renumbers its own entries when it merges.
+
+**Status**: ⬜ Open; each row is closed by the Plan 00627 task named beside it (Task 8.4 closes this entry).
+
+### N674 — a stale `refs/remotes/<remote>/HEAD` after a remote default rename misleads the remote-delete proof's default detection
+
+**Source**: Plan 00626 close-out (follow-up of its `auto` default detection, which reads only `refs/remotes/<remote>/HEAD`).
+
+**Evidence**: after the remote renames its default branch, the local `refs/remotes/<remote>/HEAD` keeps pointing at the old name until someone runs `git remote set-head`. The proof then names the old branch as the default; the live-tip confirmation fails closed, so no unsafe delete results, but the refusal is the wrong reason and the owner cannot tell why.
+
+**Status**: ⬜ Open, low priority. Confirm the default with a live `git ls-remote --symref <remote> HEAD` and report a stale tracking HEAD by name, still failing closed.
+
+### N675 — playbook probe #125 (rsync from a worktree) fails whenever the acceptance harness runs inside a worktree
+
+**Source**: Plan 00623 acceptance-harness diagnosis (`tests/acceptance/test_playbook_harness.py`).
+
+**Evidence**: the probe's event `cwd` is `$MAIN_CHECKOUT_DIR` (the main checkout), but a worktree's daemon has the WORKTREE as its project root. The rsync target `src/` then resolves to the main checkout's `src`, outside that root, so `project_containment` (priority 14) denies with R-WRITE-OUTSIDE-PROJECT-ROOT before `worktree_file_copy` (priority 15) gives the expected reason. Main's own code makes the same call: run in-process with the worktree as project root, main's `project_containment` matches the #125 event exactly as the branch's does. It passes only from the main checkout, where the cwd and the root are the same directory. #124 (`cp` to a file under `src/`) is not matched by containment in either tree.
+
+**Status**: ⬜ Open, low priority. The fix belongs to the harness or the probe, not to either handler: give the probe a cwd that is the daemon's project root, or have the harness skip or report this probe when it runs in a worktree.
+
+### N676 — the skill wrappers self-update from unsigned release assets in every session
+
+**Source**: Plan 00625's threat-model review (a Fable sub-agent, 2026-11-19), recorded in its DESIGN ruling 3. The numbering skips N675, which the Plan 00623 branch takes when it merges.
+
+**Evidence**: the skill wrappers refresh themselves from release assets fetched at the start of a session, and nothing verifies a signature on what they fetch. That is a trust gap on every install, whether or not automatic upgrades are on, and it sits outside Plan 00625's scope.
+
+**Status**: ⬜ Open, security-relevant, medium priority. Apply the Plan 00625 trust model (a human-added signers file, a verified tag, the script byte-identical to the verified copy) to the wrapper self-update path, or stop the self-update.
+
+### N677 — secret_file_guard: a `/proc` path that reaches the shell's own view without spelling `/proc/self` is placed as the daemon's
+
+**Source**: Plan 00623 review 3 (`CLAUDE/Plan/00623-secret-guard-structural-fail-closed-walks-and-link-index/subagent-reports/261119-review3-loosenings.md`).
+
+**Evidence**: with a project link `flink` to a protected dummy, these print the dummy in real bash and are allowed on main, on Plan 00623's earlier tip and after it: `cat /proc/$$/cwd/flink`, `cat /proc/$BASHPID/cwd/flink`, `cat /proc/[0-9]*/cwd/flink` (an expansion or glob as the pid), and, when the daemon's cwd is not the project root, `cat /proc/sys/../self/cwd/flink` and `cat /proc/1/../self/cwd/flink` (a `..` between `proc` and `self`, so `refuse_process_view`'s adjacent-pair test never sees `proc`,`self`). Not introduced by the plain-file carve-out (6c16ce510): the same rows are allowed before it.
+
+**Status**: ⬜ Open. Candidate fix in `refuse_process_view`: refuse any absolute `/proc/<x>/...` whose `<x>` is not a literal number, and any `/proc` path holding a `..`.
+
+### N678 — secret_file_guard: a scan of a Python heredoc holding braces that runs past its deadline is denied on the Plan 00623 branch, and allowed on main
+
+**Source**: Plan 00623 final full gate, py3.13 leg (`test_a_utf8_declaration_keeps_the_exemption` denied with R-SECRET-BASH-MENTION).
+
+**Evidence**: with `SCAN_DEADLINE_SECONDS` forced to 0 or 0.3, `python3 - <<'EOF'` followed by a 600-line program of set displays (`{0,1}`) is denied on the branch and allowed on main. On the branch, a given-up scan is denied when the command holds a glob character (review 614c P2, `_holds_search_or_glob`). The body of a quoted heredoc fed to python is not stripped there, so its code braces count as glob characters. The scan is also slower: profiled in one process it takes 2.8s against 2.3s on main, and `_search_reach` takes 0.44s against 0.15s. On a loaded host the 5s wall-clock deadline is crossed, so a command that names no protected path is denied. The tests now judge on the CPU clock with a generous deadline. Production is unchanged.
+
+**Correction to the evidence**: braces are not the trigger. `_MAY_GLOB` is `*`, `?` and `[`; with the deadline forced, a program of set displays alone stays an advisory. The failing test's program opens with `# -*- coding: utf-8 -*-`, whose `*` is the glob character. Any `x[0]`, `a * b` or `*args` in an inline or heredoc program does the same.
+
+**Status**: ⬜ Open for the speed half only. The deny is ruled KEPT (Plan 00623 JOURNAL, decision "N678 ruling"): a program can read its own text back (`/proc/self/cmdline` for a `-c` program, `/proc/$PPID/cmdline` for the whole Bash command) and hand it to a shell, the completed scan does judge a glob spelled in code (`print(own/id_rs[a])` is denied), and no test on the word tells a subscript from a glob, so an exemption would let a padded program carry a glob past the guard. The deny message now names the remedy (write the program to a file and run it); `TestAGivenUpScanOfAPythonProgram` pins the ruling. Still to do: make the scan fast enough that an ordinary program does not reach the deadline, starting with whether `_search_reach` should walk a body that the shell never expands (0.44s against 0.15s on main).
+
+### N679 — `test_every_checkout_of_the_repository_is_protected` fails when another agent removes a worktree during a long run
+
+**Source**: Plan 00623 final full gate, py3.13 leg (`tests/unit/test_doc_write_jail.py::TestSessionWiring`).
+
+**Evidence**: the protected-path set is put into the environment once, at session start. The test compares it with a fresh `checkout_roots()` read. The py3.13 leg ran for about 80 minutes. During that run, `untracked/worktrees/plan-00613-00594-rulings` was merged and removed (main reflog, 2026-11-19 21:54). The snapshot still held its two paths, so the comparison failed. It passes on a rerun in the same worktree. The branch does not touch the jail code.
+
+**Status**: ⬜ Open, low priority. Compare the snapshot against the roots that existed when the session started, or assert only that every root still present is protected.

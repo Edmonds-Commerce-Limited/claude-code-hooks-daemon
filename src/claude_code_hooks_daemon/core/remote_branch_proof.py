@@ -8,18 +8,34 @@ callers, one proof: they cannot disagree.
 The proof, for each named branch: a literal name that is not the default, exempt or
 protected; no tag of the same name; a remote-tracking ref that is merged by the
 cheapest offline evidence that holds (Plan 00594 DESIGN.md 2.1): ancestry of the
-default branch (tracking or local) or, for an ordinary branch, of an integration
-line's tracking ref; else SOME commit on the default's first-parent line (after
-merge-base(default, tip), up to the default's tip) holding the branch's NET change:
-its diff against that merge base, renames off, where every added or modified path
-has the same blob and mode in the commit's tree and every deleted path is absent.
-That is what a squash merge, a renamed pull request or a cherry-pick leaves
-behind; the content is then permanently in the default's history, so patch-id
-evidence never proves a branch alone, and an empty change (a park branch) proves
-nothing. Every git call runs from the repository top level.
-Results are cached by algorithm version, tip and default sha in the inventory
-cache, so the next call is offline and cheap. Then the remote's LIVE tip, read with one batched
-``git ls-remote`` per chunk, equal to that tracking tip. Every failure, timeout and
+REMOTE-tracking default (never the local branch, whose commits may be unpushed:
+Plan 00626) or, for an ordinary branch, of an integration line's tracking ref; else
+SOME commit on the default's first-parent line (after merge-base(default, tip), up
+to the default's tip) holding the branch's NET change: its diff against that merge
+base, renames off, where every added or modified path has the same blob and mode in
+the commit's tree and every deleted path is absent. That is what a squash merge, a
+renamed pull request or a cherry-pick leaves behind; the content is then
+permanently in the default's history. Cherry-picks the default interleaved with its
+own edits leave no single such commit; they are proven when every commit's patch is
+in the default (``git cherry``, no merges) AND every changed path is held at its
+exact blob by SOME such commit (Plan 00626). Patch-id evidence never proves a
+branch alone, and an empty change proves nothing, with TWO exceptions: a tip whose every commit beyond the default is a park commit
+(``branch_park.is_park_residue``, the one rule) is ``park-carried``, decided before the
+net-change check; and a tip whose every commit beyond the default is empty (one parent,
+that parent's tree, any message: ``branch_park.is_content_free``) is
+``empty-commits-only`` (Plan 00622). Either way the work is in the default and the delete
+loses only those commits. Last, an ordinary branch none of that proves is
+``surviving-content`` when every file it adds or changes against
+merge-base(remote default, tip) has the same mode and blob at the same path on the
+tip of a remote-tracking holder (the default, else an integration line) that the
+same command does not delete; each holder relied on is a live-tip anchor, and this
+tier is never cached (Plan 00594 Task 3.8). Every git call runs from the repository top level.
+Results are written to the inventory cache by algorithm version, tip and remote
+default sha, for the offline branch-creation count; only a cached ``unproven`` is
+reused here, because a positive read from a writable file could be forged. Then the
+remote's LIVE tips, read with one batched ``git ls-remote`` per chunk: the branch's
+equal to its tracking tip, and the proving target's (the default, or the line that
+proved ancestry) equal to the tracking sha the proof read. Every failure, timeout and
 mismatch is a reason, never a pass. The listing is ``utils/remote_refs.py``'s, the
 same one ``branch-sweep`` and ``delete-branch`` use, bounded to the named branches.
 """
@@ -40,9 +56,16 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     read_merge_proofs,
     write_merge_proofs,
 )
+from claude_code_hooks_daemon.core.branch_park import (
+    is_content_free,
+    is_park_residue,
+    park_marked_refs,
+)
 from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_CONTENT_PRESERVED,
+    TIER_EMPTY_COMMITS_ONLY,
     TIER_MERGED,
+    TIER_PARK_CARRIED,
     TIER_PATCH_EQUIVALENT,
     TIER_SURVIVING_CONTENT,
     TIER_UNPROVEN,
@@ -50,7 +73,8 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     patch_equivalent,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
+from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, run_git
+from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
 from claude_code_hooks_daemon.utils.remote_refs import list_remote_refs
 
 logger = logging.getLogger(__name__)
@@ -100,7 +124,8 @@ class RemoteProof:
         tips: Branch name to the live remote tip, for every branch proven deletable.
         problems: Branch name to why it is not, for every other branch named.
         evidence: Branch name to the evidence that proved it (a ``branch_safety`` tier:
-            ``merged``, ``patch-equivalent`` or ``content-preserved``).
+            ``merged``, ``park-carried``, ``empty-commits-only``, ``patch-equivalent``,
+            ``content-preserved`` or ``surviving-content``).
     """
 
     tips: dict[str, str]
@@ -174,13 +199,13 @@ def _merged_into(directory: Path, target: str, refnames: list[str]) -> set[str] 
 def _default_proof_targets(
     remote: str, default: str, refs: dict[str, tuple[str, str]]
 ) -> list[str]:
-    """The existing default-branch refs: the only proof an integration line accepts."""
-    tracking_prefix = f"{REMOTES_PREFIX}{remote}/"
-    return [
-        ref
-        for ref in (f"{tracking_prefix}{default}", branch_ref(default))
-        if ref in refs and refs[ref][1] == "commit"
-    ]
+    """The remote-tracking default, if it exists: the only proof an integration line accepts.
+
+    Never the LOCAL default branch: its commits may not be pushed, and a remote delete
+    proven against them would lose work the remote default does not hold (Plan 00626).
+    """
+    ref = f"{REMOTES_PREFIX}{remote}/{default}"
+    return [ref] if ref in refs and refs[ref][1] == "commit" else []
 
 
 def _proof_targets(
@@ -215,7 +240,9 @@ class _PathChange:
     blob: str
 
 
-def _net_change(directory: Path, base: str, tracking_ref: str) -> list[_PathChange]:
+def _net_change(
+    directory: Path, base: str, tracking_ref: str, *, timeout: float
+) -> list[_PathChange]:
     """The branch's net change: ``git diff --raw -z --no-renames`` of base to tip.
 
     Raises:
@@ -232,7 +259,7 @@ def _net_change(directory: Path, base: str, tracking_ref: str) -> list[_PathChan
         "--no-ext-diff",
         base,
         tracking_ref,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=timeout,
     )
     if raw.returncode != 0:
         raise ProofUnavailableError(f"git diff failed for {tracking_ref}")
@@ -249,7 +276,9 @@ def _net_change(directory: Path, base: str, tracking_ref: str) -> list[_PathChan
     return changes
 
 
-def _tree_entries(directory: Path, commit: str, paths: list[str]) -> dict[str, tuple[str, str]]:
+def _tree_entries(
+    directory: Path, commit: str, paths: list[str], *, timeout: float
+) -> dict[str, tuple[str, str]]:
     """Map path to ``(mode, blob)`` as ``commit``'s tree holds it, for the paths it has.
 
     ``directory`` is the repository top level, so the root-relative paths of
@@ -268,7 +297,7 @@ def _tree_entries(directory: Path, commit: str, paths: list[str]) -> dict[str, t
             commit,
             "--",
             *paths[start : start + _LS_TREE_CHUNK],
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=timeout,
         )
         if listing.returncode != 0:
             raise ProofUnavailableError(f"git ls-tree failed for {commit}")
@@ -280,20 +309,9 @@ def _tree_entries(directory: Path, commit: str, paths: list[str]) -> dict[str, t
     return held
 
 
-def _tree_holds(directory: Path, commit: str, changes: list[_PathChange]) -> bool:
-    """Whether ``commit``'s tree holds every change: same blob and mode, deletions absent."""
-    held = _tree_entries(directory, commit, [change.path for change in changes])
-    return all(
-        (
-            change.path not in held
-            if change.deleted
-            else held.get(change.path) == (change.mode, change.blob)
-        )
-        for change in changes
-    )
-
-
-def _touching_commits(directory: Path, base: str, target: str, paths: list[str]) -> list[str]:
+def _touching_commits(
+    directory: Path, base: str, target: str, paths: list[str], *, timeout: float
+) -> list[str]:
     """The first-parent commits in ``base..target`` that touched any of ``paths``.
 
     Raises:
@@ -310,7 +328,7 @@ def _touching_commits(directory: Path, base: str, target: str, paths: list[str])
             f"{base}..{target}",
             "--",
             *paths[start : start + _LS_TREE_CHUNK],
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=timeout,
         )
         if listing.returncode != 0:
             raise ProofUnavailableError(f"git log failed for {target}")
@@ -318,8 +336,13 @@ def _touching_commits(directory: Path, base: str, target: str, paths: list[str])
     return list(commits)
 
 
-def _holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
+def holds_net_change(
+    directory: Path, target: str, tracking_ref: str, *, timeout: float = Timeout.GIT_CONTEXT
+) -> bool:
     """Whether the default's first-parent history holds the whole net change of the branch.
+
+    Shared with ``branch_safety``'s local ``content-preserved`` tier, so a local and a
+    remote delete rest on the same per-path proof (Plan 00618 B-1).
 
     The net change is the branch's diff against ``merge-base(target, tip)``. It is
     held by a commit whose tree has every added or modified path at the same blob
@@ -329,67 +352,145 @@ def _holds_net_change(directory: Path, target: str, tracking_ref: str) -> bool:
     commit held it the content is permanently in the default's history, even if the
     default has changed it since. More candidates than ``MAX_PROOF_CANDIDATES``, or
     more changed paths than ``MAX_PROOF_PATHS``, is unproven, as is an empty net
-    change (empty commits, or changes that cancel out). The default's history is
-    read from the local refs: the live remote check covers the deleted branch's
-    tip, not the default's, so a squash only on an unpushed local default proves.
+    change (empty commits, or changes that cancel out). ``target`` is whatever ref
+    the caller names: the remote-delete proof passes only the remote-tracking
+    default, whose live tip it then confirms (Plan 00626); ``branch_safety``'s local
+    delete passes local refs. ``timeout`` is each git call's budget: the hook-context default here, the
+    load-scaled branch-safety budget from ``delete-branch``. A timeout is a failure.
 
     Raises:
         ProofUnavailableError: git failed, so there is no answer to cache.
     """
-    base = run_git(directory, "merge-base", target, tracking_ref, timeout=Timeout.GIT_CONTEXT)
+    return _net_change_state(directory, target, tracking_ref, timeout=timeout) == _HELD
+
+
+_HELD: Final[str] = "held"
+_HELD_PER_PATH: Final[str] = "held-per-path"
+_EMPTY: Final[str] = "empty"
+_NOT_HELD: Final[str] = "not-held"
+
+
+def _held_changes(
+    directory: Path, commit: str, changes: list[_PathChange], *, timeout: float
+) -> set[str]:
+    """The paths of ``changes`` that ``commit``'s tree holds: same blob and mode, or absent."""
+    held = _tree_entries(directory, commit, [change.path for change in changes], timeout=timeout)
+    return {
+        change.path
+        for change in changes
+        if (
+            change.path not in held
+            if change.deleted
+            else held.get(change.path) == (change.mode, change.blob)
+        )
+    }
+
+
+def _net_change_state(directory: Path, target: str, tracking_ref: str, *, timeout: float) -> str:
+    """:func:`holds_net_change`'s answer, telling an EMPTY net change from one not held.
+
+    ``_HELD``: one commit (the target's tip, else a first-parent commit after the merge
+    base that touched a changed path) holds the whole net change. ``_HELD_PER_PATH``:
+    no single commit does, but every changed path is held at the branch's exact blob
+    and mode (a deletion: absent) by SOME such commit. That is what cherry-picks the
+    default interleaved with its own edits leave behind (Plan 00626); it proves a
+    branch only together with patch equivalence (:func:`_judge_offline`), never alone.
+    ``_EMPTY`` (the branch's diff against the merge base is nothing) is never a proof
+    here; only the caller's empty-commit walk may prove such a branch (Plan 00622).
+    No merge base at all is ``_NOT_HELD``, so ``git cherry``'s whole-history match
+    never reaches a proof.
+
+    Raises:
+        ProofUnavailableError: git failed, so there is no answer to cache.
+    """
+    base = run_git(directory, "merge-base", target, tracking_ref, timeout=timeout)
     if base.returncode == _NO_MERGE_BASE:
-        return False
+        return _NOT_HELD
     if base.returncode != 0:
         raise ProofUnavailableError(f"git merge-base failed for {tracking_ref}")
     merge_base = base.stdout.strip()
-    changes = _net_change(directory, merge_base, tracking_ref)
-    if not changes or len(changes) > MAX_PROOF_PATHS:
-        return False
-    if _tree_holds(directory, target, changes):
-        return True
-    candidates = _touching_commits(directory, merge_base, target, [c.path for c in changes])
+    changes = _net_change(directory, merge_base, tracking_ref, timeout=timeout)
+    if not changes:
+        return _EMPTY
+    if len(changes) > MAX_PROOF_PATHS:
+        return _NOT_HELD
+    every_path = {change.path for change in changes}
+    seen = _held_changes(directory, target, changes, timeout=timeout)
+    if seen == every_path:
+        return _HELD
+    paths = [c.path for c in changes]
+    candidates = _touching_commits(directory, merge_base, target, paths, timeout=timeout)
     if len(candidates) > MAX_PROOF_CANDIDATES:
-        return False
-    return any(_tree_holds(directory, commit, changes) for commit in candidates)
+        return _NOT_HELD
+    for commit in candidates:
+        held = _held_changes(directory, commit, changes, timeout=timeout)
+        if held == every_path:
+            return _HELD
+        seen |= held
+    return _HELD_PER_PATH if seen == every_path else _NOT_HELD
 
 
-def _surviving_content_gaps(
-    directory: Path, tracking_ref: str, targets: list[str]
-) -> list[str] | None:
-    """Paths the branch adds or changes whose content is on none of ``targets``' tips.
+@dataclass(frozen=True)
+class _ContentFinding:
+    """What :func:`_surviving_content` found for one branch.
 
-    ``[]`` is the proof: every such path has the same mode and blob at the same path
-    on at least one target tip, wherever the targets differ. A path the branch
-    DELETES is not content and is ignored, so a branch of only deletions (or of no
-    change at all) has nothing to find elsewhere and is ``None``, as is a branch
-    with no merge base against the first target that has one or more changed paths
-    than ``MAX_PROOF_PATHS``. ``targets`` are the default refs first, then integration
-    lines, and never a ref this command deletes (the caller's filter).
+    ``gaps`` are the paths whose content no holder's tip has; empty is the proof.
+    ``holders`` are the holder refs whose tips the proof relied on (each path's first
+    holder), so the live check confirms each of them is still the tip the proof read.
+    """
+
+    gaps: list[str]
+    holders: list[str]
+
+
+def _surviving_content(
+    directory: Path, tracking_ref: str, tracking_default: str, holders: list[str]
+) -> _ContentFinding | None:
+    """Whether every file the branch adds or changes already exists on a holder's tip.
+
+    The branch's net change is its diff against ``merge-base(tracking_default, tip)``:
+    the REMOTE-tracking default only, never the local one (Plan 00626). Each added or
+    changed path must have the same mode and blob at the same path on at least one
+    holder's tip. ``holders`` are remote-tracking refs: the default first, then the
+    declared integration lines, never a ref this command deletes (the caller's filter).
+    A path the branch DELETES is not content and is ignored, so a branch of only
+    deletions, or of no change at all, has nothing to find elsewhere and is ``None``,
+    as is a branch with no merge base against the default or with more changed paths
+    than ``MAX_PROOF_PATHS``.
 
     Raises:
         ProofUnavailableError: git failed, so there is no answer.
     """
-    merge_base = None
-    for target in targets:
-        base = run_git(directory, "merge-base", target, tracking_ref, timeout=Timeout.GIT_CONTEXT)
-        if base.returncode == 0:
-            merge_base = base.stdout.strip()
-            break
-        if base.returncode != _NO_MERGE_BASE:
-            raise ProofUnavailableError(f"git merge-base failed for {tracking_ref}")
-    if merge_base is None:
+    base = run_git(
+        directory, "merge-base", tracking_default, tracking_ref, timeout=Timeout.GIT_CONTEXT
+    )
+    if base.returncode == _NO_MERGE_BASE:
         return None
-    changes = _net_change(directory, merge_base, tracking_ref)
+    if base.returncode != 0:
+        raise ProofUnavailableError(f"git merge-base failed for {tracking_ref}")
+    changes = _net_change(
+        directory, base.stdout.strip(), tracking_ref, timeout=Timeout.GIT_CONTEXT
+    )
     content = [change for change in changes if not change.deleted]
     if not content or len(changes) > MAX_PROOF_PATHS:
         return None
     paths = [change.path for change in content]
-    held = [_tree_entries(directory, target, paths) for target in targets]
-    return sorted(
-        change.path
-        for change in content
-        if not any(entries.get(change.path) == (change.mode, change.blob) for entries in held)
-    )
+    held = [
+        (holder, _tree_entries(directory, holder, paths, timeout=Timeout.GIT_CONTEXT))
+        for holder in holders
+    ]
+    gaps: list[str] = []
+    used: dict[str, None] = {}
+    for change in content:
+        holder = next(
+            (ref for ref, entries in held if entries.get(change.path) == (change.mode, change.blob)),
+            None,
+        )
+        if holder is None:
+            gaps.append(change.path)
+        else:
+            used[holder] = None
+    return _ContentFinding(sorted(gaps), list(used))
 
 
 #: Paths named in a refusal before the rest are counted.
@@ -401,37 +502,57 @@ def _content_gap_note(gaps: list[str] | None) -> str:
     if gaps is None:
         return (
             "; nor can its content be shown to exist elsewhere (it adds or changes no file, "
-            f"has no merge base with the default, or changes more than {MAX_PROOF_PATHS} paths)"
+            "has no merge base with the remote default, or changes more than "
+            f"{MAX_PROOF_PATHS} paths)"
         )
     shown = ", ".join(f"`{path}`" for path in gaps[:_GAP_PREVIEW])
     rest = len(gaps) - _GAP_PREVIEW
     more = f" and {rest} more" if rest > 0 else ""
     return (
         f"; and {len(gaps)} file(s) it holds exist with that content on no surviving ref "
-        f"(the default or an integration line): {shown}{more}"
+        f"(the remote default or an integration line's remote tip): {shown}{more}"
     )
 
 
 def _judge_offline(directory: Path, tracking_ref: str, targets: list[str]) -> str:
     """The tier that proves one tracking ref merged into a default ref, or ``unproven``.
 
-    The default's history must hold the branch's net change (:func:`_holds_net_change`):
-    that check comes FIRST and alone decides, so neither patch-id evidence nor an
-    empty commit on main can prove a branch.
-    The tier only names how the change got there: ``patch-equivalent`` when every
-    commit has its patch in the default, else ``content-preserved`` (a squash). It is
-    not ``branch_safety``'s local-delete tier, which proves only recoverability.
+    The default's history must hold the branch's net change, and that check comes
+    FIRST, so neither patch-id evidence alone nor an empty commit on the default can
+    prove a branch. Held by one commit (:func:`holds_net_change`): ``patch-equivalent``
+    when every commit has its patch in the default, else ``content-preserved`` (a
+    squash), the same proof ``branch_safety``'s local ``content-preserved`` tier
+    requires. Held only path by path (``_HELD_PER_PATH``: cherry-picks the default
+    interleaved with its own edits, Plan 00626): ``patch-equivalent`` and nothing
+    else, so ``git cherry`` must ALSO find every non-park commit's patch, with no merge
+    in the range. The exact blobs close patch-id's whitespace blindness, and a merge
+    base is required, so its whole-history match never proves.
+    An EMPTY net change proves nothing by itself; such a branch is proven only when
+    every commit it has beyond the default is empty (one parent, that parent's tree,
+    any message): ``empty-commits-only`` (Plan 00622). Only an empty net change pays
+    for that walk.
 
     Raises:
         ProofUnavailableError: git failed, so there is no answer to cache.
     """
     for target in targets:
-        if not _holds_net_change(directory, target, tracking_ref):
+        state = _net_change_state(directory, target, tracking_ref, timeout=Timeout.GIT_CONTEXT)
+        if state == _EMPTY:
+            content_free = is_content_free(directory, tracking_ref, target)
+            if content_free is None:
+                raise ProofUnavailableError(f"git log failed for {tracking_ref}")
+            if content_free:
+                return TIER_EMPTY_COMMITS_ONLY
+            continue
+        if state not in (_HELD, _HELD_PER_PATH):
             continue
         equivalent, count = patch_equivalent(directory, target, tracking_ref)
         if count is None:
             raise ProofUnavailableError(f"git cherry failed for {tracking_ref}")
-        return TIER_PATCH_EQUIVALENT if equivalent else TIER_CONTENT_PRESERVED
+        if equivalent:
+            return TIER_PATCH_EQUIVALENT
+        if state == _HELD:
+            return TIER_CONTENT_PRESERVED
     return TIER_UNPROVEN
 
 
@@ -440,9 +561,13 @@ def _offline_evidence(
 ) -> dict[str, str]:
     """``name -> tier`` for each pending tracking ref whose net change the default holds.
 
-    ``pending`` maps the tracking refname to its tip. Answers are read from, and
-    written to, the inventory cache keyed by algorithm version, tip and default sha,
-    so a repeat call spawns no git. Targets at the same sha are judged once.
+    ``pending`` maps the tracking refname to its tip. Answers are written to the
+    inventory cache keyed by algorithm version, tip and the REMOTE default's sha (the
+    only target), so the offline branch-creation count can read them. A cached
+    ``unproven`` is reused, since it can only refuse. A cached POSITIVE is never
+    trusted here: the cache is a plain file in the working tree that anyone can write,
+    so a delete that rested on it could be forged (Plan 00626); it is recomputed.
+    Targets at the same sha are judged once.
     """
     by_sha = {refs[target][0]: target for target in targets}
     judged_targets = list(by_sha.values())
@@ -452,9 +577,9 @@ def _offline_evidence(
     for tracking_ref, tip in pending.items():
         key = merge_proof_key(tip, by_sha)
         tier = cached.get(key)
-        if tier is None:
+        if tier != TIER_UNPROVEN:
             try:
-                tier = _judge_offline(directory, tracking_ref, judged_targets)
+                judged = _judge_offline(directory, tracking_ref, judged_targets)
             except ProofUnavailableError as exc:
                 log_and_continue(
                     logger,
@@ -462,12 +587,29 @@ def _offline_evidence(
                     reason="an unanswered proof leaves the branch unproven, which refuses its delete",
                 )
                 continue
-            fresh[key] = tier
+            if judged != tier:
+                fresh[key] = judged
+            tier = judged
         if tier != TIER_UNPROVEN:
             found[tracking_ref] = tier
     if fresh:
         write_merge_proofs(directory, fresh)
     return found
+
+
+@dataclass(frozen=True)
+class _LocalProof:
+    """What the offline half proved, before the remote's live tips confirm it.
+
+    ``anchors`` maps each proven name to the proof targets it rests on, as remote
+    branch name to the tracking sha the proof read, so the live check can confirm
+    the remote still has exactly those (Plan 00626).
+    """
+
+    tips: dict[str, str]
+    problems: dict[str, str]
+    evidence: dict[str, str]
+    anchors: dict[str, dict[str, str]]
 
 
 def _merged_tracking_tips(
@@ -477,36 +619,52 @@ def _merged_tracking_tips(
     default: str,
     branches: BranchesConfig,
     also_deleting: Collection[str] = (),
-) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
-    """``(name -> tracking tip of each proven name, name -> problem, name -> evidence)``.
+) -> _LocalProof:
+    """Each name's tracking tip, problem or evidence, judged from local git only.
 
     ``also_deleting`` names other branches the same command removes: neither they nor
     ``names`` may vouch for a branch's content (:func:`_surviving_content_gaps`).
 
     One listing call, then one ``for-each-ref --merged`` per target over all the named
-    refs; only a branch ancestry did not settle pays the patch-id and tree checks. Judged from local git
-    only; the remote's live tip is checked afterwards by :func:`_live_tip_problems`.
+    refs; only a branch ancestry did not settle pays the patch-id and tree checks.
+    Every target is a REMOTE-tracking ref: a remote delete is proven against what the
+    remote holds, never the local default, whose commits may not be pushed (Plan
+    00626). A missing tracking default refuses every name. The remote's live tips,
+    the deleted branches' and the targets', are checked afterwards by
+    :func:`_live_tip_problems`.
     """
     tracking = {name: f"{REMOTES_PREFIX}{remote}/{name}" for name in names}
+    tracking_default = f"{REMOTES_PREFIX}{remote}/{default}"
     refs = _listed_refs(
         directory,
-        [
-            f"{REMOTES_PREFIX}{remote}",
-            branch_ref(default),
-            *[f"{TAGS_PREFIX}{name}" for name in names],
-        ],
+        [f"{REMOTES_PREFIX}{remote}", *[f"{TAGS_PREFIX}{name}" for name in names]],
     )
     if refs is None:
-        return (
+        return _LocalProof(
             {},
             {
                 name: f"`git for-each-ref` failed, so `{name}` could not be checked"
                 for name in names
             },
             {},
+            {},
+        )
+    if refs.get(tracking_default, ("", ""))[1] != "commit":
+        return _LocalProof(
+            {},
+            {
+                name: (
+                    f"the remote default `{tracking_default}` does not exist here, so `{name}` "
+                    f"cannot be proven merged on {remote}; run `git fetch {remote}` and retry"
+                )
+                for name in names
+            },
+            {},
+            {},
         )
     tips: dict[str, str] = {}
     problems: dict[str, str] = {}
+    anchored_by: dict[str, str] = {}
     for name in names:
         listed = refs.get(tracking[name])
         if f"{TAGS_PREFIX}{name}" in refs:
@@ -518,6 +676,7 @@ def _merged_tracking_tips(
     proven: set[str] = set()
     evidence: dict[str, str] = {}
     content_gaps: dict[str, list[str] | None] = {}
+    content_anchors: dict[str, list[str]] = {}
     if tips:
         default_targets = _default_proof_targets(remote, default, refs)
         # An integration line is proved against the default branch ONLY: being merged
@@ -538,7 +697,9 @@ def _merged_tracking_tips(
                     n: f"`git for-each-ref --merged={target}` failed, so `{n}` could not be checked"
                     for n in tips
                 }
-                return {}, {**problems, **failed}, {}
+                return _LocalProof({}, {**problems, **failed}, {}, {})
+            for ref in merged - proven:
+                anchored_by[ref] = target
             proven |= merged
         evidence = {name: TIER_MERGED for name in tips if tracking[name] in proven}
         # An integration line is never judged by patch-id or tree: only by ancestry.
@@ -547,6 +708,21 @@ def _merged_tracking_tips(
             for name in tips
             if name in feature_names and tracking[name] not in proven
         }
+        # A park marker over work the default holds: decided by the inventory's rule,
+        # before the (cached) net-change proof, which reads an empty change as unproven.
+        undecided = [n for n in tips if n in feature_names and tracking[n] not in proven]
+        marked = (
+            park_marked_refs(
+                directory, [tracking[n] for n in undecided], timeout=Timeout.GIT_CONTEXT
+            )
+            if default_targets
+            else set()
+        )
+        for name in [n for n in undecided if tracking[n] in marked]:
+            if any(is_park_residue(directory, tips[name], target) for target in default_targets):
+                proven.add(tracking[name])
+                evidence[name] = TIER_PARK_CARRIED
+                pending.pop(tracking[name], None)
         if pending and default_targets:
             found = _offline_evidence(directory, pending, default_targets, refs)
             for name in tips:
@@ -556,29 +732,35 @@ def _merged_tracking_tips(
         # Not merged by any history evidence: is anything in it unique? Judged afresh
         # every time (a cached answer would not see a line or default moving), and
         # against surviving refs only, so a ref deleted with it cannot vouch for it.
+        # Every holder is a remote-tracking ref (Plan 00626) and each one relied on is
+        # confirmed live by `_live_tip_problems` through the anchors.
         doomed = {f"{REMOTES_PREFIX}{remote}/{n}" for n in (*names, *also_deleting)}
-        surviving = [
+        holders = [
             target
             for target in _proof_targets(remote, default, branches, refs)
             if target not in doomed
         ]
         for name in sorted(feature_names):
-            if tracking[name] in proven or not default_targets:
+            if tracking[name] in proven or tracking_default not in holders:
                 continue
+            finding: _ContentFinding | None
             try:
-                gaps = _surviving_content_gaps(directory, tracking[name], surviving)
+                finding = _surviving_content(
+                    directory, tracking[name], tracking_default, holders
+                )
             except ProofUnavailableError as exc:
                 log_and_continue(
                     logger,
                     exc,
                     reason="an unanswered content proof leaves the branch unproven, which refuses its delete",
                 )
-                gaps = None
-            if gaps == []:
+                finding = None
+            if finding is not None and not finding.gaps and finding.holders:
                 proven.add(tracking[name])
                 evidence[name] = TIER_SURVIVING_CONTENT
+                content_anchors[name] = finding.holders
             else:
-                content_gaps[name] = gaps
+                content_gaps[name] = None if finding is None else finding.gaps
     lines = " or any integration line" if branches.integration_lines else ""
     for name in list(tips):
         if tracking[name] not in proven:
@@ -591,7 +773,14 @@ def _merged_tracking_tips(
             else:
                 note = _content_gap_note(content_gaps[name]) if name in content_gaps else ""
                 problems[name] = f"`{name}` is not merged into `{default}`{lines}{note}"
-    return tips, problems, {name: evidence[name] for name in tips}
+    tracking_prefix = f"{REMOTES_PREFIX}{remote}/"
+    anchors: dict[str, dict[str, str]] = {}
+    for name in tips:
+        targets = content_anchors.get(name) or [anchored_by.get(tracking[name], tracking_default)]
+        anchors[name] = {
+            target.removeprefix(tracking_prefix): refs[target][0] for target in targets
+        }
+    return _LocalProof(tips, problems, {name: evidence[name] for name in tips}, anchors)
 
 
 def live_remote_tips(directory: Path, remote: str, names: list[str]) -> dict[str, str]:
@@ -628,26 +817,38 @@ def live_remote_listing(
     return tips, failures
 
 
-def _live_tip_problems(directory: Path, remote: str, local_tips: dict[str, str]) -> dict[str, str]:
-    """Why the remote's live tips are not the merged ``local_tips`` (name to tip).
+def _live_tip_problems(directory: Path, remote: str, proof: _LocalProof) -> dict[str, str]:
+    """Why the remote's live tips are not the ones the offline proof read.
 
-    The remote-tracking ref is only as fresh as the last fetch: a commit pushed since
-    would be lost by the delete. ``git ls-remote`` asks the remote itself, once for
-    all the branches; it never fetches.
+    The remote-tracking refs are only as fresh as the last fetch, and any of them can
+    be moved locally (``git update-ref``). A commit pushed to the branch since would
+    be lost by the delete; a proof target (the default, or the integration line that
+    proved ancestry) the remote does not hold at that sha proves nothing about the
+    remote. ``git ls-remote`` asks the remote itself, once for every branch and
+    target; it never fetches. A failed listing confirms nothing.
     """
-    if not local_tips:
+    if not proof.tips:
         return {}
-    live, failures = live_remote_listing(directory, remote, list(local_tips))
+    targets = {line for anchor in proof.anchors.values() for line in anchor}
+    live, failures = live_remote_listing(directory, remote, sorted({*proof.tips, *targets}))
     cause = f" (git ls-remote said: {'; '.join(failures)})" if failures else ""
-    return {
-        name: (
-            f"the remote tip of `{name}` could not be confirmed as merged (it differs from "
-            f"`{REMOTES_PREFIX}{remote}/{name}`, is gone, or `git ls-remote {remote}` failed)"
-            f"{cause}; run `git fetch` and retry"
-        )
-        for name, tip in local_tips.items()
-        if live.get(name) != tip
-    }
+    problems: dict[str, str] = {}
+    for name, tip in proof.tips.items():
+        if live.get(name) != tip:
+            problems[name] = (
+                f"the remote tip of `{name}` could not be confirmed as merged (it differs from "
+                f"`{REMOTES_PREFIX}{remote}/{name}`, is gone, or `git ls-remote {remote}` failed)"
+                f"{cause}; run `git fetch` and retry"
+            )
+            continue
+        moved = [line for line, sha in proof.anchors.get(name, {}).items() if live.get(line) != sha]
+        if moved or not proof.anchors.get(name):
+            problems[name] = (
+                f"`{name}` was proven against `{REMOTES_PREFIX}{remote}/{', '.join(moved)}`, "
+                f"which differs from what {remote} holds now (or `git ls-remote {remote}` "
+                f"failed){cause}; run `git fetch {remote}` and retry"
+            )
+    return problems
 
 
 def prove_remote_merged(
@@ -664,6 +865,9 @@ def prove_remote_merged(
     for another's content (the surviving-content tier).
 
     Contacts the remote (``ls-remote``) only for the names the local proof accepted.
+    ``default`` must be the remote's own default (:func:`resolve_remote_default_branch`),
+    whoever resolved it: a caller that took a local ``main`` fallback is refused here,
+    so no remote-delete path can judge against a stale branch (Plan 00626).
     Every git call of the proof runs from the repository top level, resolved once, so
     a command typed in a subdirectory reads root-relative paths the way git printed them.
     """
@@ -678,14 +882,28 @@ def prove_remote_merged(
             evidence={},
         )
     directory = Path(top.stdout.strip())
-    tips, problems, evidence = _merged_tracking_tips(
-        directory, remote, names, default, branches, also_deleting
-    )
-    stale = _live_tip_problems(directory, remote, tips)
+    remote_default = resolve_remote_default_branch(branches, directory, remote=remote)
+    if remote_default != default:
+        known = f"`{remote_default}`" if remote_default else "unknown here"
+        return RemoteProof(
+            tips={},
+            problems={
+                name: (
+                    f"`{default}` is not confirmed as {remote}'s default branch ({known}: "
+                    f"`branches.default: auto` reads only `refs/remotes/{remote}/HEAD`; run "
+                    f"`git remote set-head {remote} --auto` or set `branches.default`), so "
+                    f"`{name}` is unchecked"
+                )
+                for name in names
+            },
+            evidence={},
+        )
+    local = _merged_tracking_tips(directory, remote, names, default, branches, also_deleting)
+    stale = _live_tip_problems(directory, remote, local)
     return RemoteProof(
-        tips={name: tip for name, tip in tips.items() if name not in stale},
-        problems={**problems, **stale},
-        evidence={name: tier for name, tier in evidence.items() if name not in stale},
+        tips={name: tip for name, tip in local.tips.items() if name not in stale},
+        problems={**local.problems, **stale},
+        evidence={name: tier for name, tier in local.evidence.items() if name not in stale},
     )
 
 

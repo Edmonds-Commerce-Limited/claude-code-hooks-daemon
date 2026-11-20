@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.core.remote_branch_proof import (
 )
 from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_CONTENT_PRESERVED,
+    TIER_EMPTY_COMMITS_ONLY,
     TIER_MERGED,
     TIER_SURVIVING_CONTENT,
 )
@@ -244,14 +245,28 @@ class TestTierB:
         assert proof.tips == {}
         assert "blob.bin" in proof.problems["bin"]
 
-    def test_an_empty_diff_is_refused(self, repo: Path) -> None:
+    def test_an_empty_diff_is_never_surviving_content(self, repo: Path) -> None:
+        # An empty net change has no content to find elsewhere; only Plan 00622's
+        # empty-commit walk may prove it, never this tier.
         _branch_from_main(repo, "parked")
         _git(repo, "commit", "-q", "--allow-empty", "-m", "Park it")
         _publish_and_leave(repo, "parked")
         _land(repo, "later.txt", "later\n")
         proof = _prove(repo, "parked")
+        assert proof.evidence == {"parked": TIER_EMPTY_COMMITS_ONLY}
+
+    def test_an_empty_diff_with_a_content_commit_is_refused(self, repo: Path) -> None:
+        # Adds a file then removes it: an empty net change, but not empty commits.
+        _branch_from_main(repo, "churn")
+        _write(repo, "tmp.txt", "tmp\n")
+        _commit(repo, "add")
+        _git(repo, "rm", "-q", "tmp.txt")
+        _commit(repo, "remove")
+        _publish_and_leave(repo, "churn")
+        _land(repo, "later.txt", "later\n")
+        proof = _prove(repo, "churn")
         assert proof.tips == {}
-        assert "not merged" in proof.problems["parked"]
+        assert "not merged" in proof.problems["churn"]
 
     def test_more_changed_paths_than_the_ceiling_is_refused(
         self, repo: Path, monkeypatch: pytest.MonkeyPatch
@@ -294,6 +309,58 @@ class TestSurvivingMeansNotBeingDeleted:
         self._line_holding_the_content(repo)
         proof = prove_remote_merged(repo, "origin", ["feat", "release/1"], "main", _CONFIG)
         assert "feat" not in proof.tips
+
+
+class TestRemoteDefaultOnly:
+    """Plan 00626: every holder is a remote-tracking ref whose live tip is confirmed."""
+
+    def test_content_only_on_an_unpushed_local_default_is_refused(self, repo: Path) -> None:
+        _branch_from_main(repo, "feat")
+        _write(repo, "a.txt", "a\n")
+        _commit(repo)
+        _publish_and_leave(repo, "feat")
+        _write(repo, "a.txt", "a\n")
+        _commit(repo, "local only")
+        proof = _prove(repo, "feat")
+        assert proof.tips == {}
+        assert "a.txt" in proof.problems["feat"]
+
+    def test_a_line_moved_on_the_remote_since_the_fetch_refuses(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        _git(repo, "checkout", "-q", "-b", "release/1", "main")
+        _write(repo, "a.txt", "a\n")
+        _commit(repo, "line has a")
+        _git(repo, "push", "--quiet", "origin", "release/1")
+        _git(repo, "checkout", "-q", "-b", "feat", "main")
+        _write(repo, "a.txt", "a\n")
+        _commit(repo, "feat has a")
+        _publish_and_leave(repo, "feat")
+        other = tmp_path / "other"
+        _git(tmp_path, "clone", "-q", "-b", "release/1", str(tmp_path / "remote.git"), str(other))
+        _write(other, "a.txt", "changed\n")
+        _commit(other, "line drops a")
+        _git(other, "push", "--quiet", "origin", "release/1")
+        proof = _prove(repo, "feat")
+        assert proof.tips == {}
+        assert "release/1" in proof.problems["feat"]
+
+    def test_a_default_moved_on_the_remote_since_the_fetch_refuses(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        _branch_from_main(repo, "feat")
+        _write(repo, "a.txt", "a\n")
+        _commit(repo)
+        _publish_and_leave(repo, "feat")
+        _land(repo, "a.txt", "a\n")
+        other = tmp_path / "other"
+        _git(tmp_path, "clone", "-q", "-b", "main", str(tmp_path / "remote.git"), str(other))
+        _write(other, "a.txt", "changed\n")
+        _commit(other, "default drops a")
+        _git(other, "push", "--quiet", "origin", "main")
+        proof = _prove(repo, "feat")
+        assert proof.tips == {}
+        assert "main" in proof.problems["feat"]
 
 
 class TestNeverCached:

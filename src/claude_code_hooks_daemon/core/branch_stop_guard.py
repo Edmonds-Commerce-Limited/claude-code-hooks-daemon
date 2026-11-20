@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.core.branch_inventory import (
 )
 from claude_code_hooks_daemon.core.branch_park import BranchParkError, read_park_record
 from claude_code_hooks_daemon.core.branch_records import touched_by_session
+from claude_code_hooks_daemon.core.branch_sweep import open_work_count
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
@@ -81,6 +82,9 @@ class StopJudgement:
     findings: tuple[StopFinding, ...]
     tips: dict[str, str]
     incomplete: bool = False
+    #: The branches judged in full: those the stopping thread itself touched. Carried
+    #: so the gate hands one over only on a queue record or a git lock, from this read.
+    own: frozenset[str] = frozenset()
 
 
 class _GitResult(Protocol):
@@ -207,19 +211,39 @@ def _park_commands(record: BranchRecord) -> tuple[str, ...]:
 def _pressure_findings(
     record: BranchRecord, inventory: BranchInventory, config: BranchesConfig
 ) -> list[StopFinding]:
-    """Findings on an OWN open branch: dormant past the block stage, or in an over-cap pool."""
+    """Findings on an OWN open branch: dormant past the block stage, or in an over-cap pool.
+
+    Each follows its pool's mode as the creation guard does: ``off`` reports
+    nothing and ``warn`` reports an advisory finding that does not hold the stop
+    (Plan 00618 D-1). The pool is counted by :func:`open_work_count`, so names on
+    one tip count once, as in every other open-work count (Plan 00618 D-2).
+    """
     if pool_of(record.state) != Pool.OPEN:
         return []
     tip = record.local_tip or ""
     findings: list[StopFinding] = []
-    if config.dormancy.mode != "off" and record.dormancy_stage == DormancyStage.BLOCK:
-        findings.append(StopFinding(record.name, StopCheck.DORMANT, tip, _park_commands(record)))
-    if config.wip.mode != "off":
-        open_count = sum(1 for r in inventory.records.values() if pool_of(r.state) == Pool.OPEN)
-        if open_count > config.effective_wip_cap():
-            findings.append(
-                StopFinding(record.name, StopCheck.OVER_CAP, tip, _park_commands(record))
+    dormancy = config.dormancy.mode
+    if dormancy != "off" and record.dormancy_stage == DormancyStage.BLOCK:
+        findings.append(
+            StopFinding(
+                record.name,
+                StopCheck.DORMANT,
+                tip,
+                _park_commands(record),
+                advisory=dormancy == "warn",
             )
+        )
+    wip = config.wip.mode
+    if wip != "off" and open_work_count(inventory) > config.effective_wip_cap():
+        findings.append(
+            StopFinding(
+                record.name,
+                StopCheck.OVER_CAP,
+                tip,
+                _park_commands(record),
+                advisory=wip == "warn",
+            )
+        )
     return findings
 
 
@@ -271,7 +295,7 @@ def judge_stop(
         )
         findings.extend(found)
         incomplete = incomplete or not finished
-    return StopJudgement(tuple(findings), tips, incomplete)
+    return StopJudgement(tuple(findings), tips, incomplete, own=frozenset(own))
 
 
 #: Reflog subjects that move a branch without adding work of its own: its

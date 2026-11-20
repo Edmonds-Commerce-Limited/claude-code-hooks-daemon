@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/install
-fetched_at: '2026-11-10T16:35:05.778181+00:00'
+fetched_at: '2026-11-16T21:15:38.256893+00:00'
 fidelity: converted
 source_sha256: 041d060043a23273eba6c4679dc3ac22d01afccb51db65f8d82d231a338e187e
 licence: unreviewed
-stale_after: '2027-02-08'
+stale_after: '2027-02-14'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 

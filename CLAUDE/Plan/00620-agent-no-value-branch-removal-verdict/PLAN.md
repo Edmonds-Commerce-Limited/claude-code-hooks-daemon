@@ -1,0 +1,62 @@
+# Plan 00620: agent no value branch removal verdict
+
+**Status**: In Progress
+**Created**: 2026-11-18
+**Owner**: joseph
+**Priority**: High
+**Recommended Executor**: Opus
+**Execution Strategy**: Sub-Agent Orchestration
+
+## Overview
+
+A branch whose work the delete proof cannot clear is never deleted today, and an agent has no way to remove one. Sending every such removal to a human makes every cleanup a human decision again, and the owner wants agents to work autonomously. The owner's proposal: require a sub-agent of at least Opus to confirm the work has no value, and let that verdict unlock the delete.
+
+This is a loosening of a delete guard, so it is its own plan and runs under the security rules: Opus for the work, red tests first, an independent loosening review, and an adversarial pass that tries to forge or reuse a verdict. Archive refs and tags were rejected by the owner (they sprawl and hide valuable work), so the record is a single tracked ledger line, not a ref.
+
+The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in [RULINGS.md](RULINGS.md), settled by a fable sub-agent under the owner's delegation, 2026-11-19. They are not the owner's own words, and a later owner message overturns them. The ruling that shapes everything else: a verdict is an agent's assertion and never unlocks a delete by itself. The delete also needs a fact the guard recomputes, namely that the branch's unproven work sits in a verified recovery bundle.
+
+## Goals
+
+- A verdict is written by a separate sub-agent of at least Opus, never by the agent that created or touched the branch, never by a fork or a resumed agent, and never by the guard's caller asserting it.
+- The verdict is bound to the exact tip commit, expires, and lists what the branch held with a reason for each part judged worthless.
+- Doubt means keep: tests, plan files, docs, config, and work described in any plan or journal are kept unless the reviewer clearly shows them superseded.
+- The delete proceeds only when the guard finds a valid, fresh, tip-matching verdict and has itself written and verified a recovery bundle holding the branch's work. The restore lines still print.
+- Every removal is recorded as a tracked ledger line and listed in a digest for the owner; nothing disappears silently.
+- Repeated no-value verdicts over many branches trigger a stronger review.
+
+## Non-Goals
+
+- No archive refs and no tags. (A recovery bundle file is admitted by RULINGS.md section 1; it is not a ref.)
+- No agent self-assertion path, no caller-typed reason and no override flag.
+- No change to the merge proof, which stays the normal route for work with value.
+- No remote delete. R-GIT-PUSH-DELETE-REMOTE is unchanged (RULINGS.md Q7).
+- No command that deletes a recovery bundle.
+
+## Tasks
+
+### Phase 1: Feasibility and rulings
+
+- [x] ✅ **Task 1.1**: Establish what a hook can prove about a sub-agent (its model and its independence from the session that owns the branch) from the payloads the daemon already receives. Findings: [FEASIBILITY.md](FEASIBILITY.md) (it cannot be proven against a same-user agent).
+- [x] ✅ **Task 1.2**: Answer Q1 to Q8 and fix the shape of the mechanism: [RULINGS.md](RULINGS.md), settled by a fable sub-agent under the owner's delegation, 2026-11-19.
+
+### Phase 2: Build (each slice is defined in RULINGS.md section 5)
+
+- [ ] ⬜ **Task 2.1**: Slice 1, no change to delete behaviour. The live dispatch probe (journalled); DESIGN.md with the verdict record, ledger line, review prompt and state layout; a pure module for inventory, verdict validation, bundle write and verify, ledger append and rate count, tests first; failing tests for forged, reused, stale, wrong-tip and self-written verdicts and for a verdict with no verified bundle, committed red.
+- [ ] ⬜ **Task 2.2**: Slice 2. The reviewer agent definition, the `branch-reject request` command, the dispatch gate and the SubagentStop record, and the `delete-branch` wiring under the `rejected-bundled` tier. The red tests of Task 2.1 turn green.
+- [ ] ⬜ **Task 2.3**: Slice 3. The `branch-reject digest` command and the session-start count of undigested removals.
+- [ ] ⬜ **Task 2.4**: Slice 4. Independent loosening review, adversarial forge attempt, targeted QA, CI green, merge, release note.
+
+### Phase 3: Follow-up
+
+- [ ] ⬜ **Task 3.1**: After the merge, file a follow-up plan to point `recovery_copy_advisory` at the reject route instead of `refs/archive/` (RULINGS.md Q6). Plan 00619 is not reopened.
+
+## Success Criteria
+
+- [ ] No delete of unproven work succeeds without a valid verdict that a test shows cannot be forged, reused, or self-written, and without a recovery bundle the guard verified at delete time.
+- [ ] A verdict alone, and a bundle alone, are each shown by a test to unlock nothing.
+- [ ] Every removal appears in the ledger and the digest.
+- [ ] A release note records the change in the pending-release holding area (CLAUDE/UPGRADES/UNRELEASED/release-notes/).
+
+## Delivery & Milestones
+
+- Plan filed from the owner's proposal; feasibility established; open questions ruled under delegation. No code yet. The points left for the owner's glance are in RULINGS.md section 4; none blocks Task 2.1.

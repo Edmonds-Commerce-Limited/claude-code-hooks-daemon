@@ -67,6 +67,10 @@ class _FakeGit:
 
 
 def _listing_of(tips: dict[str, str]) -> Callable[[tuple[str, ...]], Any]:
+    # The remote's default is live at the tracking tip unless a test says otherwise:
+    # the same call confirms it (Plan 00626).
+    tips = {"main": _TIP, **tips}
+
     def listing(args: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         wanted = args[2:]
         return _done(
@@ -86,7 +90,14 @@ def install(monkeypatch: pytest.MonkeyPatch) -> Callable[[_FakeGit], _FakeGit]:
         monkeypatch.setattr(remote_branch_proof, "run_git", fake)
         monkeypatch.setattr(remote_refs, "run_git", fake)
         monkeypatch.setattr(
-            destructive_git, "resolve_default_branch", lambda _config, _directory: "main"
+            destructive_git,
+            "resolve_remote_default_branch",
+            lambda _config, _directory, **_remote: "main",
+        )
+        monkeypatch.setattr(
+            remote_branch_proof,
+            "resolve_remote_default_branch",
+            lambda _config, _directory, **_remote: "main",
         )
         return fake
 
@@ -106,7 +117,9 @@ def test_many_branches_cost_one_ls_remote(
     result = _handle("git push origin --delete " + " ".join(names), tmp_path)
     assert result.decision == "allow"
     assert len(fake.ls_remote_calls) == 1
-    assert fake.ls_remote_calls[0] == ("ls-remote", "origin", *[f"refs/heads/{n}" for n in names])
+    # The remote default rides in the same call (Plan 00626); patterns are sorted.
+    wanted = sorted([*names, "main"])
+    assert fake.ls_remote_calls[0] == ("ls-remote", "origin", *[f"refs/heads/{n}" for n in wanted])
 
 
 def test_each_remote_gets_its_own_single_call(
@@ -152,9 +165,9 @@ def test_a_failed_or_timed_out_listing_denies_every_branch(
 def test_a_prefix_of_another_branch_is_matched_exactly(
     install: Callable[[_FakeGit], _FakeGit], tmp_path: Path
 ) -> None:
-    # The remote lists only feat-2; `feat` must not borrow its tip.
+    # The remote lists only feat-2 (and its default); `feat` must not borrow its tip.
     def listing(_args: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
-        return _done(0, f"{_TIP}\trefs/heads/feat-2\n")
+        return _done(0, f"{_TIP}\trefs/heads/feat-2\n{_TIP}\trefs/heads/main\n")
 
     install(_FakeGit(listing))
     result = _handle("git push origin --delete feat feat-2", tmp_path)

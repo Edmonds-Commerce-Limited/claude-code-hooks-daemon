@@ -24,10 +24,14 @@ from claude_code_hooks_daemon.config.models import (
     fold_handler_aliases,
 )
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
-from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core import Decision, branch_ladder
 from claude_code_hooks_daemon.core.branch_creation import LABELS_RELATIVE_PATH, read_labels
 from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
-from claude_code_hooks_daemon.core.branch_park import park_branch, read_park_record
+from claude_code_hooks_daemon.core.branch_park import (
+    BranchParkError,
+    park_branch,
+    read_park_record,
+)
 from claude_code_hooks_daemon.handlers.session_start.branch_sweep import BranchSweepHandler
 
 _ROOT = "claude_code_hooks_daemon.handlers.session_start.branch_sweep.ProjectContext.project_root"
@@ -301,6 +305,12 @@ class TestPoolPressureReport:
         assert "Open work branches: 2 (cap 1)" in text
         assert "branch-park" in text
 
+    def test_a_new_session_states_the_open_work_cap_once(self, repo: Path) -> None:
+        self._two_open(repo)
+        text = "\n".join(_run(self._handler(wip={"cap": 1}), repo, _new()))
+        assert "Open work branches: 2 (cap 1)" in text
+        assert "Open work: 2 of 1" not in text
+
     def test_lists_every_blocker_not_only_the_first(self, repo: Path) -> None:
         self._two_open(repo)
         _git(repo, "branch", "done", "main")
@@ -319,3 +329,51 @@ class TestPoolPressureReport:
         text = "\n".join(_run(self._handler(wip={"cap": 1}), repo, _new())).lower()
         assert "rename" not in text
         assert "branch -m" not in text
+
+
+class TestPoolLadderAtSessionStart:
+    """Plan 00619 Task 1.3: session start reports the warning ladder, below the block."""
+
+    def _two_open(self, repo: Path) -> None:
+        for name in ("a", "b"):
+            _git(repo, "checkout", "-q", "-b", name)
+            _commit(repo, name)
+            _git(repo, "checkout", "-q", "main")
+
+    def _handler(self, **pools: Any) -> BranchSweepHandler:
+        handler = BranchSweepHandler()
+        handler._branches = BranchesConfig.model_validate({"default": "main", **pools})
+        return handler
+
+    def test_a_pool_at_the_warn_level_is_reported_without_a_block(self, repo: Path) -> None:
+        self._two_open(repo)
+        handler = self._handler(wip={"cap": 3, "creation_grace": 0})
+        text = "\n".join(_run(handler, repo, _new()))
+        assert "BRANCH POOL WARNING" in text
+        assert "2 of 3" in text
+        assert "BRANCH POOLS (same report" not in text
+
+    def test_a_failed_ladder_read_keeps_the_rest_of_the_summary(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(*_args: object, **_kwargs: object) -> object:
+            raise BranchParkError("git config --get-regexp failed: timed out")
+
+        _git(repo, "checkout", "-q", "-b", "lost")
+        _commit(repo, "lost", days_ago=10)
+        _git(repo, "checkout", "-q", "main")
+        monkeypatch.setattr(branch_ladder, "work_pools", boom)
+        text = "\n".join(_run(self._handler(wip={"cap": 3}), repo, _new()))
+        assert "CONTAINED NOWHERE: lost" in text
+        assert "BRANCH POOL" not in text
+
+    def test_a_resumed_session_is_told_too(self, repo: Path, tmp_path: Path) -> None:
+        self._two_open(repo)
+        handler = self._handler(wip={"cap": 3, "creation_grace": 0})
+        text = "\n".join(_run(handler, repo, _resume(tmp_path)))
+        assert "BRANCH POOL WARNING" in text
+
+    def test_silent_below_the_warn_level(self, repo: Path) -> None:
+        self._two_open(repo)
+        text = "\n".join(_run(self._handler(wip={"cap": 10}), repo, _new()))
+        assert "BRANCH POOL" not in text

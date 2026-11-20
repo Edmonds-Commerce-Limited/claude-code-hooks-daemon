@@ -8,7 +8,21 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00606: Plan 00605 follow-up daemon fixes](00606-plan-00605-follow-up-daemon-fixes/PLAN.md) - In Progress (three defects found delivering #203: `work-queue done` caches the issue it finished as workable, acceptance socket discovery misses the `/tmp` fallback socket, and the branch-creation guard misses `scripts/setup_worktree.sh`)
+- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - In Progress (owner request: a full scratch management system; every scratch entry has a 24-hour TTL and past it is filed, archived or kept only on a machine proof of unpushed or human work; design written, rulings by a delegated sub-agent, no code yet; takes over Plan 00560's sweep)
+
+- [00628: daemon socket path too long from init sh](00628-daemon-socket-path-too-long-from-init-sh/PLAN.md) - In Progress (live defect for 3.76.0: init.sh forced an over-limit socket path on the daemon, so a long project path denied every tool call; one path-fitting function for every caller, discovery file only after bind, safe short-path root)
+
+- [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - In Progress (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
+
+- [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - In Progress (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; open questions ruled under the owner's delegation in RULINGS.md: the verdict never unlocks alone, the guard must also verify a recovery bundle; local delete only; slice 1 ready to build)
+
+- [00621: actions qa ci advisory and workflow lint on edit](00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - In Progress (peer request, owner direction relayed: advise adopting an external workflow linter and run it on workflow edits; design ruled under the owner's delegation in DESIGN.md; the linter's documentation and release were read but it has not been run, so the route fails open; slice 1 ready to build)
+
+- [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
+
+- [00614: secret guard resolves links against hook cwd](00614-secret-guard-resolves-links-against-hook-cwd/PLAN.md) - In Progress (found by the 00613 probe: a relative Bash token such as `cat link` is resolved against the daemon's cwd `/`, so a link to a protected file passes; also a directory-link grep and a glob under a directory link; fix test-first and fail closed)
+
+- [00613: worktree link secret verb](00613-worktree-link-secret-verb/PLAN.md) - In Progress (peer report: the secret guard denies a relative symlink to a protected file made inside a worktree, which a peer workflow needs; design questions settled by delegated ruling: no agent-invocable verb, config seeding in link mode plus a human-run step, copy mode refused for a protected source; Phase 2 tightening ready to build, advising the link gated on Plans 00614 and 00623)
 
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
@@ -20,7 +34,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
-- [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - In Progress (DESIGN.md draft written, awaiting client-seat review; owner request via a client team: redesign the whole branch lifecycle (birth, finish, proof of merge, delete, park, owner) from nine failure classes seen in multi-agent client use, plus letting a client follow a daemon branch tip with a one-step return to the last tag; design first, no guard change ships before review)
+- [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - In Progress (unblocked by delegated ruling in DESIGN §7; open: Task 3.8 surviving-content remote delete, Task 4.6 stacks count as one stream, Task 5.1 fixture proof of the branch tip channel; owner request via a client team: redesign the whole branch lifecycle from nine failure classes seen in multi-agent client use, plus a branch tip channel for clients)
 
 ### Next (ordered; work top to bottom)
 
@@ -194,6 +208,30 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00626: remote delete proof cherry route and remote default ref](Completed/00626-remote-delete-proof-cherry-route-and-remote-default-ref/PLAN.md) - Complete at merge `201a17fae` + the archiving commit (client report: interleaved cherry-picks now prove a branch merged, and a remote delete is proven against the remote default's live tip only, never the local default or a cached positive; security review passed; release note 003; follow-up N674)
+
+- [00624: branch park marker unsigned and reads unmerged](Completed/00624-branch-park-marker-unsigned-and-reads-unmerged/PLAN.md) - Complete at the archiving commit (GitHub #210 and #211, closed: both already fixed in v3.75.0, #210 by `d2e73d0e9` and #211 by Plans 00594 and 00622, confirmed by Phase 1 repro; the ref-based park design is not adopted and not built, kept as a record; docs only, no release note)
+
+- [00622: remote delete proof ignores empty and park marker commits](Completed/00622-remote-delete-proof-ignores-empty-and-park-marker-commits/PLAN.md) - Complete at merge `eba1de61f` + the archiving commit (empty commits over merged work no longer block a branch delete; reviews rounds 1 and 2 fixed, round 3 ledgered N665, N666; release note 002)
+
+- [00619: branch pool graduated warnings](Completed/00619-branch-pool-graduated-warnings/PLAN.md) - Complete at merge `1dc7ca3e0` + the archiving commit (each branch pool warns at 60, 80 and 90 percent of the point where creation is refused; the 90 percent warning shows on every tool call and prompt until usage drops; session start and the stop report share the ladder; the block and every guard decision are unchanged; release note 001)
+
+- [00618: release 3 75 0 code review findings](Completed/00618-release-3-75-0-code-review-findings/PLAN.md) - Complete at tag `v3.75.0` (PR 209, `1e194b693`) + the archiving commit (the Step 10 review's 5 blocking findings and the re-run's S-1 fixed test-first; 17 non-blocking defects and 12 nits fixed; owner decisions D-1/D-2 yes, D-3 no, D-4 option A; release notes 089 to 095 shipped in v3.75.0; residuals ledgered N630 to N644 and N650 to N659, audit in CLOSEOUT-AUDIT.md)
+
+- [00617: park commit keeps merged branch deletable](Completed/00617-park-commit-keeps-merged-branch-deletable/PLAN.md) - Complete at merge `01a13a600` (CI 43991958722 green) + the archiving commit (a branch left with only empty park commits is classified merged by one shared `branch_park.is_park_residue`; release note 091; peer-team notice left open)
+
+- [00612: secret guard dir glob false allows](Completed/00612-secret-guard-dir-glob-false-allows/PLAN.md) - Complete at merge `245b6d98f` + `fbbf9ca5f` (main CI 43862059384 green) + the archiving commit (POSIX bracket classes, symlinked directories and bare globs no longer let a recursive reader past `secret_file_guard`; release note 088)
+
+- [00609: tracked hook wrappers machine independent](Completed/00609-tracked-hook-wrappers-machine-independent/PLAN.md) - Complete at merge `8ea7c03c6` (CI run 43822592185 green) + the archiving commit (generated wrappers resolve the checkout root at run time and carry no machine-specific path; the daemon publishes an overflowing socket location in a file the wrapper trusts only for its own checkout; an older `init.sh` PID-path boundary defect fixed in the same merge; release note 085)
+
+- [00610: secret guard trailing slash glob](Completed/00610-secret-guard-trailing-slash-glob/PLAN.md) - Complete at merge `31a2cce4f` (main CI 43816232915 green) + the archiving commit (GitHub #204: a glob ending in `/` is judged as the directories it expands to, so `ls -d */` is allowed and `grep -r x */` still denied; release note 084; follow-ups in PLAN.md)
+
+- [00608: provision sh provisions the relay binary](Completed/00608-provision-sh-provisions-the-relay-binary/PLAN.md) - Complete at merge `71bc70cfd` (main CI run 43780371862 green) + the archiving commit (a foreground `provision.sh` provisions the relay binary through `relay_deploy --check`, a background run reports it; review fixes `a3707d629`; release note 078; follow-ups: repair at daemon startup, log the silent branch, repair state in `status`)
+
+- [00607: unblock the Dependabot-held packages](Completed/00607-dependabot-held-packages-unblock/PLAN.md) - Complete at `3076e216c` + fixes `8d82b3069` (anyio declared) and `55d78799c` (coverage held at 7.13.5) (main CI run 43766285856 green) + the archiving commit (open Dependabot alerts 19 to 0: the unused `safety` is dropped so `filelock` reaches 4.2.10; semgrep runs from a pinned `uv tool run` environment, so `mcp` and OpenTelemetry leave `uv.lock`; dev-only, no release note)
+
+- [00606: Plan 00605 follow-up daemon fixes](Completed/00606-plan-00605-follow-up-daemon-fixes/PLAN.md) - Complete at merge `0fb70b7c6` (main CI run 43752399610 green) + the archiving commit (`work-queue done` drops the issue it finished from the workable cache; acceptance socket discovery uses the daemon's resolver; the branch-creation guard sees `scripts/setup_worktree.sh` through wrappers; release note 077)
+
 - [00605: branch sweep classifies no merge base branches](Completed/00605-branch-sweep-classifies-no-merge-base-branches/PLAN.md) - Complete at merge `3b39560f9` (main CI run 43620790845 green on attempt 2) + the archiving commit (GitHub #203, closed: a no-merge-base branch is measured as unmerged work, never patch-equivalent; reasons name the real cause; `branch-sweep --budget-ms`; release note 073)
 
 - [00599: claude md ownership statement and hint drops](Completed/00599-claude-md-ownership-statement-and-hint-drops/PLAN.md) - Complete at merges `b0bff26d8` + `7e534918e` (review fixes) + the archiving commit (a `claude_md.ownership` toggle, on by default, leads the injected CLAUDE.md block with the ownership sentence and drives once-per-session hint drops; `off` silences all; release note 055 and config-changes manifest v3.75.0.yaml)
@@ -230,35 +268,13 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00579: copy seeded files and worktree removal](Completed/00579-copy-seeded-files-and-worktree-removal/PLAN.md) - Complete at merge `a26be56b0` (main CI run 42762876632 green) + the archiving commit (#164, closed: a copy-mode seed byte-identical to its source in the main checkout no longer blocks a worktree removal; a diverged, missing or worktree-resolving source still blocks and is named; bounded comparison; release note 030)
 
-- [00577: forwarder stubs shellcheck clean](Completed/00577-forwarder-stubs-shellcheck-clean/PLAN.md) - Complete at `43250b5fb` (CI run 42627973690 success) + the archiving commit (GitHub #163, closed: generated hook stubs export the relay-unused marker the sourced init.sh reads, so `shellcheck --severity=warning` is clean with no suppression; a test shellchecks the stub generated for every event; release note 015)
-
-- [00576: hotfix release fast path](Completed/00576-hotfix-release-fast-path/PLAN.md) - Complete at merge `8bfcad71f` (PR #190) + the archiving commit (owner request after v3.73.1: `/release hotfix` runs the RELEASING.md "Hotfix fast path" and the state file and `release_blocker` name the mode; advise-severity plan/docs QA findings never fail CI; a test pins the release gate's cancel-in-progress concurrency, which the journal shows did cancel the superseded v3.73.1 run; release note 013)
-
-- [00572: ci wall clock sharding arm and hygiene](Completed/00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - Complete at merge `f2d532f89` (PR #187) + the archiving commit (owner request: `qa.yml` reuses release-gate's shard matrix, so the nightly fell from 116 to 28.5 min; every `main` push gets a verdict; native and released aarch64 relay and hooks-screen, a non-blocking arm64 test leg, SHA-pinned actions; release notes 006, 012)
-
-- [00571: branch pools parked merged caps](Completed/00571-branch-pools-parked-merged-caps/PLAN.md) - Complete at merge `9314a6e4c` (PR #186) + `7a917cff9` (green CI) + the archiving commit (GitHub #165, closed: open, parked and merged branches are three pools, each with its own cap, max age and deny rule; `branch-keep`, `branches.bot_owned`, safe `branch-sweep --clean --remote`; release note 007)
-
-- [00573: admin seat issue assignment override](Completed/00573-admin-seat-issue-assignment-override/PLAN.md) - Complete at merge `a2b7f27e9` + the archiving commit (owner ruling: a repository admin seat is never blocked by a non-admin's issue assignment; it gets an advisory, and `issue-validity --claim` performs a recorded takeover; non-admin seats and other admins' claims keep the duplicate-work block; dogfooded live on #155; ships in the release after v3.73.0, release note 004)
-
-- [00570: branch containment remote archive refs](Completed/00570-branch-containment-remote-archive-refs/PLAN.md) - Complete at merge `df4a928e9` (green CI run 42404687976) + the archiving commit (GitHub #166: branch-sweep and delete-branch accept a remote ref outside `refs/remotes`, such as an archive namespace, as proof of containment via one bounded `ls-remote`; the offline wording says only what it checked; release note 004)
-
-- [00569: hooks screen target by host arch](Completed/00569-hooks-screen-target-by-host-arch/PLAN.md) - Complete at merge `ae0af5761` (green CI run 42404687976) + the archiving commit (GitHub #174: the ccy supervisor and `screen/build.sh` choose the hooks-screen musl target triple from the host architecture, x86_64 or aarch64, and the failure note names the architecture; release note 003)
-
-- [00567: lsp coverage extensionless file targets](Completed/00567-lsp-coverage-extensionless-file-targets/PLAN.md) - Complete at merge `6ab6b7bfb` + the archiving commit (GitHub #162: named file targets are judged by their own suffix, an extensionless file counts as unserved, so a grep over extensionless scripts gets the same advisory as a search of their directory; release note 002)
-
-- [00566: nested worktree create root anchoring](Completed/00566-nested-worktree-create-root-anchoring/PLAN.md) - Complete, already delivered (GitHub #161: Plan 00474 N563 `dc45486fa` had anchored `worktree_create` on the main checkout in v3.72.0; this plan adds regression tests only, merged via `82673feec`; no release-bound consequence)
-
-- [00565: gh view comments suggestion hides body](Completed/00565-gh-view-comments-suggestion-hides-body/PLAN.md) - Complete at merge `eed7fd934` + the archiving commit (GitHub #158: `gh_issue_comments` / `gh_pr_comments` suggest `--json title,body,state,comments` instead of `--comments`, which prints only comments without a TTY; release note 001)
-
-- [00563: optimise suggests claudemd excludes](Completed/00563-optimise-suggests-claudemd-excludes/PLAN.md) - Complete at merge `d95c988f1` + `3f5a5dff3` + the archiving commit (owner ruling on Plan 00561 Q1: `/hooks-daemon optimise` lists an unscored `claudeMdExcludes` suggestion for worktree roots under the project that no glob covers; never writes it; release note 001)
-
-- [00562: cross clone plan number allocation](Completed/00562-cross-clone-plan-number-allocation/PLAN.md) - Complete at merge `5289e8fad` + `9b21e9c5c` + the archiving commit (GitHub #154: `mkplan.bash` fetches with a time limit and reads the plan folders on every remote branch before allocating; hooks read already-fetched refs only; release note 033; the not-yet-pushed race is Plan 00564)
-
-  Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
+Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
 
-- None. (00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
+- [00616: secret guard regex token in interpreter code](00616-secret-guard-regex-token-in-interpreter-code/PLAN.md) - Blocked on the owner (#205, N626: should a glob-shaped token in interpreter code, such as the regex `.*?\n`, be judged against the protected-file index? Options A/B/C in PLAN.md)
+
+(00032, 00034 and 00035 were held on an upstream delegate-mode fix; the mode no longer exists, so they are cancelled below.)
 
 ## Cancelled Plans
 
@@ -305,11 +321,11 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Plan Statistics
 
-- **Total Plans Created**: 606 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 627 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 509 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 521 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 74 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 81 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

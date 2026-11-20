@@ -4,6 +4,30 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00577: forwarder stubs shellcheck clean](00577-forwarder-stubs-shellcheck-clean/PLAN.md) - Complete at `43250b5fb` (CI run 42627973690 success) + the archiving commit (GitHub #163, closed: generated hook stubs export the relay-unused marker the sourced init.sh reads, so `shellcheck --severity=warning` is clean with no suppression; a test shellchecks the stub generated for every event; release note 015)
+
+- [00576: hotfix release fast path](00576-hotfix-release-fast-path/PLAN.md) - Complete at merge `8bfcad71f` (PR #190) + the archiving commit (owner request after v3.73.1: `/release hotfix` runs the RELEASING.md "Hotfix fast path" and the state file and `release_blocker` name the mode; advise-severity plan/docs QA findings never fail CI; a test pins the release gate's cancel-in-progress concurrency, which the journal shows did cancel the superseded v3.73.1 run; release note 013)
+
+- [00572: ci wall clock sharding arm and hygiene](00572-ci-wall-clock-sharding-arm-and-hygiene/PLAN.md) - Complete at merge `f2d532f89` (PR #187) + the archiving commit (owner request: `qa.yml` reuses release-gate's shard matrix, so the nightly fell from 116 to 28.5 min; every `main` push gets a verdict; native and released aarch64 relay and hooks-screen, a non-blocking arm64 test leg, SHA-pinned actions; release notes 006, 012)
+
+- [00571: branch pools parked merged caps](00571-branch-pools-parked-merged-caps/PLAN.md) - Complete at merge `9314a6e4c` (PR #186) + `7a917cff9` (green CI) + the archiving commit (GitHub #165, closed: open, parked and merged branches are three pools, each with its own cap, max age and deny rule; `branch-keep`, `branches.bot_owned`, safe `branch-sweep --clean --remote`; release note 007)
+
+- [00573: admin seat issue assignment override](00573-admin-seat-issue-assignment-override/PLAN.md) - Complete at merge `a2b7f27e9` + the archiving commit (owner ruling: a repository admin seat is never blocked by a non-admin's issue assignment; it gets an advisory, and `issue-validity --claim` performs a recorded takeover; non-admin seats and other admins' claims keep the duplicate-work block; dogfooded live on #155; ships in the release after v3.73.0, release note 004)
+
+- [00570: branch containment remote archive refs](00570-branch-containment-remote-archive-refs/PLAN.md) - Complete at merge `df4a928e9` (green CI run 42404687976) + the archiving commit (GitHub #166: branch-sweep and delete-branch accept a remote ref outside `refs/remotes`, such as an archive namespace, as proof of containment via one bounded `ls-remote`; the offline wording says only what it checked; release note 004)
+
+- [00569: hooks screen target by host arch](00569-hooks-screen-target-by-host-arch/PLAN.md) - Complete at merge `ae0af5761` (green CI run 42404687976) + the archiving commit (GitHub #174: the ccy supervisor and `screen/build.sh` choose the hooks-screen musl target triple from the host architecture, x86_64 or aarch64, and the failure note names the architecture; release note 003)
+
+- [00567: lsp coverage extensionless file targets](00567-lsp-coverage-extensionless-file-targets/PLAN.md) - Complete at merge `6ab6b7bfb` + the archiving commit (GitHub #162: named file targets are judged by their own suffix, an extensionless file counts as unserved, so a grep over extensionless scripts gets the same advisory as a search of their directory; release note 002)
+
+- [00566: nested worktree create root anchoring](00566-nested-worktree-create-root-anchoring/PLAN.md) - Complete, already delivered (GitHub #161: Plan 00474 N563 `dc45486fa` had anchored `worktree_create` on the main checkout in v3.72.0; this plan adds regression tests only, merged via `82673feec`; no release-bound consequence)
+
+- [00565: gh view comments suggestion hides body](00565-gh-view-comments-suggestion-hides-body/PLAN.md) - Complete at merge `eed7fd934` + the archiving commit (GitHub #158: `gh_issue_comments` / `gh_pr_comments` suggest `--json title,body,state,comments` instead of `--comments`, which prints only comments without a TTY; release note 001)
+
+- [00562: cross clone plan number allocation](00562-cross-clone-plan-number-allocation/PLAN.md) - Complete at merge `5289e8fad` + `9b21e9c5c` + the archiving commit (GitHub #154: `mkplan.bash` fetches with a time limit and reads the plan folders on every remote branch before allocating; hooks read already-fetched refs only; release note 033; the not-yet-pushed race is Plan 00564)
+
+- [00563: optimise suggests claudemd excludes](00563-optimise-suggests-claudemd-excludes/PLAN.md) - Complete at merge `d95c988f1` + `3f5a5dff3` + the archiving commit (owner ruling on Plan 00561 Q1: `/hooks-daemon optimise` lists an unscored `claudeMdExcludes` suggestion for worktree roots under the project that no glob covers; never writes it; release note 001)
+
 - [00561: worktree sub-agents load the root CLAUDE.md twice](00561-worktree-claudemd-duplicate-load/PLAN.md) - Complete at merge `3d50b7077` + the archiving commit (#156: `claudeMdExcludes` skips the worktree-root `CLAUDE.md` copies, so a worktree agent loads the root file once; a test derives every worktree root from the code; no release-bound consequence; owner question Q1, whether to recommend or install it for clients, stays open)
 
 - [00558: branch WIP limit and hygiene](00558-git-branch-hygiene-sweep/PLAN.md) - Complete at the Plan 00558 merges + `0c75cfa0b`, `42502078a`, `bce4f829c` + the archiving commit (GitHub #152: a blocking WIP cap of 10 over every branch, dormancy limits, park and lossless delete, a Stop/SubagentStop guard against abandoned branches, lossless cleanup after merge and worktree removal; release notes 023-032)

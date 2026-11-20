@@ -76,6 +76,29 @@ class TestStopHandler:
     def test_clean_repo_allows(self, handler: BranchStopGuardHandler) -> None:
         assert handler.handle(_payload()).decision == Decision.ALLOW
 
+    def test_judges_the_project_root_whatever_directory_the_payload_names(
+        self, handler: BranchStopGuardHandler, repo: Path, tmp_path: Path
+    ) -> None:
+        """Plan 00619 Task 2.1: the stop guard judges the session's own repository.
+
+        The creation guard follows ``cd`` and ``-C`` into the clone a command runs in,
+        because it judges that command. The stop guard judges the branches THIS
+        session touched, recorded in the project's repository, so a payload whose
+        ``cwd`` is another clone neither adds that clone's branches nor hides the
+        project's own. The two differ by construction, and this pins the choice.
+        """
+        other = tmp_path / "other"
+        _git(tmp_path, "clone", "-q", str(tmp_path / "remote.git"), str(other))
+        _git(other, "config", "user.email", "t@example.com")
+        _git(other, "config", "user.name", "t")
+        _leave_unpushed(other, "elsewhere")
+        assert handler.handle({**_payload(), "cwd": str(other)}).decision == Decision.ALLOW
+        _leave_unpushed(repo)
+        result = handler.handle({**_payload(), "cwd": str(other)})
+        assert result.decision == Decision.DENY
+        assert "feat-a" in (result.reason or "")
+        assert "elsewhere" not in (result.reason or "")
+
     def test_unpushed_branch_denies_under_rule(
         self, handler: BranchStopGuardHandler, repo: Path
     ) -> None:

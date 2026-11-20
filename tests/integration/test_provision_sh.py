@@ -75,6 +75,12 @@ GATE_FILES = (
     "src/claude_code_hooks_daemon/utils/deliberate_swallow.py",
 )
 
+#: What a release carries for the relay step (Plan 00608), sourced by provision.sh.
+RELAY_STEP_FILES = (
+    "scripts/install/relay_provision.sh",
+    "scripts/install/hooks_deploy.sh",
+)
+
 HEADER = f"> Generated on 2026-09-01 (v{CLONE_VERSION}) by the hooks daemon\n"
 
 SETTINGS_WITH_HOOKS = (
@@ -117,6 +123,10 @@ class Provisioning:
         source = tmp_path / "origin-src"
         shutil.copytree(self.box.clone, source)
         shutil.rmtree(self.box.clone)
+        for rel in RELAY_STEP_FILES:
+            dest = source / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO_ROOT / rel, dest)
         (source / ".gitignore").write_text("untracked/\n__pycache__/\n")
         _git(source, "init", "-q", "-b", "main")
         _git(source, "add", "-A")
@@ -1465,3 +1475,294 @@ class TestTheGateConstantsAreUpgradesOwn:
 
         assert upgrade is not None and provision is not None
         assert provision.group(1) == upgrade.group(1)
+
+
+BANNER = "WARNING: RELAY BINARY NOT PROVISIONED (stand-in banner)"
+RELAY_FAILED = {"SANDBOX_RELAY_EXIT": "3", "SANDBOX_RELAY_OUTPUT": BANNER}
+RELAY_MISSING = {"SANDBOX_RELAY_CHECK_EXIT": "3", "SANDBOX_RELAY_CHECK_OUTPUT": "relay is missing"}
+
+
+def _provisioning_calls(p: Provisioning) -> list[str]:
+    """The relay_deploy calls that provision (everything but ``--check``)."""
+    return [c for c in p.box.relay_calls() if c.startswith("relay_deploy") and "--check" not in c]
+
+
+def _check_calls(p: Provisioning) -> list[str]:
+    return [c for c in p.box.relay_calls() if c.startswith("relay_deploy") and "--check" in c]
+
+
+def _regenerations(p: Provisioning) -> list[str]:
+    return [c for c in p.box.relay_calls() if c.startswith("forwarder_generator")]
+
+
+class TestAFreshProvisionProvisionsTheRelay:
+    """Plan 00608: the relay binary is put in place as install and upgrade do."""
+
+    def test_runs_the_install_relay_step_after_the_venv_is_built(self, fresh: Provisioning) -> None:
+        result = fresh.provision()
+
+        assert result.returncode == 0, _out(result)
+        calls = _provisioning_calls(fresh)
+        assert len(calls) == 1, fresh.box.relay_calls()
+        assert f"--version-tag v{CLONE_VERSION}" in calls[0]
+        assert f"--project-root {fresh.project}" in calls[0]
+        assert "uvcalls=0" not in calls[0], "the relay step runs after the venv build"
+        assert len(_regenerations(fresh)) == 1, "the forwarders are regenerated as install does"
+        assert "PROVISIONED" in _out(result)
+
+    def test_a_failed_relay_step_warns_with_the_banner_and_still_provisions(
+        self, fresh: Provisioning
+    ) -> None:
+        result = fresh.provision(extra_env=RELAY_FAILED)
+
+        assert result.returncode == 0, _out(result)
+        assert BANNER in _out(result)
+        assert "PROVISIONED" in _out(result)
+        assert "transport on" in _out(result)
+        assert fresh.starts() == 1, "the daemon still starts"
+
+    def test_the_relay_step_failing_unexpectedly_does_not_abort(self, fresh: Provisioning) -> None:
+        result = fresh.provision(
+            extra_env={"SANDBOX_RELAY_EXIT": "7", "SANDBOX_RELAY_OUTPUT": "boom"}
+        )
+
+        assert result.returncode == 0, _out(result)
+        assert "boom" in _out(result)
+        assert "PROVISIONED" in _out(result)
+
+    def test_a_failing_forwarder_regeneration_does_not_abort(self, fresh: Provisioning) -> None:
+        result = fresh.provision(extra_env={"SANDBOX_REGEN_EXIT": "1"})
+
+        assert result.returncode == 0, _out(result)
+        assert "PROVISIONED" in _out(result)
+
+    def test_a_clean_relay_step_prints_no_warning(self, fresh: Provisioning) -> None:
+        result = fresh.provision()
+
+        assert "NOT provisioned" not in _out(result)
+        assert "NOT PROVISIONED" not in _out(result)
+        assert fresh.tracked_changes() == ""
+
+    def test_regenerated_tracked_forwarders_are_reported_not_denied(
+        self, fresh: Provisioning
+    ) -> None:
+        hook = fresh.project / ".claude" / "hooks" / "pre-tool-use"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("#!/bin/bash\n")
+        # Executable as committed, or init.sh's exec-bit fixer dirties it on its own.
+        hook.chmod(0o755)
+        _git(fresh.project, "add", "-A")
+        _git(fresh.project, "commit", "-q", "-m", "a tracked forwarder")
+
+        result = fresh.provision(extra_env={"SANDBOX_REGEN_APPEND": str(hook)})
+
+        assert result.returncode == 0, _out(result)
+        assert ".claude/hooks" in _out(result)
+        assert "No tracked file was changed" not in _out(result)
+
+
+class TestAnExistingCloneProvisionsAMissingRelay:
+    """Plan 00608: the already-at-version path fixes a missing or defective binary."""
+
+    def test_a_usable_binary_is_left_alone(self, fresh: Provisioning) -> None:
+        assert fresh.provision().returncode == 0
+        before = len(_provisioning_calls(fresh))
+
+        result = fresh.provision()
+
+        assert result.returncode == 0, _out(result)
+        assert "nothing to do" in _out(result)
+        assert len(_check_calls(fresh)) == 1
+        assert len(_provisioning_calls(fresh)) == before, "nothing is built or downloaded"
+
+    def test_a_missing_binary_is_provisioned(self, fresh: Provisioning) -> None:
+        assert fresh.provision().returncode == 0
+        before = len(_provisioning_calls(fresh))
+
+        result = fresh.provision(extra_env=RELAY_MISSING)
+
+        assert result.returncode == 0, _out(result)
+        assert len(_provisioning_calls(fresh)) == before + 1
+
+    def test_a_failure_there_warns_and_still_succeeds(self, fresh: Provisioning) -> None:
+        assert fresh.provision().returncode == 0
+
+        result = fresh.provision(extra_env={**RELAY_MISSING, **RELAY_FAILED})
+
+        assert result.returncode == 0, _out(result)
+        assert BANNER in _out(result)
+        assert "transport on" in _out(result)
+
+    def test_a_clone_whose_cli_has_no_check_mode_is_provisioned(self, fresh: Provisioning) -> None:
+        assert fresh.provision().returncode == 0
+        before = len(_provisioning_calls(fresh))
+
+        result = fresh.provision(extra_env={"SANDBOX_RELAY_CHECK_EXIT": "2"})
+
+        assert result.returncode == 0, _out(result)
+        assert len(_provisioning_calls(fresh)) == before + 1
+
+    def test_a_clone_without_the_helper_skips_the_step_with_a_note(
+        self, fresh: Provisioning
+    ) -> None:
+        assert fresh.provision().returncode == 0
+        (fresh.clone / "scripts" / "install" / "relay_provision.sh").unlink()
+        before = len(_provisioning_calls(fresh))
+
+        result = fresh.provision(extra_env=RELAY_MISSING)
+
+        assert result.returncode == 0, _out(result)
+        assert "relay_provision.sh" in _out(result)
+        assert "transport on" in _out(result)
+        assert len(_provisioning_calls(fresh)) == before
+
+    def test_a_stale_venv_is_rebuilt_before_the_relay_step(self, fresh: Provisioning) -> None:
+        assert fresh.provision().returncode == 0
+        _make_venv_stale(fresh)
+        builds = len(fresh.box.uv_calls())
+        before = len(_provisioning_calls(fresh))
+
+        result = fresh.provision(extra_env=RELAY_MISSING)
+
+        assert result.returncode == 0, _out(result)
+        assert len(fresh.box.uv_calls()) > builds
+        calls = _provisioning_calls(fresh)
+        assert len(calls) == before + 1
+        assert f"uvcalls={len(fresh.box.uv_calls())} " in calls[-1], "after the rebuild"
+
+    def test_a_background_run_reports_a_missing_relay_and_builds_nothing(
+        self, fresh: Provisioning
+    ) -> None:
+        assert fresh.provision().returncode == 0
+        before = len(_provisioning_calls(fresh))
+        builds = len(fresh.box.uv_calls())
+
+        result = fresh.provision(args=BACKGROUND, extra_env=RELAY_MISSING)
+
+        assert result.returncode == 0, _out(result)
+        assert "transport on" in _out(result)
+        assert "relay is missing" in _out(result)
+        assert "A background run does not build or download it" in _out(result)
+        assert len(_provisioning_calls(fresh)) == before
+        assert len(fresh.box.uv_calls()) == builds
+
+    def test_a_background_run_with_a_usable_relay_says_nothing_of_it(
+        self, fresh: Provisioning
+    ) -> None:
+        assert fresh.provision().returncode == 0
+
+        result = fresh.provision(args=BACKGROUND)
+
+        assert result.returncode == 0, _out(result)
+        assert "transport on" not in _out(result)
+
+
+class TestTheRelayStepReportsTruthfully:
+    """Plan 00608 review: the closing lines say what the run did, and why it failed."""
+
+    def test_a_forwarder_already_modified_and_rewritten_is_reported(
+        self, fresh: Provisioning
+    ) -> None:
+        hook = fresh.project / ".claude" / "hooks" / "pre-tool-use"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("#!/bin/bash\n")
+        hook.chmod(0o755)
+        _git(fresh.project, "add", "-A")
+        _git(fresh.project, "commit", "-q", "-m", "a tracked forwarder")
+        hook.write_text("#!/bin/bash\n# edited by hand\n")
+
+        result = fresh.provision(extra_env={"SANDBOX_REGEN_APPEND": str(hook)})
+
+        assert result.returncode == 0, _out(result)
+        assert "regenerated tracked forwarders" in _out(result)
+        assert "No tracked file was changed" not in _out(result)
+
+    def test_a_crashing_check_is_a_failure_and_provisions_nothing(
+        self, fresh: Provisioning
+    ) -> None:
+        assert fresh.provision().returncode == 0
+        before = len(_provisioning_calls(fresh))
+
+        result = fresh.provision(
+            extra_env={
+                "SANDBOX_RELAY_CHECK_EXIT": "1",
+                "SANDBOX_RELAY_CHECK_STDERR": "Traceback boom",
+            }
+        )
+
+        assert result.returncode == 0, _out(result)
+        assert len(_provisioning_calls(fresh)) == before
+        assert "relay check failed" in _out(result)
+        assert "Traceback boom" in _out(result)
+        assert "NOT provisioned" in _out(result)
+
+    def test_an_old_cli_usage_error_is_hidden(self, fresh: Provisioning) -> None:
+        assert fresh.provision().returncode == 0
+        before = len(_provisioning_calls(fresh))
+
+        result = fresh.provision(
+            extra_env={
+                "SANDBOX_RELAY_CHECK_EXIT": "2",
+                "SANDBOX_RELAY_CHECK_STDERR": "usage: argparse noise",
+            }
+        )
+
+        assert result.returncode == 0, _out(result)
+        assert len(_provisioning_calls(fresh)) == before + 1
+        assert "argparse noise" not in _out(result)
+
+    def test_a_helper_that_fails_to_source_prints_a_banner_naming_it(
+        self, fresh: Provisioning
+    ) -> None:
+        assert fresh.provision().returncode == 0
+        helper = fresh.clone / "scripts" / "install" / "relay_provision.sh"
+        helper.write_text("return 1\n")
+
+        result = fresh.provision(extra_env=RELAY_MISSING)
+
+        assert result.returncode == 0, _out(result)
+        assert "could not source" in _out(result)
+        assert "relay_provision.sh" in _out(result)
+        assert "NOT provisioned" in _out(result)
+
+
+class TestASyncProvisionsTheRelay:
+    def test_a_foreground_sync_runs_the_relay_step_for_the_new_tag(
+        self, fresh: Provisioning
+    ) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        before = len(_provisioning_calls(fresh))
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision()
+
+        assert result.returncode == 0, _out(result)
+        calls = _provisioning_calls(fresh)
+        assert len(calls) == before + 1
+        assert f"--version-tag v{MAIN_VERSION}" in calls[-1]
+        assert "SYNCED" in _out(result)
+
+    def test_a_failed_relay_step_does_not_undo_the_sync(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision(extra_env=RELAY_FAILED)
+
+        assert result.returncode == 0, _out(result)
+        assert BANNER in _out(result)
+        assert fresh.clone_version() == MAIN_VERSION
+
+    def test_a_background_sync_never_builds_the_relay(self, fresh: Provisioning) -> None:
+        _provisioned_at(fresh, CLONE_VERSION)
+        before = len(_provisioning_calls(fresh))
+        fresh.expect(MAIN_VERSION)
+
+        result = fresh.provision(args=BACKGROUND, extra_env=RELAY_MISSING)
+
+        assert result.returncode == 0, _out(result)
+        assert len(_provisioning_calls(fresh)) == before
+        state = _outcome(fresh, MAIN_VERSION)
+        log = (_sync_dir(fresh) / f"v{MAIN_VERSION}.log").read_text()
+        assert state["status"] == "synced", log
+        assert "A background run does not build or download it" in log
+        assert len(_provisioning_calls(fresh)) == before

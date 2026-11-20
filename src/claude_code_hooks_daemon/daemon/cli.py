@@ -32,6 +32,7 @@ import fcntl
 import importlib.util
 import json
 import logging
+import math
 import os
 import platform
 import shutil
@@ -64,6 +65,7 @@ from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler_bases import StatusLineSegmentHandler
 from claude_code_hooks_daemon.core.project_context import GitContextError, ProjectContext
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
+from claude_code_hooks_daemon.daemon import paths as daemon_paths
 from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
 
 # The daemon's untracked directory for the current install mode: the ONE rule,
@@ -161,8 +163,10 @@ from claude_code_hooks_daemon.install.forwarder_generator import REPAIR_INSTALL_
 from claude_code_hooks_daemon.install.install_stamp import read_install_stamp
 from claude_code_hooks_daemon.install.relay_deploy import (
     missing_configured_relay_binary,
+    relay_binary_defect,
     relay_binary_missing_warning,
 )
+from claude_code_hooks_daemon.install.relay_repair import relay_repair_status_lines
 from claude_code_hooks_daemon.install.release_notes import load_release_notes_between
 from claude_code_hooks_daemon.install.repair_install import repair_install, settings_path
 from claude_code_hooks_daemon.issue_report.build import build_report
@@ -536,7 +540,7 @@ def _resolve_pid_path(args: argparse.Namespace, project_path: Path) -> Path:
         Resolved PID file path
     """
     if hasattr(args, "pid_file") and args.pid_file is not None:
-        return Path(args.pid_file)
+        return daemon_paths.fit_pid_path(project_path, args.pid_file)
     return get_pid_path(project_path)
 
 
@@ -553,7 +557,7 @@ def _resolve_socket_path(args: argparse.Namespace, project_path: Path) -> Path:
         Resolved socket path
     """
     if hasattr(args, "socket") and args.socket is not None:
-        return Path(args.socket)
+        return daemon_paths.fit_socket_path(project_path, args.socket)
     return get_socket_path(project_path)
 
 
@@ -740,8 +744,14 @@ def cmd_start(args: argparse.Namespace) -> int:
         0 if daemon started successfully, 1 otherwise
     """
     project_path = get_project_path(getattr(args, "project_root", None))
-    socket_path = _resolve_socket_path(args, project_path)
-    pid_path = _resolve_pid_path(args, project_path)
+    # Resolved before the fork: the daemon child's stderr is /dev/null, so a
+    # path with no safe place to live is reported here, where the hook reads it.
+    try:
+        socket_path = _resolve_socket_path(args, project_path)
+        pid_path = _resolve_pid_path(args, project_path)
+    except daemon_paths.UnsafeRuntimeDirError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     # Load config for enforcement check
     config_path = project_path / ".claude" / "hooks-daemon.yaml"
@@ -985,55 +995,51 @@ def _start_under_launch_lock(
     daemon_config = config.daemon
 
     # Ensure paths are set (use getters if not set)
-    if daemon_config.socket_path is None:
-        daemon_config.socket_path = str(daemon_config.get_socket_path(project_path))
-    if daemon_config.pid_file_path is None:
-        daemon_config.pid_file_path = str(daemon_config.get_pid_file_path(project_path))
+    # Through the getters even when configured: they fit a configured path to
+    # the AF_UNIX limit as every other caller's is (Plan 00628).
+    daemon_socket = str(daemon_config.get_socket_path(project_path))
+    daemon_config.socket_path = daemon_socket
+    daemon_config.pid_file_path = str(daemon_config.get_pid_file_path(project_path))
 
-    daemon = HooksDaemon(
-        daemon_config,
-        controller,
-        start_lock_waiting=reporter.start_lock_waiting,
-        serving=launch.release,
-        deferred_startup=controller.take_deferred_startup(),
-    )
-
-    # Write socket discovery file so bash hook forwarders (init.sh)
-    # can find the daemon when the socket path differs from the default
-    # (e.g., AF_UNIX path length fallback to XDG_RUNTIME_DIR)
+    # The socket discovery file tells bash hook forwarders (init.sh) where the
+    # daemon listens when that differs from the default (the AF_UNIX length
+    # fallback). It is SHARED by every start of this project's daemon, so it is
+    # written only once THIS process has bound its socket (the `serving`
+    # callback), and removed only by the process that wrote it (Plan 00628;
+    # Plan 00127 Finding 2). A start whose bind fails, or that loses the reuse
+    # race, never touches a live incumbent's file.
     from claude_code_hooks_daemon.daemon.paths import (
         cleanup_socket_discovery_file,
         write_socket_discovery_file,
     )
 
-    write_socket_discovery_file(project_path, daemon_config.socket_path)
+    published: list[bool] = []
 
-    # Plan 00127 (Finding 2): the socket-discovery file is SHARED between the
-    # incumbent and any losing same-root start (deterministic per untracked dir
-    # + hostname). It must be deleted ONLY by the process that actually OWNED
-    # the daemon, never by a reuse-race loser — on long-path (fallback-socket)
-    # setups init.sh relies on this file to find the live incumbent's socket,
-    # and the incumbent only writes it once at its own startup. Deleting it in a
-    # blanket `finally` would silently break the incumbent's hook forwarding.
-    i_owned_the_daemon = False
+    def _serving() -> None:
+        write_socket_discovery_file(project_path, daemon_socket)
+        published.append(True)
+        launch.release()
+
+    daemon = HooksDaemon(
+        daemon_config,
+        controller,
+        start_lock_waiting=reporter.start_lock_waiting,
+        serving=_serving,
+        deferred_startup=controller.take_deferred_startup(),
+    )
+
     try:
         asyncio.run(daemon.start())
-        # start() returned normally => this process owned and then shut the
-        # daemon down cleanly. Its discovery file is now stale and ours to clear.
-        i_owned_the_daemon = True
     except DaemonAlreadyRunningError as e:
         # A live incumbent won the race. This is a benign REUSE, NOT a crash —
         # the winning daemon already wrote the PID file the parent polls for, so
-        # overall start is a clean exit 0 with exactly one daemon. We did NOT own
-        # the daemon, so we must NOT delete the incumbent's discovery file.
+        # overall start is a clean exit 0 with exactly one daemon.
         print(
             f"Daemon already running on {daemon_config.socket_path}; reusing existing instance: {e}"
         )
         sys.exit(0)
     except Exception as e:
-        # A genuine crash AFTER we bound and published our own discovery file:
-        # we owned it, so clear it on the way out.
-        i_owned_the_daemon = True
+        # A crash, before the bind (nothing published) or after it.
         print(f"ERROR: Daemon crashed: {e}", file=sys.stderr)
         import traceback
 
@@ -1041,7 +1047,7 @@ def _start_under_launch_lock(
         sys.exit(1)
     finally:
         launch.release()
-        if i_owned_the_daemon:
+        if published:
             cleanup_socket_discovery_file(project_path)
 
     sys.exit(0)
@@ -1614,6 +1620,18 @@ def _print_transport_status_warnings(project_path: Path, transport: _StatusTrans
     if binary is not None:
         fix = daemon_cli_command("transport", relay_fix_subcommand())
         print(f"WARNING: {relay_binary_missing_warning(binary, fix)}")
+        from claude_code_hooks_daemon.version import __version__
+
+        defect = relay_binary_defect(binary)
+        # None means the binary was repaired between the two checks: no repair to show.
+        if defect is not None:
+            for line in relay_repair_status_lines(
+                binary,
+                defect,
+                untracked_dir=_daemon_untracked_dir(project_path),
+                version=__version__,
+            ):
+                print(line)
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -2334,6 +2352,21 @@ def _positive_int(text: str) -> int:
     return value
 
 
+def _positive_seconds(text: str) -> float:
+    """An argparse type: a finite number of seconds above zero.
+
+    Zero makes a watch loop call the daemon back to back, and a negative value
+    crashes ``time.sleep`` after the first line (Plan 00618 N-16).
+    """
+    try:
+        value = float(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"expected a number of seconds, got {text!r}") from error
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError(f"expected a finite number above 0, got {text!r}")
+    return value
+
+
 def _print_mode_history(result: dict[str, Any]) -> None:
     """Human-readable ``mode-history`` output.
 
@@ -3020,15 +3053,16 @@ def _repair_venv_locked(daemon_dir: Path, venv_path: Path, env: dict[str, str]) 
     record every build path writes, and starts the fingerprint's build log the
     bash drivers also write.
     """
-    log = build_log_path(daemon_dir, _fingerprint_of(venv_path))
+    fingerprint = _fingerprint_of(venv_path)
+    log = build_log_path(daemon_dir, fingerprint)
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(f"venv repair started in {daemon_dir}\n")
     try:
         rc = _sync_and_verify_venv(daemon_dir, venv_path, env, log)
     except Exception:
-        write_build_result(daemon_dir, "failed", 1, log)
+        write_build_result(daemon_dir, fingerprint, "failed", 1, log)
         raise
-    write_build_result(daemon_dir, "succeeded" if rc == 0 else "failed", rc, log)
+    write_build_result(daemon_dir, fingerprint, "succeeded" if rc == 0 else "failed", rc, log)
     return rc
 
 
@@ -11862,7 +11896,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_session_state.add_argument(
         "--interval",
-        type=float,
+        type=_positive_seconds,
         default=2.0,
         help="Seconds between checks for --watch (default 2)",
     )
@@ -13490,6 +13524,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser_delete_branch.set_defaults(func=cmd_delete_branch)
 
     # branch-sweep command (Plan 00558 Task 2.2)
+    from claude_code_hooks_daemon.core.branch_cleanup import BULK_BATCH_SIZE
+    from claude_code_hooks_daemon.core.branch_creation import EXIT_CREATION_REFUSED
     from claude_code_hooks_daemon.core.branch_sweep import JSON_RECORD_KEYS
 
     parser_branch_sweep = subparsers.add_parser(
@@ -13527,7 +13563,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser_branch_sweep.add_argument(
         "--apply",
         action="store_true",
-        help="With --clean: delete, in batches of 50, printing a restore line per branch "
+        help=f"With --clean: delete, in batches of {BULK_BATCH_SIZE}, printing a restore line per branch "
         "and making one remote push per batch, removing a linked worktree "
         "only when it holds nothing outside branches.cleanup_after_merge.regenerable. An "
         "interrupted run is resumed by running the same command again",
@@ -13560,8 +13596,9 @@ def build_parser() -> argparse.ArgumentParser:
         "branch-preflight",
         help="List every reason creating a branch is refused right now (open cap, parked, "
         "merged, dormant), each with its fix command; read-only",
-        epilog="Exit 0 when a branch may be created, 4 when a pool refuses it, 1 when this "
-        "is not a git repository. The creation deny prints the same report.",
+        epilog=f"Exit 0 when a branch may be created, {EXIT_CREATION_REFUSED} when a pool "
+        "refuses it, 1 when this is not a git repository. The creation deny prints the "
+        "same report.",
     )
     parser_branch_preflight.add_argument(
         "name",

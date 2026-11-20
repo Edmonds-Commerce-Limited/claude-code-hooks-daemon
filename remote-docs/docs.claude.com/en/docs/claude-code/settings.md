@@ -1,10 +1,10 @@
 ---
 source_url: https://docs.claude.com/en/docs/claude-code/settings
-fetched_at: '2026-11-10T16:35:26.945558+00:00'
+fetched_at: '2026-11-16T21:15:55.264991+00:00'
 fidelity: converted
-source_sha256: a990a481f11d432305626bd0c50f64d6ed61a6d8967307d1b7e35701edc6d261
+source_sha256: bc72fdd5dc45fdf7ea3ce5d480628ce1fcb31aa09b6b796316f1db8ac02eb5e9
 licence: unreviewed
-stale_after: '2027-02-08'
+stale_after: '2027-02-14'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -187,7 +187,7 @@ claude --settings '{"model": "claude-opus-5-5"}'
 
 Claude Code watches your settings files and reloads them when they change, so it applies most edits to the running session without a restart, including edits to `permissions`, `hooks`, and credential helpers such as `apiKeyHelper`. Claude Code also loads a settings file you create mid-session if its folder existed when the session started. For the project's `.claude/` folder, it loads the file even when you create the folder in the same session.
 
-The reload covers user, project, local, and managed settings, and Claude Code runs the [`ConfigChange` hook](https://code.claude.com/docs/en/hooks#configchange) for each settings-file change it detects, not for managed settings that arrive from MDM or the claude.ai console. Managed settings that arrive through MDM or from the claude.ai console reach a running session on a schedule rather than on save; the [delivery table](https://code.claude.com/docs/en/managed-settings.md#choose-a-delivery-mechanism) gives it per source.
+The reload covers user, project, local, and managed settings. Claude Code runs the [`ConfigChange` hook](https://code.claude.com/docs/en/hooks#configchange) for direct edits to settings files, not for managed settings that arrive from MDM or the claude.ai console. Managed settings that arrive through MDM or from the claude.ai console reach a running session on a schedule rather than on save; the [delivery table](https://code.claude.com/docs/en/managed-settings.md#choose-a-delivery-mechanism) gives it per source.
 
 Claude Code reads some keys only once, at session start, so an edit to one of them doesn't reach the running session. Admin-side keys that also wait for a restart, such as `requiredMinimumVersion`, are listed under [where and when a policy applies](https://code.claude.com/docs/en/managed-settings.md#where-and-when-a-policy-applies). The ones you're most likely to edit mid-session:
 
@@ -209,7 +209,7 @@ If you mistype JSON or set a key to a value Claude Code doesn't accept, Claude C
 * **Settings Error**: a user, project, or local file has invalid JSON or a value the schema rejects. At the start of an interactive session Claude Code shows a dialog that lets you fix the file with Claude's help, exit, or continue without the broken settings.
 * **Settings Warning**: only individual entries fail, such as a malformed permission rule or an unknown hook event name. Claude Code skips those values and keeps the rest of the file in effect.
 * **Managed settings**: Claude Code keeps enforcing the rest of the file. [Invalid entries in managed settings](https://code.claude.com/docs/en/managed-settings.md#invalid-entries-in-managed-settings) says what it drops and which keys fall back to a stricter value until you fix them. For a managed settings document that isn't valid JSON, see [Managed settings document could not be parsed](https://code.claude.com/docs/en/errors.md#managed-settings-document-could-not-be-parsed).
-* **Configuration error**: [`~/.claude.json`](https://code.claude.com/docs/en/claude-directory#ce-claude-json) can't be parsed. A `claude -p` run exits, and your file is unchanged. See [Configuration error in \~/.claude.json](https://code.claude.com/docs/en/errors.md#configuration-error-in-claude-json) to restore an earlier copy. Claude Code copies the broken file to `~/.claude/backups/.claude.json.corrupted.<timestamp>`, and in an interactive session asks whether to exit and fix it or reset to the default configuration. When the file is blank and there's no backup to restore, Claude Code starts with default settings.
+* **Configuration error**: [`~/.claude.json`](https://code.claude.com/docs/en/claude-directory#ce-claude-json) can't be parsed. A `claude -p` run exits. See [Configuration error in \~/.claude.json](https://code.claude.com/docs/en/errors.md#configuration-error-in-claude-json) to restore an earlier copy. Claude Code copies the broken file to `~/.claude/backups/.claude.json.corrupted.<timestamp>`, and in an interactive session asks whether to exit and fix it or reset to the default configuration. When the file is blank and there's no backup to restore, Claude Code starts with default settings.
 
 After you continue, run `/status` to see the affected files and `claude doctor` for the details of each error.
 

@@ -432,16 +432,14 @@ class TestCleanupAfterMerge:
         assert report.deleted == ()
         assert report.skipped
 
-    def test_the_remote_delete_is_printed_never_run(self, repo: Path, tmp_path: Path) -> None:
+    def test_the_remote_delete_is_pointed_at_never_run(self, repo: Path, tmp_path: Path) -> None:
         bare = tmp_path / "remote.git"
         _git(tmp_path, "init", "--quiet", "--bare", str(bare))
         _git(repo, "remote", "add", "origin", str(bare))
         _merged(repo, "feat")
         _git(repo, "push", "--quiet", "origin", "feat")
         report = cleanup_after_merge(repo, ["feat"], config=_CONFIG, target="main", mode="act")
-        assert f"{daemon_cli_command_for_docs('delete-branch', '--remote-only')} feat" in (
-            report.commands
-        )
+        assert any("origin/feat is for the owner" in c for c in report.commands)
         assert "feat" in _git(bare, "branch")
 
     def test_a_line_merged_into_another_line_is_refused(self, repo: Path) -> None:
@@ -672,6 +670,13 @@ class TestFailuresAndEdges:
         _git(repo, "remote", "add", "origin", str(bare))
         _merged(repo, "feat")
         _git(repo, "push", "--quiet", "origin", "feat")
+        # Merged only into the LOCAL main, which the remote does not have: the remote
+        # copy is the only one there, so no delete line is printed (Plan 00626).
+        _git(repo, "fetch", "--quiet", "origin")
+        advice = branch_cleanup.remote_delete_advice(repo, _CONFIG, "main", "feat")
+        assert advice is not None
+        assert advice.startswith("remote delete of origin/feat is for the owner")
+        _git(repo, "push", "--quiet", "origin", "main")
         report = clean_sweep(repo, _CONFIG, dry_run=False)
         assert f"{daemon_cli_command_for_docs('delete-branch', '--remote-only')} feat" in (
             report.commands
