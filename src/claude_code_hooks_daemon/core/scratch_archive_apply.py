@@ -309,7 +309,9 @@ def _archive_claimed(
             max_inodes=settings.max_inodes,
             max_depth=settings.max_depth,
         )
-    except PackRefused as exc:
+    except (PackRefused, OSError) as exc:
+        # An I/O error mid-pack renames back like a refusal; a partial archive it
+        # leaves has no record, so the store audit reports it and nothing removes by it.
         try:
             back = release(handle, f"pack refused: {exc}")
         except ClaimStuck as stuck:

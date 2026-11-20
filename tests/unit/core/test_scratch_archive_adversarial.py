@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.core import scratch_archive_apply as apply_mod
+from claude_code_hooks_daemon.core import scratch_archive_claim as claim_mod
 from claude_code_hooks_daemon.core import scratch_archive_remove as remove_mod
 from claude_code_hooks_daemon.core.scratch_archive import ArchiveRecord, ArchiveStore
 from claude_code_hooks_daemon.core.scratch_archive_apply import (
@@ -327,6 +329,141 @@ class TestKilledBetweenSteps:
         assert_converged(root, store, tar, "e1", before)
 
 
+class TestOrdinaryErrorsMidStep:
+    """An ``OSError`` (not a kill) inside a step: the run goes on and the entry is whole."""
+
+    def _converges_after(
+        self, root: Path, store: ArchiveStore, tar: TarTool, before: Snapshot
+    ) -> ApplyResult:
+        result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
+        assert_converged(root, store, tar, "e1", before)
+        return result
+
+    def test_the_claims_re_fingerprint_failing(
+        self,
+        root: Path,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        entry(root, "e1")
+        entry(root, "e2")
+        before = snapshot(root / "e1")
+
+        def failing(*args: object, **kwargs: object) -> object:
+            raise OSError(5, "injected I/O error")
+
+        monkeypatch.setattr(claim_mod, "fingerprint_at", failing)
+        rows = [row("e1"), row("e2")]
+        result = apply_sweep(store, FakeFacts(rows).facts(), settings(root, tar))
+        assert outcome_of(result, "e1").outcome != "archived"
+        # The run went on to the next entry rather than stopping with a claim held.
+        assert outcome_of(result, "e2").outcome != "archived"
+        assert not (root / (CLAIM_PREFIX + "e1")).exists()
+        assert snapshot(root / "e1") == before
+        monkeypatch.undo()
+        self._converges_after(root, store, tar, before)
+
+    def test_pack_failing_with_an_os_error(
+        self,
+        root: Path,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        entry(root, "e1")
+        before = snapshot(root / "e1")
+
+        def failing(*args: object, **kwargs: object) -> object:
+            raise OSError(28, "injected: no space left")
+
+        monkeypatch.setattr(apply_mod, "pack", failing)
+        result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
+        assert outcome_of(result, "e1").outcome == "renamed-back"
+        assert snapshot(root / "e1") == before
+        assert store.read_index().records == ()
+        monkeypatch.undo()
+        self._converges_after(root, store, tar, before)
+
+    def test_the_record_append_failing(
+        self,
+        root: Path,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        entry(root, "e1")
+        before = snapshot(root / "e1")
+
+        def failing(record: ArchiveRecord) -> None:
+            raise OSError(28, "injected: no space left")
+
+        monkeypatch.setattr(store, "append", failing)
+        result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
+        assert outcome_of(result, "e1").outcome == "left-claimed"
+        monkeypatch.undo()
+        self._converges_after(root, store, tar, before)
+
+    def test_a_delete_failing_with_an_os_error(
+        self,
+        root: Path,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        entry(root, "e1")
+        before = snapshot(root / "e1")
+        real_delete = remove_mod._delete
+        calls = {"n": 0}
+
+        def failing_rmdir(*args: object, **kwargs: object) -> None:
+            raise OSError(16, "injected: busy")
+
+        real_rmdir = os.rmdir
+        real_unlink = os.unlink
+
+        def flaky_delete(dir_fd: int, name: str, *, directory: bool, inside: bool) -> None:
+            # The third deletion meets an I/O error inside the real _delete.
+            calls["n"] += 1
+            monkeypatch.setattr(os, "rmdir", failing_rmdir if calls["n"] == 3 else real_rmdir)
+            monkeypatch.setattr(os, "unlink", failing_rmdir if calls["n"] == 3 else real_unlink)
+            real_delete(dir_fd, name, directory=directory, inside=inside)
+
+        monkeypatch.setattr(remove_mod, "_delete", flaky_delete)
+        result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
+        assert outcome_of(result, "e1").outcome == "left-claimed"
+        monkeypatch.undo()
+        self._converges_after(root, store, tar, before)
+
+
+class TestLinksAreNeverFollowed:
+    def test_a_disposable_link_entry_loses_only_the_link(
+        self, root: Path, store: ArchiveStore, tar: TarTool, outside: Path
+    ) -> None:
+        (root / "e1").symlink_to(outside, target_is_directory=True)
+        before_outside = deep_snapshot(outside)
+        result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
+        assert outcome_of(result, "e1").outcome == "archived"
+        assert not (root / "e1").is_symlink()
+        assert deep_snapshot(outside) == before_outside
+
+    def test_a_link_deep_inside_is_archived_as_a_link(
+        self, root: Path, store: ArchiveStore, tar: TarTool, outside: Path
+    ) -> None:
+        entry(root, "e1")
+        (root / "e1" / "sub" / "out").symlink_to(outside, target_is_directory=True)
+        (root / "e1" / "outfile").symlink_to(outside / "keep.txt")
+        before = snapshot(root / "e1")
+        before_outside = deep_snapshot(outside)
+        result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
+        assert outcome_of(result, "e1").outcome == "archived"
+        assert deep_snapshot(outside) == before_outside
+        (record,) = records_naming(store, "e1")
+        restore_into(root, store, record.archive_id, tar)
+        assert snapshot(root / "e1") == before
+        assert deep_snapshot(outside) == before_outside
+
+
 class TestSwappedBetweenSteps:
     def test_an_entry_swapped_for_a_symlink_after_its_fingerprint_is_not_followed(
         self, root: Path, store: ArchiveStore, tar: TarTool, outside: Path
@@ -485,6 +622,11 @@ def test_nothing_outside_the_root_and_the_store_is_ever_touched(
         rows.append(row(name, verdict, due=rng.random() < 0.8))
         if verdict in KEPT:
             kept.append(name)
+    # Every seed carries the hard cases: a due, disposable link to outside, and one inside.
+    (root / "forced-out").symlink_to(outside, target_is_directory=True)
+    entry(root, "forced-in")
+    (root / "forced-in" / "out").symlink_to(outside / "keep.txt")
+    rows += [row("forced-out"), row("forced-in")]
     fake = FakeFacts(rows)
     if rng.random() < 0.3:
         victim = rng.choice(rows).name

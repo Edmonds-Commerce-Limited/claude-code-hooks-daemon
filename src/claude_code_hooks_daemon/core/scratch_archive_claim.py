@@ -333,7 +333,8 @@ def claim(
         actual = fingerprint_at(
             handle.parent_fd, handle.claimed_name, max_inodes=max_inodes, max_depth=max_depth
         )
-    except WalkRefused as exc:
+    except (WalkRefused, OSError) as exc:
+        # An I/O error is a refusal too: the claim is never left held by an escaping error.
         return release(handle, f"the claimed entry could not be walked: {exc}")
     if actual != expected:
         return release(handle, "fingerprint changed since classification")
