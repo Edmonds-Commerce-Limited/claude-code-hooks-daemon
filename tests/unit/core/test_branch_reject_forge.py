@@ -6,8 +6,8 @@ A refusal asserts no side effect: the branch still resolves at its tip and the l
 gained no removal line.
 
 A test whose name starts ``test_accepted_residue_`` pins a gap the plan accepts
-(RULINGS.md Q1 and Q8) rather than a refusal: it documents what the guard does NOT
-catch, so a change in that behaviour is seen.
+(RULINGS.md Q1) rather than a refusal: it documents what the guard does NOT catch,
+so a change in that behaviour is seen.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.core.branch_reject import (
     RejectStore,
     Verdict,
     bundle_path_for,
+    main_checkout,
     new_id,
     read_ledger,
 )
@@ -35,6 +36,7 @@ from tests.unit.core.test_branch_reject import (
     NOW,
     _git,
     _issue,
+    _reviewer,
     _tip,
     config,
     repo,
@@ -393,23 +395,93 @@ class TestRestoreWhenTheBundleIsGone:
         assert _tip(repo) == tip
 
 
-class TestPerCheckoutLedger:
-    """RULINGS Q8: the ledger is written in the checkout the delete runs in."""
+def _checkout_route(checkout: Path, config: BranchRejectConfig) -> RejectRoute:
+    """The route as ``delete-branch`` builds it in ``checkout``: its own ledger, shared state."""
+    shared = RejectStore(main_checkout(checkout) / config.state_dir)
+    return RejectRoute(
+        store=shared, ledger_path=checkout / config.ledger_path, config=config, now=NOW
+    )
 
-    def test_accepted_residue_a_removal_in_one_checkout_is_unseen_by_another(
+
+class TestSingleUseAcrossCheckouts:
+    """RULINGS Q8: single use and the rate hold across every checkout of the repository.
+
+    The tracked ledger is per checkout; the consumed markers and the removal count live
+    in the shared main-checkout state directory, which every worktree resolves alike.
+    """
+
+    def test_a_second_worktree_cannot_reuse_a_used_verdict(
         self, repo: Path, store: RejectStore, config: BranchRejectConfig, tmp_path: Path
     ) -> None:
         tip = _tip(repo)
         _issue(repo, store)
-        route = _route(repo, store, config)
-        assert _delete(repo, route).deleted == ("feat",)
+        assert _delete(repo, _checkout_route(repo, config)).deleted == ("feat",)
         _git(repo, "branch", "feat", tip)
         linked = tmp_path / "linked"
         _git(repo, "worktree", "add", "-q", "--detach", str(linked), "main")
-        other = RejectRoute(
-            store=store, ledger_path=linked / config.ledger_path, config=config, now=NOW
-        )
+        other = _checkout_route(linked, config)
         report = delete_branches(linked, ["feat"], protected_ref="main", reject_route=other)
-        assert report.deleted == ("feat",)
-        assert len(read_ledger(route.ledger_path)) == 1
-        assert len(read_ledger(other.ledger_path)) == 1
+        assert report.refused is True
+        assert report.deleted == ()
+        assert _tip(repo) == tip
+        assert any("already used" in b for b in report.blockers)
+        assert read_ledger(other.ledger_path) == []
+
+    def test_a_checkout_switched_to_an_older_commit_cannot_reuse_a_used_verdict(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        """The committed ledger line is gone from the work tree; the shared marker is not."""
+        tip = _tip(repo)
+        _issue(repo, store)
+        route = _checkout_route(repo, config)
+        assert _delete(repo, route).deleted == ("feat",)
+        _git(repo, "add", config.ledger_path)
+        _git(repo, "commit", "-q", "-m", "ledger")
+        _git(repo, "switch", "-q", "--detach", "HEAD~1")
+        assert not route.ledger_path.exists()
+        _git(repo, "branch", "feat", tip)
+        report = _delete(repo, route)
+        assert report.refused is True
+        assert _tip(repo) == tip
+        assert any("already used" in b for b in report.blockers)
+
+    def test_the_rate_cap_counts_removals_made_in_other_worktrees(
+        self, repo: Path, store: RejectStore, tmp_path: Path
+    ) -> None:
+        config = BranchRejectConfig(two_reviewer_after=1, refuse_after=1)
+        _git(repo, "branch", "twin", "feat")
+        _issue(repo, store)
+        assert _delete(repo, _checkout_route(repo, config)).deleted == ("feat",)
+        _issue(repo, store, branch="twin", reviewer=_reviewer(agent_id="reviewer2"))
+        linked = tmp_path / "linked"
+        _git(repo, "worktree", "add", "-q", "--detach", str(linked), "main")
+        other = _checkout_route(linked, config)
+        tip = _tip(repo, "twin")
+        report = delete_branches(linked, ["twin"], protected_ref="main", reject_route=other)
+        assert report.refused is True
+        assert _tip(repo, "twin") == tip
+        assert any("removal rate" in b for b in report.blockers)
+
+    def test_a_git_refused_removal_does_not_count_toward_the_shared_rate(
+        self, repo: Path, store: RejectStore
+    ) -> None:
+        config = BranchRejectConfig(two_reviewer_after=1, refuse_after=1)
+        _issue(repo, store)
+        route = _checkout_route(repo, config)
+        lock = repo / ".git" / "refs" / "heads" / "feat.lock"
+        lock.write_text("held\n", encoding="utf-8")
+        assert _delete(repo, route).refused is True
+        lock.unlink()
+        _issue(repo, store, reviewer=_reviewer(agent_id="reviewer2"))
+        assert _delete(repo, route).deleted == ("feat",)
+
+    def test_a_file_in_place_of_the_consumed_directory_refuses(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        """A store kind that is not a directory is unreadable, never "nothing consumed"."""
+        tip = _tip(repo)
+        _issue(repo, store)
+        store.root.mkdir(parents=True, exist_ok=True)
+        (store.root / "consumed").write_text("", encoding="utf-8")
+        route = _checkout_route(repo, config)
+        _assert_untouched(repo, _delete(repo, route), route, tip)

@@ -60,12 +60,7 @@ The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in 
 
 - A forger who also writes a NEW agent id into a copied dispatch and verdict is not caught. Accepted under RULINGS Q1 (the recovery bundle bounds the harm); DESIGN section 5 item 09.
 
-- **OPEN question for the owner or coordinator (RULINGS Q8).** The used-verdict ledger is per checkout, so a second worktree or checkout can re-delete a restored branch on the same already-used verdict. A test pins this as accepted residue (`test_accepted_residue_a_removal_in_one_checkout_is_unseen_by_another`). Options:
-
-  1. Keep the per-checkout ledger and accept the residue (bounded: the bundle exists and the other checkout's ledger names the removal).
-  2. Move the used-verdict ledger to a shared location such as the git common dir, so single use holds across worktrees.
-
-  Recommendation: option 2. A replay across worktrees defeats single use.
+- **Resolved (RULINGS Q8): single use and the rate are shared.** Each used verdict and reviewer agent gets a marker in the main checkout's `state_dir`, created exclusively when the ledger line is written. A git-refused removal gets a cancel marker. The used-verdict check, the 2-reviewer step and the refuse-after cap read the per-checkout tracked ledger together with these markers, and fail closed on damage. The ledger remains the human-readable record. `TestSingleUseAcrossCheckouts` in the forge tests pins three refusals: reuse from a second worktree, reuse after switching to an older commit, and the cap counting removals made in other worktrees.
 
 - Slug collision: `a/b` and `a-b` at one tip share a bundle path; the second removal is refused (fails closed), so `a-b` cannot use the route while that bundle exists.
 
@@ -73,7 +68,7 @@ The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in 
 
 ## Success Criteria
 
-- [ ] No delete of unproven work succeeds without a valid verdict that a test shows cannot be forged, reused, or self-written, and without a recovery bundle the guard verified at delete time.
+- [ ] No delete of unproven work succeeds without a valid verdict and a recovery bundle the guard verified at delete time. Tests show the verdict cannot be reused (in any checkout or worktree), self-written, or forged by any route except the accepted RULINGS Q1 gap above, which the bundle bounds.
 - [ ] A verdict alone, and a bundle alone, are each shown by a test to unlock nothing.
 - [ ] Every removal appears in the ledger and the digest.
 - [ ] A release note records the change in the pending-release holding area (CLAUDE/UPGRADES/UNRELEASED/release-notes/).

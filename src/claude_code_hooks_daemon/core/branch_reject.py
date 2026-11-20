@@ -85,6 +85,13 @@ _DISPATCHES = "dispatches"
 _VERDICTS = "verdicts"
 _KEEPS = "keeps"
 _STOPS = "stops"
+#: Shared single-use and rate state (RULINGS Q8): one marker per used verdict id, one
+#: per used reviewer agent, and one per removal git refused. Under the MAIN checkout's
+#: state directory, so every worktree and every commit a checkout is switched to reads
+#: the same markers; the tracked ledger stays the human-readable record.
+_CONSUMED = "consumed"
+_CONSUMED_AGENTS = "consumed-agents"
+_CANCELLED = "cancelled"
 _DIGEST_FILE = "digest.json"
 _ENTRY_KEY = re.compile(r"[0-9a-f]{64}")
 
@@ -434,6 +441,50 @@ class KeepRecord:
         )
 
 
+@dataclass(frozen=True)
+class ConsumedRecord:
+    """A shared marker that one verdict was used for one removal (RULINGS Q8).
+
+    ``removal`` is the removal's key, its first verdict id, so a removal on two
+    verdicts counts once toward the rate.
+    """
+
+    verdict_id: str
+    removal: str
+    branch: str
+    tip: str
+    reviewer_agent_ids: tuple[str, ...]
+    removed_at: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": SCHEMA_VERSION,
+            "verdict_id": self.verdict_id,
+            "removal": self.removal,
+            "branch": self.branch,
+            "tip": self.tip,
+            "reviewer_agent_ids": list(self.reviewer_agent_ids),
+            "removed_at": self.removed_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ConsumedRecord:
+        _schema(data)
+        return cls(
+            verdict_id=_str(data, "verdict_id"),
+            removal=_str(data, "removal"),
+            branch=_str(data, "branch"),
+            tip=_str(data, "tip"),
+            reviewer_agent_ids=_strs(data, "reviewer_agent_ids"),
+            removed_at=_float(data, "removed_at"),
+        )
+
+
+def agent_key(agent_id: str) -> str:
+    """The record id a reviewer agent's consumed marker is filed under."""
+    return hashlib.sha256(agent_id.encode("utf-8")).hexdigest()[: _ID_BYTES * 2]
+
+
 # --- the state store -----------------------------------------------------------------
 
 
@@ -492,6 +543,10 @@ class RejectStore:
     def _all_with_paths(self, kind: str) -> list[tuple[Path, Mapping[str, Any]]]:
         directory = self.root / kind
         if not directory.is_dir():
+            if directory.exists() or directory.is_symlink():
+                # A file or dangling link where a record directory belongs is damage,
+                # never "no records": no records would read as nothing used or kept.
+                raise RejectError(f"{directory} is not a directory")
             return []
         return [
             (path, self._load(path))
@@ -587,6 +642,55 @@ class RejectStore:
 
     def keeps(self) -> list[KeepRecord]:
         return [KeepRecord.from_dict(data) for data in self._all(_KEEPS)]
+
+    def claim_consumed(self, records: Sequence[ConsumedRecord]) -> None:
+        """Create every verdict's and every reviewer agent's marker EXCLUSIVELY.
+
+        Raises RejectRefusedError when any marker already exists: another checkout or
+        a concurrent delete used it. Markers made before that point stay, so a lost
+        race burns the verdicts (fail closed) and never frees a used one.
+        """
+        taken: list[str] = []
+        agents: dict[str, str] = {}
+        for record in records:
+            if not self._create(_CONSUMED, record.verdict_id, record.to_dict()):
+                taken.append(record.verdict_id)
+            agents.update((agent_id, record.removal) for agent_id in record.reviewer_agent_ids)
+        for agent_id, removal in agents.items():
+            marker = {"schema": SCHEMA_VERSION, "agent_id": agent_id, "removal": removal}
+            if not self._create(_CONSUMED_AGENTS, agent_key(agent_id), marker):
+                taken.append(agent_id)
+        if taken:
+            raise RejectRefusedError(f"already used by another removal: {sorted(set(taken))}")
+
+    def consumed(self) -> list[ConsumedRecord]:
+        """Every shared consumed marker; raises RejectError on any damage."""
+        records: list[ConsumedRecord] = []
+        for path, data in self._all_with_paths(_CONSUMED):
+            record = ConsumedRecord.from_dict(data)
+            if record.verdict_id != path.stem:
+                raise RejectError(f"the consumed marker {path} is not named by its verdict id")
+            records.append(record)
+        return records
+
+    def consumed_agents(self) -> frozenset[str]:
+        """Every reviewer agent a shared marker names; raises RejectError on any damage."""
+        agents: set[str] = set()
+        for path, data in self._all_with_paths(_CONSUMED_AGENTS):
+            agent_id = _str(data, "agent_id")
+            if agent_key(agent_id) != path.stem:
+                raise RejectError(f"the agent marker {path} is not named by its agent key")
+            agents.add(agent_id)
+        for record in self.consumed():
+            agents.update(record.reviewer_agent_ids)
+        return frozenset(agents)
+
+    def cancel_removal(self, removal: str) -> None:
+        """Record that git refused the removal keyed ``removal``: it then counts as none."""
+        self._create(_CANCELLED, removal, {"schema": SCHEMA_VERSION, "removal": removal})
+
+    def cancelled(self) -> frozenset[str]:
+        return frozenset(_str(data, "removal") for data in self._all(_CANCELLED))
 
     @property
     def digest_path(self) -> Path:
@@ -1469,7 +1573,7 @@ def issue_requests(repo: Path, branch: str, route: RejectRoute) -> list[IssuedRe
     if (branch_tip(repo, branch), _resolve(repo, _full_ref(default_ref))) != (tip, default_sha):
         raise RejectError("the branch or the default moved while the inventory was computed")
     keeps = route.store.keeps()
-    removals = removals_in_window(effective_removals(entries), now=route.now, config=route.config)
+    removals = used_state(entries, route.store, now=route.now, config=route.config).removals
     required = admit_request(branch, tip, inventory, keeps, removals, route.config)
     keep_reasons = tuple(
         reason for keep in related_keeps(branch, tip, inventory, keeps) for reason in keep.reasons
@@ -1866,6 +1970,45 @@ def removals_in_window(
     return sum(1 for line in lines if start <= line.removed_at <= now)
 
 
+@dataclass(frozen=True)
+class UsedState:
+    """What single use and the rate read: this checkout's ledger AND the shared markers.
+
+    The union is never looser than either source. The ledger alone is per checkout
+    (and per commit, once tracked), so a removal made from another worktree, or
+    recorded on a commit this checkout has switched away from, is seen only through
+    the shared markers (RULINGS Q8).
+    """
+
+    verdict_ids: frozenset[str]
+    agent_ids: frozenset[str]
+    removals: int
+
+
+def used_state(
+    entries: Sequence[LedgerEntry], store: RejectStore, *, now: float, config: BranchRejectConfig
+) -> UsedState:
+    """Read single use and the removal count; raises RejectError on any damage."""
+    shared = store.consumed()
+    cancelled = store.cancelled()
+    lines = effective_removals(entries)
+    ledger_keys = {line.verdict_ids[0] for line in lines if line.verdict_ids}
+    start = now - config.window_days * _SECONDS_PER_DAY
+    shared_times = {
+        record.removal: record.removed_at
+        for record in shared
+        if record.removal not in cancelled and record.removal not in ledger_keys
+    }
+    count = removals_in_window(lines, now=now, config=config) + sum(
+        1 for at in shared_times.values() if start <= at <= now
+    )
+    return UsedState(
+        verdict_ids=consumed_verdict_ids(entries) | {r.verdict_id for r in shared},
+        agent_ids=consumed_reviewer_agents(entries) | store.consumed_agents(),
+        removals=count,
+    )
+
+
 # --- the delete route (slice 2, DESIGN.md section 10) ----------------------------------
 
 
@@ -1916,11 +2059,10 @@ def approve_removal(
     of them is in the ledger yet, and the rate must count them all the same.
     """
     entries = read_ledger_entries(route.ledger_path)
+    used = used_state(entries, route.store, now=route.now, config=route.config)
     default_sha = _resolve(repo, _full_ref(default_ref))
     inventory = compute_inventory(repo, branch, default_ref)
-    removals = pending + removals_in_window(
-        effective_removals(entries), now=route.now, config=route.config
-    )
+    removals = pending + used.removals
     required = admit_request(branch, tip, inventory, route.store.keeps(), removals, route.config)
     verdicts = route.store.verdicts_for(branch, tip)
     if not verdicts:
@@ -1930,8 +2072,8 @@ def approve_removal(
         for v in verdicts
     ):
         raise RejectRefusedError("a reviewer judged keep for this tip; disagreement is keep")
-    consumed = consumed_verdict_ids(entries)
-    consumed_agents = consumed_reviewer_agents(entries)
+    consumed = used.verdict_ids
+    consumed_agents = used.agent_ids
     valid: list[Verdict] = []
     problems: dict[str, list[str]] = {}
     for verdict in verdicts:
@@ -1977,9 +2119,10 @@ def record_removal(repo: Path, approval: RemovalApproval, route: RejectRoute) ->
     if problems:
         raise RejectError(f"the bundle no longer verifies: {'; '.join(problems)}")
     ids = tuple(v.verdict_id for v in approval.verdicts)
+    agents = tuple(v.reviewer.agent_id for v in approval.verdicts)
     entries = read_ledger_entries(route.ledger_path)
-    reused = consumed_verdict_ids(entries) & set(ids)
-    reused |= consumed_reviewer_agents(entries) & {v.reviewer.agent_id for v in approval.verdicts}
+    used = used_state(entries, route.store, now=route.now, config=route.config)
+    reused = (used.verdict_ids & set(ids)) | (used.agent_ids & set(agents))
     if reused:
         raise RejectError(f"verdict(s) already used by a concurrent removal: {sorted(reused)}")
     line = LedgerLine(
@@ -1995,12 +2138,35 @@ def record_removal(repo: Path, approval: RemovalApproval, route: RejectRoute) ->
         restore_commands=restore_commands(approval.branch, approval.tip, approval.bundle.path),
         removed_at=route.now,
     )
+    # The exclusive claim is the single-use decision; the read above only names the
+    # common case early. Of two checkouts racing on one verdict, exactly one claims it.
+    try:
+        route.store.claim_consumed(
+            [
+                ConsumedRecord(
+                    verdict_id=verdict_id,
+                    removal=ids[0],
+                    branch=approval.branch,
+                    tip=approval.tip,
+                    reviewer_agent_ids=agents,
+                    removed_at=route.now,
+                )
+                for verdict_id in ids
+            ]
+        )
+    except RejectRefusedError as exc:
+        raise RejectError(f"verdict(s) {exc} (a concurrent removal)") from exc
     append_ledger(route.ledger_path, line)
     return line
 
 
 def record_git_refusal(line: LedgerLine, detail: str, route: RejectRoute) -> None:
-    """Append the ``git-refused`` line cancelling ``line``; raises RejectError on failure."""
+    """Cancel ``line`` in the shared rate and the ledger; raises RejectError on failure.
+
+    Its verdicts stay consumed: only the count of removals forgets it.
+    """
+    if line.verdict_ids:
+        route.store.cancel_removal(line.verdict_ids[0])
     append_refusal(
         route.ledger_path,
         LedgerRefusal(
@@ -2124,7 +2290,7 @@ def build_digest(
     keeps = store.keeps()
     state = read_digest_state(store.digest_path)
     fresh = [entry for entry in entries if entry_key(entry) not in state.ledger_keys]
-    removals = removals_in_window(effective_removals(entries), now=now, config=config)
+    removals = used_state(entries, store, now=now, config=config).removals
     return Digest(
         removals=tuple(entry for entry in fresh if isinstance(entry, LedgerLine)),
         refusals=tuple(entry for entry in fresh if isinstance(entry, LedgerRefusal)),

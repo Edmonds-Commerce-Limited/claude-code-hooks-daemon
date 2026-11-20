@@ -2490,9 +2490,10 @@ class BranchRejectConfig(BaseModel):
 
     With ``n`` removals already in the window, the next needs two reviewers when
     ``n >= two_reviewer_after`` and is refused when ``n >= refuse_after``.
-    ``ledger_path`` is relative to the checkout the delete runs in; ``bundle_dir``
-    and ``state_dir`` are relative to the MAIN checkout, so a removed linked
-    worktree never takes a bundle or a verdict with it.
+    ``ledger_path`` (the human-readable record) is relative to the checkout the
+    delete runs in; ``bundle_dir`` and ``state_dir`` are relative to the MAIN
+    checkout, so a removed linked worktree never takes a bundle or a verdict with
+    it, and single use and the rate (kept in ``state_dir``) hold across worktrees.
     """
 
     model_config = ConfigDict(extra="forbid")
