@@ -68,6 +68,23 @@ class WorktreeSeedError(RuntimeError):
     """
 
 
+class SeedPlacementError(WorktreeSeedError):
+    """Placement stopped part-way; ``placed`` holds the destinations already created.
+
+    The message names entries by position, never by path (a path may be a
+    protected name), and lists which were placed and which were not.
+    """
+
+    def __init__(self, message: str, placed: list[Path]) -> None:
+        super().__init__(message)
+        self.placed = placed
+
+
+def _entry_numbers(numbers: Iterable[int]) -> str:
+    listed = ", ".join(f"#{number}" for number in numbers)
+    return listed or "none"
+
+
 def _describe_problem(root: Path, entry: SeedEntry) -> str | None:
     """Return why ``entry`` cannot be seeded from ``root``, or ``None`` if it can."""
     candidate = Path(entry.path)
@@ -511,6 +528,30 @@ def seed_copy_is_identical(
     )
 
 
+def _place_one(
+    root: Path, worktree: Path, entry: SeedEntry, number: int, auditor: _LinkAuditor
+) -> Path | None:
+    """Place one entry; its destination, or ``None`` when it was skipped."""
+    source = root / entry.path
+    dest = worktree / entry.path
+
+    if dest.is_symlink() or dest.exists():
+        logger.debug("worktree seed: %s already exists in the worktree; left untouched", entry.path)
+        return None
+
+    if entry.optional and not source.exists():
+        logger.debug(
+            "worktree seed: optional entry %s is absent from the main checkout; skipped",
+            entry.path,
+        )
+        return None
+
+    if entry.mode == SEED_MODE_SYMLINK:
+        auditor.before_link(entry, number)
+    _place(source, dest, entry.mode)
+    return dest
+
+
 def seed_worktree(
     root: Path, worktree: Path, entries: list[SeedEntry], *, audit: LinkAudit
 ) -> list[Path]:
@@ -540,32 +581,33 @@ def seed_worktree(
         destination is absent from this list.
 
     Raises:
-        WorktreeSeedError: a link's audit line could not be written; that link
-            is not created, and entries placed before it stay placed.
+        SeedPlacementError: a link's audit line could not be written, or the
+            filesystem refused a placement (a parent that is a regular file, a
+            name too long, ...). That entry and every later one are not
+            placed; entries placed before it stay placed and are listed on the
+            error's ``placed``.
     """
     auditor = _LinkAuditor(root, worktree, audit)
     placed: list[Path] = []
+    placed_numbers: list[int] = []
     for number, entry in enumerate(entries, start=1):
-        source = root / entry.path
-        dest = worktree / entry.path
-
-        if dest.is_symlink() or dest.exists():
-            logger.debug(
-                "worktree seed: %s already exists in the worktree; left untouched", entry.path
+        try:
+            dest = _place_one(root, worktree, entry, number, auditor)
+        except (OSError, WorktreeSeedError) as exc:
+            cause = (
+                f"{type(exc).__name__}: {exc.strerror or 'error'}"
+                if isinstance(exc, OSError)
+                else str(exc)
             )
-            continue
-
-        if entry.optional and not source.exists():
-            logger.debug(
-                "worktree seed: optional entry %s is absent from the main checkout; skipped",
-                entry.path,
-            )
-            continue
-
-        if entry.mode == SEED_MODE_SYMLINK:
-            auditor.before_link(entry, number)
-        _place(source, dest, entry.mode)
-        placed.append(dest)
+            raise SeedPlacementError(
+                f"seed entry #{number} could not be placed ({cause}). "
+                f"Placed before it: {_entry_numbers(placed_numbers)}. "
+                f"Not placed: {_entry_numbers(range(number, len(entries) + 1))}",
+                placed,
+            ) from exc
+        if dest is not None:
+            placed.append(dest)
+            placed_numbers.append(number)
 
     if placed:
         logger.info(

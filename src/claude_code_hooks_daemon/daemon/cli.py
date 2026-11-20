@@ -5356,10 +5356,13 @@ def cmd_seed_worktree(args: argparse.Namespace) -> int:
         seed_existing_worktree,
     )
 
+    project_root = get_project_path(getattr(args, "project_root", None))
     try:
-        placed = seed_existing_worktree(Path(args.worktree))
+        placed = seed_existing_worktree(Path(args.worktree), project_root=Path(project_root))
     except SeedApplyRefused as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
+        for dest in exc.placed:
+            print(f"placed: {dest}")
         return 1
     if not placed:
         print("Nothing to place: no seed entry is configured, or each is already present.")

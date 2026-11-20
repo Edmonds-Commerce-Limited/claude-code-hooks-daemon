@@ -31,9 +31,10 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.worktree_seed import SeedEntry, parse_seed_config
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.git_repo import parse_worktree_porcelain, run_git
+from claude_code_hooks_daemon.utils.git_repo import GitRepo, parse_worktree_porcelain, run_git
 from claude_code_hooks_daemon.utils.worktree_seeding import (
     LinkAudit,
+    SeedPlacementError,
     WorktreeSeedError,
     protecting_pattern_for_source,
     seed_link_audit_path,
@@ -57,11 +58,33 @@ _SECRET_GUARD_KEY = "secret_file_guard"
 
 class SeedApplyRefused(RuntimeError):
     """The worktree, the config or a seed entry cannot be honoured; nothing was placed
-    unless the message says which entries were."""
+    unless the message says which entries were, and ``placed`` lists their destinations."""
+
+    def __init__(self, message: str, placed: list[Path] | None = None) -> None:
+        super().__init__(message)
+        self.placed: list[Path] = list(placed or [])
 
 
 def _has_control_character(text: str) -> bool:
     return any(ord(char) < 0x20 or ord(char) == 0x7F for char in text)
+
+
+def _refuse_another_project(main: Path, project_root: Path) -> None:
+    """Refuse a worktree whose main checkout is not the daemon project's main checkout.
+
+    Git is asked from the TARGET to find its main checkout, so a worktree of a
+    sibling clone would otherwise bring its own config, its own committed
+    baseline and its own audit log (security review D-PATH 1). The project
+    root may itself be a linked worktree (a worktree-root daemon): its main
+    checkout is what is compared.
+    """
+    repo = GitRepo.resolve_for(project_root)
+    ours = repo.main_worktree_root().resolve() if repo is not None else None
+    if ours != main:
+        raise SeedApplyRefused(
+            "target worktree: it is not a worktree of this project (its main checkout is "
+            f"{main}, the daemon's project is {ours or project_root}); nothing was placed"
+        )
 
 
 def _main_checkout_of(worktree: Path) -> Path:
@@ -150,6 +173,14 @@ def _refuse_redirected_parents(worktree: Path, entries: list[SeedEntry]) -> None
                 break
 
 
+def _committed_seed_baseline(committed: Config) -> set[SeedEntry]:
+    """The seed entries the committed config lists; none when its handler is disabled."""
+    block = committed.handlers.worktree_create.get(_HANDLER_KEY)
+    if getattr(block, "enabled", True) is False:
+        return set()
+    return set(parse_seed_config(handler_options(block).get(_SEED_OPTION)))
+
+
 def _committed_config(main: Path) -> Config | None:
     """The daemon config committed at ``HEAD`` of the main checkout; None when there is none.
 
@@ -173,58 +204,94 @@ def _committed_config(main: Path) -> Config | None:
     return None
 
 
-def _refuse_uncommitted_protected_links(
+_UNCOMMITTED_REFUSAL = (
+    "seed entry #{number}: it links a protected path, and the config committed at HEAD "
+    "of the main checkout does not list it. Commit the config change first; nothing was "
+    "placed"
+)
+
+
+def refuse_uncommitted_protected_links(
     main: Path, entries: list[SeedEntry], protected_patterns: Callable[[], tuple[str, ...]]
 ) -> None:
-    """Refuse a protected link entry the config committed at ``HEAD`` does not list.
+    """Refuse a protected seed entry the config committed at ``HEAD`` does not list.
 
-    ``seed-worktree`` reads the config fresh from disk, so an agent's uncommitted
-    edit to the seed list would otherwise place a link to any protected path in
-    one command (Plan 00613 handoff 261120, residual 1). An entry whose source
-    is, holds or links to a path either config protects is placed only when the
-    committed config lists the same entry. This NARROWS the route to one that
-    leaves a commit behind; it does not close it.
+    The ONE check both seeding routes run before anything is placed: the
+    creation hook (whose list is the daemon's loaded config, so an uncommitted
+    edit takes effect after a restart) and ``seed-worktree`` (which reads the
+    config fresh from disk). An entry whose source is, holds or links to a path
+    protected by the shipped defaults, the working config or the committed
+    config is placed only when the committed config lists the same entry
+    (security review F6; Plan 00613 handoff 261120, residual 1). This NARROWS
+    the route to one that leaves a commit behind; it does not close it.
+
+    A working protected set that cannot be read contributes nothing beyond the
+    shipped defaults; committed guard options that cannot be read refuse every
+    entry the baseline does not list (fail closed).
+
+    Raises:
+        WorktreeSeedError: the first such entry, named by position only.
     """
     committed = _committed_config(main)
-    baseline: set[SeedEntry] = set()
-    patterns = protected_patterns()
+    baseline = _committed_seed_baseline(committed) if committed is not None else set()
+    pending = [(n, e) for n, e in enumerate(entries, start=1) if e not in baseline]
+    if not pending:
+        return
+    patterns: tuple[str, ...] = sfm.DEFAULT_PROTECTED_PATTERNS
+    try:
+        patterns = (*patterns, *protected_patterns())
+    except sfm.ProtectedSetUnreadable as exc:
+        log_and_continue(
+            logger, exc, reason="the shipped defaults and the committed set still judge the entry"
+        )
     if committed is not None:
-        baseline = set(_seed_entries(committed))
         committed_guard = handler_options(committed.handlers.pre_tool_use.get(_SECRET_GUARD_KEY))
-        patterns = tuple(
-            dict.fromkeys((*patterns, *sfm.protected_patterns_from_options(committed_guard)))
-        )
-    for number, entry in enumerate(entries, start=1):
-        if entry in baseline:
-            continue
+        try:
+            patterns = (*patterns, *sfm.protected_patterns_from_options(committed_guard))
+        except sfm.ProtectedSetUnreadable as exc:
+            raise WorktreeSeedError(
+                _UNCOMMITTED_REFUSAL.format(number=pending[0][0])
+                + " (the committed secret_file_guard options could not be read)"
+            ) from exc
+    patterns = tuple(dict.fromkeys(patterns))
+    for number, entry in pending:
         # A source that could not be walked is judged protected (fail closed).
-        if protecting_pattern_for_source(main, entry.path, patterns) is None:
-            continue
-        raise SeedApplyRefused(
-            f"seed entry #{number}: it links a protected path, and the config committed "
-            "at HEAD of the main checkout does not list it. Commit the config change "
-            "first; nothing was placed"
-        )
+        if protecting_pattern_for_source(main, entry.path, patterns) is not None:
+            raise WorktreeSeedError(_UNCOMMITTED_REFUSAL.format(number=number))
 
 
-def seed_existing_worktree(worktree: Path) -> list[Path]:
+def seed_existing_worktree(worktree: Path, *, project_root: Path) -> list[Path]:
     """Place the configured seed entries into the registered ``worktree``.
 
     Args:
         worktree: A linked worktree of a repository whose main checkout holds a
-            daemon config. The only input: nothing here names what to place.
+            daemon config. Nothing here names what to place.
+        project_root: The daemon's project root. ``worktree`` must belong to the
+            same repository (its main checkout is the project's main checkout).
 
     Returns:
         The destinations created, in configured order; empty when nothing is
         configured or every destination already exists.
 
     Raises:
-        SeedApplyRefused: the worktree is not a registered linked worktree, the
-            config cannot be read, an entry is unusable (absent, unsafe, or a
-            protected source in copy mode), or a link's audit line could not be
-            written (entries placed before it stay placed).
+        SeedApplyRefused: the worktree is not a registered linked worktree of
+            this project, the config cannot be read, an entry is unusable
+            (absent, unsafe, or a protected source in copy mode), or a
+            placement failed part-way (``placed`` lists what landed). A
+            filesystem error anywhere is a refusal, never a raw ``OSError``.
     """
+    try:
+        return _seed_existing_worktree(worktree, project_root)
+    except OSError as exc:
+        raise SeedApplyRefused(
+            f"a filesystem error stopped the seeding ({type(exc).__name__}: "
+            f"{exc.strerror or 'error'}); nothing was placed"
+        ) from exc
+
+
+def _seed_existing_worktree(worktree: Path, project_root: Path) -> list[Path]:
     main = _main_checkout_of(worktree)
+    _refuse_another_project(main, project_root)
     config = _load_config(main)
     entries = _seed_entries(config)
     if not entries:
@@ -234,11 +301,18 @@ def seed_existing_worktree(worktree: Path) -> list[Path]:
     def protected_patterns() -> tuple[str, ...]:
         return sfm.protected_patterns_from_options(guard_options)
 
+    try:
+        protected_patterns()
+    except sfm.ProtectedSetUnreadable as exc:
+        raise SeedApplyRefused(
+            f"the secret_file_guard options in the config could not be read ({exc}); "
+            "nothing was placed"
+        ) from exc
     target = worktree.resolve()
     _refuse_redirected_parents(target, entries)
     try:
         validate_seed_sources(main, entries, protected_patterns=protected_patterns)
-        _refuse_uncommitted_protected_links(main, entries, protected_patterns)
+        refuse_uncommitted_protected_links(main, entries, protected_patterns)
         return seed_worktree(
             main,
             target,
@@ -250,5 +324,7 @@ def seed_existing_worktree(worktree: Path) -> list[Path]:
                 verb=SEED_APPLY_VERB,
             ),
         )
+    except SeedPlacementError as exc:
+        raise SeedApplyRefused(str(exc), placed=exc.placed) from exc
     except WorktreeSeedError as exc:
         raise SeedApplyRefused(str(exc)) from exc

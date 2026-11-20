@@ -94,7 +94,7 @@ class TestSeedsARegisteredWorktree:
     def test_places_each_configured_entry_as_a_relative_link(
         self, repo: Path, worktree: Path
     ) -> None:
-        placed = seed_existing_worktree(worktree)
+        placed = seed_existing_worktree(worktree, project_root=repo)
         assert sorted(p.name for p in placed) == sorted([VAULT, "local.env"])
         link = worktree / VAULT
         assert link.is_symlink()
@@ -104,11 +104,11 @@ class TestSeedsARegisteredWorktree:
     def test_works_from_the_main_checkout_path_spelling_of_a_worktree(
         self, repo: Path, worktree: Path
     ) -> None:
-        placed = seed_existing_worktree(Path(str(worktree) + "/"))
+        placed = seed_existing_worktree(Path(str(worktree) + "/"), project_root=repo)
         assert len(placed) == 2
 
     def test_audits_the_protected_link_under_its_own_verb(self, repo: Path, worktree: Path) -> None:
-        seed_existing_worktree(worktree)
+        seed_existing_worktree(worktree, project_root=repo)
         lines = seed_link_audit_path(repo).read_text(encoding="utf-8").splitlines()
         records = [json.loads(line) for line in lines]
         assert [r["path"] for r in records] == [VAULT]
@@ -119,18 +119,18 @@ class TestSeedsARegisteredWorktree:
     def test_a_second_run_places_nothing_and_leaves_the_links(
         self, repo: Path, worktree: Path
     ) -> None:
-        seed_existing_worktree(worktree)
-        assert seed_existing_worktree(worktree) == []
+        seed_existing_worktree(worktree, project_root=repo)
+        assert seed_existing_worktree(worktree, project_root=repo) == []
         assert (worktree / VAULT).is_symlink()
 
     def test_no_seed_configured_places_nothing(self, repo: Path, worktree: Path) -> None:
         (repo / _CONFIG).write_text("version: '2.0'\n", encoding="utf-8")
-        assert seed_existing_worktree(worktree) == []
+        assert seed_existing_worktree(worktree, project_root=repo) == []
 
     def test_never_writes_the_protected_content_anywhere_new(
         self, repo: Path, worktree: Path
     ) -> None:
-        seed_existing_worktree(worktree)
+        seed_existing_worktree(worktree, project_root=repo)
         audit = seed_link_audit_path(repo).read_text(encoding="utf-8")
         assert "not-a-real-secret" not in audit
         assert not any(
@@ -141,49 +141,92 @@ class TestSeedsARegisteredWorktree:
 class TestRefusesAnythingButARegisteredWorktree:
     def test_the_main_checkout(self, repo: Path, worktree: Path) -> None:
         with pytest.raises(SeedApplyRefused, match="main checkout"):
-            seed_existing_worktree(repo)
+            seed_existing_worktree(repo, project_root=repo)
 
     def test_an_unregistered_directory(self, repo: Path, tmp_path: Path) -> None:
         stray = tmp_path / "stray"
         stray.mkdir()
         with pytest.raises(SeedApplyRefused):
-            seed_existing_worktree(stray)
+            seed_existing_worktree(stray, project_root=repo)
 
     def test_a_subdirectory_of_a_worktree(self, repo: Path, worktree: Path) -> None:
         sub = worktree / "sub"
         sub.mkdir()
         with pytest.raises(SeedApplyRefused, match="registered worktree"):
-            seed_existing_worktree(sub)
+            seed_existing_worktree(sub, project_root=repo)
         assert not (sub / VAULT).exists()
 
-    def test_a_worktree_of_another_repository_is_judged_by_its_own_config(
-        self, repo: Path, tmp_path: Path
-    ) -> None:
+    @staticmethod
+    def _other_repository(tmp_path: Path, *, configured: bool) -> Path:
+        """A second repository with a hand-made worktree; optionally with its own seed config."""
         other = tmp_path / "other"
         other.mkdir()
         _git(other, "init", "-q", "-b", "main")
+        _git(other, "config", "user.email", "test@example.invalid")
+        _git(other, "config", "user.name", "Test")
         _git(other, "commit", "-q", "--allow-empty", "-m", "init")
+        if configured:
+            (other / "local.env").write_text("ordinary\n", encoding="utf-8")
+            (other / ".claude").mkdir()
+            (other / _CONFIG).write_text(_config(_LINK_PLAIN), encoding="utf-8")
+            _git(other, "add", _CONFIG)
+            _git(other, "commit", "-q", "-m", "config")
         other_wt = tmp_path / "other-wt"
         _git(other, "worktree", "add", "-q", "-b", "x", str(other_wt))
-        # The other repository has no config, so nothing of ``repo`` reaches it.
-        with pytest.raises(SeedApplyRefused, match="config"):
-            seed_existing_worktree(other_wt)
+        return other_wt
+
+    def test_a_worktree_of_another_repository_is_refused(self, repo: Path, tmp_path: Path) -> None:
+        other_wt = self._other_repository(tmp_path, configured=False)
+        with pytest.raises(SeedApplyRefused, match="not a worktree of this project"):
+            seed_existing_worktree(other_wt, project_root=repo)
         assert not (other_wt / VAULT).exists()
+
+    def test_a_configured_worktree_of_another_repository_is_refused(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """D-PATH 1: a sibling clone with a valid config of its own is still not this project."""
+        other_wt = self._other_repository(tmp_path, configured=True)
+        with pytest.raises(SeedApplyRefused, match="not a worktree of this project"):
+            seed_existing_worktree(other_wt, project_root=repo)
+        assert not (other_wt / "local.env").exists()
+        assert not (tmp_path / "other" / "untracked").exists()
+
+    def test_a_project_root_inside_a_worktree_anchors_to_the_same_main_checkout(
+        self, repo: Path, worktree: Path
+    ) -> None:
+        """A daemon rooted at the worktree is still this project."""
+        assert len(seed_existing_worktree(worktree, project_root=worktree)) == 2
+
+    def test_a_project_root_that_is_no_repository_refuses(
+        self, repo: Path, worktree: Path, tmp_path: Path
+    ) -> None:
+        bare = tmp_path / "not-a-repo"
+        bare.mkdir()
+        with pytest.raises(SeedApplyRefused, match="not a worktree of this project"):
+            seed_existing_worktree(worktree, project_root=bare)
+        assert not (worktree / VAULT).exists()
 
     def test_a_path_that_does_not_exist(self, repo: Path, tmp_path: Path) -> None:
         with pytest.raises(SeedApplyRefused):
-            seed_existing_worktree(tmp_path / "absent")
+            seed_existing_worktree(tmp_path / "absent", project_root=repo)
 
     def test_a_path_with_a_control_character(self, repo: Path, worktree: Path) -> None:
         with pytest.raises(SeedApplyRefused):
-            seed_existing_worktree(Path(str(worktree) + "\n"))
+            seed_existing_worktree(Path(str(worktree) + "\n"), project_root=repo)
+
+    def test_a_path_too_long_to_name_refuses_without_a_traceback(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """D-PATH 2: ENAMETOOLONG is a refusal, not a raw OSError."""
+        with pytest.raises(SeedApplyRefused):
+            seed_existing_worktree(tmp_path / ("x" * 300), project_root=repo)
 
     def test_a_symlink_to_a_worktree_is_judged_by_where_it_resolves(
         self, repo: Path, worktree: Path, tmp_path: Path
     ) -> None:
         alias = tmp_path / "alias"
         alias.symlink_to(worktree)
-        placed = seed_existing_worktree(alias)
+        placed = seed_existing_worktree(alias, project_root=repo)
         assert {p.parent for p in placed} == {worktree.resolve()}
 
 
@@ -191,12 +234,12 @@ class TestReadsTheConfigStrictly:
     def test_missing_config_refuses(self, repo: Path, worktree: Path) -> None:
         (repo / _CONFIG).unlink()
         with pytest.raises(SeedApplyRefused, match="config"):
-            seed_existing_worktree(worktree)
+            seed_existing_worktree(worktree, project_root=repo)
         assert not (worktree / VAULT).exists()
 
     def test_a_yml_config_is_read_as_the_daemon_reads_it(self, repo: Path, worktree: Path) -> None:
         (repo / _CONFIG).rename(repo / ".claude" / "hooks-daemon.yml")
-        assert len(seed_existing_worktree(worktree)) == 2
+        assert len(seed_existing_worktree(worktree, project_root=repo)) == 2
 
     def test_a_disabled_worktree_create_handler_refuses(self, repo: Path, worktree: Path) -> None:
         text = (repo / _CONFIG).read_text(encoding="utf-8")
@@ -204,13 +247,13 @@ class TestReadsTheConfigStrictly:
             text.replace("enabled: true", "enabled: false"), encoding="utf-8"
         )
         with pytest.raises(SeedApplyRefused, match="disabled"):
-            seed_existing_worktree(worktree)
+            seed_existing_worktree(worktree, project_root=repo)
         assert not (worktree / VAULT).exists()
 
     def test_malformed_config_refuses(self, repo: Path, worktree: Path) -> None:
         (repo / _CONFIG).write_text("handlers: [unclosed\n", encoding="utf-8")
         with pytest.raises(SeedApplyRefused, match="config"):
-            seed_existing_worktree(worktree)
+            seed_existing_worktree(worktree, project_root=repo)
         assert not (worktree / VAULT).exists()
 
 
@@ -228,8 +271,38 @@ class TestAnExistingWorktreeCannotRedirectAPlacement:
         outside.mkdir()
         (worktree / "conf").symlink_to(outside)
         with pytest.raises(SeedApplyRefused, match="symlink"):
-            seed_existing_worktree(worktree)
+            seed_existing_worktree(worktree, project_root=repo)
         assert list(outside.iterdir()) == []
+
+
+class TestAFilesystemErrorMidPlacementIsARefusal:
+    """D-PATH 2: an OSError after the first placement reports what landed and what did not."""
+
+    def test_a_parent_that_is_a_regular_file_refuses_and_names_the_placed(
+        self, repo: Path, worktree: Path
+    ) -> None:
+        (repo / "sub").mkdir()
+        (repo / "sub" / "notes.txt").write_text("ordinary\n", encoding="utf-8")
+        (repo / "later.txt").write_text("ordinary\n", encoding="utf-8")
+        entries = (
+            _LINK_PLAIN
+            + "            - path: sub/notes.txt\n              mode: symlink\n"
+            + "            - path: later.txt\n              mode: symlink\n"
+        )
+        (repo / _CONFIG).write_text(_config(entries), encoding="utf-8")
+        (worktree / "sub").write_text("a file where a directory is expected\n", encoding="utf-8")
+
+        with pytest.raises(SeedApplyRefused) as caught:
+            seed_existing_worktree(worktree, project_root=repo)
+
+        message = str(caught.value)
+        assert "seed entry #2" in message
+        assert "#1" in message  # placed before the failure
+        assert "#3" in message  # never attempted
+        assert "FileExistsError" in message
+        assert caught.value.placed == [worktree.resolve() / "local.env"]
+        assert (worktree / "local.env").is_symlink()
+        assert not (worktree / "later.txt").exists()
 
 
 class TestTheSameExecutorAsCreation:
@@ -239,14 +312,14 @@ class TestTheSameExecutorAsCreation:
         copy_vault = f"            - path: {VAULT}\n              mode: copy\n"
         (repo / _CONFIG).write_text(_config(_LINK_PLAIN + copy_vault), encoding="utf-8")
         with pytest.raises(SeedApplyRefused, match="secret_file_guard"):
-            seed_existing_worktree(worktree)
+            seed_existing_worktree(worktree, project_root=repo)
         assert not (worktree / VAULT).exists()
         assert not (worktree / "local.env").exists()
 
     def test_an_absent_required_source_refuses(self, repo: Path, worktree: Path) -> None:
         (repo / "local.env").unlink()
         with pytest.raises(SeedApplyRefused, match="no such file"):
-            seed_existing_worktree(worktree)
+            seed_existing_worktree(worktree, project_root=repo)
 
 
 class TestAProtectedLinkMustBeInTheCommittedConfig:
@@ -266,7 +339,7 @@ class TestAProtectedLinkMustBeInTheCommittedConfig:
         added = "            - path: conf\n              mode: symlink\n"
         (repo / _CONFIG).write_text(_config(_LINK_PLAIN + added), encoding="utf-8")
         with pytest.raises(SeedApplyRefused, match="committed"):
-            seed_existing_worktree(worktree)
+            seed_existing_worktree(worktree, project_root=repo)
         assert not (worktree / "conf").exists()
         assert not (worktree / "local.env").exists()
 
@@ -274,11 +347,11 @@ class TestAProtectedLinkMustBeInTheCommittedConfig:
         (repo / "notes.txt").write_text("ordinary\n", encoding="utf-8")
         added = "            - path: notes.txt\n              mode: symlink\n"
         (repo / _CONFIG).write_text(_config(_LINK_VAULT + added), encoding="utf-8")
-        placed = seed_existing_worktree(worktree)
+        placed = seed_existing_worktree(worktree, project_root=repo)
         assert sorted(p.name for p in placed) == sorted([VAULT, "notes.txt"])
 
     def test_a_committed_protected_entry_is_placed(self, repo: Path, worktree: Path) -> None:
-        assert (worktree.resolve() / VAULT) in seed_existing_worktree(worktree)
+        assert (worktree.resolve() / VAULT) in seed_existing_worktree(worktree, project_root=repo)
 
     def test_no_committed_config_refuses_a_protected_entry(
         self, repo: Path, worktree: Path
@@ -286,7 +359,7 @@ class TestAProtectedLinkMustBeInTheCommittedConfig:
         _git(repo, "rm", "-q", "--cached", _CONFIG)
         _git(repo, "commit", "-q", "-m", "untrack config")
         with pytest.raises(SeedApplyRefused, match="committed"):
-            seed_existing_worktree(worktree)
+            seed_existing_worktree(worktree, project_root=repo)
         assert not (worktree / VAULT).exists()
 
     def test_unprotecting_the_path_in_the_working_config_does_not_ungate_it(
@@ -309,5 +382,5 @@ class TestAProtectedLinkMustBeInTheCommittedConfig:
         added = "            - path: conf\n              mode: symlink\n"
         (repo / _CONFIG).write_text(_config(_LINK_PLAIN + added), encoding="utf-8")
         with pytest.raises(SeedApplyRefused, match="committed"):
-            seed_existing_worktree(worktree)
+            seed_existing_worktree(worktree, project_root=repo)
         assert not (worktree / "conf").exists()

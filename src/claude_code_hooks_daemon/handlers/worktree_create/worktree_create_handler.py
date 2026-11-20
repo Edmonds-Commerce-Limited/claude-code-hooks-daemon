@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
 )
 from claude_code_hooks_daemon.utils.load_scaling import describe_load, scaled_timeout
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
+from claude_code_hooks_daemon.utils.worktree_seed_apply import refuse_uncommitted_protected_links
 from claude_code_hooks_daemon.utils.worktree_seeding import (
     LinkAudit,
     seed_link_audit_path,
@@ -208,6 +209,11 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             # STRICTLY: unreadable refuses the copy (Plan 00613 ruling Q3).
             validate_seed_sources(
                 Path(root), entries, protected_patterns=sfm.load_protected_patterns_strict
+            )
+            # The same committed-config check as `seed-worktree` (review F6):
+            # the loaded list may carry an uncommitted edit after a restart.
+            refuse_uncommitted_protected_links(
+                Path(root), entries, sfm.load_protected_patterns_strict
             )
 
             path.parent.mkdir(parents=True, exist_ok=True)

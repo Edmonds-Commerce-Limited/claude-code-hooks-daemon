@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -65,18 +67,60 @@ class TestArgumentSurface:
             build_parser().parse_args(["seed-worktree", "a", "b"])
 
 
+@pytest.fixture
+def in_project(worktree: Path) -> Iterator[Path]:
+    """The CLI's project root is the worktree's main checkout (``get_project_path``)."""
+    main = worktree.parent / "main"
+    with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=main.resolve()):
+        yield main
+
+
 class TestExitCodes:
     def test_success_places_the_link_and_exits_zero(
-        self, worktree: Path, capsys: pytest.CaptureFixture[str]
+        self, worktree: Path, in_project: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         assert cmd_seed_worktree(argparse.Namespace(worktree=str(worktree))) == 0
         assert (worktree / VAULT).is_symlink()
         assert "not-a-real-secret" not in capsys.readouterr().out
 
     def test_refusal_exits_one_and_says_why(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, in_project: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         stray = tmp_path / "stray"
         stray.mkdir()
         assert cmd_seed_worktree(argparse.Namespace(worktree=str(stray))) == 1
         assert "REFUSED" in capsys.readouterr().err
+
+    def test_a_worktree_of_another_project_is_refused(
+        self, worktree: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """D-PATH 1: the CLI judges the worktree against the daemon's own project root."""
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        _git(elsewhere, "init", "-q", "-b", "main")
+        with patch(
+            "claude_code_hooks_daemon.daemon.cli.get_project_path",
+            return_value=elsewhere.resolve(),
+        ):
+            assert cmd_seed_worktree(argparse.Namespace(worktree=str(worktree))) == 1
+        assert "not a worktree of this project" in capsys.readouterr().err
+        assert not (worktree / VAULT).exists()
+
+    def test_a_mid_placement_failure_prints_what_was_placed(
+        self, worktree: Path, in_project: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """D-PATH 2: no traceback; the placed destinations are still reported."""
+        main = in_project
+        (main / "sub").mkdir()
+        (main / "sub" / "notes.txt").write_text("ordinary\n", encoding="utf-8")
+        config = main / ".claude" / "hooks-daemon.yaml"
+        config.write_text(
+            config.read_text(encoding="utf-8")
+            + "            - path: sub/notes.txt\n              mode: symlink\n",
+            encoding="utf-8",
+        )
+        (worktree / "sub").write_text("a file\n", encoding="utf-8")
+        assert cmd_seed_worktree(argparse.Namespace(worktree=str(worktree))) == 1
+        captured = capsys.readouterr()
+        assert "REFUSED" in captured.err
+        assert f"placed: {worktree.resolve() / VAULT}" in captured.out
