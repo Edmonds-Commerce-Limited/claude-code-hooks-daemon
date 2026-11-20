@@ -32,6 +32,7 @@ import fnmatch
 import os
 import posixpath
 import re
+import stat
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Final
@@ -63,6 +64,7 @@ from claude_code_hooks_daemon.utils.secret_file_matching import (
     directory_ancestors,
     expand_directory_glob,
     link_scan_scope,
+    path_mention_words,
     place_outside_project,
     scan_project_links,
     toplevel_move_length,
@@ -968,6 +970,8 @@ def _segment_reads(
     """The trees the one command of ``segment`` reads, from each of ``current``."""
     words = _command_words(segment)
     if not words:
+        # `$(<file)` runs no command word and still reads its redirect (re-review R4).
+        yield from _reads_through_made_links(words, segment, current, tracker)
         return
     here = current
     relocating_env = _assigns_a_relocating_variable(segment, words)
@@ -999,8 +1003,8 @@ def _segment_reads(
         # move could have reached, the links among them, is read as a root too.
         for directory in tracker.indeterminate():
             yield Read(directory, view=TreeView.ALL)
-    yield from _reads_through_made_links(words, head, here, tracker)
-    made = _made_link(words, here)
+    yield from _reads_through_made_links(words, segment, here, tracker)
+    made = _made_link(words, here, segment)
     if made is not None and made not in tracker.made_links:
         tracker.made_links.append(made)
     if head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
@@ -1040,17 +1044,44 @@ def _segment_reads(
 # statement that names that place, or a place above or below it, is judged as a read of where
 # the link leads. A link that leads outside the project fails closed (see `Read.physical`).
 
-_LN: Final[str] = "ln"
-_SYMBOLIC_LONG: Final[dict[str, str]] = {"ln": "--symbolic", "cp": "--symbolic-link"}
+#: Every ``ln``/``link`` makes a link, whatever its flags (re-review R4: an
+#: abbreviated ``--sym`` is still ``--symbolic``, and a hard link is a link too).
+_LINK_COMMANDS: Final[frozenset[str]] = frozenset({"ln", "link"})
+_SYMBOLIC_COPY: Final[str] = "cp"
+_SYMBOLIC_COPY_LONG: Final[str] = "--symbolic-link"
+#: ``install -l <flags>`` (BSD) links instead of copying; ``-l`` takes a value.
+_INSTALL: Final[str] = "install"
+_INSTALL_LINK_OPTION: Final[str] = "-l"
+#: ``mv`` relocates an existing link (a seeded one): its target is read from where it lands.
+_MOVE: Final[str] = "mv"
+#: Multi-call binaries that run the applet named by their first argument.
+_MULTI_CALL: Final[frozenset[str]] = frozenset({"busybox", "toybox"})
 _TARGET_DIRECTORY_OPTIONS: Final[frozenset[str]] = frozenset({"-t", "--target-directory"})
 _SUFFIX_OPTIONS: Final[frozenset[str]] = frozenset({"-S", "--suffix"})
 _SEED_WORKTREE: Final[str] = "seed-worktree"
 _HOOKS_DAEMON: Final[str] = "hooks-daemon"
+_INPUT_REDIRECT: Final[str] = "<"
+#: An interpreter one-liner that may make a link: its operands cannot be placed (N683 class),
+#: so the link is judged as leading anywhere and landing anywhere.
+_INTERPRETER: Final[re.Pattern[str]] = re.compile(
+    r"(?:python|pypy)[0-9.]*|node(?:js)?|deno|bun|perl|ruby|php|lua"
+)
+_INTERPRETER_LINK_CALL: Final[re.Pattern[str]] = re.compile(
+    r"symlink|link_to|link(?:Sync)?\(|\bln\b"
+)
 
 
-def _made_link(words: list[str], here: tuple[str, ...]) -> _MadeLink | None:
-    """The link a statement creates (``ln -s``, ``cp -s``, ``hooks-daemon seed-worktree``), or None."""
+def _made_link(words: list[str], here: tuple[str, ...], segment: str) -> _MadeLink | None:
+    """The link a statement creates or relocates, or None.
+
+    ``ln``/``link`` (any flags), ``cp -s``, ``install -l``, ``mv`` of what may be a
+    link, an interpreter one-liner calling a link function, and
+    ``hooks-daemon seed-worktree``; a ``busybox``/``toybox`` applet is its applet.
+    """
     head = posixpath.basename(words[0])
+    if head in _MULTI_CALL and len(words) > 1:
+        words = words[1:]
+        head = posixpath.basename(words[0])
     if head == _HOOKS_DAEMON:
         operands = _link_operands(words[1:])[0]
         if not operands or operands[0] != _SEED_WORKTREE:
@@ -1058,9 +1089,14 @@ def _made_link(words: list[str], here: tuple[str, ...]) -> _MadeLink | None:
         destinations = _places(operands[1:2], here)
         # What a seed list links is the project's configuration: every file may be behind one.
         return _MadeLink((_EVERYTHING,), destinations, tuple(words))
-    if head not in _SYMBOLIC_LONG or not _makes_symbolic_links(head, words[1:]):
+    if _INTERPRETER.fullmatch(head) and _INTERPRETER_LINK_CALL.search(segment):
+        return _MadeLink((_EVERYTHING,), None, tuple(words))
+    if head == _MOVE:
+        return _moved_link(words, here)
+    if not _makes_a_link(head, words[1:]):
         return None
-    operands, target_directory = _link_operands(words[1:])
+    valued = frozenset({_INSTALL_LINK_OPTION}) if head == _INSTALL else frozenset()
+    operands, target_directory = _link_operands(words[1:], valued)
     if target_directory is not None:
         sources, destination_words = operands, [target_directory]
     elif len(operands) >= 2:
@@ -1087,20 +1123,82 @@ def _made_link(words: list[str], here: tuple[str, ...]) -> _MadeLink | None:
     return _MadeLink(tuple(placed), destinations, tuple(words))
 
 
-def _makes_symbolic_links(head: str, arguments: list[str]) -> bool:
-    """Does an ``ln``/``cp`` carry its symbolic-link option (``-s``, ``-sf``, ``--symbolic``)?"""
+def _makes_a_link(head: str, arguments: list[str]) -> bool:
+    """Does the command make a link: any ``ln``, a ``cp -s``, an ``install -l``?
+
+    A ``cp`` long option is matched by any unambiguous abbreviation (``--sy``),
+    as GNU getopt accepts one.
+    """
+    if head in _LINK_COMMANDS:
+        return True
+    if head not in (_SYMBOLIC_COPY, _INSTALL):
+        return False
+    letter = "s" if head == _SYMBOLIC_COPY else _INSTALL_LINK_OPTION[1]
     for word in arguments:
         if word == _END_OF_OPTIONS:
             return False
-        if word == _SYMBOLIC_LONG[head]:
+        name = word.partition("=")[0]
+        if head == _SYMBOLIC_COPY and len(name) > 3 and _SYMBOLIC_COPY_LONG.startswith(name):
             return True
-        if word.startswith("-") and not word.startswith("--") and "s" in word[1:]:
+        if word.startswith("-") and not word.startswith("--") and letter in word[1:]:
             return True
     return False
 
 
-def _link_operands(arguments: list[str]) -> tuple[list[str], str | None]:
-    """The operands of an ``ln``/``cp``/``hooks-daemon`` command, and its ``-t`` directory."""
+def _moved_link(words: list[str], here: tuple[str, ...]) -> _MadeLink | None:
+    """What an ``mv`` relocates, judged as a link made where it lands.
+
+    A renamed link keeps its target text, and a relative target is then read
+    from the new directory; a moved directory may hold such links. A link or a
+    directory that changes directory is judged as leading anywhere; one renamed
+    in place, or a plain file, leads where the source does now.
+    """
+    operands, target_directory = _link_operands(words[1:])
+    if target_directory is not None:
+        sources, destination_words = operands, [target_directory]
+    elif len(operands) >= 2:
+        sources, destination_words = operands[:-1], [operands[-1]]
+    else:
+        return None
+    destinations = _places(destination_words, here)
+    stays = target_directory is None and len(sources) == 1
+    placed: dict[str, None] = {}
+    for base in here or (None,):
+        for source in sources:
+            place = _place(source, base)
+            if place is None:
+                placed[_EVERYTHING] = None
+                continue
+            same_parent = (
+                stays
+                and destinations is not None
+                and all(
+                    posixpath.dirname(landed) == posixpath.dirname(place) for landed in destinations
+                )
+            )
+            relocates = _may_hold_links(place) and not same_parent
+            placed[_EVERYTHING if relocates else place] = None
+    return _MadeLink(tuple(placed), destinations, tuple(words))
+
+
+def _may_hold_links(path: str) -> bool:
+    """Is ``path`` a link or a directory (which may hold links)? Unreadable counts."""
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return stat.S_ISLNK(mode) or stat.S_ISDIR(mode)
+
+
+def _link_operands(
+    arguments: list[str], valued: frozenset[str] = frozenset()
+) -> tuple[list[str], str | None]:
+    """The operands of an ``ln``/``cp``/``mv``/``hooks-daemon`` command, and its ``-t`` directory.
+
+    ``valued`` names further options that take the next word as their value.
+    """
     operands: list[str] = []
     target_directory: str | None = None
     options_ended = False
@@ -1116,7 +1214,7 @@ def _link_operands(arguments: list[str]) -> tuple[list[str], str | None]:
             operands.append(word)
         elif word == _END_OF_OPTIONS:
             options_ended = True
-        elif word in _TARGET_DIRECTORY_OPTIONS or word in _SUFFIX_OPTIONS:
+        elif word in _TARGET_DIRECTORY_OPTIONS or word in _SUFFIX_OPTIONS or word in valued:
             skip_value, take_target = True, word in _TARGET_DIRECTORY_OPTIONS
         elif word.startswith("--target-directory="):
             target_directory = word.partition("=")[2]
@@ -1136,16 +1234,31 @@ def _places(words: list[str], here: tuple[str, ...]) -> tuple[str, ...] | None:
 
 
 def _reads_through_made_links(
-    words: list[str], head: str, here: tuple[str, ...], tracker: _SearchCwds
+    words: list[str], segment: str, here: tuple[str, ...], tracker: _SearchCwds
 ) -> Iterator[Read]:
-    """The places earlier-made links lead to, when this statement names where they land."""
-    if not tracker.made_links or head in _DIRECTORY_CHANGERS or not _runs_a_reader(words):
+    """The places earlier-made links lead to, when this statement names where they land.
+
+    Besides the operands, every path-shaped word of the statement counts, split
+    as the direct mention scan splits it (re-review R4): a leading or attached
+    redirect, ``dd if=``, an interpreter literal, a ``file://`` URL. Any input
+    redirect makes the statement a reader, whatever its command: ``$(<file)``
+    reads even with no command word, or inside an ``echo``.
+    """
+    if not tracker.made_links:
         return
-    recursive = _reads_files(words, head)
+    head = posixpath.basename(words[0]) if words else ""
+    if words and head in _DIRECTORY_CHANGERS:
+        return
+    if _INPUT_REDIRECT not in segment and not _runs_a_reader(words):
+        return
+    recursive = bool(words) and _reads_files(words, head)
+    candidates = [*_path_operands(words[1:]), *(["."] if recursive else [])]
+    mentioned = path_mention_words(segment)
     named: list[str | None] = []
     for base in here or (None,):
-        candidates = [*_path_operands(words[1:]), *(["."] if recursive else [])]
         named.extend(_place(word, base) for word in candidates)
+        # A crude word that cannot be placed is not a path operand: it is dropped.
+        named.extend(place for word in mentioned if (place := _place(word, base)) is not None)
     for link in tracker.made_links:
         if link.origin == tuple(words):
             continue

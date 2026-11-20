@@ -664,6 +664,19 @@ def _tokenise(command: str) -> list[str]:
     return [token for token, _start in _tokenise_with_offsets(command)]
 
 
+def path_mention_words(text: str) -> list[str]:
+    """Every path-shaped word the mention scan reads in ``text``, in each spelling it judges.
+
+    The same crude split the protected-name scan uses: quotes, ``=``, ``<``,
+    ``>``, parentheses and commas end a word, so a redirect operand, ``if=p``,
+    an interpreter one-liner's literal and a ``file://`` URL's path all
+    surface. A caller that PLACES paths (the made-link tracker in
+    ``recursive_search``, re-review R4) uses it so it reads the same words a
+    direct mention is judged on.
+    """
+    return [form for token in _tokenise(text) for form in _normalised_token_forms(token)]
+
+
 def _tokenise_with_offsets(command: str) -> list[tuple[str, int]]:
     """:func:`_tokenise`'s tokens, each with its offset in ``command``."""
     return [(match.group(), match.start()) for match in _TOKEN_PATTERN.finditer(command)]

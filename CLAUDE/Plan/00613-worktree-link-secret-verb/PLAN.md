@@ -78,7 +78,8 @@ root (`utils/link_reach.py`, closing the gap the 261120 handoff recorded).
 - [x] ✅ **Task 3.3**: (Done.) `hooks-daemon seed-worktree <worktree>` applies
   the configured list to a hand-made worktree; one positional, no options;
   release note 019. A protected link entry must also be listed in the config
-  committed at HEAD (residual 1 of the 261120 handoff, narrowed).
+  committed on the default branch, with the main checkout on it (residual 1
+  of the 261120 handoff, narrowed; re-review R5).
 - [ ] ⬜ **Task 3.4**: Reply to the peer project with the route (coordinator).
 
 ## Success Criteria

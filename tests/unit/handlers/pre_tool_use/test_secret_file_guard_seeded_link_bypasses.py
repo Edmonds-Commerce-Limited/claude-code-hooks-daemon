@@ -217,3 +217,86 @@ class TestALinkMadeEarlierInTheCommand:
     ) -> None:
         command = "ln -s @ROOT/conf conf2 && cat plain.txt"
         assert _decision(layout, command) == Decision.ALLOW
+
+
+#: Readers of one file, ``{P}`` its path (re-review R4). Each is denied on the
+#: protected file named directly, so each must be denied on it through a made link.
+_READERS = [
+    "cat {P}",
+    "< {P} cat",
+    "cat <{P}",
+    "cat 0<{P}",
+    "dd if={P}",
+    "dd status=none if={P} of=/dev/stdout",
+    "python3 -c \"print(open('{P}').read())\"",
+    "node -e \"process.stdout.write(require('fs').readFileSync('{P}'))\"",
+    "perl -ne print {P}",
+    "curl -s file://@WT/{P}",
+    'echo "$(<{P})"',
+    "base64 {P}",
+]
+
+
+class TestEveryReaderThroughAMadeLink:
+    """Re-review R4: the made-link tracker judges every reader the direct path is judged on."""
+
+    @pytest.mark.parametrize("reader", _READERS)
+    def test_the_reader_is_denied_on_the_direct_path(self, layout: _Layout, reader: str) -> None:
+        assert _decision(layout, reader.replace("{P}", "conf/vault.txt")) == Decision.DENY
+
+    @pytest.mark.parametrize("reader", _READERS)
+    def test_the_reader_is_denied_through_a_made_link(self, layout: _Layout, reader: str) -> None:
+        command = "ln -s @ROOT/conf y && " + reader.replace("{P}", "y/vault.txt")
+        assert _decision(layout, command) == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "ln -s @ROOT/conf y && python3 -c 'print(1)'",
+            "ln -s @ROOT/conf y && echo y/vault.txt",
+            "ln -s @ROOT/conf y && dd if=plain.txt of=/dev/null",
+            "ln -s docs y && < y/notes.txt cat",
+        ],
+    )
+    def test_controls_are_allowed(self, layout: _Layout, command: str) -> None:
+        assert _decision(layout, command) == Decision.ALLOW
+
+
+class TestEveryWayOfMakingOrMovingALink:
+    """Re-review R4: link-makers the tracker missed, and relocation of an existing link."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "ln --sym @ROOT/conf y && cat y/vault.txt",
+            "ln --symb @ROOT/conf y && cat y/vault.txt",
+            "ln --symbolic=x @ROOT/conf y && cat y/vault.txt",
+            "busybox ln -s @ROOT/conf y && cat y/vault.txt",
+            "toybox ln -s @ROOT/conf y && cat y/vault.txt",
+            "/usr/bin/busybox ln -s @ROOT/conf y && cat y/vault.txt",
+            "link @ROOT/conf y && cat y/vault.txt",
+            "mv conf y && cat y/vault.txt",
+            "mv -f conf y && grep -R fixture y",
+            "mv -t docs conf && cat docs/conf/vault.txt",
+            "cp -a conf y && cat y/vault.txt",
+            "cp -P conf y && cat y/vault.txt",
+            "install -l s @ROOT/conf y && cat y/vault.txt",
+            "python3 -c \"import os; os.symlink('@ROOT/conf', 'y')\" && cat y/vault.txt",
+            "node -e \"require('fs').symlinkSync('@ROOT/conf', 'y')\" && cat y/vault.txt",
+        ],
+    )
+    def test_denied(self, layout: _Layout, command: str) -> None:
+        assert _decision(layout, command) == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "mv docs d2 && cat d2/notes.txt",
+            "mv plain.txt p2 && cat p2",
+            "busybox ln -s docs d2 && cat d2/notes.txt",
+            "ln --sym docs d2 && cat d2/notes.txt",
+            "python3 -c \"print('hello')\" && cat plain.txt",
+        ],
+    )
+    def test_controls_are_allowed(self, layout: _Layout, command: str) -> None:
+        assert _decision(layout, command) == Decision.ALLOW
