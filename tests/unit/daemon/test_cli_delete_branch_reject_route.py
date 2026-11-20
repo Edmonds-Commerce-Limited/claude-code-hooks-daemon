@@ -152,6 +152,23 @@ class TestNoMainCheckout:
         assert _exists(project)
         assert read_ledger(project / config.ledger_path) == []
 
+    def test_a_worktree_of_a_bare_repository_has_no_route_and_refuses(
+        self, repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Real git, no monkeypatch: the common dir is not a checkout's ``.git``."""
+        bare = tmp_path / "bare.git"
+        _git(repo, "clone", "-q", "--bare", str(repo), str(bare))
+        # No remote: otherwise the source repository proves feat remote-held.
+        _git(bare, "remote", "remove", "origin")
+        worktree = tmp_path / "wt"
+        _git(bare, "worktree", "add", "-q", str(worktree), "main")
+        (worktree / ".claude" / "hooks-daemon").mkdir(parents=True)
+        assert cmd_delete_branch(_args(worktree)) == 1
+        err = capsys.readouterr().err
+        assert "no-value route is unavailable" in err
+        assert "Traceback" not in err
+        assert _git(bare, "for-each-ref", "refs/heads/feat").strip()
+
     def test_an_unbuildable_route_leaves_a_proven_delete_alone(
         self,
         project: Path,
