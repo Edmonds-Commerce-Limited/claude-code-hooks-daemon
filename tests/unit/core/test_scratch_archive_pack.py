@@ -14,9 +14,11 @@ import os
 import tarfile
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.core import scratch_archive_pack as pack_mod
 from claude_code_hooks_daemon.core.scratch_archive import ArchiveStore, new_archive_id
 from claude_code_hooks_daemon.core.scratch_archive_claim import (
     Claimed,
@@ -472,6 +474,34 @@ class TestVerifyRemaining:
         (tree / "sub" / "b.bin").unlink()
         (tree / "rel-link").unlink()
         self._check(claimed, store, archive_id, sha)
+        claimed.close()
+
+    def test_compares_in_argv_batches_and_catches_a_change_in_a_later_one(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        claimed, archive_id, sha = _packed(root, root_fd, store, tar)
+        tree = root / claimed.claimed_name
+        (tree / "sub" / "b.bin").unlink()
+        monkeypatch.setattr(pack_mod, "COMPARE_ARGV_BUDGET", 1)
+        seen: list[tuple[str, ...]] = []
+        real_compare = pack_mod._compare
+
+        def compare(*args: Any, **kwargs: Any) -> None:
+            seen.append(kwargs["only"])
+            real_compare(*args, **kwargs)
+
+        monkeypatch.setattr(pack_mod, "_compare", compare)
+        self._check(claimed, store, archive_id, sha)
+        assert seen == [("./a.txt",), ("./rel-link",)]
+        (tree / "rel-link").unlink()
+        (tree / "rel-link").symlink_to("elsewhere")
+        with pytest.raises(VerifyFailed):
+            self._check(claimed, store, archive_id, sha)
         claimed.close()
 
     @pytest.mark.parametrize("change", ["new-file", "changed-content", "wrong-sha"])

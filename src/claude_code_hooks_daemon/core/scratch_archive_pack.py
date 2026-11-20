@@ -33,6 +33,7 @@ import shutil
 import subprocess  # nosec B404 - argv only, never a shell
 import tarfile
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import IO
 
@@ -61,12 +62,20 @@ _CHUNK = 1 << 20
 _PROC_FD_PARTS = ("", "proc", "self", "fd")
 
 
+#: The most argv bytes of member names one restricted ``tar --compare`` is given.
+COMPARE_ARGV_BUDGET = 64 * 1024
+
+
 class PackRefused(Exception):
     """The entry was not packed; no archive of it remains."""
 
 
 class VerifyFailed(Exception):
     """The archive does not match the tree; it authorises no removal."""
+
+
+class TarDidNotRun(VerifyFailed):
+    """tar could not be run (missing, timed out): nothing was learned about the tree."""
 
 
 @dataclass(frozen=True)
@@ -310,7 +319,7 @@ def _compare(
             timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise VerifyFailed(f"tar --compare did not run: {exc}") from exc
+        raise TarDidNotRun(f"tar --compare did not run: {exc}") from exc
     finally:
         os.close(cwd_fd)
     if proc.returncode != 0 or proc.stdout or proc.stderr:
@@ -318,6 +327,21 @@ def _compare(
         raise VerifyFailed(
             f"tar --compare found differences (exit {proc.returncode}, {lines} lines)"
         )
+
+
+def _batches(names: list[str], budget: int) -> Iterator[tuple[str, ...]]:
+    """Split ``names`` into argv batches of at most ``budget`` bytes (at least one name each)."""
+    batch: list[str] = []
+    used = 0
+    for name in names:
+        size = len(os.fsencode(name)) + 1
+        if batch and used + size > budget:
+            yield tuple(batch)
+            batch, used = [], 0
+        batch.append(name)
+        used += size
+    if batch:
+        yield tuple(batch)
 
 
 def verify_remaining(
@@ -362,11 +386,11 @@ def verify_remaining(
         absent = {_canonical(n) for n in remaining.names} - set(names)
         if absent:
             raise VerifyFailed(f"{len(absent)} remaining names are not in the archive")
-        files = tuple(n for n in remaining.names if not n.endswith("/"))
-        if files:
+        files = [n for n in remaining.names if not n.endswith("/")]
+        for batch in _batches(files, COMPARE_ARGV_BUDGET):
             os.lseek(archive_fd, 0, os.SEEK_SET)
             _compare(
-                parent_fd, claimed_name, listing, archive_fd, tar=tar, timeout=timeout, only=files
+                parent_fd, claimed_name, listing, archive_fd, tar=tar, timeout=timeout, only=batch
             )
     finally:
         os.close(archive_fd)

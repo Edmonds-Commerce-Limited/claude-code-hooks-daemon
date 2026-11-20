@@ -55,6 +55,7 @@ from claude_code_hooks_daemon.core.scratch_archive_claim import (
 from claude_code_hooks_daemon.core.scratch_archive_pack import (
     DEFAULT_TAR_TIMEOUT_SECONDS,
     PackRefused,
+    TarDidNotRun,
     TarTool,
     VerifyFailed,
     members_of,
@@ -68,6 +69,10 @@ _MNT_ID = "mnt_id:"
 
 class RemoveRefused(Exception):
     """Nothing more was removed; what is left stays under its claimed name."""
+
+
+class ProofUnavailable(RemoveRefused):
+    """The archive could not be checked at all (tar did not run); nothing was learned."""
 
 
 @dataclass(frozen=True)
@@ -168,6 +173,8 @@ def _prove(
             expected_sha256=record.sha256,
             timeout=timeout,
         )
+    except TarDidNotRun as exc:
+        raise ProofUnavailable(f"archive {record.archive_id} was not checked: {exc}") from exc
     except VerifyFailed as exc:
         raise RemoveRefused(f"archive {record.archive_id} does not verify: {exc}") from exc
     after = _walk(parent_fd, claimed_name, max_inodes, max_depth)
@@ -236,8 +243,11 @@ def _delete(dir_fd: int, name: str, *, directory: bool, inside: bool) -> None:
         except PermissionError as exc:
             if attempt == 2 or not inside or exc.errno != errno.EACCES:
                 raise RemoveRefused(f"cannot remove {name!r}: {exc}") from exc
-            mode = stat.S_IMODE(os.fstat(dir_fd).st_mode)
-            os.fchmod(dir_fd, mode | stat.S_IWUSR | stat.S_IXUSR)
+            try:
+                mode = stat.S_IMODE(os.fstat(dir_fd).st_mode)
+                os.fchmod(dir_fd, mode | stat.S_IWUSR | stat.S_IXUSR)
+            except OSError as chmod_exc:
+                raise RemoveRefused(f"cannot make a directory writable: {chmod_exc}") from exc
         except OSError as exc:
             raise RemoveRefused(f"cannot remove {name!r}: {exc}") from exc
 
@@ -250,15 +260,29 @@ def _children(listing: TreeListing) -> dict[str, list[Node]]:
     return found
 
 
+def _fsync(dir_fd: int) -> None:
+    try:
+        os.fsync(dir_fd)
+    except OSError as exc:
+        raise RemoveRefused(f"cannot fsync the parent directory: {exc}") from exc
+
+
+def _readlink(dir_fd: int, name: str) -> str:
+    try:
+        return os.readlink(name, dir_fd=dir_fd)
+    except OSError as exc:
+        raise RemoveRefused(f"cannot read the link {name!r}: {exc}") from exc
+
+
 def _remove(parent_fd: int, proof: _Proof, *, max_depth: int) -> Removed:
     name = proof.claimed_name
     root = proof.listing.root
     info = _lstat_at(parent_fd, name)
     if root.kind != "dir":
         _require_listed(info, root)
-        target = os.readlink(name, dir_fd=parent_fd) if root.kind == "symlink" else None
+        target = _readlink(parent_fd, name) if root.kind == "symlink" else None
         _delete(parent_fd, name, directory=False, inside=False)
-        os.fsync(parent_fd)
+        _fsync(parent_fd)
         return Removed(name, proof.record.archive_id, 1, target, proof.partial)
     _require_listed(info, root)
     mount = _mount_id(parent_fd)
@@ -295,7 +319,7 @@ def _remove(parent_fd: int, proof: _Proof, *, max_depth: int) -> Removed:
     finally:
         for fd, _rel, _pending in stack:
             os.close(fd)
-    os.fsync(parent_fd)
+    _fsync(parent_fd)
     return Removed(name, proof.record.archive_id, removed, None, proof.partial)
 
 
@@ -349,7 +373,9 @@ def resume_claimed(
     Each record of this checkout naming the entry is tried, newest first, whole
     and then as a partly removed tree; the first that verifies authorises the
     removal. When none does, the tree is renamed back; when its name is taken,
-    it stays claimed and is reported stuck. Nothing is removed without a record.
+    it stays claimed and is reported stuck. A record that could not be checked at
+    all (tar did not run) also leaves it stuck: a partly removed tree is never
+    renamed back for want of a check. Nothing is removed without a record.
     """
     name = entry_name_of(claimed_name)
     records = _index(store)
@@ -357,7 +383,10 @@ def resume_claimed(
         os.lstat(claimed_name, dir_fd=parent_fd)
     except FileNotFoundError:
         return Resumed(name, "absent", "no leftover claim")
+    except OSError as exc:
+        raise RemoveRefused(f"cannot lstat {claimed_name!r}: {exc}") from exc
     candidates = [r for r in reversed(records) if r.checkout == checkout and _names_entry(r, name)]
+    unchecked = False
     for record in candidates:
         for partial in (False, True):
             try:
@@ -372,6 +401,9 @@ def resume_claimed(
                     timeout=timeout,
                     partial=partial,
                 )
+            except ProofUnavailable:
+                unchecked = True
+                continue
             except RemoveRefused:
                 continue
             try:
@@ -379,10 +411,12 @@ def resume_claimed(
             except RemoveRefused as exc:
                 return Resumed(name, "stuck", f"removal stopped: {exc}")
             return Resumed(name, "removed", f"archive {record.archive_id} verified", removed)
+    if unchecked:
+        return Resumed(name, "stuck", "a recorded archive could not be checked (tar did not run)")
     reason = "no recorded archive verifies" if candidates else "no record names the entry"
     try:
         rename_noreplace(parent_fd, claimed_name, name)
     except (OSError, ClaimRefused) as exc:
         return Resumed(name, "stuck", f"{reason}; cannot rename back: {exc}")
-    os.fsync(parent_fd)
+    _fsync(parent_fd)
     return Resumed(name, "renamed-back", reason)

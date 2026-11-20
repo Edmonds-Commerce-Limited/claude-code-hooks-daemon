@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 
 import claude_code_hooks_daemon
+from claude_code_hooks_daemon.core import scratch_archive_pack as pack_mod
 from claude_code_hooks_daemon.core import scratch_archive_remove as remove_mod
 from claude_code_hooks_daemon.core.scratch_archive import (
     ArchiveRecord,
@@ -33,6 +34,7 @@ from claude_code_hooks_daemon.core.scratch_archive import (
 from claude_code_hooks_daemon.core.scratch_archive_claim import (
     CLAIM_PREFIX,
     Claimed,
+    WalkRefused,
     claim,
     fingerprint_at,
     open_dir,
@@ -601,6 +603,27 @@ class TestEscapes:
             (claimed / "sub").chmod(0o755)
         assert (claimed / "a.txt").exists()
 
+    def test_an_unreadable_directory_injected_is_refused_before_anything_goes(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The root-proof twin of the test above: a walk that cannot list refuses."""
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        before = _snapshot(root)
+
+        def unreadable(*_args: Any, **_kwargs: Any) -> Any:
+            raise WalkRefused("cannot list a directory: Permission denied")
+
+        monkeypatch.setattr(remove_mod, "walk_tree", unreadable)
+        with pytest.raises(RemoveRefused, match="walked"):
+            _remove(root_fd, store, tar, record)
+        assert _snapshot(root) == before
+
     def test_an_immutable_file_stops_the_removal_and_a_resume_finishes_it(
         self,
         root: Path,
@@ -732,6 +755,28 @@ class TestResume:
         assert _resume(root_fd, store, tar).outcome == "removed"
         assert list(root.iterdir()) == []
 
+    def test_a_partly_removed_tree_is_stuck_when_tar_cannot_run(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """No check is not a failed check: the half-removed tree is never renamed back."""
+        _entry(root)
+        _archived(root_fd, store, tar)
+        (root / (CLAIM_PREFIX + "e1") / "sub" / "b.bin").unlink()
+
+        def no_tar(*_args: Any, **_kwargs: Any) -> Any:
+            raise OSError(errno.ENOENT, "No such file or directory", "tar")
+
+        monkeypatch.setattr(pack_mod, "_run_tar", no_tar)
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "stuck"
+        assert not (root / "e1").exists()
+        assert (root / (CLAIM_PREFIX + "e1") / "a.txt").read_text() == "alpha"
+
     def test_refuses_an_unclaimed_name(
         self, root_fd: int, store: ArchiveStore, tar: TarTool
     ) -> None:
@@ -849,28 +894,56 @@ class TestCrashSafety:
 
 
 _DELETERS = frozenset(
-    {"unlink", "rmdir", "rmtree", "remove", "removedirs", "replace", "truncate", "ftruncate"}
+    {
+        "unlink",
+        "rmdir",
+        "rmtree",
+        "remove",
+        "removedirs",
+        "replace",
+        "rename",
+        "renames",
+        "truncate",
+        "ftruncate",
+    }
 )
 
 
+def _deleter(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Attribute) and node.attr in _DELETERS:
+        return node.attr
+    if isinstance(node, ast.Name) and node.id in _DELETERS:
+        return node.id
+    return None
+
+
+def _scan(node: ast.AST, scope: str, module: str, found: set[tuple[str, str, str]]) -> None:
+    """Record every deleting reference under ``node``, scoped to its innermost function."""
+    for child in ast.iter_child_nodes(node):
+        inner = child.name if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef) else scope
+        name = _deleter(child)
+        if name is not None:
+            found.add((module, inner, name))
+        _scan(child, inner, module, found)
+
+
 def _deletion_surfaces() -> set[tuple[str, str, str]]:
-    """Every reference to a deleting call in the archive modules: (module, function, call)."""
+    """Every reference to a deleting call in the archive modules: (module, scope, call).
+
+    The whole module is scanned, so a module- or class-level alias such as
+    ``_rm = shutil.rmtree`` is listed under ``<module>``.
+    """
     core = Path(claude_code_hooks_daemon.__file__).parent / "core"
     found: set[tuple[str, str, str]] = set()
     for path in sorted(core.glob("scratch_archive*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for func in ast.walk(tree):
-            if not isinstance(func, ast.FunctionDef):
-                continue
-            for node in ast.walk(func):
-                name = None
-                if isinstance(node, ast.Attribute) and node.attr in _DELETERS:
-                    name = node.attr
-                elif isinstance(node, ast.Name) and node.id in _DELETERS:
-                    name = node.id
-                if name is not None:
-                    found.add((path.name, func.name, name))
+        _scan(ast.parse(path.read_text(encoding="utf-8")), "<module>", path.name, found)
     return found
+
+
+def test_the_surface_scan_sees_a_module_level_alias() -> None:
+    found: set[tuple[str, str, str]] = set()
+    _scan(ast.parse("import shutil\n_rm = shutil.rmtree\n"), "<module>", "m.py", found)
+    assert found == {("m.py", "<module>", "rmtree")}
 
 
 def test_deletion_surfaces_are_only_the_listed_ones() -> None:
