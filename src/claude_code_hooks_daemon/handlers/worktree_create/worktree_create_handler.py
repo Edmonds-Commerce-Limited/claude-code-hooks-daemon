@@ -623,7 +623,10 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             "re-seeds over an agent's own edits. A configured path that has since "
             "disappeared ABORTS creation rather than handing you a quietly "
             f"under-seeded worktree — run `{daemon_cli_command_for_docs('check-worktree-seed')}` to "
-            "see which entries are stale and which local files are not yet covered."
+            "see which entries are stale and which local files are not yet covered. "
+            "A worktree made by hand (`git worktree add`) is not seeded; run "
+            f"`{daemon_cli_command_for_docs('seed-worktree')} <worktree>` to apply this "
+            "same list to it (it takes no path of its own)."
         )
         return "".join(lines)
 

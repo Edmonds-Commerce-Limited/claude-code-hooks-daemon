@@ -186,7 +186,8 @@ def _describe_copy_refusal(
     if verdict is not None:
         return (
             f"{refused}: its source is, holds or links to a path the secret guard protects. "
-            "A protected file may not be seeded with mode: copy"
+            "A protected file may not be seeded with mode: copy; seed it with "
+            "mode: symlink, which makes no second copy of it"
         )
     return None
 

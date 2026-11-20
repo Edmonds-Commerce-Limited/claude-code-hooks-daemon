@@ -1193,7 +1193,9 @@ handlers:
       #     #             but a write from INSIDE a worktree flows back.
       #     #   copy    — isolated. Safe to overwrite; may drift from the
       #     #             canonical file after creation. REFUSED for a path
-      #     #             the secret_file_guard protects (creation aborts).
+      #     #             the secret_file_guard protects (creation aborts):
+      #     #             seed such a file with symlink, which agents still
+      #     #             cannot read through.
       #     default_mode: symlink
       #     entries:
       #       # Repository-root-relative. Files or directories; no globs.
@@ -1204,6 +1206,9 @@ handlers:
       #   # Seeding happens once, at creation. A re-fired event never re-seeds
       #   # over an agent's own edits, and a listed path that does not exist
       #   # ABORTS creation rather than yielding a quietly under-seeded worktree.
+      #   # A worktree made by hand (`git worktree add`) skips this hook; run
+      #   #   bin/hooks-daemon seed-worktree <worktree>
+      #   # to apply this same list to it.
 
   worktree_remove:  # WorktreeRemove event (worktree teardown)
     worktree_remove:  # Prunes stale worktree registrations; removes a named worktree
