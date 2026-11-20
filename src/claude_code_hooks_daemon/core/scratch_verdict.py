@@ -17,10 +17,12 @@ from a walk that did not finish:
    outside the entry, or is related and holds work no remote holds (R6); or
    the entry holds a file the project tracks.
 5. REFERENCED: not evaluated yet (Task 2.4).
-6. DISPOSABLE when every file is covered by P1, P2, P4 or P5; else UNCERTAIN.
-   A standalone repository has no rule of its own (R7 overturned): its ``.git``
-   is ordinary content. P4 covers a clean pushed related repository's git
-   directory and tracked files.
+6. DISPOSABLE when every file is covered by P1, P2, P4, P5 or P7; else UNCERTAIN.
+   P4 covers a clean pushed related repository's git directory and tracked
+   files. P7 covers a standalone repository's work tree and git directory: the
+   coordinator's ruling applying the owner's "scratch repo ... no value"
+   (DESIGN.md section 0). It stops at the deepest other repository root, and
+   files beside the repository are judged on their own.
 
 Coverage is judged over every non-directory node and every empty directory.
 P1 trusts a regular file's own basename only; P2 covers anything, links and
@@ -99,6 +101,7 @@ class Proof(enum.Enum):
     P2 = "P2"
     P4 = "P4"
     P5 = "P5"
+    P7 = "P7"
 
 
 class RepositoryMarker(enum.Enum):
@@ -159,6 +162,22 @@ def _p4(path: str, repos: RepoFindings | None) -> bool:
     )
 
 
+def _under(path: str, root: str) -> bool:
+    return path == root or path.startswith(f"{root}/")
+
+
+def _p7(path: str, repos: RepoFindings | None) -> bool:
+    """Covered by P7: the deepest repository root holding ``path`` is a standalone one."""
+    if repos is None:
+        return False
+    holders = [
+        (len(root), root in repos.standalone_roots)
+        for root in (*repos.standalone_roots, *repos.other_roots)
+        if _under(path, root)
+    ]
+    return bool(holders) and max(holders)[1]
+
+
 def _coverage(
     nodes: Sequence[Node], repos: RepoFindings | None = None
 ) -> tuple[tuple[Proof, ...], list[str]]:
@@ -168,7 +187,12 @@ def _coverage(
     for node in nodes:
         if node.kind is NodeKind.DIRECTORY and not node.empty:
             continue
-        proof = Proof.P4 if _p4(node.path, repos) else _proof_for(node, venvs)
+        if _p4(node.path, repos):
+            proof: Proof | None = Proof.P4
+        elif _p7(node.path, repos):
+            proof = Proof.P7
+        else:
+            proof = _proof_for(node, venvs)
         if proof is None:
             uncovered.append(node.path)
         else:

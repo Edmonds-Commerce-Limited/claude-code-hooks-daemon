@@ -12,8 +12,9 @@ repository (a directory holding ``HEAD``, ``objects/`` and ``refs/``), is one of
   clean (no staged change, every worktree change a remote-held blob), has no
   stash, and every ref tip and HEAD is contained by a LIVE-verified remote tip
   of the project. Then its git directory and tracked files are covered by P4.
-- STANDALONE: none of the above. No repository rule (R7 overturned): the entry
-  goes down the ordinary ladder with its ``.git`` as ordinary content.
+- STANDALONE: none of the above. Disposable (proof P7 covers its work tree and
+  git directory), the coordinator's ruling applying the owner's "scratch repo
+  ... no value" (DESIGN.md section 0). Files beside it are judged on their own.
 - BROKEN: anything that could not be judged. The entry is STUCK.
 
 Standalone must be proved for every marker: any other kind decides the entry.
@@ -175,6 +176,10 @@ class RepoFindings:
     p4_covered: tuple[str, ...] = ()
     #: The git directories among ``p4_covered``: they alone cover everything beneath them.
     p4_git_dirs: tuple[str, ...] = ()
+    #: Roots (work tree and git directory) of each STANDALONE repository: P7 covers them.
+    standalone_roots: tuple[str, ...] = ()
+    #: Roots of every other repository: P7 stops at the deepest root holding a path.
+    other_roots: tuple[str, ...] = ()
 
 
 def _shas(text: str) -> list[str] | None:
@@ -540,6 +545,16 @@ def _dirty_problems(repo: _Repo, project: ProjectGit, root: Path) -> list[str]:
     ]
 
 
+def _standalone_roots(repo: _Repo, root: Path) -> list[str]:
+    """A standalone repository's work tree and git directory, from the scratch root."""
+    places = [repo.gitdir]
+    if repo.work_tree is not None:
+        places = [repo.work_tree]
+        if not _inside(repo.gitdir, repo.work_tree):
+            places.append(repo.gitdir)
+    return [place.relative_to(root).as_posix() for place in places]
+
+
 def _related_problems(
     repo: _Repo, project: ProjectGit, refs: Mapping[str, str], root: Path
 ) -> list[str]:
@@ -640,9 +655,15 @@ def classify_entry(
     stuck: list[str] = []
     protected: list[str] = []
     covered: list[str] = []
+    standalone: set[str] = set()
+    others: set[str] = set()
     for marker in [*markers, *_bare_candidates(node_set, markers)]:
         kind, reasons, cover = _classify_one(root, entry, marker, node_set, project)
         kinds[marker] = kind
+        if kind is RepoKind.STANDALONE:
+            standalone.update(cover)
+            continue
+        others.add(marker.removesuffix(f"/{_GIT_MARKER}"))
         if kind is RepoKind.BROKEN:
             stuck.extend(reasons)
         elif reasons:
@@ -652,7 +673,15 @@ def classify_entry(
         return RepoFindings(kinds, tuple(stuck), tuple(protected))
     git_dirs = tuple(sorted({path[:-1] for path in covered if path.endswith("/")}))
     files = {path for path in covered if not path.endswith("/")}
-    return RepoFindings(kinds, (), (), tuple(sorted({*files, *git_dirs})), git_dirs)
+    return RepoFindings(
+        kinds,
+        (),
+        (),
+        tuple(sorted({*files, *git_dirs})),
+        git_dirs,
+        tuple(sorted(standalone)),
+        tuple(sorted(others - standalone)),
+    )
 
 
 def _classify_one(
@@ -668,7 +697,7 @@ def _classify_one(
         refs = _refs(repo, project)
         related = _is_related(repo, project, keys, refs)
         if not related:
-            return RepoKind.STANDALONE, [], []
+            return RepoKind.STANDALONE, [], _standalone_roots(repo, root)
         problems = _related_problems(repo, project, refs, root)
         if problems:
             return (

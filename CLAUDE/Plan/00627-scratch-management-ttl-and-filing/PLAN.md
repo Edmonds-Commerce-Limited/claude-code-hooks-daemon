@@ -29,7 +29,7 @@ This plan is design only until the owner or coordinator starts Phase 1. No exist
 ## Goals
 
 - Every scratch entry past its TTL (24 hours by default, configurable) is filed, archived or removed, unless a machine test shows it is live or holds work that exists nowhere else.
-- Removal is only ever by machine proof or after a verified archive has been held and announced. A repository or worktree that has somewhere to push (a remote, or shared history with the project) and holds unpushed commits or dirty tracked content is never packed or removed (DESIGN.md R6). A standalone repository has no special rule: the owner, 2026-11-20, "no special rules for repos ... scratch repo - i dont know what this is for but its presumably for testing stuff etc - no value". It goes down the same ladder as any other content (R7 overturned).
+- Removal is only ever by machine proof or after a verified archive has been held and announced. A repository or worktree that has somewhere to push (a remote, or shared history with the project) and holds unpushed commits or dirty tracked content is never packed or removed (DESIGN.md R6). A standalone repository has no special rule: the owner, 2026-11-20, "no special rules for repos ... scratch repo - i dont know what this is for but its presumably for testing stuff etc - no value". It is DISPOSABLE by proof P7, the coordinator's application of those words (DESIGN.md R7a); files beside it are judged on their own.
 - Each directory directly under `untracked/` has a configurable TTL, as the owner asked on 2026-11-20: "default/configurable TTL for untracked paths: untracked-ttl: repos: * (means unlimited, never clear); scratch: 7d; other-dir: 36h". `untracked/repos` and the reference-repository roots are never swept (DESIGN.md section 4.1, R16).
 - `hooks-daemon scratch-sweep` reports by default and acts with `--apply`. It runs from the housekeeping pass, a must-do item and a routine.
 - A SessionStart report, and caps on directories, bytes and entries that warn and then block before the link index is affected. The link index excludes nothing.
@@ -70,7 +70,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 
 ### Phase 2: Git proofs and references
 
-- [x] ✅ **Task 2.1**: Classify each nested repository: registered worktree, outside-pointing `.git` file, related, standalone, linked inside (DESIGN.md section 3.3). A standalone repository drops to the ordinary ladder; git runs in a nested repository take no locks and run no hooks or fsmonitor.
+- [x] ✅ **Task 2.1**: Classify each nested repository: registered worktree, outside-pointing `.git` file, related, standalone, linked inside (DESIGN.md section 3.3). A standalone repository is DISPOSABLE by P7 (R7a); git runs in a nested repository take no locks and run no hooks or fsmonitor.
 - [x] ✅ **Task 2.2**: Add the related-repository tests: dirty tracked content, stash, ref tips proved against the main repository's objects and remote-held refs. A git failure or timeout is STUCK.
 - [ ] ⬜ **Task 2.3**: Add proof P3 (identical copy by blob hash) and P4 (clean pushed clone).
 - [ ] ⬜ **Task 2.4**: Add the reference set (exact path, HEAD and unmerged branch tips) and the REFERENCED verdict.
@@ -133,7 +133,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [ ] A failure injected after each step of the removal order leaves the original or a verified archive, and a second run converges.
 - [ ] No link is followed: the escape tests leave every outside dummy file untouched.
 - [ ] A dry run changes no inode.
-- [ ] A related repository (a remote, or shared history) with unpushed commits or dirty tracked content is never packed or removed, including when its own remote refs claim otherwise and when the remote cannot be reached. A standalone repository gets no repository-specific verdict (R7 overturned), and one marker of another kind in the same entry decides the entry.
+- [ ] A related repository (a remote, or shared history) with unpushed commits or dirty tracked content is never packed or removed, including when its own remote refs claim otherwise and when the remote cannot be reached. A standalone repository is DISPOSABLE by P7 (R7a) and covers nothing beside its own root, and one marker of another kind in the same entry decides the entry.
 - [ ] No sweep root is, or lies inside, `untracked/repos`, a reference-repository root or the archive store, whatever `scratch.untracked_ttl` says; a malformed TTL falls back to the key's default with a warning and is never read as `"*"`.
 - [ ] The cap guard denies a directory-creating command at the block cap and never denies a commit or journal body file.
 - [ ] No code path and no printed suggestion deletes on age alone.

@@ -112,26 +112,94 @@ class TestOrdering:
         assert judgement.verdict is Verdict.PROTECTED
         assert judgement.reasons == ("e/.git: worktree",)
 
-    def test_a_standalone_repository_is_ordinary_content(self) -> None:
+    def test_a_standalone_repository_is_disposable_by_p7(self) -> None:
+        """Coordinator's ruling applying the owner's "scratch repo ... no value" (DESIGN 0)."""
         walk = finished(
             _stats(
                 Node("e", D, 0),
                 Node("e/.git", D, 0),
                 Node("e/.git/HEAD", F, 21),
+                Node("e/.git/objects/ab/cdef", F, 90),
+                Node("e/probe.py", F, 40),
                 git_markers=("e/.git",),
             )
         )
-        repos = RepoFindings(kinds={"e/.git": RepoKind.STANDALONE})
+        repos = RepoFindings(kinds={"e/.git": RepoKind.STANDALONE}, standalone_roots=("e",))
+        judgement = judge(walk, age=_DUE, liveness=(), repos=repos)
+        assert judgement.verdict is Verdict.DISPOSABLE
+        assert judgement.proofs == (Proof.P7,)
+
+    def test_p7_covers_only_the_repository_subtree_not_its_neighbours(self) -> None:
+        walk = finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/report.md", F, 300),
+                Node("e/tmp/repo/.git/HEAD", F, 21),
+                Node("e/tmp/repo/a.txt", F, 3),
+                git_markers=("e/tmp/repo/.git",),
+            )
+        )
+        repos = RepoFindings(
+            kinds={"e/tmp/repo/.git": RepoKind.STANDALONE}, standalone_roots=("e/tmp/repo",)
+        )
         judgement = judge(walk, age=_DUE, liveness=(), repos=repos)
         assert judgement.verdict is Verdict.UNCERTAIN
-        assert judgement.uncovered == ("e/.git/HEAD",)
+        assert judgement.uncovered == ("e/report.md",)
 
-    def test_an_empty_standalone_repository_is_disposable_by_the_ordinary_proofs(self) -> None:
-        walk = finished(
-            _stats(Node("e", D, 0), Node("e/.git", D, 0, empty=True), git_markers=("e/.git",))
+    def test_p7_stops_at_a_nested_related_repository(self) -> None:
+        """A clean pushed clone inside a standalone repository keeps its own rule."""
+        nodes = (
+            Node("e", D, 0),
+            Node("e/.git/HEAD", F, 21),
+            Node("e/clone/.git/HEAD", F, 21),
+            Node("e/clone/notes.txt", F, 5),
         )
-        repos = RepoFindings(kinds={"e/.git": RepoKind.STANDALONE})
-        assert judge(walk, age=_DUE, liveness=(), repos=repos).verdict is Verdict.DISPOSABLE
+        repos = RepoFindings(
+            kinds={"e/.git": RepoKind.STANDALONE, "e/clone/.git": RepoKind.RELATED},
+            p4_covered=("e/clone/.git",),
+            p4_git_dirs=("e/clone/.git",),
+            standalone_roots=("e",),
+            other_roots=("e/clone",),
+        )
+        judgement = judge(
+            finished(_stats(*nodes, git_markers=("e/.git", "e/clone/.git"))),
+            age=_DUE,
+            liveness=(),
+            repos=repos,
+        )
+        assert judgement.verdict is Verdict.UNCERTAIN
+        assert judgement.uncovered == ("e/clone/notes.txt",)
+
+    def test_p7_covers_a_standalone_repository_inside_a_related_one(self) -> None:
+        nodes = (
+            Node("e", D, 0),
+            Node("e/.git/HEAD", F, 21),
+            Node("e/sub/.git/HEAD", F, 21),
+            Node("e/sub/x.txt", F, 5),
+        )
+        repos = RepoFindings(
+            kinds={"e/.git": RepoKind.RELATED, "e/sub/.git": RepoKind.STANDALONE},
+            p4_covered=("e/.git",),
+            p4_git_dirs=("e/.git",),
+            standalone_roots=("e/sub",),
+            other_roots=("e",),
+        )
+        judgement = judge(
+            finished(_stats(*nodes, git_markers=("e/.git", "e/sub/.git"))),
+            age=_DUE,
+            liveness=(),
+            repos=repos,
+        )
+        assert judgement.verdict is Verdict.DISPOSABLE
+        assert judgement.proofs == (Proof.P4, Proof.P7)
+
+    def test_a_tracked_file_beats_a_standalone_repository(self) -> None:
+        walk = finished(
+            _stats(Node("e", D, 0), Node("e/.git/HEAD", F, 21), git_markers=("e/.git",))
+        )
+        repos = RepoFindings(kinds={"e/.git": RepoKind.STANDALONE}, standalone_roots=("e",))
+        judgement = judge(walk, age=_DUE, liveness=(), repos=repos, tracked=("e/.git/HEAD",))
+        assert judgement.verdict is Verdict.PROTECTED
 
     def test_p4_covers_a_clean_pushed_clone_but_not_its_untracked_work(self) -> None:
         nodes = (

@@ -72,6 +72,16 @@ class TestStandalone:
         assert findings.stuck == ()
         assert findings.protected == ()
         assert findings.p4_covered == ()
+        assert findings.standalone_roots == ("e/repo",)
+
+    def test_a_standalone_root_inside_a_related_clone_names_both_roots(
+        self, gp: GitProject
+    ) -> None:
+        gp.clone("e")
+        gp.standalone("e/sub")
+        findings = _classify(gp, "e")
+        assert findings.standalone_roots == ("e/sub",)
+        assert findings.other_roots == ("e",)
 
     def test_an_empty_repository_with_no_commit_is_standalone(self, gp: GitProject) -> None:
         gp.standalone("e", commit=False)
@@ -85,6 +95,11 @@ class TestStandalone:
         findings = _classify(gp, "e")
         assert set(findings.kinds.values()) == {RepoKind.STANDALONE}
         assert findings.stuck == ()
+        assert findings.standalone_roots == (
+            "e/main",
+            "e/main/.git/worktrees/side",
+            "e/side",
+        )
 
 
 class TestNotARepository:
