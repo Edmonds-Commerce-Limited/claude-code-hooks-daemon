@@ -237,6 +237,8 @@ def run_sweep(
         return SweepReport(str(root), (), False, (sweep_root.refusal,), tuple(notes))
     ttl_hours = sweep_root.ttl_hours
     notes.extend(sweep_root.notes)
+    if sweep_root.apply_refusal:
+        notes.append(f"not apply-eligible: {sweep_root.apply_refusal}")
     problem, absent = _root_problem(root)
     if absent:
         return SweepReport(str(root), (), True, (), (*notes, problem))

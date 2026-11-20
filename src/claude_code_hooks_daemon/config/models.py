@@ -2751,11 +2751,12 @@ class ScratchArchiveConfig(BaseModel):
 
 
 class ScratchKeepConfig(BaseModel):
-    """``scratch.keep``: the longest an agent's pause may last."""
+    """``scratch.keep``: the longest an agent's pause may last, and how many one archive may carry."""
 
     model_config = ConfigDict(extra="forbid")
 
     max_hours: Annotated[int, Field(ge=1)] = Field(default=168)
+    max_keeps: Annotated[int, Field(ge=1)] = Field(default=4)
 
 
 class ScratchFilingConfig(BaseModel):
@@ -2792,6 +2793,12 @@ def _is_ttl(value: object) -> bool:
     )
 
 
+def _malformed(value: object) -> str:
+    """``value`` as text that can never parse as a TTL, so reading it raises later."""
+    text = value if isinstance(value, str) else repr(value)
+    return repr(text) if _is_ttl(text) else text
+
+
 def _is_directory_name(key: object) -> bool:
     return isinstance(key, str) and key not in ("", ".", "..") and "/" not in key
 
@@ -2800,8 +2807,9 @@ class ScratchConfig(BaseModel):
     """``scratch``: the TTL, sweep, archive and caps of agent scratch (Plan 00627).
 
     The full design is Plan 00627 DESIGN.md section 10. A malformed TTL never
-    stops the config loading and is never read as ``"*"``: it falls back to
-    that key's built-in default, with a warning (section 4.1).
+    stops the config loading, and is never replaced by a default or by ``"*"``:
+    it is kept, logged, and :meth:`ttl_hours_for` raises for every directory it
+    governs, so the sweep refuses that root naming the bad value (section 4.1).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -2825,29 +2833,32 @@ class ScratchConfig(BaseModel):
 
     @field_validator("untracked_default_ttl", mode="before")
     @classmethod
-    def _fallthrough_or_never(cls, value: object) -> str:
+    def _keep_malformed_default(cls, value: object) -> str:
         if _is_ttl(value):
             return str(value)
         logger.warning(
-            'scratch.untracked_default_ttl: %r is not <N>h, <N>d or "*"; using %r',
+            'scratch.untracked_default_ttl: %r is not <N>h, <N>d or "*";'
+            " every directory it governs is refused by the sweep",
             value,
-            UNTRACKED_TTL_NEVER,
         )
-        return UNTRACKED_TTL_NEVER
+        return _malformed(value)
 
     @model_validator(mode="before")
     @classmethod
-    def _sanitise_untracked_ttl(cls, data: object) -> object:
-        """Merge the map over the built-ins; a bad value takes that key's default, logged."""
+    def _merge_untracked_ttl(cls, data: object) -> object:
+        """Merge the map over the built-ins; a bad value is kept (and logged) so it refuses."""
         if not isinstance(data, dict) or "untracked_ttl" not in data:
             return data
         raw = data["untracked_ttl"]
-        configured = data.get("untracked_default_ttl", UNTRACKED_TTL_NEVER)
-        fallthrough = str(configured) if _is_ttl(configured) else UNTRACKED_TTL_NEVER
         merged = dict(UNTRACKED_TTL_DEFAULTS)
         if not isinstance(raw, dict):
-            logger.warning("scratch.untracked_ttl: not a mapping; using the built-in map")
-            return {**data, "untracked_ttl": merged}
+            logger.warning("scratch.untracked_ttl: not a mapping; every sweep is refused")
+            marker = _malformed(f"scratch.untracked_ttl is not a mapping: {raw!r}")
+            return {
+                **data,
+                "untracked_ttl": dict.fromkeys(merged, marker),
+                "untracked_default_ttl": marker,
+            }
         for key, value in raw.items():
             if not _is_directory_name(key):
                 logger.warning(
@@ -2857,19 +2868,27 @@ class ScratchConfig(BaseModel):
             if _is_ttl(value):
                 merged[key] = value
                 continue
-            default = UNTRACKED_TTL_DEFAULTS.get(key, fallthrough)
             logger.warning(
-                'scratch.untracked_ttl: %s: %r is not <N>h, <N>d or "*"; using %r',
+                'scratch.untracked_ttl: %s: %r is not <N>h, <N>d or "*"; its sweep is refused',
                 key,
                 value,
-                default,
             )
-            merged[key] = default
+            merged[key] = _malformed(value)
         return {**data, "untracked_ttl": merged}
 
     def ttl_hours_for(self, directory: str) -> int | None:
-        """The TTL in hours of ``untracked/<directory>``, or None when it is never cleared."""
-        return untracked_ttl_hours(self.untracked_ttl.get(directory, self.untracked_default_ttl))
+        """The TTL in hours of ``untracked/<directory>``, or None when it is never cleared.
+
+        Raises ValueError, naming the config key and the value, when that TTL is malformed.
+        """
+        if directory in self.untracked_ttl:
+            source, value = f"scratch.untracked_ttl.{directory}", self.untracked_ttl[directory]
+        else:
+            source, value = "scratch.untracked_default_ttl", self.untracked_default_ttl
+        try:
+            return untracked_ttl_hours(value)
+        except ValueError as exc:
+            raise ValueError(f"{source}: {exc}; fix it in .claude/hooks-daemon.yaml") from exc
 
     @model_validator(mode="after")
     def validate_lifetimes(self) -> Self:

@@ -267,3 +267,49 @@ class TestRootInsideARepository:
             reference_roots=(),
         )
         assert resolved.refusal == ""
+
+
+class TestApplyEligibility:
+    """F-BYPS F1: only a first-level ``untracked/<key>`` root may be applied or restored into.
+
+    A narrower root sees no protection whose source lies outside it (an
+    alternates borrower beside it, a process whose working directory is its
+    parent), so a deeper root is a dry run only.
+    """
+
+    @pytest.mark.parametrize("key", ["scratch", "briefs"])
+    def test_a_first_level_root_is_apply_eligible(self, project: Path, key: str) -> None:
+        config = ScratchConfig.model_validate({"untracked_ttl": {"briefs": "36h"}})
+        root = resolve_sweep_root(
+            project / "untracked" / key, project_root=project, config=config, reference_roots=()
+        )
+        assert (root.refusal, root.apply_refusal) == ("", "")
+
+    def test_a_deeper_root_may_be_judged_but_not_applied(self, project: Path) -> None:
+        inner = project / "untracked" / "scratch" / "lend"
+        inner.mkdir()
+        root = resolve_sweep_root(
+            inner, project_root=project, config=ScratchConfig(), reference_roots=()
+        )
+        assert root.refusal == ""
+        assert "first-level" in root.apply_refusal
+        assert "untracked/scratch" in root.apply_refusal
+
+    def test_a_link_resolving_deeper_is_not_apply_eligible(self, project: Path) -> None:
+        (project / "untracked" / "scratch" / "deep").mkdir()
+        (project / "untracked" / "scratch" / "deep" / "er").mkdir()
+        link = project / "untracked" / "scratch" / "deep" / "back"
+        link.symlink_to(project / "untracked" / "scratch" / "deep" / "er")
+        root = resolve_sweep_root(
+            link, project_root=project, config=ScratchConfig(), reference_roots=()
+        )
+        assert root.apply_refusal
+
+    def test_a_refused_root_carries_the_same_refusal_for_apply(self, project: Path) -> None:
+        root = resolve_sweep_root(
+            project / "untracked" / "repos",
+            project_root=project,
+            config=ScratchConfig(),
+            reference_roots=(),
+        )
+        assert root.refusal and root.apply_refusal == root.refusal

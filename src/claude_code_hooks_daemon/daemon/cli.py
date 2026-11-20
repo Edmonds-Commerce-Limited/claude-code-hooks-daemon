@@ -6755,76 +6755,387 @@ def cmd_scratch_sweep(
     budget_clock: Callable[[], float] = time.monotonic,
     process_cwds: Callable[[], Mapping[int, Path]] | None = None,
     git_runner: Callable[..., Any] | None = None,
+    confirm_apply: Callable[[str], bool] | None = None,
 ) -> int:
-    """``scratch-sweep [--json] [--root PATH]``: judge every scratch entry; change nothing.
+    """``scratch-sweep [--apply] [--json] [--root PATH] [restore ID | keep ID --reason R]``.
 
-    A Phase 1 dry run (Plan 00627 Task 1.7). It never creates the scratch root,
-    writes no cache or state, prints no file content and prints no delete command.
-    The keyword parameters exist for tests.
+    ``--apply`` also needs a human to type the go-ahead at a terminal
+    (:func:`confirm_apply_interactively`); no flag, variable or file stands in
+    for it. ``confirm_apply`` is the test seam for that question.
+
+    Without ``--apply`` or a sub-command it is a dry run: it never creates the
+    scratch root or the archive store, writes no cache or state, prints no file
+    content and prints no delete command. ``--apply``, ``restore`` and ``keep``
+    act on the archive store, which lives in the main checkout only, so each is
+    refused from a linked worktree; every refusal comes before the store is
+    opened, because opening creates it. The keyword parameters exist for tests.
 
     Returns:
-        0 for a report, complete or not.
+        0 for a report or a completed action; 1 for a refusal.
     """
     from claude_code_hooks_daemon.core import scratch_sweep
-    from claude_code_hooks_daemon.core.scratch_liveness import (
-        LivenessInputs,
-        ProcessCwdReading,
-        read_background_records,
-        read_process_cwds,
-    )
-    from claude_code_hooks_daemon.core.scratch_repos import build_project_git
-    from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
     from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
-    from claude_code_hooks_daemon.utils.git_repo import run_git
-    from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
 
     repo = get_project_path(getattr(args, "project_root", None))
     config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
-    scratch = config.scratch
+    action: str | None = getattr(args, "scratch_action", None)
+    applying = bool(getattr(args, "apply", False))
     root = Path(args.root) if args.root is not None else repo / "untracked" / "scratch"
     if not root.is_absolute():
         root = repo / root
-    now = wall_clock()
-    cwd_reading = (
-        ProcessCwdReading(process_cwds(), ()) if process_cwds is not None else read_process_cwds()
-    )
-    inputs = LivenessInputs(
-        cwds=cwd_reading.cwds,
-        background=read_background_records(
-            _daemon_untracked_dir(repo) / "background-processes.jsonl"
-        ),
-        min_age_minutes=scratch.min_age_minutes,
-        now=now,
-        unreadable_pids=cwd_reading.unreadable,
-    )
-    report = scratch_sweep.run_sweep(
-        resolve_sweep_root(
-            root,
-            project_root=repo,
-            config=scratch,
-            reference_roots=tuple(config.reference_repos.roots),
-        ),
-        config=scratch,
-        now=now,
-        budget=WalkBudget(
-            seconds=args.budget_seconds, max_inodes=args.max_inodes, clock=budget_clock
-        ),
-        inputs=inputs,
+    sweep_root = resolve_sweep_root(
+        root,
         project_root=repo,
-        project_git=build_project_git(
-            repo,
-            remote=config.branches.remote,
-            default_branch=resolve_remote_default_branch(config.branches, repo),
-            runner=git_runner or run_git,
-        ),
-        scandir=scandir,
-        plan_dir=config.plan_workflow.directory,
+        config=config.scratch,
+        reference_roots=tuple(config.reference_repos.roots),
     )
-    if args.json:
-        print(json.dumps(scratch_sweep.report_json(report), indent=2))
+    sources = _ScratchSources(
+        repo=repo,
+        config=config,
+        budget_seconds=args.budget_seconds,
+        max_inodes=args.max_inodes,
+        scandir=scandir,
+        wall_clock=wall_clock,
+        budget_clock=budget_clock,
+        process_cwds=process_cwds,
+        git_runner=git_runner,
+    )
+    if action is None and not applying:
+        report = sources.classify(sweep_root)
+        if args.json:
+            print(json.dumps(scratch_sweep.report_json(report), indent=2))
+            return 0
+        for line in scratch_sweep.render_table(report, max_listed=config.scratch.sweep.max_listed):
+            print(line)
         return 0
-    for line in scratch_sweep.render_table(report, max_listed=scratch.sweep.max_listed):
-        print(line)
+    refusal = _scratch_store_refusal(repo, sweep_root, applying=applying, action=action)
+    if refusal:
+        print(f"scratch-sweep: refused: {refusal}", file=sys.stderr)
+        return 1
+    if action == "restore":
+        return _scratch_restore(args, sources, sweep_root)
+    if action == "keep":
+        return _scratch_keep(args, sources)
+    relative = _scratch_relative_root(sources, sweep_root)[1]
+    if not (confirm_apply or confirm_apply_interactively)(relative):
+        print(
+            "scratch-sweep: refused: --apply needs a human's typed confirmation at a "
+            "terminal (stdin and stdout both a TTY); nothing was changed",
+            file=sys.stderr,
+        )
+        return 1
+    return _scratch_apply(args, sources, sweep_root)
+
+
+def confirm_apply_interactively(
+    relative_root: str,
+    *,
+    stdin: Any = None,
+    stdout: Any = None,
+    prompt_stream: Any = None,
+) -> bool:
+    """True only when a human at a terminal types ``apply <relative_root>``.
+
+    The interim gate of Plan 00627 F-BYPS F2: until an archive can be kept in
+    advance (Task 4.4) and the coming expiries are announced (Task 5.2), an
+    apply run's hold window is one nobody is told about, so a person decides
+    each run. Both stdin and stdout must be terminals; end of input, any other
+    text, or a non-terminal stream is a refusal. Nothing else is consulted.
+    """
+    stdin = stdin if stdin is not None else sys.stdin
+    stdout = stdout if stdout is not None else sys.stdout
+    prompt_stream = prompt_stream if prompt_stream is not None else sys.stderr
+    if not (stdin.isatty() and stdout.isatty()):
+        return False
+    phrase = f"apply {relative_root}"
+    prompt_stream.write(
+        "scratch-sweep --apply archives and then removes every due DISPOSABLE or "
+        f"UNCERTAIN entry under {relative_root}, and expires archives past retention.\n"
+        f"Type '{phrase}' to go ahead: "
+    )
+    prompt_stream.flush()
+    return bool(stdin.readline().strip() == phrase)
+
+
+@dataclass(frozen=True)
+class _ScratchSources:
+    """Where ``scratch-sweep`` reads its facts; each method reads them FRESH."""
+
+    repo: Path
+    config: Config
+    budget_seconds: float
+    max_inodes: int
+    scandir: Callable[[str], Any]
+    wall_clock: Callable[[], float]
+    budget_clock: Callable[[], float]
+    process_cwds: Callable[[], Mapping[int, Path]] | None
+    git_runner: Callable[..., Any] | None
+
+    @property
+    def store_path(self) -> Path:
+        return self.repo / "untracked" / "scratch-archive"
+
+    @property
+    def background_file(self) -> Path:
+        return _daemon_untracked_dir(self.repo) / "background-processes.jsonl"
+
+    def now(self) -> datetime.datetime:
+        return datetime.datetime.fromtimestamp(self.wall_clock(), datetime.UTC)
+
+    def retention_hours(self) -> dict[str, float]:
+        archive = self.config.scratch.archive
+        return {
+            "DISPOSABLE": float(archive.disposable_hours),
+            "UNCERTAIN": float(archive.uncertain_hours),
+        }
+
+    def cwds(self) -> Any:
+        from claude_code_hooks_daemon.core.scratch_liveness import (
+            ProcessCwdReading,
+            read_process_cwds,
+        )
+
+        if self.process_cwds is not None:
+            return ProcessCwdReading(self.process_cwds(), ())
+        return read_process_cwds()
+
+    def project_git(self) -> Any:
+        from claude_code_hooks_daemon.core.scratch_repos import build_project_git
+        from claude_code_hooks_daemon.utils.git_repo import run_git
+        from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
+
+        return build_project_git(
+            self.repo,
+            remote=self.config.branches.remote,
+            default_branch=resolve_remote_default_branch(self.config.branches, self.repo),
+            runner=self.git_runner or run_git,
+        )
+
+    def classify(self, sweep_root: Any) -> Any:
+        """One fresh classification: clock, process cwds, background records and git."""
+        from claude_code_hooks_daemon.core import scratch_sweep
+        from claude_code_hooks_daemon.core.scratch_liveness import (
+            LivenessInputs,
+            read_background_records,
+        )
+        from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
+
+        now = self.wall_clock()
+        reading = self.cwds()
+        inputs = LivenessInputs(
+            cwds=reading.cwds,
+            background=read_background_records(self.background_file),
+            min_age_minutes=self.config.scratch.min_age_minutes,
+            now=now,
+            unreadable_pids=reading.unreadable,
+        )
+        return scratch_sweep.run_sweep(
+            sweep_root,
+            config=self.config.scratch,
+            now=now,
+            budget=WalkBudget(
+                seconds=self.budget_seconds, max_inodes=self.max_inodes, clock=self.budget_clock
+            ),
+            inputs=inputs,
+            project_root=self.repo,
+            project_git=self.project_git(),
+            scandir=self.scandir,
+            plan_dir=self.config.plan_workflow.directory,
+        )
+
+
+def _scratch_store_refusal(
+    repo: Path, sweep_root: Any, *, applying: bool, action: str | None
+) -> str:
+    """Why ``--apply``/``restore``/``keep`` may not run here; "" when it may.
+
+    Fails closed: a checkout whose ``.git`` is not a directory is a linked
+    worktree, and git's own answer must also name this checkout as the main one.
+    """
+    from claude_code_hooks_daemon.utils.git_repo import GitRepo
+
+    if applying and action is not None:
+        return f"--apply cannot be combined with {action}"
+    store_rule = "the archive store lives in the main checkout only"
+    if not (repo / ".git").is_dir():
+        return f"{repo} is not the main checkout (its .git is not a directory): {store_rule}"
+    found = GitRepo.resolve_for(repo)
+    if found is None:
+        return f"{repo} is not a git repository: {store_rule}"
+    if found.main_worktree_root().resolve() != repo.resolve():
+        return f"{repo} is not the main checkout: {store_rule}"
+    if sweep_root.refusal:
+        return str(sweep_root.refusal)
+    if (applying or action == "restore") and sweep_root.apply_refusal:
+        return str(sweep_root.apply_refusal)
+    path = Path(sweep_root.path)
+    if path.is_symlink() or not path.is_dir():
+        return f"{path} is not a directory"
+    if action is not None:
+        store = repo / "untracked" / "scratch-archive"
+        if store.is_symlink() or not store.is_dir():
+            return f"there is no archive store at {store}"
+    return ""
+
+
+def _scratch_relative_root(sources: _ScratchSources, sweep_root: Any) -> tuple[Path, str]:
+    resolved = Path(sweep_root.path).resolve()
+    return resolved, resolved.relative_to(sources.repo.resolve()).as_posix()
+
+
+def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_root: Any) -> int:
+    """``--apply``: archive and remove every due DISPOSABLE or UNCERTAIN entry."""
+    import dataclasses
+
+    from claude_code_hooks_daemon.core.scratch_archive import (
+        ArchiveStore,
+        StoreBusy,
+        StoreRefused,
+    )
+    from claude_code_hooks_daemon.core.scratch_archive_apply import (
+        ApplyFacts,
+        ApplySettings,
+        apply_sweep,
+    )
+    from claude_code_hooks_daemon.core.scratch_archive_facts import (
+        LazyReferences,
+        entry_in_use,
+    )
+    from claude_code_hooks_daemon.core.scratch_archive_pack import PackRefused, find_gnu_tar
+    from claude_code_hooks_daemon.core.scratch_liveness import read_background_records
+    from claude_code_hooks_daemon.core.scratch_references import build_references
+
+    try:
+        tar = find_gnu_tar()
+    except PackRefused as exc:
+        print(f"scratch-sweep: refused: {exc}", file=sys.stderr)
+        return 1
+    resolved, relative = _scratch_relative_root(sources, sweep_root)
+
+    def entry_live(name: str) -> bool:
+        return entry_in_use(
+            name,
+            root=resolved,
+            relative_root=relative,
+            reading=sources.cwds(),
+            background=read_background_records(sources.background_file),
+        )
+
+    facts = ApplyFacts(
+        classify=lambda: sources.classify(sweep_root),
+        entry_live=entry_live,
+        referenced=LazyReferences(lambda: build_references(sources.project_git(), relative)),
+    )
+    settings = ApplySettings(
+        root=Path(sweep_root.path),
+        original_prefix=relative,
+        checkout=str(sources.repo.resolve()),
+        tar=tar,
+        max_inodes=sources.max_inodes,
+        retention_hours=sources.retention_hours(),
+        clock=sources.now,
+    )
+    try:
+        with ArchiveStore.open(sources.store_path) as store, store.lock():
+            result = apply_sweep(store, facts, settings)
+    except (StoreRefused, StoreBusy, OSError) as exc:
+        print(f"scratch-sweep: refused: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        document = {"root": str(sweep_root.path), **dataclasses.asdict(result)}
+        print(json.dumps(document, indent=2, default=str))
+        return 0
+    print(f"scratch-sweep --apply: {sweep_root.path}")
+    if not result.complete:
+        print("INCOMPLETE: " + "; ".join(result.incomplete_reasons))
+    for outcome in result.entries:
+        detail = f" ({outcome.reason})" if outcome.reason else ""
+        archived = f" archive {outcome.archive_id}" if outcome.archive_id else ""
+        print(f"  {outcome.name}: {outcome.outcome}{archived}{detail}")
+    for resumed in result.resumed:
+        print(f"  resumed: {resumed}")
+    for expired in result.expired:
+        print(f"  expired: {expired}")
+    for note in result.notes:
+        print(f"  note: {note}")
+    return 0
+
+
+def _scratch_restore(args: argparse.Namespace, sources: _ScratchSources, sweep_root: Any) -> int:
+    """``restore <id>``: put an archived entry back into the (re-validated) sweep root."""
+    from claude_code_hooks_daemon.core.scratch_archive import (
+        ArchiveStore,
+        StoreBusy,
+        StoreRefused,
+    )
+    from claude_code_hooks_daemon.core.scratch_archive_claim import open_dir
+    from claude_code_hooks_daemon.core.scratch_archive_pack import PackRefused, find_gnu_tar
+    from claude_code_hooks_daemon.core.scratch_archive_restore import (
+        RestoredWithLeftovers,
+        RestoreRefused,
+        restore,
+    )
+
+    try:
+        tar = find_gnu_tar()
+        _resolved, relative = _scratch_relative_root(sources, sweep_root)
+        root_fd = open_dir(Path(sweep_root.path))
+    except (PackRefused, OSError, ValueError) as exc:
+        print(f"scratch-sweep: refused: {exc}", file=sys.stderr)
+        return 1
+    try:
+        with ArchiveStore.open(sources.store_path) as store, store.lock():
+            result = restore(
+                store,
+                args.archive_id,
+                root_fd,
+                root_path=relative,
+                tar=tar,
+                max_inodes=sources.max_inodes,
+                entry=args.entry,
+            )
+    except (RestoreRefused, StoreRefused, StoreBusy, ValueError, OSError) as exc:
+        print(f"scratch-sweep: restore refused: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        os.close(root_fd)
+    print(f"restored {result.archive_id} to {Path(sweep_root.path) / result.name}")
+    if isinstance(result, RestoredWithLeftovers):
+        for problem in result.problems:
+            print(f"scratch-sweep: after the restore: {problem}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _scratch_keep(args: argparse.Namespace, sources: _ScratchSources) -> int:
+    """``keep <id> --reason R [--hours N]``: a bounded, reasoned pause of an archive's expiry."""
+    from claude_code_hooks_daemon.core.scratch_archive import (
+        ArchiveStore,
+        StoreBusy,
+        StoreRefused,
+    )
+    from claude_code_hooks_daemon.core.scratch_archive_expire import KeepRefused, keep
+
+    max_hours = sources.config.scratch.keep.max_hours
+    hours = args.hours if args.hours is not None else float(max_hours)
+    now = sources.now()
+    try:
+        with ArchiveStore.open(sources.store_path) as store, store.lock():
+            event = keep(
+                store,
+                args.archive_id,
+                reason=args.reason,
+                until=now + datetime.timedelta(hours=hours),
+                now=now,
+                max_hours=float(max_hours),
+                max_keeps=sources.config.scratch.keep.max_keeps,
+                retention_hours=sources.retention_hours(),
+                entry=args.entry,
+            )
+    except (KeepRefused, StoreRefused, StoreBusy, ValueError, OSError) as exc:
+        print(f"scratch-sweep: keep refused: {exc}", file=sys.stderr)
+        return 1
+    print(f"kept {args.archive_id}: {event}")
     return 0
 
 
@@ -13985,12 +14296,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_branch_sweep.set_defaults(func=cmd_branch_sweep)
 
-    # scratch-sweep command (Plan 00627 Task 1.7): a dry run only.
+    # scratch-sweep command (Plan 00627 Tasks 1.7 and 3.8): a dry run unless --apply.
     parser_scratch_sweep = subparsers.add_parser(
         "scratch-sweep",
         help="Judge every scratch entry (LIVE, STUCK, PROTECTED, REFERENCED, DISPOSABLE, "
         "UNCERTAIN); "
-        "a read-only report that changes nothing",
+        "a read-only report unless --apply",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Exit 0 for a report, complete or not. The report says when the walk "
@@ -14028,6 +14339,38 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Inode cap for the whole walk "
         f"(default {SCRATCH_SWEEP_DEFAULT_MAX_INODES}); entries past it are reported STUCK",
+    )
+    parser_scratch_sweep.add_argument(
+        "--apply",
+        action="store_true",
+        help="Archive, verify, record, then remove every due DISPOSABLE or UNCERTAIN entry "
+        "(main checkout only; a human must type the confirmation at a terminal; the "
+        "default is a dry run that changes nothing)",
+    )
+    scratch_actions = parser_scratch_sweep.add_subparsers(dest="scratch_action")
+    parser_scratch_restore = scratch_actions.add_parser(
+        "restore", help="Restore an archived entry into the scratch root"
+    )
+    parser_scratch_restore.add_argument("archive_id", help="The archive id --apply printed")
+    parser_scratch_restore.add_argument(
+        "--entry", default=None, metavar="PATH", help="The original path, for a batch archive"
+    )
+    parser_scratch_keep = scratch_actions.add_parser(
+        "keep", help="Pause an archive's expiry, bounded by scratch.keep.max_hours"
+    )
+    parser_scratch_keep.add_argument("archive_id", help="The archive id --apply printed")
+    parser_scratch_keep.add_argument(
+        "--reason", required=True, help="Why it is kept; a repeated reason is refused"
+    )
+    parser_scratch_keep.add_argument(
+        "--hours",
+        type=_positive_seconds,
+        default=None,
+        metavar="N",
+        help="How long from now (default scratch.keep.max_hours)",
+    )
+    parser_scratch_keep.add_argument(
+        "--entry", default=None, metavar="PATH", help="The original path, for a batch archive"
     )
     parser_scratch_sweep.set_defaults(func=cmd_scratch_sweep)
 

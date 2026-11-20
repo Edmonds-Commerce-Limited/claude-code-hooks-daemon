@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
     GIT_TIMED_OUT,
     RELOCATING_VARIABLES,
     GitRepo,
+    IsolatedGitEnv,
     git_visible_paths,
     read_blobs,
     run_git,
@@ -442,6 +443,49 @@ class TestCallerSuppliedEnvironment:
             "a caller overrode the declined index lock, so the runner no longer "
             "guarantees the property it exists for"
         )
+
+
+class TestAnIsolatedEnvironmentDropsEveryInheritedGitVariable:
+    """D-EXEC 1 (Plan 00627 Task 3.9): an IsolatedGitEnv replaces the git part of
+    the inherited environment instead of laying variables over it."""
+
+    _INHERITED = (
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_EXEC_PATH",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_NAMESPACE",
+    )
+
+    def test_inherited_git_variables_are_dropped(
+        self, tmp_git_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for name in self._INHERITED:
+            monkeypatch.setenv(name, "inherited")
+        with mock.patch("subprocess.run") as runner:
+            runner.return_value = subprocess.CompletedProcess([], 0, "", "")
+            run_git(tmp_git_repo, "status", env=IsolatedGitEnv({"GIT_TERMINAL_PROMPT": "0"}))
+
+        passed = runner.call_args.kwargs["env"]
+        assert not set(self._INHERITED) & set(passed)
+        assert passed["GIT_TERMINAL_PROMPT"] == "0"
+        assert passed["GIT_OPTIONAL_LOCKS"] == "0"
+        assert "PATH" in passed
+
+    def test_a_plain_mapping_still_overlays(
+        self, tmp_git_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'a.b'='c'")
+        with mock.patch("subprocess.run") as runner:
+            runner.return_value = subprocess.CompletedProcess([], 0, "", "")
+            run_git(tmp_git_repo, "status", env={"GIT_TERMINAL_PROMPT": "0"})
+
+        assert runner.call_args.kwargs["env"]["GIT_CONFIG_PARAMETERS"] == "'a.b'='c'"
+
+    def test_it_survives_a_dict_copy_only_as_a_plain_mapping(self) -> None:
+        """A copy loses the marker, so callers pass the object itself through."""
+        isolated = IsolatedGitEnv({"A": "1"})
+        assert dict(isolated) == {"A": "1"}
+        assert len(isolated) == 1
 
 
 class TestGitReadsTheRealObjects:

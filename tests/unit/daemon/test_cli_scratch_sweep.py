@@ -101,10 +101,6 @@ class TestParser:
         with pytest.raises(SystemExit):
             build_parser().parse_args(["scratch-sweep", flag, "0"])
 
-    def test_there_is_no_apply_flag_yet(self) -> None:
-        with pytest.raises(SystemExit):
-            build_parser().parse_args(["scratch-sweep", "--apply"])
-
 
 class TestReadOnly:
     @pytest.mark.parametrize("as_json", [False, True])
@@ -192,6 +188,22 @@ class TestOutput:
         assert _run(tree, _args(tree, as_json=True, root=briefs)) == 0
         document = json.loads(capsys.readouterr().out)
         assert [row["name"] for row in document["entries"]] == ["f.out"]
+
+    @pytest.mark.parametrize("ttl", ['"7 days"', "36", "[1h]"])
+    def test_a_malformed_ttl_refuses_the_root_naming_the_value(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str], ttl: str
+    ) -> None:
+        config = tree.base / "project" / ".claude" / "hooks-daemon.yaml"
+        config.write_text(f'version: "2.0"\nscratch:\n  untracked_ttl:\n    scratch: {ttl}\n')
+        tree.file("a.log", b"x", mtime=time.time() - 30 * _DAY)
+        assert _run(tree, _args(tree, as_json=True)) == 0
+        document = json.loads(capsys.readouterr().out)
+        assert document["entries"] == []
+        assert document["complete"] is False
+        assert any(
+            "scratch.untracked_ttl.scratch" in reason for reason in document["incomplete_reasons"]
+        )
+        assert (tree.root / "a.log").exists()
 
     def test_the_reference_repositories_root_is_refused(
         self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
