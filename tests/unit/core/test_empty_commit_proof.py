@@ -476,6 +476,8 @@ def _forge_graph(
         position = _graph_position(data, parent)
         data[record + _OID : record + _OID + 4] = position.to_bytes(4, "big")
     data[-_OID:] = hashlib.sha1(bytes(data[:-_OID]), usedforsecurity=False).digest()
+    # git writes the graph read-only (0444); only root could rewrite it as-is.
+    path.chmod(0o644)
     path.write_bytes(bytes(data))
 
 

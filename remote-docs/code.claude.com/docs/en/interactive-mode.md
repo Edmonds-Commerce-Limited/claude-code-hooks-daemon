@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/interactive-mode.md
-fetched_at: '2026-11-16T21:15:34.870480+00:00'
+fetched_at: '2026-11-20T09:13:41.380092+00:00'
 fidelity: converted
-source_sha256: cd3a58dc2b3d4f054e9c23982b2f6cb745a9ed384f6ed546166fadb5f6d84497
+source_sha256: 7b5afca9ec3484326860990d84aa08bc1feabd53c165c5331b0678c54bb21024
 licence: unreviewed
-stale_after: '2027-02-14'
+stale_after: '2027-02-18'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -44,7 +44,7 @@ fetch_method: agent-browser-lite-headless (accept-markdown)
 | `Tab` | Accept an autocomplete suggestion, or add a comment to a permission answer | While autocomplete suggestions are showing in the prompt input, accepts the selected suggestion. On most permission prompts, with **Yes** or **No** focused, opens a comment field on that option, and pressing it again closes the field. See [add a comment when you answer a permission prompt](https://code.claude.com/docs/en/permissions.md#add-a-comment-when-you-answer-a-permission-prompt) |
 | `Up/Down arrows` or `Ctrl+P`/`Ctrl+N` | Move cursor or navigate command history | When the input spans more than one visual row, whether wrapped or multiline, first moves the cursor within the prompt. Once the cursor is on the first or last visual row, pressing again navigates command history. While you have messages queued, `Up` from the first row instead [takes them back](#take-back-what-you-queued) |
 | `Esc` | Interrupt Claude, or close a dialog | Stop the current response or tool call mid-turn so you can redirect. Claude keeps the work done so far. If you have [messages queued](#queue-messages-while-claude-works), Claude Code sends them next. When a dialog is open, `Esc` closes the dialog. While a footer item is selected, such as a row in the [subagent panel](https://code.claude.com/docs/en/sub-agents.md#run-subagents-in-foreground-or-background) below the prompt, `Esc` [deselects it](https://code.claude.com/docs/en/keybindings.md#footer-actions) instead of interrupting. On a permission prompt, `Esc` declines the action, the same as [**No** without a comment](https://code.claude.com/docs/en/permissions.md#add-a-comment-when-you-answer-a-permission-prompt) |
-| `Esc` + `Esc` | Clear input draft, or rewind | When the prompt input contains text, double `Esc` clears it and saves the draft to history so `Up` recalls it. When the input is empty, double `Esc` opens the [rewind menu](https://code.claude.com/docs/en/checkpointing.md) to restore or summarize code and conversation from a previous point |
+| `Esc` + `Esc` | Clear input draft, or rewind | Outside [vim mode](#vim-editor-mode), when the prompt input contains text, double `Esc` clears it and saves the draft to history so `Up` recalls it. When the input is empty, double `Esc` opens the [rewind menu](https://code.claude.com/docs/en/checkpointing.md) to restore or summarize code and conversation from a previous point. In vim mode, the menu opens from NORMAL mode |
 | `Ctrl+Enter` or `Ctrl+X Ctrl+S` | Send queued messages now | Sends your [queued messages](#queue-messages-while-claude-works), and your draft with them, right away. [When Claude Code sends what you queued](#when-claude-code-sends-what-you-queued) covers what happens to the turn Claude is working on. In [shell mode](#shell-mode-with-prefix), the key only queues your command. In terminals that don't report extended keys, `Ctrl+Enter` arrives as plain `Enter`; `Ctrl+X Ctrl+S` works in any terminal. Requires Claude Code v2.1.275 or later |
 | `Shift+Tab`, or `Alt+M` on Windows when the Node or Bun runtime doesn't enable VT input mode | Cycle permission modes | Cycle through `default` (labeled Manual in the mode indicator), `acceptEdits`, and `plan`, then `bypassPermissions` and `auto` where available. See [permission modes](https://code.claude.com/docs/en/permission-modes.md). On a file permission prompt, the same key closes an open [comment field](https://code.claude.com/docs/en/permissions.md#add-a-comment-when-you-answer-a-permission-prompt). With no field open, it selects the option that allows the action for the rest of the session, when the prompt offers that option. At the plan approval prompt, it approves the plan |
 | `Option+P` (macOS) or `Alt+P` (Windows/Linux) | Switch model | Switch models without clearing your prompt |
@@ -91,7 +91,7 @@ You can't remap these shortcuts in the [keybindings configuration file](https://
 | :- | :- | :- |
 | Quick escape | `\` + `Enter` | Works in all terminals |
 | Option key | `Option+Enter` | After enabling [Option as Meta](https://code.claude.com/docs/en/terminal-config.md#enable-option-key-shortcuts-on-macos) on macOS |
-| Shift+Enter | `Shift+Enter` | Native in iTerm2, WezTerm, Ghostty, Kitty, Warp, Windows Terminal. For other terminals, see [Enter multiline prompts](https://code.claude.com/docs/en/terminal-config.md#enter-multiline-prompts) |
+| Shift+Enter | `Shift+Enter` | Native in iTerm2, WezTerm, Ghostty, Kitty, Warp, Windows Terminal 1.25 or later. For other terminals, see [Enter multiline prompts](https://code.claude.com/docs/en/terminal-config.md#enter-multiline-prompts) |
 | Control sequence | `Ctrl+J` | Works in any terminal without configuration |
 | Paste mode | Paste directly | For code blocks, logs |
 
@@ -489,7 +489,7 @@ To turn it on, run this at the Claude Code prompt:
 /plugin enable cc-plugin-you-should-know@builtin
 ```
 
-Where `/plugin` doesn't list the mod, the enable command answers `Plugin "cc-plugin-you-should-know@builtin" is not installed in this project`.
+Where `/plugin` doesn't list the mod, the enable command says the plugin isn't installed in this project.
 
 ### Cost of checks
 

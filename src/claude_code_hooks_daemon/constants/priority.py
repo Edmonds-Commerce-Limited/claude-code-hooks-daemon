@@ -462,8 +462,9 @@ class Priority:
     BRANCH_CREATION_GUARD = 40
 
     # Plan 00619: the branch pool warning ladder, said on every tool call. Context
-    # only and never terminal; it sits early so a later terminal allow cannot end
-    # the chain before the warning is gathered.
+    # only and never terminal; it sits early because a terminal DENY ends the
+    # chain, so a later slot would lose the warning on every denied call (an
+    # ALLOW never ends the chain).
     BRANCH_POOL_PRESSURE_ADVISOR = 20
 
     # Plan 00602: judges a foreground Bash call's length by shape. Same band

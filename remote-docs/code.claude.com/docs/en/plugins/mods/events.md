@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/events
-fetched_at: '2026-11-16T21:15:41.700597+00:00'
+fetched_at: '2026-11-20T09:13:49.901158+00:00'
 fidelity: converted
-source_sha256: dd50c7d1acbf12eec077dedfa3c4ae45de2e7225bcf75f34c10ff545c8ffac2c
+source_sha256: b1a98246633f1352cfea4789628969e972a9fdb0b126114925ff98a69a589326
 licence: unreviewed
-stale_after: '2027-02-14'
+stale_after: '2027-02-18'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -97,7 +97,7 @@ on('tool.call', { tool: /^mcp__github__/ }, hook)
 
 `hook` runs once for a Bash, Edit, or Write call, and once for a call to a tool whose name starts with `mcp__github__`. A call to any other tool, such as Read, matches none of the three, so `hook` doesn't run for it.
 
-The event name can be a wildcard. `'classic.*'` matches every [settings hook event](#hook-the-settings-hook-events). `'*'` matches every event except the [telemetry events](https://code.claude.com/docs/en/plugins/mods/reference.md#telemetry), which take their own name and a `{ to: 'collector' }` filter.
+The event name can be a wildcard. `'classic.*'` matches every [settings hook event](#hook-the-settings-hook-events). `'*'` matches most events, but not the [telemetry events](https://code.claude.com/docs/en/plugins/mods/reference.md#telemetry), which take their own name and a `{ to: 'collector' }` filter.
 
 Register each event once per matcher. If you call `on` twice for `session.start` with no matcher, the module fails to load with `on("session.start") is registered twice without a matcher`. Put everything your mod does at session start in one hook.
 
@@ -480,7 +480,7 @@ The same handler shape fits a guard on `prompt.submit` or `config.set`. When `ne
 At `tool.check` and `plugin.register`, a refusal returned after `next` resolved still holds, so return it without testing `next.called`:
 
 * **`tool.check`**: return `{ decision: 'deny', reason: 'the reason' }`
-* **`plugin.register`**: return `{ refuse: 'the reason' }`, as [Refuse mods when your check fails](https://code.claude.com/docs/en/plugins/mods/admin.md#refuse-mods-when-your-check-fails) shows
+* **`plugin.register`**: return `{ refuse: 'the reason' }`. On v2.1.326 or later, the other mod's whole plugin then stays out. To stop only the mod, see [Refuse mods when your check fails](https://code.claude.com/docs/en/plugins/mods/admin.md#refuse-mods-when-your-check-fails).
 
 At `tool.call`, a `deny` returned after `next` resolved [withholds the result from Claude](#guard-or-change-a-tool-call).
 

@@ -44,7 +44,8 @@ def test_upgrade_redeploy_replaces_a_stale_fallback_events_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = tmp_path / "run"
-    runtime.mkdir()
+    # 0700: only a private directory is accepted, whatever the umask.
+    runtime.mkdir(mode=0o700)
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
     monkeypatch.setenv("HOSTNAME", "host-a")
     paths._resolve_hostname_from_env.cache_clear()
