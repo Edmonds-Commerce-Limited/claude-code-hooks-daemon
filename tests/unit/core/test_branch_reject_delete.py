@@ -551,6 +551,231 @@ class TestCompareAndDelete:
         assert [type(e) for e in read_ledger_entries(route.ledger_path)] == [LedgerLine]
 
 
+def _peer_on_feat(repo: Path) -> Path:
+    peer = repo.parent / "peer"
+    _git(repo, "worktree", "add", "-q", str(peer), "feat")
+    return peer
+
+
+def _conflicting_side(repo: Path) -> None:
+    """``side`` rewrites feat's file from ``main``, so rebasing feat onto it stops."""
+    _git(repo, "switch", "-q", "-c", "side", "main")
+    _commit(repo, "src/feature.py", "x = 2\n", "side rewrites the feature")
+    _git(repo, "switch", "-q", "main")
+
+
+def _stopped_rebase(repo: Path, *extra: str) -> Callable[[], None]:
+    def _act() -> None:
+        peer = _peer_on_feat(repo)
+        with pytest.raises(subprocess.CalledProcessError):
+            _git(peer, "rebase", *extra, "side")
+        assert "feat" not in branch_safety.worktree_branches(repo), "HEAD must be detached"
+
+    return _act
+
+
+class TestOperationInProgress:
+    """A branch another worktree is rebasing or bisecting is refused, as ``git branch -D`` does.
+
+    During either operation that worktree's HEAD is detached, so ``worktree list``
+    carries no ``branch`` line for it; git learns the branch from the worktree's own
+    admin dir (``rebase-*/head-name``, ``BISECT_START``, ``rebase-merge/update-refs``).
+    """
+
+    @pytest.mark.parametrize("extra", [(), ("--apply",)], ids=["merge-backend", "apply-backend"])
+    def test_a_branch_mid_rebase_in_another_worktree_survives(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+        extra: tuple[str, ...],
+    ) -> None:
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        tip = _tip(repo)
+        _conflicting_side(repo)
+        _during_record(monkeypatch, _stopped_rebase(repo, *extra))
+        report = _delete(repo, route)
+        assert _tip(repo) == tip
+        _assert_cancelled(repo, report, route)
+        assert any("being rebased" in b for b in report.blockers), report.blockers
+
+    def test_a_branch_mid_bisect_in_another_worktree_survives(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        tip = _tip(repo)
+
+        def _bisect() -> None:
+            peer = _peer_on_feat(repo)
+            _git(peer, "bisect", "start")
+            _git(peer, "checkout", "-q", "--detach", "main")
+            assert "feat" not in branch_safety.worktree_branches(repo)
+
+        _during_record(monkeypatch, _bisect)
+        report = _delete(repo, route)
+        assert _tip(repo) == tip
+        _assert_cancelled(repo, report, route)
+        assert any("being bisected" in b for b in report.blockers), report.blockers
+
+    def test_a_branch_named_in_a_peer_rebase_update_refs_survives(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``rebase --update-refs`` will rewrite feat at the end, so it is in use."""
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        tip = _tip(repo)
+        _conflicting_side(repo)
+
+        def _stacked() -> None:
+            peer = repo.parent / "peer"
+            _git(repo, "worktree", "add", "-q", "-b", "stack", str(peer), "feat")
+            _commit(peer, "stack.py", "s\n", "stack on feat")
+            with pytest.raises(subprocess.CalledProcessError):
+                _git(peer, "rebase", "--update-refs", "side")
+
+        _during_record(monkeypatch, _stacked)
+        report = _delete(repo, route)
+        assert _tip(repo) == tip
+        _assert_cancelled(repo, report, route)
+        assert any("being rebased" in b for b in report.blockers), report.blockers
+
+    def test_a_peer_rebasing_another_branch_does_not_block(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Exact match only: a rebase of ``feat-two`` says nothing about ``feat``."""
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        _conflicting_side(repo)
+        _git(repo, "branch", "feat-two", "feat")
+
+        def _other() -> None:
+            peer = repo.parent / "peer"
+            _git(repo, "worktree", "add", "-q", str(peer), "feat-two")
+            with pytest.raises(subprocess.CalledProcessError):
+                _git(peer, "rebase", "side")
+            _git(peer, "bisect", "start")
+
+        _during_record(monkeypatch, _other)
+        report = _delete(repo, route)
+        assert report.deleted == ("feat",)
+        assert not _branch_exists(repo)
+
+    def test_a_rebase_in_the_main_worktree_is_seen(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The main worktree's admin dir is the common dir, not ``worktrees/<id>``."""
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        tip = _tip(repo)
+        _conflicting_side(repo)
+
+        def _rebase_here() -> None:
+            (repo / ".git" / "rebase-merge").mkdir()
+            (repo / ".git" / "rebase-merge" / "head-name").write_text("refs/heads/feat\n")
+
+        _during_record(monkeypatch, _rebase_here)
+        report = _delete(repo, route)
+        assert _tip(repo) == tip
+        _assert_cancelled(repo, report, route)
+        assert any("being rebased" in b for b in report.blockers), report.blockers
+
+    def test_an_unreadable_state_file_refuses(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Fail closed: a state file that exists but cannot be read is not 'no operation'."""
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        tip = _tip(repo)
+
+        def _broken() -> None:
+            (repo / ".git" / "BISECT_START").mkdir()
+
+        _during_record(monkeypatch, _broken)
+        report = _delete(repo, route)
+        assert _tip(repo) == tip
+        _assert_cancelled(repo, report, route)
+        assert any("could not read" in b for b in report.blockers), report.blockers
+
+    def test_a_failed_common_dir_lookup_refuses(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        tip = _tip(repo)
+        real = branch_safety._git
+
+        def _fails(repo_: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if "--git-common-dir" in args:
+                return subprocess.CompletedProcess(list(args), 128, "", "boom")
+            return real(repo_, *args, **kwargs)
+
+        _during_record(monkeypatch, lambda: monkeypatch.setattr(branch_safety, "_git", _fails))
+        report = _delete(repo, route)
+        assert _tip(repo) == tip
+        _assert_cancelled(repo, report, route)
+        assert any("could not read" in b for b in report.blockers), report.blockers
+
+    @pytest.mark.parametrize("operation", ["merge", "cherry-pick", "revert"])
+    def test_a_stopped_merge_or_pick_keeps_head_attached_and_is_refused(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+        operation: str,
+    ) -> None:
+        """Regression: these stop with HEAD still on feat, so the worktree check sees it."""
+        _conflicting_side(repo)
+        args: tuple[str, ...] = (operation, "side")
+        if operation == "revert":
+            # Reverting the commit that added the file, after a later edit to it, stops.
+            _git(repo, "switch", "-q", "feat")
+            _commit(repo, "src/feature.py", "x = 3\n", "later")
+            _git(repo, "switch", "-q", "main")
+            args = ("revert", "--no-edit", "HEAD~1")
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        tip = _tip(repo)
+
+        def _stop() -> None:
+            peer = _peer_on_feat(repo)
+            with pytest.raises(subprocess.CalledProcessError):
+                _git(peer, *args)
+
+        _during_record(monkeypatch, _stop)
+        report = _delete(repo, route)
+        assert _tip(repo) == tip
+        _assert_cancelled(repo, report, route)
+        assert any("worktree" in b for b in report.blockers), report.blockers
+
+
 class TestRecordRemoval:
     def _approval(
         self, repo: Path, store: RejectStore, route: RejectRoute, *, write: bool = True

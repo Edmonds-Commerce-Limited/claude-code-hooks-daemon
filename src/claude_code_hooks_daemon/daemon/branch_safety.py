@@ -973,6 +973,54 @@ def _remove_branch_config(repo: Path, name: str) -> None:
         )
 
 
+def _read_state_file(path: Path) -> str | None:
+    """A git state file's text; None when absent. Any other read failure raises."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+
+
+def _operation_holding_branch(repo: Path, name: str) -> str | None:
+    """Why a rebase or bisect in any worktree holds ``name``; None when none does.
+
+    Both detach that worktree's HEAD, so ``worktree list`` has no ``branch`` line for
+    it, yet ``git branch -D`` refuses the branch and the operation writes it back at
+    the end. git records the branch in the worktree's admin dir (the common dir for
+    the main worktree, ``worktrees/<id>`` for a linked one): ``rebase-merge`` or
+    ``rebase-apply`` ``/head-name`` (full ref), ``rebase-merge/update-refs`` (every
+    third line a full ref) and ``BISECT_START`` (short name). A merge, cherry-pick or
+    revert keeps HEAD attached, so the ``branch`` line already covers it.
+
+    Fails closed: an unreadable admin dir or state file is returned as a reason.
+    """
+    common = _git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False)
+    if common.returncode != 0:
+        detail = common.stderr.strip() or "no detail"
+        return f"could not read the git dir to look for a rebase or bisect: {detail}"
+    common_dir = Path(common.stdout.strip())
+    ref = branch_ref(name)
+    try:
+        linked = common_dir / "worktrees"
+        admin_dirs = [common_dir]
+        if linked.is_dir():
+            admin_dirs += sorted(p for p in linked.iterdir() if p.is_dir())
+        for admin in admin_dirs:
+            for state in ("rebase-merge", "rebase-apply"):
+                head_name = _read_state_file(admin / state / "head-name")
+                if head_name is not None and head_name.strip() == ref:
+                    return f"{name} is being rebased in the worktree recorded at {admin}"
+            update_refs = _read_state_file(admin / "rebase-merge" / "update-refs")
+            if update_refs is not None and ref in update_refs.splitlines()[::3]:
+                return f"{name} is being rebased (--update-refs) in the worktree at {admin}"
+            bisect = _read_state_file(admin / "BISECT_START")
+            if bisect is not None and branch_ref(bisect.strip().removeprefix("refs/heads/")) == ref:
+                return f"{name} is being bisected in the worktree recorded at {admin}"
+    except OSError as exc:
+        return f"could not read the rebase or bisect state under {common_dir}: {exc}"
+    return None
+
+
 def _compare_and_delete(repo: Path, name: str, tip: str) -> str | None:
     """Delete ``refs/heads/<name>`` only while it is still ``tip``; None when it went.
 
@@ -984,7 +1032,9 @@ def _compare_and_delete(repo: Path, name: str, tip: str) -> str | None:
     - a symbolic ref is refused. ``--no-deref`` removes only the alias, never its
       target, but it also skips the old-value compare for a symref (measured on git
       2.47), so a symref is never what the verdict judged;
-    - a branch checked out in any worktree is refused, as ``git branch -D`` would.
+    - a branch checked out in any worktree is refused, as ``git branch -D`` would;
+    - so is a branch a rebase or bisect holds in any worktree
+      (:func:`_operation_holding_branch`), which ``worktree list`` does not show.
 
     Returns git's or the re-check's reason when nothing was deleted.
     """
@@ -1000,6 +1050,9 @@ def _compare_and_delete(repo: Path, name: str, tip: str) -> str | None:
         return f"could not list the worktrees: {(exc.stderr or '').strip() or 'no detail'}"
     if checked_out:
         return f"{name} {_REFUSAL_DETAIL[REFUSAL_WORKTREE]} since it was proved"
+    held = _operation_holding_branch(repo, name)
+    if held is not None:
+        return held
     result = _git(repo, "update-ref", "--no-deref", "-d", ref, tip, check=False)
     if result.returncode != 0:
         return result.stderr.strip() or "no detail"

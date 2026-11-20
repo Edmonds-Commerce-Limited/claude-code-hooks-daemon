@@ -342,8 +342,18 @@ Decided in slice 2 (`approve_removal`, `record_removal`, `record_git_refusal`):
     for a symref (probed), so a symref is never what the verdict covered.
   - **A branch checked out in any worktree is refused**, as `git branch -D` refuses it.
     If the worktree listing itself fails, the delete is refused too.
+  - **A branch a rebase or bisect holds in any worktree is refused**, as `git branch -D`
+    refuses it (`_operation_holding_branch`). Both detach that worktree's HEAD, so
+    `worktree list` carries no `branch` line; the branch is read from each admin dir (the
+    common dir and every `worktrees/<id>`): `rebase-merge`/`rebase-apply` `head-name`,
+    `rebase-merge/update-refs` and `BISECT_START`, matched exactly. An admin dir or state
+    file that exists but cannot be read refuses (fail closed). A stopped merge,
+    cherry-pick or revert keeps HEAD attached, so the line above already refuses it
+    (tests pin all three). Measured on git 2.47: deleting a branch mid-rebase makes
+    `rebase --continue` fail with "could not update refs/heads/<name>", leaving the
+    rebased commits on a detached HEAD only, so this is a real loss, not residue.
 
-  Either refusal takes the git-refused path above (the message carries `git refused`, the
+  Each refusal takes the git-refused path above (the message carries `git refused`, the
   `git-refused` line cancels the removal, and the verdicts stay consumed). After a
   successful delete `_remove_branch_config` drops `branch.<name>.*` as `git branch -D`
   would, when such a section exists. The ref is already gone at that point, so a failure
@@ -351,12 +361,12 @@ Decided in slice 2 (`approve_removal`, `record_removal`, `record_git_refusal`):
   undercount the rate. The reflog needs no step: `update-ref -d` removes it with the ref
   (probed, git 2.47).
 
-  **Residue.** The compare is atomic, but the two re-checks are not. A worktree created
+  **Residue.** The compare is atomic, but the re-checks are not. A worktree created
   on the branch, or a symref made of it, between the re-check and `update-ref` is not
   seen. Neither loses commits: a worktree checkout leaves the tip unmoved, so the bundle
-  holds it, and `--no-deref` never touches a target. A branch mid-rebase or mid-bisect in
-  another worktree (HEAD detached) is refused by `git branch -D` but not by this re-check.
-  The rebase's own ref update recreates the branch, and the bundle holds the approved tip.
+  holds it, and `--no-deref` never touches a target. A rebase or bisect started on the
+  branch in that same window is not seen either; the bundle still holds the approved tip,
+  but the rebase's new commits are left on a detached HEAD.
 
 ## 11. The digest (slice 3)
 
