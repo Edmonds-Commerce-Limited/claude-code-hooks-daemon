@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
 import pytest
-from tests.support.scratch_tree import ScratchTree, build_scratch_tree
+from tests.support.scratch_tree import ScratchTree, build_git_project, git
 
 from claude_code_hooks_daemon.daemon.cli import build_parser, cmd_scratch_sweep
 
@@ -22,7 +23,7 @@ _DAY = 86400.0
 
 @pytest.fixture
 def tree(tmp_path: Path) -> ScratchTree:
-    tree = build_scratch_tree(tmp_path)
+    tree = build_git_project(tmp_path).tree
     (tmp_path / "project" / ".claude" / "hooks-daemon").mkdir(parents=True)
     return tree
 
@@ -67,6 +68,12 @@ def _populate(tree: ScratchTree) -> None:
     tree.fifo("pipe-entry")
     tree.file("locked/inner/x.txt", b"x")
     tree.git_marker("clone")
+    # A real clone of the project with a stat-dirty tracked file: a plain
+    # ``git status`` would rewrite its index (the inode test below would fail).
+    real = tree.root / "realclone"
+    git(tree.root, "clone", "-q", f"file://{tree.base / 'remote.git'}", str(real))
+    os.utime(real / "src" / "app.py", (1_000_000, 1_000_000))
+    tree.set_tree_mtime("realclone", time.time() - 2 * _DAY)
 
 
 class TestParser:
@@ -116,7 +123,9 @@ class TestReadOnly:
             assert document["complete"] is False
             verdicts = {row["name"]: row["verdict"] for row in document["entries"]}
             assert verdicts["locked"] == "STUCK"
-            assert verdicts["clone"] == "REPOSITORY"
+            assert verdicts["clone"] == "STUCK"
+            reasons = {row["name"]: row["reasons"] for row in document["entries"]}
+            assert verdicts["realclone"] in {"PROTECTED", "DISPOSABLE", "UNCERTAIN"}, reasons
         else:
             assert "INCOMPLETE" in out
         assert "dummy" not in out.replace("dummy.txt", "")
@@ -141,11 +150,26 @@ class TestOutput:
         assert Path(document["root"]) == tree.root
         assert [row["name"] for row in document["entries"]] == ["a.log"]
 
-    def test_an_explicit_root(self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_an_explicit_root_outside_untracked_is_refused(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         other = tree.base / "other"
         other.mkdir()
         (other / "f.out").write_text("x")
         assert _run(tree, _args(tree, as_json=True, root=other)) == 0
+        document = json.loads(capsys.readouterr().out)
+        assert document["entries"] == []
+        assert any("never swept" in reason for reason in document["incomplete_reasons"])
+
+    def test_an_explicit_untracked_root_with_a_ttl(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        config = tree.base / "project" / ".claude" / "hooks-daemon.yaml"
+        config.write_text('version: "2.0"\nscratch:\n  untracked_ttl:\n    briefs: 1h\n')
+        briefs = tree.base / "project" / "untracked" / "briefs"
+        briefs.mkdir()
+        (briefs / "f.out").write_text("x")
+        assert _run(tree, _args(tree, as_json=True, root=briefs)) == 0
         document = json.loads(capsys.readouterr().out)
         assert [row["name"] for row in document["entries"]] == ["f.out"]
 

@@ -70,8 +70,8 @@ Every build task is test-first: the failing test is written and seen to fail bef
 
 ### Phase 2: Git proofs and references
 
-- [ ] ⬜ **Task 2.1**: Classify each nested repository: registered worktree, outside-pointing `.git` file, related, standalone, linked inside (DESIGN.md section 3.3). A standalone repository drops to the ordinary ladder; git runs in a nested repository take no locks and run no hooks or fsmonitor.
-- [ ] ⬜ **Task 2.2**: Add the related-repository tests: dirty tracked content, stash, ref tips proved against the main repository's objects and remote-held refs. A git failure or timeout is STUCK.
+- [x] ✅ **Task 2.1**: Classify each nested repository: registered worktree, outside-pointing `.git` file, related, standalone, linked inside (DESIGN.md section 3.3). A standalone repository drops to the ordinary ladder; git runs in a nested repository take no locks and run no hooks or fsmonitor.
+- [x] ✅ **Task 2.2**: Add the related-repository tests: dirty tracked content, stash, ref tips proved against the main repository's objects and remote-held refs. A git failure or timeout is STUCK.
 - [ ] ⬜ **Task 2.3**: Add proof P3 (identical copy by blob hash) and P4 (clean pushed clone).
 - [ ] ⬜ **Task 2.4**: Add the reference set (exact path, HEAD and unmerged branch tips) and the REFERENCED verdict.
 - [ ] ⬜ **Task 2.5**: Add the filing proposal table (DESIGN.md section 6) to the dry-run output.

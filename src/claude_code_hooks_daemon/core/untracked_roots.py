@@ -8,13 +8,15 @@ anything is listed:
   and any path inside one of them;
 - the project root, ``untracked/`` itself, and any path that holds the project;
 - a directory whose TTL is ``"*"`` (never cleared), which is what an unlisted
-  ``untracked/`` directory falls through to by default.
+  ``untracked/`` directory falls through to by default;
+- any root that is not inside THIS project's ``untracked/`` (a tracked
+  directory, a test tree, another checkout);
+- any root whose path, literal or link-resolved, passes through an
+  ``untracked/repos`` or ``untracked/scratch-archive`` of ANY checkout.
 
 A protected path that lies inside an accepted root is skipped as an entry and
 named in a note. A root at any depth inside ``untracked/`` takes the TTL of
-its first directory there (``untracked/logs/inner`` is ``logs``); a root
-outside ``untracked/`` (a test tree named with ``--root``) is judged with the
-``scratch`` TTL. Paths are compared both as
+its first directory there (``untracked/logs/inner`` is ``logs``). Paths are compared both as
 given and with links resolved, so a link cannot carry a root past the check.
 """
 
@@ -33,7 +35,7 @@ from claude_code_hooks_daemon.utils.path_containment import (
 #: ``untracked/`` directories never swept, whatever the config says.
 NEVER_SWEPT: tuple[str, ...] = ("repos", "scratch-archive")
 
-#: The TTL key a root outside ``untracked/`` is judged with.
+#: The default sweep root's TTL key.
 SCRATCH_KEY = "scratch"
 
 _UNTRACKED = "untracked"
@@ -82,6 +84,12 @@ def resolve_sweep_root(
         return SweepRoot(Path(root), None, reason)
 
     for form in root_forms:
+        parts = form.parts
+        for index in range(len(parts) - 1):
+            if parts[index] == _UNTRACKED and parts[index + 1] in NEVER_SWEPT:
+                return refused(
+                    f"{root} passes through an untracked/{parts[index + 1]} directory: never swept"
+                )
         for project in project_forms:
             if form in (project, project / _UNTRACKED):
                 return refused(f"{root} is the project or its untracked/ directory: never swept")
@@ -99,7 +107,12 @@ def resolve_sweep_root(
     }
     if len(keys) > 1:
         return refused(f"{root} names more than one untracked/ directory once links are resolved")
-    key = keys.pop() if keys else SCRATCH_KEY
+    if not keys or not all(
+        any(path_is_relative_to(form, project / _UNTRACKED) for project in project_forms)
+        for form in root_forms
+    ):
+        return refused(f"{root} is not inside this project's untracked/ directory: never swept")
+    key = keys.pop()
     ttl = config.ttl_hours_for(key)
     if ttl is None:
         return refused(f'untracked/{key} has the TTL "*": never swept')

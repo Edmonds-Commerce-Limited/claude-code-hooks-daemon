@@ -10,13 +10,17 @@ from a walk that did not finish:
 2. STUCK: the walk did not finish, or a file has another name outside the
    entry. Nothing is concluded about an entry that was not read whole.
 3. KEPT: not evaluated in Phase 1 (no keep marker or pause store exists yet).
-4. REPOSITORY: a ``.git`` marker at any depth. Phase 1 runs no git, so it
-   cannot tell a standalone repository (which has no repository rule and goes
-   down the ordinary ladder) from a registered worktree or a related clone
-   (which may be PROTECTED). Until Task 2.1 classifies the marker, the entry is
-   "repository, not judged" and never DISPOSABLE.
-5. REFERENCED: not evaluated in Phase 1 (the reference set needs git).
-6. DISPOSABLE when every file is covered by P1, P2 or P5; else UNCERTAIN.
+   Also STUCK: a repository in the entry could not be classified
+   (:mod:`~claude_code_hooks_daemon.core.scratch_repos`), or the project's
+   tracked files could not be listed.
+4. PROTECTED: a repository in the entry is a registered worktree, points
+   outside the entry, or is related and holds work no remote holds (R6); or
+   the entry holds a file the project tracks.
+5. REFERENCED: not evaluated yet (Task 2.4).
+6. DISPOSABLE when every file is covered by P1, P2, P4 or P5; else UNCERTAIN.
+   A standalone repository has no rule of its own (R7 overturned): its ``.git``
+   is ordinary content. P4 covers a clean pushed related repository's git
+   directory and tracked files.
 
 Coverage is judged over every non-directory node and every empty directory.
 P1 trusts a regular file's own basename only; P2 covers anything, links and
@@ -32,6 +36,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from claude_code_hooks_daemon.core.scratch_clock import EntryAge
+from claude_code_hooks_daemon.core.scratch_repos import RepoFindings
 from claude_code_hooks_daemon.core.scratch_walk import EntryStats, Node, NodeKind
 from claude_code_hooks_daemon.utils.bounded_walk import Bounded
 from claude_code_hooks_daemon.utils.regenerable_paths import is_regenerable
@@ -70,8 +75,8 @@ REGENERABLE_DIRECTORIES: tuple[str, ...] = (
 #: A regular file of this name makes its directory a virtual environment (P2).
 VENV_MARKER = "pyvenv.cfg"
 
-#: The rungs of the order Phase 1 does not evaluate, in order.
-NOT_EVALUATED: tuple[str, ...] = ("KEPT", "PROTECTED", "REFERENCED")
+#: The rungs of the order not evaluated yet, in order.
+NOT_EVALUATED: tuple[str, ...] = ("KEPT", "REFERENCED")
 
 #: How many uncovered paths a judgement keeps, so a huge entry stays small in memory.
 MAX_UNCOVERED = 5
@@ -82,7 +87,7 @@ class Verdict(enum.Enum):
 
     LIVE = "LIVE"
     STUCK = "STUCK"
-    REPOSITORY = "REPOSITORY"
+    PROTECTED = "PROTECTED"
     DISPOSABLE = "DISPOSABLE"
     UNCERTAIN = "UNCERTAIN"
 
@@ -92,6 +97,7 @@ class Proof(enum.Enum):
 
     P1 = "P1"
     P2 = "P2"
+    P4 = "P4"
     P5 = "P5"
 
 
@@ -144,14 +150,20 @@ def _proof_for(node: Node, venvs: Sequence[str]) -> Proof | None:
     return None
 
 
-def _coverage(nodes: Sequence[Node]) -> tuple[tuple[Proof, ...], list[str]]:
+def _p4(path: str, p4_covered: Sequence[str]) -> bool:
+    return any(path == covered or path.startswith(f"{covered}/") for covered in p4_covered)
+
+
+def _coverage(
+    nodes: Sequence[Node], p4_covered: Sequence[str] = ()
+) -> tuple[tuple[Proof, ...], list[str]]:
     venvs = _venv_directories(nodes)
     used: set[Proof] = set()
     uncovered: list[str] = []
     for node in nodes:
         if node.kind is NodeKind.DIRECTORY and not node.empty:
             continue
-        proof = _proof_for(node, venvs)
+        proof = Proof.P4 if _p4(node.path, p4_covered) else _proof_for(node, venvs)
         if proof is None:
             uncovered.append(node.path)
         else:
@@ -159,8 +171,26 @@ def _coverage(nodes: Sequence[Node]) -> tuple[tuple[Proof, ...], list[str]]:
     return tuple(proof for proof in Proof if proof in used), uncovered
 
 
-def judge(walk: Bounded[EntryStats], *, age: EntryAge, liveness: tuple[str, ...]) -> Judgement:
-    """Judge one walked entry, given its age and any liveness reasons."""
+#: Said when an entry holds a repository and no classification was run.
+NOT_CLASSIFIED = "a repository in the entry was not classified (the project's git was not read)"
+
+#: Said when the project's tracked files under the root could not be listed.
+TRACKED_UNKNOWN = "the project's tracked files could not be listed"
+
+
+def judge(
+    walk: Bounded[EntryStats],
+    *,
+    age: EntryAge,
+    liveness: tuple[str, ...],
+    repos: RepoFindings | None = None,
+    tracked: tuple[str, ...] | None = (),
+) -> Judgement:
+    """Judge one walked entry, given its age and any liveness reasons.
+
+    ``repos`` is the entry's repository classification (None: not run).
+    ``tracked`` lists the entry's paths the project tracks (None: unknown).
+    """
     stats = walk.value
     markers = stats.git_markers
     if markers:
@@ -183,12 +213,20 @@ def judge(walk: Bounded[EntryStats], *, age: EntryAge, liveness: tuple[str, ...]
             Verdict.STUCK,
             f"{count} file(s) have another name outside the entry, first {stats.multi_linked[0]}",
         )
-    if markers:
+    if tracked is None:
+        return result(Verdict.STUCK, TRACKED_UNKNOWN)
+    if markers and repos is None:
+        return result(Verdict.STUCK, NOT_CLASSIFIED)
+    if repos is not None and repos.stuck:
+        return result(Verdict.STUCK, *repos.stuck)
+    if repos is not None and repos.protected:
+        return result(Verdict.PROTECTED, *repos.protected)
+    if tracked:
         return result(
-            Verdict.REPOSITORY,
-            "repository, not judged: which kind of repository it is (Task 2.1) is not yet known",
+            Verdict.PROTECTED,
+            f"holds {len(tracked)} file(s) the project tracks, first {tracked[0]}",
         )
-    proofs, uncovered = _coverage(stats.nodes)
+    proofs, uncovered = _coverage(stats.nodes, repos.p4_covered if repos else ())
     if not uncovered:
         return result(Verdict.DISPOSABLE, "every file is covered by a proof", proofs=proofs)
     return Judgement(
@@ -205,8 +243,10 @@ def judge(walk: Bounded[EntryStats], *, age: EntryAge, liveness: tuple[str, ...]
 __all__ = [
     "CONSUMED_SHAPES",
     "MAX_UNCOVERED",
+    "NOT_CLASSIFIED",
     "NOT_EVALUATED",
     "REGENERABLE_DIRECTORIES",
+    "TRACKED_UNKNOWN",
     "VENV_MARKER",
     "Judgement",
     "Proof",

@@ -14,10 +14,12 @@ testing anything.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+import subprocess  # nosec B404 - test fixtures build real git repositories
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from claude_code_hooks_daemon.core.scratch_repos import ProjectGit
 from claude_code_hooks_daemon.core.scratch_walk import ScandirFn
 
 #: name relative to ``base`` -> (mtime_ns, ctime_ns), every inode, links not followed.
@@ -134,6 +136,115 @@ class ScratchTree:
                 candidate = Path(dirpath) / name
                 if candidate.is_symlink():
                     yield candidate
+
+
+#: Every git the helpers run reads no global or system config, so a developer's
+#: own settings (hooks, filters, a default branch) cannot change a fixture.
+GIT_TEST_ENV: dict[str, str] = {
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_AUTHOR_NAME": "t",
+    "GIT_AUTHOR_EMAIL": "t@example.invalid",
+    "GIT_COMMITTER_NAME": "t",
+    "GIT_COMMITTER_EMAIL": "t@example.invalid",
+    "GIT_TERMINAL_PROMPT": "0",
+}
+
+
+def git(cwd: Path, *args: str) -> str:
+    """Run git in ``cwd`` for a fixture; raises when git fails. Returns stdout, stripped."""
+    env = {
+        **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+        **GIT_TEST_ENV,
+    }
+    done = subprocess.run(  # nosec B603 B607 - fixed argv, test fixture only
+        ["git", "-C", str(cwd), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    return done.stdout.strip()
+
+
+def commit_file(repo: Path, rel: str, content: str, message: str = "c") -> str:
+    """Write ``rel`` in ``repo``, commit it, and return the new HEAD sha."""
+    path = repo / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    git(repo, "add", "--", rel)
+    git(repo, "commit", "-q", "-m", message)
+    return git(repo, "rev-parse", "HEAD")
+
+
+@dataclass(frozen=True)
+class GitProject:
+    """A real project repository with a bare ``origin``, around a scratch tree."""
+
+    tree: ScratchTree
+    project: Path
+    remote: Path
+
+    def clone(self, rel: str) -> Path:
+        """A clone of the project at ``rel`` under the scratch root, its remote kept."""
+        target = self.tree.root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # file:// so objects are copied: a local-path clone hard-links them, and the
+        # walk's link-count rule would make every such entry STUCK.
+        git(self.tree.root, "clone", "-q", f"file://{self.remote}", str(target))
+        return target
+
+    def standalone(self, rel: str, *, commit: bool = True) -> Path:
+        """A fresh repository at ``rel``: no remote, history unrelated to the project."""
+        target = self.tree.root / rel
+        target.mkdir(parents=True, exist_ok=True)
+        git(target, "init", "-q", "-b", "main")
+        if commit:
+            commit_file(target, "notes.txt", "standalone\n")
+        return target
+
+    def worktree(self, rel: str, branch: str) -> Path:
+        """A registered worktree of the project at ``rel`` on a new ``branch``."""
+        target = self.tree.root / rel
+        git(self.project, "worktree", "add", "-q", "-b", branch, str(target))
+        return target
+
+
+def quiet_project_git(project_root: Path) -> ProjectGit:
+    """A project whose git answers every question with "nothing": no tracked file
+    under the root, no worktree, no remote. For sweep tests whose point is not git."""
+
+    def runner(
+        cwd: Path, *args: str, timeout: float = 30.0, env: Mapping[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(["git", *args], 0, "", "")
+
+    return ProjectGit(
+        root=project_root,
+        remote="origin",
+        runner=runner,
+        worktrees=frozenset(),
+        verified={},
+        verified_note="",
+        remote_blobs=None,
+    )
+
+
+def build_git_project(base: Path) -> GitProject:
+    """A scratch tree whose project is a real repository pushed to a bare ``origin``."""
+    tree = build_scratch_tree(base)
+    project = base / "project"
+    remote = base / "remote.git"
+    git(base, "init", "-q", "--bare", "-b", "main", str(remote))
+    git(project, "init", "-q", "-b", "main")
+    (project / ".gitignore").write_text("untracked/\n")
+    git(project, "add", ".gitignore")
+    commit_file(project, "src/app.py", "print('app')\n", "initial")
+    git(project, "remote", "add", "origin", str(remote))
+    git(project, "push", "-q", "origin", "main")
+    git(project, "fetch", "-q", "origin")
+    git(project, "remote", "set-head", "origin", "main")
+    return GitProject(tree=tree, project=project, remote=remote)
 
 
 def build_scratch_tree(base: Path) -> ScratchTree:

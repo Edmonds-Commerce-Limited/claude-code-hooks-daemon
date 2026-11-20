@@ -5,8 +5,11 @@ from __future__ import annotations
 import pytest
 
 from claude_code_hooks_daemon.core.scratch_clock import EntryAge
+from claude_code_hooks_daemon.core.scratch_repos import RepoFindings, RepoKind
 from claude_code_hooks_daemon.core.scratch_verdict import (
+    NOT_CLASSIFIED,
     NOT_EVALUATED,
+    TRACKED_UNKNOWN,
     Proof,
     RepositoryMarker,
     Verdict,
@@ -82,7 +85,7 @@ class TestOrdering:
         walk = stopped(_stats(git_markers=("e/.git",)), "walk deadline reached")
         assert _judge(walk) is Verdict.STUCK
 
-    def test_a_git_marker_at_any_depth_is_a_repository_not_judged(self) -> None:
+    def test_a_git_marker_with_no_classification_is_stuck(self) -> None:
         walk = finished(
             _stats(
                 Node("e", D, 0),
@@ -91,19 +94,70 @@ class TestOrdering:
             )
         )
         judgement = judge(walk, age=_DUE, liveness=())
-        assert judgement.verdict is Verdict.REPOSITORY
+        assert judgement.verdict is Verdict.STUCK
+        assert judgement.reasons == (NOT_CLASSIFIED,)
         assert judgement.proofs == ()
 
-    def test_the_reason_names_the_pending_classification_and_no_ruling(self) -> None:
-        walk = finished(_stats(Node("e", D, 0), git_markers=("e/.git",)))
-        judgement = judge(walk, age=_DUE, liveness=())
-        assert judgement.reasons == (
-            "repository, not judged: which kind of repository it is (Task 2.1) is not yet known",
-        )
-
-    def test_a_git_file_marker_is_a_repository(self) -> None:
+    def test_a_repository_that_could_not_be_classified_is_stuck(self) -> None:
         walk = finished(_stats(Node("e", D, 0), Node("e/.git", F, 20), git_markers=("e/.git",)))
-        assert _judge(walk) is Verdict.REPOSITORY
+        repos = RepoFindings(kinds={"e/.git": RepoKind.BROKEN}, stuck=("e/.git: broken",))
+        assert judge(walk, age=_DUE, liveness=(), repos=repos).verdict is Verdict.STUCK
+
+    def test_a_protected_repository_protects_the_entry(self) -> None:
+        walk = finished(_stats(Node("e", D, 0), Node("e/.git", F, 20), git_markers=("e/.git",)))
+        repos = RepoFindings(
+            kinds={"e/.git": RepoKind.REGISTERED_WORKTREE}, protected=("e/.git: worktree",)
+        )
+        judgement = judge(walk, age=_DUE, liveness=(), repos=repos)
+        assert judgement.verdict is Verdict.PROTECTED
+        assert judgement.reasons == ("e/.git: worktree",)
+
+    def test_a_standalone_repository_is_ordinary_content(self) -> None:
+        walk = finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/.git", D, 0),
+                Node("e/.git/HEAD", F, 21),
+                git_markers=("e/.git",),
+            )
+        )
+        repos = RepoFindings(kinds={"e/.git": RepoKind.STANDALONE})
+        judgement = judge(walk, age=_DUE, liveness=(), repos=repos)
+        assert judgement.verdict is Verdict.UNCERTAIN
+        assert judgement.uncovered == ("e/.git/HEAD",)
+
+    def test_an_empty_standalone_repository_is_disposable_by_the_ordinary_proofs(self) -> None:
+        walk = finished(
+            _stats(Node("e", D, 0), Node("e/.git", D, 0, empty=True), git_markers=("e/.git",))
+        )
+        repos = RepoFindings(kinds={"e/.git": RepoKind.STANDALONE})
+        assert judge(walk, age=_DUE, liveness=(), repos=repos).verdict is Verdict.DISPOSABLE
+
+    def test_p4_covers_a_clean_pushed_clone_but_not_its_untracked_work(self) -> None:
+        nodes = (
+            Node("e", D, 0),
+            Node("e/.git", D, 0),
+            Node("e/.git/HEAD", F, 21),
+            Node("e/app.py", F, 9),
+        )
+        repos = RepoFindings(kinds={"e/.git": RepoKind.RELATED}, p4_covered=("e/.git", "e/app.py"))
+        judgement = judge(
+            finished(_stats(*nodes, git_markers=("e/.git",))), age=_DUE, liveness=(), repos=repos
+        )
+        assert judgement.verdict is Verdict.DISPOSABLE
+        assert judgement.proofs == (Proof.P4,)
+        extra = finished(_stats(*nodes, Node("e/notes.txt", F, 5), git_markers=("e/.git",)))
+        assert judge(extra, age=_DUE, liveness=(), repos=repos).verdict is Verdict.UNCERTAIN
+
+    def test_an_entry_holding_a_tracked_file_is_protected(self) -> None:
+        walk = finished(_stats(Node("e", D, 0), Node("e/a.log", F, 1)))
+        judgement = judge(walk, age=_DUE, liveness=(), tracked=("e/a.log",))
+        assert judgement.verdict is Verdict.PROTECTED
+
+    def test_unknown_tracked_files_make_a_due_entry_stuck(self) -> None:
+        walk = finished(_stats(Node("e", D, 0), Node("e/a.log", F, 1)))
+        judgement = judge(walk, age=_DUE, liveness=(), tracked=None)
+        assert (judgement.verdict, judgement.reasons) == (Verdict.STUCK, (TRACKED_UNKNOWN,))
 
 
 class TestRepositoryMarker:
@@ -292,4 +346,4 @@ class TestP5:
 
 
 def test_not_evaluated_rungs_are_named() -> None:
-    assert NOT_EVALUATED == ("KEPT", "PROTECTED", "REFERENCED")
+    assert NOT_EVALUATED == ("KEPT", "REFERENCED")

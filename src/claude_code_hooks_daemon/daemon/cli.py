@@ -6725,6 +6725,7 @@ def cmd_scratch_sweep(
     wall_clock: Callable[[], float] = time.time,
     budget_clock: Callable[[], float] = time.monotonic,
     process_cwds: Callable[[], Mapping[int, Path]] | None = None,
+    git_runner: Callable[..., Any] | None = None,
 ) -> int:
     """``scratch-sweep [--json] [--root PATH]``: judge every scratch entry; change nothing.
 
@@ -6740,9 +6741,12 @@ def cmd_scratch_sweep(
         LivenessInputs,
         read_background_records,
     )
+    from claude_code_hooks_daemon.core.scratch_repos import build_project_git
     from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
     from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
     from claude_code_hooks_daemon.core.worktree_reaping import default_process_cwds
+    from claude_code_hooks_daemon.utils.git_repo import run_git
+    from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
 
     repo = get_project_path(getattr(args, "project_root", None))
     config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
@@ -6773,6 +6777,12 @@ def cmd_scratch_sweep(
         ),
         inputs=inputs,
         project_root=repo,
+        project_git=build_project_git(
+            repo,
+            remote=config.branches.remote,
+            default_branch=resolve_remote_default_branch(config.branches, repo),
+            runner=git_runner or run_git,
+        ),
         scandir=scandir,
     )
     if args.json:
@@ -13617,14 +13627,16 @@ def build_parser() -> argparse.ArgumentParser:
     # scratch-sweep command (Plan 00627 Task 1.7): a dry run only.
     parser_scratch_sweep = subparsers.add_parser(
         "scratch-sweep",
-        help="Judge every scratch entry (LIVE, STUCK, REPOSITORY, DISPOSABLE, UNCERTAIN); "
+        help="Judge every scratch entry (LIVE, STUCK, PROTECTED, DISPOSABLE, UNCERTAIN); "
         "a read-only report that changes nothing",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Exit 0 for a report, complete or not. The report says when the walk "
             "budget ran out or a directory could not be read.\n\n"
-            "KEPT, PROTECTED and REFERENCED are not evaluated yet; an entry holding a "
-            ".git marker is reported 'repository, not judged'."
+            "KEPT and REFERENCED are not evaluated yet. A repository in an entry is "
+            "classified (a registered worktree, a related clone with unpushed or dirty "
+            "work: PROTECTED; a standalone repository: ordinary content). The remote's "
+            "live tips are read with git ls-remote."
         ),
     )
     parser_scratch_sweep.add_argument(
@@ -13635,7 +13647,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         metavar="PATH",
-        help="The scratch root to judge (default: untracked/scratch/ of the project)",
+        help="The root to judge: a directory inside this project's untracked/ "
+        "(default: untracked/scratch/); any other path is refused",
     )
     parser_scratch_sweep.add_argument(
         "--budget-seconds",

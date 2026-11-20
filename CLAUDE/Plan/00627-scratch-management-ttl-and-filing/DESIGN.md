@@ -182,6 +182,7 @@ scratch:
 - **A TTL only makes an entry due.** Every directory swept under this map goes through the same ladder (section 3), the same proofs and the same archive hold as scratch. Nothing is removed on age alone.
 - `sweep.extra_roots` is retired in favour of the map (neither has shipped). Loose files directly under `untracked/` are not a directory, so the map does not reach them; they are left to Task 6.1.
 - The default run sweeps `untracked/scratch/` only; `--root untracked/<dir>` sweeps another and takes that directory's TTL. Sweeping every finite-TTL directory in one run belongs with Task 6.1.
+- **A root outside this project's `untracked/` is refused** (a tracked directory, a test tree, another checkout), and so is any root whose literal or link-resolved path passes through an `untracked/repos` or `untracked/scratch-archive` of any checkout. An entry holding a file the project tracks (one `git ls-files` per sweep) is PROTECTED; when that listing fails, every due entry is STUCK.
 
 ## 5. Removal: the archive store
 

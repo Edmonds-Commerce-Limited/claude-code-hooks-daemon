@@ -1,8 +1,11 @@
 """The read-only scratch sweep: one verdict per entry, as a table or JSON (Plan 00627 Task 1.7).
 
-Phase 1 is a report and nothing else. It lists, ``lstat``s and judges; it
-never creates, moves, packs or removes anything, never opens a file, and
-prints no file content and no removal command.
+The sweep is a report and nothing else. It lists, ``lstat``s and judges; it
+never creates, moves, packs or removes anything, and prints no file content
+and no removal command. Git is run once per sweep in the project (tracked files
+under the root, worktrees, live remote tips) and, for a due entry holding a
+repository, inside that repository under the rules of
+:mod:`~claude_code_hooks_daemon.core.scratch_repos`.
 
 One :class:`~claude_code_hooks_daemon.core.scratch_walk.WalkBudget` covers the
 whole run. Each entry is judged as soon as it is walked and its node list is
@@ -25,6 +28,7 @@ from typing import Any
 from claude_code_hooks_daemon.config.models import ScratchConfig
 from claude_code_hooks_daemon.core.scratch_clock import NO_BIRTH_NOTE, entry_age
 from claude_code_hooks_daemon.core.scratch_liveness import LivenessInputs, entry_liveness
+from claude_code_hooks_daemon.core.scratch_repos import ProjectGit, RepoFindings, classify_entry
 from claude_code_hooks_daemon.core.scratch_verdict import (
     NOT_EVALUATED,
     Proof,
@@ -56,14 +60,14 @@ NO_CWDS_NOTE = (
 #: Table order: what needs a human first, what is in use last.
 _TABLE_ORDER = (
     Verdict.STUCK,
-    Verdict.REPOSITORY,
+    Verdict.PROTECTED,
     Verdict.UNCERTAIN,
     Verdict.DISPOSABLE,
     Verdict.LIVE,
 )
 
 _REPOSITORY_LABEL = {
-    RepositoryMarker.FOUND: "repository, not judged",
+    RepositoryMarker.FOUND: "repository",
     RepositoryMarker.NONE: "-",
     RepositoryMarker.UNKNOWN: "unknown (walk incomplete)",
 }
@@ -132,6 +136,7 @@ def run_sweep(
     budget: WalkBudget,
     inputs: LivenessInputs,
     project_root: Path,
+    project_git: ProjectGit | None,
     scandir: ScandirFn = os.scandir,
 ) -> SweepReport:
     """Judge every entry of a resolved sweep root; read only.
@@ -139,6 +144,8 @@ def run_sweep(
     The root comes from :func:`~claude_code_hooks_daemon.core.untracked_roots.resolve_sweep_root`,
     so a refused root (``untracked/repos``, a reference root, a ``"*"`` TTL) is
     reported and never listed, and an entry holding a never-swept path is skipped.
+    ``project_git`` is the project's repository read once (None: git unavailable,
+    so every due entry is STUCK: nothing can be proved about tracked files).
     """
     root = sweep_root.path
     notes: list[str] = [] if inputs.cwds else [NO_CWDS_NOTE]
@@ -156,6 +163,11 @@ def run_sweep(
         return SweepReport(str(root), (), False, (listing.reason,), tuple(notes))
     resolved_root = root.resolve()
     relative_root = _relative(resolved_root, project_root.resolve())
+    tracked = _tracked_by_entry(project_git, project_root, relative_root)
+    if tracked is None:
+        notes.append("the project's tracked files under the root could not be listed")
+    if project_git is not None and project_git.verified_note:
+        notes.append(f"remote proof: {project_git.verified_note}")
     rows = [
         _judge_entry(
             root,
@@ -166,6 +178,7 @@ def run_sweep(
             budget,
             inputs,
             scandir,
+            _EntryGit(project_git, None if tracked is None else tracked.get(name, ())),
         )
         for name in listing.value
         if name not in sweep_root.skip
@@ -181,6 +194,33 @@ def run_sweep(
     if budget.spent_reason:
         reasons.append(budget.spent_reason)
     return SweepReport(str(root), tuple(rows), not reasons, tuple(reasons), tuple(notes))
+
+
+def _tracked_by_entry(
+    project_git: ProjectGit | None, project_root: Path, relative_root: str | None
+) -> dict[str, tuple[str, ...]] | None:
+    """Tracked paths under the root by entry name; None when they could not be listed."""
+    if project_git is None or relative_root is None:
+        return None
+    result = project_git.runner(project_root, "ls-files", "-z", "--", relative_root)
+    if result.returncode != 0:
+        return None
+    by_entry: dict[str, list[str]] = {}
+    prefix = f"{relative_root}/"
+    for path in filter(None, result.stdout.split("\0")):
+        if not path.startswith(prefix):
+            return None
+        rel = path[len(prefix) :]
+        by_entry.setdefault(rel.split("/", 1)[0], []).append(rel)
+    return {name: tuple(paths) for name, paths in by_entry.items()}
+
+
+@dataclass(frozen=True)
+class _EntryGit:
+    """The project's git, and the entry's paths the project tracks (None: unknown)."""
+
+    project: ProjectGit | None
+    tracked: tuple[str, ...] | None
 
 
 @dataclass(frozen=True)
@@ -201,6 +241,7 @@ def _judge_entry(
     budget: WalkBudget,
     inputs: LivenessInputs,
     scandir: ScandirFn,
+    git: _EntryGit,
 ) -> EntryRow:
     now = clock.now
     walk = walk_entry(root, name, now=now, budget=budget, scandir=scandir)
@@ -215,7 +256,17 @@ def _judge_entry(
         birth=None,
         inputs=inputs,
     )
-    judgement = judge(walk, age=age, liveness=liveness)
+    repos: RepoFindings | None = None
+    needs_git = not liveness and age.due and walk.complete and not stats.multi_linked
+    if needs_git and git.project is not None:
+        repos = classify_entry(
+            root,
+            name,
+            nodes=tuple(node.path for node in stats.nodes),
+            markers=stats.git_markers,
+            project=git.project,
+        )
+    judgement = judge(walk, age=age, liveness=liveness, repos=repos, tracked=git.tracked)
     return EntryRow(
         name=name,
         kind=stats.kind,

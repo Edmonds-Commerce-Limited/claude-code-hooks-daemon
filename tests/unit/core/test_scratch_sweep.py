@@ -19,7 +19,7 @@ from claude_code_hooks_daemon.core.scratch_sweep import (
 )
 from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
 from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
-from tests.support.scratch_tree import ScratchTree, build_scratch_tree
+from tests.support.scratch_tree import ScratchTree, build_scratch_tree, quiet_project_git
 
 _DAY = 86400.0
 
@@ -60,6 +60,7 @@ def _sweep(
         budget=budget or WalkBudget(seconds=60, max_inodes=10_000),
         inputs=inputs,
         project_root=tree.base / "project",
+        project_git=quiet_project_git(tree.base / "project"),
         scandir=tree.refusing_scandir(*refused),
     )
 
@@ -102,6 +103,7 @@ class TestSweepRoot:
                 now=_now(),
             ),
             project_root=tree.base / "project",
+            project_git=quiet_project_git(tree.base / "project"),
             scandir=spy,
         )
         assert listed == []
@@ -143,7 +145,7 @@ class TestRunSweep:
         report = _sweep(tree, now=now)
         assert _verdicts(report) == {
             "cache": "DISPOSABLE",
-            "clone": "REPOSITORY",
+            "clone": "STUCK",
             "commit-a.txt": "DISPOSABLE",
             "notes.txt": "UNCERTAIN",
         }
@@ -254,8 +256,8 @@ class TestRendering:
         text = "\n".join(render_table(self._report(tmp_path), max_listed=50))
         assert "nothing was changed" in text
         assert "DISPOSABLE 1" in text
-        assert "KEPT, PROTECTED, REFERENCED" in text
-        assert "repository, not judged" in text
+        assert "KEPT, REFERENCED" in text
+        assert "not a git repository" in text
 
     def test_the_table_suggests_no_removal(self, tmp_path: Path) -> None:
         text = "\n".join(render_table(self._report(tmp_path), max_listed=50)).lower()
@@ -281,7 +283,7 @@ class TestRendering:
         document = report_json(self._report(tmp_path))
         json.dumps(document)
         assert document["dry_run"] is True
-        assert document["not_evaluated"] == ["KEPT", "PROTECTED", "REFERENCED"]
+        assert document["not_evaluated"] == ["KEPT", "REFERENCED"]
         rows = {row["name"]: row for row in document["entries"]}
         assert set(rows) == {"a.log", "clone", "notes.txt"}
         assert rows["clone"]["repository"] == "found"

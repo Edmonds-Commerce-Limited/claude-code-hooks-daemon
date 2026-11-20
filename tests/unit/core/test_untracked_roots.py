@@ -43,14 +43,42 @@ class TestScratch:
         )
         assert root.ttl_hours == 168
 
-    def test_a_root_outside_untracked_is_judged_with_the_scratch_ttl(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        "rel", ["tests/support", "src", ".claude/worktrees/x/untracked/scratch"]
+    )
+    def test_a_root_outside_this_projects_untracked_is_refused(
+        self, tmp_path: Path, rel: str
+    ) -> None:
         project = tmp_path / "project"
-        elsewhere = project / "tests" / "support"
+        elsewhere = project / rel
         elsewhere.mkdir(parents=True)
         root = resolve_sweep_root(
             elsewhere, project_root=project, config=ScratchConfig(), reference_roots=()
         )
-        assert (root.refusal, root.ttl_hours) == ("", 24)
+        assert root.ttl_hours is None
+        assert "not inside this project's untracked/" in root.refusal
+
+    def test_a_tree_outside_the_project_is_refused(self, tmp_path: Path) -> None:
+        project = tmp_path / "project"
+        outside = tmp_path / "elsewhere" / "untracked" / "scratch"
+        outside.mkdir(parents=True)
+        root = resolve_sweep_root(
+            outside, project_root=project, config=ScratchConfig(), reference_roots=()
+        )
+        assert root.ttl_hours is None
+
+    @pytest.mark.parametrize("name", ["repos", "scratch-archive"])
+    def test_another_checkouts_never_swept_directory_is_refused_at_any_depth(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        project = tmp_path / "project"
+        other = project / "untracked" / "scratch" / "clone" / "untracked" / name / "x"
+        other.mkdir(parents=True)
+        root = resolve_sweep_root(
+            other, project_root=project, config=ScratchConfig(), reference_roots=()
+        )
+        assert root.ttl_hours is None
+        assert f"untracked/{name}" in root.refusal
 
 
 class TestNeverSwept:
