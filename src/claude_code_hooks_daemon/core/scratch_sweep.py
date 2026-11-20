@@ -78,6 +78,24 @@ NO_CWDS_NOTE = (
     "signal was unavailable"
 )
 
+
+def liveness_unknown_reason(inputs: LivenessInputs) -> str:
+    """Why the working-directory liveness signal proves nothing this sweep, or ''.
+
+    Empty cwds (no ``/proc``, another pid namespace) or any unreadable pid
+    means "no process sits in the entry" was never established (F-BYPS low).
+    """
+    if not inputs.cwds:
+        return NO_CWDS_NOTE
+    if inputs.unreadable_pids:
+        count = len(inputs.unreadable_pids)
+        return (
+            f"{count} process(es) whose working directory could not be read, "
+            f"first pid {inputs.unreadable_pids[0]}"
+        )
+    return ""
+
+
 #: Table order: what needs a human first, what is in use last.
 _TABLE_ORDER = (
     Verdict.STUCK,
@@ -204,7 +222,8 @@ def run_sweep(
     proposals (None: no plan folder is proposed).
     """
     root = sweep_root.path
-    notes: list[str] = [] if inputs.cwds else [NO_CWDS_NOTE]
+    notes: list[str] = []
+    liveness_unknown = liveness_unknown_reason(inputs)
     if sweep_root.refusal or sweep_root.ttl_hours is None:
         return SweepReport(str(root), (), False, (sweep_root.refusal,), tuple(notes))
     ttl_hours = sweep_root.ttl_hours
@@ -263,6 +282,8 @@ def run_sweep(
         reasons.append(f"{stopped} {noun} not walked to the end")
     if budget.spent_reason:
         reasons.append(budget.spent_reason)
+    if liveness_unknown:
+        reasons.append(liveness_unknown)
     if tracked is None:
         reasons.append("the project's tracked files under the root could not be listed")
     if references.unknown:
@@ -360,6 +381,7 @@ def _judge_entry(
         references=git.references,
         repos=repos,
         tracked=git.tracked,
+        liveness_unknown=liveness_unknown_reason(inputs),
     )
     if judgement.verdict is Verdict.UNCERTAIN:
         judgement = _with_p3(root, walk, age, repos, git, judgement)

@@ -6739,12 +6739,13 @@ def cmd_scratch_sweep(
     from claude_code_hooks_daemon.core import scratch_sweep
     from claude_code_hooks_daemon.core.scratch_liveness import (
         LivenessInputs,
+        ProcessCwdReading,
         read_background_records,
+        read_process_cwds,
     )
     from claude_code_hooks_daemon.core.scratch_repos import build_project_git
     from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
     from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
-    from claude_code_hooks_daemon.core.worktree_reaping import default_process_cwds
     from claude_code_hooks_daemon.utils.git_repo import run_git
     from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
 
@@ -6755,13 +6756,17 @@ def cmd_scratch_sweep(
     if not root.is_absolute():
         root = repo / root
     now = wall_clock()
+    cwd_reading = (
+        ProcessCwdReading(process_cwds(), ()) if process_cwds is not None else read_process_cwds()
+    )
     inputs = LivenessInputs(
-        cwds=(process_cwds or default_process_cwds)(),
+        cwds=cwd_reading.cwds,
         background=read_background_records(
             _daemon_untracked_dir(repo) / "background-processes.jsonl"
         ),
         min_age_minutes=scratch.min_age_minutes,
         now=now,
+        unreadable_pids=cwd_reading.unreadable,
     )
     report = scratch_sweep.run_sweep(
         resolve_sweep_root(

@@ -7,8 +7,10 @@ from a walk that did not finish:
 1. LIVE: something uses the entry now, or it is within its TTL. A fresh mtime
    found by a partial walk still proves this: the walk can only have missed a
    NEWER mtime, never an older one.
-2. STUCK: the walk did not finish, or a file has another name outside the
-   entry. Nothing is concluded about an entry that was not read whole.
+2. STUCK: liveness could not be read (no process working directory was
+   readable, or some pids were not), the walk did not finish, or a file has
+   another name outside the entry. Nothing is concluded about an entry that
+   was not read whole.
 3. KEPT: not evaluated in Phase 1 (no keep marker or pause store exists yet).
    Also STUCK: a repository in the entry could not be classified
    (:mod:`~claude_code_hooks_daemon.core.scratch_repos`), or the project's
@@ -278,9 +280,13 @@ def judge(
     repos: RepoFindings | None = None,
     tracked: tuple[str, ...] | None = (),
     p3: frozenset[str] = frozenset(),
+    liveness_unknown: str = "",
 ) -> Judgement:
     """Judge one walked entry, given its age and any liveness reasons.
 
+    ``liveness_unknown`` says why the absence of a liveness reason proves
+    nothing (no process working directory could be read): a due entry is then
+    STUCK, since "no process found in it" was never established.
     ``repos`` is the entry's repository classification (None: not run).
     ``tracked`` lists the entry's paths the project tracks (None: unknown).
     ``p3`` holds the regular files whose blob the remote's default tip holds.
@@ -300,6 +306,8 @@ def judge(
         return result(Verdict.LIVE, *liveness)
     if not age.due:
         return result(Verdict.LIVE, "within its TTL")
+    if liveness_unknown:
+        return result(Verdict.STUCK, f"liveness unknown: {liveness_unknown}")
     if not walk.complete:
         return result(Verdict.STUCK, walk.reason)
     if stats.multi_linked:

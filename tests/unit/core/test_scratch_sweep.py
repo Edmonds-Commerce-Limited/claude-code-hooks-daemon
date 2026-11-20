@@ -54,12 +54,14 @@ def _sweep(
     config: ScratchConfig | None = None,
     root: Path | None = None,
     reference_roots: tuple[str, ...] = ("untracked/repos",),
+    unreadable: tuple[int, ...] = (),
 ) -> SweepReport:
     inputs = LivenessInputs(
         cwds={1: Path("/elsewhere")} if cwds is None else cwds,
         background=BackgroundRecords((), error),
         min_age_minutes=30,
         now=now,
+        unreadable_pids=unreadable,
     )
     config = config or ScratchConfig()
     return run_sweep(
@@ -235,10 +237,34 @@ class TestRunSweep:
         report = _sweep(tree, now=now, cwds={9: (tree.root / "work").resolve()})
         assert _verdicts(report) == {"work": "LIVE"}
 
-    def test_an_empty_cwd_map_is_noted(self, tmp_path: Path) -> None:
+    def test_an_empty_cwd_map_makes_the_report_incomplete_and_due_entries_stuck(
+        self, tmp_path: Path
+    ) -> None:
+        """F-BYPS low: no readable cwd at all is liveness unknown, not liveness absent."""
         tree = build_scratch_tree(tmp_path)
+        tree.file("old.log")
         report = _sweep(tree, now=_now(), cwds={})
-        assert any("working director" in note for note in report.notes)
+        assert not report.complete
+        assert any("working director" in reason for reason in report.incomplete_reasons)
+        (row,) = report.rows
+        assert row.verdict.value == "STUCK"
+        assert any("liveness" in reason for reason in row.reasons)
+
+    def test_unreadable_pids_make_due_entries_stuck(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        tree.file("old.log")
+        report = _sweep(tree, now=_now(), unreadable=(41, 42))
+        assert not report.complete
+        assert any("2 process" in reason for reason in report.incomplete_reasons)
+        (row,) = report.rows
+        assert row.verdict.value == "STUCK"
+
+    def test_unknown_liveness_leaves_an_entry_within_its_ttl_live(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        tree.file("new.log")
+        report = _sweep(tree, now=time.time(), cwds={})
+        (row,) = report.rows
+        assert row.verdict.value == "LIVE"
 
     def test_the_repository_marker_is_carried_on_a_live_row(self, tmp_path: Path) -> None:
         tree = build_scratch_tree(tmp_path)

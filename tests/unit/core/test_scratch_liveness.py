@@ -12,6 +12,7 @@ from claude_code_hooks_daemon.core.scratch_liveness import (
     LivenessInputs,
     entry_liveness,
     read_background_records,
+    read_process_cwds,
 )
 
 _NOW = 2_000_000_000.0
@@ -35,6 +36,36 @@ def _inputs(
 
 
 ENTRY = Path("/p/untracked/scratch/probe")
+
+
+class TestReadProcessCwds:
+    """F-BYPS low: a pid whose cwd cannot be read is reported, never silently skipped."""
+
+    def test_reads_each_pid_cwd_and_names_the_unreadable_ones(self, tmp_path: Path) -> None:
+        proc = tmp_path / "proc"
+        work = tmp_path / "work"
+        work.mkdir()
+        (proc / "123").mkdir(parents=True)
+        (proc / "123" / "cwd").symlink_to(work)
+        (proc / "124").mkdir()  # exited between listing and reading: no cwd at all
+        (proc / "125" / "cwd").mkdir(parents=True)  # not a link: readlink fails
+        (proc / "self").mkdir()
+        reading = read_process_cwds(proc_root=proc, own_pid=999)
+        assert dict(reading.cwds) == {123: work.resolve()}
+        assert reading.unreadable == (125,)
+
+    def test_skips_its_own_pid(self, tmp_path: Path) -> None:
+        proc = tmp_path / "proc"
+        (proc / "7").mkdir(parents=True)
+        (proc / "7" / "cwd").symlink_to(tmp_path)
+        reading = read_process_cwds(proc_root=proc, own_pid=7)
+        assert dict(reading.cwds) == {}
+        assert reading.unreadable == ()
+
+    def test_no_proc_root_reads_nothing(self, tmp_path: Path) -> None:
+        reading = read_process_cwds(proc_root=tmp_path / "absent", own_pid=1)
+        assert dict(reading.cwds) == {}
+        assert reading.unreadable == ()
 
 
 class TestReadBackgroundRecords:

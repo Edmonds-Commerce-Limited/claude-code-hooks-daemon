@@ -14,6 +14,7 @@ records file is the one empty answer: nothing has been backgrounded.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +47,50 @@ class LivenessInputs:
     min_age_minutes: int
     #: Wall clock, seconds.
     now: float
+    #: pids whose working directory exists but could not be read: liveness is unknown.
+    unreadable_pids: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class ProcessCwdReading:
+    """Every readable process working directory, and the pids that could not be read."""
+
+    cwds: Mapping[int, Path]
+    unreadable: tuple[int, ...]
+
+
+#: Where the kernel lists processes.
+PROC_ROOT = Path("/proc")
+
+
+def read_process_cwds(
+    *, proc_root: Path = PROC_ROOT, own_pid: int | None = None
+) -> ProcessCwdReading:
+    """pid -> working directory from ``<proc_root>/<pid>/cwd``, naming each pid that failed.
+
+    Unlike ``worktree_reaping.default_process_cwds``, a pid is skipped only when
+    it has exited (its ``cwd`` link is gone); any other failure, permission
+    included, is reported, because an unread process may be sitting in the
+    entry. The link is read, not followed, so a deleted directory still reads.
+    No ``proc_root`` at all (a non-Linux host) reads nothing; the sweep treats
+    an empty map as liveness unknown.
+    """
+    if not proc_root.is_dir():
+        return ProcessCwdReading({}, ())
+    me = os.getpid() if own_pid is None else own_pid
+    cwds: dict[int, Path] = {}
+    unreadable: list[int] = []
+    for entry in sorted(proc_root.iterdir()):
+        if not entry.name.isdigit() or int(entry.name) == me:
+            continue
+        pid = int(entry.name)
+        try:
+            cwds[pid] = (entry / "cwd").readlink().resolve()
+        except (FileNotFoundError, ProcessLookupError):
+            continue  # exited between listing and reading: it is in no entry now
+        except OSError:
+            unreadable.append(pid)
+    return ProcessCwdReading(cwds, tuple(sorted(unreadable)))
 
 
 def read_background_records(state_file: Path) -> BackgroundRecords:
@@ -115,8 +160,11 @@ def entry_liveness(
 
 __all__ = [
     "COMMAND_KEY",
+    "PROC_ROOT",
     "BackgroundRecords",
     "LivenessInputs",
+    "ProcessCwdReading",
     "entry_liveness",
     "read_background_records",
+    "read_process_cwds",
 ]

@@ -65,6 +65,19 @@ def _judge(
     return judge(walk, age=age, liveness=liveness).verdict
 
 
+class TestLivenessUnknown:
+    def test_a_due_entry_is_stuck_when_liveness_is_unknown(self) -> None:
+        walk = finished(_stats(Node("a.log", F, 5), kind=F))
+        judgement = judge(walk, age=_DUE, liveness=(), liveness_unknown="no cwd readable")
+        assert judgement.verdict is Verdict.STUCK
+        assert judgement.reasons == ("liveness unknown: no cwd readable",)
+
+    def test_a_known_live_signal_still_wins(self) -> None:
+        walk = finished(_stats(Node("a.log", F, 5), kind=F))
+        judgement = judge(walk, age=_DUE, liveness=("process 1",), liveness_unknown="x")
+        assert judgement.verdict is Verdict.LIVE
+
+
 class TestOrdering:
     def test_liveness_wins_first(self) -> None:
         walk = stopped(_stats(git_markers=("e/.git",)), "walk deadline reached")
