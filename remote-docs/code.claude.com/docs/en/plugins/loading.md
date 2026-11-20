@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/loading
-fetched_at: '2026-11-16T21:15:38.854905+00:00'
+fetched_at: '2026-11-20T09:13:44.929363+00:00'
 fidelity: converted
-source_sha256: 4bb33ca142523286f1ae9d0fea67cd234bd94376041a959108444187e71b45cd
+source_sha256: 72d5d7129f8cc4ef2f6746f95c303d47dab5fb4809c3b2884b9dda49fa82b52c
 licence: unreviewed
-stale_after: '2027-02-14'
+stale_after: '2027-02-18'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -42,7 +42,7 @@ An `enabledPlugins` entry becomes a plugin you can use in stages: your settings 
   * `known_marketplaces.json` records each marketplace Claude Code has fetched, with its `source`, `installLocation`, `lastUpdated`, and `autoUpdate`. There is one `known_marketplaces.json` per user, so a marketplace you add in one project is available in every project
   * `installed_plugins.json` records each install with its `scope`, `installPath`, and `version`
   * `cache/` holds the plugin files
-* **Loaded, in the running session**: the plugin set Claude Code loaded at startup or at the last `/reload-plugins`. Changes to settings or to disk don't reach this layer until you run `/reload-plugins` or start a new session. That is why `claude plugin update` ends with `Restart to apply changes.` and background updates prompt you with `Run /reload-plugins to apply`
+* **Loaded, in the running session**: the plugin set Claude Code loaded at startup or at the last reload. After you install, update, enable, or disable a plugin outside the `/plugin` panel, run [`/reload-plugins`](https://code.claude.com/docs/en/plugins/cli-reference#reload-plugins) in the session or start a new session
 
 ### Plugins and marketplaces that aren't on disk at session start
 
@@ -168,7 +168,7 @@ You can set an `enabledPlugins` entry in any of six sources. The table lists the
 
 | Source | Where you set it | Reaches |
 | :- | :- | :- |
-| `--add-dir` | `.claude/settings.json` or `.claude/settings.local.json` in a directory you pass with `--add-dir` | This session only. Only a `true` value has an effect, and every other source overrides it |
+| `--add-dir` | `.claude/settings.json` or `.claude/settings.local.json` in a directory you pass with `--add-dir` | This session only, and every other source overrides it. Can be [skipped until you save trust for the directory](#enabled-in-an-add-dir-directory-but-not-loaded) |
 | `user` | `~/.claude/settings.json` | You, in every project |
 | `project` | `.claude/settings.json` | Everyone who clones the repository |
 | `local` | `.claude/settings.local.json` | You, in this repository only |
@@ -185,6 +185,12 @@ To opt out of a project-enabled plugin on your machine, set the id to `false` in
 
 ### Enabled in an `--add-dir` directory but not loaded
 
+Until you save trust for the added directory, Claude Code skips its [`extraKnownMarketplaces`](https://code.claude.com/docs/en/permissions#what-runs-before-you-trust-a-folder) entries. In an interactive terminal session, it also skips `enabledPlugins` entries set to `true`. Answering the prompt that `--add-dir` shows doesn't save that trust. To save it, start a session in the directory and accept the [workspace trust dialog](https://code.claude.com/docs/en/permissions.md#project-allow-rules-and-workspace-trust). If no dialog appears, [set the trust key yourself](https://code.claude.com/docs/en/permissions.md#what-runs-before-you-trust-a-folder). The trust check requires Claude Code v2.1.319 or later.
+
+> [!NOTE]
+>
+> A directory inside a [pull request worktree](https://code.claude.com/docs/en/worktrees.md#branch-from-a-pull-request) can be skipped even after you trust it, so pass your main checkout's copy to `--add-dir` instead.
+
 Claude Code reads an `enabledPlugins` entry of `true` in one of the added directory's files only when that file's setting sources are on:
 
 * **`.claude/settings.json`**: `project`
@@ -199,11 +205,11 @@ For example, if you run `claude --setting-sources user --add-dir ./shared` in yo
 
 ### Enabled in project settings but not installed
 
-By default, a plugin enabled only in your project's `.claude/settings.json` doesn't load at session start until you install it on your machine. With the marketplace on your machine, the `/plugin` **Errors** tab shows [`Plugin "<name>" is enabled in project settings but isn't installed here`](https://code.claude.com/docs/en/plugins/troubleshooting#plugin-is-enabled-in-project-settings-but-isnt-installed-here) or [`Plugin "<name>" not cached at <path>`](https://code.claude.com/docs/en/plugins/troubleshooting#plugin-not-cached-at).
+By default, a plugin enabled only in your project's `.claude/settings.json` doesn't load at session start until you install it on your machine. With the marketplace on your machine when the session starts, the `/plugin` **Errors** tab shows a line ending in [`isn't installed here`](https://code.claude.com/docs/en/plugins/troubleshooting#plugin-is-enabled-in-project-settings-but-isnt-installed-here).
 
 > [!NOTE]
 >
-> If the tab shows neither message, [add the marketplace](https://code.claude.com/docs/en/plugins/install.md#add-a-marketplace) before you install. Find its source in the `extraKnownMarketplaces` setting of `.claude/settings.json`, or ask your maintainer.
+> If the marketplace isn't on your machine yet, [add it](https://code.claude.com/docs/en/plugins/install.md#add-a-marketplace) before you install. Find its source in the `extraKnownMarketplaces` setting of `.claude/settings.json`, or ask your maintainer.
 
 To install, run this in a shell from the project, using the plugin's key in `enabledPlugins`:
 
@@ -228,7 +234,7 @@ Claude Code fetches a plugin with an external source only when one of these sour
 
 ## Find plugins on disk
 
-Claude Code keeps plugin files and state records under one plugins root, which is `~/.claude/plugins` unless you set [`CLAUDE_CODE_PLUGIN_CACHE_DIR`](https://code.claude.com/docs/en/env-vars). Every path in the table is relative to that root.
+Claude Code keeps plugin files and state records under a plugins root, which is `~/.claude/plugins` unless you set [`CLAUDE_CODE_PLUGIN_CACHE_DIR`](https://code.claude.com/docs/en/env-vars). Every path in the table except `synced/` and `.trash/` is relative to that root. Those two stay under `~/.claude/plugins`.
 
 | Path | What it holds |
 | :- | :- |
@@ -239,7 +245,7 @@ Claude Code keeps plugin files and state records under one plugins root, which i
 | `synced/` | The plugins Claude Code [synced from your claude.ai account](#synced-plugins) |
 | `.trash/` | Plugins that the claude.ai sync removed, such as after you turn one off on claude.ai or stop syncing |
 | `installed_plugins.json` and `known_marketplaces.json` | The records of what Claude Code has installed and which marketplaces it has fetched, described under [Check which stage a plugin reached](#check-which-stage-a-plugin-reached). A [marketplace hosted on claude.ai](https://code.claude.com/docs/en/plugins/install.md#add-from-claude-ai) is recorded in `known_marketplaces_claudeai.json` instead |
-| `flagged-plugins.json` | Plugins Claude Code uninstalled because their marketplace delisted them. They appear in the **Flagged** section of `/plugin`; see [Host a marketplace](https://code.claude.com/docs/en/plugins/host-marketplace.md) |
+| `flagged-plugins.json` | Plugins Claude Code flagged as removed because their marketplace delisted them; see [Host a marketplace](https://code.claude.com/docs/en/plugins/host-marketplace.md) |
 | `installed_plugins.set-aside.<date>.<hash>.json` and `installed_plugins.unreadable.<date>.<hash>.kept` | Dated copies Claude Code keeps before it drops install records that no version of Claude Code can use or rebuilds an unreadable `installed_plugins.json`. See [the recovery notes](https://code.claude.com/docs/en/plugins/troubleshooting.md#installed-plugins-json-could-not-be-read-and-was-rebuilt). They age out on the [`cleanupPeriodDays`](https://code.claude.com/docs/en/settings-reference#cleanupperioddays) schedule |
 
 Because `${CLAUDE_PLUGIN_ROOT}` points at a version directory, a plugin's root path changes with every version. Keep a plugin's durable files in `${CLAUDE_PLUGIN_DATA}` instead.
@@ -392,17 +398,17 @@ Claude Code skips the refresh before a `name@marketplace` install when:
 
 In an interactive session, after you send your first message, Claude Code waits a random delay of up to ten minutes. It then refreshes every marketplace with auto-update on and updates the plugins installed from them on disk.
 
-The running session keeps the versions it loaded, and you see `Plugin updated: <name> · Run /reload-plugins to apply`. Whether or not you reload, the new versions load on your next launch.
+When you see `Plugin updated: <name> · Run /reload-plugins to apply`, run [`/reload-plugins`](https://code.claude.com/docs/en/plugins/cli-reference#reload-plugins) in that session. Whether or not you reload, the new versions load on your next launch.
 
 #### Which marketplaces and plugins auto-update
 
 Whether a marketplace auto-updates follows the first of these that is set:
 
 1. **`autoUpdate` on its `extraKnownMarketplaces` entry** in a settings file
-2. **`autoUpdate` on its `known_marketplaces.json` entry**, which the **Enable auto-update** toggle under `/plugin` **Marketplaces** writes. When a settings file also declares the marketplace under `extraKnownMarketplaces`, the toggle writes `autoUpdate` to that settings entry as well
+2. **`autoUpdate` on its `known_marketplaces.json` entry**, which the auto-update toggle under `/plugin` **Marketplaces** writes. When your user, project, or local settings also declare the marketplace under `extraKnownMarketplaces`, the toggle writes `autoUpdate` there as well
 3. **The default**: on for Anthropic's official marketplaces such as `claude-plugins-official`, off for `knowledge-work-plugins` and `first-party-plugins`, on for [marketplaces added from claude.ai](https://code.claude.com/docs/en/plugins/install.md#add-from-claude-ai), and off for every other marketplace
 
-If you set `DISABLE_UPDATES=1`, `DISABLE_AUTOUPDATER=1`, or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, the whole pass is off and the **Enable auto-update** toggle is hidden, unless you also set `FORCE_AUTOUPDATE_PLUGINS=1`. The [environment variables reference](https://code.claude.com/docs/en/env-vars.md) covers each variable's wider effect.
+If you set `DISABLE_UPDATES=1`, `DISABLE_AUTOUPDATER=1`, or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, the whole pass is off and the auto-update toggle is hidden, unless you also set `FORCE_AUTOUPDATE_PLUGINS=1`. The [environment variables reference](https://code.claude.com/docs/en/env-vars.md) covers each variable's wider effect.
 
 Auto-update also skips a plugin whose marketplace entry declares a `headersHelper`. [Installs and updates that refuse a command instead of asking](https://code.claude.com/docs/en/plugins/host-marketplace.md#installs-and-updates-that-refuse-the-command-instead-of-asking) explains when such a plugin appears in the `/plugin` **Errors** tab and how you update it from there.
 

@@ -240,6 +240,104 @@ def test_a_search_from_a_holding_directory_is_judged_over_every_indexed_file(
     assert _decision(many, 'cd "$D" && grep -r x sub') is Decision.DENY
 
 
+#: Release 3.76.0 review 2 F4: an apostrophe makes a body line unparseable on its own.
+_APOSTROPHE = "it" + "'" + "s"
+
+#: A quoted heredoc body no command runs, now or later (prose to `.md`), holding
+#: text that reads as a computed move, and a relative word spelling a link name.
+UNRUN_BODIES = [
+    f"cat > notes.md <<'EOF'\n{_APOSTROPHE} `sudo -D/--chdir` text\nsee .bin/tool\nEOF",
+    f"cat > notes.md <<'EOF'\n{_APOSTROPHE} `cd d && cat x`\nsee .bin/tool\nEOF",
+    "cat > notes.md <<'EOF'\ncd \"$D\"\nsee .bin/tool\nEOF",
+    "cat > notes.md <<'EOF'\ncd -\nsee .bin/tool\nEOF",
+    "cat <<'EOF' > notes.md\ncd ~\nsee .bin/tool\nEOF",
+    "git commit -F - <<'EOF'\ncd \"$D\"\nsee .bin/tool\nEOF",
+]
+
+#: Prose whose option words sit in no command position: a loose (unbalanced) segment.
+LOOSE_PROSE = [
+    f"cat > notes.txt <<'EOF'\n{_APOSTROPHE} sudo -D x\nsee .bin/tool\nEOF",
+    f"cat > notes.txt <<'EOF'\n{_APOSTROPHE} env --chdir x\nsee .bin/tool\nEOF",
+    "git commit -m 'x sudo -D y && z'; cat .bin/tool",
+    "echo 'a env -C y && b'; cat .bin/tool",
+]
+
+#: The same moves where something RUNS them, or after the heredoc ends.
+RUN_BODIES = [
+    "bash <<'EOF'\ncd \"$D\" && cat late\nEOF",
+    "sh <<'EOF'\ncd \"$D\" && cat late\nEOF",
+    "python3 <<'EOF'\ncd \"$D\" && cat late\nEOF",
+    "ssh h <<'EOF'\ncd \"$D\" && cat late\nEOF",
+    "cat <<'EOF' | bash\ncd \"$D\" && cat late\nEOF",
+    "cat <<'EOF' > >(bash)\ncd \"$D\" && cat late\nEOF",
+    'cat <<EOF\n$(cd "$D" && cat late)\nEOF',
+    "$(cat <<'EOF'\ncd \"$D\" && cat late\nEOF\n)",
+    f"bash <<'EOF'\necho {_APOSTROPHE}\ncd \"$D\" && cat late\nEOF",
+    "cat > run.sh <<'EOF'\ncd \"$D\" && cat late\nEOF",
+    "cat > n.md <<'EOF'\ncd \"$D\" && cat late\nEOF\nbash n.md",
+    "cat > n.md <<'EOF'\ncd \"$D\"\nEOF\n. n.md && cat late",
+    "cat > notes.md <<'EOF'\nhello\nEOF\ncd \"$D\" && cat late",
+    f"cat > notes.md <<'EOF'\n{_APOSTROPHE}\nEOF\ncat {_LAST}/zz/late",
+]
+
+#: Loose (unbalanced) segments whose move IS in command position after a quote opens.
+LOOSE_MOVES = [
+    "bash -c 'cd \"$D\" && cat late'",
+    'sh -c "cd $D && cat late"',
+    "sudo bash -c 'cd \"$D\" && cat late'",
+    'eval "cd $D && cat late"',
+    "ssh h 'cd \"$D\" && cat late'",
+    "bash -c 'sudo -D \"$D\" cat late && true'",
+    "bash -c 'true && env -C \"$D\" cat late'",
+    "bash -c 'FOO=1 cd \"$D\" && cat late'",
+    "bash -c '(cd \"$D\" && cat late)'",
+    "bash -c 'builtin cd \"$D\" && cat late'",
+]
+
+
+class TestQuotedHeredocPastTheCap:
+    """Review 2 F4: data in a quoted heredoc body moves nowhere, so it never overflows."""
+
+    @pytest.mark.parametrize("command", UNRUN_BODIES)
+    def test_an_unrun_body_is_allowed(self, many: Project, command: str) -> None:
+        _built(many)
+        assert _decision(many, command) is Decision.ALLOW
+
+    @pytest.mark.parametrize("command", UNRUN_BODIES)
+    def test_an_unrun_body_makes_no_move(self, many: Project, command: str) -> None:
+        _built(many)
+        assert not sfm.effective_cwds(command, str(many.root)).overflowed
+
+    @pytest.mark.parametrize("command", LOOSE_PROSE)
+    def test_prose_in_a_loose_segment_is_allowed(self, many: Project, command: str) -> None:
+        _built(many)
+        assert _decision(many, command) is Decision.ALLOW
+
+    @pytest.mark.parametrize("command", RUN_BODIES)
+    def test_a_run_body_still_denies(self, reaching: Project, command: str) -> None:
+        _built(reaching)
+        assert _decision(reaching, command) is Decision.DENY
+
+    @pytest.mark.parametrize("command", LOOSE_MOVES)
+    def test_a_loose_move_after_a_quote_still_denies(self, reaching: Project, command: str) -> None:
+        _built(reaching)
+        assert _decision(reaching, command) is Decision.DENY
+
+    def test_the_reason_names_no_move_the_decision_never_saw(self, reaching: Project) -> None:
+        """Review 2 F4 (c): the cause is computed from the text the decision judged."""
+        _built(reaching)
+        handler = SecretFileGuardHandler()
+        command = f"cat > notes.md <<'EOF'\ncd \"$D\"\nEOF\ncat {_LAST}/zz/late"
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(reaching.root),
+        }
+        result = handler.handle(hook_input)
+        assert result.decision is Decision.DENY
+        assert "existing directories" not in (result.reason or "")
+
+
 class TestLinkNames:
     """The name rule on its own: a word whose leading components spell a link path's tail."""
 

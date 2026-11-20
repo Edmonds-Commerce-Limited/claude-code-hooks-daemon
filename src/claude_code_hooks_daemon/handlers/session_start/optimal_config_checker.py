@@ -15,6 +15,8 @@ The full audit (``_run_checks()``) covers:
 5. Auto Memory (CLAUDE_CODE_DISABLE_AUTO_MEMORY should NOT be "1")
 6. Bash Working Directory (CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1)
 7. Idle Compaction (idleCompaction not false, and no disabler; Plan 00557)
+8. Idle Compaction Threshold (CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS at the 100000
+   floor; warns when unset or higher, never auto-written)
 
 ``handle()`` also writes ``alwaysThinkingEnabled: true`` and
 ``idleCompaction: true`` to the user settings when those keys are ABSENT; an
@@ -89,6 +91,27 @@ _IDLE_COMPACTION_CHECK_WHERE = (
     "environment (~/.bashrc, ~/.zshrc), the env section of any settings file, and "
     "idleCompaction / autoCompactEnabled in ~/.claude/settings.json, "
     ".claude/settings.json or .claude/settings.local.json"
+)
+
+# ── Idle compaction threshold check ──────────────────────────────────────────
+_IDLE_THRESHOLD_NAME = "Idle Compaction Threshold"
+_IDLE_THRESHOLD_ENV_VAR = "CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS"
+# Claude Code raises any lower value to this floor, the lowest threshold.
+_IDLE_THRESHOLD_FLOOR = 100000
+_IDLE_THRESHOLD_DEFAULT = 200000
+_IDLE_THRESHOLD_WHY = (
+    "Idle compaction only applies once the conversation's context reaches this many "
+    f"tokens (default {_IDLE_THRESHOLD_DEFAULT}). The lowest value Claude Code accepts is "
+    f"{_IDLE_THRESHOLD_FLOOR}, which lets the most idle sessions compact before the "
+    "one-hour prompt cache expires."
+)
+_IDLE_THRESHOLD_FIX = (
+    'Add to the "env" section of ~/.claude/settings.json: '
+    f'{{"env": {{"{_IDLE_THRESHOLD_ENV_VAR}": "{_IDLE_THRESHOLD_FLOOR}"}}}}'
+)
+_IDLE_THRESHOLD_WHERE = (
+    f"{_IDLE_THRESHOLD_ENV_VAR} in the environment or the env section of "
+    "~/.claude/settings.json, .claude/settings.json or .claude/settings.local.json"
 )
 
 
@@ -553,6 +576,70 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
             "docs": DOCS_URL,
         }
 
+    def _idle_threshold_value(self, project_root: Path) -> tuple[str, str] | None:
+        """Return ``(value, source)`` of the threshold setting, or None if unset.
+
+        Precedence: shell environment, then project local settings, project
+        settings, user settings. An unreadable project file is skipped.
+        """
+        if _IDLE_THRESHOLD_ENV_VAR in os.environ:
+            return os.environ[_IDLE_THRESHOLD_ENV_VAR], "environment"
+        sources: list[tuple[str, dict[str, Any]]] = []
+        for name in reversed(_PROJECT_SETTINGS_FILES):
+            path = project_root / ".claude" / name
+            if not path.exists():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as e:
+                logger.debug("Cannot read %s for the idle threshold check: %s", path, e)
+                continue
+            if isinstance(data, dict):
+                sources.append((f".claude/{name}", data))
+        sources.append(("~/.claude/settings.json", self._read_global_settings()))
+        for location, data in sources:
+            env_obj = data.get("env")
+            if isinstance(env_obj, dict) and _IDLE_THRESHOLD_ENV_VAR in env_obj:
+                return str(env_obj[_IDLE_THRESHOLD_ENV_VAR]).strip(), location
+        return None
+
+    def _check_idle_threshold(self, project_root: Path) -> dict[str, Any]:
+        """Encourage the lowest idle compaction threshold (100000).
+
+        Advisory only: an unset or higher value is reported with the exact fix,
+        never rewritten. Not flagged while idle compaction itself is off.
+        """
+        base: dict[str, Any] = {
+            "name": _IDLE_THRESHOLD_NAME,
+            "why": _IDLE_THRESHOLD_WHY,
+            "fix": _IDLE_THRESHOLD_FIX,
+            "where": _IDLE_THRESHOLD_WHERE,
+            "docs": DOCS_URL,
+        }
+        if not self._check_idle_compaction(project_root)["passed"]:
+            return {**base, "passed": True, "current": "Not applicable: idle compaction is off"}
+        found = self._idle_threshold_value(project_root)
+        if found is None:
+            return {
+                **base,
+                "passed": False,
+                "warn": True,
+                "current": f"Not set (default {_IDLE_THRESHOLD_DEFAULT})",
+            }
+        value, source = found
+        try:
+            tokens = int(value)
+        except ValueError:
+            tokens = None
+        if tokens is not None and tokens <= _IDLE_THRESHOLD_FLOOR:
+            return {**base, "passed": True, "current": f"{value} ({source})"}
+        return {
+            **base,
+            "passed": False,
+            "warn": True,
+            "current": f"{value!r} ({source}), above the {_IDLE_THRESHOLD_FLOOR} floor",
+        }
+
     def _run_checks(self, project_root: Path) -> list[dict[str, Any]]:
         """Run all configuration checks.
 
@@ -573,6 +660,7 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
             self._check_auto_memory(),
             self._check_bash_working_dir(),
             self._check_idle_compaction(project_root),
+            self._check_idle_threshold(project_root),
         ]
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

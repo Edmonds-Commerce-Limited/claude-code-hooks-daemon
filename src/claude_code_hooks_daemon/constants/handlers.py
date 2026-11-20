@@ -1153,6 +1153,14 @@ class HandlerID:
         config_key="unproven_venv_advisor",
         display_name="unproven-venv-advisor",
     )
+    # Workflow linter advisor (SessionStart handler) -- Plan 00621 Task 2.2: the
+    # one place actions-qa-ci is suggested, since lint_on_edit is silent when the
+    # optional linter is missing.
+    WORKFLOW_LINTER_ADVISOR = HandlerIDMeta(
+        class_name="WorkflowLinterAdvisorHandler",
+        config_key="workflow_linter_advisor",
+        display_name="workflow-linter-advisor",
+    )
     # Relay binary checker (SessionStart handler) -- Plan 00474 N523: an enabled
     # relay whose binary is missing or not executable is named at session start
     # with the path and the fix, instead of hooks quietly using the fallback.

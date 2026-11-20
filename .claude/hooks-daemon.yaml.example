@@ -835,6 +835,10 @@ handlers:
       enabled: true  # Advisory only, never removes; silent when there are none
       priority: 72
 
+    workflow_linter_advisor:  # Suggest the actions-qa-ci workflow linter when workflows exist and none uses it (Plan 00621)
+      enabled: true  # Advisory only, new sessions only; links the release page, prints no install command
+      priority: 72
+
     relay_binary_checker:  # Warn when the relay is enabled but its binary is missing or not executable (Plan 00474 N523)
       enabled: true  # Advisory only, never builds; silent when the relay is off or the binary is usable
       priority: 72

@@ -291,6 +291,8 @@ class TestRemoteDefaultDetection:
         _git(repo, "push", "--quiet", "other", "landed", f"{_DEFAULT}:{_DEFAULT}")
         _git(repo, "checkout", "-q", _DEFAULT)
         _git(repo, "fetch", "--quiet", "other")
+        # git >= 2.48 records the remote's HEAD on fetch (followRemoteHEAD=create).
+        _git(repo, "remote", "set-head", "other", "-d")
         proof = prove_remote_merged(repo, "other", ["landed"], _DEFAULT, BranchesConfig())
         assert proof.tips == {}
         assert "not confirmed" in proof.problems["landed"]
@@ -320,8 +322,9 @@ class TestRemoteDefaultDetection:
         _git(repo, "merge", "-q", "--ff-only", "old-work")
         _git(repo, "push", "--quiet", "origin", "main")
         _git(repo, "checkout", "-q", _DEFAULT)
-        _git(repo, "remote", "set-head", "origin", "-d")
         _git(repo, "fetch", "--quiet", "origin")
+        # After the fetch: git >= 2.48 re-records the remote's HEAD on fetch.
+        _git(repo, "remote", "set-head", "origin", "-d")
         assert _guard(repo, "git push origin --delete old-work", by_proof=False) == "deny"
         # Every caller of the one proof is held to it, not only the guard: a sweep that
         # resolved `main` through the local fallback is refused by the proof itself.

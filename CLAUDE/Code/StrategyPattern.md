@@ -199,6 +199,25 @@ source of truth for which languages are registered** — do not maintain a
 language roster in documentation (the per-domain coverage table in root
 `CLAUDE.md` is the human summary).
 
+### Lint domain: shared extensions and optional capabilities
+
+The lint registry (`strategies/lint/registry.py`) differs from the TDD one in
+one way: an extension may be held by several strategies, because `.yml` is
+both an Ansible playbook and a GitHub workflow. Sharing is allowed only when
+every strategy on the extension implements `NarrowsByPath`; `register()`
+raises `ValueError` otherwise, and `get_strategy()` returns the first, in
+registration order, whose `handles_file` accepts the path.
+
+Behaviour a few strategies need is expressed as separate `runtime_checkable`
+capabilities in `strategies/lint/protocol.py`, never as members of
+`LintStrategy`: `NarrowsByPath`, `ProvidesCommandValues`,
+`ClassifiesToolUnavailable`, `ClassifiesMidEditOutput`, `HasPrecheckCommands`,
+`DeclaresFindingsExitCodes` (only the named non-zero exits are findings; any
+other is a fault that allows with a "NOT checked" advisory) and
+`DeclaresOptionalTool` (a missing tool is skipped silently). Both lint gates
+read the last two through `is_findings_exit` and `lint_tool_is_optional` in
+`strategies/lint/common.py`, so they cannot disagree.
+
 ## Shared Utilities (DRY)
 
 `common.py` holds cross-language logic: `COMMON_TEST_DIRECTORIES` (the

@@ -22,7 +22,7 @@
   "conditional_input_fields": {
     "effort": "In the example, but present only when the current model supports the effort parameter.",
     "session_crons": "In the example, but conditional in practice -- an ABSENT list is not the same fact as an EMPTY one (the example carries an empty one). Same shape and same 1000-character prompt cap as Stop.",
-    "background_tasks": "In the example, but conditional in practice -- treat an absent list as 'unknown', never as 'no tasks running'."
+    "background_tasks": "In the example, but conditional in practice -- treat an absent list as 'unknown', never as 'no tasks running'. Upstream: the arrays are those 'described under [Stop input]', 'scoped to the parent session, not the subagent' -- so the same open set of `type` labels as Stop, including `monitor` (a Monitor's script is listed as `monitor`, not `shell`, from Claude Code 2.1.329)."
   },
   "notes": "Same decision control as Stop; reason required when decision is 'block'. agent_id and agent_type are UNCONDITIONAL here -- this event only ever fires for a subagent -- so they sit in the input_example and need no conditional slot.",
   "input_example": {
