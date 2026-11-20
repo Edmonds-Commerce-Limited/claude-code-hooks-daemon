@@ -34,6 +34,7 @@ def _sweep(
     error: str = "",
     refused: tuple[str, ...] = (),
     config: ScratchConfig | None = None,
+    root: Path | None = None,
 ) -> SweepReport:
     inputs = LivenessInputs(
         cwds={1: Path("/elsewhere")} if cwds is None else cwds,
@@ -42,7 +43,7 @@ def _sweep(
         now=now,
     )
     return run_sweep(
-        tree.root,
+        root or tree.root,
         config=config or ScratchConfig(),
         now=now,
         budget=budget or WalkBudget(seconds=60, max_inodes=10_000),
@@ -117,6 +118,21 @@ class TestRunSweep:
         report = _sweep(tree, now=_now(), refused=("",))
         assert not report.complete
         assert report.incomplete_reasons
+
+    def test_a_root_that_is_a_file_is_incomplete(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        tree.root.rmdir()
+        tree.root.write_text("x")
+        report = _sweep(tree, now=_now())
+        assert not report.complete
+        assert "not a directory" in report.incomplete_reasons[0]
+
+    def test_a_root_that_cannot_be_read_is_incomplete(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        blocker = tree.file("plain.txt")
+        report = _sweep(tree, now=_now(), root=blocker / "below")
+        assert not report.complete
+        assert "could not be read" in report.incomplete_reasons[0]
 
     def test_a_root_that_is_a_link_is_not_followed(self, tmp_path: Path) -> None:
         tree = build_scratch_tree(tmp_path)

@@ -149,6 +149,14 @@ class TestOutput:
         document = json.loads(capsys.readouterr().out)
         assert [row["name"] for row in document["entries"]] == ["f.out"]
 
+    def test_a_relative_root_is_taken_from_the_project(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        tree.file("a.log")
+        assert _run(tree, _args(tree, as_json=True, root=Path("untracked/scratch"))) == 0
+        document = json.loads(capsys.readouterr().out)
+        assert Path(document["root"]) == tree.root
+
     def test_the_budget_flags_reach_the_walk(
         self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
     ) -> None:

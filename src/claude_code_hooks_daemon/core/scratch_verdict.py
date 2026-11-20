@@ -1,6 +1,8 @@
 """One verdict per scratch entry, and the proofs that need no git (Plan 00627 Task 1.6).
 
-The order is DESIGN.md section 3.1's, first match wins:
+The verdicts are DESIGN.md section 3.1's, first match wins. STUCK is checked
+second rather than last as 3.1 lists it, because no later rung can be judged
+from a walk that did not finish:
 
 1. LIVE: something uses the entry now, or it is within its TTL. A fresh mtime
    found by a partial walk still proves this: the walk can only have missed a
