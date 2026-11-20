@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import os
+import subprocess
 import tarfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -102,6 +103,26 @@ class TestFindTar:
     def test_refuses_a_missing_tar(self, tmp_path: Path) -> None:
         with pytest.raises(PackRefused):
             find_gnu_tar(str(tmp_path / "absent"))
+
+    def test_ignores_a_tar_earlier_on_the_callers_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D-EXEC 3 (Task 3.9): tar is looked up on the pinned PATH, like every run."""
+        shadow = tmp_path / "tar"
+        shadow.write_text("#!/bin/sh\necho 'tar (GNU tar) 1.35'\n")
+        shadow.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ.get('PATH', '')}")
+        assert find_gnu_tar().path != str(shadow)
+
+    def test_a_hung_version_check_is_refused_not_raised(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def hung(*args: object, **kwargs: object) -> object:
+            raise subprocess.TimeoutExpired(cmd="tar", timeout=30)
+
+        monkeypatch.setattr(subprocess, "run", hung)
+        with pytest.raises(PackRefused, match="did not answer"):
+            find_gnu_tar("/usr/bin/tar")
 
 
 class TestPack:

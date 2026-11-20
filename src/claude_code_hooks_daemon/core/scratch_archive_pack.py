@@ -96,10 +96,11 @@ class TarTool:
 
 
 def find_gnu_tar(path: str | None = None) -> TarTool:
-    """Resolve GNU tar (``path`` or ``tar`` on ``PATH``); raise :class:`PackRefused` otherwise."""
-    resolved = path if path is not None else shutil.which("tar")
+    """Resolve GNU tar (``path``, or ``tar`` on the pinned ``PATH`` every tar run
+    uses, never the caller's); raise :class:`PackRefused` otherwise."""
+    resolved = path if path is not None else shutil.which("tar", path=_TAR_ENV["PATH"])
     if resolved is None or not resolved.startswith("/"):
-        raise PackRefused("GNU tar is not on PATH as an absolute path")
+        raise PackRefused(f"GNU tar is not on {_TAR_ENV['PATH']} as an absolute path")
     try:
         proc = subprocess.run(  # nosec B603 - fixed argv
             [resolved, "--version"],
@@ -110,6 +111,8 @@ def find_gnu_tar(path: str | None = None) -> TarTool:
         )
     except OSError as exc:
         raise PackRefused(f"tar at {resolved} cannot run: {exc}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise PackRefused(f"tar at {resolved} did not answer --version: {exc}") from exc
     first = proc.stdout.decode(errors="replace").splitlines()[:1]
     if proc.returncode != 0 or not first or "GNU tar" not in first[0]:
         raise PackRefused(f"{resolved} is not GNU tar")
