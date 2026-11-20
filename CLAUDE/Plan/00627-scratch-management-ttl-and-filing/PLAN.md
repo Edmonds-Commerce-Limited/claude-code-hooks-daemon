@@ -60,7 +60,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [x] ✅ **Task 1.1**: Add the fake-tree builder `tests/support/scratch_tree.py` (the project's helper directory) with its own tests (entries, set mtimes, links to dummy files outside the root, hard links, FIFOs, unreadable directories).
 - [x] ✅ **Task 1.2**: Add the `scratch:` keys of DESIGN.md section 10 to the config model, with validation tests (bounds, `extra="forbid"`).
 - [x] ✅ **Task 1.3**: Add the entry walker: per entry, directories, files, bytes, newest mtime, special files, link counts, nested `.git` markers. `lstat` only, one device, a `ScanDeadline` budget, and an explicit incomplete result.
-- [ ] ⬜ **Task 1.4**: Add the TTL clock (DESIGN.md section 4): newest mtime, root ctime, birth time, future mtimes, maximum lifetime.
+- [x] ✅ **Task 1.4**: Add the TTL clock (DESIGN.md section 4): newest mtime, root ctime, birth time, future mtimes, maximum lifetime.
 - [ ] ⬜ **Task 1.5**: Add liveness: process working directories (reusing `default_process_cwds`), background-process records, minimum age.
 - [ ] ⬜ **Task 1.6**: Add the verdict type and the ordering, with proofs P1, P2 and P5 (the ones that need no git).
 - [ ] ⬜ **Task 1.7**: Add `hooks-daemon scratch-sweep` as a dry run only: the table and `--json`. Test that a run changes no inode (snapshot before and after).
