@@ -85,6 +85,7 @@ __all__ = [
     "Reclaimed",
     "RestoreRefused",
     "Restored",
+    "RestoredWithLeftovers",
     "leftover_staging",
     "read_headers",
     "reclaim_staging",
@@ -114,7 +115,11 @@ Layout = Literal["directory", "member", "adopted"]
 
 
 class RestoreRefused(Exception):
-    """Nothing was restored; any staging this restore created is gone."""
+    """Nothing was restored.
+
+    Any staging this restore created is gone, unless the message names it as
+    left in the store (then :func:`reclaim_staging` removes it).
+    """
 
 
 @dataclass(frozen=True)
@@ -133,6 +138,20 @@ class Restored:
     archive_id: str
     name: str
     layout: Layout
+
+
+@dataclass(frozen=True)
+class RestoredWithLeftovers(Restored):
+    """Restored (the no-replace move succeeded), but a step after the move failed.
+
+    ``problems`` names each failure: the root directory's mode not reset, the
+    destination directory not synced, or the staging directory not cleaned.
+    ``staging`` names a staging directory left in the store, for
+    :func:`reclaim_staging`; ``None`` when it was cleaned.
+    """
+
+    problems: tuple[str, ...]
+    staging: str | None
 
 
 @dataclass(frozen=True)
@@ -352,7 +371,9 @@ def restore(
 ) -> Restored:
     """Restore ``archive_id`` (``entry`` names one of a batch) into ``dest_parent_fd``.
 
-    Raises :class:`RestoreRefused`; the archive and its records are untouched either way.
+    Raises :class:`RestoreRefused` when nothing was restored. Returns
+    :class:`RestoredWithLeftovers` when the entry WAS moved into place but a later
+    step failed. The archive and its records are untouched either way.
     """
     store.require_lock("restore")
     try:
@@ -368,7 +389,7 @@ def restore(
     archive_fd, headers, compression = _checked_archive(store, record)
     try:
         plan = _plan(record, headers, dest_name, compression)
-        _stage_and_move(
+        problems, left = _stage_and_move(
             store,
             archive_fd,
             plan,
@@ -381,6 +402,14 @@ def restore(
         )
     finally:
         os.close(archive_fd)
+    if problems:
+        return RestoredWithLeftovers(
+            archive_id=archive_id,
+            name=dest_name,
+            layout=plan.layout,
+            problems=problems,
+            staging=left,
+        )
     return Restored(archive_id=archive_id, name=dest_name, layout=plan.layout)
 
 
@@ -395,7 +424,13 @@ def _stage_and_move(
     max_inodes: int,
     max_depth: int,
     timeout: float,
-) -> None:
+) -> tuple[tuple[str, ...], str | None]:
+    """Stage, verify and move; return the after-move problems and any staging left.
+
+    A failure before or at the rename cleans the staging and raises
+    :class:`RestoreRefused`; once the rename succeeded nothing raises (except a
+    process death), every later failure is collected instead.
+    """
     staging = STAGING_PREFIX + secrets.token_hex(8)
     os.mkdir(staging, 0o700, dir_fd=store.dir_fd)
     staging_fd = os.open(staging, _DIR_FLAGS, dir_fd=store.dir_fd)
@@ -412,16 +447,27 @@ def _stage_and_move(
                 max_depth=max_depth,
                 timeout=timeout,
             )
-            _move(staging_fd, target, dest_parent_fd, dest_name, _root_mode(plan))
+            problems = _move(staging_fd, target, dest_parent_fd, dest_name, _root_mode(plan))
         except Exception as exc:
+            reason = str(exc) if isinstance(exc, RestoreRefused) else f"restore failed: {exc}"
+            try:
+                _clean_staging(store, staging, ident, max_depth=max_depth)
+            except (RestoreRefused, OSError) as clean_exc:
+                reason += f"; staging {staging!r} was left in the store: {clean_exc}"
+            raise RestoreRefused(reason) from exc
+        try:
+            os.fsync(dest_parent_fd)
+        except OSError as exc:
+            problems.append(f"the destination directory was not synced: {exc}")
+        left: str | None = None
+        try:
             _clean_staging(store, staging, ident, max_depth=max_depth)
-            if isinstance(exc, RestoreRefused):
-                raise
-            raise RestoreRefused(f"restore failed: {exc}") from exc
-        os.fsync(dest_parent_fd)
-        _clean_staging(store, staging, ident, max_depth=max_depth)
+        except (RestoreRefused, OSError) as exc:
+            problems.append(f"staging {staging!r} was left in the store: {exc}")
+            left = staging
     finally:
         os.close(staging_fd)
+    return tuple(problems), left
 
 
 def _extract_and_verify(
@@ -510,28 +556,36 @@ def _root_mode(plan: _Plan) -> int | None:
 
 def _move(
     staging_fd: int, target: str, dest_parent_fd: int, dest_name: str, root_mode: int | None
-) -> None:
-    """The no-replace rename into place.
+) -> list[str]:
+    """The no-replace rename into place; return the problems found after it succeeded.
 
     A directory (``root_mode`` given: tar leaves its working directory's mode
     alone) is owner-writable for the move, then takes the archived root's mode.
+    A failed rename raises :class:`RestoreRefused` (the caller cleans staging);
+    a failed mode reset after it is a problem, never a refusal, since the entry
+    is already in place.
     """
-    restore_mode: int | None = None
     target_fd: int | None = None
     if root_mode is not None:
         target_fd = os.open(target, _DIR_FLAGS, dir_fd=staging_fd)
-        os.fchmod(target_fd, stat.S_IMODE(os.fstat(target_fd).st_mode) | stat.S_IWUSR)
-        restore_mode = root_mode
     try:
+        if target_fd is not None:
+            os.fchmod(target_fd, stat.S_IMODE(os.fstat(target_fd).st_mode) | stat.S_IWUSR)
         try:
             rename_noreplace_between(staging_fd, target, dest_parent_fd, dest_name)
         except OSError as exc:
             if exc.errno == errno.EEXIST:
                 raise RestoreRefused(f"{dest_name!r} exists; restore never overwrites") from exc
             raise RestoreRefused(f"the move into place failed: {exc}") from exc
-        finally:
-            if target_fd is not None and restore_mode is not None:
-                os.fchmod(target_fd, restore_mode)
+        problems: list[str] = []
+        if target_fd is not None and root_mode is not None:
+            try:
+                os.fchmod(target_fd, root_mode)
+            except OSError as exc:
+                problems.append(
+                    f"the restored root's mode was not reset to {oct(root_mode)}: {exc}"
+                )
+        return problems
     finally:
         if target_fd is not None:
             os.close(target_fd)

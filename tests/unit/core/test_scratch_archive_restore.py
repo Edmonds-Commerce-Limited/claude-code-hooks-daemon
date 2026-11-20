@@ -50,6 +50,7 @@ from claude_code_hooks_daemon.core.scratch_archive_restore import (
     STAGING_PREFIX,
     Reclaimed,
     Restored,
+    RestoredWithLeftovers,
     RestoreRefused,
     leftover_staging,
     reclaim_staging,
@@ -927,3 +928,158 @@ class TestReclaimStaging:
     def test_an_empty_store_reclaims_nothing(self, store: ArchiveStore) -> None:
         assert reclaim_staging(store) == ()
         assert store.audit().staging_dirs == ()
+
+
+# --- restored, but something after the move failed (Task 3.8 precondition) ------
+
+
+def _after_rename(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Track whether the no-replace rename has happened; return the flag cell."""
+    moved = [False]
+    real = restore_mod.rename_noreplace_between
+
+    def wrapped(*args: Any, **kwargs: Any) -> None:
+        real(*args, **kwargs)
+        moved[0] = True
+
+    monkeypatch.setattr(restore_mod, "rename_noreplace_between", wrapped)
+    return moved
+
+
+class TestRestoredWithLeftovers:
+    def test_a_clean_restore_is_plain_restored(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _make_entry(root)
+        archive_id = _pack_entry(root, root_fd, store, tar, "e1")
+        result = _restore(store, root_fd, tar, archive_id)
+        assert type(result) is Restored
+
+    def test_a_staging_cleanup_failure_after_the_move_is_reported_not_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        before = _make_entry(root)
+        archive_id = _pack_entry(root, root_fd, store, tar, "e1")
+
+        def refuse(*_args: Any, **_kwargs: Any) -> None:
+            raise RestoreRefused("staging holds another device; it is left in place")
+
+        monkeypatch.setattr(restore_mod, "_clean_staging", refuse)
+        result = _restore(store, root_fd, tar, archive_id)
+        monkeypatch.undo()
+        assert isinstance(result, RestoredWithLeftovers)
+        assert (result.archive_id, result.name, result.layout) == (archive_id, "e1", "directory")
+        assert _tree(root / "e1") == before
+        (staged,) = _staging(store)
+        assert result.staging == staged
+        assert any("device" in p for p in result.problems)
+        assert reclaim_staging(store) == (Reclaimed(staged, "reclaimed", ""),)
+
+    def test_a_destination_fsync_failure_after_the_move_is_reported(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        before = _make_entry(root)
+        archive_id = _pack_entry(root, root_fd, store, tar, "e1")
+        real = os.fsync
+
+        def fsync(fd: int) -> None:
+            if fd == root_fd:
+                raise OSError(errno.EIO, "fsync failed")
+            real(fd)
+
+        monkeypatch.setattr(restore_mod.os, "fsync", fsync)
+        result = _restore(store, root_fd, tar, archive_id)
+        monkeypatch.undo()
+        assert isinstance(result, RestoredWithLeftovers)
+        assert result.staging is None
+        assert any("sync" in p for p in result.problems)
+        assert _tree(root / "e1") == before
+        assert _staging(store) == []
+
+    def test_a_root_mode_reset_failure_after_the_move_is_reported(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _make_entry(root)
+        (root / "e1").chmod(0o555)
+        archive_id = _pack_entry(root, root_fd, store, tar, "e1")
+        moved = _after_rename(monkeypatch)
+        real = os.fchmod
+        failed: list[int] = []
+
+        def fchmod(fd: int, mode: int) -> None:
+            if moved[0] and not failed:
+                failed.append(mode)
+                raise OSError(errno.EPERM, "fchmod failed")
+            real(fd, mode)
+
+        monkeypatch.setattr(restore_mod.os, "fchmod", fchmod)
+        result = _restore(store, root_fd, tar, archive_id)
+        monkeypatch.undo()
+        assert failed == [0o555]
+        assert isinstance(result, RestoredWithLeftovers)
+        assert any("mode" in p for p in result.problems)
+        # The entry is in place, still owner-writable from the move.
+        assert (root / "e1" / "a.txt").read_text() == "alpha"
+        assert _staging(store) == []
+        (root / "e1").chmod(0o755)
+
+    def test_a_failed_move_still_refuses_and_leaves_no_staging(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _make_entry(root)
+        archive_id = _pack_entry(root, root_fd, store, tar, "e1")
+
+        def fail(*_args: Any, **_kwargs: Any) -> None:
+            raise OSError(errno.EXDEV, "cross-device")
+
+        monkeypatch.setattr(restore_mod, "rename_noreplace_between", fail)
+        with pytest.raises(RestoreRefused, match="move into place"):
+            _restore(store, root_fd, tar, archive_id)
+        assert _staging(store) == []
+        assert not (root / "e1").exists()
+
+    def test_a_refusal_whose_cleanup_fails_names_the_leftover(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _make_entry(root)
+        archive_id = _pack_entry(root, root_fd, store, tar, "e1")
+
+        def fail(*_args: Any, **_kwargs: Any) -> None:
+            raise OSError(errno.EXDEV, "cross-device")
+
+        def refuse(*_args: Any, **_kwargs: Any) -> None:
+            raise RestoreRefused("staging changed; it is left in place")
+
+        monkeypatch.setattr(restore_mod, "rename_noreplace_between", fail)
+        monkeypatch.setattr(restore_mod, "_clean_staging", refuse)
+        with pytest.raises(RestoreRefused, match="left in the store") as caught:
+            _restore(store, root_fd, tar, archive_id)
+        monkeypatch.undo()
+        (staged,) = _staging(store)
+        assert staged in str(caught.value)
+        assert not (root / "e1").exists()
