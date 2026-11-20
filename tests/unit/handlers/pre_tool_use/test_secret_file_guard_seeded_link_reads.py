@@ -216,6 +216,14 @@ class TestAProjectGlobIsJudgedThroughTheLinkNotBySpelling:
             "diff -r . /dev/null",
             "tar -chf out.tar .",
             "cp -rL . ../copy",
+            # find hands each link it lists to its command, which may follow it.
+            "find . -exec grep -r secret {} +",
+            "find . -type l -exec grep -r secret {} +",
+            "find . -name conf -exec cat {}/vault.txt \\;",
+            # A glob expands to command-line operands, which grep -r and rg follow.
+            "grep -r secret *",
+            "rg secret *",
+            "grep -r secret */",
         ],
     )
     def test_link_following_reads_from_the_worktree(

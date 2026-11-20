@@ -931,7 +931,9 @@ def _segment_reads(
         yield from _reads(" ".join(words[1:]), here, depth + 1, tracker)
     elif head == _FIND:
         if _find_execs_a_reader(words):
-            yield from _reads_from_each(_find_roots(words), here, follows=_find_link_follow(words))
+            # find hands each link it lists to its command, which may follow it
+            # (`-exec grep -r {}`, `-exec cat {}/x`): no find proves it follows none.
+            yield from _reads_from_each(_find_roots(words), here)
     elif head == _XARGS:
         inner_words = _xargs_command(words)
         if inner_words and _is_search(inner_words):
@@ -1646,8 +1648,10 @@ def _reads_of_roots(
     for root in roots:
         glob_root = _place_directory_glob(root, cwd)
         if glob_root is not None:
-            # Answered from the index when judged: no directory is listed here.
-            yield Read(glob_root, view=_view_for(rules), glob=True, rules=rules, follows=follows)
+            # Answered from the index when judged: no directory is listed here. The shell
+            # expands it to command-line operands, which every reader follows, so it is
+            # judged as following every link below its literal directory.
+            yield Read(glob_root, view=_view_for(rules), glob=True, rules=rules)
     placed = _placed(roots, cwd)
     for root in placed:
         yield Read(root, view=_view_for(rules), skip=rules.predicate(root), follows=follows)
@@ -1664,12 +1668,13 @@ def _reads_of_roots(
 # Every reader follows every link unless its own options prove otherwise: a miss here is a
 # protected file read through a seeded link, so only the shapes below are proven not to.
 
-#: Short options that make a grep-family tool follow every link it meets while recursing.
+#: Short options that make a grep-family tool follow every link it meets while recursing
+#: (``S`` too for grep: BSD grep's ``-S`` follows every link under ``-r``).
 _GREP_FOLLOW_SHORT: Final[dict[str, str]] = {
-    "grep": "R",
-    "egrep": "R",
-    "fgrep": "R",
-    "zgrep": "R",
+    "grep": "RS",
+    "egrep": "RS",
+    "fgrep": "RS",
+    "zgrep": "RS",
     "ugrep": "RS",
     "ug": "RS",
     "rg": "L",
@@ -1686,8 +1691,6 @@ _FOLLOW_LONG: Final[tuple[str, ...]] = (
 _FOLLOW_STEERING: Final[re.Pattern[str]] = re.compile(
     r"GREP_OPTIONS|\(\s*\)|\bfunction\b|\balias\b"
 )
-#: A ``find`` option that follows links below its starting points.
-_FIND_FOLLOW_WORDS: Final[frozenset[str]] = frozenset({"-L", "-follow"})
 
 
 def _search_link_follow(tool: str, arguments: list[str], scan: SearchArguments) -> LinkFollow:
@@ -1714,10 +1717,3 @@ def _search_link_follow(tool: str, arguments: list[str], scan: SearchArguments) 
         elif word.startswith("-") and any(flag in word[1:] for flag in shorts):
             return LinkFollow.ALL
     return LinkFollow.NONE
-
-
-def _find_link_follow(words: list[str]) -> LinkFollow:
-    """``find`` descends no directory link without ``-L``/``-follow``, but its reader opens file links."""
-    if any(word in _FIND_FOLLOW_WORDS for word in words) or _follow_steering_named.get():
-        return LinkFollow.ALL
-    return LinkFollow.FILES
