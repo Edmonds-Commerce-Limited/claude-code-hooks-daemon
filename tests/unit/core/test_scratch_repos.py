@@ -379,6 +379,99 @@ class TestRelated:
         assert findings.p4_covered == ()
 
 
+_UNHELD = "commit tip(s) no live-verified remote tip contains"
+
+
+class TestRecoverableCommits:
+    """A commit only a reflog or a pseudo-ref still names is work: it protects the clone."""
+
+    def _abandon(self, repo: Path) -> str:
+        """Commit unpushed work, then reset it away so no ref tip holds it."""
+        sha = commit_file(repo, "lost.txt", "only recoverable\n")
+        git(repo, "reset", "-q", "--hard", "origin/main")
+        return sha
+
+    def test_a_commit_only_the_reflog_names_protects_the_clone(self, gp: GitProject) -> None:
+        repo = gp.clone("e")
+        self._abandon(repo)
+        (repo / ".git" / "ORIG_HEAD").unlink()
+        findings = _classify(gp, "e")
+        assert _UNHELD in " ".join(findings.protected)
+        assert findings.p4_covered == ()
+
+    def test_a_commit_only_orig_head_names_protects_the_clone(self, gp: GitProject) -> None:
+        repo = gp.clone("e")
+        self._abandon(repo)
+        shutil.rmtree(repo / ".git" / "logs")
+        findings = _classify(gp, "e")
+        assert _UNHELD in " ".join(findings.protected)
+        assert findings.p4_covered == ()
+
+    def test_a_commit_only_fetch_head_names_protects_the_clone(self, gp: GitProject) -> None:
+        repo = gp.clone("e")
+        sha = self._abandon(repo)
+        (repo / ".git" / "ORIG_HEAD").unlink()
+        shutil.rmtree(repo / ".git" / "logs")
+        (repo / ".git" / "FETCH_HEAD").write_text(f"{sha}\t\tbranch 'x' of /elsewhere\n")
+        findings = _classify(gp, "e")
+        assert _UNHELD in " ".join(findings.protected)
+        assert findings.p4_covered == ()
+
+    def test_a_commit_only_a_linked_worktree_reflog_names_protects_the_clone(
+        self, gp: GitProject
+    ) -> None:
+        repo = gp.clone("e")
+        inside = repo / "wt"
+        git(repo, "worktree", "add", "-q", "--detach", str(inside))
+        commit_file(inside, "only-here.txt", "unpushed\n")
+        git(inside, "checkout", "-q", "--detach", "origin/main")
+        findings = _classify(gp, "e")
+        assert _UNHELD in " ".join(findings.protected)
+        assert findings.p4_covered == ()
+
+    def test_an_unparseable_pseudo_ref_is_not_a_proof(self, gp: GitProject) -> None:
+        repo = gp.clone("e")
+        (repo / ".git" / "ORIG_HEAD").write_text("not a sha\n")
+        findings = _classify(gp, "e")
+        assert findings.stuck or findings.protected
+        assert findings.p4_covered == ()
+
+    def test_a_fifo_pseudo_ref_is_stuck_and_never_blocks(self, gp: GitProject) -> None:
+        repo = gp.clone("e")
+        os.mkfifo(repo / ".git" / "FETCH_HEAD")
+        findings = _classify(gp, "e")
+        assert findings.stuck
+        assert findings.p4_covered == ()
+
+    def test_more_reflog_commits_than_are_proved_protects_the_clone(
+        self, gp: GitProject, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = gp.clone("e")
+        commit_file(repo, "a.txt", "one\n")
+        commit_file(repo, "b.txt", "two\n")
+        git(repo, "push", "-q", "origin", "main")
+        git(gp.project, "fetch", "-q", "origin")
+        monkeypatch.setattr("claude_code_hooks_daemon.core.scratch_repos.MAX_TIPS", 1)
+        findings = _classify(gp, "e")
+        assert "more than 1 are proved" in " ".join(findings.protected)
+        assert findings.p4_covered == ()
+
+    def test_a_pushed_clone_with_a_pushed_orig_head_and_reflog_stays_covered(
+        self, gp: GitProject
+    ) -> None:
+        repo = gp.clone("e")
+        commit_file(repo, "a.txt", "one\n")
+        git(repo, "push", "-q", "origin", "main")
+        git(gp.project, "fetch", "-q", "origin")
+        git(repo, "reset", "-q", "--hard", "HEAD~1")
+        git(repo, "reset", "-q", "--hard", "origin/main")
+        assert (repo / ".git" / "ORIG_HEAD").exists()
+        findings = _classify(gp, "e")
+        assert findings.protected == ()
+        assert findings.stuck == ()
+        assert "e/.git" in findings.p4_covered
+
+
 class TestWorktreesAndOutsidePointers:
     def test_a_registered_worktree_of_the_project_is_protected(self, gp: GitProject) -> None:
         gp.worktree("wt", "feature")
@@ -575,9 +668,16 @@ _SUBCOMMANDS = (
 #: Subcommands the standalone path never runs, so injecting into them changes nothing.
 _NOT_ON_THE_STANDALONE_PATH = frozenset({"status", "ls-files", "worktree", "ls-remote"})
 
-#: Subcommands that decide whether a clone with a remote is pushed. ``rev-list`` and
-#: ``worktree`` are not on that path: a remote alone makes a clone related.
-_ON_THE_PUSHED_CLONE_PATH = ("rev-parse", "config", "for-each-ref", "status", "ls-remote")
+#: Subcommands that decide whether a clone with a remote is pushed (``rev-list`` lists
+#: its reflog commits). ``worktree`` is not on that path.
+_ON_THE_PUSHED_CLONE_PATH = (
+    "rev-parse",
+    "config",
+    "for-each-ref",
+    "status",
+    "ls-remote",
+    "rev-list",
+)
 
 
 class TestWrongVerdictControls:

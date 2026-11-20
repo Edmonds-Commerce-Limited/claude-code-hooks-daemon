@@ -12,8 +12,9 @@ repository (a directory holding ``HEAD``, ``objects/`` and ``refs/``), is one of
 - RELATED: it has a remote, is shallow, borrows objects, or has a root commit or
   ref tip the project's object database holds. R6: it is PROTECTED unless it is
   clean (no staged change, every worktree change a remote-held blob), has no
-  stash, and every ref tip and HEAD is contained by a LIVE-verified remote tip
-  of the project. Then its git directory and tracked files are covered by P4.
+  stash, and every ref tip, HEAD, reflog commit (each worktree's) and commit a
+  pseudo-ref (``ORIG_HEAD``, ``FETCH_HEAD``, ...) names is contained by a
+  LIVE-verified remote tip of the project; more than :data:`MAX_TIPS` protects it. Then its git directory and tracked files are covered by P4.
 - STANDALONE: none of the above. Disposable (proof P7 covers its work tree and
   git directory), the coordinator's ruling applying the owner's "scratch repo
   ... no value" (DESIGN.md section 0). Files beside it are judged on their own.
@@ -164,6 +165,16 @@ _STASH_REF: Final[str] = "refs/stash"
 _REMOTES: Final[str] = "refs/remotes/"
 #: More distinct ref tips than this are not proved one by one: the entry is protected.
 MAX_TIPS: Final[int] = 200
+#: Pseudo-refs whose commits a human can still recover, so each joins a related clone's tips.
+_PSEUDO_REFS: Final[tuple[str, ...]] = (
+    "ORIG_HEAD",
+    "FETCH_HEAD",
+    "MERGE_HEAD",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "AUTO_MERGE",
+)
+_MAX_PSEUDO_REF_BYTES: Final[int] = 64 * 1024
 #: More dirty paths than this are not hashed: the entry is protected.
 MAX_DIRTY_PATHS: Final[int] = 200
 
@@ -696,6 +707,55 @@ def _points_back(marker: Path, admin: Path) -> bool:
     return os.path.realpath(back) == os.path.realpath(admin)
 
 
+def _pseudo_ref_tips(directory: Path, rel: str) -> list[str]:
+    """Every commit a pseudo-ref file in ``directory`` names, read as a file, never through git.
+
+    Each non-empty line's first word must be a sha (``FETCH_HEAD`` lines carry a
+    description after it). A pseudo-ref that is not a small regular file, or a
+    line that does not start with a sha, is BROKEN: it proves nothing.
+    """
+    tips: list[str] = []
+    for name in _PSEUDO_REFS:
+        path = directory / name
+        if not os.path.lexists(path):
+            continue
+        raw = read_small_regular_file(path, _MAX_PSEUDO_REF_BYTES)
+        if raw is None:
+            raise _Broken(f"{rel}/{name} is not a small regular file: not read")
+        for line in raw.decode("utf-8", errors="replace").splitlines():
+            words = line.split()
+            if not words:
+                continue
+            if not _SHA.fullmatch(words[0]):
+                raise _Broken(f"{rel}/{name}: unparseable")
+            tips.append(words[0])
+    return tips
+
+
+def _reflog_tips(repo: _Repo, project: ProjectGit) -> list[str]:
+    """Every commit a reflog names (each worktree's included), at most ``MAX_TIPS + 1``.
+
+    ``--all`` adds only ref tips, already in the set; with no reflog and no ref,
+    a bare ``--reflog`` is an empty revision list, which ``rev-list`` refuses.
+    """
+    output = _checked(
+        _nested(
+            repo,
+            project,
+            "rev-list",
+            "--no-walk",
+            "--reflog",
+            "--all",
+            f"--max-count={MAX_TIPS + 1}",
+        ),
+        f"{repo.marker}: listing reflog commits",
+    )
+    tips = _shas(output)
+    if tips is None:
+        raise _Broken(f"{repo.marker}: unparseable reflog listing")
+    return tips
+
+
 def _admin_head(admin: Path, admin_rel: str, refs: Mapping[str, str]) -> tuple[str, str]:
     """``(tip sha or "", problem or "")`` from a linked worktree's own ``HEAD``.
 
@@ -758,6 +818,7 @@ def _linked_worktrees(
         tip, problem = _admin_head(admin, admin_rel, refs)
         if tip:
             heads.append(tip)
+        heads.extend(_pseudo_ref_tips(admin, admin_rel))
         if problem:
             problems.append(problem)
     return problems, heads
@@ -787,6 +848,9 @@ def _related_problems(
     head = _nested(repo, project, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
     tips = set(refs.values()) - ({refs[_STASH_REF]} if _STASH_REF in refs else set())
     tips.update(worktree_heads)
+    for directory in dict.fromkeys((repo.gitdir, repo.common)):
+        tips.update(_pseudo_ref_tips(directory, directory.relative_to(root).as_posix()))
+    tips.update(_reflog_tips(repo, project))
     if head.returncode == 0:
         head_sha = _shas(head.stdout)
         if head_sha is None or len(head_sha) != 1:
