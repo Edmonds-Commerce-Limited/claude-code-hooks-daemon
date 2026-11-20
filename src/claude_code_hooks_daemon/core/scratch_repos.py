@@ -6,7 +6,9 @@ repository (a directory holding ``HEAD``, ``objects/`` and ``refs/``), is one of
 - REGISTERED_WORKTREE: its directory is in the project's ``git worktree list``.
   PROTECTED: removal is ``git worktree remove`` and its guard, never a tree delete.
 - OUTSIDE_POINTING: a ``.git`` file (or ``commondir``) whose target is outside the
-  entry. PROTECTED: it is part of another repository.
+  entry, or a git directory with no marker that is not provably bare (N2: its
+  config lacks ``bare = true`` or it holds an ``index``, so its work tree may be
+  elsewhere). PROTECTED: it is part of another repository.
 - RELATED: it has a remote, is shallow, borrows objects, or has a root commit or
   ref tip the project's object database holds. R6: it is PROTECTED unless it is
   clean (no staged change, every worktree change a remote-held blob), has no
@@ -154,6 +156,7 @@ _REMOTE_URL: Final[re.Pattern[str]] = re.compile(r"remote\..+\.url")
 _IN_PROGRESS_NAMES: Final[frozenset[str]] = frozenset(
     {"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "rebase-merge", "rebase-apply"}
 )
+_GIT_TRUE: Final[frozenset[str]] = frozenset({"true", "yes", "on", "1"})
 _GIT_MARKER: Final[str] = ".git"
 _GITDIR_PREFIX: Final[str] = "gitdir:"
 _MAX_GIT_FILE_BYTES: Final[int] = 4096
@@ -491,7 +494,8 @@ def _allowed(key: str) -> bool:
     return False
 
 
-def _config_keys(repo: _Repo, project: ProjectGit) -> list[str]:
+def _config(repo: _Repo, project: ProjectGit) -> list[tuple[str, str]]:
+    """``(key, value)`` of every entry of the repository's config; any unknown key is BROKEN."""
     config = repo.common / "config"
     if not _regular_file(config):
         raise _Broken(f"{repo.marker}: no readable config file")
@@ -507,11 +511,37 @@ def _config_keys(repo: _Repo, project: ProjectGit) -> list[str]:
     )
     if result.returncode != 0:
         raise _Broken(f"{repo.marker}: its config could not be read ({result.returncode})")
-    keys = [record.partition("\n")[0] for record in result.stdout.split("\0") if record]
-    for key in keys:
+    entries = [
+        (key, value)
+        for key, _, value in (record.partition("\n") for record in result.stdout.split("\0"))
+        if key
+    ]
+    for key, _value in entries:
         if not _allowed(key):
             raise _Broken(f"{repo.marker}: its config sets {key!r}, so git is not run in it")
-    return keys
+    return entries
+
+
+def _require_bare(repo: _Repo, config: Sequence[tuple[str, str]]) -> None:
+    """N2: a git directory with no work tree in the entry must prove it is bare.
+
+    ``git init --separate-git-dir`` leaves a git directory whose work tree is
+    elsewhere: its config does not say ``bare = true`` and, once anything is
+    staged, it holds an ``index``. Either sign, or a value-less ``core.bare``,
+    means work lives outside the entry, so a human decides.
+    """
+    elsewhere = "so its work tree may be outside the entry (git init --separate-git-dir)"
+    if os.path.lexists(repo.gitdir / "index"):
+        raise _Decided(
+            RepoKind.OUTSIDE_POINTING,
+            f"{repo.marker}: a git directory holding an index, {elsewhere}",
+        )
+    bare = [value for key, value in config if key == "core.bare"]
+    if not bare or bare[-1].strip().lower() not in _GIT_TRUE:
+        raise _Decided(
+            RepoKind.OUTSIDE_POINTING,
+            f"{repo.marker}: a git directory whose config does not set bare = true, {elsewhere}",
+        )
 
 
 def _nested(repo: _Repo, project: ProjectGit, *args: str) -> GitResult:
@@ -552,10 +582,10 @@ def _confirm_gitdir(repo: _Repo, project: ProjectGit) -> None:
 
 
 def _is_related(
-    repo: _Repo, project: ProjectGit, keys: Sequence[str], refs: Mapping[str, str]
+    repo: _Repo, project: ProjectGit, config: Sequence[tuple[str, str]], refs: Mapping[str, str]
 ) -> str:
     """Why the repository is related to the project, or "" when it is standalone."""
-    if any(_REMOTE_URL.fullmatch(key) for key in keys):
+    if any(_REMOTE_URL.fullmatch(key) for key, _value in config):
         return "it has a remote"
     if os.path.lexists(repo.common / "shallow"):
         return "it is a shallow clone"
@@ -805,15 +835,23 @@ def _tracked(
     return paths, flagged
 
 
-def _bare_candidates(nodes: frozenset[str], markers: Iterable[str]) -> list[str]:
+def _bare_candidates(root: Path, nodes: frozenset[str], markers: Iterable[str]) -> list[str]:
+    """Git directories no ``.git`` marker accounts for.
+
+    One a ``.git`` file in the entry points back at (``--separate-git-dir`` with
+    the work tree in the entry) is judged with that marker, which covers it.
+    """
     gitdirs = tuple(markers)
+    git_files = [root / marker for marker in gitdirs if _regular_file(root / marker)]
     found = []
     for node in sorted(nodes):
         if node.rsplit("/", 1)[-1] == _GIT_MARKER or any(
             node == marker or node.startswith(f"{marker}/") for marker in gitdirs
         ):
             continue
-        if {f"{node}/HEAD", f"{node}/objects", f"{node}/refs"} <= nodes:
+        if not {f"{node}/HEAD", f"{node}/objects", f"{node}/refs"} <= nodes:
+            continue
+        if not any(_points_back(git_file, root / node) for git_file in git_files):
             found.append(node)
     return found
 
@@ -842,7 +880,7 @@ def classify_entry(
     covered: list[str] = []
     standalone: set[str] = set()
     others: set[str] = set()
-    for marker in [*markers, *_bare_candidates(node_set, markers)]:
+    for marker in [*markers, *_bare_candidates(root, node_set, markers)]:
         kind, reasons, cover = _classify_one(root, entry, marker, node_set, project)
         kinds[marker] = kind
         if kind is RepoKind.STANDALONE:
@@ -878,11 +916,13 @@ def _classify_one(
         progress = _in_progress(repo, root, nodes)
         if progress:
             raise _Broken(progress)
-        keys = _config_keys(repo, project)
+        config = _config(repo, project)
+        if repo.work_tree is None:
+            _require_bare(repo, config)
         _confirm_gitdir(repo, project)
         refs = _refs(repo, project)
         worktree_problems, worktree_heads = _linked_worktrees(repo, root, entry, nodes, refs)
-        related = _is_related(repo, project, keys, refs)
+        related = _is_related(repo, project, config, refs)
         if not related:
             if worktree_problems:
                 # Another tree depends on this git directory: a human decides.

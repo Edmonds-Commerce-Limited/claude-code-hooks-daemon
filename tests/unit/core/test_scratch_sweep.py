@@ -659,6 +659,32 @@ class TestCrossEntryDependencies:
         _old(gp.tree, now)
         assert _verdicts(_git_sweep(gp, now)) == {"e": "DISPOSABLE"}
 
+    def test_n2_a_separate_git_dir_whose_work_tree_is_outside_is_protected(
+        self, tmp_path: Path
+    ) -> None:
+        gp = build_git_project(tmp_path)
+        work = gp.tree.outside / "wt"
+        git(gp.tree.root, "init", "-q", "--separate-git-dir", str(gp.tree.root / "gd"), str(work))
+        commit_file(work, "work.txt", "lives outside the scratch root\n")
+        now = _now()
+        _old(gp.tree, now)
+        report = _git_sweep(gp, now)
+        assert _verdicts(report) == {"gd": "PROTECTED"}
+        row = next(row for row in report.rows if row.name == "gd")
+        assert "separate-git-dir" in " ".join(row.reasons)
+
+    def test_n2_a_separate_git_dir_with_its_work_tree_in_the_entry_is_disposable(
+        self, tmp_path: Path
+    ) -> None:
+        gp = build_git_project(tmp_path)
+        entry = gp.tree.root / "e"
+        entry.mkdir()
+        git(gp.tree.root, "init", "-q", "--separate-git-dir", str(entry / "gd"), str(entry / "wt"))
+        commit_file(entry / "wt", "work.txt", "throwaway\n")
+        now = _now()
+        _old(gp.tree, now)
+        assert _verdicts(_git_sweep(gp, now)) == {"e": "DISPOSABLE"}
+
     def test_an_unreadable_pointer_makes_disposable_rows_stuck(self, tmp_path: Path) -> None:
         gp = build_git_project(tmp_path)
         gp.standalone("a")

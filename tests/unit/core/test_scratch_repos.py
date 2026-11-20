@@ -412,6 +412,68 @@ class TestWorktreesAndOutsidePointers:
         assert _classify(gp, "e").protected == ()
 
 
+class TestSeparateGitDirectories:
+    """N2: a git directory in the entry is disposable only when it is provably bare."""
+
+    def _separate(self, gp: GitProject, gitdir: str, work: Path, *, commit: bool = True) -> Path:
+        target = gp.tree.root / gitdir
+        target.parent.mkdir(parents=True, exist_ok=True)
+        git(gp.tree.root, "init", "-q", "--separate-git-dir", str(target), str(work))
+        if commit:
+            commit_file(work, "work.txt", "work that lives outside the entry\n")
+        return target
+
+    def test_a_separate_git_dir_whose_work_tree_is_outside_is_not_disposable(
+        self, gp: GitProject
+    ) -> None:
+        self._separate(gp, "e/gd", gp.tree.outside / "wt")
+        findings = _classify(gp, "e")
+        assert findings.kinds == {"e/gd": RepoKind.OUTSIDE_POINTING}
+        assert "e/gd" in " ".join(findings.protected)
+        assert findings.standalone_roots == ()
+
+    def test_a_separate_git_dir_with_no_commit_and_no_index_is_not_disposable(
+        self, gp: GitProject
+    ) -> None:
+        self._separate(gp, "e/gd", gp.tree.outside / "wt", commit=False)
+        findings = _classify(gp, "e")
+        assert findings.kinds == {"e/gd": RepoKind.OUTSIDE_POINTING}
+        assert findings.protected
+
+    def test_a_bare_flagged_git_dir_holding_an_index_is_not_disposable(
+        self, gp: GitProject
+    ) -> None:
+        gitdir = self._separate(gp, "e/gd", gp.tree.outside / "wt")
+        git(gp.tree.root, "--git-dir", str(gitdir), "config", "core.bare", "true")
+        findings = _classify(gp, "e")
+        assert findings.kinds == {"e/gd": RepoKind.OUTSIDE_POINTING}
+        assert "index" in " ".join(findings.protected)
+
+    def test_an_unreadable_config_in_a_git_dir_is_stuck(self, gp: GitProject) -> None:
+        gitdir = self._separate(gp, "e/gd", gp.tree.outside / "wt")
+        (gitdir / "config").unlink()
+        os.mkfifo(gitdir / "config")
+        findings = _classify(gp, "e")
+        assert findings.stuck
+        assert RepoKind.STANDALONE not in findings.kinds.values()
+
+    def test_a_true_bare_repository_stays_standalone(self, gp: GitProject) -> None:
+        bare = gp.tree.root / "e" / "b.git"
+        git(gp.tree.root, "init", "-q", "--bare", str(bare))
+        findings = _classify(gp, "e")
+        assert findings.kinds == {"e/b.git": RepoKind.STANDALONE}
+        assert findings.standalone_roots == ("e/b.git",)
+
+    def test_a_separate_git_dir_whose_work_tree_is_in_the_entry_is_judged_with_it(
+        self, gp: GitProject
+    ) -> None:
+        self._separate(gp, "e/gd", gp.tree.root / "e" / "wt")
+        findings = _classify(gp, "e")
+        assert findings.kinds == {"e/wt/.git": RepoKind.STANDALONE}
+        assert findings.protected == ()
+        assert findings.standalone_roots == ("e/gd", "e/wt")
+
+
 class TestLinkedWorktreesOfANestedRepository:
     """F-BYPS 1 and 2: a nested repository's linked worktrees are part of its judgement."""
 
