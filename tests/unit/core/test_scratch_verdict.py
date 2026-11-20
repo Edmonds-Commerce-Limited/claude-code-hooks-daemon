@@ -94,6 +94,13 @@ class TestOrdering:
         assert judgement.verdict is Verdict.REPOSITORY
         assert judgement.proofs == ()
 
+    def test_the_reason_names_the_pending_classification_and_no_ruling(self) -> None:
+        walk = finished(_stats(Node("e", D, 0), git_markers=("e/.git",)))
+        judgement = judge(walk, age=_DUE, liveness=())
+        assert judgement.reasons == (
+            "repository, not judged: which kind of repository it is (Task 2.1) is not yet known",
+        )
+
     def test_a_git_file_marker_is_a_repository(self) -> None:
         walk = finished(_stats(Node("e", D, 0), Node("e/.git", F, 20), git_markers=("e/.git",)))
         assert _judge(walk) is Verdict.REPOSITORY

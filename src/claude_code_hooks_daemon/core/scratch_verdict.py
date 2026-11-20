@@ -10,9 +10,11 @@ from a walk that did not finish:
 2. STUCK: the walk did not finish, or a file has another name outside the
    entry. Nothing is concluded about an entry that was not read whole.
 3. KEPT: not evaluated in Phase 1 (no keep marker or pause store exists yet).
-4. REPOSITORY: a ``.git`` marker at any depth. Phase 1 runs no git, so the
-   entry is "repository, not judged": never DISPOSABLE, and never sent down
-   the standalone-repository route of ruling R7, which awaits the owner.
+4. REPOSITORY: a ``.git`` marker at any depth. Phase 1 runs no git, so it
+   cannot tell a standalone repository (which has no repository rule and goes
+   down the ordinary ladder) from a registered worktree or a related clone
+   (which may be PROTECTED). Until Task 2.1 classifies the marker, the entry is
+   "repository, not judged" and never DISPOSABLE.
 5. REFERENCED: not evaluated in Phase 1 (the reference set needs git).
 6. DISPOSABLE when every file is covered by P1, P2 or P5; else UNCERTAIN.
 
@@ -184,7 +186,7 @@ def judge(walk: Bounded[EntryStats], *, age: EntryAge, liveness: tuple[str, ...]
     if markers:
         return result(
             Verdict.REPOSITORY,
-            "repository, not judged: the git proofs (Phase 2) and ruling R7 are pending",
+            "repository, not judged: which kind of repository it is (Task 2.1) is not yet known",
         )
     proofs, uncovered = _coverage(stats.nodes)
     if not uncovered:
