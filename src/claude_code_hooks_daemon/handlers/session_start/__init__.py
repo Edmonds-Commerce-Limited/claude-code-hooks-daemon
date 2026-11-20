@@ -25,6 +25,7 @@ from .suggest_statusline import SuggestStatusLineHandler
 from .tool_disable_advisor import ToolDisableAdvisorHandler
 from .unproven_venv_advisor import UnprovenVenvAdvisorHandler
 from .version_check import VersionCheckHandler
+from .workflow_linter_advisor import WorkflowLinterAdvisorHandler
 
 SecretFileHygieneCheckerHandler = (
     _secret_file_hygiene_checker_module.SecretFileHygieneCheckerHandler
@@ -56,4 +57,5 @@ __all__ = [
     "ToolDisableAdvisorHandler",
     "UnprovenVenvAdvisorHandler",
     "VersionCheckHandler",
+    "WorkflowLinterAdvisorHandler",
 ]

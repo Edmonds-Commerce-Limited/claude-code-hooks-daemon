@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
-from claude_code_hooks_daemon.strategies.lint.protocol import ProvidesCommandValues
+from claude_code_hooks_daemon.strategies.lint.protocol import (
+    DeclaresFindingsExitCodes,
+    DeclaresOptionalTool,
+    ProvidesCommandValues,
+)
 from claude_code_hooks_daemon.utils.path_segments import matches_path_segment
 
 #: Prefix for the per-process compiler-output directory, so a leftover is
@@ -71,6 +75,33 @@ def resolve_lint_executable(executable: str, bin_dirs: tuple[Path, ...]) -> str 
         if candidate.is_file():
             return str(candidate)
     return shutil.which(executable)
+
+
+def is_findings_exit(strategy: object, returncode: int) -> bool:
+    """Whether a NON-ZERO lint exit is a finding about the file.
+
+    The ONE answer both lint gates use (`lint_on_edit` and `staged_lint_gate`),
+    so an exit that only faults an edit's check can never fail a commit. A
+    strategy implementing :class:`DeclaresFindingsExitCodes` names its findings
+    codes and every other code is a fault; any other strategy keeps the
+    original rule, every non-zero exit is a finding.
+
+    Args:
+        strategy: The strategy that owns the command, or None for none.
+        returncode: The command's non-zero exit code.
+
+    Returns:
+        True to report the output as a lint failure, False to treat the run as
+        not having checked the file.
+    """
+    if isinstance(strategy, DeclaresFindingsExitCodes):
+        return returncode in strategy.findings_exit_codes
+    return True
+
+
+def lint_tool_is_optional(strategy: object) -> bool:
+    """Whether a missing tool for ``strategy`` is skipped silently (no advisory)."""
+    return isinstance(strategy, DeclaresOptionalTool) and strategy.lint_tool_is_optional
 
 
 def build_lint_argv(

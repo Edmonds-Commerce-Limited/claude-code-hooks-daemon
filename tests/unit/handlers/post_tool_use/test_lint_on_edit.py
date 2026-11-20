@@ -86,6 +86,35 @@ class TestResidentGuidance:
 
         assert "not installed" in guidance or "not found" in guidance
 
+    def test_says_workflow_files_are_linted_by_the_optional_linter(
+        self, handler: LintOnEditHandler
+    ) -> None:
+        """Plan 00621: a `.github/workflows/` file goes to the workflow linter."""
+        guidance = handler.get_claude_md() or ""
+
+        assert "only Ansible YAML" not in guidance
+        assert "actions-qa check --file" in guidance
+        assert ".github/workflows/" in guidance
+
+    def test_says_the_optional_workflow_linter_is_silent_when_missing(
+        self, handler: LintOnEditHandler
+    ) -> None:
+        guidance = handler.get_claude_md() or ""
+
+        assert "prints nothing" in guidance
+        assert "workflow_linter_advisor" in guidance
+
+    def test_says_a_tool_fault_allows_with_a_not_checked_advisory(
+        self, handler: LintOnEditHandler
+    ) -> None:
+        guidance = handler.get_claude_md() or ""
+
+        assert "NOT checked" in guidance
+        assert "exit 1" in guidance
+
+    def test_names_the_workflow_timeout_key(self, handler: LintOnEditHandler) -> None:
+        assert 'options.timeouts."GitHub Workflow"' in (handler.get_claude_md() or "")
+
     def test_points_at_the_config_keys_that_narrow_it(self, handler: LintOnEditHandler) -> None:
         guidance = handler.get_claude_md() or ""
 

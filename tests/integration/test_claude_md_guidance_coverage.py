@@ -621,6 +621,11 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "instructions and the agent clears it in one command per venv, so nothing "
         "needs to stay resident once it has been read"
     ),
+    "WorkflowLinterAdvisorHandler": (
+        "T4 fires once at a new session naming the workflow linter, what it checks "
+        "and its release page; it never denies anything, so there is no block to "
+        "avoid and nothing needs to stay resident once it has been read"
+    ),
     "GuardConfigDriftHandler": (
         "T4 fires once at session start naming each weakened guard and both "
         "remedies. Deliberately NOT grouped with ProjectHandlerLoadCheckerHandler, "

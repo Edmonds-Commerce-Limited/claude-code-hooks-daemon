@@ -14,7 +14,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - In Progress (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; open questions ruled under the owner's delegation in RULINGS.md: the verdict never unlocks alone, the guard must also verify a recovery bundle; local delete only; slice 1 ready to build)
 
-- [00621: actions qa ci advisory and workflow lint on edit](00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - In Progress (peer request, owner direction relayed: advise adopting an external workflow linter and run it on workflow edits; design ruled under the owner's delegation in DESIGN.md; the linter's documentation and release were read but it has not been run, so the route fails open; slice 1 ready to build)
+- [00621: actions qa ci advisory and workflow lint on edit](00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - In Progress (peer request, owner direction relayed: advise adopting an external workflow linter and run it on workflow edits; design ruled under the owner's delegation in DESIGN.md; the linter's documentation and release were read but it has not been run, so the route fails open; slice 1 built, slices 2-3 and Task 1.1 remain)
 
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
 
