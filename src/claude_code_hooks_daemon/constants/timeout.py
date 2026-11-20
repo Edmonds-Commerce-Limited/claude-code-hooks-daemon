@@ -311,6 +311,13 @@ class Timeout:
     # tree. Killed at GIT_CONTEXT's five seconds it leaves a half-deleted,
     # `prunable` worktree that git then refuses to remove (Plan 00474 N464).
     GIT_WORKTREE_REMOVE = 300
+    # 30 seconds (`tar --version` probe before a scratch-archive pack). A local
+    # exec that answers in milliseconds; the ceiling only stops a wedged binary.
+    TAR_VERSION_PROBE = 30
+    # 10 seconds (privileged setup/teardown subprocesses in tests: `mount`,
+    # `umount`, `chattr`). Local kernel calls; bounded so a wedged mount cannot
+    # hang the suite.
+    TEST_PRIVILEGED_SETUP = 10
     VALIDATION_CHECK = 5  # 5 seconds (installation validation subprocess)
     VERSION_CHECK = 5  # 5 seconds (git ls-remote for version check)
     # 10 seconds (`ps -eo ...` for the background harvester). A local process
