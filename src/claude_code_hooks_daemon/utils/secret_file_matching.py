@@ -364,6 +364,24 @@ def load_protected_patterns_strict() -> tuple[str, ...]:
         raise ProtectedSetUnreadable(
             f"the daemon config could not be loaded ({type(exc).__name__})"
         ) from exc
+    return protected_patterns_from_options(options)
+
+
+def protected_patterns_from_options(options: object) -> tuple[str, ...]:
+    """Effective protected globs from a ``secret_file_guard`` options mapping, STRICTLY.
+
+    The type checks :func:`load_protected_patterns_strict` applies, for a caller
+    that already holds the options (``check-worktree-seed`` reads them from the
+    config file it was given). ``None`` means no options: the shipped defaults.
+
+    Raises:
+        ProtectedSetUnreadable: ``options`` is not a mapping, or its ``mode`` /
+            ``protected_paths`` have the wrong type.
+    """
+    if options is None:
+        options = {}
+    if not isinstance(options, dict):
+        raise ProtectedSetUnreadable("secret_file_guard options are not a mapping")
     mode = options.get("mode")
     project_patterns = options.get("protected_paths")
     if mode is not None and not isinstance(mode, str):

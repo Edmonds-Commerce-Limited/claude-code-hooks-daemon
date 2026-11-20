@@ -111,9 +111,7 @@ class TestAProtectedCopyIsReported:
     def test_replace_mode_with_an_empty_list_protects_nothing(self, repo: Path) -> None:
         report = build_seed_report(
             repo,
-            _config(
-                _covering((VAULT, SEED_MODE_COPY)), {"mode": "replace", "protected_paths": []}
-            ),
+            _config(_covering((VAULT, SEED_MODE_COPY)), {"mode": "replace", "protected_paths": []}),
         )
         assert report.refused_copies == ()
 

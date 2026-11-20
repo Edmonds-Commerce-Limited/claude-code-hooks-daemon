@@ -223,6 +223,24 @@ def _copy_refusals(
     ]
 
 
+def protected_copy_refusals(
+    root: Path, entries: list[SeedEntry], *, protected_patterns: ProtectedPatternsLoader
+) -> list[str]:
+    """The copy-mode refusals :func:`validate_seed_sources` would raise, one per entry.
+
+    Public so ``check-worktree-seed`` reports exactly what creation refuses,
+    in the same words. An entry with a shape problem (absolute, ``..``, absent,
+    outside the root) aborts creation anyway, so it is not walked here; entries
+    keep their 1-based position among ``entries``.
+    """
+    judged = [
+        (number, entry)
+        for number, entry in enumerate(entries, start=1)
+        if _describe_problem(root, entry) is None
+    ]
+    return _copy_refusals(root, judged, protected_patterns)
+
+
 def validate_seed_sources(
     root: Path, entries: list[SeedEntry], *, protected_patterns: ProtectedPatternsLoader
 ) -> None:
@@ -243,16 +261,8 @@ def validate_seed_sources(
             the first would make fixing a misconfigured list an iterative
             guessing game.
     """
-    shape = [_describe_problem(root, entry) for entry in entries]
-    problems = [problem for problem in shape if problem]
-    # An entry already refused for its shape (absolute, '..', outside the
-    # root) aborts creation anyway, so it is not walked for protected paths.
-    judged = [
-        (number, entry)
-        for number, (entry, problem) in enumerate(zip(entries, shape, strict=True), start=1)
-        if problem is None
-    ]
-    problems.extend(_copy_refusals(root, judged, protected_patterns))
+    problems = [problem for entry in entries if (problem := _describe_problem(root, entry))]
+    problems.extend(protected_copy_refusals(root, entries, protected_patterns=protected_patterns))
     if problems:
         raise WorktreeSeedError(
             "Cannot seed worktree — "
