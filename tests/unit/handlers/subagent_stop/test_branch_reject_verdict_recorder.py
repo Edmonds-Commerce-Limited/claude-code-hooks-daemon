@@ -152,7 +152,11 @@ def _transcript(
         ),
         _rec(
             "assistant",
-            message={"role": "assistant", "model": OPUS, "content": [{"type": "text", "text": reply}]},
+            message={
+                "role": "assistant",
+                "model": OPUS,
+                "content": [{"type": "text", "text": reply}],
+            },
         ),
     ]
     path = directory / f"agent-{AGENT}.jsonl"

@@ -822,6 +822,12 @@ class HandlerID:
         config_key="branch_subagent_stop_guard",
         display_name="branch-subagent-stop-guard",
     )
+    # Plan 00620: turns a branch-reject reviewer's final stop into a verdict.
+    BRANCH_REJECT_VERDICT_RECORDER = HandlerIDMeta(
+        class_name="BranchRejectVerdictRecorderHandler",
+        config_key="branch_reject_verdict_recorder",
+        display_name="branch-reject-verdict-recorder",
+    )
     # Operator signal notice (PostToolUse) -- Plan 00508: the ccy supervisor
     # types a host reboot/shutdown warning only when the session is idle, so a
     # busy agent hears it late. This adds the same warning as hook context at

@@ -218,6 +218,10 @@ class Priority:
     # Plan 00558 Task 4.4: non-terminal, so it sits below the terminal size
     # blocker (15) and the handoff gate (11) and one stop reports all of them.
     BRANCH_SUBAGENT_STOP_GUARD = 12
+    # Plan 00620: records a branch-reject reviewer's verdict; never blocks. 13,
+    # not after the terminal size blocker (15): test_stop_chain_terminal_shadowing.py
+    # forbids that. Order does not matter: a re-entry stop withdraws the verdict.
+    BRANCH_REJECT_VERDICT_RECORDER = 13
     # Plan 00558 Task 4.4: Stop twin; ahead of the terminal auto_continue_stop.
     BRANCH_STOP_GUARD = 9
     # Plan 00460 Task 1.6: runs ahead of the terminal size blocker (15) so a
