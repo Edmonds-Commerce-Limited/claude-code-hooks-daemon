@@ -25,6 +25,7 @@ from typing import Any, Final
 
 import yaml
 
+from claude_code_hooks_daemon.config.models import HandlerConfig, handler_options
 from claude_code_hooks_daemon.constants.config import ConfigKey
 from claude_code_hooks_daemon.constants.events import EventID
 from claude_code_hooks_daemon.constants.handlers import HandlerID
@@ -206,7 +207,13 @@ def _guard_patterns(config: dict[str, Any]) -> tuple[str, ...]:
         return protected_patterns_from_options(None)
     if not isinstance(block, dict):
         raise ProtectedSetUnreadable("the secret_file_guard config block is not a mapping")
-    return protected_patterns_from_options(block.get(ConfigKey.OPTIONS))
+    try:
+        validated = HandlerConfig.model_validate(block)
+    except ValueError as exc:
+        raise ProtectedSetUnreadable(
+            f"the secret_file_guard config block is schema-invalid ({type(exc).__name__})"
+        ) from exc
+    return protected_patterns_from_options(handler_options(validated))
 
 
 def configured_seed_entries(root: Path) -> list[SeedEntry]:
