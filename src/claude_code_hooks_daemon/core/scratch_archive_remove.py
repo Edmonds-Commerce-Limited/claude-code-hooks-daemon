@@ -342,6 +342,10 @@ def remove_claimed(
         raise RemoveRefused(f"archive {record.archive_id} is not in the index as given")
     if not _names_entry(record, name):
         raise RemoveRefused(f"archive {record.archive_id} names another entry")
+    # A batch archive (Task 3.5) is shared by one record per loose file: each
+    # file is proved by its own member (the restricted compare), never by the
+    # whole archive's member set.
+    shared = sum(1 for r in records if r.archive_id == record.archive_id) > 1
     proof = _prove(
         parent_fd,
         claimed_name,
@@ -351,9 +355,13 @@ def remove_claimed(
         max_inodes=max_inodes,
         max_depth=max_depth,
         timeout=timeout,
-        partial=False,
+        partial=shared,
         expected=expected,
     )
+    if shared:
+        root = proof.listing.root
+        if root.kind == "dir" or dict(record.counts) != {root.kind: 1}:
+            raise RemoveRefused(f"archive {record.archive_id} is a batch; this is not its file")
     return _remove(parent_fd, proof, max_depth=max_depth)
 
 

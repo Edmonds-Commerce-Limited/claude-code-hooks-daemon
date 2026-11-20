@@ -60,6 +60,8 @@ _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _MEMBER_TYPES = (tarfile.DIRTYPE, tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.SYMTYPE)
 _CHUNK = 1 << 20
 _PROC_FD_PARTS = ("", "proc", "self", "fd")
+#: A member operand is a literal name: no glob, no backslash unquoting.
+_LITERAL_OPERANDS = ("--no-wildcards", "--no-unquote")
 
 
 #: The most argv bytes of member names one restricted ``tar --compare`` is given.
@@ -308,7 +310,7 @@ def _compare(
         cwd_fd = _cwd_fd(parent_fd, claimed_name, listing)
     except WalkRefused as exc:
         raise VerifyFailed(str(exc)) from exc
-    operands = ("--", *only) if only else ()
+    operands = (*_LITERAL_OPERANDS, "--", *only) if only else ()
     try:
         proc = _run_tar(
             tar,
@@ -342,6 +344,64 @@ def _batches(names: list[str], budget: int) -> Iterator[tuple[str, ...]]:
         used += size
     if batch:
         yield tuple(batch)
+
+
+def digest_fd(fd: int) -> tuple[int, str]:
+    """Return the size and SHA-256 of an open archive, read from its start."""
+    return _digest(fd)
+
+
+def run_tar(
+    tar: TarTool,
+    args: list[str],
+    *,
+    cwd_fd: int,
+    stdin: bytes | int,
+    stdout: int | None,
+    timeout: float,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run GNU tar by argv in the directory ``cwd_fd`` names, with the scrubbed environment."""
+    return _run_tar(tar, args, cwd_fd=cwd_fd, stdin=stdin, stdout=stdout, timeout=timeout)
+
+
+def tar_create_args() -> list[str]:
+    """tar's argv for packing a NUL-separated, ``./``-prefixed member list read on stdin."""
+    return ["--create", "--file=-", *_COMMON, "--null", "--verbatim-files-from", "--files-from=-"]
+
+
+def batched_compare(
+    dir_fd: int,
+    archive_fd: int,
+    names: list[str],
+    *,
+    tar: TarTool,
+    timeout: float,
+) -> None:
+    """Run ``tar --compare`` in ``dir_fd`` restricted to ``names``, in argv-bounded batches.
+
+    Raises :class:`VerifyFailed` on any difference, :class:`TarDidNotRun` when tar cannot run.
+    """
+    for batch in _batches(names, COMPARE_ARGV_BUDGET):
+        os.lseek(archive_fd, 0, os.SEEK_SET)
+        cwd_fd = os.dup(dir_fd)
+        try:
+            proc = _run_tar(
+                tar,
+                ["--compare", "--file=-", *_COMMON, *_LITERAL_OPERANDS, "--", *batch],
+                cwd_fd=cwd_fd,
+                stdin=archive_fd,
+                stdout=None,
+                timeout=timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise TarDidNotRun(f"tar --compare did not run: {exc}") from exc
+        finally:
+            os.close(cwd_fd)
+        if proc.returncode != 0 or proc.stdout or proc.stderr:
+            lines = len(proc.stdout.splitlines()) + len(proc.stderr.splitlines())
+            raise VerifyFailed(
+                f"tar --compare found differences (exit {proc.returncode}, {lines} lines)"
+            )
 
 
 def verify_remaining(
