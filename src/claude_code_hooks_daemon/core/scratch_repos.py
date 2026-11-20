@@ -173,6 +173,8 @@ class RepoFindings:
     protected: tuple[str, ...] = ()
     #: Paths (from the scratch root) covered by P4: git directories and tracked files.
     p4_covered: tuple[str, ...] = ()
+    #: The git directories among ``p4_covered``: they alone cover everything beneath them.
+    p4_git_dirs: tuple[str, ...] = ()
 
 
 def _shas(text: str) -> list[str] | None:
@@ -565,14 +567,34 @@ def _related_problems(
     return problems
 
 
-def _tracked(repo: _Repo, project: ProjectGit, root: Path, nodes: frozenset[str]) -> list[str]:
-    """The tracked files the walk saw; a listed path the walk did not see covers nothing."""
+#: ``ls-files -v`` tags of an index entry whose worktree changes ``status`` does not see.
+_HIDING_TAGS: Final[frozenset[str]] = frozenset("hmrcks" + "S")
+
+
+def _tracked(
+    repo: _Repo, project: ProjectGit, root: Path, nodes: frozenset[str]
+) -> tuple[list[str], list[str]]:
+    """The tracked files the walk saw, and the tracked paths flagged so ``status`` hides edits.
+
+    A listed path the walk did not see covers nothing. An ``assume-unchanged`` or
+    ``skip-worktree`` entry can hold an edit no ``status`` reports, so it is flagged.
+    """
     if repo.work_tree is None:
-        return []
-    output = _checked(_nested(repo, project, "ls-files", "-z"), f"{repo.marker}: ls-files")
+        return [], []
+    output = _checked(_nested(repo, project, "ls-files", "-z", "-v"), f"{repo.marker}: ls-files")
     base = repo.work_tree.relative_to(root).as_posix()
-    listed = (f"{base}/{rel}" for rel in output.split("\0") if rel)
-    return [path for path in listed if path in nodes]
+    paths: list[str] = []
+    flagged: list[str] = []
+    for record in filter(None, output.split("\0")):
+        tag, separator, rel = record.partition(" ")
+        if not separator or len(tag) != 1:
+            raise _Broken(f"{repo.marker}: unparseable ls-files listing")
+        if tag in _HIDING_TAGS:
+            flagged.append(rel)
+        path = f"{base}/{rel}"
+        if path in nodes:
+            paths.append(path)
+    return paths, flagged
 
 
 def _bare_candidates(nodes: frozenset[str], markers: Iterable[str]) -> list[str]:
@@ -626,8 +648,11 @@ def classify_entry(
         elif reasons:
             protected.extend(reasons)
         covered.extend(cover)
-    p4 = tuple(sorted(set(covered))) if not stuck and not protected else ()
-    return RepoFindings(kinds, tuple(stuck), tuple(protected), p4)
+    if stuck or protected:
+        return RepoFindings(kinds, tuple(stuck), tuple(protected))
+    git_dirs = tuple(sorted({path[:-1] for path in covered if path.endswith("/")}))
+    files = {path for path in covered if not path.endswith("/")}
+    return RepoFindings(kinds, (), (), tuple(sorted({*files, *git_dirs})), git_dirs)
 
 
 def _classify_one(
@@ -651,8 +676,17 @@ def _classify_one(
                 [f"{marker}: related ({related}) and holds {'; '.join(problems)}"],
                 [],
             )
-        cover = [repo.gitdir.relative_to(root).as_posix(), *_tracked(repo, project, root, nodes)]
-        return RepoKind.RELATED, [], cover
+        tracked, flagged = _tracked(repo, project, root, nodes)
+        if flagged:
+            return (
+                RepoKind.RELATED,
+                [
+                    f"{marker}: related ({related}) and {len(flagged)} tracked path(s) are "
+                    f"flagged so status hides their edits, first {flagged[0]}"
+                ],
+                [],
+            )
+        return RepoKind.RELATED, [], [f"{repo.gitdir.relative_to(root).as_posix()}/", *tracked]
     except _Decided as decided:
         return (
             decided.kind,

@@ -150,12 +150,17 @@ def _proof_for(node: Node, venvs: Sequence[str]) -> Proof | None:
     return None
 
 
-def _p4(path: str, p4_covered: Sequence[str]) -> bool:
-    return any(path == covered or path.startswith(f"{covered}/") for covered in p4_covered)
+def _p4(path: str, repos: RepoFindings | None) -> bool:
+    """Covered by P4: a tracked file exactly, or anything inside a covered git directory."""
+    if repos is None:
+        return False
+    return path in repos.p4_covered or any(
+        path.startswith(f"{git_dir}/") for git_dir in repos.p4_git_dirs
+    )
 
 
 def _coverage(
-    nodes: Sequence[Node], p4_covered: Sequence[str] = ()
+    nodes: Sequence[Node], repos: RepoFindings | None = None
 ) -> tuple[tuple[Proof, ...], list[str]]:
     venvs = _venv_directories(nodes)
     used: set[Proof] = set()
@@ -163,7 +168,7 @@ def _coverage(
     for node in nodes:
         if node.kind is NodeKind.DIRECTORY and not node.empty:
             continue
-        proof = Proof.P4 if _p4(node.path, p4_covered) else _proof_for(node, venvs)
+        proof = Proof.P4 if _p4(node.path, repos) else _proof_for(node, venvs)
         if proof is None:
             uncovered.append(node.path)
         else:
@@ -226,7 +231,7 @@ def judge(
             Verdict.PROTECTED,
             f"holds {len(tracked)} file(s) the project tracks, first {tracked[0]}",
         )
-    proofs, uncovered = _coverage(stats.nodes, repos.p4_covered if repos else ())
+    proofs, uncovered = _coverage(stats.nodes, repos)
     if not uncovered:
         return result(Verdict.DISPOSABLE, "every file is covered by a proof", proofs=proofs)
     return Judgement(

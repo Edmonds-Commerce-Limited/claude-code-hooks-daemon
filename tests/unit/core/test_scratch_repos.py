@@ -208,6 +208,23 @@ class TestRelated:
         git(repo, "add", "added.txt")
         assert _classify(gp, "e").protected
 
+    @pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+    def test_an_edit_hidden_from_status_by_an_index_flag_protects_the_entry(
+        self, gp: GitProject, flag: str
+    ) -> None:
+        repo = gp.clone("e")
+        git(repo, "update-index", flag, "src/app.py")
+        (repo / "src" / "app.py").write_text("edited, but status will not say so\n")
+        findings = _classify(gp, "e")
+        assert findings.protected
+        assert findings.p4_covered == ()
+
+    def test_a_clean_pushed_clone_covers_only_its_git_directory_by_prefix(
+        self, gp: GitProject
+    ) -> None:
+        gp.clone("e")
+        assert _classify(gp, "e").p4_git_dirs == ("e/.git",)
+
     def test_a_stash_protects_the_entry(self, gp: GitProject) -> None:
         repo = gp.clone("e")
         (repo / "src" / "app.py").write_text("edited\n")
@@ -341,11 +358,25 @@ class TestWrongVerdictControls:
         assert findings.stuck
         assert findings.p4_covered == ()
 
-    def test_a_listed_path_the_walk_did_not_see_covers_nothing(self, gp: GitProject) -> None:
-        # Git itself is trusted to list what the index tracks; a listed name the walk
-        # never saw (here: invented by the injected runner) must not widen coverage.
+    def test_a_garbage_tracked_listing_makes_a_pushed_clone_stuck(self, gp: GitProject) -> None:
         gp.clone("e")
         findings = _classify(gp, "e", runner=_injecting("ls-files", "garbage"))
+        assert findings.stuck
+        assert findings.p4_covered == ()
+
+    def test_a_listed_path_the_walk_did_not_see_covers_nothing(self, gp: GitProject) -> None:
+        # Git is trusted to list what the index tracks; a listed name the walk never
+        # saw must not widen coverage.
+        gp.clone("e")
+
+        def inventing(
+            cwd: Path, *args: str, timeout: float = 30.0, env: Mapping[str, str] | None = None
+        ) -> subprocess.CompletedProcess[str]:
+            if "ls-files" in args:
+                return subprocess.CompletedProcess(["git"], 0, "H invented.txt\x00", "")
+            return run_git(cwd, *args, timeout=timeout, env=env)
+
+        findings = _classify(gp, "e", runner=inventing)
         assert findings.p4_covered == ("e/.git",)
 
     def test_a_bare_repository_with_unpushed_work_is_protected(self, gp: GitProject) -> None:

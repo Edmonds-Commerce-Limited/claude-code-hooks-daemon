@@ -164,8 +164,6 @@ def run_sweep(
     resolved_root = root.resolve()
     relative_root = _relative(resolved_root, project_root.resolve())
     tracked = _tracked_by_entry(project_git, project_root, relative_root)
-    if tracked is None:
-        notes.append("the project's tracked files under the root could not be listed")
     if project_git is not None and project_git.verified_note:
         notes.append(f"remote proof: {project_git.verified_note}")
     rows = [
@@ -193,6 +191,8 @@ def run_sweep(
         reasons.append(f"{stopped} {noun} not walked to the end")
     if budget.spent_reason:
         reasons.append(budget.spent_reason)
+    if tracked is None:
+        reasons.append("the project's tracked files under the root could not be listed")
     return SweepReport(str(root), tuple(rows), not reasons, tuple(reasons), tuple(notes))
 
 

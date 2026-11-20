@@ -216,3 +216,54 @@ class TestStarAndFallthrough:
             reference_roots=(),
         )
         assert root.refusal
+
+
+class TestRootInsideARepository:
+    """A root at or inside a nested repository would judge its parts as loose entries."""
+
+    @pytest.mark.parametrize("depth", ["", "/src", "/src/deep"])
+    def test_a_root_at_or_inside_a_dot_git_checkout_is_refused(
+        self, tmp_path: Path, depth: str
+    ) -> None:
+        project = tmp_path / "project"
+        clone = project / "untracked" / "scratch" / "clone"
+        (clone / ".git").mkdir(parents=True)
+        root = clone.parent / (clone.name + depth)
+        root.mkdir(parents=True, exist_ok=True)
+        resolved = resolve_sweep_root(
+            root, project_root=project, config=ScratchConfig(), reference_roots=()
+        )
+        assert resolved.ttl_hours is None
+        assert "repository" in resolved.refusal
+
+    def test_a_root_at_a_worktree_dot_git_file_is_refused(self, tmp_path: Path) -> None:
+        project = tmp_path / "project"
+        wt = project / "untracked" / "scratch" / "wt"
+        wt.mkdir(parents=True)
+        (wt / ".git").write_text("gitdir: /elsewhere/.git/worktrees/wt\n")
+        resolved = resolve_sweep_root(
+            wt, project_root=project, config=ScratchConfig(), reference_roots=()
+        )
+        assert resolved.ttl_hours is None
+
+    def test_a_root_inside_a_bare_repository_is_refused(self, tmp_path: Path) -> None:
+        project = tmp_path / "project"
+        bare = project / "untracked" / "scratch" / "b.git"
+        (bare / "objects").mkdir(parents=True)
+        (bare / "refs").mkdir()
+        (bare / "HEAD").write_text("ref: refs/heads/main\n")
+        resolved = resolve_sweep_root(
+            bare / "objects", project_root=project, config=ScratchConfig(), reference_roots=()
+        )
+        assert resolved.ttl_hours is None
+
+    def test_the_scratch_root_itself_is_still_accepted(self, tmp_path: Path) -> None:
+        project = tmp_path / "project"
+        (project / "untracked" / "scratch" / "clone" / ".git").mkdir(parents=True)
+        resolved = resolve_sweep_root(
+            project / "untracked" / "scratch",
+            project_root=project,
+            config=ScratchConfig(),
+            reference_roots=(),
+        )
+        assert resolved.refusal == ""

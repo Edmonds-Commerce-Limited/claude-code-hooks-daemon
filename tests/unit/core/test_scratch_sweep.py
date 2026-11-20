@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
+import subprocess
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import AbstractContextManager
 from pathlib import Path
 
@@ -289,3 +291,36 @@ class TestRendering:
         assert rows["clone"]["repository"] == "found"
         assert rows["a.log"]["proofs"] == ["P1"]
         assert rows["notes.txt"]["uncovered"] == ["notes.txt"]
+
+
+class TestTrackedListing:
+    def test_a_failed_tracked_listing_makes_the_report_incomplete(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        tree.file("a.log", b"x")
+        _old(tree, _now())
+        project = tree.base / "project"
+        quiet = quiet_project_git(project)
+
+        def failing(
+            cwd: Path, *args: str, timeout: float = 30.0, env: Mapping[str, str] | None = None
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(["git", *args], 128, "", "not a repository")
+
+        config = ScratchConfig()
+        report = run_sweep(
+            resolve_sweep_root(tree.root, project_root=project, config=config, reference_roots=()),
+            config=config,
+            now=_now(),
+            budget=WalkBudget(seconds=60, max_inodes=10_000),
+            inputs=LivenessInputs(
+                cwds={1: Path("/elsewhere")},
+                background=BackgroundRecords((), ""),
+                min_age_minutes=30,
+                now=_now(),
+            ),
+            project_root=project,
+            project_git=dataclasses.replace(quiet, runner=failing),
+        )
+        assert not report.complete
+        assert any("tracked files" in reason for reason in report.incomplete_reasons)
+        assert _verdicts(report) == {"a.log": "STUCK"}

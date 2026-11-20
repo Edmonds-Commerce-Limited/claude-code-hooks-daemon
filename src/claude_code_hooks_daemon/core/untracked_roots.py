@@ -12,7 +12,10 @@ anything is listed:
 - any root that is not inside THIS project's ``untracked/`` (a tracked
   directory, a test tree, another checkout);
 - any root whose path, literal or link-resolved, passes through an
-  ``untracked/repos`` or ``untracked/scratch-archive`` of ANY checkout.
+  ``untracked/repos`` or ``untracked/scratch-archive`` of ANY checkout;
+- a root at or inside a repository (a ``.git`` of any type, or the bare
+  shape) below ``untracked/``: its parts would be judged as loose entries.
+  A repository is judged whole, as one entry of the root that holds it.
 
 A protected path that lies inside an accepted root is skipped as an entry and
 named in a note. A root at any depth inside ``untracked/`` takes the TTL of
@@ -22,6 +25,8 @@ given and with links resolved, so a link cannot carry a root past the check.
 
 from __future__ import annotations
 
+import os
+import stat
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,6 +68,34 @@ def _forms(path: Path) -> tuple[Path, ...]:
 
 def _within(path: Path, container: Path) -> bool:
     return path == container or path_is_relative_to(path, container)
+
+
+def _is_repository(directory: Path) -> bool:
+    """A ``.git`` of any type in ``directory``, or the bare shape; ``lstat`` only."""
+    if os.path.lexists(directory / ".git"):
+        return True
+    try:
+        return (
+            stat.S_ISREG(os.lstat(directory / "HEAD").st_mode)
+            and stat.S_ISDIR(os.lstat(directory / "objects").st_mode)
+            and stat.S_ISDIR(os.lstat(directory / "refs").st_mode)
+        )
+    except OSError:
+        return False
+
+
+def _repository_at_or_above(form: Path, project_forms: Sequence[Path]) -> Path | None:
+    """The first repository at ``form`` or above it, up to (not including) ``untracked/``."""
+    for project in project_forms:
+        untracked = project / _UNTRACKED
+        if not path_is_relative_to(form, untracked):
+            continue
+        directory = form
+        while directory != untracked:
+            if _is_repository(directory):
+                return directory
+            directory = directory.parent
+    return None
 
 
 def resolve_sweep_root(
@@ -113,6 +146,13 @@ def resolve_sweep_root(
     ):
         return refused(f"{root} is not inside this project's untracked/ directory: never swept")
     key = keys.pop()
+    for form in root_forms:
+        holder = _repository_at_or_above(form, project_forms)
+        if holder is not None:
+            return refused(
+                f"{root} is at or inside the repository {holder}: its parts would be judged "
+                "as loose entries; never swept"
+            )
     ttl = config.ttl_hours_for(key)
     if ttl is None:
         return refused(f'untracked/{key} has the TTL "*": never swept')

@@ -140,7 +140,11 @@ class TestOrdering:
             Node("e/.git/HEAD", F, 21),
             Node("e/app.py", F, 9),
         )
-        repos = RepoFindings(kinds={"e/.git": RepoKind.RELATED}, p4_covered=("e/.git", "e/app.py"))
+        repos = RepoFindings(
+            kinds={"e/.git": RepoKind.RELATED},
+            p4_covered=("e/.git", "e/app.py"),
+            p4_git_dirs=("e/.git",),
+        )
         judgement = judge(
             finished(_stats(*nodes, git_markers=("e/.git",))), age=_DUE, liveness=(), repos=repos
         )
@@ -148,6 +152,12 @@ class TestOrdering:
         assert judgement.proofs == (Proof.P4,)
         extra = finished(_stats(*nodes, Node("e/notes.txt", F, 5), git_markers=("e/.git",)))
         assert judge(extra, age=_DUE, liveness=(), repos=repos).verdict is Verdict.UNCERTAIN
+
+    def test_a_covered_tracked_path_does_not_cover_what_lies_beneath_it(self) -> None:
+        nodes = (Node("e", D, 0), Node("e/sub", D, 0), Node("e/sub/work.txt", F, 4))
+        repos = RepoFindings(kinds={"e/.git": RepoKind.RELATED}, p4_covered=("e/sub",))
+        judgement = judge(finished(_stats(*nodes)), age=_DUE, liveness=(), repos=repos)
+        assert judgement.verdict is Verdict.UNCERTAIN
 
     def test_an_entry_holding_a_tracked_file_is_protected(self) -> None:
         walk = finished(_stats(Node("e", D, 0), Node("e/a.log", F, 1)))
