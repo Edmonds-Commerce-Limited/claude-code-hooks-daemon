@@ -12,13 +12,17 @@ claim time would refuse every claim. Age is judged once, by the classification.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
 from claude_code_hooks_daemon.core.scratch_archive_claim import CLAIM_PREFIX
 from claude_code_hooks_daemon.core.scratch_liveness import BackgroundRecords, ProcessCwdReading
 from claude_code_hooks_daemon.core.scratch_references import ReferenceSet
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
+
+_LOG = logging.getLogger(__name__)
 
 
 def entry_in_use(
@@ -64,6 +68,11 @@ class LazyReferences:
             try:
                 self._set = self._build()
             except Exception as exc:  # any failure leaves the answer unknown
+                log_and_continue(
+                    _LOG,
+                    exc,
+                    reason="a failed reference-set build leaves every entry in use (unknown)",
+                )
                 self._set = ReferenceSet(unknown=f"reference set could not be built: {exc}")
         found = self._set.for_entry(name)
         return bool(found.unknown or found.sites)

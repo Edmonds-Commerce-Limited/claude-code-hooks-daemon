@@ -27,6 +27,7 @@ name is reported foreign and left alone.
 from __future__ import annotations
 
 import errno
+import logging
 import os
 import stat
 from collections.abc import Callable, Iterator, Mapping
@@ -72,6 +73,9 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import (
     verify,
     verify_remaining,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
+_LOG = logging.getLogger(__name__)
 
 _FDINFO_PARTS = ("", "proc", "self", "fdinfo")
 _MNT_ID = "mnt_id:"
@@ -503,6 +507,12 @@ def resume_claimed(
             blocked: str | None = None
         except RemoveRefused as exc:
             blocked = str(exc)
+            log_and_continue(
+                _LOG,
+                exc,
+                reason=f"archive {record.archive_id} cannot authorise removal; reported as stuck",
+                level=logging.DEBUG,
+            )
         for partial in (False, True):
             try:
                 proof = _prove(
@@ -516,10 +526,19 @@ def resume_claimed(
                     timeout=timeout,
                     partial=partial,
                 )
-            except ProofUnavailable:
+            except ProofUnavailable as exc:
                 unchecked = True
+                log_and_continue(
+                    _LOG, exc, reason="tar did not run; the entry is reported stuck, not removed"
+                )
                 continue
-            except RemoveRefused:
+            except RemoveRefused as exc:
+                log_and_continue(
+                    _LOG,
+                    exc,
+                    reason=f"archive {record.archive_id} does not prove the entry; try the next",
+                    level=logging.DEBUG,
+                )
                 continue
             if blocked is not None:
                 if not partial:

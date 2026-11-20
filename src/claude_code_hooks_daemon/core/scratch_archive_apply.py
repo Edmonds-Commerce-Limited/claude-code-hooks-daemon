@@ -25,6 +25,7 @@ is not archived diverges from DESIGN 5.2 (recorded in DESIGN section 13).
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -76,6 +77,9 @@ from claude_code_hooks_daemon.core.scratch_archive_remove import (
 from claude_code_hooks_daemon.core.scratch_archive_restore import Reclaimed, reclaim_staging
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport
 from claude_code_hooks_daemon.core.scratch_verdict import Verdict
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
+_LOG = logging.getLogger(__name__)
 
 #: The only verdicts an apply run acts on, and only when the entry is due.
 ACTIONABLE = frozenset({Verdict.DISPOSABLE, Verdict.UNCERTAIN})
@@ -241,8 +245,12 @@ def _fingerprint_all(
             prints[name] = fingerprint_at(
                 root_fd, name, max_inodes=settings.max_inodes, max_depth=settings.max_depth
             )
-        except (WalkRefused, OSError):
-            continue
+        except (WalkRefused, OSError) as exc:
+            log_and_continue(
+                _LOG,
+                exc,
+                reason=f"{name!r} cannot be walked, so it is left out and never claimed",
+            )
     return prints
 
 

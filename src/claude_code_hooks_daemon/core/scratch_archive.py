@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import logging
 import os
 import re
 import secrets
@@ -33,6 +34,10 @@ from datetime import datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Any
+
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
+_LOG = logging.getLogger(__name__)
 
 #: The append-only record of every archive the store holds.
 INDEX_NAME = "index.jsonl"
@@ -371,7 +376,13 @@ class ArchiveStore:
             try:
                 os.mkdir(path.name, STORE_MODE, dir_fd=parent_fd)
                 created = True
-            except FileExistsError:
+            except FileExistsError as exc:
+                log_and_continue(
+                    _LOG,
+                    exc,
+                    reason="an existing store directory is the normal reopen case",
+                    level=logging.DEBUG,
+                )
                 created = False
             except OSError as exc:
                 raise StoreRefused(f"store {path} cannot be created: {exc}") from exc
@@ -559,9 +570,15 @@ class ArchiveStore:
             raise StoreRefused(f"archive {archive_id} is an adopted tarball; it is never discarded")
         try:
             os.unlink(archive_file_name(archive_id), dir_fd=self._dir_fd)
-        except FileNotFoundError:
-            return
-        fsync_dir(self._dir_fd)
+        except FileNotFoundError as exc:
+            log_and_continue(
+                _LOG,
+                exc,
+                reason="an archive file that is already gone needs no discard",
+                level=logging.DEBUG,
+            )
+        else:
+            fsync_dir(self._dir_fd)
 
     def audit(self) -> StoreAudit:
         """Name unrecorded archive files, records whose archive is missing, and staging dirs.

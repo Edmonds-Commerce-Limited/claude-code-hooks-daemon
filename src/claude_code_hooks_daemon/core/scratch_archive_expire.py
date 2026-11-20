@@ -25,6 +25,7 @@ here is :func:`_unlink_expired`.
 
 from __future__ import annotations
 
+import logging
 import os
 import stat
 from collections.abc import Callable, Mapping
@@ -43,6 +44,9 @@ from claude_code_hooks_daemon.core.scratch_archive import (
     fsync_dir,
     parse_instant,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
+_LOG = logging.getLogger(__name__)
 
 #: The longest keep reason, after its whitespace is collapsed.
 MAX_KEEP_REASON_CHARS = 500
@@ -160,11 +164,17 @@ def require_not_due(
         raise Incomplete("the events file has a torn final line; expiry is unknown")
     records = complete_records(index, events, archive_id)
     _aware(now, "the clock")
+    due: datetime | None = None
     try:
         due = effective_expiry(records, _keeps(events, archive_id), retention_hours)
-    except _Hold:
-        return
-    if due <= now:
+    except _Hold as exc:
+        log_and_continue(
+            _LOG,
+            exc,
+            reason=f"archive {archive_id} is held, so it never expires",
+            level=logging.DEBUG,
+        )
+    if due is not None and due <= now:
         raise Due(f"archive {archive_id} is due for expiry since {due.isoformat()}")
 
 
@@ -243,10 +253,17 @@ def _select(records: tuple[ArchiveRecord, ...], entry: str | None) -> ArchiveRec
 
 
 def _lstat_archive(store: ArchiveStore, archive_id: str) -> os.stat_result | None:
+    found: os.stat_result | None = None
     try:
-        return os.lstat(archive_file_name(archive_id), dir_fd=store.dir_fd)
-    except FileNotFoundError:
-        return None
+        found = os.lstat(archive_file_name(archive_id), dir_fd=store.dir_fd)
+    except FileNotFoundError as exc:
+        log_and_continue(
+            _LOG,
+            exc,
+            reason=f"archive {archive_id} has no file; the caller reports it absent",
+            level=logging.DEBUG,
+        )
+    return found
 
 
 def _unlink_expired(store: ArchiveStore, archive_id: str, expected: os.stat_result) -> bool:

@@ -44,12 +44,14 @@ record, or refuses (:class:`AdoptRefused`) leaving the archive in place.
 from __future__ import annotations
 
 import errno
+import logging
 import os
 import posixpath
 import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from typing import NoReturn
 
 from claude_code_hooks_daemon.core.scratch_archive import (
     AdoptEvent,
@@ -91,6 +93,9 @@ from claude_code_hooks_daemon.core.scratch_archive_restore import (
     RestoreRefused,
     read_headers,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
+_LOG = logging.getLogger(__name__)
 
 #: The proof id an adopted archive's record always carries.
 PROOF_ID = "P6"
@@ -475,11 +480,17 @@ def _check_moved(
     sha: str,
 ) -> None:
     """The moved file must be the verified inode, singly linked, with the verified digest."""
+    fd: int | None = None
+    unopenable = ""
     try:
         fd = store.open_archive(archive_id)
     except StoreRefused as exc:
-        _move_back(store, parent_fd, tarball_name, archive_id, str(exc))
-        return
+        log_and_continue(
+            _LOG, exc, reason="the moved archive cannot be opened; it is moved back and refused"
+        )
+        unopenable = str(exc)
+    if fd is None:
+        _move_back(store, parent_fd, tarball_name, archive_id, unopenable)
     try:
         info = os.fstat(fd)
         same = (info.st_ino, info.st_dev, info.st_nlink) == (tarball.ino, tarball.dev, 1)
@@ -493,7 +504,7 @@ def _check_moved(
 
 def _move_back(
     store: ArchiveStore, parent_fd: int, tarball_name: str, archive_id: str, why: str
-) -> None:
+) -> NoReturn:
     """Return a file that failed its check to its old name; raise in every case."""
     try:
         rename_noreplace_between(

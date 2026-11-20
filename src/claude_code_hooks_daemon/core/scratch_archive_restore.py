@@ -34,6 +34,7 @@ same cleaner. The archive and its records are never touched.
 from __future__ import annotations
 
 import errno
+import logging
 import os
 import posixpath
 import re
@@ -78,6 +79,9 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import (
     run_tar,
     tarfile_mode,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
+_LOG = logging.getLogger(__name__)
 
 __all__ = [
     "STAGING_PREFIX",
@@ -325,11 +329,18 @@ def _select(records: tuple[ArchiveRecord, ...], entry: str | None) -> ArchiveRec
 def _check_destination(store: ArchiveStore, dest_parent_fd: int, dest_name: str) -> None:
     try:
         os.lstat(dest_name, dir_fd=dest_parent_fd)
-        present = True
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
+        log_and_continue(
+            _LOG,
+            exc,
+            reason="an absent destination is the expected case for a restore",
+            level=logging.DEBUG,
+        )
         present = False
     except OSError as exc:
         raise RestoreRefused(f"the destination cannot be checked: {exc}") from exc
+    else:
+        present = True
     if present:
         raise RestoreRefused(f"{dest_name!r} exists; restore never overwrites")
     if os.fstat(dest_parent_fd).st_dev != os.fstat(store.dir_fd).st_dev:
