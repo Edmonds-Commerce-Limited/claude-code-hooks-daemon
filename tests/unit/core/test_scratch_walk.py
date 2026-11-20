@@ -115,9 +115,7 @@ class TestSpecialAndMultiLinked:
         stats = walk_entry(tree.root, "e", now=_now(), budget=_budget()).value
         assert stats.multi_linked == ("e/second",)
 
-    def test_two_names_inside_the_same_entry_are_not_multi_linked(
-        self, tree: ScratchTree
-    ) -> None:
+    def test_two_names_inside_the_same_entry_are_not_multi_linked(self, tree: ScratchTree) -> None:
         first = tree.file("e/a")
         tree.hardlink("e/b", first)
         stats = walk_entry(tree.root, "e", now=_now(), budget=_budget()).value
