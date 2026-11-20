@@ -45,6 +45,7 @@ the two makes an alarming path count look like data loss when it is not.
 
 from __future__ import annotations
 
+import logging
 import subprocess  # nosec B404 - trusted system tool (git), list form, no shell
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
@@ -64,6 +65,8 @@ from claude_code_hooks_daemon.utils.remote_refs import (
     holder_of,
     resolve_source,
 )
+
+logger = logging.getLogger(__name__)
 
 # Proof tiers, strongest first.
 TIER_MERGED = "merged"
@@ -194,7 +197,9 @@ def tip_moved_since_proof(repo: Path, classification: BranchClassification) -> s
     the refusal to remove a branch checked out in a linked worktree, which a peer
     can create after classification WITHOUT moving the tip, making it invisible to
     this check. Keeping git's own delete keeps every such check; see Plan 00254
-    Decision 1.
+    Decision 1. The no-value route (Plan 00620) is the exception: its ``unproven``
+    branch holds work no ref keeps, so it uses the compare-and-delete and makes the
+    worktree and symref checks itself, immediately before (``_compare_and_delete``).
     """
     if not classification.tip:
         return None
@@ -940,28 +945,89 @@ def _rejected_bundled(
     )
 
 
+def _remove_branch_config(repo: Path, name: str) -> None:
+    """Drop ``branch.<name>.*`` as ``git branch -D`` does; never raises.
+
+    Called only after the ref is gone, so a failure here cannot undo the removal and
+    must not be reported as a refusal (that would cancel a real removal in the rate).
+    It is logged instead: a stale section is inherited by a later branch of the name.
+    """
+    listing = _git(repo, "config", "--local", "--name-only", "--list", check=False)
+    if listing.returncode != 0:
+        logger.warning(
+            "branch %s removed, but its config could not be listed: %s",
+            name,
+            listing.stderr.strip() or "no detail",
+        )
+        return
+    prefix = f"branch.{name}."
+    if not any(key.startswith(prefix) for key in listing.stdout.splitlines()):
+        return
+    result = _git(repo, "config", "--remove-section", f"branch.{name}", check=False)
+    if result.returncode != 0:
+        logger.warning(
+            "branch %s removed, but its config section branch.%s could not be removed: %s",
+            name,
+            name,
+            result.stderr.strip() or "no detail",
+        )
+
+
+def _compare_and_delete(repo: Path, name: str, tip: str) -> str | None:
+    """Delete ``refs/heads/<name>`` only while it is still ``tip``; None when it went.
+
+    ``git update-ref --no-deref -d <ref> <tip>`` is a compare-and-delete: git refuses
+    under the ref's lock when the ref no longer equals ``tip``, so a branch moved after
+    the tip re-check keeps the commits no verdict covered (D-EXEC F1). It skips two
+    checks ``git branch -D`` makes, so they are made here, immediately before it:
+
+    - a symbolic ref is refused. ``--no-deref`` removes only the alias, never its
+      target, but it also skips the old-value compare for a symref (measured on git
+      2.47), so a symref is never what the verdict judged;
+    - a branch checked out in any worktree is refused, as ``git branch -D`` would.
+
+    Returns git's or the re-check's reason when nothing was deleted.
+    """
+    ref = branch_ref(name)
+    symref = _git(repo, "symbolic-ref", "--quiet", ref, check=False)
+    if symref.returncode == 0:
+        return f"{ref} is now a symbolic ref to {symref.stdout.strip()}"
+    if symref.returncode != 1:
+        return f"could not tell whether {ref} is a symbolic ref: {symref.stderr.strip()}"
+    try:
+        checked_out = name in worktree_branches(repo)
+    except subprocess.CalledProcessError as exc:
+        return f"could not list the worktrees: {(exc.stderr or '').strip() or 'no detail'}"
+    if checked_out:
+        return f"{name} {_REFUSAL_DETAIL[REFUSAL_WORKTREE]} since it was proved"
+    result = _git(repo, "update-ref", "--no-deref", "-d", ref, tip, check=False)
+    if result.returncode != 0:
+        return result.stderr.strip() or "no detail"
+    _remove_branch_config(repo, name)
+    return None
+
+
 def _delete_rejected(
     repo: Path,
     classification: BranchClassification,
     approval: branch_reject.RemovalApproval,
     route: branch_reject.RejectRoute,
 ) -> str | None:
-    """Ledger line, then git's delete; a failure message, or None when the branch went.
+    """Ledger line, then the compare-and-delete; a failure message, or None when it went.
 
     The line goes in BEFORE git is asked (RULINGS.md section 1 item 5). Should git
     then refuse, a ``git-refused`` line cancels it, so the ledger never reports a
-    removal that did not happen; if even that append fails, the message says so.
+    removal that did not happen; if even that append fails, the message says so. The
+    delete is keyed to ``approval.tip``, the exact sha the verdicts and bundle cover.
     """
     try:
         line = branch_reject.record_removal(repo, approval, route)
     except branch_reject.RejectError as exc:
         return f"{classification.name}: nothing deleted; the no-value route refused: {exc}"
-    result = _git(
-        repo, *delete_argv_for_tier(classification.tier), classification.name, check=False
-    )
-    if result.returncode == 0:
+    refused = _compare_and_delete(repo, classification.name, approval.tip)
+    if refused is None:
         return None
-    detail = f"git refused the delete: {result.stderr.strip() or 'no detail'}"
+    detail = f"git refused the delete: {refused}"
     message = f"{classification.name}: {detail} (proven {classification.tier})"
     try:
         branch_reject.record_git_refusal(line, detail, route)

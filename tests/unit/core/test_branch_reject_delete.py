@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import json
 import shlex
+import subprocess
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -36,10 +39,12 @@ from claude_code_hooks_daemon.core.branch_reject import (
     read_ledger_entries,
     write_bundle,
 )
+from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.daemon.branch_safety import DeletionReport, delete_branches
 from tests.unit.core.test_branch_reject import (
     HOUR,
     NOW,
+    _commit,
     _git,
     _issue,
     _ledger_line,
@@ -404,6 +409,146 @@ class TestBatchAndFailures:
         assert _branch_exists(repo)
         assert read_ledger_entries(route.ledger_path) == []
         assert any("no longer verifies" in b for b in report.blockers)
+
+
+def _during_record(monkeypatch: pytest.MonkeyPatch, action: Callable[[], object]) -> None:
+    """Run ``action`` inside the window between the ledger append and git's delete."""
+    real = branch_reject.record_removal
+
+    def _then_act(repo_: Path, approval: RemovalApproval, route_: RejectRoute) -> LedgerLine:
+        line = real(repo_, approval, route_)
+        action()
+        return line
+
+    monkeypatch.setattr(branch_reject, "record_removal", _then_act)
+
+
+def _config_keys(repo: Path, branch: str = "feat") -> list[str]:
+    listing = _git(repo, "config", "--local", "--name-only", "--list")
+    return [key for key in listing.splitlines() if key.startswith(f"branch.{branch}.")]
+
+
+def _assert_cancelled(repo: Path, report: DeletionReport, route: RejectRoute) -> None:
+    assert report.refused is True
+    assert report.deleted == ()
+    entries = read_ledger_entries(route.ledger_path)
+    assert [type(e) for e in entries] == [LedgerLine, LedgerRefusal]
+    assert read_ledger(route.ledger_path) == []
+
+
+class TestCompareAndDelete:
+    """git deletes the branch only while it still points at the tip the verdict covered.
+
+    The proof and the verdicts are about one sha. A branch moved after the tip re-check
+    (``git branch -f``, ``git fetch . y:x``) holds commits no reviewer saw and no bundle
+    carries, so the delete is a compare-and-delete and git refuses a moved ref.
+    """
+
+    def test_a_branch_moved_after_the_proof_survives(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        _git(repo, "switch", "-q", "-c", "elsewhere", "main")
+        moved_to = _commit(repo, "late.py", "late\n", "late work")
+        _git(repo, "switch", "-q", "main")
+        _during_record(monkeypatch, lambda: _git(repo, "branch", "-f", "feat", moved_to))
+        report = _delete(repo, route)
+        assert _tip(repo) == moved_to
+        _assert_cancelled(repo, report, route)
+        assert any("git refused" in b for b in report.blockers)
+        assert _config_keys(repo), "a refused delete must leave branch.feat.* in place"
+
+    def test_a_worktree_added_after_the_proof_refuses(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A compare-and-delete skips git's worktree check, so the guard makes it itself."""
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        tip = _tip(repo)
+        peer = repo.parent / "peer"
+        _during_record(monkeypatch, lambda: _git(repo, "worktree", "add", "-q", str(peer), "feat"))
+        report = _delete(repo, route)
+        assert _tip(repo) == tip
+        _assert_cancelled(repo, report, route)
+        assert any("worktree" in b for b in report.blockers)
+
+    def test_a_branch_turned_into_a_symref_after_the_proof_refuses(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A dereferencing delete would remove the TARGET, a branch nobody judged."""
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        tip = _tip(repo)
+        _git(repo, "branch", "target", tip)
+
+        def _alias() -> None:
+            _git(repo, "update-ref", "-d", "refs/heads/feat")
+            _git(repo, "symbolic-ref", "refs/heads/feat", "refs/heads/target")
+
+        _during_record(monkeypatch, _alias)
+        report = _delete(repo, route)
+        assert _tip(repo, "target") == tip
+        assert _branch_exists(repo)
+        _assert_cancelled(repo, report, route)
+
+    def test_a_removal_takes_the_branch_config_and_reflog_with_it(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        """What ``git branch -D`` removes, the compare-and-delete removes too."""
+        _issue(repo, store)
+        assert _config_keys(repo)
+        report = _delete(repo, _route(repo, store, config))
+        assert report.deleted == ("feat",)
+        assert report.refused is False
+        assert _config_keys(repo) == []
+        assert not (repo / ".git" / "logs" / "refs" / "heads" / "feat").exists()
+
+    def test_a_branch_with_no_config_section_is_removed(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        _issue(repo, store)
+        _git(repo, "config", "--remove-section", "branch.feat")
+        report = _delete(repo, _route(repo, store, config))
+        assert report.deleted == ("feat",)
+        assert report.refused is False
+
+    def test_a_failed_config_cleanup_never_cancels_a_real_removal(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The ref is gone once git said so; cancelling it would undercount the rate."""
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        real = branch_safety._git
+
+        def _config_fails(
+            repo_: Path, *args: str, **kwargs: Any
+        ) -> subprocess.CompletedProcess[str]:
+            if args[:2] == ("config", "--remove-section"):
+                return subprocess.CompletedProcess(list(args), 5, "", "could not lock config")
+            return real(repo_, *args, **kwargs)
+
+        monkeypatch.setattr(branch_safety, "_git", _config_fails)
+        report = _delete(repo, route)
+        assert report.deleted == ("feat",)
+        assert not _branch_exists(repo)
+        assert [type(e) for e in read_ledger_entries(route.ledger_path)] == [LedgerLine]
 
 
 class TestRecordRemoval:

@@ -59,6 +59,19 @@ judge, and the bundle keeps the whole tip regardless.
 | `verdicts/<verdict_id>.json` | SubagentStop recorder (2)            | `Verdict` (section 4)                                                                                      |
 | `keeps/<verdict_id>.json`    | SubagentStop recorder, on `keep` (2) | `KeepRecord`: branch, tip, commits, reasons, recorded_at                                                   |
 | `stops/<nonce>.json`         | SubagentStop recorder (2)            | Marker: schema, nonce. Created exclusively on the reviewer's FIRST stop                                    |
+| `consumed/<verdict_id>.json` | `record_removal` (review fix 1)      | `ConsumedRecord`: verdict_id, removal (first verdict id), branch, tip, reviewer_agent_ids, removed_at      |
+| `consumed-agents/<key>.json` | `record_removal` (review fix 1)      | Marker: schema, agent_id, removal. `<key>` is `sha256(agent_id)[:32]`                                      |
+| `cancelled/<removal>.json`   | `record_git_refusal` (review fix 1)  | Marker: schema, removal. The removal no longer counts toward the rate                                      |
+
+**Single use and the rate are shared across checkouts.** The ledger is a tracked file, so
+each worktree has its own copy until a merge. The three marker kinds live in the main
+checkout's state directory, which every worktree shares. `record_removal` creates the
+`consumed/` and `consumed-agents/` markers exclusively (`os.link`) immediately before the
+ledger append, so of two checkouts racing on one verdict or one reviewer agent exactly one
+wins. A lost race keeps the markers it did create (fail closed: a used verdict is never
+freed). `used_state()` is the one reader. It unions the ledger with the markers, minus the
+`cancelled/` removals, and `issue_requests`, `approve_removal`, `record_removal` and
+`build_digest` all read it.
 
 The nonce is 32 lowercase hex characters from `secrets.token_hex(16)`; the verdict id is
 the same shape. A file name that is not that shape is ignored and never opened.
@@ -231,7 +244,8 @@ behaviour, so `clean_sweep`, `cleanup_after_merge` and `delete_if_merged` never 
 verdict. With a route, an `unproven` branch is deleted only when, in order: the verdicts
 for its current tip validate (section 5) in the number required (section 6); the bundle is
 written and `bundle_problems` is empty; the tip re-check passes; the ledger line is
-appended (RULINGS section 1 item 5: before git is asked); git deletes. The classification
+appended (RULINGS section 1 item 5: before git is asked); git's compare-and-delete removes
+the ref at the approved tip (below). The classification
 then reports tier `rejected-bundled` and the report's restore commands carry both lines of
 section 7. Any failure before the ledger append leaves the branch in place and names the
 problem.
@@ -243,32 +257,40 @@ Decided in slice 2 (`approve_removal`, `record_removal`, `record_git_refusal`):
   is recomputed at delete time from `admit_request` over the keeps and the ledger, and the
   larger of that and each request's own count wins, so a request admitted at an empty
   window cannot carry one reviewer past the two-reviewer or refuse threshold.
+
 - **Any stored `keep` for this tip refuses**, even beside enough valid `no-value`
   verdicts; only then are the rest validated, and invalid ones are named in the refusal.
+
 - **Eligibility:** only `unproven` with no refusal. A protected, current, worktree or
   unmerged-line branch stays refused whatever verdict exists.
+
 - **Phases:** validation and the bundle write happen with every other blocker, so one
   unapproved branch removes none of the batch. A dry run validates and writes nothing.
   The route measures against `RejectRoute.default_ref` (the CLI sets the resolved default,
   since `--protected-ref` may name an integration line), falling back to `protected_ref`.
+
 - **Bundle prerequisites.** `bundle_problems` also reads the bundle header and requires
   every prerequisite to be an ancestor of the base it was cut against
   (`BundleRecord.base`). Without it a planted thin bundle (`feat ^feat~1`) verifies and
   lists the tip, yet restores nothing once the branch is gone; a test pins the refusal.
   A `@filter` capability (a filtered bundle omits objects) refuses too.
+
 - **Only bytes the guard wrote are trusted.** `git bundle verify` reads the header, not the
   pack: a probe (git 2.47) showed a planted bundle with a truncated pack, and a planted
   `--filter=blob:none` bundle, both passing it. `_create_bundle` therefore writes a
   `<bundle>.sha256` sidecar beside the file, and an existing bundle is reused only when its
   sha256 equals that record. A planted file, or one altered after the guard wrote it,
   refuses. A same-user forger who writes both files is the residue RULINGS Q1 accepts.
+
 - **The batch counts itself.** Phase one appends nothing, so each approval passes the
   number already approved in the batch as `pending`, added to the window count; one
   batch cannot carry several removals past the two-reviewer or refuse threshold.
+
 - **A crash between the append and git's answer** leaves an uncancelled removal line for
   a branch that may still exist. This is the cost of the ruling's append-first order; the
   digest (section 11) flags every listed removal whose branch still resolves at its
   recorded tip as `STILL PRESENT at its tip`.
+
 - **A git refusal after the append** appends a second line,
   `{"outcome": "git-refused", branch, tip, verdict_ids, detail, refused_at}`.
   `read_ledger` returns only removals no refusal cancels (same tip and verdict ids), so
@@ -276,6 +298,36 @@ Decided in slice 2 (`approve_removal`, `record_removal`, `record_git_refusal`):
   digest. The refused attempt's verdicts stay consumed (fail closed: a retry needs a fresh
   review). If even the refusal line cannot be appended, the blocker says the ledger
   wrongly records the removal. A line with an unknown `outcome` raises.
+
+- **The delete is a compare-and-delete (review fix 2, D-EXEC F1).** The tip re-check and
+  the ledger append both run before git is asked. A plain `git branch --delete --force`
+  would remove a branch moved in that window (`git branch -f`, `git fetch . y:x`), along
+  with commits no reviewer saw, no bundle carries and, since the reflog goes with the ref,
+  nothing else records. `_compare_and_delete` therefore runs
+  `git update-ref --no-deref -d refs/heads/<name> <approval.tip>`, and git refuses under
+  the ref lock when the ref no longer equals the tip. That command skips checks
+  `git branch -D` makes, so the guard makes them itself immediately before it:
+
+  - **A symbolic ref is refused.** Without `--no-deref`, `update-ref -d` removes the
+    symref's TARGET, a branch nobody judged. With it, git 2.47 skips the old-value compare
+    for a symref (probed), so a symref is never what the verdict covered.
+  - **A branch checked out in any worktree is refused**, as `git branch -D` refuses it.
+    If the worktree listing itself fails, the delete is refused too.
+
+  Either refusal takes the git-refused path above (the message carries `git refused`, the
+  `git-refused` line cancels the removal, and the verdicts stay consumed). After a
+  successful delete `_remove_branch_config` drops `branch.<name>.*` as `git branch -D`
+  would, when such a section exists. The ref is already gone at that point, so a failure
+  is logged and never reported as a refusal, which would cancel a real removal and
+  undercount the rate. The reflog needs no step: `update-ref -d` removes it with the ref
+  (probed, git 2.47).
+
+  **Residue.** The compare is atomic, but the two re-checks are not. A worktree created
+  on the branch, or a symref made of it, between the re-check and `update-ref` is not
+  seen. Neither loses commits: a worktree checkout leaves the tip unmoved, so the bundle
+  holds it, and `--no-deref` never touches a target. A branch mid-rebase or mid-bisect in
+  another worktree (HEAD detached) is refused by `git branch -D` but not by this re-check.
+  The rebase's own ref update recreates the branch, and the bundle holds the approved tip.
 
 ## 11. The digest (slice 3)
 
