@@ -39,8 +39,9 @@ from claude_code_hooks_daemon.utils.worktree_seeding import (
 #: The audit verb of a link placed by this route, distinct from creation's.
 SEED_APPLY_VERB = "seed-worktree"
 
-#: Where the project's daemon config lives, relative to its main checkout.
-_CONFIG_RELATIVE = Path(".claude") / "hooks-daemon.yaml"
+#: The daemon config's names under the main checkout's ``.claude/``, in the
+#: order the daemon's own loader tries them.
+_CONFIG_NAMES = ("hooks-daemon.yaml", "hooks-daemon.yml")
 
 _HANDLER_KEY = "worktree_create"
 _SEED_OPTION = "seed"
@@ -95,8 +96,13 @@ def _main_checkout_of(worktree: Path) -> Path:
 
 
 def _load_config(main: Path) -> Config:
-    """The main checkout's daemon config, read STRICTLY: no fallback to defaults."""
-    path = main / _CONFIG_RELATIVE
+    """The main checkout's daemon config, read STRICTLY: no fallback to defaults.
+
+    Found by the names the daemon itself accepts (``.yaml``, then ``.yml``).
+    Read fresh from disk, so an uncommitted edit counts at once.
+    """
+    candidates = [main / ".claude" / name for name in _CONFIG_NAMES]
+    path = next((c for c in candidates if c.is_file()), candidates[0])
     try:
         return Config.load(path)
     except (OSError, RuntimeError, ValueError, yaml.YAMLError) as exc:
@@ -107,8 +113,34 @@ def _load_config(main: Path) -> Config:
 
 
 def _seed_entries(config: Config) -> list[SeedEntry]:
-    options = handler_options(config.handlers.worktree_create.get(_HANDLER_KEY))
-    return parse_seed_config(options.get(_SEED_OPTION))
+    """The configured entries; a disabled ``worktree_create`` handler refuses."""
+    block = config.handlers.worktree_create.get(_HANDLER_KEY)
+    if getattr(block, "enabled", True) is False:
+        raise SeedApplyRefused(
+            "the worktree_create handler is disabled in the config, so its seed list "
+            "is not in force"
+        )
+    return parse_seed_config(handler_options(block).get(_SEED_OPTION))
+
+
+def _refuse_redirected_parents(worktree: Path, entries: list[SeedEntry]) -> None:
+    """Refuse an entry whose destination's parent, inside ``worktree``, is a symlink.
+
+    A hand-made worktree is not fresh: a directory link inside it would carry
+    the placement somewhere else. Checked with ``lstat`` (no link followed),
+    on every existing component between the worktree and the destination.
+    """
+    for number, entry in enumerate(entries, start=1):
+        current = worktree
+        for part in Path(entry.path).parts[:-1]:
+            current = current / part
+            if current.is_symlink():
+                raise SeedApplyRefused(
+                    f"seed entry #{number}: a parent of its destination inside the "
+                    "worktree is a symlink, so the placement could land elsewhere"
+                )
+            if not current.exists():
+                break
 
 
 def seed_existing_worktree(worktree: Path) -> list[Path]:
@@ -138,11 +170,13 @@ def seed_existing_worktree(worktree: Path) -> list[Path]:
     def protected_patterns() -> tuple[str, ...]:
         return sfm.protected_patterns_from_options(guard_options)
 
+    target = worktree.resolve()
+    _refuse_redirected_parents(target, entries)
     try:
         validate_seed_sources(main, entries, protected_patterns=protected_patterns)
         return seed_worktree(
             main,
-            worktree.resolve(),
+            target,
             entries,
             audit=LinkAudit(
                 log_path=seed_link_audit_path(main),

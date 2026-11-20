@@ -1194,8 +1194,8 @@ handlers:
       #     #   copy    — isolated. Safe to overwrite; may drift from the
       #     #             canonical file after creation. REFUSED for a path
       #     #             the secret_file_guard protects (creation aborts):
-      #     #             seed such a file with symlink, which agents still
-      #     #             cannot read through.
+      #     #             seed such a file with symlink; the guard judges a
+      #     #             read through the link as a read of the file.
       #     default_mode: symlink
       #     entries:
       #       # Repository-root-relative. Files or directories; no globs.

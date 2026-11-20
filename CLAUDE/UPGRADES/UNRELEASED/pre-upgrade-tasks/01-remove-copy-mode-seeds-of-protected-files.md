@@ -23,7 +23,7 @@ Do not open the file to decide. The question is about its NAME. Name matches are
 
 ## How to handle
 
-Change each copy-mode entry whose path is protected to `mode: symlink`. If the entry relies on `default_mode: copy`, give that entry its own `mode: symlink`. A link puts no second copy of the file anywhere, and the secret guard still denies an agent every read through it.
+Change each copy-mode entry whose path is protected to `mode: symlink`. If the entry relies on `default_mode: copy`, give that entry its own `mode: symlink`. A link puts no second copy of the file anywhere, and the secret guard judges a read through it as a read of the file.
 
 Entries in symlink mode are not refused. If the project would rather not have the file in its worktrees at all, remove the entry instead.
 
