@@ -97,9 +97,11 @@ def _describe_problem(root: Path, entry: SeedEntry) -> str | None:
 #: Most paths one copy-mode directory may hold before it is refused unjudged.
 PROTECTED_COPY_WALK_MAX_PATHS = 10_000
 
-_COPY_REFUSAL = (
-    "seed entry #{number} (mode: copy): refused by the secret_file_guard protected-set check"
-)
+#: How a refusal names a seed: by position among the VALID entries (a malformed
+#: entry is dropped at parse time), never by its path, which may be protected.
+_SEED_ROLE = "seed entry #{number} of the valid entries (mode: copy)"
+
+_COPY_REFUSAL = _SEED_ROLE + ": refused by the secret_file_guard protected-set check"
 
 
 def _paths_a_copy_would_read(source: Path) -> list[str] | None:
@@ -161,27 +163,28 @@ def _describe_copy_refusal(
 
 
 def _copy_refusals(
-    root: Path, entries: list[SeedEntry], protected_patterns: ProtectedPatternsLoader
+    root: Path,
+    numbered: list[tuple[int, SeedEntry]],
+    protected_patterns: ProtectedPatternsLoader,
 ) -> list[str]:
     """One refusal per copy-mode entry that cannot be shown free of protected paths.
 
-    The protected set is read once, and only when a copy-mode entry exists, so
-    a link-only config behaves the same whatever state the guard config is in.
-    An unreadable set refuses EVERY copy entry rather than falling back.
+    ``numbered`` pairs each entry with its 1-based position among the parsed
+    (valid) entries. The protected set is read once, and only when a
+    copy-mode entry exists, so a link-only config behaves the same whatever
+    state the guard config is in. An unreadable set refuses EVERY copy entry
+    rather than falling back.
     """
-    copies = [
-        (number, entry)
-        for number, entry in enumerate(entries, start=1)
-        if entry.mode == SEED_MODE_COPY
-    ]
+    copies = [(number, entry) for number, entry in numbered if entry.mode == SEED_MODE_COPY]
     if not copies:
         return []
     try:
         patterns = protected_patterns()
     except sfm.ProtectedSetUnreadable as exc:
         return [
-            f"seed entry #{number} (mode: copy): refused because the secret_file_guard "
-            f"protected set could not be read ({exc}), so no copy can be shown safe; fix the "
+            _SEED_ROLE.format(number=number)
+            + ": refused because the secret_file_guard protected set could not be read "
+            f"({exc}), so no copy can be shown safe; fix the "
             "config or seed it with mode: symlink"
             for number, _entry in copies
         ]
@@ -212,8 +215,16 @@ def validate_seed_sources(
             the first would make fixing a misconfigured list an iterative
             guessing game.
     """
-    problems = [problem for entry in entries if (problem := _describe_problem(root, entry))]
-    problems.extend(_copy_refusals(root, entries, protected_patterns))
+    shape = [_describe_problem(root, entry) for entry in entries]
+    problems = [problem for problem in shape if problem]
+    # An entry already refused for its shape (absolute, '..', outside the
+    # root) aborts creation anyway, so it is not walked for protected paths.
+    judged = [
+        (number, entry)
+        for number, (entry, problem) in enumerate(zip(entries, shape, strict=True), start=1)
+        if problem is None
+    ]
+    problems.extend(_copy_refusals(root, judged, protected_patterns))
     if problems:
         raise WorktreeSeedError(
             "Cannot seed worktree — "

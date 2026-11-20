@@ -179,6 +179,49 @@ class TestADirectoryCopyIsJudgedOnEveryPathItWouldCopy:
         (root / "local" / "loop").symlink_to(".")
         _refusal(root, [SeedEntry(path="local", mode=SEED_MODE_COPY)], _defaults)
 
+    def test_a_directory_past_the_path_cap_is_refused_unjudged(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.utils import worktree_seeding
+
+        monkeypatch.setattr(worktree_seeding, "PROTECTED_COPY_WALK_MAX_PATHS", 2)
+        (root / "local").mkdir()
+        for name in ("a", "b", "c"):
+            (root / "local" / name).write_text("x\n", encoding="utf-8")
+        message = _refusal(root, [SeedEntry(path="local", mode=SEED_MODE_COPY)], _defaults)
+        assert "walked in full" in message
+
+    def test_a_directory_that_cannot_be_listed_is_refused(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Root ignores permissions, so the listing failure is injected."""
+        import os
+
+        (root / "local").mkdir()
+        (root / "local" / "sub").mkdir()
+        real_scandir = os.scandir
+
+        def failing_scandir(path: Any = ".") -> Any:
+            if str(path).endswith("sub"):
+                raise PermissionError(13, "denied")
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, "scandir", failing_scandir)
+        message = _refusal(root, [SeedEntry(path="local", mode=SEED_MODE_COPY)], _defaults)
+        assert "walked in full" in message
+
+    def test_an_entry_refused_for_its_shape_is_not_walked(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.utils import worktree_seeding
+
+        def no_walk(source: Path) -> list[str] | None:
+            raise AssertionError(f"walked {source}")
+
+        monkeypatch.setattr(worktree_seeding, "_paths_a_copy_would_read", no_walk)
+        message = _refusal(root, [SeedEntry(path="/etc", mode=SEED_MODE_COPY)], _defaults)
+        assert "absolute" in message
+
     def test_a_directory_with_no_protected_path_is_allowed(self, root: Path) -> None:
         (root / "local").mkdir()
         (root / "local" / "sub").mkdir()
