@@ -58,9 +58,19 @@ judge, and the bundle keeps the whole tip regardless.
 | `dispatches/<nonce>.json`    | PreToolUse/PostToolUse `Agent` (2)   | `DispatchRecord`: nonce, session_id, tool_use_id, agent_id                                                 |
 | `verdicts/<verdict_id>.json` | SubagentStop recorder (2)            | `Verdict` (section 4)                                                                                      |
 | `keeps/<verdict_id>.json`    | SubagentStop recorder, on `keep` (2) | `KeepRecord`: branch, tip, commits, reasons, recorded_at                                                   |
+| `stops/<nonce>.json`         | SubagentStop recorder (2)            | Marker: schema, nonce. Created exclusively on the reviewer's FIRST stop                                    |
 
 The nonce is 32 lowercase hex characters from `secrets.token_hex(16)`; the verdict id is
 the same shape. A file name that is not that shape is ignored and never opened.
+
+The recorder writes the verdict under `verdict_id = nonce`, with an exclusive create
+(`os.link`, as `dispatches/` uses), so one nonce has at most one verdict. A verdict counts
+only from a clean, final stop. The first stop of an identified reviewer creates
+`stops/<nonce>.json` before anything else. A later stop of the same nonce, or any stop
+whose `stop_hook_active` is not literally `false`, withdraws (unlinks) the nonce's verdict
+and records nothing. A stop hook that blocked the first reply therefore leaves no verdict.
+A keep record is never withdrawn, because it only restricts. The recorder never writes the
+dispatch record's agent id and never touches the ledger.
 
 A record is believed only through its chain. A verdict counts only when a request with its
 nonce exists, a dispatch record binds that nonce to the verdict's reviewer agent, and the
