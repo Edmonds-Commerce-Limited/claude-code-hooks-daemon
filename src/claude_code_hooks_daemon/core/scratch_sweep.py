@@ -39,6 +39,10 @@ from claude_code_hooks_daemon.core.scratch_walk import (
     list_entries,
     walk_entry,
 )
+from claude_code_hooks_daemon.utils.path_containment import (
+    path_is_relative_to,
+    path_relative_to,
+)
 
 _SECONDS_PER_HOUR = 3600.0
 
@@ -98,10 +102,10 @@ class SweepReport:
 
 
 def _relative(root: Path, project_root: Path) -> str | None:
-    try:
-        return root.relative_to(project_root).as_posix()
-    except ValueError:
+    """``root`` from the project root, or None for a root outside the project."""
+    if not path_is_relative_to(root, project_root):
         return None
+    return path_relative_to(root, project_root).as_posix()
 
 
 def _root_problem(root: Path) -> tuple[str, bool]:

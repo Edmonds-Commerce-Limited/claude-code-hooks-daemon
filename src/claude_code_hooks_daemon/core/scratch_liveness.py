@@ -18,6 +18,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
+
 _NANOSECONDS = 1_000_000_000
 _SECONDS_PER_MINUTE = 60
 
@@ -74,7 +76,7 @@ def read_background_records(state_file: Path) -> BackgroundRecords:
 
 
 def _inside(path: Path, entry: Path) -> bool:
-    return path == entry or entry in path.parents
+    return path_is_relative_to(path, entry)
 
 
 def entry_liveness(

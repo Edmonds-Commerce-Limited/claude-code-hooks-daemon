@@ -14,12 +14,11 @@ testing anything.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-#: ``os.scandir``'s shape as the walker calls it.
-ScandirFn = Callable[[str], "os._ScandirIterator[str]"]
+from claude_code_hooks_daemon.core.scratch_walk import ScandirFn
 
 #: name relative to ``base`` -> (mtime_ns, ctime_ns), every inode, links not followed.
 Snapshot = dict[str, tuple[int, int]]
