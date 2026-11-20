@@ -162,6 +162,59 @@ class TestWhatCounts:
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
+_SUB = "untracked/scratch/sub"
+
+
+class TestSubRoot:
+    """F-BYPS 3, coordinator's ruling: the root itself protects; an ancestor does not."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "see untracked/scratch/sub for the evidence",
+            "see untracked/scratch/sub/ for the evidence",
+            "see untracked/scratch/sub.",
+            "see `untracked/scratch/sub`",
+        ],
+    )
+    def test_a_reference_to_the_root_itself_names_every_entry(
+        self, gp: GitProject, text: str
+    ) -> None:
+        commit_file(gp.project, "docs/ref.md", f"{text}\n")
+        refs = build_references(_project_git(gp), _SUB)
+        assert refs.unknown == ""
+        assert refs.for_entry("run.log").sites == ("HEAD:docs/ref.md:1",)
+        assert refs.for_entry("qa-findings.md").sites == ("HEAD:docs/ref.md:1",)
+
+    def test_a_path_under_the_sub_root_names_only_its_entry(self, gp: GitProject) -> None:
+        commit_file(gp.project, "docs/ref.md", "untracked/scratch/sub/run.log\n")
+        refs = build_references(_project_git(gp), _SUB)
+        assert _referenced(refs, "run.log")
+        assert not _referenced(refs, "other")
+
+    @pytest.mark.parametrize(
+        "text",
+        ["untracked/scratch/", "untracked/scratch", "untracked/", "untracked/scratch/subway/x"],
+    )
+    def test_an_ancestor_or_a_sibling_names_no_entry(self, gp: GitProject, text: str) -> None:
+        commit_file(gp.project, "docs/ref.md", f"mention {text} here\n")
+        refs = build_references(_project_git(gp), _SUB)
+        assert not _referenced(refs, "run.log")
+
+    def test_a_root_reference_site_is_listed_once_beside_an_entry_site(
+        self, gp: GitProject
+    ) -> None:
+        commit_file(
+            gp.project, "docs/ref.md", "untracked/scratch/sub and untracked/scratch/sub/a\n"
+        )
+        sites = build_references(_project_git(gp), _SUB).for_entry("a").sites
+        assert sites == ("HEAD:docs/ref.md:1",)
+
+    def test_the_default_root_ignores_a_bare_mention_of_itself(self, gp: GitProject) -> None:
+        commit_file(gp.project, "docs/ref.md", "files go in untracked/scratch/ always\n")
+        assert not _referenced(_refs(gp), "anything")
+
+
 def _intercept(
     project: ProjectGit, when: Callable[[tuple[str, ...]], bool], rc: int, out: str
 ) -> ProjectGit:

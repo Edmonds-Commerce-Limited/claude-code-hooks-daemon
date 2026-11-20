@@ -81,6 +81,8 @@ class ReferenceSet:
 
     sites: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     unknown: str = ""
+    #: Sites naming a sub-root itself: they name every entry in it (F-BYPS 3).
+    root_sites: tuple[str, ...] = ()
 
     def for_entry(self, name: str) -> References:
         """The entry's references; unknown when the set is, or the name is unsearchable."""
@@ -88,16 +90,43 @@ class ReferenceSet:
             return References((), self.unknown)
         if not _NAME.fullmatch(name):
             return References((), UNSEARCHABLE_NAME)
-        return References(self.sites.get(name, ()))
+        own = self.sites.get(name, ())
+        return References((*own, *(site for site in self.root_sites if site not in own)))
 
 
 class _Unknown(Exception):
     """The reference set cannot be known; the message says why."""
 
 
+def names_whole_root(relative_root: str) -> bool:
+    """True for a root deeper than ``untracked/<name>``: a mention of it names its entries.
+
+    The coordinator's ruling on F-BYPS 3: a tracked line naming a sub-root
+    itself protects every entry in it, but a line naming only an ancestor
+    (``untracked/scratch/``, which docs cite everywhere) does not. A top-level
+    root such as ``untracked/scratch`` keeps the per-entry rule.
+    """
+    return relative_root.count("/") >= 2
+
+
 def _pattern(relative_root: str) -> str:
     escaped = relative_root.replace(".", "[.]").replace("+", "[+]")
+    if names_whole_root(relative_root):
+        return f"{escaped}{PATH_CLASS}*"
     return f"{escaped}/{PATH_CLASS}+"
+
+
+def _strip_forms(match: str) -> set[str]:
+    return {match, match.rstrip("./"), match.rstrip(_TRAILING)}
+
+
+def _names_root(match: str, relative_root: str) -> bool:
+    """A match that, stripped or dot-resolved, is the root itself."""
+    return any(
+        form == relative_root or posixpath.normpath(form) == relative_root
+        for form in _strip_forms(match)
+        if form
+    )
 
 
 def _branch_listing(project: ProjectGit, *extra: str) -> list[tuple[str, str]]:
@@ -178,10 +207,12 @@ def _entries_named(match: str, relative_root: str) -> set[str]:
     """Every entry name a matched path could mean; stripping only adds candidates."""
     prefix = f"{relative_root}/"
     if not match.startswith(prefix):
+        if names_whole_root(relative_root) and match.startswith(relative_root):
+            return set()  # the root itself, or a sibling sharing its prefix (``sub`` vs ``subway``)
         raise _Unknown("git grep returned a match outside the root")
     rest = match[len(prefix) :]
     names: set[str] = set()
-    for form in {rest, rest.rstrip("./"), rest.rstrip(_TRAILING)}:
+    for form in _strip_forms(rest):
         candidates = [form]
         resolved = posixpath.normpath(f"{relative_root}/{form}")
         if resolved.startswith(prefix):
@@ -213,6 +244,8 @@ def build_references(project: ProjectGit | None, relative_root: str | None) -> R
     except _Unknown as unknown:
         return ReferenceSet(unknown=f"references from tracked files: {unknown}")
     sites: dict[str, list[str]] = {}
+    root_sites: list[str] = []
+    whole_root = names_whole_root(relative_root)
     for sha, path, line, match in found:
         if sha is not None and sha not in revs:
             return ReferenceSet(
@@ -224,12 +257,16 @@ def build_references(project: ProjectGit | None, relative_root: str | None) -> R
             names = _entries_named(match, relative_root)
         except _Unknown as unknown:
             return ReferenceSet(unknown=f"references from tracked files: {unknown}")
-        for name in names:
-            listed = sites.setdefault(name, [])
+        targets = [sites.setdefault(name, []) for name in names]
+        if whole_root and _names_root(match, relative_root):
+            targets.append(root_sites)
+        for listed in targets:
             # The working tree repeats every committed line HEAD already showed.
             if site not in listed and not (sha is None and f"HEAD:{path}:{line}" in listed):
                 listed.append(site)
-    return ReferenceSet({name: tuple(listed) for name, listed in sites.items()})
+    return ReferenceSet(
+        {name: tuple(listed) for name, listed in sites.items()}, root_sites=tuple(root_sites)
+    )
 
 
 __all__ = [

@@ -364,13 +364,15 @@ class TestTrackedListing:
         assert _verdicts(report) == {"a.log": "STUCK"}
 
 
-def _git_sweep(gp: GitProject, now: float, **kwargs: Any) -> SweepReport:
+def _git_sweep(
+    gp: GitProject, now: float, *, root: Path | None = None, **kwargs: Any
+) -> SweepReport:
     """A sweep of a real git project's scratch root, every entry's TTL past."""
     config = ScratchConfig()
     project_git = build_project_git(gp.project, remote="origin", default_branch="main")
     return run_sweep(
         resolve_sweep_root(
-            gp.tree.root,
+            root or gp.tree.root,
             project_root=gp.project,
             config=config,
             reference_roots=("untracked/repos",),
@@ -551,6 +553,27 @@ class TestReferenced:
         row = next(row for row in report.rows if row.name == "repo")
         assert row.reasons == ("named by 1 tracked line(s), first HEAD:docs/a.md:2",)
         assert report.complete
+
+    def test_a_reference_to_a_sub_root_itself_protects_its_entries(self, tmp_path: Path) -> None:
+        """F-BYPS 3: ``--root untracked/scratch/sub`` honours a line naming ``sub``."""
+        gp = build_git_project(tmp_path)
+        commit_file(gp.project, "docs/ref.md", "see untracked/scratch/sub for the evidence\n")
+        gp.tree.file("sub/run.log")
+        gp.tree.file("sub/qa-findings.md")
+        now = _now()
+        for name in ("run.log", "qa-findings.md"):
+            gp.tree.set_tree_mtime(f"sub/{name}", now - 2 * _DAY)
+        report = _git_sweep(gp, now, root=gp.tree.root / "sub")
+        assert _verdicts(report) == {"run.log": "REFERENCED", "qa-findings.md": "REFERENCED"}
+
+    def test_an_ancestor_mention_does_not_protect_sub_root_entries(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        commit_file(gp.project, "docs/ref.md", "scratch goes in untracked/scratch/ always\n")
+        gp.tree.file("sub/run.log")
+        now = _now()
+        gp.tree.set_tree_mtime("sub/run.log", now - 2 * _DAY)
+        report = _git_sweep(gp, now, root=gp.tree.root / "sub")
+        assert _verdicts(report) == {"run.log": "DISPOSABLE"}
 
     def test_protected_beats_referenced(self, tmp_path: Path) -> None:
         gp = build_git_project(tmp_path)
