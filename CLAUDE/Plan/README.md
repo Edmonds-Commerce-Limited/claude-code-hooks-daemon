@@ -8,7 +8,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - Not Started (owner request: a full scratch management system; every scratch entry has a 24-hour TTL and past it is filed, packed into a verified archive and removed after a hold, or kept only on a machine proof of unpushed or human work; a `scratch-sweep` command, a SessionStart report, caps that act before the link index overflows, a per-session scratch directory; design written, rulings by a delegated sub-agent, no code yet; takes over Plan 00560's sweep)
+- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - In Progress (owner request: a full scratch management system; every scratch entry has a 24-hour TTL and past it is filed, packed into a verified archive and removed after a hold, or kept only on a machine proof of unpushed or human work; a `scratch-sweep` command, a SessionStart report, caps that act before the link index overflows, a per-session scratch directory; design written, rulings by a delegated sub-agent; Phase 1 read-only core under way; takes over Plan 00560's sweep)
 
 - [00628: daemon socket path too long from init sh](00628-daemon-socket-path-too-long-from-init-sh/PLAN.md) - In Progress (live defect for 3.76.0: init.sh forced an over-limit socket path on the daemon, so a long project path denied every tool call; one path-fitting function for every caller, discovery file only after bind, safe short-path root)
 

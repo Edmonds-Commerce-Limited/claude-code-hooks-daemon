@@ -1,6 +1,6 @@
 # Plan 00627: scratch management ttl and filing
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-19
 **Owner**: joseph
 **Priority**: High
@@ -57,7 +57,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 
 ### Phase 1: Read-only core (no mutation anywhere)
 
-- [ ] ⬜ **Task 1.1**: Add the fake-tree builder `tests/helpers/scratch_tree.py` with its own tests (entries, set mtimes, links to dummy files outside the root, hard links, FIFOs, unreadable directories).
+- [x] ✅ **Task 1.1**: Add the fake-tree builder `tests/support/scratch_tree.py` (the project's helper directory) with its own tests (entries, set mtimes, links to dummy files outside the root, hard links, FIFOs, unreadable directories).
 - [ ] ⬜ **Task 1.2**: Add the `scratch:` keys of DESIGN.md section 10 to the config model, with validation tests (bounds, `extra="forbid"`).
 - [ ] ⬜ **Task 1.3**: Add the entry walker: per entry, directories, files, bytes, newest mtime, special files, link counts, nested `.git` markers. `lstat` only, one device, a `ScanDeadline` budget, and an explicit incomplete result.
 - [ ] ⬜ **Task 1.4**: Add the TTL clock (DESIGN.md section 4): newest mtime, root ctime, birth time, future mtimes, maximum lifetime.
