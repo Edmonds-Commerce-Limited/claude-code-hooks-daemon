@@ -29,6 +29,7 @@ that hand a whole directory to a reader (``find -exec``, ``xargs``, ``tar``, ``c
 
 import contextvars
 import fnmatch
+import logging
 import os
 import posixpath
 import re
@@ -41,6 +42,7 @@ from claude_code_hooks_daemon.utils import linear_shlex, path_exclusion
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import GIT_GLOBAL_OPTIONS_TAKING_SEPARATE_VALUE
 from claude_code_hooks_daemon.utils.command_position import SHELL_NAMES
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.find_expression import FIND_EXEC_ACTIONS, find_exec_end
 from claude_code_hooks_daemon.utils.git_repo import RELOCATING_VARIABLES
 from claude_code_hooks_daemon.utils.grep_option_grammar import (
@@ -79,6 +81,8 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted_spans,
 )
 from claude_code_hooks_daemon.utils.shell_snapshot import default_glob_semantics
+
+logger = logging.getLogger(__name__)
 
 # Whether the command being read names the ripgrep config variable; set by
 # :func:`search_reads` for the duration of one read, so the nested readers see it.
@@ -2060,11 +2064,19 @@ def _reads_of_roots(
     *,
     follows: LinkFollow = LinkFollow.ALL,
 ) -> Iterator[Read]:
+    unlistable = False
     try:
         roots = _brace_spellings(roots)
-    except TooManyToEnumerateError:
-        # Brace operands are judged as each spelling; one that cannot be listed
-        # (past the cap, or quoting that hides a group) fails closed.
+    except TooManyToEnumerateError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="a brace operand that cannot be listed (past the cap, or quoting that "
+            "hides a group) fails closed: every indexed file is judged",
+            level=logging.DEBUG,
+        )
+        unlistable = True
+    if unlistable:
         yield Read(_EVERYTHING, view=TreeView.ALL, follows=follows)
         return
     if any(unknown_tilde(root) for root in roots):

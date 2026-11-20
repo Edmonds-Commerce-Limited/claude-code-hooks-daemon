@@ -156,9 +156,14 @@ class _Links:
                             links.append(entry.path)
                         elif entry.is_dir(follow_symlinks=False):
                             queue.append(entry.path)
-            except (FileNotFoundError, NotADirectoryError):
-                # A missing root, or a file, holds no link below it; a file root that is
-                # itself a link is find_under's to judge.
+            except (FileNotFoundError, NotADirectoryError) as exc:
+                # A file root that is itself a link is find_under's to judge.
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="a missing root, or a file, holds no link below it",
+                    level=logging.DEBUG,
+                )
                 continue
             except OSError as exc:
                 log_and_continue(
