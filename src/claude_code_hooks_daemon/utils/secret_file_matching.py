@@ -68,6 +68,7 @@ from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.realpath import resolve_checking_loop
 from claude_code_hooks_daemon.utils.resolution_failure import (
     IncompleteScanError,
+    ProcessViewRefusedError,
     ResolutionFailedError,
     fails_closed,
     refuse_process_view,
@@ -92,6 +93,44 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.utils.protected_file_index import ProtectedFileIndex
 
 logger = logging.getLogger(__name__)
+
+
+# ── Process-view words in the Bash mention scan (release 3.76.0 review F2) ───
+class ProcessViewMode(Enum):
+    """How the mention scan treats a word through the calling process's own view.
+
+    ``REFUSE`` (the default, and every caller but the guard's Bash route) lets
+    :class:`ProcessViewRefusedError` propagate, so the caller denies. Under
+    ``MENTION`` the word is a mention carrying :data:`PROCESS_VIEW_PATTERN`,
+    so the same position exemptions a protected name gets apply to it.
+    ``NAMES_ONLY`` judges such a word as naming nothing, and ``VIEWS_ONLY``
+    yields nothing BUT such words: the guard runs the two as a pair over
+    different spellings of one command, so between them every word is judged.
+    """
+
+    REFUSE = "refuse"
+    MENTION = "mention"
+    NAMES_ONLY = "names-only"
+    VIEWS_ONLY = "views-only"
+
+
+#: The pattern a process-view mention carries; it is no glob, and matches no file.
+PROCESS_VIEW_PATTERN: Final[str] = "<process-view>"
+
+_PROCESS_VIEW_MODE: contextvars.ContextVar[ProcessViewMode] = contextvars.ContextVar(
+    "secret_file_matching_process_view_mode", default=ProcessViewMode.REFUSE
+)
+
+
+@contextlib.contextmanager
+def process_view_mode(mode: ProcessViewMode) -> Iterator[None]:
+    """Judge process-view words by ``mode`` for the duration of the block."""
+    token = _PROCESS_VIEW_MODE.set(mode)
+    try:
+        yield
+    finally:
+        _PROCESS_VIEW_MODE.reset(token)
+
 
 # ── Config modes (additive/replace paradigm, mirrors command_hints) ──────────
 MODE_ADDITIVE: Final[str] = "additive"
@@ -2803,6 +2842,7 @@ def iter_protected_mentions(
     mention_cache: dict[str, str | None] = {}
     yielded_tokens: set[str] = set()
     default_globs = _default_globs_for(command)
+    views_only = _PROCESS_VIEW_MODE.get() is ProcessViewMode.VIEWS_ONLY
 
     def judge(word: str) -> str | None:
         """The pattern ``word`` mentions once the bare-dotted gate has judged it."""
@@ -2882,6 +2922,8 @@ def iter_protected_mentions(
                 # file does not make the whole string a mention.
                 pattern = next((p for p in map(judge, token.split()) if p is not None), None)
             mention_cache[token] = pattern
+        if views_only and pattern != PROCESS_VIEW_PATTERN:
+            continue
         if pattern is not None and token not in yielded_tokens:
             yielded_tokens.add(token)
             yield (pattern, token)
@@ -3129,6 +3171,47 @@ def _file_url_path_tokens(
 
 
 def _token_mention(
+    token: str,
+    patterns: tuple[str, ...],
+    stem_pairs: list[tuple[str, str]],
+    project_root: str | None,
+    *,
+    context: MentionContext = "bash",
+    realpath_cache: dict[str, tuple[str, ...]] | None = None,
+    expands_globs: Callable[[], bool] = lambda: True,
+    effective_cwds: tuple[str, ...] = (),
+    is_quoted_literal: Callable[[], bool] = lambda: False,
+    index: "ProtectedFileIndex | None" = None,
+    default_globs: Callable[[], bool] = lambda: False,
+) -> str | None:
+    """:func:`_token_mention_judged`, with a process-view word judged by the active mode.
+
+    Under :attr:`ProcessViewMode.REFUSE` the refusal propagates. Otherwise the
+    word is a mention carrying :data:`PROCESS_VIEW_PATTERN`, or, under
+    ``NAMES_ONLY``, names nothing.
+    """
+    mode = _PROCESS_VIEW_MODE.get()
+    try:
+        return _token_mention_judged(
+            token,
+            patterns,
+            stem_pairs,
+            project_root,
+            context=context,
+            realpath_cache=realpath_cache,
+            expands_globs=expands_globs,
+            effective_cwds=effective_cwds,
+            is_quoted_literal=is_quoted_literal,
+            index=index,
+            default_globs=default_globs,
+        )
+    except ProcessViewRefusedError:
+        if mode is ProcessViewMode.REFUSE:
+            raise
+        return None if mode is ProcessViewMode.NAMES_ONLY else PROCESS_VIEW_PATTERN
+
+
+def _token_mention_judged(
     token: str,
     patterns: tuple[str, ...],
     stem_pairs: list[tuple[str, str]],
@@ -5295,7 +5378,9 @@ def is_encrypted_target_invocation(
     if not _is_encrypted_target_reader(words):
         return False
     mentions = list(iter_protected_mentions(command, patterns, deadline=deadline, cwd=cwd))
-    if not mentions:
+    if not mentions or any(pattern == PROCESS_VIEW_PATTERN for pattern, _token in mentions):
+        # A process-view word would be read for encryption through the
+        # DAEMON's own view, not the shell's, so it is never confirmed.
         return False
     literal_words = frozenset(words)
     return all(

@@ -1444,7 +1444,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
 
     def _literal_finding_or_advisory(
         self, hook_input: dict[str, Any], reason: str
-    ) -> tuple[str, str, str]:
+    ) -> tuple[str, str, str] | None:
         """The literal protected path in a Bash command whose full scan gave up, else an advisory."""
         tool_input = hook_input.get(HookInputField.TOOL_INPUT)
         command = tool_input.get(_FIELD_COMMAND) if isinstance(tool_input, dict) else None
@@ -1471,17 +1471,26 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
 
     def _gave_up_finding_or_advisory(
         self, hook_input: dict[str, Any], reason: str
-    ) -> tuple[str, str, str]:
-        """The literal fallback, then a finding when a search or glob was left unjudged (review 614c P2)."""
-        found = self._literal_finding_or_advisory(hook_input, reason)
-        if found[2] != _ADVISORY_ROUTE or not _holds_search_or_glob(hook_input):
-            return found
-        patterns = self._patterns()
-        route = "bash" if hook_input.get(HookInputField.TOOL_NAME) == ToolName.BASH else "read"
-        return (patterns[0] if patterns else _NOT_JUDGED_PATTERN, _GAVE_UP_TOKEN, route)
+    ) -> tuple[str, str, str] | None:
+        """The literal fallback, then a finding when a search or glob was left unjudged (review 614c P2).
 
-    def _unresolved_finding(self, hook_input: dict[str, Any]) -> tuple[str, str, str]:
-        """A finding for a call whose words could not be placed (review 614b): it is denied."""
+        With no protected pattern nothing is protected, so a scan that gave up
+        has nothing it could have found (``fail_closed_finding``'s contract).
+        """
+        patterns = self._patterns()
+        if not patterns:
+            return None
+        found = self._literal_finding_or_advisory(hook_input, reason)
+        if found is None or found[2] != _ADVISORY_ROUTE or not _holds_search_or_glob(hook_input):
+            return found
+        route = "bash" if hook_input.get(HookInputField.TOOL_NAME) == ToolName.BASH else "read"
+        return (patterns[0], _GAVE_UP_TOKEN, route)
+
+    def _unresolved_finding(self, hook_input: dict[str, Any]) -> tuple[str, str, str] | None:
+        """A finding for a call whose words could not be placed (review 614b): it is denied.
+
+        None when no pattern is protected: there is nothing a placement could reach.
+        """
         patterns = self._patterns()
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         if tool_name == ToolName.BASH:
@@ -1491,9 +1500,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         else:
             route = "read"
         finding = fail_closed_finding(patterns, _UNRESOLVED_TOKEN)
-        if finding is None:
-            return (_NOT_JUDGED_PATTERN, _UNRESOLVED_TOKEN, route)
-        return (*finding, route)
+        return None if finding is None else (*finding, route)
 
     def prewarm_index(self) -> None:
         """Start building the protected-file and link indexes now; never waits for them."""
@@ -1550,69 +1557,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             command = strip_quoted_heredoc_bodies(
                 str(tool_input.get(_FIELD_COMMAND, "")), text_readers_only=True
             )
-            deadline = time.monotonic() + sfm.SCAN_DEADLINE_SECONDS
-            # review 7 follow-up (team-lead's double-scan finding): decode
-            # ONCE, up front, when it is provably safe to share with BOTH
-            # the ordinary scan below and the one-liner fallback further
-            # down -- true whenever import-module-path stripping would not
-            # change `command` at all (the overwhelming majority of
-            # commands: anything with no `import <module>` positioned where
-            # the stripper looks). `None` means stripping WOULD change the
-            # text -- sharing would corrupt a `-c "import ...` argument's
-            # own syntax before the one-liner scan's AST-based literal
-            # extraction runs (proven RED by a real inline-import one-liner
-            # that stopped matching once fed stripped words) -- so each
-            # consumer decodes separately for correctness, same as before.
-            shared_words = sfm.bash_route_word_stream(command, deadline=deadline)
-            # A bare dotted word is a mention only when it names an existing or
-            # indexed file, so such a command needs the index too.
-            needs_index = _MAY_GLOB.search(command) or sfm.has_bare_dotted_word(command)
-            index = self._index(patterns) if needs_index else None
-            # A glob is expanded against the index of protected files; with none
-            # it goes unjudged, and the agent is told so (never a silent allow).
-            glob_unjudged = index is None and sfm.has_name_agnostic_glob(command)
-            mention = sfm.find_protected_mention_detail(
-                command,
-                patterns,
-                deadline=deadline,
-                cwd=cwd,
-                normalised_words=shared_words,
-                bash_tool_command=True,
-                index=index,
-            )
-            if mention is None:
-                # review 6 minor-2: an interpreter one-liner's own
-                # shell-exec call can hide a protected mention the ordinary
-                # text scan above never sees (the AST-folded/adjacent-
-                # literal cases especially) -- checked only when the plain
-                # scan found nothing, since a match there already answers
-                # the question more cheaply.
-                one_liner_mention = _bash_interpreter_one_liner_mention(
-                    command, patterns, deadline=deadline, cwd=cwd, words=shared_words
-                )
-                if one_liner_mention is None:
-                    return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
-                return (*one_liner_mention, "bash")
-            # The EFFECTIVE patterns are passed through (review finding 1):
-            # the flag-position check re-tests bare consumer arguments, and
-            # testing the shipped defaults there would blind it to every
-            # project-configured pattern — all of them under mode: replace.
-            if sfm.is_exempt_invocation(
-                command, self._consumers(), patterns, deadline=deadline, cwd=cwd
-            ):
-                return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
-            if sfm.is_encrypted_target_invocation(
-                command, patterns, cwd=cwd, is_encrypted=self._is_encrypted, deadline=deadline
-            ):
-                return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
-            # Plan 00466 niggle (gd5_fp): a grep-family search PATTERN that
-            # happens to spell a protected name is not a read of that file
-            # -- only a FILE-TARGET argument is (see the function's own
-            # docstring for the position-based distinction and every shape
-            # this must NOT unlock).
-            if sfm.is_grep_pattern_only_mention(command, patterns, deadline=deadline, cwd=cwd):
-                return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
-            return (mention[0], mention[1], "bash")
+            return self._judge_bash_with_views(hook_input, command, patterns, cwd)
 
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
         if path_field is None:
@@ -1652,6 +1597,125 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 return None
             return (script_mention[0], script_mention[1], "script")
         return None
+
+    def _judge_bash_with_views(
+        self,
+        hook_input: dict[str, Any],
+        command: str,
+        patterns: tuple[str, ...],
+        cwd: str | None,
+    ) -> tuple[str, str, str] | None:
+        """The Bash verdict, with a process-view word judged where a protected name is.
+
+        Release 3.76.0 review F2: a word through the calling process's own view
+        (N668) is a mention, so the grep-PATTERN exemption that clears a
+        protected name clears it too, while every position that opens it still
+        denies. A quoted heredoc body written only to ``.md`` files is prose no
+        command opens, so process-view words there are not judged: the names
+        pass reads the whole command with such words naming nothing, and the
+        views pass reads only the command with those bodies blanked. A
+        process-view finding is reported as the unresolved finding it was.
+        """
+        prose_blanked = strip_quoted_heredoc_bodies(
+            command, text_readers_only=True, prose_sinks=True
+        )
+        if prose_blanked == command:
+            with sfm.process_view_mode(sfm.ProcessViewMode.MENTION):
+                found = self._judge_bash(command, patterns, cwd)
+        else:
+            with sfm.process_view_mode(sfm.ProcessViewMode.NAMES_ONLY):
+                found = self._judge_bash(command, patterns, cwd)
+            if found is None or found[2] == _ADVISORY_ROUTE:
+                with sfm.process_view_mode(sfm.ProcessViewMode.VIEWS_ONLY):
+                    views = self._judge_bash(prose_blanked, patterns, cwd)
+                if views is not None:
+                    found = views
+        if found is not None and found[0] == sfm.PROCESS_VIEW_PATTERN:
+            return self._unresolved_finding(hook_input)
+        return found
+
+    def _judge_bash(
+        self, command: str, patterns: tuple[str, ...], cwd: str | None
+    ) -> tuple[str, str, str] | None:
+        """The Bash route's mention scan and exemptions, under the active process-view mode."""
+        deadline = time.monotonic() + sfm.SCAN_DEADLINE_SECONDS
+        # review 7 follow-up (team-lead's double-scan finding): decode
+        # ONCE, up front, when it is provably safe to share with BOTH
+        # the ordinary scan below and the one-liner fallback further
+        # down -- true whenever import-module-path stripping would not
+        # change `command` at all (the overwhelming majority of
+        # commands: anything with no `import <module>` positioned where
+        # the stripper looks). `None` means stripping WOULD change the
+        # text -- sharing would corrupt a `-c "import ...` argument's
+        # own syntax before the one-liner scan's AST-based literal
+        # extraction runs (proven RED by a real inline-import one-liner
+        # that stopped matching once fed stripped words) -- so each
+        # consumer decodes separately for correctness, same as before.
+        shared_words = sfm.bash_route_word_stream(command, deadline=deadline)
+        # A bare dotted word is a mention only when it names an existing or
+        # indexed file, so such a command needs the index too.
+        needs_index = _MAY_GLOB.search(command) or sfm.has_bare_dotted_word(command)
+        index = self._index(patterns) if needs_index else None
+        # A glob is expanded against the index of protected files; with none
+        # it goes unjudged, and the agent is told so (never a silent allow).
+        glob_unjudged = index is None and sfm.has_name_agnostic_glob(command)
+        mention = sfm.find_protected_mention_detail(
+            command,
+            patterns,
+            deadline=deadline,
+            cwd=cwd,
+            normalised_words=shared_words,
+            bash_tool_command=True,
+            index=index,
+        )
+        if mention is None:
+            # review 6 minor-2: an interpreter one-liner's own
+            # shell-exec call can hide a protected mention the ordinary
+            # text scan above never sees (the AST-folded/adjacent-
+            # literal cases especially) -- checked only when the plain
+            # scan found nothing, since a match there already answers
+            # the question more cheaply.
+            one_liner_mention = _bash_interpreter_one_liner_mention(
+                command, patterns, deadline=deadline, cwd=cwd, words=shared_words
+            )
+            if one_liner_mention is None:
+                return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
+            return (*one_liner_mention, "bash")
+        # The consumer and encrypted-target exemptions vouch for a file the
+        # command OPENS; a process-view word is one the daemon cannot place,
+        # so neither may clear a command holding one (release 3.76.0 F2).
+        opens_a_view = mention[0] == sfm.PROCESS_VIEW_PATTERN or any(
+            pattern == sfm.PROCESS_VIEW_PATTERN
+            for pattern, _token in sfm.iter_protected_mentions(
+                command,
+                patterns,
+                deadline=deadline,
+                cwd=cwd,
+                normalised_words=shared_words,
+                bash_tool_command=True,
+                index=index,
+            )
+        )
+        # The EFFECTIVE patterns are passed through (review finding 1):
+        # the flag-position check re-tests bare consumer arguments, and
+        # testing the shipped defaults there would blind it to every
+        # project-configured pattern — all of them under mode: replace.
+        if not opens_a_view and sfm.is_exempt_invocation(
+            command, self._consumers(), patterns, deadline=deadline, cwd=cwd
+        ):
+            return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
+        if not opens_a_view and sfm.is_encrypted_target_invocation(
+            command, patterns, cwd=cwd, is_encrypted=self._is_encrypted, deadline=deadline
+        ):
+            return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
+        # Plan 00466 niggle (gd5_fp): a grep-family search PATTERN that
+        # happens to spell a protected name is not a read of that file
+        # -- only a FILE-TARGET argument is (see the function's own
+        # docstring for the position-based distinction and every shape
+        # this must NOT unlock).
+        if sfm.is_grep_pattern_only_mention(command, patterns, deadline=deadline, cwd=cwd):
+            return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
+        return (mention[0], mention[1], "bash")
 
     def _search_reach(
         self,
