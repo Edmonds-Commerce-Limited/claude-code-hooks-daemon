@@ -1137,9 +1137,7 @@ def effective_removals(entries: Iterable[LedgerEntry]) -> list[LedgerLine]:
     """The removal lines no ``git-refused`` line cancels (same tip and verdicts)."""
     materialised = list(entries)
     refused = {
-        (entry.tip, entry.verdict_ids)
-        for entry in materialised
-        if isinstance(entry, LedgerRefusal)
+        (entry.tip, entry.verdict_ids) for entry in materialised if isinstance(entry, LedgerRefusal)
     }
     return [
         entry
@@ -1209,9 +1207,7 @@ def approve_removal(
     default_sha = _resolve(repo, _full_ref(default_ref))
     inventory = compute_inventory(repo, branch, default_ref)
     removals = removals_in_window(effective_removals(entries), now=route.now, config=route.config)
-    required = admit_request(
-        branch, tip, inventory, route.store.keeps(), removals, route.config
-    )
+    required = admit_request(branch, tip, inventory, route.store.keeps(), removals, route.config)
     verdicts = route.store.verdicts_for(branch, tip)
     if not verdicts:
         raise RejectRefusedError("no reviewer verdict is on file for this tip")
