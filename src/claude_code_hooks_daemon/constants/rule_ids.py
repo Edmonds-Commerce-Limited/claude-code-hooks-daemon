@@ -237,7 +237,7 @@ class RuleID:
     # staged_lint_gate handler
     # ------------------------------------------------------------------
 
-    #: A staged file fails the cheap syntax check at commit time.
+    #: A staged file fails its cheap syntax check (a workflow: actions-qa) at commit time.
     STAGED_LINT_FAILURE: str = "R-STAGED-LINT-FAILURE"
 
     # ------------------------------------------------------------------

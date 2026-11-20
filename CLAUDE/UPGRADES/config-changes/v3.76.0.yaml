@@ -60,3 +60,38 @@ config_changes:
         handlers:
           user_prompt_submit:
             branch_pool_pressure_prompt: {enabled: true, priority: 44}
+    - key: handlers.session_start.workflow_linter_advisor
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00621). At a new session (not a resume), when
+        `.github/workflows/` holds at least one `.yml`/`.yaml` file and none
+        has a `uses:` line naming `actions-qa-ci`, suggests that workflow
+        linter: what it checks and its release page. It prints no install
+        command, never runs the linter and never blocks. A workflow file it
+        cannot read is named and never counts as using the linter.
+      example_yaml: |
+        handlers:
+          session_start:
+            workflow_linter_advisor:
+              enabled: true
+              priority: 72
+      migration_note: >-
+        On by default. Adopt the linter, or set `enabled: false` to silence
+        the suggestion.
+    - key: handlers.post_tool_use.lint_on_edit.options.timeouts."GitHub Workflow"
+      recommended: false
+      dormant: false
+      description: >-
+        NEW language name (Plan 00621). lint_on_edit runs the optional
+        `actions-qa check --file` linter on a file directly in
+        `.github/workflows/`; `GitHub Workflow` is its language name for
+        `options.timeouts`, `options.languages` and `options.command_overrides`.
+        Default budget 15s; a timeout allows the edit with an advisory.
+      example_yaml: |
+        handlers:
+          post_tool_use:
+            lint_on_edit:
+              options:
+                timeouts:
+                  "GitHub Workflow": 30

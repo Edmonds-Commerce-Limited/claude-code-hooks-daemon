@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.core.workspace import resolve_workspace
 from claude_code_hooks_daemon.strategies.lint.common import (
     build_lint_argv,
+    is_findings_exit,
     matches_skip_path,
     resolve_lint_executable,
 )
@@ -178,7 +179,10 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         # about the gate itself goes terse-after-first-fire.
         self._rule = Rule(
             rule_id=RuleID.STAGED_LINT_FAILURE,
-            blocked="a staged file fails the cheap syntax check at commit time",
+            blocked=(
+                "a staged file fails its cheap syntax check (or, for a workflow, "
+                "the actions-qa linter) at commit time"
+            ),
             why=(
                 "lint_on_edit only ever runs at Write/Edit time, so a git add of "
                 "pre-existing content skips it entirely"
@@ -188,7 +192,10 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
                 "This is the CHEAP syntax tier only -- the same check `lint_on_edit` "
                 "would have run at Write/Edit time, run again here because a file can "
                 "reach the index by routes `lint_on_edit` never sees (a `git add` of "
-                "something written earlier, a merge, a commit of pre-existing changes)."
+                "something written earlier, a merge, a commit of pre-existing changes). "
+                "A staged `.github/workflows/` file is run through `actions-qa check "
+                "--file` instead, where that optional linter is installed; only its "
+                "findings exit counts."
             ),
         )
         self._formatter = RuleFormatter()
@@ -417,6 +424,22 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         if result.returncode == 0:
             return None
 
+        if not is_findings_exit(strategy, result.returncode):
+            # The strategy names its tool's findings codes and this is not one:
+            # the tool faulted and never judged the file, so it cannot fail a
+            # commit -- the same contract lint_on_edit applies (Plan 00621).
+            tool_error = " ".join(f"{result.stderr or ''} {result.stdout or ''}".split())[:300]
+            logger.warning(
+                "staged_lint_gate: %s was NOT checked: %s exited %d, which is not a "
+                "findings code for %s; tool said: %s",
+                file_path,
+                parts[0],
+                result.returncode,
+                strategy.language_name,
+                tool_error or "(no output)",
+            )
+            return None
+
         output = result.stdout
         if result.stderr:
             output = f"{output}\n{result.stderr}" if output else result.stderr
@@ -476,6 +499,13 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
             "deeper `extended` linter, and never more than `max_files` (default 20) "
             "files, which stands the whole check down with an advisory naming how "
             "many were skipped rather than linting a subset silently.\n\n"
+            "**A staged GitHub workflow is the exception.** A file directly inside "
+            "`.github/workflows/` has no cheap syntax tier: its check IS the "
+            "optional `actions-qa check --file` linter, run on the working-tree "
+            "copy with a 15s budget. Only exit 1 (findings) counts as a failure; "
+            "any other exit, a missing linter or a timeout never affects the "
+            "commit and is only logged, so a commit that passes did not "
+            "necessarily have its workflows checked.\n\n"
             "**This is a BACKSTOP, not a replacement for `lint_on_edit`.** "
             "`lint_on_edit` only ever sees a file at the moment `Write`/`Edit` "
             "touches it. A file that reaches the index by any OTHER route — "

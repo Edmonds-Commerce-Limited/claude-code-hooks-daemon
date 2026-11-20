@@ -3055,6 +3055,12 @@ session, a merge, a commit of pre-existing changes) is never linted before it
 lands. This handler catches that at the one point guaranteed to see it -- the
 commit itself.
 
+**Staged workflows** (Plan 00621): a file directly in `.github/workflows/` has
+no syntax tier; it is run through the optional `actions-qa check --file` linter
+on the working-tree copy (15s budget). Only its findings exit (1) is a failure;
+any other exit, a missing linter or a timeout never affects the commit and is
+only logged.
+
 **Fires when:** a Bash command's command string contains a `git commit`
 invocation in any segment (evasion-resistant via `GIT_INVOCATION`/`ENV_PREFIX`
 -- `git -C <path> commit`, `env git commit`, and line-continued spellings are
@@ -3982,7 +3988,7 @@ handlers:
 | **Type**       | Blocking       |
 | **Event**      | PostToolUse    |
 
-**Description:** Runs a language-aware lint check on source files after they are written, and DENIES on failure. Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) then an optional deeper linter (`ruff`, `shellcheck`, `golangci-lint`, `rubocop`, …). Tools resolve from the daemon's venv before `PATH`. A linter that is not installed ALLOWs with an advisory — that message means the check was skipped, not that it passed. `.ts`/`.tsx` files are handled by `validate_eslint_on_write` instead, which is stricter.
+**Description:** Runs a language-aware lint check on source files after they are written, and DENIES on failure. Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) then an optional deeper linter (`ruff`, `shellcheck`, `golangci-lint`, `rubocop`, …). Tools resolve from the daemon's venv before `PATH`. A linter that is not installed ALLOWs with an advisory — that message means the check was skipped, not that it passed (the optional workflow linter, below, is silent instead). `.ts`/`.tsx` files are handled by `validate_eslint_on_write` instead, which is stricter.
 
 **Bash-authored files**: as for `validate_eslint_on_write` above — authoring routes are linted, relocation routes are not. A command that authors several files (`tee a.py b.py`) has each linted, and the first failure is reported.
 
@@ -3990,13 +3996,21 @@ handlers:
 plausibly a playbook or role task file — by Ansible's own path conventions
 (`playbooks/`, `roles/`, `tasks/`, `handlers/`, `site.yml`, `play-*`,
 `playbook-*`) or by carrying a top-level `- hosts:` / `- import_playbook:`
-line wherever it sits. Everything else sharing the extension is left alone
-(`.github/workflows/`, `docker-compose*`, `group_vars/`, `host_vars/`,
-inventories, vault files — never read). The cheap tier is
+line wherever it sits. A file directly in `.github/workflows/` goes to the
+workflow linter below; everything else sharing the extension is not linted
+(`docker-compose*`, `group_vars/`, `host_vars/`, inventories, vault files —
+never read). The cheap tier is
 `ansible-playbook --syntax-check`, which catches a play that will not LOAD
 (e.g. an unbalanced quote inside a `shell:` block); full `ansible-lint` runs
 at the `extended` tier. The linter runs from the nearest directory containing
 `ansible.cfg`, because roles and collections resolve relative to it.
+
+**GitHub workflows** (Plan 00621): a file directly in `.github/workflows/` is
+run through the optional `actions-qa check --file` linter (the
+[actions-qa-ci](https://github.com/LongTermSupport/actions-qa-ci/releases)
+project). Only its findings exit (1) DENIES; any other exit ALLOWs with a "NOT
+checked" advisory, and a missing linter is silent (`workflow_linter_advisor`
+suggests it at session start). Budget: `options.timeouts."GitHub Workflow"`.
 
 **Rust** (GitHub #76): `rustc` runs from the nearest `Cargo.toml` with that
 crate's edition (`package.edition`, or `[workspace.package].edition` when the
@@ -4007,12 +4021,13 @@ means it cannot be resolved outside its crate (`E0432`, `E0433`, `E0463`,
 checked. Syntax errors and other compiler errors still DENY. A `command_overrides`
 template may use `{edition}` as a whole argument; one without it is run as written.
 
-| Option              | Values         | Default | Effect                                                                                          |
-| ------------------- | -------------- | ------- | ----------------------------------------------------------------------------------------------- |
-| `lint_bash_writes`  | `true`/`false` | `true`  | Lint files authored by a Bash command. `false` restricts the handler to `Write`/`Edit` only.    |
-| `languages`         | list           | all     | Restrict which languages are checked.                                                           |
-| `command_overrides` | map            | none    | Replace a language's `default`/`extended` command; `extended: null` runs only the syntax check. |
-| `exclude_paths`     | glob list      | none    | Exempt paths entirely; unions with `daemon.exclude_paths`.                                      |
+| Option              | Values         | Default | Effect                                                                                            |
+| ------------------- | -------------- | ------- | ------------------------------------------------------------------------------------------------- |
+| `lint_bash_writes`  | `true`/`false` | `true`  | Lint files authored by a Bash command. `false` restricts the handler to `Write`/`Edit` only.      |
+| `languages`         | list           | all     | Restrict which languages are checked.                                                             |
+| `command_overrides` | map            | none    | Replace a language's `default`/`extended` command; `extended: null` runs only the syntax check.   |
+| `exclude_paths`     | glob list      | none    | Exempt paths entirely; unions with `daemon.exclude_paths`.                                        |
+| `timeouts`          | map            | 15s     | Per-language budget in seconds (e.g. `"GitHub Workflow": 30`); a timeout ALLOWs with an advisory. |
 
 **Config example:**
 
@@ -5397,7 +5412,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | -------------------------- | ---------------- | -------- | ------------------------------------------------ |
 | `verification_result_gate` | PreToolUse       | 34       | Verifier result unconsumed before a mutator      |
 | `bash_safe_mode`           | PreToolUse       | 36       | Opt-in safe-prelude forcer (ships disabled)      |
-| `staged_lint_gate`         | PreToolUse       | 43       | Cheap syntax check over staged files             |
+| `staged_lint_gate`         | PreToolUse       | 43       | Syntax check (workflows: actions-qa) over staged |
 | `plan_close_approval`      | PreToolUse       | 43       | A human closes a plan when the key says so       |
 | `global_npm_advisor`       | PreToolUse       | 40       | Suggests npx over global installs                |
 | `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation                       |

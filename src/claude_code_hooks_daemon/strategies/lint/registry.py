@@ -14,12 +14,40 @@ class LintStrategyRegistry:
     """
 
     def __init__(self) -> None:
-        self._strategies: dict[str, LintStrategy] = {}
+        # Several strategies may share one extension (Plan 00621: Ansible and
+        # GitHub workflows both own `.yml`), held in registration order.
+        self._strategies: dict[str, list[LintStrategy]] = {}
 
     def register(self, strategy: LintStrategy) -> None:
-        """Register a strategy for all its declared extensions."""
-        for ext in strategy.extensions:
-            self._strategies[ext.lower()] = strategy
+        """Register a strategy for all its declared extensions.
+
+        An extension may be shared only when EVERY strategy on it implements
+        :class:`NarrowsByPath`. A non-narrowing strategy claims every file with
+        the extension, so sharing with one either hides the newcomer for ever
+        or takes files from the owner, depending on order. Both are refused
+        before anything is recorded, so a refused registration changes nothing.
+
+        Raises:
+            ValueError: If the strategy would share an extension with a
+                strategy where either of them does not narrow by path.
+        """
+        extensions = [ext.lower() for ext in strategy.extensions]
+        for ext in extensions:
+            owners = self._strategies.get(ext, [])
+            if not owners:
+                continue
+            if not isinstance(strategy, NarrowsByPath) or not all(
+                isinstance(owner, NarrowsByPath) for owner in owners
+            ):
+                owner_names = ", ".join(owner.language_name for owner in owners)
+                msg = (
+                    f"Cannot register lint strategy {strategy.language_name!r} for {ext}: "
+                    f"already owned by {owner_names}, and an extension is shared only "
+                    f"when every strategy on it implements NarrowsByPath"
+                )
+                raise ValueError(msg)
+        for ext in extensions:
+            self._strategies.setdefault(ext, []).append(strategy)
 
     def get_strategy(self, file_path: str) -> LintStrategy | None:
         """Get the strategy for a file path based on its extension.
@@ -30,16 +58,19 @@ class LintStrategyRegistry:
         config and inventories as well as Ansible playbooks, and handing all of
         them to one linter reports failures their authors cannot act on.
 
-        A strategy that does not implement the capability is matched on
+        Where several strategies share the extension, the first (in
+        registration order) whose ``handles_file`` accepts the path wins. A
+        strategy that does not implement the capability is matched on
         extension alone, exactly as before.
         """
         file_path_lower = file_path.lower()
-        for ext, strategy in self._strategies.items():
+        for ext, candidates in self._strategies.items():
             if not file_path_lower.endswith(ext):
                 continue
-            if isinstance(strategy, NarrowsByPath) and not strategy.handles_file(file_path):
-                continue
-            return strategy
+            for strategy in candidates:
+                if isinstance(strategy, NarrowsByPath) and not strategy.handles_file(file_path):
+                    continue
+                return strategy
         return None
 
     def filter_by_languages(self, language_names: list[str]) -> None:
@@ -51,13 +82,11 @@ class LintStrategyRegistry:
         if not language_names:
             return
         allowed = {name.lower() for name in language_names}
-        to_remove = [
-            ext
-            for ext, strategy in self._strategies.items()
-            if strategy.language_name.lower() not in allowed
-        ]
-        for ext in to_remove:
-            del self._strategies[ext]
+        filtered = {
+            ext: [s for s in candidates if s.language_name.lower() in allowed]
+            for ext, candidates in self._strategies.items()
+        }
+        self._strategies = {ext: kept for ext, kept in filtered.items() if kept}
 
     def strategies(self) -> list[LintStrategy]:
         """Deduplicated list of currently registered strategy instances.
@@ -69,11 +98,12 @@ class LintStrategyRegistry:
         """
         seen: set[int] = set()
         result: list[LintStrategy] = []
-        for strategy in self._strategies.values():
-            if id(strategy) in seen:
-                continue
-            seen.add(id(strategy))
-            result.append(strategy)
+        for candidates in self._strategies.values():
+            for strategy in candidates:
+                if id(strategy) in seen:
+                    continue
+                seen.add(id(strategy))
+                result.append(strategy)
         return result
 
     @property
@@ -81,7 +111,7 @@ class LintStrategyRegistry:
         """Get names of all registered languages (deduplicated)."""
         seen: set[str] = set()
         result: list[str] = []
-        for strategy in self._strategies.values():
+        for strategy in self.strategies():
             if strategy.language_name not in seen:
                 seen.add(strategy.language_name)
                 result.append(strategy.language_name)
@@ -93,6 +123,9 @@ class LintStrategyRegistry:
         # Lazy imports to avoid circular dependencies
         from claude_code_hooks_daemon.strategies.lint.ansible_strategy import AnsibleLintStrategy
         from claude_code_hooks_daemon.strategies.lint.dart_strategy import DartLintStrategy
+        from claude_code_hooks_daemon.strategies.lint.github_workflow_strategy import (
+            GitHubWorkflowLintStrategy,
+        )
         from claude_code_hooks_daemon.strategies.lint.go_strategy import GoLintStrategy
         from claude_code_hooks_daemon.strategies.lint.kotlin_strategy import KotlinLintStrategy
         from claude_code_hooks_daemon.strategies.lint.php_strategy import PhpLintStrategy
@@ -113,4 +146,5 @@ class LintStrategyRegistry:
         registry.register(KotlinLintStrategy())
         registry.register(SwiftLintStrategy())
         registry.register(AnsibleLintStrategy())
+        registry.register(GitHubWorkflowLintStrategy())
         return registry

@@ -184,6 +184,46 @@ class ClassifiesMidEditOutput(Protocol):
 
 
 @runtime_checkable
+class DeclaresFindingsExitCodes(Protocol):
+    """Optional capability: a strategy whose tool separates findings from faults.
+
+    Without it every non-zero exit is a finding and DENIES. An external linter
+    that documents several exit codes (``actions-qa``: 1 findings; 2, 3 and 4
+    faults of the command line, the toolchain, or reaching a verdict) names the
+    codes that are findings here; any other non-zero exit is a fault about the
+    run, not about the file, and the write is ALLOWED with a "NOT checked"
+    advisory. Naming the findings codes, rather than the fault codes, makes an
+    undocumented exit fail open.
+
+    Separate from :class:`LintStrategy` for the same Interface Segregation
+    reason as :class:`NarrowsByPath`.
+    """
+
+    @property
+    def findings_exit_codes(self) -> frozenset[int]:
+        """The non-zero exit codes that mean "the tool found problems in the file"."""
+        ...
+
+
+@runtime_checkable
+class DeclaresOptionalTool(Protocol):
+    """Optional capability: a strategy whose tool most projects will not have.
+
+    The handler normally prints "lint tool not found, install it" when a tool
+    cannot be resolved. For an optional external linter that line would appear
+    on every edit of its files in every project that has not adopted it, so a
+    strategy declaring its tool optional is skipped SILENTLY when the tool is
+    absent. Suggesting the tool is some other component's job (Plan 00621: a
+    session-start advisory).
+    """
+
+    @property
+    def lint_tool_is_optional(self) -> bool:
+        """True to skip silently, with no advisory, when the tool is not installed."""
+        ...
+
+
+@runtime_checkable
 class HasPrecheckCommands(Protocol):
     """Optional capability: cheap commands run before the default one.
 

@@ -202,6 +202,9 @@ class AnsibleLintStrategy:
             TestType,
             ToolPayload,
         )
+        from claude_code_hooks_daemon.strategies.lint.github_workflow_strategy import (
+            CLEAN_WORKFLOW_SAMPLE,
+        )
 
         fixture_root = acceptance_path(_FIXTURE_DIR)
         probe_valid = ToolPayload(
@@ -225,7 +228,10 @@ class AnsibleLintStrategy:
             tool_name=ToolName.WRITE,
             tool_input={
                 "file_path": acceptance_path(_FIXTURE_DIR, ".github", "workflows", "ci.yml"),
-                "content": "---\non:\n  push:\njobs: {}\n",
+                # The workflow strategy sees this file too, so it carries the
+                # sample actions-qa reports clean (Plan 00621 Task 1.1): the
+                # ALLOW then holds with or without that linter installed.
+                "content": CLEAN_WORKFLOW_SAMPLE,
             },
         )
 

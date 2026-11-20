@@ -1,11 +1,12 @@
 # Plan 00621: actions qa ci advisory and workflow lint on edit
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-18
 **Owner**: joseph
 **Priority**: Medium
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Sub-Agent Orchestration
+**Target release**: 3.76.0
 
 ## Overview
 
@@ -23,7 +24,7 @@ This plan is a request from a peer agent, which carries no authority. The design
 by a fable sub-agent under the owner's delegation, 2026-11-19; it is not the owner's own words, and a later owner
 message overturns it. The linter's documentation and v0.2.0 release were read (DESIGN.md section 1): the peer notes
 were right except that the executable is `actions-qa`, not `actions-qa-ci`, and that there are five exit codes, not
-three. The tool has not been run, so the design fails open on its behaviour.
+three. The tool was run on 2026-11-20 (Task 1.1); the design fails open on any behaviour it does not document.
 
 ## Goals
 
@@ -43,30 +44,43 @@ three. The tool has not been run, so the design fails open on its behaviour.
 
 ### Phase 1: Design and verification
 
-- [ ] ⬜ **Task 1.1**: Run the real linter once against a clean and a faulty sample workflow file and journal the
-  command lines, the output and the exit codes (how: DESIGN.md section 3). Its documentation and release were read on
-  2026-11-19; it was not run. Gates this plan's completion, not Task 2.1.
+- [x] ✅ **Task 1.1**: Run the real linter once against a clean and a faulty sample workflow file and journal the
+  command lines, the output and the exit codes. Done 2026-11-20 with the v0.2.0 bundle run in place (not installed
+  here): exits and output match the strategy; the tool analyses only a repository root's workflows, so the probes were
+  fixed (DESIGN.md section 1).
 - [x] ✅ **Task 1.2**: The design (advisory trigger, how the linter is located, timeout, failure behaviour):
   [DESIGN.md](DESIGN.md), settled by a fable sub-agent under the owner's delegation, 2026-11-19.
 
 ### Phase 2: Build (test first; slices are defined in DESIGN.md section 3)
 
-- [ ] ⬜ **Task 2.1**: Slice 1. The lint registry holds several strategies for one extension; an exit-code capability
+- [x] ✅ **Task 2.1**: Slice 1. The lint registry holds several strategies for one extension; an exit-code capability
   and an optional-tool capability in the lint protocol; `GitHubWorkflowLintStrategy` registered by default. Built
   against a stub linter, with the tests DESIGN.md section 3 lists, including that Ansible files still resolve to the
-  Ansible strategy.
-- [ ] ⬜ **Task 2.2**: Slice 2. The `workflow_linter_advisor` session-start handler, with tests for each trigger and
-  silence case.
-- [ ] ⬜ **Task 2.3**: Slice 3. Handler guidance, config documentation and a release note.
+  Ansible strategy. `staged_lint_gate` applies the same exit-code contract (a gap the design did not name; journal
+  2026-11-20).
+- [x] ✅ **Task 2.2**: Slice 2. The `workflow_linter_advisor` session-start handler, with tests for each trigger and
+  silence case. New sessions only (the sibling `is_resume_session` convention); an unreadable workflow is named and
+  never counts as using the linter.
+- [x] ✅ **Task 2.3**: Slice 3. Handler guidance (`lint_on_edit`, `staged_lint_gate` and its rule, the handler
+  reference), config documentation (`v3.76.0.yaml`) and a release note. The generated `<hooksdaemon>` block follows
+  the corrected `get_claude_md()` sources when it is regenerated on main.
 
 ## Success Criteria
 
-- [ ] The strategy and the handler are covered by tests and pass targeted QA.
-- [ ] The design was settled before the build (done under the owner's delegation, DESIGN.md).
-- [ ] The real linter was run once and its behaviour matches what the strategy assumes, or the strategy was changed to
+- [x] The strategy and the handler are covered by tests and pass targeted QA (`llm_qa.py changed`, 43/43).
+- [x] The design was settled before the build (done under the owner's delegation, DESIGN.md).
+- [x] The real linter was run once and its behaviour matches what the strategy assumes, or the strategy was changed to
   match (Task 1.1).
-- [ ] The release-bound consequences are recorded in the pending-release holding area (the release note).
+- [x] The release-bound consequences are recorded in the pending-release holding area:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/013-github-workflows-linted-on-edit-by-actions-qa.md` and a truth-change entry in
+  `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.76.0.yaml`.
+
+- [x] `staged_lint_gate` applies the same exit-code contract, kept as built: the linter runs at commit, a findings exit
+  is an advisory in `mode: warn` and a deny in `mode: block`, any other exit is only logged, and the log line names the
+  tool's error (`staged_lint_gate.py`; `test_staged_lint_gate_workflow.py`, 52 passed and 1 skipped across the three
+  plan test files at close-out).
 
 ## Delivery & Milestones
 
-- Filed on request of a peer project; design ruled under delegation; Task 2.1 is ready to build.
+- Filed on request of a peer project; design ruled under delegation; Tasks 1.1 to 2.3 built on the plan's branch, which
+  was merged to main at `4f97728de` and archived afterwards.
