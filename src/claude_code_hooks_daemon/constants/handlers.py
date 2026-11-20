@@ -470,6 +470,13 @@ class HandlerID:
         config_key="agent_dispatch_recorder",
         display_name="agent-dispatch-recorder",
     )
+    # Plan 00620: admits a branch-reject reviewer dispatch only with the exact
+    # daemon-composed prompt, and records the nonce's dispatch.
+    BRANCH_REJECT_DISPATCH_GATE = HandlerIDMeta(
+        class_name="BranchRejectDispatchGateHandler",
+        config_key="branch_reject_dispatch_gate",
+        display_name="branch-reject-dispatch-gate",
+    )
     # Plan 00471 L2: a subagent's context budget (soft advisory, hard handoff-only).
     SUBAGENT_CONTEXT_BUDGET = HandlerIDMeta(
         class_name="SubagentContextBudgetHandler",

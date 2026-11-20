@@ -624,6 +624,13 @@ class RuleID:
     SUBAGENT_CRON_DELETE: str = "R-SUBAGENT-CRON-DELETE"
 
     # ------------------------------------------------------------------
+    # branch_reject_dispatch_gate handler (Plan 00620)
+    # ------------------------------------------------------------------
+
+    #: A branch-reject reviewer dispatch whose prompt, type, model or state fails the gate.
+    BRANCH_REJECT_DISPATCH: str = "R-BRANCH-REJECT-DISPATCH"
+
+    # ------------------------------------------------------------------
     # subagent_worktree_write_guard handler
     # ------------------------------------------------------------------
 

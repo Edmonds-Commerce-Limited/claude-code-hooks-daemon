@@ -769,6 +769,10 @@ handlers:
       enabled: true
       priority: 42
 
+    branch_reject_dispatch_gate:  # Admits a branch-reject reviewer only on the daemon's exact prompt (Plan 00620)
+      enabled: true
+      priority: 59
+
     dispatch_declaration:  # Advises a file-handoff declaration on Task dispatch (Plan 00307)
       enabled: true
       priority: 48

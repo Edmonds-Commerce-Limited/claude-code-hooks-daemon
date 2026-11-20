@@ -425,6 +425,10 @@ handlers:
       enabled: true
       priority: 42
 
+    branch_reject_dispatch_gate:  # Admits a branch-reject reviewer only on the daemon's exact prompt
+      enabled: true          # Off fails closed: no reviewer verdict can unlock a removal
+      priority: 59           # After every handler that can deny an Agent call
+
     dispatch_declaration:  # Advises/enforces a file-handoff declaration on Task dispatch
       enabled: true          # On by default (Plan 00307 Task 4.3); set false to opt out
       priority: 48

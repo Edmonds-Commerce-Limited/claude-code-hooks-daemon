@@ -6,6 +6,26 @@ breaking: false
 
 config_changes:
   added:
+    - key: handlers.pre_tool_use.branch_reject_dispatch_gate
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00620). Admits a dispatch of the branch-reject reviewer agent
+        only with the exact prompt `hooks-daemon branch-reject request` printed,
+        once per nonce, on Opus or above, as a fresh agent of the shipped
+        definition, and records the dispatch. Denies the reviewer type with any
+        other prompt and a review prompt under any other type. Enabled by
+        default; disabling it fails closed (no reviewer verdict can then unlock
+        a removal).
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            branch_reject_dispatch_gate:
+              enabled: true
+              priority: 59
+      migration_note: >-
+        Keep it at priority 59, after every handler that can deny an Agent call:
+        its allow records the dispatch, so a later deny would burn the nonce.
     - key: branches.wip.ladder
       recommended: false
       dormant: false

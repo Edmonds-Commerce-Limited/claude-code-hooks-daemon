@@ -550,6 +550,13 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
 # assumption that let the git bypasses survive.
 _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "AbsolutePathHandler": "matches on the file_path parameter, not a command",
+    "BranchRejectDispatchGateHandler": (
+        "matches on tool_name in the subagent dispatch tools (Agent, Task) and on the "
+        "call's subagent_type or prompt prefix, not a shell command - there is no command "
+        "string to respell. Respelling the prompt (a leading space, another type) only "
+        "skips the gate's ALLOW too, so no dispatch record is written and the resulting "
+        "verdict never chains: the evasion fails closed"
+    ),
     "ReviewRoundAdvisorHandler": (
         "matches an Agent/Task dispatch's description and prompt text and never denies"
     ),

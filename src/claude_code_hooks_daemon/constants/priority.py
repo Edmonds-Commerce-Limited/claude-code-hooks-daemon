@@ -529,6 +529,11 @@ class Priority:
     # npm_command (50), a sibling gate on a disjoint tool shape (Task).
     DISPATCH_DECLARATION = 48
 
+    # Plan 00620: its ALLOW records the nonce's dispatch, and an allow never ends
+    # the chain, so a later deny would burn the nonce. It runs after every handler
+    # that can deny an Agent call (39, 40, 48); only advisories (60) follow it.
+    BRANCH_REJECT_DISPATCH_GATE = 59
+
     # Plan 00412 class 2a: the guard-config half of the commit gate. Shares the
     # band with the other staged-tree gates and sits last among them -- it only
     # ever adds context, so a gate that can DENY should have had its say first.
