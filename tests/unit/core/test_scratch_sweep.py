@@ -269,7 +269,7 @@ class TestRendering:
         text = "\n".join(render_table(self._report(tmp_path), max_listed=50))
         assert "nothing was changed" in text
         assert "DISPOSABLE 1" in text
-        assert "KEPT, REFERENCED" in text
+        assert "evaluated in this phase: KEPT" in text
         assert "not a git repository" in text
 
     def test_the_table_suggests_no_removal(self, tmp_path: Path) -> None:
@@ -296,7 +296,7 @@ class TestRendering:
         document = report_json(self._report(tmp_path))
         json.dumps(document)
         assert document["dry_run"] is True
-        assert document["not_evaluated"] == ["KEPT", "REFERENCED"]
+        assert document["not_evaluated"] == ["KEPT"]
         rows = {row["name"]: row for row in document["entries"]}
         assert set(rows) == {"a.log", "clone", "notes.txt"}
         assert rows["clone"]["repository"] == "found"
@@ -337,32 +337,37 @@ class TestTrackedListing:
         assert _verdicts(report) == {"a.log": "STUCK"}
 
 
+def _git_sweep(gp: GitProject, now: float, **kwargs: Any) -> SweepReport:
+    """A sweep of a real git project's scratch root, every entry's TTL past."""
+    config = ScratchConfig()
+    project_git = build_project_git(gp.project, remote="origin", default_branch="main")
+    return run_sweep(
+        resolve_sweep_root(
+            gp.tree.root,
+            project_root=gp.project,
+            config=config,
+            reference_roots=("untracked/repos",),
+        ),
+        config=config,
+        now=now,
+        budget=WalkBudget(seconds=60, max_inodes=10_000),
+        inputs=LivenessInputs(
+            cwds={1: Path("/elsewhere")},
+            background=BackgroundRecords((), ""),
+            min_age_minutes=30,
+            now=now,
+        ),
+        project_root=gp.project,
+        project_git=project_git,
+        **kwargs,
+    )
+
+
 class TestP3IdenticalCopy:
     """DESIGN.md section 3.2 P3 and section 14 (Plan 00627 Task 2.3)."""
 
     def _sweep(self, gp: GitProject, now: float, **kwargs: Any) -> SweepReport:
-        config = ScratchConfig()
-        project_git = build_project_git(gp.project, remote="origin", default_branch="main")
-        return run_sweep(
-            resolve_sweep_root(
-                gp.tree.root,
-                project_root=gp.project,
-                config=config,
-                reference_roots=("untracked/repos",),
-            ),
-            config=config,
-            now=now,
-            budget=WalkBudget(seconds=60, max_inodes=10_000),
-            inputs=LivenessInputs(
-                cwds={1: Path("/elsewhere")},
-                background=BackgroundRecords((), ""),
-                min_age_minutes=30,
-                now=now,
-            ),
-            project_root=gp.project,
-            project_git=project_git,
-            **kwargs,
-        )
+        return _git_sweep(gp, now, **kwargs)
 
     def test_a_copy_of_a_file_on_the_pushed_default_tip_is_disposable(self, tmp_path: Path) -> None:
         gp = build_git_project(tmp_path)
@@ -414,3 +419,76 @@ class TestP3IdenticalCopy:
         report = self._sweep(gp, now, hash_budget=HashBudget(max_files=1, max_bytes=1_000_000))
         assert sorted(_verdicts(report).values()) == ["DISPOSABLE", "UNCERTAIN"]
         assert any("P3" in note for note in report.notes)
+
+
+class TestReferenced:
+    """DESIGN.md section 3.4 at sweep level (Plan 00627 Task 2.4)."""
+
+    def _sweep(self, gp: GitProject, now: float) -> SweepReport:
+        return _git_sweep(gp, now)
+
+    def test_referenced_beats_p7_and_p1_and_names_file_and_line(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        commit_file(
+            gp.project, "docs/a.md", "x\nsee untracked/scratch/repo and untracked/scratch/a.log\n"
+        )
+        gp.standalone("repo")
+        gp.tree.file("a.log")
+        gp.tree.file("other.log")
+        now = _now()
+        _old(gp.tree, now)
+        report = self._sweep(gp, now)
+        assert _verdicts(report) == {
+            "a.log": "REFERENCED",
+            "other.log": "DISPOSABLE",
+            "repo": "REFERENCED",
+        }
+        row = next(row for row in report.rows if row.name == "repo")
+        assert row.reasons == ("named by 1 tracked line(s), first HEAD:docs/a.md:2",)
+        assert report.complete
+
+    def test_protected_beats_referenced(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        commit_file(gp.project, "docs/a.md", "untracked/scratch/wt\n")
+        gp.worktree("wt", "wt-branch")
+        now = _now()
+        _old(gp.tree, now)
+        assert _verdicts(self._sweep(gp, now)) == {"wt": "PROTECTED"}
+
+    def test_unknown_references_make_due_entries_stuck_and_the_report_incomplete(
+        self, tmp_path: Path
+    ) -> None:
+        gp = build_git_project(tmp_path)
+        gp.tree.file("a.log")
+        now = _now()
+        _old(gp.tree, now)
+        project_git = build_project_git(gp.project, remote="origin", default_branch="main")
+        real = project_git.runner
+
+        def failing_grep(
+            cwd: Path, *args: str, timeout: float = 30.0, env: Mapping[str, str] | None = None
+        ) -> subprocess.CompletedProcess[str]:
+            if "grep" in args:
+                return subprocess.CompletedProcess(["git", *args], 128, "", "boom")
+            return real(cwd, *args, timeout=timeout, env=env)
+
+        config = ScratchConfig()
+        report = run_sweep(
+            resolve_sweep_root(
+                gp.tree.root, project_root=gp.project, config=config, reference_roots=()
+            ),
+            config=config,
+            now=now,
+            budget=WalkBudget(seconds=60, max_inodes=10_000),
+            inputs=LivenessInputs(
+                cwds={1: Path("/elsewhere")},
+                background=BackgroundRecords((), ""),
+                min_age_minutes=30,
+                now=now,
+            ),
+            project_root=gp.project,
+            project_git=dataclasses.replace(project_git, runner=failing_grep),
+        )
+        assert _verdicts(report) == {"a.log": "STUCK"}
+        assert not report.complete
+        assert any("git grep failed" in reason for reason in report.incomplete_reasons)

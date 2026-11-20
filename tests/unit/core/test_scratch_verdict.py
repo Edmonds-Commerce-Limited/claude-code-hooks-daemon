@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from claude_code_hooks_daemon.core.scratch_clock import EntryAge
+from claude_code_hooks_daemon.core.scratch_references import References
 from claude_code_hooks_daemon.core.scratch_repos import RepoFindings, RepoKind
 from claude_code_hooks_daemon.core.scratch_verdict import (
     NOT_CLASSIFIED,
     NOT_EVALUATED,
     TRACKED_UNKNOWN,
+    Judgement,
     Proof,
     RepositoryMarker,
     Verdict,
-    judge,
 )
+from claude_code_hooks_daemon.core.scratch_verdict import judge as real_judge
 from claude_code_hooks_daemon.core.scratch_walk import EntryStats, Node, NodeKind
 from claude_code_hooks_daemon.utils.bounded_walk import Bounded, finished, stopped
 
@@ -42,6 +46,17 @@ def _stats(
         multi_linked=multi_linked,
         git_markers=git_markers,
     )
+
+
+#: A known answer: no tracked line names the entry.
+_UNREFERENCED = References(())
+
+
+def judge(
+    walk: Bounded[EntryStats], *, references: References = _UNREFERENCED, **kwargs: Any
+) -> Judgement:
+    """``judge`` with "nothing references it" unless a test says otherwise."""
+    return real_judge(walk, references=references, **kwargs)
 
 
 def _judge(
@@ -424,4 +439,41 @@ class TestP5:
 
 
 def test_not_evaluated_rungs_are_named() -> None:
-    assert NOT_EVALUATED == ("KEPT", "REFERENCED")
+    assert NOT_EVALUATED == ("KEPT",)
+
+
+class TestReferenced:
+    """DESIGN.md section 3.4 (Plan 00627 Task 2.4): REFERENCED sits after PROTECTED."""
+
+    _SITE = References(("HEAD:docs/a.md:3", "feat:docs/b.md:1"))
+
+    def test_a_referenced_entry_beats_every_proof(self) -> None:
+        walk = finished(_stats(Node("e", D, 0), Node("e/a.log", F, 1)))
+        judgement = judge(walk, age=_DUE, liveness=(), references=self._SITE)
+        assert judgement.verdict is Verdict.REFERENCED
+        assert judgement.reasons == ("named by 2 tracked line(s), first HEAD:docs/a.md:3",)
+
+    def test_a_referenced_standalone_repository_is_not_disposable(self) -> None:
+        walk = finished(_stats(Node("e", D, 0), Node("e/.git", D, 0), git_markers=("e/.git",)))
+        repos = RepoFindings(kinds={"e/.git": RepoKind.STANDALONE}, standalone_roots=("e",))
+        judgement = judge(walk, age=_DUE, liveness=(), repos=repos, references=self._SITE)
+        assert judgement.verdict is Verdict.REFERENCED
+
+    def test_protected_beats_referenced(self) -> None:
+        walk = finished(_stats(Node("e", D, 0), Node("e/a.log", F, 1)))
+        judgement = judge(walk, age=_DUE, liveness=(), tracked=("e/a.log",), references=self._SITE)
+        assert judgement.verdict is Verdict.PROTECTED
+
+    def test_unknown_references_make_a_due_entry_stuck(self) -> None:
+        walk = finished(_stats(Node("e", D, 0), Node("e/a.log", F, 1)))
+        unknown = References((), "references could not be read")
+        judgement = judge(walk, age=_DUE, liveness=(), references=unknown)
+        assert (judgement.verdict, judgement.reasons) == (
+            Verdict.STUCK,
+            ("references could not be read",),
+        )
+
+    def test_unknown_references_do_not_touch_a_live_entry(self) -> None:
+        walk = finished(_stats(Node("e", D, 0), Node("e/a.log", F, 1)))
+        unknown = References((), "references could not be read")
+        assert judge(walk, age=_FRESH, liveness=(), references=unknown).verdict is Verdict.LIVE

@@ -210,13 +210,30 @@ class GitProject:
         return target
 
 
+#: The one commit :func:`quiet_project_git` reports for HEAD and its one branch.
+QUIET_SHA = "0" * 39 + "1"
+
+
 def quiet_project_git(project_root: Path) -> ProjectGit:
     """A project whose git answers every question with "nothing": no tracked file
-    under the root, no worktree, no remote. For sweep tests whose point is not git."""
+    under the root, no worktree, no remote, one branch and no reference to the root.
+    For sweep tests whose point is not git.
+
+    The reference set reads an empty answer as UNKNOWN, so the questions it asks
+    get a real "nothing": ``git grep`` answers rc 1 (no match), and HEAD and the
+    branch listing name one fake commit."""
 
     def runner(
         cwd: Path, *args: str, timeout: float = 30.0, env: Mapping[str, str] | None = None
     ) -> subprocess.CompletedProcess[str]:
+        if "grep" in args:
+            return subprocess.CompletedProcess(["git", *args], 1, "", "")
+        if args[:2] == ("rev-parse", "--verify"):
+            return subprocess.CompletedProcess(["git", *args], 0, f"{QUIET_SHA}\n", "")
+        if args[:1] == ("for-each-ref",) and args[-1] == "refs/heads/":
+            return subprocess.CompletedProcess(
+                ["git", *args], 0, f"{QUIET_SHA} refs/heads/main\n", ""
+            )
         return subprocess.CompletedProcess(["git", *args], 0, "", "")
 
     return ProjectGit(

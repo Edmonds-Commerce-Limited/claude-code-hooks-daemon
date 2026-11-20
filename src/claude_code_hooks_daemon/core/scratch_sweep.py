@@ -3,7 +3,8 @@
 The sweep is a report and nothing else. It lists, ``lstat``s and judges; it
 never creates, moves, packs or removes anything, and prints no file content
 and no removal command. Git is run once per sweep in the project (tracked files
-under the root, worktrees, live remote tips) and, for a due entry holding a
+under the root, worktrees, live remote tips, and the tracked lines that name
+a scratch path) and, for a due entry holding a
 repository, inside that repository under the rules of
 :mod:`~claude_code_hooks_daemon.core.scratch_repos`.
 
@@ -28,6 +29,10 @@ from typing import Any
 from claude_code_hooks_daemon.config.models import ScratchConfig
 from claude_code_hooks_daemon.core.scratch_clock import NO_BIRTH_NOTE, EntryAge, entry_age
 from claude_code_hooks_daemon.core.scratch_liveness import LivenessInputs, entry_liveness
+from claude_code_hooks_daemon.core.scratch_references import (
+    References,
+    build_references,
+)
 from claude_code_hooks_daemon.core.scratch_repos import (
     ProjectGit,
     RepoFindings,
@@ -71,6 +76,7 @@ NO_CWDS_NOTE = (
 _TABLE_ORDER = (
     Verdict.STUCK,
     Verdict.PROTECTED,
+    Verdict.REFERENCED,
     Verdict.UNCERTAIN,
     Verdict.DISPOSABLE,
     Verdict.LIVE,
@@ -202,6 +208,7 @@ def run_sweep(
     resolved_root = root.resolve()
     relative_root = _relative(resolved_root, project_root.resolve())
     tracked = _tracked_by_entry(project_git, project_root, relative_root)
+    references = build_references(project_git, relative_root)
     hashing = hash_budget or HashBudget()
     if project_git is not None and project_git.verified_note:
         notes.append(f"remote proof: {project_git.verified_note}")
@@ -215,7 +222,12 @@ def run_sweep(
             budget,
             inputs,
             scandir,
-            _EntryGit(project_git, None if tracked is None else tracked.get(name, ()), hashing),
+            _EntryGit(
+                project_git,
+                None if tracked is None else tracked.get(name, ()),
+                hashing,
+                references.for_entry(name),
+            ),
         )
         for name in listing.value
         if name not in sweep_root.skip
@@ -234,6 +246,8 @@ def run_sweep(
         reasons.append(budget.spent_reason)
     if tracked is None:
         reasons.append("the project's tracked files under the root could not be listed")
+    if references.unknown:
+        reasons.append(references.unknown)
     return SweepReport(str(root), tuple(rows), not reasons, tuple(reasons), tuple(notes))
 
 
@@ -263,6 +277,7 @@ class _EntryGit:
     project: ProjectGit | None
     tracked: tuple[str, ...] | None
     hashing: HashBudget
+    references: References
 
 
 @dataclass(frozen=True)
@@ -308,7 +323,14 @@ def _judge_entry(
             markers=stats.git_markers,
             project=git.project,
         )
-    judgement = judge(walk, age=age, liveness=liveness, repos=repos, tracked=git.tracked)
+    judgement = judge(
+        walk,
+        age=age,
+        liveness=liveness,
+        references=git.references,
+        repos=repos,
+        tracked=git.tracked,
+    )
     if judgement.verdict is Verdict.UNCERTAIN:
         judgement = _with_p3(root, walk, age, repos, git, judgement)
     return EntryRow(
@@ -359,7 +381,15 @@ def _with_p3(
             held.add(node.path)
     if len(held) < len(nodes):
         return judgement
-    return judge(walk, age=age, liveness=(), repos=repos, tracked=git.tracked, p3=frozenset(held))
+    return judge(
+        walk,
+        age=age,
+        liveness=(),
+        references=git.references,
+        repos=repos,
+        tracked=git.tracked,
+        p3=frozenset(held),
+    )
 
 
 def _printable(text: str) -> str:

@@ -12,11 +12,13 @@ from a walk that did not finish:
 3. KEPT: not evaluated in Phase 1 (no keep marker or pause store exists yet).
    Also STUCK: a repository in the entry could not be classified
    (:mod:`~claude_code_hooks_daemon.core.scratch_repos`), or the project's
-   tracked files could not be listed.
+   tracked files could not be listed, or whether a tracked file names the entry
+   is unknown (:mod:`~claude_code_hooks_daemon.core.scratch_references`).
 4. PROTECTED: a repository in the entry is a registered worktree, points
    outside the entry, or is related and holds work no remote holds (R6); or
    the entry holds a file the project tracks.
-5. REFERENCED: not evaluated yet (Task 2.4).
+5. REFERENCED: a tracked file, on a revision that can still reach the default
+   branch or in the working tree, names a path in the entry (DESIGN.md 3.4).
 6. DISPOSABLE when every file is covered by P1, P2, P3, P4, P5 or P7; else
    UNCERTAIN. P3 is computed by the caller (it hashes files) and passed in.
    P4 covers a clean pushed related repository's git directory and tracked
@@ -39,6 +41,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from claude_code_hooks_daemon.core.scratch_clock import EntryAge
+from claude_code_hooks_daemon.core.scratch_references import References
 from claude_code_hooks_daemon.core.scratch_repos import RepoFindings
 from claude_code_hooks_daemon.core.scratch_walk import EntryStats, Node, NodeKind
 from claude_code_hooks_daemon.utils.bounded_walk import Bounded
@@ -79,7 +82,7 @@ REGENERABLE_DIRECTORIES: tuple[str, ...] = (
 VENV_MARKER = "pyvenv.cfg"
 
 #: The rungs of the order not evaluated yet, in order.
-NOT_EVALUATED: tuple[str, ...] = ("KEPT", "REFERENCED")
+NOT_EVALUATED: tuple[str, ...] = ("KEPT",)
 
 #: How many uncovered paths a judgement keeps, so a huge entry stays small in memory.
 MAX_UNCOVERED = 5
@@ -91,6 +94,7 @@ class Verdict(enum.Enum):
     LIVE = "LIVE"
     STUCK = "STUCK"
     PROTECTED = "PROTECTED"
+    REFERENCED = "REFERENCED"
     DISPOSABLE = "DISPOSABLE"
     UNCERTAIN = "UNCERTAIN"
 
@@ -225,6 +229,7 @@ def judge(
     *,
     age: EntryAge,
     liveness: tuple[str, ...],
+    references: References,
     repos: RepoFindings | None = None,
     tracked: tuple[str, ...] | None = (),
     p3: frozenset[str] = frozenset(),
@@ -234,6 +239,7 @@ def judge(
     ``repos`` is the entry's repository classification (None: not run).
     ``tracked`` lists the entry's paths the project tracks (None: unknown).
     ``p3`` holds the regular files whose blob the remote's default tip holds.
+    ``references`` is required, so no caller can skip the REFERENCED rung.
     """
     stats = walk.value
     markers = stats.git_markers
@@ -259,6 +265,8 @@ def judge(
         )
     if tracked is None:
         return result(Verdict.STUCK, TRACKED_UNKNOWN)
+    if references.unknown:
+        return result(Verdict.STUCK, references.unknown)
     if markers and repos is None:
         return result(Verdict.STUCK, NOT_CLASSIFIED)
     if repos is not None and repos.stuck:
@@ -269,6 +277,11 @@ def judge(
         return result(
             Verdict.PROTECTED,
             f"holds {len(tracked)} file(s) the project tracks, first {tracked[0]}",
+        )
+    if references.sites:
+        return result(
+            Verdict.REFERENCED,
+            f"named by {len(references.sites)} tracked line(s), first {references.sites[0]}",
         )
     proofs, uncovered = _coverage(stats.nodes, repos, p3)
     if not uncovered:

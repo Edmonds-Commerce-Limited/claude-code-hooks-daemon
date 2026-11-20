@@ -6730,7 +6730,7 @@ def cmd_scratch_sweep(
     """``scratch-sweep [--json] [--root PATH]``: judge every scratch entry; change nothing.
 
     A Phase 1 dry run (Plan 00627 Task 1.7). It never creates the scratch root,
-    writes no cache or state, prints no file content and suggests no removal.
+    writes no cache or state, prints no file content and prints no delete command.
     The keyword parameters exist for tests.
 
     Returns:
@@ -13627,13 +13627,15 @@ def build_parser() -> argparse.ArgumentParser:
     # scratch-sweep command (Plan 00627 Task 1.7): a dry run only.
     parser_scratch_sweep = subparsers.add_parser(
         "scratch-sweep",
-        help="Judge every scratch entry (LIVE, STUCK, PROTECTED, DISPOSABLE, UNCERTAIN); "
+        help="Judge every scratch entry (LIVE, STUCK, PROTECTED, REFERENCED, DISPOSABLE, "
+        "UNCERTAIN); "
         "a read-only report that changes nothing",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Exit 0 for a report, complete or not. The report says when the walk "
             "budget ran out or a directory could not be read.\n\n"
-            "KEPT and REFERENCED are not evaluated yet. A repository in an entry is "
+            "KEPT is not evaluated yet. An entry a tracked file names is REFERENCED. "
+            "A repository in an entry is "
             "classified (a registered worktree, a related clone with unpushed or dirty "
             "work: PROTECTED; a standalone repository: ordinary content). The remote's "
             "live tips are read with git ls-remote."

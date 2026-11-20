@@ -32,6 +32,7 @@ no hook or fsmonitor (:data:`NESTED_GIT_ENV`, :data:`NESTED_GIT_FLAGS`).
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 import hashlib
 import os
@@ -164,6 +165,8 @@ class ProjectGit:
     verified_note: str
     #: Blob shas of the verified default tip's tree; None when there is no verified default.
     remote_blobs: frozenset[str] | None
+    #: The default branch's name (the reference set searches its local tip), if known.
+    default_branch: str | None = None
 
 
 @dataclass(frozen=True)
@@ -253,7 +256,9 @@ def build_project_git(
         tree = runner(project_root, "ls-tree", "-r", "-z", default_tip)
         if tree.returncode == 0:
             blobs = _tree_blobs(tree.stdout)
-    return ProjectGit(project_root, remote, runner, worktrees, verified, note, blobs)
+    return ProjectGit(
+        project_root, remote, runner, worktrees, verified, note, blobs, default_branch
+    )
 
 
 _HASHES: Final[Mapping[int, Callable[[bytes], hashlib._Hash]]] = {
@@ -686,15 +691,7 @@ def classify_entry(
     ``runner`` replaces ``project.runner`` for the nested calls (tests).
     """
     if runner is not None and runner is not project.runner:
-        project = ProjectGit(
-            project.root,
-            project.remote,
-            runner,
-            project.worktrees,
-            project.verified,
-            project.verified_note,
-            project.remote_blobs,
-        )
+        project = dataclasses.replace(project, runner=runner)
     entry = root / name
     node_set = frozenset(nodes)
     kinds: dict[str, RepoKind] = {}
