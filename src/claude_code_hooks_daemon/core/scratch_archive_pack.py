@@ -21,6 +21,11 @@ Verification, both ways:
   see a file added to the tree),
 - the SHA-256 of the archive, against the record's when one exists.
 
+The compression is always read from the archive's first bytes. An adopted (P6)
+archive is read only when the caller names its ``<entry>/...`` layout, taken
+from the record: members ``<entry>`` or under it, compared with
+``--strip-components=1`` inside the claimed tree.
+
 Every refusal discards the unrecorded archive; the caller renames the entry back.
 """
 
