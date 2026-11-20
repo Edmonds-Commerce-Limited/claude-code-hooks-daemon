@@ -66,7 +66,7 @@ three. The tool was run on 2026-11-20 (Task 1.1); the design fails open on any b
 
 ## Success Criteria
 
-- [ ] The strategy and the handler are covered by tests and pass targeted QA.
+- [x] The strategy and the handler are covered by tests and pass targeted QA (`llm_qa.py changed`, 43/43).
 - [x] The design was settled before the build (done under the owner's delegation, DESIGN.md).
 - [x] The real linter was run once and its behaviour matches what the strategy assumes, or the strategy was changed to
   match (Task 1.1).
