@@ -163,9 +163,7 @@ class TestADirectoryCopyIsJudgedOnEveryPathItWouldCopy:
         (root / "local" / "plain-name").symlink_to("../" + VAULT)
         _refusal(root, [SeedEntry(path="local", mode=SEED_MODE_COPY)], _defaults)
 
-    def test_a_symlinked_subdirectory_holding_a_protected_file_is_refused(
-        self, root: Path
-    ) -> None:
+    def test_a_symlinked_subdirectory_holding_a_protected_file_is_refused(self, root: Path) -> None:
         """os.walk does not enter a linked directory, but copytree copies through it."""
         (root / "keys").mkdir()
         (root / "keys" / ED_KEY).write_text(_SECRET_CONTENT, encoding="utf-8")
