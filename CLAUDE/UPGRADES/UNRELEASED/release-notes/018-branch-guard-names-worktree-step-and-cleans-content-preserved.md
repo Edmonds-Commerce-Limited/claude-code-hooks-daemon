@@ -1,5 +1,6 @@
 # Callout: Branch cleanup can finish a branch whose work reached the default another way
 
+**Plan**: 00594
 **Audience**: client projects
 
 `delete-branch` still refuses a branch checked out in a linked worktree, because git refuses it too. When the branch's work is already safe, the refusal now says so. It names the proof, for example `proven content-preserved`, and the exact next step: `git worktree remove <path>`, then rerun `delete-branch`. A branch whose content the default branch lacks gets the plain refusal, with no removal step.
