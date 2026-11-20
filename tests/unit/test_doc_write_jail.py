@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.cli import cmd_init_config
 from tests.jail_site import doc_write_jail as jail
 
@@ -348,12 +349,54 @@ class TestSessionWiring:
         with jail.consuming_refusals(self._session_log()), pytest.raises(jail.DocWriteRefused):
             (conftest._REPO_ROOT / "CLAUDE.md").write_text("tampered\n", encoding="utf-8")
 
-    def test_every_checkout_of_the_repository_is_protected(self) -> None:
+    @staticmethod
+    def _main_checkout(repo_root: Path) -> Path:
+        common_dir = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=Timeout.GIT_CONTEXT,
+        ).stdout.strip()
+        return Path(common_dir).resolve().parent
+
+    @classmethod
+    def _assert_the_session_is_wired(cls) -> None:
+        """The children's set is the one armed, and it covers this and the main checkout.
+
+        Compared with the set armed at import, not a fresh ``git worktree list``:
+        other checkouts come and go during a run, and the jail reads them once.
+        """
         import tests.conftest as conftest
 
-        expected = jail.protected_paths(jail.checkout_roots(conftest._REPO_ROOT))
+        armed = conftest._DOC_WRITE_JAIL_PROTECTED
+        stable_roots = [conftest._REPO_ROOT.resolve(), cls._main_checkout(conftest._REPO_ROOT)]
 
-        assert set(os.environ[jail.ENV_PROTECTED].split(os.pathsep)) == expected
+        assert set(os.environ[jail.ENV_PROTECTED].split(os.pathsep)) == armed
+        assert jail.protected_paths(stable_roots) <= armed
+
+    def test_every_checkout_of_the_repository_is_protected(self) -> None:
+        self._assert_the_session_is_wired()
+
+    def test_a_checkout_made_after_arming_does_not_fail_the_wiring_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A worktree added or removed mid-run must not fail it (a full gate runs for hours)."""
+        live = jail.checkout_roots
+
+        def with_a_later_worktree(repo_root: Path) -> list[Path]:
+            return [*live(repo_root), tmp_path.resolve()]
+
+        monkeypatch.setattr(jail, "checkout_roots", with_a_later_worktree)
+
+        self._assert_the_session_is_wired()
 
     def test_a_spawned_python_inherits_the_protection_of_this_run(self) -> None:
         import tests.conftest as conftest

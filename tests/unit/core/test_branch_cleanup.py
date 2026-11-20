@@ -678,7 +678,9 @@ class TestFailuresAndEdges:
         assert advice.startswith("remote delete of origin/feat is for the owner")
         _git(repo, "push", "--quiet", "origin", "main")
         report = clean_sweep(repo, _CONFIG, dry_run=False)
-        assert "git push origin --delete feat" in report.commands
+        assert f"{daemon_cli_command_for_docs('delete-branch', '--remote-only')} feat" in (
+            report.commands
+        )
 
 
 class TestDeleteIfMerged:

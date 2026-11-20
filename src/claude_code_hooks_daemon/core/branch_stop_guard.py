@@ -38,7 +38,7 @@ from claude_code_hooks_daemon.core.branch_records import touched_by_session
 from claude_code_hooks_daemon.core.branch_sweep import open_work_count
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import SEE_SUBMODULES, run_git
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +143,7 @@ def _is_dirty(record: BranchRecord, budget: _Budget) -> bool | None:
     if record.worktree is None:
         # A failed worktree listing says nothing about whether one exists.
         return False if record.worktree_known else None
-    result = budget.git(record.worktree, "status", "--porcelain")
+    result = budget.git(record.worktree, "status", "--porcelain", SEE_SUBMODULES)
     if result is None or result.returncode != 0:
         return None
     return bool(result.stdout.strip())

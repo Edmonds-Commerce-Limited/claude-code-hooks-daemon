@@ -70,6 +70,13 @@ _REAL_OBJECTS_ENV: Final[Mapping[str, str]] = {
     "GIT_GRAFT_FILE": "/dev/null/no-grafts",
 }
 
+#: Every ``git diff`` or ``git status`` that decides whether work would be lost
+#: passes this. Without it git drops a submodule's row when the TRACKED
+#: ``.gitmodules`` says ``ignore = all`` or any config level sets
+#: ``diff.ignoreSubmodules = all``, so a pointer change reads as no change. The
+#: flag outranks both. ``git cherry`` takes no such flag: its patch-ids stay blind.
+SEE_SUBMODULES: Final[str] = "--ignore-submodules=none"
+
 #: Each of these points git at a repository, work tree or index other than the
 #: one ``-C <cwd>`` names. Shared with ``git_invocation_directory``, which denies
 #: an agent's git command that sets one.
