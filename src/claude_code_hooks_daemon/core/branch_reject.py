@@ -830,12 +830,15 @@ def verdict_problems(
     default_ref: str,
     now: float,
     consumed: frozenset[str],
+    consumed_agents: frozenset[str],
     config: BranchRejectConfig,
 ) -> list[str]:
     """Every reason ``verdict`` cannot unlock a delete; an empty list is the only pass.
 
     Runs every check (DESIGN.md section 5) rather than stopping at the first, so a
-    refusal names everything wrong at once.
+    refusal names everything wrong at once. ``consumed`` holds used verdict ids and
+    ``consumed_agents`` the reviewer agents a ledger entry already names: one agent
+    reviews one nonce, so a used chain copied whole under a fresh nonce is still used.
     """
     problems = _shape_problems(verdict)
     problems += _chain_problems(verdict, store)
@@ -845,6 +848,8 @@ def verdict_problems(
     problems += _time_problems(verdict, now, config)
     if verdict.verdict_id in consumed or verdict.nonce in consumed:
         problems.append("the verdict was already used for a removal")
+    if verdict.reviewer.agent_id in consumed_agents:
+        problems.append("the reviewer agent's verdict was already used for a removal")
     problems += _reviewer_problems(verdict.reviewer)
     problems += _independence_problems(verdict, repo)
     return problems
@@ -1838,6 +1843,16 @@ def read_ledger(path: Path) -> list[LedgerLine]:
     return effective_removals(read_ledger_entries(path))
 
 
+def consumed_reviewer_agents(entries: Iterable[LedgerEntry]) -> frozenset[str]:
+    """Every reviewer agent a removal, or a refused removal attempt, has already used."""
+    return frozenset(
+        agent_id
+        for entry in entries
+        if isinstance(entry, LedgerLine)
+        for agent_id in entry.reviewer_agent_ids
+    )
+
+
 def consumed_verdict_ids(entries: Iterable[LedgerEntry]) -> frozenset[str]:
     """Every verdict id a removal, or a refused removal attempt, has already used."""
     return frozenset(verdict_id for entry in entries for verdict_id in entry.verdict_ids)
@@ -1916,6 +1931,7 @@ def approve_removal(
     ):
         raise RejectRefusedError("a reviewer judged keep for this tip; disagreement is keep")
     consumed = consumed_verdict_ids(entries)
+    consumed_agents = consumed_reviewer_agents(entries)
     valid: list[Verdict] = []
     problems: dict[str, list[str]] = {}
     for verdict in verdicts:
@@ -1926,6 +1942,7 @@ def approve_removal(
             default_ref=default_ref,
             now=route.now,
             consumed=consumed,
+            consumed_agents=consumed_agents,
             config=route.config,
         )
         if found:
@@ -1960,7 +1977,9 @@ def record_removal(repo: Path, approval: RemovalApproval, route: RejectRoute) ->
     if problems:
         raise RejectError(f"the bundle no longer verifies: {'; '.join(problems)}")
     ids = tuple(v.verdict_id for v in approval.verdicts)
-    reused = consumed_verdict_ids(read_ledger_entries(route.ledger_path)) & set(ids)
+    entries = read_ledger_entries(route.ledger_path)
+    reused = consumed_verdict_ids(entries) & set(ids)
+    reused |= consumed_reviewer_agents(entries) & {v.reviewer.agent_id for v in approval.verdicts}
     if reused:
         raise RejectError(f"verdict(s) already used by a concurrent removal: {sorted(reused)}")
     line = LedgerLine(

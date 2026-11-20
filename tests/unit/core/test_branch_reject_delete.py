@@ -434,6 +434,18 @@ class TestRecordRemoval:
             branch_reject.record_removal(repo, approval, route)
         assert len(read_ledger_entries(route.ledger_path)) == 1
 
+    def test_a_concurrent_use_of_the_same_reviewer_agent_refuses(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        verdict = _issue(repo, store)
+        route = _route(repo, store, config)
+        approval = self._approval(repo, store, route)
+        line = replace(_ledger_line(branch="old"), reviewer_agent_ids=(verdict.reviewer.agent_id,))
+        append_ledger(route.ledger_path, line)
+        with pytest.raises(RejectError, match="concurrent"):
+            branch_reject.record_removal(repo, approval, route)
+        assert len(read_ledger_entries(route.ledger_path)) == 1
+
 
 def _copy_under_new_id(store: RejectStore, verdict: Verdict) -> Verdict:
     """What an agent with write access to the store could do: re-file a verdict."""

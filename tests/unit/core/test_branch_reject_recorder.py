@@ -659,6 +659,7 @@ class TestEndToEnd:
                 default_ref="main",
                 now=NOW + 60,
                 consumed=frozenset(),
+                consumed_agents=frozenset(),
                 config=config,
             )
             == []

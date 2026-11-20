@@ -213,6 +213,7 @@ def _problems(
     config: BranchRejectConfig,
     *,
     consumed: frozenset[str] = frozenset(),
+    consumed_agents: frozenset[str] = frozenset(),
     now: float = NOW,
 ) -> list[str]:
     return verdict_problems(
@@ -222,6 +223,7 @@ def _problems(
         default_ref="main",
         now=now,
         consumed=consumed,
+        consumed_agents=consumed_agents,
         config=config,
     )
 
