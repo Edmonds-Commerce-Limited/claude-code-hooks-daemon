@@ -127,7 +127,9 @@ class TestAcceptanceTests:
         self, strategy: GitHubWorkflowLintStrategy
     ) -> None:
         """A machine without the optional linter must skip, not fail, the probe."""
-        blocking = [t for t in strategy.get_acceptance_tests() if t.expected_decision == Decision.DENY]
+        blocking = [
+            t for t in strategy.get_acceptance_tests() if t.expected_decision == Decision.DENY
+        ]
         assert blocking, "the strategy must prove a finding is reported"
         for test in blocking:
             assert test.required_tools == ["actions-qa"]

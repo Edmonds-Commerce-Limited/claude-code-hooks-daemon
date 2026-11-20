@@ -31,6 +31,8 @@ from claude_code_hooks_daemon.core.workspace import Workspace, resolve_workspace
 from claude_code_hooks_daemon.strategies.lint.common import (
     INTERPRETER_BIN_DIR,
     build_lint_argv,
+    is_findings_exit,
+    lint_tool_is_optional,
     matches_skip_path,
     resolve_lint_executable,
 )
@@ -436,6 +438,10 @@ class LintOnEditHandler(LazyLanguageFilterMixin[LintStrategyRegistry], PostToolU
         # venv, which is the normal case for a Python project.
         resolved = self._resolve_executable(command_parts[0], workspace.bin_dirs)
         if resolved is None:
+            if lint_tool_is_optional(strategy):
+                # An optional linter most projects never adopt: an "install
+                # it" line on every edit of its files would be noise (Plan 00621).
+                return None
             searched = ", ".join(str(bin_dir) for bin_dir in workspace.bin_dirs)
             where = f"{searched}, " if searched else ""
             return BlockingResult(
@@ -464,6 +470,23 @@ class LintOnEditHandler(LazyLanguageFilterMixin[LintStrategyRegistry], PostToolU
                 if result.stderr:
                     error_output = (
                         error_output + "\n" + result.stderr if error_output else result.stderr
+                    )
+
+                if not is_findings_exit(strategy, result.returncode):
+                    # The strategy names its tool's findings codes and this is
+                    # not one: the tool faulted (bad command line, broken
+                    # toolchain, no verdict), so the file was never judged.
+                    first_line = (
+                        error_output.strip().splitlines()[0] if error_output.strip() else ""
+                    )
+                    return BlockingResult(
+                        decision=Decision.ALLOW,
+                        context=[
+                            f"⚠️ {language_name} lint did not reach a verdict "
+                            f"({command_parts[0]} exit {result.returncode}), so "
+                            f"{Path(file_path).name} was NOT checked"
+                            + (f" - {first_line}" if first_line else "")
+                        ],
                     )
 
                 if isinstance(strategy, ClassifiesToolUnavailable) and (
@@ -521,6 +544,8 @@ class LintOnEditHandler(LazyLanguageFilterMixin[LintStrategyRegistry], PostToolU
                 )
 
         except FileNotFoundError:
+            if lint_tool_is_optional(strategy):
+                return None
             # Linter not installed - advisory allow (visible in system-reminders)
             return BlockingResult(
                 decision=Decision.ALLOW,
@@ -699,12 +724,11 @@ warning, never crashes the handler."""
         """Return acceptance tests aggregated from all registered strategies."""
         tests: list[Any] = []
         seen_languages: set[str] = set()
-        for strategy in self._registry._strategies.values():
+        for strategy in self._registry.strategies():
             if strategy.language_name in seen_languages:
                 continue
             seen_languages.add(strategy.language_name)
-            if hasattr(strategy, "get_acceptance_tests"):
-                tests.extend(strategy.get_acceptance_tests())
+            tests.extend(strategy.get_acceptance_tests())
         tests.extend(self._bash_route_acceptance_tests())
         return tests
 

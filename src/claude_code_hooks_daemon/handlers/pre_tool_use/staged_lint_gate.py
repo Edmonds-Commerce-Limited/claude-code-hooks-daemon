@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.core.workspace import resolve_workspace
 from claude_code_hooks_daemon.strategies.lint.common import (
     build_lint_argv,
+    is_findings_exit,
     matches_skip_path,
     resolve_lint_executable,
 )
@@ -415,6 +416,20 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
             return None
 
         if result.returncode == 0:
+            return None
+
+        if not is_findings_exit(strategy, result.returncode):
+            # The strategy names its tool's findings codes and this is not one:
+            # the tool faulted and never judged the file, so it cannot fail a
+            # commit -- the same contract lint_on_edit applies (Plan 00621).
+            logger.warning(
+                "staged_lint_gate: %s was NOT checked: %s exited %d, which is not a "
+                "findings code for %s",
+                file_path,
+                parts[0],
+                result.returncode,
+                strategy.language_name,
+            )
             return None
 
         output = result.stdout

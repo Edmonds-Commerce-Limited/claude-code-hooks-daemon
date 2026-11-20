@@ -1,6 +1,6 @@
 # Plan 00621: actions qa ci advisory and workflow lint on edit
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-18
 **Owner**: joseph
 **Priority**: Medium
@@ -51,10 +51,11 @@ three. The tool has not been run, so the design fails open on its behaviour.
 
 ### Phase 2: Build (test first; slices are defined in DESIGN.md section 3)
 
-- [ ] ⬜ **Task 2.1**: Slice 1. The lint registry holds several strategies for one extension; an exit-code capability
+- [x] ✅ **Task 2.1**: Slice 1. The lint registry holds several strategies for one extension; an exit-code capability
   and an optional-tool capability in the lint protocol; `GitHubWorkflowLintStrategy` registered by default. Built
   against a stub linter, with the tests DESIGN.md section 3 lists, including that Ansible files still resolve to the
-  Ansible strategy.
+  Ansible strategy. `staged_lint_gate` applies the same exit-code contract (a gap the design did not name; journal
+  2026-11-20).
 - [ ] ⬜ **Task 2.2**: Slice 2. The `workflow_linter_advisor` session-start handler, with tests for each trigger and
   silence case.
 - [ ] ⬜ **Task 2.3**: Slice 3. Handler guidance, config documentation and a release note.
