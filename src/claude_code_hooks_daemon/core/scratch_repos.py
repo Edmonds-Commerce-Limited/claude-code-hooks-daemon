@@ -1040,7 +1040,11 @@ def _classify_one(
                 ],
                 [],
             )
-        return RepoKind.RELATED, [], [f"{path_relative_to(repo.gitdir, root).as_posix()}/", *tracked]
+        return (
+            RepoKind.RELATED,
+            [],
+            [f"{path_relative_to(repo.gitdir, root).as_posix()}/", *tracked],
+        )
     except _Decided as decided:
         return (
             decided.kind,
