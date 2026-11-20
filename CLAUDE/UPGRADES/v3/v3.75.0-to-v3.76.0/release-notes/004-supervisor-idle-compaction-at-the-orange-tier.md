@@ -9,4 +9,4 @@ New setting `CCY_IDLE_COMPACT_TIER` (`yellow`, `orange` or `red`; anything else 
 
 The idle compaction also now waits for queued supervisor work: when a standing-authorisation reminder, a session-actions directive or a cron-reconcile prompt is pending, that goes first and the compaction is reconsidered after.
 
-The mode default is unchanged (`dry-run`: a `would idle-compact` line in `decision.log`, nothing typed); set `CCY_IDLE_COMPACT=on` in `.claude/ccy/ccy.env` to arm it. The decision half hot-reloads with the worker; no relaunch is needed for the new defaults. See [CLAUDE/development/CcySupervisor.md](../../../development/CcySupervisor.md).
+The mode default is unchanged (`dry-run`: a `would idle-compact` line in `decision.log`, nothing typed); set `CCY_IDLE_COMPACT=on` in `.claude/ccy/ccy.env` to arm it. The decision half hot-reloads with the worker; no relaunch is needed for the new defaults. See [CLAUDE/development/CcySupervisor.md](../../../../development/CcySupervisor.md).
