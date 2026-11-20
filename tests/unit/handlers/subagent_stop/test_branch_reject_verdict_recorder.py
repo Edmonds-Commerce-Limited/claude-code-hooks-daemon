@@ -441,3 +441,39 @@ class TestAcceptance:
         tests = handler.get_acceptance_tests()
         assert len(tests) == 1
         assert tests[0].expected_decision == Decision.ALLOW
+
+
+_REPO = Path(__file__).resolve().parents[4]
+_KEY = "branch_reject_verdict_recorder"
+
+
+class TestRegistration:
+    """Registered at priority 13 on SubagentStop everywhere the gate and binder are."""
+
+    @pytest.mark.parametrize(
+        "name", [".claude/hooks-daemon.yaml", ".claude/hooks-daemon.yaml.example"]
+    )
+    def test_config_files_enable_it_at_13(self, name: str) -> None:
+        import yaml
+
+        config = yaml.safe_load((_REPO / name).read_text(encoding="utf-8"))
+        entry = config["handlers"]["subagent_stop"][_KEY]
+        assert entry["enabled"] is True
+        assert entry["priority"] == 13
+
+    def test_init_config_template_carries_it(self) -> None:
+        text = (_REPO / "src/claude_code_hooks_daemon/daemon/init_config.py").read_text(
+            encoding="utf-8"
+        )
+        assert f"    {_KEY}: {{enabled: true, priority: 13}}" in text
+
+    def test_the_unreleased_manifest_adds_it(self) -> None:
+        import yaml
+
+        manifest = yaml.safe_load(
+            (_REPO / "CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.76.0.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        keys = [entry["key"] for entry in manifest["config_changes"]["added"]]
+        assert f"handlers.subagent_stop.{_KEY}" in keys
