@@ -8,11 +8,11 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - In Progress (owner request: a full scratch management system; every scratch entry has a 24-hour TTL and past it is filed, packed into a verified archive and removed after a hold, or kept only on a machine proof of unpushed or human work; a `scratch-sweep` command, a SessionStart report, caps that act before the link index overflows, a per-session scratch directory; design written, rulings by a delegated sub-agent, no code yet; takes over Plan 00560's sweep)
+- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - In Progress (owner request: a full scratch management system; every scratch entry has a 24-hour TTL and past it is filed, archived or kept only on a machine proof of unpushed or human work; design written, rulings by a delegated sub-agent, no code yet; takes over Plan 00560's sweep)
 
 - [00628: daemon socket path too long from init sh](00628-daemon-socket-path-too-long-from-init-sh/PLAN.md) - In Progress (live defect for 3.76.0: init.sh forced an over-limit socket path on the daemon, so a long project path denied every tool call; one path-fitting function for every caller, discovery file only after bind, safe short-path root)
 
-- [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - Not Started (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
+- [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - In Progress (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
 
 - [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - In Progress (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; open questions ruled under the owner's delegation in RULINGS.md: the verdict never unlocks alone, the guard must also verify a recovery bundle; local delete only; slice 1 ready to build)
 
@@ -34,7 +34,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
-- [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - In Progress (unblocked by delegated ruling in DESIGN §7; open: Task 3.8 surviving-content remote delete, Task 4.6 stacks count as one stream, Task 5.1 fixture proof of the branch tip channel; owner request via a client team: redesign the whole branch lifecycle (birth, finish, proof of merge, delete, park, owner) from nine failure classes seen in multi-agent client use, plus letting a client follow a daemon branch tip with a one-step return to the last tag; design first, no guard change ships before review)
+- [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - In Progress (unblocked by delegated ruling in DESIGN §7; open: Task 3.8 surviving-content remote delete, Task 4.6 stacks count as one stream, Task 5.1 fixture proof of the branch tip channel; owner request via a client team: redesign the whole branch lifecycle from nine failure classes seen in multi-agent client use, plus a branch tip channel for clients)
 
 ### Next (ordered; work top to bottom)
 
