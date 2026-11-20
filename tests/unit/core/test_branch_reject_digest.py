@@ -315,8 +315,6 @@ class TestDigestGatesNothing:
             store.digest_path.parent.mkdir(parents=True, exist_ok=True)
             store.digest_path.write_text("garbage", encoding="utf-8")
         route = RejectRoute(store=store, ledger_path=ledger, config=config, now=NOW)
-        approval = approve_removal(
-            repo, "feat", _tip(repo), route, default_ref="main", write=False
-        )
+        approval = approve_removal(repo, "feat", _tip(repo), route, default_ref="main", write=False)
         assert approval.branch == "feat"
         assert len(approval.verdicts) == 1

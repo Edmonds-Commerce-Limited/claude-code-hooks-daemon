@@ -85,6 +85,8 @@ _DISPATCHES = "dispatches"
 _VERDICTS = "verdicts"
 _KEEPS = "keeps"
 _STOPS = "stops"
+_DIGEST_FILE = "digest.json"
+_ENTRY_KEY = re.compile(r"[0-9a-f]{64}")
 
 #: Path parts, name markers and suffixes a reviewer may judge worthless only with a
 #: citation of what supersedes them (PLAN.md goal "doubt means keep").
@@ -573,6 +575,11 @@ class RejectStore:
 
     def keeps(self) -> list[KeepRecord]:
         return [KeepRecord.from_dict(data) for data in self._all(_KEEPS)]
+
+    @property
+    def digest_path(self) -> Path:
+        """The digest watermark: one file, since its keys are 64 hex, not record ids."""
+        return self.root / _DIGEST_FILE
 
 
 @dataclass(frozen=True)
@@ -1969,3 +1976,160 @@ def record_git_refusal(line: LedgerLine, detail: str, route: RejectRoute) -> Non
             refused_at=route.now,
         ),
     )
+
+
+# --- the digest (slice 3, RULINGS.md section 3 item 5) --------------------------------
+
+
+def entry_key(entry: LedgerEntry) -> str:
+    """The sha256 of the entry's canonical JSON: its identity, not its position.
+
+    The ledger merges with ``merge=union``, so a line can arrive by a merge AFTER a
+    digest, anywhere in the file. A positional or time watermark would read such a
+    line as already digested; an identity key never does.
+    """
+    canonical = json.dumps(entry.to_dict(), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class DigestState:
+    """The digest watermark: what an explicit mark-read has recorded as read.
+
+    It gates nothing. ``approve_removal`` never reads it, so an agent that marks
+    entries read hides them from the digest only, never unlocks a delete.
+    """
+
+    ledger_keys: frozenset[str]
+    keep_ids: frozenset[str]
+    marked_at: float | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": SCHEMA_VERSION,
+            "ledger_keys": sorted(self.ledger_keys),
+            "keep_ids": sorted(self.keep_ids),
+            "marked_at": self.marked_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> DigestState:
+        _schema(data)
+        ledger_keys = _strs(data, "ledger_keys")
+        keep_ids = _strs(data, "keep_ids")
+        if not all(_ENTRY_KEY.fullmatch(key) for key in ledger_keys):
+            raise RejectError("a digest ledger key is not a 64-hex entry key")
+        if not all(_ID.fullmatch(key) for key in keep_ids):
+            raise RejectError("a digest keep id is not a record id")
+        return cls(
+            ledger_keys=frozenset(ledger_keys),
+            keep_ids=frozenset(keep_ids),
+            marked_at=_float(data, "marked_at"),
+        )
+
+
+_NEVER_MARKED = DigestState(ledger_keys=frozenset(), keep_ids=frozenset(), marked_at=None)
+
+
+def read_digest_state(path: Path) -> DigestState:
+    """The watermark; a missing file was never marked, a damaged one raises RejectError."""
+    if not path.exists():
+        return _NEVER_MARKED
+    return DigestState.from_dict(RejectStore._load(path))
+
+
+def write_digest_state(path: Path, state: DigestState) -> None:
+    """Write the watermark atomically (a sibling temp file, then ``os.replace``)."""
+    if state.marked_at is None:
+        raise RejectError("a written digest state records when it was marked")
+    tmp = path.with_name(f".{path.name}.{new_id()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(state.to_dict(), sort_keys=True), encoding="utf-8")
+        tmp.replace(path)
+    except OSError as exc:
+        raise RejectError(f"could not write {path}: {exc}") from exc
+    finally:
+        with suppress(FileNotFoundError, NotADirectoryError):
+            tmp.unlink()
+
+
+@dataclass(frozen=True)
+class Digest:
+    """Everything not yet marked read, and the route's rate state now.
+
+    ``ledger_keys`` are the keys of the listed entries, so a mark-read marks exactly
+    what was listed and never an entry that arrived after the listing.
+    """
+
+    removals: tuple[LedgerLine, ...]
+    refusals: tuple[LedgerRefusal, ...]
+    keeps: tuple[KeepRecord, ...]
+    ledger_keys: frozenset[str]
+    removals_in_window: int
+    #: Reviewers the next removal needs; None when the route is refusing.
+    reviewers_next: int | None
+    last_marked_at: float | None
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.removals or self.refusals or self.keeps)
+
+
+def build_digest(
+    ledger_path: Path, store: RejectStore, *, now: float, config: BranchRejectConfig
+) -> Digest:
+    """List every undigested ledger entry and keep record; never writes anything.
+
+    Strict: a damaged ledger, keep record or watermark raises RejectError, so an
+    unreadable state never reads as "nothing to digest". The rate counts every
+    removal in the window, marked read or not.
+    """
+    entries = read_ledger_entries(ledger_path)
+    keeps = store.keeps()
+    state = read_digest_state(store.digest_path)
+    fresh = [entry for entry in entries if entry_key(entry) not in state.ledger_keys]
+    removals = removals_in_window(effective_removals(entries), now=now, config=config)
+    return Digest(
+        removals=tuple(entry for entry in fresh if isinstance(entry, LedgerLine)),
+        refusals=tuple(entry for entry in fresh if isinstance(entry, LedgerRefusal)),
+        keeps=tuple(keep for keep in keeps if keep.verdict_id not in state.keep_ids),
+        ledger_keys=frozenset(entry_key(entry) for entry in fresh),
+        removals_in_window=removals,
+        reviewers_next=reviewers_for_rate(removals, config),
+        last_marked_at=state.marked_at,
+    )
+
+
+def mark_digest_read(store: RejectStore, digest: Digest, *, now: float) -> DigestState:
+    """Add exactly the listed entries to the watermark, recording when; returns it."""
+    current = read_digest_state(store.digest_path)
+    state = DigestState(
+        ledger_keys=current.ledger_keys | digest.ledger_keys,
+        keep_ids=current.keep_ids | {keep.verdict_id for keep in digest.keeps},
+        marked_at=now,
+    )
+    write_digest_state(store.digest_path, state)
+    return state
+
+
+def branch_still_at_tip(repo: Path, line: LedgerLine) -> bool:
+    """True when the removed branch still resolves at the recorded tip.
+
+    A crash between the ledger append and git's answer leaves exactly that. Absent
+    is the normal case and is False; any other git failure raises RejectError, so a
+    failed lookup never reads as "removed".
+    """
+    result = run_git(
+        repo,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"{branch_ref(line.branch)}^{{commit}}",
+        timeout=_git_budget(),
+    )
+    if result.returncode == 0:
+        return result.stdout.strip() == line.tip
+    if result.returncode == 1 and not result.stdout.strip() and not result.stderr.strip():
+        return False
+    raise RejectError(f"could not resolve {line.branch}: {result.stderr.strip() or 'no detail'}")
