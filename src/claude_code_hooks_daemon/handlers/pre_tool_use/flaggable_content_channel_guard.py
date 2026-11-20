@@ -61,6 +61,10 @@ from claude_code_hooks_daemon.utils.recursive_search import (
     shell_directory_after,
     unknown_tilde,
 )
+from claude_code_hooks_daemon.utils.resolution_failure import (
+    ResolutionFailedError,
+    fail_closed_finding,
+)
 from claude_code_hooks_daemon.utils.unknown_verdict import unknown_verdict_allow
 
 _RULE = Rule(
@@ -254,6 +258,23 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
 
         raw_cwd = hook_input.get(HookInputField.CWD)
         cwd = raw_cwd if isinstance(raw_cwd, str) else None
+        try:
+            return self._revealing_segment(command, globs, shapes, cwd)
+        except ResolutionFailedError:
+            # Plan 00623: a word that cannot be placed is a finding (denied), never the
+            # unknown-verdict route an unplaced search root takes.
+            logger.exception("flaggable_content_channel_guard: placing the command's words failed")
+            finding = fail_closed_finding(globs, _UNRESOLVED_LABEL)
+            return None if finding is None else (_UNRESOLVED_LABEL, finding[0], None)
+
+    def _revealing_segment(
+        self,
+        command: str,
+        globs: tuple[str, ...],
+        shapes: list[tuple[str, re.Pattern[str]]],
+        cwd: str | None,
+    ) -> tuple[str, str, str | None] | None:
+        """The body of :meth:`_matched_reason` once its inputs are known."""
         unplaced: tuple[str, str, str | None] | None = None
         # Where the shell is: a `git -C` is placed from here AND from the payload cwd.
         shell_cwd = cwd
@@ -292,6 +313,18 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
             return GatingResult(decision=Decision.ALLOW)
 
         shape_label, glob, remedy = matched
+
+        if shape_label == _UNRESOLVED_LABEL:
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=(
+                    f"BLOCKED [{RuleID.FLAGGABLE_CONTENT_CHANNEL}]: where this command's words "
+                    f"lead could not be worked out, so it may read the flaggable directory "
+                    f"matched by `{glob}`.\n\n"
+                    "Name literal paths, or delegate any review of flagged content to the "
+                    "quarantine subagent (hooks-daemon-opus-security)."
+                ),
+            )
 
         if shape_label == _UNPLACED_LABEL:
             return unknown_verdict_allow(
@@ -448,6 +481,8 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
 _RECURSIVE_SEARCH_LABEL: Final[str] = "recursive grep/rg search reaching a flaggable directory"
 _NO_REMEDY: Final[str] = "Name explicit narrower roots that do not contain the flagged directory."
 _UNPLACED_LABEL: Final[str] = "recursive search whose roots could not be placed"
+#: A word whose place could not be worked out (a ResolutionFailedError): DENIED, unlike the above.
+_UNRESOLVED_LABEL: Final[str] = "command whose words could not be placed"
 _GREP_SHAPE: Final[re.Pattern[str]] = re.compile(r"\b(?:grep|egrep|fgrep|zgrep|rg)\b")
 _NEGATION: Final[str] = "!"
 _GIT_EXCLUDE_MAGIC: Final[tuple[str, ...]] = (":(exclude)", ":!", ":^")

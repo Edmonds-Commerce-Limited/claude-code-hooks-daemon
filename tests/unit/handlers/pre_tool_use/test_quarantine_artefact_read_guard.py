@@ -30,6 +30,10 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.quarantine_artefact_read_gua
     QuarantineArtefactReadGuardHandler,
 )
 from claude_code_hooks_daemon.utils import protected_file_index
+from claude_code_hooks_daemon.utils.resolution_failure import (
+    IncompleteScanError,
+    ResolutionFailedError,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -1028,3 +1032,33 @@ class TestPrewarmIndex:
         handler.prewarm_index()
 
         assert protected_file_index.cached_index("/nowhere", ()) is None
+
+
+class TestAPlacementThatCannotFinishDenies:
+    """Plan 00614 round 6: a ResolutionFailedError (an unfinished link scan) is a finding.
+
+    The secret guard denies it; this guard sent it to the A1 advisory route, so a
+    computed cd in a project past the link scan's cap left a later read unjudged.
+    """
+
+    @pytest.mark.parametrize(
+        "error", [ResolutionFailedError("unplaceable"), IncompleteScanError("scan stopped")]
+    )
+    @pytest.mark.parametrize("tool", ["Bash", "Grep"])
+    def test_denied(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        monkeypatch: pytest.MonkeyPatch,
+        error: Exception,
+        tool: str,
+    ) -> None:
+        def _raise(self: Any, hook_input: dict[str, Any]) -> str | None:
+            raise error
+
+        monkeypatch.setattr(QuarantineArtefactReadGuardHandler, "_evaluate_matched_pattern", _raise)
+        tool_input = (
+            {"command": "cd $(echo x) && grep -r x ."} if tool == "Bash" else {"pattern": "x"}
+        )
+        payload = _hook_input(tool, tool_input, Path("/p"))
+        assert handler.matches(payload) is True
+        assert handler.handle(payload).decision == Decision.DENY
