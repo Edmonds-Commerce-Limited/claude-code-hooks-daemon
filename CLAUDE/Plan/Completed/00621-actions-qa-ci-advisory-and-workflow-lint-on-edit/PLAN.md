@@ -1,11 +1,12 @@
 # Plan 00621: actions qa ci advisory and workflow lint on edit
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-18
 **Owner**: joseph
 **Priority**: Medium
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Sub-Agent Orchestration
+**Target release**: 3.76.0
 
 ## Overview
 
@@ -71,10 +72,15 @@ three. The tool was run on 2026-11-20 (Task 1.1); the design fails open on any b
 - [x] The real linter was run once and its behaviour matches what the strategy assumes, or the strategy was changed to
   match (Task 1.1).
 - [x] The release-bound consequences are recorded in the pending-release holding area:
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/013-github-workflows-linted-on-edit-by-actions-qa.md` and two entries in
-  `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.76.0.yaml`.
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/013-github-workflows-linted-on-edit-by-actions-qa.md` and a truth-change entry in
+  `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.76.0.yaml`.
+
+- [x] `staged_lint_gate` applies the same exit-code contract, kept as built: the linter runs at commit, a findings exit
+  is an advisory in `mode: warn` and a deny in `mode: block`, any other exit is only logged, and the log line names the
+  tool's error (`staged_lint_gate.py`; `test_staged_lint_gate_workflow.py`, 52 passed and 1 skipped across the three
+  plan test files at close-out).
 
 ## Delivery & Milestones
 
 - Filed on request of a peer project; design ruled under delegation; Tasks 1.1 to 2.3 built on the plan's branch, which
-  awaits the coordinator's merge.
+  was merged to main at `4f97728de` and archived afterwards.
