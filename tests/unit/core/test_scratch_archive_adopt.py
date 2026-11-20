@@ -3,24 +3,41 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import io
 import lzma
 import os
 import shutil
 import subprocess
 import tarfile
+from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.core import scratch_archive_adopt as adopt_mod
 from claude_code_hooks_daemon.core import scratch_archive_pack as pack_mod
+from claude_code_hooks_daemon.core.scratch_archive import (
+    ARCHIVE_SUFFIX,
+    AdoptEvent,
+    ArchiveStore,
+    StoreRefused,
+    archive_file_name,
+)
+from claude_code_hooks_daemon.core.scratch_archive_adopt import Adopted, AdoptRefused, adopt
+from claude_code_hooks_daemon.core.scratch_archive_claim import open_dir
 from claude_code_hooks_daemon.core.scratch_archive_pack import (
     PackRefused,
+    TarTool,
     compression_flags,
     compression_of,
+    find_gnu_tar,
     require_decompressor,
     tarfile_mode,
 )
+from claude_code_hooks_daemon.core.scratch_archive_restore import restore
 
 TAR = shutil.which("tar")
 _ENV = {"LC_ALL": "C", "PATH": "/usr/bin:/bin"}
@@ -231,3 +248,416 @@ def test_a_missing_decompressor_is_a_refusal(kind: str, monkeypatch: pytest.Monk
 def test_a_plain_tar_needs_no_decompressor(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pack_mod.shutil, "which", lambda *_a, **_k: None)
     require_decompressor("none")
+
+
+# --- adopt ------------------------------------------------------------------------
+
+_NOW = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
+_FLAGS = {"gzip": "-czf", "none": "-cf", "xz": "-cJf"}
+
+
+class Crash(BaseException):
+    """A simulated process death: no ``except Exception`` cleanup runs."""
+
+
+@pytest.fixture
+def root(tmp_path: Path) -> Path:
+    path = tmp_path / "project" / "untracked" / "scratch"
+    path.mkdir(parents=True)
+    return path
+
+
+@pytest.fixture
+def root_fd(root: Path) -> Iterator[int]:
+    fd = open_dir(root)
+    yield fd
+    os.close(fd)
+
+
+@pytest.fixture
+def store(tmp_path: Path) -> Iterator[ArchiveStore]:
+    with ArchiveStore.open(tmp_path / "project" / "untracked" / "scratch-archive") as opened:
+        with opened.lock():
+            yield opened
+
+
+@pytest.fixture
+def gnu_tar() -> TarTool:
+    return find_gnu_tar()
+
+
+def _make(root: Path, name: str = "e1") -> dict[str, str]:
+    entry = root / name
+    (entry / "sub").mkdir(parents=True)
+    (entry / "a.txt").write_text("alpha")
+    (entry / "sub" / "b.txt").write_text("beta")
+    (entry / "rel-link").symlink_to("a.txt")
+    return _tree(entry)
+
+
+def _tree(path: Path) -> dict[str, str]:
+    found: dict[str, str] = {}
+    for item in sorted(path.rglob("*")):
+        rel = str(item.relative_to(path))
+        if item.is_symlink():
+            found[rel] = "-> " + str(item.readlink())
+        elif item.is_dir():
+            found[rel] = "dir"
+        else:
+            found[rel] = item.read_text()
+    return found
+
+
+def _pack_by_hand(
+    root: Path, name: str = "e1", compression: str = "gzip", tarball: str = "e1.tgz"
+) -> Path:
+    if compression == "xz" and shutil.which("xz", path="/usr/bin:/bin") is None:
+        pytest.skip("xz is not installed")
+    assert TAR is not None
+    proc = subprocess.run(
+        [TAR, "--format=gnu", _FLAGS[compression], tarball, "--", name],
+        cwd=root,
+        env=_ENV,
+        capture_output=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return root / tarball
+
+
+def _adopt(
+    store: ArchiveStore,
+    root_fd: int,
+    gnu_tar: TarTool,
+    tarball: str = "e1.tgz",
+    name: str = "e1",
+    original: str | None = None,
+) -> Adopted:
+    return adopt(
+        store,
+        root_fd,
+        name,
+        tarball,
+        original_path=original or f"untracked/scratch/{name}",
+        checkout="main",
+        verdict="DISPOSABLE",
+        proof_ids=("P6",),
+        expires_at="2026-11-21T00:00:00+00:00",
+        restore_command="hooks-daemon scratch-restore",
+        now=_NOW,
+        tar=gnu_tar,
+        max_inodes=1000,
+    )
+
+
+def _remove_tree(path: Path) -> None:
+    for item in [path, *path.rglob("*")]:
+        if item.is_dir() and not item.is_symlink():
+            item.chmod(0o755)
+    shutil.rmtree(path)
+
+
+def _store_files(store: ArchiveStore) -> list[str]:
+    return sorted(p.name for p in store.path.iterdir() if p.name.endswith(ARCHIVE_SUFFIX))
+
+
+class TestAdopt:
+    @pytest.mark.parametrize("compression", ["gzip", "none", "xz"])
+    def test_an_equal_tarball_is_adopted_and_restores_whole(
+        self, root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool, compression: str
+    ) -> None:
+        before = _make(root)
+        tarball = _pack_by_hand(root, compression=compression)
+        data = tarball.read_bytes()
+        result = _adopt(store, root_fd, gnu_tar)
+        assert not tarball.exists()
+        assert (root / "e1").is_dir()
+        assert _store_files(store) == [archive_file_name(result.archive_id)]
+        (record,) = store.read_index().records
+        assert (record.archive_id, record.sha256, record.archive_size) == (
+            result.archive_id,
+            hashlib.sha256(data).hexdigest(),
+            len(data),
+        )
+        assert dict(record.counts) == {"dir": 2, "file": 2, "symlink": 1}
+        assert record.original_path == "untracked/scratch/e1"
+        assert store.read_events().events == (
+            AdoptEvent(
+                archive_id=result.archive_id,
+                original_path="untracked/scratch/e1",
+                tarball="untracked/scratch/e1.tgz",
+                at=_NOW.isoformat(),
+            ),
+        )
+        audit = store.audit()
+        assert (audit.unrecorded_archives, audit.records_without_archive) == ((), ())
+        _remove_tree(root / "e1")
+        restored = restore(store, result.archive_id, root_fd, tar=gnu_tar, max_inodes=1000)
+        assert restored.layout == "adopted"
+        assert _tree(root / "e1") == before
+
+    def test_an_empty_directory_is_checked_by_member_set_alone(
+        self, root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool
+    ) -> None:
+        (root / "e1").mkdir()
+        _pack_by_hand(root)
+        result = _adopt(store, root_fd, gnu_tar)
+        assert store.read_index().by_id(result.archive_id) is not None
+
+    def test_a_hostile_name_is_adopted(
+        self, root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool
+    ) -> None:
+        name = "-rf --to-command=x \n 'q\"\\"
+        (root / name).mkdir()
+        (root / name / "--checkpoint-action=exec=x").write_text("payload")
+        _pack_by_hand(root, name=name, tarball="-x.tgz")
+        _adopt(store, root_fd, gnu_tar, tarball="-x.tgz", name=name)
+        assert not (root / "-x.tgz").exists()
+
+
+def _refused(
+    store: ArchiveStore,
+    root: Path,
+    root_fd: int,
+    gnu_tar: TarTool,
+    match: str,
+    tarball: str = "e1.tgz",
+    original: str | None = None,
+) -> None:
+    before = sorted(p.name for p in root.iterdir())
+    with pytest.raises(AdoptRefused, match=match):
+        _adopt(store, root_fd, gnu_tar, tarball=tarball, original=original)
+    assert sorted(p.name for p in root.iterdir()) == before
+    assert _store_files(store) == []
+    assert store.read_index().records == ()
+    assert store.read_events().events == ()
+
+
+class TestAdoptRefusals:
+    def test_needs_the_lock(self, tmp_path: Path, root: Path, root_fd: int) -> None:
+        _make(root)
+        _pack_by_hand(root)
+        with ArchiveStore.open(tmp_path / "other-store") as unlocked:
+            with pytest.raises(StoreRefused, match="lock"):
+                _adopt(unlocked, root_fd, find_gnu_tar())
+
+    @pytest.mark.parametrize(
+        "change",
+        ["changed-file", "missing-file", "extra-file", "extra-dir"],
+    )
+    def test_a_tarball_that_differs_from_its_original_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool, change: str
+    ) -> None:
+        _make(root)
+        _pack_by_hand(root)
+        if change == "changed-file":
+            (root / "e1" / "a.txt").write_text("ALPHA")
+        elif change == "missing-file":
+            (root / "e1" / "sub" / "b.txt").unlink()
+        elif change == "extra-file":
+            (root / "e1" / "sub" / "new.txt").write_text("new work")
+        else:
+            (root / "e1" / "new").mkdir()
+        _refused(store, root, root_fd, gnu_tar, "differ")
+
+    def test_a_tarball_that_is_a_link_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool
+    ) -> None:
+        _make(root)
+        _pack_by_hand(root, tarball="real.tgz")
+        (root / "e1.tgz").symlink_to("real.tgz")
+        _refused(store, root, root_fd, gnu_tar, "link")
+
+    def test_a_multi_linked_tarball_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool
+    ) -> None:
+        _make(root)
+        tarball = _pack_by_hand(root)
+        os.link(tarball, root / "other-name.tgz")
+        _refused(store, root, root_fd, gnu_tar, "hard link")
+
+    def test_a_special_file_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool
+    ) -> None:
+        _make(root)
+        os.mkfifo(root / "e1.tgz")
+        _refused(store, root, root_fd, gnu_tar, "regular file")
+
+    @pytest.mark.parametrize("tarball", ["../e1.tgz", "e1/inner.tgz", "", "..", "e1"])
+    def test_a_tarball_outside_the_entry_directory_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool, tarball: str
+    ) -> None:
+        _make(root)
+        _pack_by_hand(root, tarball="inner.tgz").replace(root / "e1" / "inner.tgz")
+        _refused(store, root, root_fd, gnu_tar, "name|regular file", tarball=tarball)
+
+    def test_a_record_path_naming_another_entry_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool
+    ) -> None:
+        _make(root)
+        _pack_by_hand(root)
+        _refused(store, root, root_fd, gnu_tar, "name", original="untracked/scratch/e2")
+
+    def test_an_original_holding_a_special_file_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool
+    ) -> None:
+        _make(root)
+        _pack_by_hand(root)
+        os.mkfifo(root / "e1" / "pipe")
+        _refused(store, root, root_fd, gnu_tar, "special")
+
+    @pytest.mark.parametrize(
+        "payload",
+        [b"BZh91AY&SY" + b"\0" * 600, b"\x1f\x8b" + b"\0" * 600, b"\0" * 2048],
+        ids=["bzip2", "corrupt-gzip", "zeros"],
+    )
+    def test_an_unverifiable_tarball_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool, payload: bytes
+    ) -> None:
+        _make(root)
+        (root / "e1.tgz").write_bytes(payload)
+        _refused(store, root, root_fd, gnu_tar, "format|headers|member")
+
+    @pytest.mark.parametrize(
+        "names",
+        [["e1/a.txt"], ["other/", "other/a.txt"], ["e1/", "e1/a.txt", "e1/a.txt"]],
+        ids=["no-root-member", "other-root", "repeated"],
+    )
+    def test_a_tarball_of_the_wrong_shape_is_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        names: list[str],
+    ) -> None:
+        (root / "e1").mkdir()
+        (root / "e1" / "a.txt").write_text("x")
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz", format=tarfile.GNU_FORMAT) as archive:
+            for name in names:
+                info = tarfile.TarInfo(name)
+                if name.endswith("/"):
+                    info.type = tarfile.DIRTYPE
+                    archive.addfile(info)
+                else:
+                    info.size = 1
+                    archive.addfile(info, io.BytesIO(b"x"))
+        (root / "e1.tgz").write_bytes(buffer.getvalue())
+        _refused(store, root, root_fd, gnu_tar, "member|differ")
+
+    def test_a_missing_decompressor_is_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _make(root)
+        _pack_by_hand(root)
+        monkeypatch.setattr(pack_mod.shutil, "which", lambda *_a, **_k: None)
+        _refused(store, root, root_fd, gnu_tar, "decompressor")
+
+    def test_another_device_is_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _make(root)
+        _pack_by_hand(root)
+        real = os.fstat
+
+        def other_device(fd: int) -> Any:
+            info = real(fd)
+            if fd == store.dir_fd:
+                return os.stat_result((*info[:2], info.st_dev + 1, *info[3:]))
+            return info
+
+        monkeypatch.setattr(adopt_mod.os, "fstat", other_device)
+        _refused(store, root, root_fd, gnu_tar, "device")
+
+
+class TestAdoptCrashes:
+    def test_a_crash_before_the_move_leaves_the_tarball_beside_its_original(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _make(root)
+        tarball = _pack_by_hand(root)
+        data = tarball.read_bytes()
+
+        def crash(*_args: Any, **_kwargs: Any) -> None:
+            raise Crash
+
+        monkeypatch.setattr(adopt_mod, "rename_noreplace_between", crash)
+        with pytest.raises(Crash):
+            _adopt(store, root_fd, gnu_tar)
+        assert tarball.read_bytes() == data
+        assert _store_files(store) == []
+        assert store.read_index().records == ()
+        (event,) = store.read_events().events
+        assert isinstance(event, AdoptEvent)
+
+    def test_a_crash_after_the_move_leaves_a_named_archive_never_discarded(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _make(root)
+        data = _pack_by_hand(root).read_bytes()
+
+        def crash(*_args: Any, **_kwargs: Any) -> None:
+            raise Crash
+
+        monkeypatch.setattr(store, "append", crash)
+        with pytest.raises(Crash):
+            _adopt(store, root_fd, gnu_tar)
+        monkeypatch.undo()
+        (event,) = store.read_events().events
+        assert isinstance(event, AdoptEvent)
+        assert event.tarball == "untracked/scratch/e1.tgz"
+        name = archive_file_name(event.archive_id)
+        assert (store.path / name).read_bytes() == data
+        assert store.audit().unrecorded_archives == (name,)
+        with pytest.raises(StoreRefused, match="adopt"):
+            store.discard_unrecorded(event.archive_id)
+        assert (store.path / name).read_bytes() == data
+
+    def test_a_tarball_swapped_before_the_move_is_moved_back(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _make(root)
+        tarball = _pack_by_hand(root)
+        real = adopt_mod.rename_noreplace_between
+        calls: list[str] = []
+
+        def swap_then_move(src_fd: int, src: str, dst_fd: int, dst: str) -> None:
+            if not calls:
+                (root / "swap").write_bytes(b"someone else's file")
+                (root / "swap").replace(tarball)
+            calls.append(src)
+            real(src_fd, src, dst_fd, dst)
+
+        monkeypatch.setattr(adopt_mod, "rename_noreplace_between", swap_then_move)
+        with pytest.raises(AdoptRefused, match="moved back"):
+            _adopt(store, root_fd, gnu_tar)
+        assert len(calls) == 2
+        assert tarball.read_bytes() == b"someone else's file"
+        assert _store_files(store) == []
+        assert store.read_index().records == ()

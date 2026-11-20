@@ -521,6 +521,9 @@ class ArchiveStore:
         self.require_lock("discard_unrecorded")
         if self.read_index().by_id(archive_id) is not None:
             raise StoreRefused(f"archive {archive_id} is recorded; it is never discarded here")
+        adopted = {e.archive_id for e in self.read_events().events if isinstance(e, AdoptEvent)}
+        if archive_id in adopted:
+            raise StoreRefused(f"archive {archive_id} is an adopted tarball; it is never discarded")
         try:
             os.unlink(archive_file_name(archive_id), dir_fd=self._dir_fd)
         except FileNotFoundError:

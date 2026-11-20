@@ -979,6 +979,8 @@ def test_ctypes_moves_are_only_the_listed_ones() -> None:
         ("scratch_archive_claim.py", "<module>", "_RENAMEAT2"),
         ("scratch_archive_claim.py", "rename_noreplace", "_RENAMEAT2"),
         ("scratch_archive_claim.py", "rename_noreplace_between", "_RENAMEAT2"),
+        ("scratch_archive_adopt.py", "_move_in", "rename_noreplace_between"),
+        ("scratch_archive_adopt.py", "_move_back", "rename_noreplace_between"),
         ("scratch_archive_claim.py", "claim", "rename_noreplace"),
         ("scratch_archive_claim.py", "release", "rename_noreplace"),
         ("scratch_archive_remove.py", "resume_claimed", "rename_noreplace"),
