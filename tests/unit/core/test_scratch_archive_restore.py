@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.core.scratch_archive import (
 from claude_code_hooks_daemon.core.scratch_archive_claim import (
     CLAIM_PREFIX,
     Claimed,
+    WalkRefused,
     claim,
     fingerprint_at,
     open_dir,
@@ -828,6 +829,15 @@ def _crashed_staging(
     return leftover
 
 
+def _walk_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the cleaner's per-directory inode check fail, as a swapped subdirectory would."""
+
+    def refuse(*_args: Any, **_kwargs: Any) -> int:
+        raise WalkRefused("directory 'sub' changed while it was walked")
+
+    monkeypatch.setattr(restore_mod, "open_child_dir", refuse)
+
+
 class TestReclaimStaging:
     def test_needs_the_lock(self, tmp_path: Path) -> None:
         with ArchiveStore.open(tmp_path / "other-store") as unlocked:
@@ -925,6 +935,20 @@ class TestReclaimStaging:
         assert "device" in result.reason
         assert _staging(store) == [leftover]
 
+    def test_a_staged_subdirectory_that_changed_is_stuck_not_raised(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        leftover = _crashed_staging(root, root_fd, store, tar, monkeypatch)
+        _walk_refused(monkeypatch)
+        (result,) = reclaim_staging(store)
+        assert (result.name, result.outcome) == (leftover, "stuck")
+        assert "changed" in result.reason
+
     def test_an_empty_store_reclaims_nothing(self, store: ArchiveStore) -> None:
         assert reclaim_staging(store) == ()
         assert store.audit().staging_dirs == ()
@@ -979,6 +1003,31 @@ class TestRestoredWithLeftovers:
         assert result.staging == staged
         assert any("device" in p for p in result.problems)
         assert reclaim_staging(store) == (Reclaimed(staged, "reclaimed", ""),)
+
+    def test_a_walk_refusal_while_cleaning_after_the_move_is_reported(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        before = _make_entry(root)
+        archive_id = _pack_entry(root, root_fd, store, tar, "e1")
+
+        def plant() -> None:
+            # Something beside the staged root, which the after-move cleanup must walk.
+            (staged,) = _staging(store)
+            (store.path / staged / "extra").mkdir()
+
+        _after_extract(monkeypatch, plant)
+        _walk_refused(monkeypatch)
+        result = _restore(store, root_fd, tar, archive_id)
+        monkeypatch.undo()
+        assert isinstance(result, RestoredWithLeftovers)
+        assert result.staging is not None
+        assert any("changed" in p for p in result.problems)
+        assert _tree(root / "e1") == before
 
     def test_a_destination_fsync_failure_after_the_move_is_reported(
         self,

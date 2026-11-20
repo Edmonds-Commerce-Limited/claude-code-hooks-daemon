@@ -122,6 +122,10 @@ class RestoreRefused(Exception):
     """
 
 
+#: What :func:`_clean_staging` can raise (``open_child_dir`` raises :class:`WalkRefused`).
+_CLEAN_FAILURES = (RestoreRefused, WalkRefused, OSError)
+
+
 @dataclass(frozen=True)
 class Header:
     """One tar header: its name as stored, its kind and permission bits."""
@@ -203,7 +207,7 @@ def reclaim_staging(
             if info.st_dev != store_dev:
                 raise RestoreRefused("on another device than the store; it is left in place")
             _clean_staging(store, name, (info.st_ino, info.st_dev), max_depth=max_depth)
-        except (RestoreRefused, OSError) as exc:
+        except _CLEAN_FAILURES as exc:
             results.append(Reclaimed(name, "stuck", str(exc)))
             continue
         results.append(Reclaimed(name, "reclaimed", ""))
@@ -452,7 +456,7 @@ def _stage_and_move(
             reason = str(exc) if isinstance(exc, RestoreRefused) else f"restore failed: {exc}"
             try:
                 _clean_staging(store, staging, ident, max_depth=max_depth)
-            except (RestoreRefused, OSError) as clean_exc:
+            except _CLEAN_FAILURES as clean_exc:
                 reason += f"; staging {staging!r} was left in the store: {clean_exc}"
             raise RestoreRefused(reason) from exc
         try:
@@ -462,7 +466,7 @@ def _stage_and_move(
         left: str | None = None
         try:
             _clean_staging(store, staging, ident, max_depth=max_depth)
-        except (RestoreRefused, OSError) as exc:
+        except _CLEAN_FAILURES as exc:
             problems.append(f"staging {staging!r} was left in the store: {exc}")
             left = staging
     finally:
