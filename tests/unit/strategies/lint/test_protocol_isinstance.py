@@ -35,3 +35,50 @@ def test_protocol_methods_called_via_implementation() -> None:
     # Call method through Protocol type annotation
     # This ensures Protocol method stub is covered
     assert isinstance(strategy.get_acceptance_tests(), list)
+
+
+def test_existing_strategies_declare_neither_exit_codes_nor_an_optional_tool() -> None:
+    """Plan 00621: the two capabilities are opt-in, so no existing strategy changes."""
+    from claude_code_hooks_daemon.strategies.lint.protocol import (
+        DeclaresFindingsExitCodes,
+        DeclaresOptionalTool,
+    )
+    from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
+
+    for strategy in LintStrategyRegistry.create_default().strategies():
+        if strategy.language_name == "GitHub Workflow":
+            continue
+        assert not isinstance(strategy, DeclaresFindingsExitCodes), strategy.language_name
+        assert not isinstance(strategy, DeclaresOptionalTool), strategy.language_name
+
+
+def test_is_findings_exit_defaults_to_every_non_zero_exit() -> None:
+    from claude_code_hooks_daemon.strategies.lint.common import is_findings_exit
+
+    strategy = PythonLintStrategy()
+    assert is_findings_exit(strategy, 1) is True
+    assert is_findings_exit(strategy, 2) is True
+    assert is_findings_exit(None, 3) is True
+
+
+def test_is_findings_exit_honours_declared_codes() -> None:
+    from claude_code_hooks_daemon.strategies.lint.common import is_findings_exit
+    from claude_code_hooks_daemon.strategies.lint.github_workflow_strategy import (
+        GitHubWorkflowLintStrategy,
+    )
+
+    strategy = GitHubWorkflowLintStrategy()
+    assert is_findings_exit(strategy, 1) is True
+    assert is_findings_exit(strategy, 2) is False
+    assert is_findings_exit(strategy, 4) is False
+
+
+def test_lint_tool_is_optional_helper() -> None:
+    from claude_code_hooks_daemon.strategies.lint.common import lint_tool_is_optional
+    from claude_code_hooks_daemon.strategies.lint.github_workflow_strategy import (
+        GitHubWorkflowLintStrategy,
+    )
+
+    assert lint_tool_is_optional(GitHubWorkflowLintStrategy()) is True
+    assert lint_tool_is_optional(PythonLintStrategy()) is False
+    assert lint_tool_is_optional(None) is False

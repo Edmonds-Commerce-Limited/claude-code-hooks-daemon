@@ -198,12 +198,14 @@ class TestRegistryIntegration:
 
     def test_registry_declines_a_workflow_rather_than_claiming_it(self, tmp_path: Path) -> None:
         """Without the registry honouring the narrowing, an extension match
-        would hand this to ansible-playbook."""
+        would hand this to ansible-playbook. (Plan 00621: a workflow now has
+        its own strategy, so the registry answers -- just never with Ansible.)"""
         from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
 
         path = _write(tmp_path, ".github/workflows/ci.yml", _WORKFLOW)
+        strategy = LintStrategyRegistry.create_default().get_strategy(path)
 
-        assert LintStrategyRegistry.create_default().get_strategy(path) is None
+        assert strategy is None or strategy.language_name != "Ansible"
 
     def test_a_non_narrowing_strategy_is_unaffected(self) -> None:
         """Eight strategies do not implement the capability and must keep

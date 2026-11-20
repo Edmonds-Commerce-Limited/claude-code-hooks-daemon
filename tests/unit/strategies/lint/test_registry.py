@@ -1,5 +1,6 @@
 """Tests for Lint Strategy Registry."""
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -157,6 +158,121 @@ class TestFilterByLanguages:
         assert registry.get_strategy("/workspace/script.bash") is None
 
 
+class _NarrowingMockStrategy(_MockLintStrategy):
+    """A mock that implements NarrowsByPath: accepts paths containing a marker."""
+
+    def __init__(self, marker: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._marker = marker
+
+    def handles_file(self, file_path: str) -> bool:
+        return self._marker in file_path
+
+
+class TestSharedExtensions:
+    """Plan 00621: several strategies may share an extension when each narrows.
+
+    ``.yml`` is shared by Ansible playbooks and GitHub workflows. Storing one
+    strategy per extension would let the second registration silently replace
+    the first for every YAML file in the project.
+    """
+
+    @pytest.fixture()
+    def registry(self) -> LintStrategyRegistry:
+        reg = LintStrategyRegistry()
+        reg.register(
+            _NarrowingMockStrategy(marker="/plays/", language_name="First", extensions=(".yml",))
+        )
+        reg.register(
+            _NarrowingMockStrategy(marker="/flows/", language_name="Second", extensions=(".yml",))
+        )
+        return reg
+
+    def test_each_narrowing_strategy_keeps_its_own_files(
+        self, registry: LintStrategyRegistry
+    ) -> None:
+        first = registry.get_strategy("/repo/plays/site.yml")
+        second = registry.get_strategy("/repo/flows/ci.yml")
+        assert first is not None and first.language_name == "First"
+        assert second is not None and second.language_name == "Second"
+
+    def test_a_file_neither_accepts_resolves_to_none(self, registry: LintStrategyRegistry) -> None:
+        assert registry.get_strategy("/repo/config.yml") is None
+
+    def test_a_non_narrowing_newcomer_on_an_owned_extension_is_refused(
+        self, registry: LintStrategyRegistry
+    ) -> None:
+        with pytest.raises(ValueError, match=r"\.yml"):
+            registry.register(_MockLintStrategy(language_name="Greedy", extensions=(".yml",)))
+
+    def test_a_newcomer_onto_a_non_narrowing_owner_is_refused(self) -> None:
+        """The owner claims every file, so the newcomer would never be reached."""
+        reg = LintStrategyRegistry()
+        reg.register(_MockLintStrategy(language_name="Owner", extensions=(".yml",)))
+        with pytest.raises(ValueError, match=r"\.yml"):
+            reg.register(
+                _NarrowingMockStrategy(marker="/x/", language_name="Late", extensions=(".yml",))
+            )
+
+    def test_a_refused_registration_leaves_the_registry_unchanged(
+        self, registry: LintStrategyRegistry
+    ) -> None:
+        greedy = _MockLintStrategy(language_name="Greedy", extensions=(".other", ".yml"))
+        with pytest.raises(ValueError):
+            registry.register(greedy)
+        assert registry.get_strategy("/repo/a.other") is None
+        assert "Greedy" not in registry.registered_languages
+
+    def test_filter_removes_one_of_two_sharing_and_keeps_the_other(
+        self, registry: LintStrategyRegistry
+    ) -> None:
+        registry.filter_by_languages(["Second"])
+        assert registry.get_strategy("/repo/plays/site.yml") is None
+        kept = registry.get_strategy("/repo/flows/ci.yml")
+        assert kept is not None and kept.language_name == "Second"
+        assert registry.registered_languages == ["Second"]
+
+    def test_strategies_lists_both_sharing_strategies_once(
+        self, registry: LintStrategyRegistry
+    ) -> None:
+        assert [s.language_name for s in registry.strategies()] == ["First", "Second"]
+
+    def test_registered_languages_lists_both(self, registry: LintStrategyRegistry) -> None:
+        assert registry.registered_languages == ["First", "Second"]
+
+
+class TestDefaultYamlRouting:
+    """The default registry routes each YAML file to the right strategy, or none."""
+
+    @staticmethod
+    def _write(root: Path, relative: str, content: str) -> str:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return str(path)
+
+    def test_an_ansible_playbook_still_resolves_to_ansible(self, tmp_path: Path) -> None:
+        path = self._write(tmp_path, "playbooks/site.yml", "---\n- hosts: all\n  tasks: []\n")
+        strategy = LintStrategyRegistry.create_default().get_strategy(path)
+        assert strategy is not None
+        assert strategy.language_name == "Ansible"
+
+    @pytest.mark.parametrize("name", ["ci.yml", "release.yaml"])
+    def test_a_workflow_resolves_to_the_workflow_strategy(self, tmp_path: Path, name: str) -> None:
+        path = self._write(tmp_path, f".github/workflows/{name}", "on: push\njobs: {}\n")
+        strategy = LintStrategyRegistry.create_default().get_strategy(path)
+        assert strategy is not None
+        assert strategy.language_name == "GitHub Workflow"
+
+    @pytest.mark.parametrize(
+        "relative",
+        [".github/workflows/sub/x.yml", ".github/dependabot.yml", "config.yml"],
+    )
+    def test_other_yaml_resolves_to_neither(self, tmp_path: Path, relative: str) -> None:
+        path = self._write(tmp_path, relative, "version: 2\n")
+        assert LintStrategyRegistry.create_default().get_strategy(path) is None
+
+
 class TestCreateDefault:
     def test_create_default_returns_registry(self) -> None:
         registry = LintStrategyRegistry.create_default()
@@ -175,6 +291,7 @@ class TestCreateDefault:
             "Kotlin",
             "Swift",
             "Ansible",
+            "GitHub Workflow",
         }
         assert set(registry.registered_languages) == expected_languages
 
