@@ -343,8 +343,10 @@ def _main_checkout_unguarded(
     Such a probe states the verdict of a daemon whose project root is the main
     checkout. A linked worktree's own daemon is rooted at the worktree, so
     `project_containment` refuses the main-checkout path before the handler
-    under test answers, and no path inside the worktree can stand in: every
-    one of them reads as a worktree path. None when the daemon root is unknown.
+    under test answers. A path inside the worktree is no stand-in: it reads as
+    a worktree path, so the copy becomes a worktree-to-worktree one judged by
+    a different branch of the handler, and getting there would mean rewriting
+    the probe's declared command. None when the daemon root is unknown.
     """
     if daemon_root is None:
         return None
