@@ -77,7 +77,7 @@ root (`utils/link_reach.py`, closing the gap the 261120 handoff recorded).
   a protected copy at symlink mode.
 - [x] ✅ **Task 3.3**: (Done.) `hooks-daemon seed-worktree <worktree>` applies
   the configured list to a hand-made worktree; one positional, no options;
-  release note 018. A protected link entry must also be listed in the config
+  release note 019. A protected link entry must also be listed in the config
   committed at HEAD (residual 1 of the 261120 handoff, narrowed).
 - [ ] ⬜ **Task 3.4**: Reply to the peer project with the route (coordinator).
 
@@ -94,7 +94,7 @@ root (`utils/link_reach.py`, closing the gap the 261120 handoff recorded).
   socket. (Through the handler: all pinned cases denied, the link-following
   gap included; the live-socket check is still open.)
 - [x] Release-bound consequences recorded in the pending release notes
-  (`CLAUDE/UPGRADES/UNRELEASED/release-notes/009-*` and `018-*`) and the
+  (`CLAUDE/UPGRADES/UNRELEASED/release-notes/009-*` and `019-*`) and the
   pre-upgrade tasks (`CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/01-*`).
 
 ## Delivery & Milestones
