@@ -17,6 +17,11 @@ repository (a directory holding ``HEAD``, ``objects/`` and ``refs/``), is one of
   ... no value" (DESIGN.md section 0). Files beside it are judged on their own.
 - BROKEN: anything that could not be judged. The entry is STUCK.
 
+A repository's linked worktrees (``<common>/worktrees/<id>``) are judged with
+it: one outside the entry, or missing, protects it whatever its kind (a
+standalone one becomes OUTSIDE_POINTING), and each worktree's ``HEAD`` joins a
+related clone's tip set.
+
 Standalone must be proved for every marker: any other kind decides the entry.
 Every git failure, timeout or unparseable answer is BROKEN, never STANDALONE,
 and never a proof. A git operation in progress (a lock file, ``MERGE_HEAD``, a
@@ -651,6 +656,83 @@ def _dirty_problems(repo: _Repo, project: ProjectGit, root: Path) -> list[str]:
     ]
 
 
+def _points_back(marker: Path, admin: Path) -> bool:
+    """Whether ``marker`` is a ``.git`` file whose pointer resolves to ``admin``."""
+    try:
+        pointer = _read_pointer(marker, _GITDIR_PREFIX)
+    except _Broken:
+        return False
+    back = os.path.normpath(marker.parent / pointer)
+    return os.path.realpath(back) == os.path.realpath(admin)
+
+
+def _admin_head(admin: Path, admin_rel: str, refs: Mapping[str, str]) -> tuple[str, str]:
+    """``(tip sha or "", problem or "")`` from a linked worktree's own ``HEAD``.
+
+    Read as a file, never through git: git would follow the admin dir's own
+    ``commondir``, which is unchecked.
+    """
+    raw = read_small_regular_file(admin / "HEAD")
+    if raw is None:
+        raise _Broken(f"{admin_rel}: HEAD is not a small regular file")
+    text = raw.decode("utf-8", errors="replace").strip()
+    if _SHA.fullmatch(text):
+        return text, ""
+    if not text.startswith("ref:"):
+        raise _Broken(f"{admin_rel}: unparseable HEAD")
+    name = text[len("ref:") :].strip()
+    if name in refs:
+        return refs[name], ""
+    if name.startswith("refs/heads/"):
+        return "", ""  # an unborn branch: no commit to prove
+    return "", f"{admin_rel}: its HEAD names a ref that is not proved"
+
+
+def _linked_worktrees(
+    repo: _Repo, root: Path, entry: Path, nodes: frozenset[str], refs: Mapping[str, str]
+) -> tuple[list[str], list[str]]:
+    """F-BYPS 1 and 2: ``(problems, HEAD tips)`` of every linked worktree of ``repo``.
+
+    Each admin dir ``<common>/worktrees/<id>`` the walk saw is read. Its worktree
+    must be in the entry and its ``.git`` file must point back at the admin dir;
+    otherwise the worktree is elsewhere or gone and the repository is protected.
+    An unreadable admin dir is BROKEN. Each admin ``HEAD`` joins the tip set.
+    """
+    common_rel = repo.common.relative_to(root).as_posix()
+    prefix = f"{common_rel}/worktrees/"
+    ids = sorted({node[len(prefix) :].split("/")[0] for node in nodes if node.startswith(prefix)})
+    problems: list[str] = []
+    heads: list[str] = []
+    real_entry = Path(os.path.realpath(entry))
+    for ident in ids:
+        admin = repo.common / "worktrees" / ident
+        admin_rel = f"{prefix}{ident}"
+        try:
+            pointer = _read_pointer(admin / "gitdir", "")
+        except _Broken as exc:
+            raise _Broken(f"{admin_rel}: {exc}") from exc
+        target = Path(os.path.normpath(admin / pointer))
+        if not (_inside(target, entry) and _inside(Path(os.path.realpath(target)), real_entry)):
+            problems.append(f"{admin_rel}: its linked worktree lies outside the entry")
+        elif (
+            target.name != _GIT_MARKER
+            or target.relative_to(root).as_posix() not in nodes
+            or not _points_back(target, admin)
+        ):
+            problems.append(
+                f"{admin_rel}: its linked worktree is missing (restore it, or run "
+                "`git worktree prune` in the repository)"
+            )
+        if any(node.startswith(f"{admin_rel}/refs/") for node in nodes):
+            problems.append(f"{admin_rel}: it holds per-worktree refs that are not proved")
+        tip, problem = _admin_head(admin, admin_rel, refs)
+        if tip:
+            heads.append(tip)
+        if problem:
+            problems.append(problem)
+    return problems, heads
+
+
 def _standalone_roots(repo: _Repo, root: Path) -> list[str]:
     """A standalone repository's work tree and git directory, from the scratch root."""
     places = [repo.gitdir]
@@ -662,7 +744,11 @@ def _standalone_roots(repo: _Repo, root: Path) -> list[str]:
 
 
 def _related_problems(
-    repo: _Repo, project: ProjectGit, refs: Mapping[str, str], root: Path
+    repo: _Repo,
+    project: ProjectGit,
+    refs: Mapping[str, str],
+    root: Path,
+    worktree_heads: Sequence[str] = (),
 ) -> list[str]:
     """R6: why a related repository holds work that exists nowhere else."""
     problems = _dirty_problems(repo, project, root)
@@ -670,6 +756,7 @@ def _related_problems(
         problems.append("a stash")
     head = _nested(repo, project, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
     tips = set(refs.values()) - ({refs[_STASH_REF]} if _STASH_REF in refs else set())
+    tips.update(worktree_heads)
     if head.returncode == 0:
         head_sha = _shas(head.stdout)
         if head_sha is None or len(head_sha) != 1:
@@ -768,7 +855,8 @@ def classify_entry(
             protected.extend(reasons)
         covered.extend(cover)
     if stuck or protected:
-        return RepoFindings(kinds, tuple(stuck), tuple(protected))
+        # Markers sharing one git directory report its linked worktrees alike: once each.
+        return RepoFindings(kinds, tuple(dict.fromkeys(stuck)), tuple(dict.fromkeys(protected)))
     git_dirs = tuple(sorted({path[:-1] for path in covered if path.endswith("/")}))
     files = {path for path in covered if not path.endswith("/")}
     return RepoFindings(
@@ -793,10 +881,17 @@ def _classify_one(
         keys = _config_keys(repo, project)
         _confirm_gitdir(repo, project)
         refs = _refs(repo, project)
+        worktree_problems, worktree_heads = _linked_worktrees(repo, root, entry, nodes, refs)
         related = _is_related(repo, project, keys, refs)
         if not related:
+            if worktree_problems:
+                # Another tree depends on this git directory: a human decides.
+                raise _Decided(RepoKind.OUTSIDE_POINTING, "; ".join(worktree_problems))
             return RepoKind.STANDALONE, [], _standalone_roots(repo, root)
-        problems = _related_problems(repo, project, refs, root)
+        problems = [
+            *worktree_problems,
+            *_related_problems(repo, project, refs, root, worktree_heads),
+        ]
         if problems:
             return (
                 RepoKind.RELATED,

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shlex
+import shutil
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
@@ -409,6 +410,78 @@ class TestWorktreesAndOutsidePointers:
     def test_the_same_entry_without_the_worktree_is_not_protected(self, gp: GitProject) -> None:
         gp.standalone("e/throwaway")
         assert _classify(gp, "e").protected == ()
+
+
+class TestLinkedWorktreesOfANestedRepository:
+    """F-BYPS 1 and 2: a nested repository's linked worktrees are part of its judgement."""
+
+    def test_a_clone_backing_a_detached_worktree_outside_the_entry_is_protected(
+        self, gp: GitProject
+    ) -> None:
+        repo = gp.clone("e")
+        outside = gp.tree.outside / "clwt"
+        git(repo, "worktree", "add", "-q", "--detach", str(outside))
+        commit_file(outside, "only-here.txt", "unpushed\n")
+        findings = _classify(gp, "e")
+        assert findings.kinds["e/.git"] is RepoKind.RELATED
+        assert findings.protected
+        assert findings.p4_covered == ()
+        assert "e/.git/worktrees/clwt" in " ".join(findings.protected)
+
+    def test_a_standalone_repository_with_a_worktree_outside_the_entry_is_protected(
+        self, gp: GitProject
+    ) -> None:
+        repo = gp.standalone("sa")
+        git(repo, "worktree", "add", "-q", "-b", "wtb", str(gp.tree.root / "sawt"))
+        findings = _classify(gp, "sa")
+        assert findings.kinds["sa/.git"] is not RepoKind.STANDALONE
+        assert findings.protected
+        assert findings.standalone_roots == ()
+        assert "sa/.git/worktrees/sawt" in " ".join(findings.protected)
+
+    def test_a_removed_detached_worktree_with_an_unpushed_commit_protects_a_clone(
+        self, gp: GitProject
+    ) -> None:
+        repo = gp.clone("e")
+        inside = repo / "wt"
+        git(repo, "worktree", "add", "-q", "--detach", str(inside))
+        commit_file(inside, "only-here.txt", "unpushed\n")
+        shutil.rmtree(inside)
+        findings = _classify(gp, "e")
+        reasons = " ".join(findings.protected)
+        assert "e/.git/worktrees/wt" in reasons
+        assert "git worktree prune" in reasons
+        assert "commit tip(s) no live-verified remote tip contains" in reasons
+
+    def test_an_admin_dir_whose_worktree_points_elsewhere_counts_as_missing(
+        self, gp: GitProject
+    ) -> None:
+        repo = gp.standalone("e/main")
+        side = gp.tree.root / "e" / "side"
+        git(repo, "worktree", "add", "-q", "-b", "side", str(side))
+        (side / ".git").unlink()
+        gp.standalone("e/side", commit=False)
+        findings = _classify(gp, "e")
+        assert "e/main/.git/worktrees/side" in " ".join(findings.protected)
+
+    def test_an_unreadable_admin_gitdir_is_stuck(self, gp: GitProject) -> None:
+        repo = gp.standalone("e/main")
+        git(repo, "worktree", "add", "-q", "-b", "side", str(gp.tree.root / "e" / "side"))
+        admin_gitdir = repo / ".git" / "worktrees" / "side" / "gitdir"
+        admin_gitdir.unlink()
+        os.mkfifo(admin_gitdir)
+        findings = _classify(gp, "e")
+        assert findings.stuck
+        assert RepoKind.STANDALONE not in findings.kinds.values()
+
+    def test_a_clean_clone_with_a_pushed_in_entry_worktree_stays_covered(
+        self, gp: GitProject
+    ) -> None:
+        repo = gp.clone("e")
+        git(repo, "worktree", "add", "-q", "--detach", str(repo / "wt"))
+        findings = _classify(gp, "e")
+        assert findings.protected == ()
+        assert findings.stuck == ()
 
 
 def _injecting(subcommand: str, mode: str) -> GitRunner:
