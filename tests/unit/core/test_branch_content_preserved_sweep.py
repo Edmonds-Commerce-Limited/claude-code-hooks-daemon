@@ -347,16 +347,21 @@ class TestForeignContentPreservedRemoteDelete:
         other = tmp_path / "other-clone"
         _git(tmp_path, "clone", "-q", "-b", _RC, remote_url, str(other))
         real = branch_cleanup._push_deletes
+        planned = _git(other, "rev-parse", "HEAD")
+        called: list[bool] = []
 
         def moved_first(repo: Path, remote: str, tips: Any) -> Any:
+            called.append(True)
             _git(other, "commit", "-q", "--allow-empty", "-m", "new work after the proof")
             _git(other, "push", "-q", "origin", _RC)
             return real(repo, remote, tips)
 
         monkeypatch.setattr(branch_cleanup, "_push_deletes", moved_first)
         report = branch_cleanup.clean_sweep(seed, _CONFIG, dry_run=False, remote=True)
+        assert called, "the remote delete was never attempted, so the lease went unexercised"
         assert f"origin/{_RC}" not in report.deleted_remote
         moved = _git(other, "rev-parse", "HEAD")
+        assert moved != planned
         assert moved in _git(seed, "ls-remote", "--heads", "origin", _RC)
 
 
@@ -412,3 +417,36 @@ class TestApplyRechecksTheWorktree:
         assert _RC not in report.deleted
         assert _has_branch(seed, _RC)
         assert any(_RC in line and "fresh-claim" in line for line in report.skipped), report.skipped
+
+
+class TestMoreSpareAndRecheckEdges:
+    def test_a_parked_foreign_branch_is_not_remote_deleted(self, held_no_worktree: Path) -> None:
+        seed = held_no_worktree
+        _park(seed, commit=True)
+        _make_foreign(seed)
+        report = branch_cleanup.clean_sweep(seed, _CONFIG, dry_run=False, remote=True)
+        assert f"origin/{_RC}" not in report.deleted_remote
+        assert _RC in _git(seed, "ls-remote", "--heads", "origin")
+        assert any(
+            line.startswith(f"origin/{_RC}:") and "waiting on the audit" in line
+            for line in report.skipped
+        ), report.skipped
+
+    def test_an_unreadable_worktree_list_at_apply_keeps_the_worktree(
+        self, held: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed, tree = held
+        real_apply = branch_cleanup._apply_in_batches
+
+        def listing_breaks(*args: Any, **kwargs: Any) -> Any:
+            def broken(_repo: Path) -> Any:
+                raise RuntimeError("git worktree list failed: simulated")
+
+            monkeypatch.setattr(branch_cleanup, "linked_worktree_records", broken)
+            return real_apply(*args, **kwargs)
+
+        monkeypatch.setattr(branch_cleanup, "_apply_in_batches", listing_breaks)
+        report = branch_cleanup.clean_sweep(seed, _CONFIG, dry_run=False)
+        assert tree.is_dir()
+        assert _has_branch(seed, _RC)
+        assert any("could not be re-read" in line for line in report.skipped), report.skipped

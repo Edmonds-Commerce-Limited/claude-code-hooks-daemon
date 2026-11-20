@@ -860,7 +860,11 @@ def clean_sweep(
 
     Each candidate is classified on its own first, because ``delete_branches`` is
     all-or-nothing: only the proven ones are batched. A linked worktree is removed
-    first, and only when :func:`worktree_blockers` finds nothing it would lose.
+    first, and only when :func:`worktree_blockers` finds nothing it would lose and a
+    fresh worktree listing at apply time shows it still holds the planned branch.
+
+    A parked branch that is only content-preserved (never merged) is skipped on
+    both sides with its park reason; a merged tier ends a park instead.
 
     A branch and worktree a live agent owns (:mod:`agent_ownership`: a ``running``
     work-queue record in ``untracked``, the harness's ``.claude/worktrees/``
@@ -1078,11 +1082,14 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
     local: list[str] = []
     # The plan's worktree map is as old as its proofs: re-read it once per batch, so
     # a worktree switched to another branch (or claimed afresh) is never removed.
-    now_held = (
-        {name: record.path for name, record in linked_worktree_records(repo).items()}
-        if any(name in plan.worktrees for name in batch)
-        else {}
-    )
+    now_held: Mapping[str, Path] | None = {}
+    if any(name in plan.worktrees for name in batch):
+        try:
+            now_held = {name: rec.path for name, rec in linked_worktree_records(repo).items()}
+        except RuntimeError as exc:
+            # Fail closed: an unread listing cannot show the worktree still holds it.
+            logger.warning("branch cleanup: worktree list unreadable at apply: %s", exc)
+            now_held = None
     for name in batch:
         if name not in plan.proven:
             continue
@@ -1091,6 +1098,11 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             continue
         held_by = plan.worktrees.get(name)
         if held_by is not None:
+            if now_held is None:
+                outcome.skipped.append(
+                    f"{name}: the worktree list could not be re-read, so {held_by} was kept"
+                )
+                continue
             if now_held.get(name) != held_by:
                 outcome.skipped.append(_worktree_changed_line(name, held_by, now_held))
                 continue
