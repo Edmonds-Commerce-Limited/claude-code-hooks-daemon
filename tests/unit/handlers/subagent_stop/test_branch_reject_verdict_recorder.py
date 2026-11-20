@@ -256,6 +256,26 @@ class TestMatches:
 
 
 class TestHandle:
+    @pytest.mark.parametrize("error", [KeyError("message"), AttributeError("get"), IndexError()])
+    def test_an_unexpected_lookup_error_never_blocks_the_stop(
+        self,
+        handler: BranchRejectVerdictRecorderHandler,
+        root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        error: Exception,
+    ) -> None:
+        """Strict mode turns a handler crash into a deny, so the recorder must not crash."""
+        _request, transcript, reply = _setup(root, tmp_path)
+
+        def _raise(*_args: object, **_kwargs: object) -> str:
+            raise error
+
+        monkeypatch.setattr(recorder, "record_review_stop", _raise)
+        result = handler.handle(_event(transcript, reply))
+        assert result.decision == Decision.ALLOW
+        assert _state_files(root, "verdicts") == []
+
     def test_a_clean_stop_records_the_verdict(
         self, handler: BranchRejectVerdictRecorderHandler, root: Path, tmp_path: Path
     ) -> None:

@@ -103,7 +103,9 @@ class BranchRejectVerdictRecorderHandler(SubagentStopHandlerBase):
             )
             outcome = record_review_stop(store, stop, facts, now=time.time())
             logger.info("branch-reject reviewer stop: %s", outcome)
-        except (OSError, RuntimeError, ValueError) as exc:
+        # A recorder must never block a stop: strict mode turns a crash into a deny,
+        # and every later stop would crash the same way. Any failure records nothing.
+        except (OSError, RuntimeError, ValueError, LookupError, AttributeError, TypeError) as exc:
             log_and_continue(
                 logger,
                 exc,

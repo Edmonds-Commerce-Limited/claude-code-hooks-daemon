@@ -1296,7 +1296,9 @@ def read_review_transcript(path: Path) -> TranscriptFacts:
         if _is_human_turn(record):
             turns += 1
             if turns == 1:
-                content = record["message"].get("content")
+                # A human turn need not carry an object ``message``; only a str counts.
+                message = record.get("message")
+                content = message.get("content") if isinstance(message, dict) else None
                 first = content if isinstance(content, str) else None
         elif record.get("type") == _ASSISTANT:
             message = record.get("message")

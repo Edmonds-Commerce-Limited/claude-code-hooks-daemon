@@ -310,6 +310,21 @@ class TestParseVerdictReply:
 
 
 class TestReadReviewTranscript:
+    def test_a_user_record_with_no_message_does_not_raise(self, tmp_path: Path) -> None:
+        """A raise here crashes the SubagentStop handler, which strict mode turns into a deny."""
+        path = _write_transcript(tmp_path / "t.jsonl", [{"type": "user"}])
+        facts = read_review_transcript(path)
+        assert facts.first_user_text is None
+        assert facts.user_turns == 1
+
+    def test_a_user_record_whose_message_is_not_an_object_does_not_raise(
+        self, tmp_path: Path
+    ) -> None:
+        path = _write_transcript(tmp_path / "t.jsonl", [{"type": "user", "message": "text"}])
+        facts = read_review_transcript(path)
+        assert facts.first_user_text is None
+        assert facts.user_turns == 1
+
     def test_the_facts_of_a_clean_review(self, tmp_path: Path, store: RejectStore) -> None:
         request, prompt = _request(store)
         facts = _facts(tmp_path, prompt, _reply(request))
