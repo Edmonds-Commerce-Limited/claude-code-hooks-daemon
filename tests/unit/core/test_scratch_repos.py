@@ -9,12 +9,19 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shlex
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.core.branch_records import (
+    CREATED_KEY,
+    CREATOR_KEY,
+    ROUTE_KEY,
+    TOUCHED_KEY,
+)
 from claude_code_hooks_daemon.core.scratch_repos import (
     NESTED_GIT_ENV,
     GitRunner,
@@ -121,6 +128,40 @@ class TestNotARepository:
         assert RepoKind.STANDALONE not in findings.kinds.values()
 
 
+class TestPointerFiles:
+    """D-EXEC 2: a pointer file is read only as a small regular file, never followed."""
+
+    def test_a_fifo_named_commondir_is_stuck_and_never_blocks(self, gp: GitProject) -> None:
+        repo = gp.standalone("e")
+        os.mkfifo(repo / ".git" / "commondir")
+        findings = _classify(gp, "e")
+        assert findings.stuck
+        assert RepoKind.STANDALONE not in findings.kinds.values()
+
+    def test_a_symlinked_commondir_is_never_read_or_echoed(self, gp: GitProject) -> None:
+        secret = gp.tree.outside / "secret.txt"
+        secret.write_text("TOP-SECRET-LINE\n")
+        repo = gp.standalone("e")
+        (repo / ".git" / "commondir").symlink_to(secret)
+        findings = _classify(gp, "e")
+        assert findings.stuck or findings.protected
+        assert RepoKind.STANDALONE not in findings.kinds.values()
+        assert "TOP-SECRET" not in " ".join((*findings.stuck, *findings.protected))
+
+    def test_a_fifo_dot_git_file_target_is_stuck(self, gp: GitProject) -> None:
+        gp.tree.directory("e")
+        os.mkfifo(gp.tree.root / "e" / ".git")
+        assert _classify(gp, "e").stuck
+
+    def test_an_outside_pointer_message_does_not_echo_the_file_content(
+        self, gp: GitProject
+    ) -> None:
+        gp.tree.git_marker("e", gitdir=str(gp.tree.outside / "MARKER-CONTENT.git"))
+        findings = _classify(gp, "e")
+        assert findings.protected
+        assert "MARKER-CONTENT" not in " ".join(findings.protected)
+
+
 class TestInProgress:
     @pytest.mark.parametrize(
         "rel",
@@ -166,6 +207,35 @@ class TestUntrustedConfig:
         findings = _classify(gp, "e")
         assert findings.stuck
         assert not sentinel.exists()
+
+    def test_a_clean_filter_on_an_inner_gitlinked_repository_is_never_run(
+        self, gp: GitProject
+    ) -> None:
+        """D-EXEC 1: status in the outer clone must not recurse into the inner repository."""
+        script, sentinel = self._sentinel_script(gp)
+        outer = gp.clone("e")
+        inner = gp.standalone("e/inner")
+        (inner / ".gitattributes").write_text("*.txt filter=evil\n")
+        git(inner, "config", "filter.evil.clean", str(script))
+        git(outer, "add", "inner")
+        git(outer, "commit", "-q", "-m", "gitlink")
+        # Same size, new mtime: git must hash (so filter) the file to compare it.
+        (inner / "notes.txt").write_text("STANDALONE\n")
+        findings = _classify(gp, "e")
+        assert not sentinel.exists()
+        assert findings.stuck or findings.protected
+
+    def test_a_pushed_clone_whose_index_holds_a_gitlink_is_protected(self, gp: GitProject) -> None:
+        sha = git(gp.project, "rev-parse", "HEAD")
+        git(gp.project, "update-index", "--add", "--cacheinfo", f"160000,{sha},vendor/sub")
+        git(gp.project, "commit", "-q", "-m", "gitlink")
+        git(gp.project, "push", "-q", "origin", "main")
+        git(gp.project, "fetch", "-q", "origin")
+        gp.clone("e")
+        findings = _classify(gp, "e")
+        assert findings.protected
+        assert "gitlink" in " ".join(findings.protected)
+        assert findings.p4_covered == ()
 
     def test_an_include_makes_the_entry_stuck(self, gp: GitProject) -> None:
         repo = gp.standalone("e")
@@ -218,6 +288,16 @@ class TestRelated:
         assert "e/.git" in findings.p4_covered
         assert "e/src/app.py" in findings.p4_covered
         assert "e/.gitignore" in findings.p4_covered
+
+    @pytest.mark.parametrize("key", [CREATOR_KEY, CREATED_KEY, ROUTE_KEY, TOUCHED_KEY])
+    def test_the_daemons_own_branch_record_keys_do_not_make_a_clone_stuck(
+        self, gp: GitProject, key: str
+    ) -> None:
+        repo = gp.clone("e")
+        git(repo, "config", "--add", f"branch.main.{key}", "session-1/agent-1")
+        findings = _classify(gp, "e")
+        assert findings.stuck == ()
+        assert "e/.git" in findings.p4_covered
 
     def test_an_unpushed_commit_protects_the_entry(self, gp: GitProject) -> None:
         repo = gp.clone("e")
@@ -305,6 +385,12 @@ class TestWorktreesAndOutsidePointers:
         assert findings.kinds == {"wt/.git": RepoKind.REGISTERED_WORKTREE}
         assert findings.protected
         assert "git worktree remove" in " ".join(findings.protected)
+
+    def test_the_worktree_remove_advice_is_shell_quoted(self, gp: GitProject) -> None:
+        gp.worktree("wt x;y", "feature")
+        findings = _classify(gp, "wt x;y")
+        path = gp.tree.root / "wt x;y"
+        assert f"git worktree remove {shlex.quote(str(path))}" in " ".join(findings.protected)
 
     def test_a_dot_git_file_pointing_outside_is_protected(self, gp: GitProject) -> None:
         gp.tree.git_marker("e", gitdir=str(gp.tree.outside / "elsewhere.git"))

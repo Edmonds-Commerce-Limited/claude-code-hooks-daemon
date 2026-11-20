@@ -37,6 +37,7 @@ import enum
 import hashlib
 import os
 import re
+import shlex
 import stat
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -44,6 +45,12 @@ from pathlib import Path
 from typing import Final, Protocol
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.branch_records import (
+    CREATED_KEY,
+    CREATOR_KEY,
+    ROUTE_KEY,
+    TOUCHED_KEY,
+)
 from claude_code_hooks_daemon.utils.git_repo import (
     GitResult,
     parse_worktree_porcelain,
@@ -85,6 +92,11 @@ NESTED_GIT_FLAGS: Final[tuple[str, ...]] = (
     "core.untrackedCache=false",
     "-c",
     "protocol.allow=never",
+    # D-EXEC 1: never recurse into an inner repository, whose config was not checked.
+    "-c",
+    "submodule.recurse=false",
+    "-c",
+    "diff.ignoreSubmodules=all",
 )
 
 _CORE_KEYS: Final[frozenset[str]] = frozenset(
@@ -117,7 +129,15 @@ _ALLOWED_CONFIG: Final[tuple[tuple[str, bool, frozenset[str]], ...]] = (
         True,
         frozenset({"url", "pushurl", "fetch", "push", "mirror", "tagopt", "prune"}),
     ),
-    ("branch", True, frozenset({"remote", "merge", "rebase", "pushremote", "description"})),
+    (
+        "branch",
+        True,
+        frozenset(
+            {"remote", "merge", "rebase", "pushremote", "description"}
+            # The daemon's own inert branch records; git lists names lowercased.
+            | {key.lower() for key in (CREATOR_KEY, CREATED_KEY, ROUTE_KEY, TOUCHED_KEY)}
+        ),
+    ),
     ("user", False, frozenset({"name", "email"})),
     ("extensions", False, frozenset({"objectformat"})),
     ("init", False, frozenset({"defaultbranch"})),
@@ -359,12 +379,34 @@ def _inside(path: Path, entry: Path) -> bool:
     return path == entry or path_is_relative_to(path, entry)
 
 
-def _read_pointer(path: Path, prefix: str) -> str:
+def read_small_regular_file(path: Path, limit: int = _MAX_GIT_FILE_BYTES) -> bytes | None:
+    """``path``'s bytes if it is itself a regular file of at most ``limit`` bytes, else None.
+
+    Opened ``O_NOFOLLOW | O_NONBLOCK`` after an ``lstat``, so a link is never
+    followed and a FIFO never blocks; the descriptor must be a regular file.
+    """
+    if not _regular_file(path):
+        return None
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
     try:
-        with open(path, "rb") as handle:
-            raw = handle.read(_MAX_GIT_FILE_BYTES + 1)
-    except OSError as exc:
-        raise _Broken(f"{path.name} could not be read: {type(exc).__name__}") from exc
+        descriptor = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
+        raw = os.read(descriptor, limit + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+    return raw if len(raw) <= limit else None
+
+
+def _read_pointer(path: Path, prefix: str) -> str:
+    raw = read_small_regular_file(path, _MAX_GIT_FILE_BYTES)
+    if raw is None:
+        raise _Broken(f"{path.name} is not a small regular file: not read")
     if len(raw) > _MAX_GIT_FILE_BYTES:
         raise _Broken(f"{path.name} is too large to be a git pointer")
     text = raw.decode("utf-8", errors="replace").strip()
@@ -382,7 +424,8 @@ def _target(base: Path, pointer: str, entry: Path, what: str) -> Path:
     lexical = Path(os.path.normpath(base / pointer))
     real = Path(os.path.realpath(lexical))
     if not (_inside(lexical, entry) and _inside(real, Path(os.path.realpath(entry)))):
-        raise _Decided(RepoKind.OUTSIDE_POINTING, f"{what} points outside the entry: {pointer}")
+        # The pointer is file content, so it is never echoed: the marker names the place.
+        raise _Decided(RepoKind.OUTSIDE_POINTING, f"{what} points outside the entry")
     return lexical
 
 
@@ -401,7 +444,7 @@ def _locate(root: Path, entry: Path, marker: str, project: ProjectGit) -> _Repo:
             raise _Decided(
                 RepoKind.REGISTERED_WORKTREE,
                 f"{marker} is a registered worktree of the project: remove it with "
-                f"`git worktree remove {path.parent}`, never a tree delete",
+                f"`git worktree remove {shlex.quote(str(path.parent))}`, never a tree delete",
             )
         gitdir = _target(path.parent, _read_pointer(path, _GITDIR_PREFIX), entry, marker)
     elif stat.S_ISDIR(info.st_mode):
@@ -411,7 +454,7 @@ def _locate(root: Path, entry: Path, marker: str, project: ProjectGit) -> _Repo:
     if not _regular_file(gitdir / "HEAD"):
         raise _Broken(f"{marker} is not a git repository (no HEAD)")
     common = gitdir
-    if os.path.lexists(gitdir / "commondir"):
+    if os.path.lexists(gitdir / "commondir"):  # read by _read_pointer: never followed
         common = _target(
             gitdir, _read_pointer(gitdir / "commondir", ""), entry, f"{marker} commondir"
         )
@@ -552,6 +595,18 @@ def _held_by_verified(sha: str, project: ProjectGit) -> bool:
 def _dirty_problems(repo: _Repo, project: ProjectGit, root: Path) -> list[str]:
     if repo.work_tree is None:
         return []
+    # Status ignores gitlinks (it would run git with the inner repository's config),
+    # so a gitlink's state is unproved: its presence protects the clone.
+    staged = _checked(
+        _nested(repo, project, "ls-files", "--stage", "-z"), f"{repo.marker}: ls-files --stage"
+    )
+    gitlinks = [
+        record.partition("\t")[2]
+        for record in filter(None, staged.split("\0"))
+        if record.startswith("160000 ")
+    ]
+    if gitlinks:
+        return [f"{len(gitlinks)} gitlink(s) whose state is not proved, first {gitlinks[0]}"]
     output = _checked(
         _nested(
             repo,
@@ -560,7 +615,7 @@ def _dirty_problems(repo: _Repo, project: ProjectGit, root: Path) -> list[str]:
             "--porcelain=v1",
             "-z",
             "--untracked-files=no",
-            "--ignore-submodules=none",
+            "--ignore-submodules=all",
         ),
         f"{repo.marker}: status",
     )
