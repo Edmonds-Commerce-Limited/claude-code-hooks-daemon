@@ -143,6 +143,42 @@ class TestStarAndFallthrough:
         )
         assert (root.refusal, root.ttl_hours) == ("", 36)
 
+    def test_a_path_inside_an_unlisted_directory_is_never_swept(self, project: Path) -> None:
+        inner = project / "untracked" / "logs" / "inner"
+        inner.mkdir()
+        root = resolve_sweep_root(
+            inner, project_root=project, config=ScratchConfig(), reference_roots=()
+        )
+        assert root.ttl_hours is None
+        assert "untracked/logs" in root.refusal
+
+    def test_a_path_inside_scratch_keeps_the_scratch_ttl(self, project: Path) -> None:
+        inner = project / "untracked" / "scratch" / "box" / "below"
+        inner.mkdir(parents=True)
+        config = ScratchConfig.model_validate({"untracked_default_ttl": "1h"})
+        root = resolve_sweep_root(inner, project_root=project, config=config, reference_roots=())
+        assert (root.refusal, root.ttl_hours) == ("", 24)
+
+    def test_a_path_inside_a_named_directory_takes_that_ttl(self, project: Path) -> None:
+        inner = project / "untracked" / "briefs" / "x"
+        inner.mkdir()
+        config = ScratchConfig.model_validate({"untracked_ttl": {"briefs": "36h"}})
+        root = resolve_sweep_root(inner, project_root=project, config=config, reference_roots=())
+        assert root.ttl_hours == 36
+
+    def test_a_link_from_scratch_into_another_directory_is_refused(self, project: Path) -> None:
+        link = project / "untracked" / "scratch" / "to-logs"
+        link.symlink_to(project / "untracked" / "logs")
+        config = ScratchConfig.model_validate({"untracked_ttl": {"logs": "1h"}})
+        root = resolve_sweep_root(link, project_root=project, config=config, reference_roots=())
+        assert "more than one" in root.refusal
+
+    def test_an_ancestor_of_the_project_is_refused(self, project: Path) -> None:
+        root = resolve_sweep_root(
+            project.parent, project_root=project, config=ScratchConfig(), reference_roots=()
+        )
+        assert "holds the project" in root.refusal
+
     def test_scratch_set_to_star_is_refused(self, project: Path) -> None:
         config = ScratchConfig.model_validate({"untracked_ttl": {"scratch": "*"}})
         root = resolve_sweep_root(

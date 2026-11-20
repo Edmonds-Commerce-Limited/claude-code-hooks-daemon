@@ -11,8 +11,10 @@ anything is listed:
   ``untracked/`` directory falls through to by default.
 
 A protected path that lies inside an accepted root is skipped as an entry and
-named in a note. A root outside ``untracked/`` (a test tree named with
-``--root``) is judged with the ``scratch`` TTL. Paths are compared both as
+named in a note. A root at any depth inside ``untracked/`` takes the TTL of
+its first directory there (``untracked/logs/inner`` is ``logs``); a root
+outside ``untracked/`` (a test tree named with ``--root``) is judged with the
+``scratch`` TTL. Paths are compared both as
 given and with links resolved, so a link cannot carry a root past the check.
 """
 
@@ -89,11 +91,15 @@ def resolve_sweep_root(
             if _within(form, guarded):
                 return refused(f"{root} is or lies inside {guarded}: never swept")
 
-    key = SCRATCH_KEY
-    for form in root_forms:
-        for project in project_forms:
-            if form.parent == project / _UNTRACKED:
-                key = form.name
+    keys = {
+        path_relative_to(form, project / _UNTRACKED).parts[0]
+        for form in root_forms
+        for project in project_forms
+        if path_is_relative_to(form, project / _UNTRACKED)
+    }
+    if len(keys) > 1:
+        return refused(f"{root} names more than one untracked/ directory once links are resolved")
+    key = keys.pop() if keys else SCRATCH_KEY
     ttl = config.ttl_hours_for(key)
     if ttl is None:
         return refused(f'untracked/{key} has the TTL "*": never swept')

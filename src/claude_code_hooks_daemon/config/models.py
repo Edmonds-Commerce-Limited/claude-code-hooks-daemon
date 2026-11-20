@@ -2742,13 +2742,9 @@ def untracked_ttl_hours(value: str) -> int | None:
 
 
 def _is_ttl(value: object) -> bool:
-    if not isinstance(value, str):
-        return False
-    try:
-        untracked_ttl_hours(value)
-    except ValueError:
-        return False
-    return True
+    return isinstance(value, str) and (
+        value == UNTRACKED_TTL_NEVER or _TTL_PATTERN.fullmatch(value) is not None
+    )
 
 
 def _is_directory_name(key: object) -> bool:

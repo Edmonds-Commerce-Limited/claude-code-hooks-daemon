@@ -36,6 +36,8 @@ Branch `agent-acff915e4bf3b86e6-0a26f829` (worktree `.claude/worktrees/agent-acf
   - `tests/support/scratch_tree.py` makes only fake `.git` markers today, not real repositories.
 - **Tasks 2.2 to 2.5**, as PLAN.md lists them.
 - **Sweeping every finite-TTL directory in one run, and loose files directly under `untracked/`**: Task 6.1.
+- **User-facing docs for the `scratch:` block.** Only DESIGN.md section 4.1 and the config-changes `example_yaml` exist. A `CLAUDE/` page, like `CLAUDE/ReferenceRepos.md` for `reference_repos`, is Task 7.4.
+- **A refused root is reported as INCOMPLETE.** Once the SessionStart report exists (Task 5.2), a project that sets `scratch: "*"` would see INCOMPLETE on every run. Report it as "not swept" there instead.
 
 ## Deletion-surface risks for the security review
 
@@ -44,7 +46,10 @@ Nothing deletes yet: the whole branch is a dry run. These are the risks the late
 1. **Standalone misclassification.** Once Task 2.1 sends standalone repositories down the ordinary ladder, any wrong "standalone" verdict gives a worktree or a related clone the archive-and-remove route. The classification must fail closed.
 2. **Root reach.**
    - `--root` accepts any path, including absolute paths. The resolver refuses the project, `untracked/`, any path holding the project, and anything at or inside `repos`, `scratch-archive` or a reference root. It checks both the literal path and the link-resolved path.
-   - Any other path is judged with the scratch TTL. That includes `--root tests/support` or a tracked directory. Tracked files are not yet excluded, because Phase 1 runs no git.
+   - A root at any depth inside `untracked/` takes the TTL of its first directory there, so `untracked/logs/inner` is refused by the `"*"` fallthrough.
+   - A root whose literal and resolved forms name different `untracked/` directories (a link) is refused.
+   - Protection is relative to THIS project only. `--root` into another checkout's `untracked/repos` is not refused; that belongs with Task 6.1.
+   - A path outside `untracked/` is judged with the scratch TTL. That includes `--root tests/support` or a tracked directory. Tracked files are not yet excluded, because Phase 1 runs no git.
    - Before `--apply` exists, it must refuse any root that is not a configured `untracked/` directory, or that holds tracked files.
 3. **A finite `untracked_default_ttl` in self-install** turns every daemon store into a sweep root. It ships as `"*"`. A client could set it, and the config-changes entry warns against that.
 4. **Git executing inside nested repositories** (Phase 2): their hooks, their config and fsmonitor are untrusted.
