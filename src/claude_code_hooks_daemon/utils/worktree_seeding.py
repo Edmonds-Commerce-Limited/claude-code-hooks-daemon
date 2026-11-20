@@ -32,14 +32,20 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from claude_code_hooks_daemon.core.worktree_seed import SEED_MODE_SYMLINK, SeedEntry
+from claude_code_hooks_daemon.core.worktree_seed import SEED_MODE_COPY, SEED_MODE_SYMLINK, SeedEntry
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 
 logger = logging.getLogger(__name__)
+
+#: Returns the secret guard's effective protected globs, or raises
+#: ``secret_file_matching.ProtectedSetUnreadable``.
+ProtectedPatternsLoader = Callable[[], tuple[str, ...]]
 
 _PARENT_TRAVERSAL = ".."
 
@@ -88,20 +94,126 @@ def _describe_problem(root: Path, entry: SeedEntry) -> str | None:
     return None
 
 
-def validate_seed_sources(root: Path, entries: list[SeedEntry]) -> None:
+#: Most paths one copy-mode directory may hold before it is refused unjudged.
+PROTECTED_COPY_WALK_MAX_PATHS = 10_000
+
+_COPY_REFUSAL = (
+    "seed entry #{number} (mode: copy): refused by the secret_file_guard protected-set check"
+)
+
+
+def _paths_a_copy_would_read(source: Path) -> list[str] | None:
+    """``source`` and every path ``shutil.copytree`` would copy from it, by name only.
+
+    ``copytree`` follows symlinks (to files and to directories), so the walk
+    does too. ``None`` when the walk cannot be completed: an unreadable
+    directory, a directory reached twice (a symlink loop, on which copytree
+    itself would never end), or more than :data:`PROTECTED_COPY_WALK_MAX_PATHS`.
+    """
+    paths = [str(source)]
+    if not source.is_dir():
+        return paths
+    errors: list[OSError] = []
+    visited: set[str] = set()
+    for current, dirs, names in os.walk(source, followlinks=True, onerror=errors.append):
+        real = os.path.realpath(current)
+        if real in visited:
+            return None
+        visited.add(real)
+        paths.extend(str(Path(current, name)) for name in (*dirs, *names))
+        if len(paths) > PROTECTED_COPY_WALK_MAX_PATHS:
+            return None
+    return None if errors else paths
+
+
+def _is_protected(path: str, patterns: tuple[str, ...], anchors: tuple[str | None, ...]) -> bool:
+    """Whether the secret guard's matcher protects ``path`` (or its realpath) under any anchor."""
+    return any(
+        sfm.protecting_pattern_under(path, patterns, anchor) is not None for anchor in anchors
+    )
+
+
+def _describe_copy_refusal(
+    root: Path, entry: SeedEntry, number: int, patterns: tuple[str, ...]
+) -> str | None:
+    """Why a copy of ``entry`` is refused for protected content, or ``None``.
+
+    Paths only: the protected file is never opened. The reason names the seed
+    by its position, never its path, because that path may itself be a
+    protected name and the reason is logged. Anchored globs are tried at the
+    seeding root (as given and resolved) and at the daemon's own project root.
+    """
+    paths = _paths_a_copy_would_read(root / entry.path)
+    refused = _COPY_REFUSAL.format(number=number)
+    if paths is None:
+        return (
+            f"{refused}: its directory could not be walked in full (unreadable, a symlink "
+            f"loop, or more than {PROTECTED_COPY_WALK_MAX_PATHS} paths), so it cannot be "
+            "shown to hold no protected path"
+        )
+    anchors = tuple(dict.fromkeys((str(root), str(root.resolve()), resolve_project_root())))
+    if any(_is_protected(path, patterns, anchors) for path in paths):
+        return (
+            f"{refused}: its source is, holds or links to a path the secret guard protects. "
+            "A protected file may be seeded only with mode: symlink"
+        )
+    return None
+
+
+def _copy_refusals(
+    root: Path, entries: list[SeedEntry], protected_patterns: ProtectedPatternsLoader
+) -> list[str]:
+    """One refusal per copy-mode entry that cannot be shown free of protected paths.
+
+    The protected set is read once, and only when a copy-mode entry exists, so
+    a link-only config behaves the same whatever state the guard config is in.
+    An unreadable set refuses EVERY copy entry rather than falling back.
+    """
+    copies = [
+        (number, entry)
+        for number, entry in enumerate(entries, start=1)
+        if entry.mode == SEED_MODE_COPY
+    ]
+    if not copies:
+        return []
+    try:
+        patterns = protected_patterns()
+    except sfm.ProtectedSetUnreadable as exc:
+        return [
+            f"seed entry #{number} (mode: copy): refused because the secret_file_guard "
+            f"protected set could not be read ({exc}), so no copy can be shown safe; fix the "
+            "config or seed it with mode: symlink"
+            for number, _entry in copies
+        ]
+    return [
+        refusal
+        for number, entry in copies
+        if (refusal := _describe_copy_refusal(root, entry, number, patterns))
+    ]
+
+
+def validate_seed_sources(
+    root: Path, entries: list[SeedEntry], *, protected_patterns: ProtectedPatternsLoader
+) -> None:
     """Check every entry can be seeded, raising before any worktree exists.
 
     Args:
         root: The main checkout's repository root, where sources live.
         entries: Validated-by-shape entries from the project's config.
+        protected_patterns: Returns the secret guard's effective globs, or
+            raises ``ProtectedSetUnreadable``. Required, so no caller can skip
+            the protected-set check; called only when a ``mode: copy`` entry
+            exists (Plan 00613 ruling Q3).
 
     Raises:
-        WorktreeSeedError: if any entry is unsafe, absent, or of an
-            unsupported type. EVERY offending entry is named in one message —
-            reporting only the first would make fixing a misconfigured list an
-            iterative guessing game.
+        WorktreeSeedError: if any entry is unsafe, absent, of an unsupported
+            type, or a copy that cannot be shown free of protected paths.
+            EVERY offending entry is named in one message — reporting only
+            the first would make fixing a misconfigured list an iterative
+            guessing game.
     """
     problems = [problem for entry in entries if (problem := _describe_problem(root, entry))]
+    problems.extend(_copy_refusals(root, entries, protected_patterns))
     if problems:
         raise WorktreeSeedError(
             "Cannot seed worktree — "

@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.core.worktree_seed import (
     SeedEntry,
     parse_seed_config,
 )
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
@@ -198,7 +199,11 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             # BEFORE creation: an unusable entry must abandon the whole
             # operation rather than leave a worktree missing files its agent
             # cannot know are absent. Both calls no-op on an empty list.
-            validate_seed_sources(Path(root), entries)
+            # A copy-mode entry is judged against the guard config read
+            # STRICTLY: unreadable refuses the copy (Plan 00613 ruling Q3).
+            validate_seed_sources(
+                Path(root), entries, protected_patterns=sfm.load_protected_patterns_strict
+            )
 
             path.parent.mkdir(parents=True, exist_ok=True)
             self._git_worktree_add(

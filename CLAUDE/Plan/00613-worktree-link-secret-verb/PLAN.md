@@ -66,7 +66,9 @@ own worktree files came from a peer and is not verified here.
 
 ### Phase 2: Tighten the seeding executor (may start now; it only tightens)
 
-- [ ] ⬜ **Task 2.1**: Test-first: `utils/worktree_seeding.py` refuses
+- [x] ✅ **Task 2.1**: (Done: `validate_seed_sources` takes a required
+  protected-set loader; the handler passes the strict config read; see the
+  journal.) Test-first: `utils/worktree_seeding.py` refuses
   `mode: copy` for a seed source the secret guard protects, using the guard's
   own matcher over paths only (never content). The refusal names the check
   and the seed by role. A config that cannot be read refuses the protected
