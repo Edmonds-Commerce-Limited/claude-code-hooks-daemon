@@ -428,13 +428,15 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
             # The strategy names its tool's findings codes and this is not one:
             # the tool faulted and never judged the file, so it cannot fail a
             # commit -- the same contract lint_on_edit applies (Plan 00621).
+            tool_error = " ".join(f"{result.stderr or ''} {result.stdout or ''}".split())[:300]
             logger.warning(
                 "staged_lint_gate: %s was NOT checked: %s exited %d, which is not a "
-                "findings code for %s",
+                "findings code for %s; tool said: %s",
                 file_path,
                 parts[0],
                 result.returncode,
                 strategy.language_name,
+                tool_error or "(no output)",
             )
             return None
 

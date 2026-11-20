@@ -61,6 +61,15 @@ class TestWorkflowExitCodes:
             is None
         )
 
+    def test_a_fault_log_names_the_tool_error(
+        self, tmp_path: Path, stub_bin: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _stub(stub_bin, 2, "no lane analyses this path")
+        with caplog.at_level("WARNING"):
+            StagedLintGateHandler()._syntax_check(_workflow(tmp_path), GitHubWorkflowLintStrategy())
+        assert "NOT checked" in caplog.text
+        assert "no lane analyses this path" in caplog.text
+
     def test_a_missing_tool_never_fails_the_commit(self, tmp_path: Path, stub_bin: Path) -> None:
         assert (
             StagedLintGateHandler()._syntax_check(_workflow(tmp_path), GitHubWorkflowLintStrategy())
