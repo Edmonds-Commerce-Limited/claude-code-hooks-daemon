@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
     verdict,
     wrapper_unreachable_reason,
 )
+from claude_code_hooks_daemon.daemon.server import NoDaemonIdentity, daemon_socket_identity
 from tests.acceptance.conftest import wrapper_subprocess_env
 from tests.load_scaling import scaled_seconds
 from tests.usage_ceiling import exempt_from_usage_ceiling
@@ -125,8 +126,21 @@ def playbook(daemon_running: None) -> list[dict]:
 
 
 @pytest.fixture(scope="module")
-def partitioned(playbook: list[dict]) -> tuple[list[ExecutableProbe], list[SkippedProbe]]:
-    return split_playbook(playbook, REPO_ROOT)
+def partitioned(
+    playbook: list[dict], daemon_socket: Path
+) -> tuple[list[ExecutableProbe], list[SkippedProbe]]:
+    """Plan against the project the answering daemon guards, as it says itself.
+
+    A linked worktree's own daemon guards the worktree, not the main checkout,
+    so a `$MAIN_CHECKOUT_DIR` probe is skipped there (see `plan_probe`).
+    """
+    identity = daemon_socket_identity(daemon_socket)
+    if isinstance(identity, NoDaemonIdentity):
+        pytest.fail(
+            f"the daemon on {daemon_socket} did not say which project it guards: "
+            f"{identity.reason}"
+        )
+    return split_playbook(playbook, REPO_ROOT, daemon_root=Path(identity.project_root))
 
 
 def _dispatch(probe: ExecutableProbe, env: dict[str, str]) -> tuple[str, str, str | None]:

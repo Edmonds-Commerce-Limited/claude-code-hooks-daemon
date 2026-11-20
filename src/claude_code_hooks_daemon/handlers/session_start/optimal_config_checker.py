@@ -120,6 +120,16 @@ def _env_truthy(value: object) -> bool:
     return str(value).strip().lower() not in _ENV_FALSY_VALUES
 
 
+def _whole_number(value: str) -> int | None:
+    """``value`` as a non-negative whole number, or None when it is not one.
+
+    None is a verdict the caller reports ("not a whole number"), never a
+    silent default.
+    """
+    stripped = value.strip()
+    return int(stripped) if stripped.isascii() and stripped.isdigit() else None
+
+
 def _idle_compaction_disablers(data: dict[str, Any], location: str) -> list[str]:
     """Return what in one settings dict (``location``) turns idle compaction off."""
     causes: list[str] = []
@@ -592,7 +602,13 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError) as e:
-                logger.debug("Cannot read %s for the idle threshold check: %s", path, e)
+                log_and_continue(
+                    logger,
+                    e,
+                    reason=f"cannot read {path} for the idle threshold check; the idle "
+                    "compaction check already reports it as unreadable",
+                    level=logging.DEBUG,
+                )
                 continue
             if isinstance(data, dict):
                 sources.append((f".claude/{name}", data))
@@ -627,11 +643,15 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
                 "current": f"Not set (default {_IDLE_THRESHOLD_DEFAULT})",
             }
         value, source = found
-        try:
-            tokens = int(value)
-        except ValueError:
-            tokens = None
-        if tokens is not None and tokens <= _IDLE_THRESHOLD_FLOOR:
+        tokens = _whole_number(value)
+        if tokens is None:
+            return {
+                **base,
+                "passed": False,
+                "warn": True,
+                "current": f"{value!r} ({source}) is not a whole number of tokens",
+            }
+        if tokens <= _IDLE_THRESHOLD_FLOOR:
             return {**base, "passed": True, "current": f"{value} ({source})"}
         return {
             **base,
