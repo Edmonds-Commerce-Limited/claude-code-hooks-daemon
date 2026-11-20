@@ -288,7 +288,8 @@ def _place(source: Path, dest: Path, mode: str) -> None:
 #: The audit log of protected links, under the MAIN checkout's daemon untracked dir.
 SEED_LINK_AUDIT_FILENAME = "worktree-seed-protected-links.jsonl"
 
-_AUDIT_VERB = "worktree-seed"
+#: The audit verb of a link placed when Claude Code creates the worktree.
+SEED_AUDIT_VERB = "worktree-seed"
 _AUDIT_CHECK = "secret_file_guard"
 _OUTCOME_LINKED = "linked"
 _OUTCOME_UNCLASSIFIED = "linked-unclassified"
@@ -311,11 +312,15 @@ class LinkAudit:
             raises ``ProtectedSetUnreadable``; read once, and only when a link
             is about to be placed.
         session_id: The session that triggered the creation, when known.
+        verb: The route that placed the link, recorded on each line: the
+            creation hook, or the ``seed-worktree`` command for a hand-made
+            worktree.
     """
 
     log_path: Path
     protected_patterns: ProtectedPatternsLoader
     session_id: str | None
+    verb: str = SEED_AUDIT_VERB
 
 
 class _LinkAuditor:
@@ -369,7 +374,7 @@ class _LinkAuditor:
                 pattern = verdict
         record = {
             "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "verb": _AUDIT_VERB,
+            "verb": self._audit.verb,
             "outcome": _OUTCOME_UNCLASSIFIED if reason else _OUTCOME_LINKED,
             "check": _AUDIT_CHECK,
             "worktree": str(self._worktree),
