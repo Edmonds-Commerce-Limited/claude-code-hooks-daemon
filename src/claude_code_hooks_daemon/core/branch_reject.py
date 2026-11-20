@@ -29,6 +29,7 @@ import os
 import re
 import secrets
 import shlex
+import unicodedata
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import suppress
@@ -803,6 +804,18 @@ def reviewers_for_rate(removals: int, config: BranchRejectConfig) -> int | None:
     return 1
 
 
+def related_keeps(
+    branch: str, tip: str, inventory: Inventory, keeps: Iterable[KeepRecord]
+) -> list[KeepRecord]:
+    """Keep records on the same WORK: same name, same tip, or any shared unique commit."""
+    commits = set(inventory.commits)
+    return [
+        keep
+        for keep in keeps
+        if keep.branch == branch or keep.tip == tip or commits & set(keep.commits)
+    ]
+
+
 def admit_request(
     branch: str,
     tip: str,
@@ -816,12 +829,7 @@ def admit_request(
     A keep is related to this request by name, by tip, or by sharing any unique commit,
     so renaming a branch earns no fresh start (RULINGS.md Q5).
     """
-    commits = set(inventory.commits)
-    related = [
-        keep
-        for keep in keeps
-        if keep.branch == branch or keep.tip == tip or commits & set(keep.commits)
-    ]
+    related = related_keeps(branch, tip, inventory, keeps)
     if any(keep.tip == tip for keep in related):
         raise RejectRefusedError(f"a keep verdict on tip {tip[:12]} is final for that tip")
     if len(related) >= 2:
@@ -836,6 +844,191 @@ def admit_request(
             f"{config.window_days} days, refuse_after {config.refuse_after})"
         )
     return max(needed, by_rate)
+
+
+# --- the review request and its prompt (DESIGN.md section 9) ---------------------------
+
+#: The shipped reviewer agent a review prompt must be dispatched to.
+REVIEWER_AGENT_TYPE = "hooks-daemon-branch-reject-reviewer"
+
+#: The first line of every review prompt is this marker followed by the nonce.
+PROMPT_MARKER = "[branch-reject review] nonce "
+
+VERDICT_BLOCK_START = "BRANCH-REJECT-VERDICT"
+VERDICT_BLOCK_END = "END-BRANCH-REJECT-VERDICT"
+
+_PROMPT_FIRST_LINE = re.compile(re.escape(PROMPT_MARKER) + r"([0-9a-f]{32})")
+#: Unicode categories refused in any text the prompt quotes: every control, format,
+#: surrogate, private-use and unassigned character, and the line and paragraph
+#: separators. A newline in a file name would otherwise put caller-chosen lines
+#: into a prompt the daemon claims to have composed alone.
+_REFUSED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+
+
+def prompt_nonce(prompt: str) -> str | None:
+    """The nonce of a well-formed review prompt's first line, else None."""
+    match = _PROMPT_FIRST_LINE.fullmatch(prompt.split("\n", 1)[0])
+    return match.group(1) if match else None
+
+
+def prompt_digest(prompt: str) -> str:
+    """The sha256 the dispatch gate compares a dispatched prompt against."""
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+
+def _check_quotable(label: str, text: str) -> None:
+    for char in text:
+        if unicodedata.category(char) in _REFUSED_CATEGORIES:
+            raise RejectRefusedError(
+                f"{label} {text!r} holds a control character (U+{ord(char):04X}); the "
+                "review prompt cannot quote it, so this branch cannot be reviewed"
+            )
+
+
+def compose_prompt(
+    *,
+    nonce: str,
+    branch: str,
+    tip: str,
+    default_sha: str,
+    commits: Sequence[tuple[str, str]],
+    paths: Sequence[str],
+    keep_reasons: Sequence[str],
+) -> str:
+    """The exact review prompt; raises RejectRefusedError on any unquotable text.
+
+    Composed from git facts and the stored keep history only, never from caller text.
+    Deterministic and without a trailing newline, so its sha256 is a stable identity.
+    """
+    _check_quotable("branch", branch)
+    for sha, subject in commits:
+        _check_quotable("commit subject", subject)
+        _check_quotable("commit", sha)
+    for path in paths:
+        _check_quotable("path", path)
+        if path.startswith('"'):
+            # ls-tree C-quotes a name holding a control character or a quote, so the
+            # inventory carries the quoted form; it is refused like the raw character.
+            raise RejectRefusedError(
+                f"path {path} is git-quoted (it holds a control character or a quote); "
+                "the review prompt cannot quote it, so this branch cannot be reviewed"
+            )
+    for reason in keep_reasons:
+        _check_quotable("earlier keep reason", reason)
+    lines = [
+        f"{PROMPT_MARKER}{nonce}",
+        "",
+        f"You are reviewing the unmerged work on branch `{branch}` at tip {tip}, measured "
+        f"against the default branch at {default_sha}. Decide, for each item below, whether "
+        "it has any value. Doubt means keep.",
+        "",
+        "Keep by default, unless you cite what supersedes it on the default branch: tests, "
+        "plan and journal files, documentation, configuration, and any work a plan or "
+        "journal describes.",
+        "",
+        "Read the work with read-only git commands only, for example `git show <sha>` and "
+        f"`git diff {default_sha} {tip} -- <path>`. Change no file, branch or ref.",
+        "",
+        "Commits not on the default branch:",
+        *([f"- {sha} {subject}" for sha, subject in commits] or ["- (none)"]),
+        "Files whose content exists nowhere on the default branch:",
+        *([f"- {path}" for path in paths] or ["- (none)"]),
+    ]
+    if keep_reasons:
+        lines += [
+            "",
+            "An earlier review judged this work worth keeping, for these reasons:",
+            *(f"- {reason}" for reason in keep_reasons),
+            "A no-value verdict must answer each of them.",
+        ]
+    lines += [
+        "",
+        "Reply with exactly this block and nothing after it: one line per commit and per "
+        "file listed above, each with a reason. A superseded-by list cites commits or "
+        "paths on the default branch.",
+        f"{VERDICT_BLOCK_START} nonce={nonce} tip={tip}",
+        "commit <sha> no-value|keep: <reason> [superseded-by: commit:<sha> path:<path> ...]",
+        "path <path> no-value|keep: <reason> [superseded-by: ...]",
+        "overall no-value|keep",
+        VERDICT_BLOCK_END,
+    ]
+    return "\n".join(lines)
+
+
+def commit_subjects(repo: Path, shas: Sequence[str]) -> dict[str, str]:
+    """Each commit's subject line; raises RejectError when any is missing."""
+    if not shas:
+        return {}
+    out = _git_out(repo, "log", "--no-walk=unsorted", "--format=%H%x00%s", *shas)
+    subjects: dict[str, str] = {}
+    for record in out.split("\n"):
+        if record:
+            sha, _, subject = record.partition("\x00")
+            subjects[sha] = subject
+    missing = sorted(set(shas) - set(subjects))
+    if missing:
+        raise RejectError(f"git log did not report the subject of {missing}")
+    return subjects
+
+
+@dataclass(frozen=True)
+class IssuedRequest:
+    """A stored request and the exact prompt its reviewer must be dispatched with."""
+
+    request: RejectRequest
+    prompt: str
+
+
+def issue_requests(repo: Path, branch: str, route: RejectRoute) -> list[IssuedRequest]:
+    """Admit a review of ``branch`` and store one request per reviewer required.
+
+    One nonce binds one reviewer agent, so a review needing two reviewers mints two
+    requests. The caller must already have classified the branch as ``unproven`` with
+    no refusal. Raises RejectRefusedError when admission refuses and RejectError when
+    a fact cannot be read; nothing is stored in either case. Never touches the ledger.
+    """
+    if route.default_ref is None:
+        raise RejectError("a review request needs the resolved default branch")
+    default_ref = route.default_ref
+    entries = read_ledger_entries(route.ledger_path)
+    tip = branch_tip(repo, branch)
+    default_sha = _resolve(repo, _full_ref(default_ref))
+    inventory = compute_inventory(repo, branch, default_ref)
+    if (branch_tip(repo, branch), _resolve(repo, _full_ref(default_ref))) != (tip, default_sha):
+        raise RejectError("the branch or the default moved while the inventory was computed")
+    keeps = route.store.keeps()
+    removals = removals_in_window(effective_removals(entries), now=route.now, config=route.config)
+    required = admit_request(branch, tip, inventory, keeps, removals, route.config)
+    keep_reasons = tuple(
+        reason for keep in related_keeps(branch, tip, inventory, keeps) for reason in keep.reasons
+    )
+    subjects = commit_subjects(repo, inventory.commits)
+    issued: list[IssuedRequest] = []
+    for _ in range(required):
+        nonce = new_id()
+        prompt = compose_prompt(
+            nonce=nonce,
+            branch=branch,
+            tip=tip,
+            default_sha=default_sha,
+            commits=[(sha, subjects[sha]) for sha in inventory.commits],
+            paths=inventory.paths,
+            keep_reasons=keep_reasons,
+        )
+        request = RejectRequest(
+            nonce=nonce,
+            branch=branch,
+            tip=tip,
+            default_sha=default_sha,
+            inventory=inventory,
+            reviewers_required=required,
+            prompt_sha256=prompt_digest(prompt),
+            created_at=route.now,
+        )
+        issued.append(IssuedRequest(request=request, prompt=prompt))
+    for item in issued:
+        route.store.write_request(item.request)
+    return issued
 
 
 # --- the recovery bundle -------------------------------------------------------------
