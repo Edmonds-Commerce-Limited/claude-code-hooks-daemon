@@ -22,6 +22,18 @@ Reviews:
   - **No declared invariant pair added.** `scripts/qa/declared-invariant-pairs.yaml` extractors compare literal sets (dict keys, tuples, regex alternations); none expresses "both callers call function X". Sharing one function plus the parity test is the defence here.
   - **Behaviour change at creation:** a protected link entry (including one protected only by the shipped defaults, such as `.vault-pass`) is now refused at creation unless the config committed at HEAD lists it. A client that never commits its daemon config loses protected-link seeding at creation; recorded in release note 019.
 
-## Left (F1 to F5)
+## F1 to F5 (second unit)
 
-See the next section of this file once that work lands.
+Commits: `e5f486201` (F1, F3), `939ce272c` (F4), `24bc33d2c` (F5), and the commit carrying this section (F2 niggle, release note). Tests: `tests/unit/handlers/pre_tool_use/test_secret_file_guard_seeded_link_bypasses.py` (both daemon-root placements, 140 cases, red first).
+
+- **F1 closed.** `fd`/`fdfind` `-x/--exec/-X/--exec-batch` (clustered, `--exec=`) are modelled as walkers that run a reader per file, judged as following every link below their roots (`_fd_exec_roots`; default root cwd, `--search-path`, `--base-directory`). `bfs` and `gfind` share `find`'s grammar (`_FIND_COMMANDS`). ugrep was already a grep; ag/ack have no exec.
+- **F3 closed.** `_reads_of_roots` expands brace operands (`expand_braces`, the file-read expander) before placing roots, so it covers every recursive reader and `find` roots; a group that cannot be listed (cap, quoting) fails closed as a read of everything.
+- **F4 closed.** A `link/..` physical root (`Read.physical`) that lies outside the daemon's project fails closed in `protected_reached` (`_outside_project`): the index lists nothing there.
+- **F5 closed.** `_MadeLink` records `ln -s`/`--symbolic`, `cp -s`, `hooks-daemon seed-worktree` statements; a later statement that is not content-free and names the destination (at, above or below it; unplaceable names count) is judged as a read of where the link leads. The target is judged as if the link existed, so a link to a tree holding nothing protected stays allowed. `ln -s X y` alone, and later `ls`/`echo`, stay allowed.
+- **F2 not closed.** Recorded as N683 in the open ledger `CLAUDE/Plan/00474-niggles-ledger-seventeen/NIGGLES.md`: the one-liner route extracts string literals and models no library call's root, so denying `copytree`/`cpSync`/`os.walk` would be a new interpreter model.
+
+Residuals:
+
+- A link whose target is outside the project fails closed for any later reader naming its destination, whether or not the target holds a protected file (also the F4 shape, `link/..` leaving the project). `hooks-daemon seed-worktree wt && <reader of wt>` is denied whenever the project has any protected file, because the seed list is config the hook does not read.
+- A worktree-root daemon still allows a direct non-following recursive read of a main-checkout directory (`grep -r x <main>/conf`, `fd . <main>/conf -x cat`): the blind spot the review routed to F-GAP, not fixed here.
+- F5 matches by destination path; a link reached through a variable the hook cannot place is covered only when the link's own destination is unplaceable.
