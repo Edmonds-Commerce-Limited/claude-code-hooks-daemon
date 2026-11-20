@@ -166,12 +166,13 @@ def apply_sweep(
     root_fd = open_dir(settings.root)
     try:
         reclaimed = reclaim_staging(store, max_depth=settings.max_depth)
-        names = bounded_names(root_fd, settings.max_inodes)
         resumed = tuple(
             _resume(root_fd, name, store, settings)
-            for name in names
+            for name in bounded_names(root_fd, settings.max_inodes)
             if name.startswith(CLAIM_PREFIX)
         )
+        # Listed again: a claim renamed back above is an entry to judge this run.
+        names = bounded_names(root_fd, settings.max_inodes)
         fingerprints = _fingerprint_all(root_fd, names, settings)
         report = facts.classify()
         entries = [
@@ -209,17 +210,22 @@ def apply_sweep(
 def _resume(
     root_fd: int, claimed_name: str, store: ArchiveStore, settings: ApplySettings
 ) -> Resumed:
-    return resume_claimed(
-        root_fd,
-        claimed_name,
-        store,
-        checkout=settings.checkout,
-        tar=settings.tar,
-        max_inodes=settings.max_inodes,
-        clock=settings.clock,
-        retention_hours=settings.retention_hours,
-        max_depth=settings.max_depth,
-    )
+    """Resume one leftover claim; a refusal leaves it whole and is reported stuck."""
+    name = claimed_name.removeprefix(CLAIM_PREFIX)
+    try:
+        return resume_claimed(
+            root_fd,
+            claimed_name,
+            store,
+            checkout=settings.checkout,
+            tar=settings.tar,
+            max_inodes=settings.max_inodes,
+            clock=settings.clock,
+            retention_hours=settings.retention_hours,
+            max_depth=settings.max_depth,
+        )
+    except (RemoveRefused, ValueError) as exc:
+        return Resumed(name, "stuck", f"resume refused: {exc}")
 
 
 def _fingerprint_all(
@@ -311,7 +317,11 @@ def _archive_claimed(
         return EntryOutcome(name, "renamed-back", back.reason)
     after_step(STEP_PACK, name)
     record = _record(row, packed, settings)
-    store.append(record)
+    try:
+        store.append(record)
+    except (StoreRefused, OSError) as exc:
+        # The claim stays: the next run's resume finds no record and renames it back.
+        return EntryOutcome(name, "left-claimed", f"record not appended: {exc}")
     after_step(STEP_APPEND, name)
     try:
         remove_claimed(
@@ -366,12 +376,19 @@ def _expire(
     settings: ApplySettings,
     notes: list[str],
 ) -> tuple[ExpiryOutcome, ...]:
-    """Expire due archives LAST; hold any whose entry is still claimed or still named."""
+    """Expire due archives LAST; hold any whose entry is still claimed or still named.
+
+    A record of another root cannot be checked from this one (neither its claim
+    nor its references), so it is held.
+    """
+    prefix = PurePosixPath(settings.original_prefix)
 
     def still_referenced(records: tuple[ArchiveRecord, ...]) -> bool:
         for record in records:
-            name = PurePosixPath(record.original_path).name
-            if _claim_present(root_fd, name) or facts.referenced(name):
+            path = PurePosixPath(record.original_path)
+            if path.parent != prefix:
+                return True
+            if _claim_present(root_fd, path.name) or facts.referenced(path.name):
                 return True
         return False
 

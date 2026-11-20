@@ -9,6 +9,7 @@ claimed. Removal goes through ``scratch_archive_remove`` only.
 from __future__ import annotations
 
 import ast
+import dataclasses
 import os
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -19,7 +20,12 @@ import pytest
 
 import claude_code_hooks_daemon
 from claude_code_hooks_daemon.core import scratch_archive_apply as apply_mod
-from claude_code_hooks_daemon.core.scratch_archive import ArchiveStore
+from claude_code_hooks_daemon.core.scratch_archive import (
+    AdoptEvent,
+    ArchiveStore,
+    StoreRefused,
+    new_archive_id,
+)
 from claude_code_hooks_daemon.core.scratch_archive_apply import (
     ApplyFacts,
     ApplySettings,
@@ -325,3 +331,109 @@ class TestOnlyTheRemoverDeletes:
         assert not (root / "e2").is_symlink()
         assert snapshot(outside) == before
         assert (outside / "keep.txt").stat().st_mtime_ns == mtime
+
+
+def later(hours: float) -> Callable[[], datetime]:
+    return lambda: NOW + timedelta(hours=hours)
+
+
+def archive_e1(root: Path, store: ArchiveStore, tar: TarTool) -> str:
+    entry(root, "e1")
+    result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
+    outcome = outcome_of(result, "e1")
+    assert outcome.outcome == "archived"
+    return outcome.archive_id
+
+
+class TestResumeReclaimExpireOrder:
+    def test_a_leftover_claim_is_resumed_then_judged_in_the_same_run(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, CLAIM_PREFIX + "e1")
+        result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
+        assert [r.outcome for r in result.resumed] == ["renamed-back"]
+        assert outcome_of(result, "e1").outcome == "archived"
+        assert not (root / "e1").exists()
+
+    def test_a_resume_that_raises_is_reported_stuck_and_the_run_goes_on(
+        self, root: Path, store: ArchiveStore, tar: TarTool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        entry(root, CLAIM_PREFIX + "x")
+        entry(root, "e1")
+
+        def refuse(*args: object, **kwargs: object) -> object:
+            raise apply_mod.RemoveRefused("index unreadable")
+
+        monkeypatch.setattr(apply_mod, "resume_claimed", refuse)
+        result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
+        assert [(r.name, r.outcome) for r in result.resumed] == [("x", "stuck")]
+        assert (root / (CLAIM_PREFIX + "x") / "a.txt").exists()
+        assert outcome_of(result, "e1").outcome == "archived"
+
+    def test_an_archive_past_retention_expires_last(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        archive_id = archive_e1(root, store, tar)
+        result = apply_sweep(store, FakeFacts([]).facts(), settings(root, tar, later(13)))
+        assert [(o.archive_id, o.outcome) for o in result.expired] == [(archive_id, "expired")]
+
+    def test_an_archive_whose_claim_is_still_present_never_expires(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        archive_id = archive_e1(root, store, tar)
+        # A stuck, partly removed claim (its name taken, so it cannot be renamed back).
+        (root / (CLAIM_PREFIX + "e1")).mkdir()
+        (root / (CLAIM_PREFIX + "e1") / "a.txt").write_text("alpha e1")
+        (root / "e1").mkdir()
+        result = apply_sweep(store, FakeFacts([]).facts(), settings(root, tar, later(13)))
+        assert [r.outcome for r in result.resumed] == ["stuck"]
+        assert [(o.archive_id, o.outcome) for o in result.expired] == [(archive_id, "held")]
+        assert archive_id in {r.archive_id for r in store.read_index().records}
+
+    def test_an_archive_a_tracked_file_still_names_never_expires(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        archive_id = archive_e1(root, store, tar)
+        fake = FakeFacts([], referenced={"e1"})
+        result = apply_sweep(store, fake.facts(), settings(root, tar, later(13)))
+        assert [(o.archive_id, o.outcome) for o in result.expired] == [(archive_id, "held")]
+
+    def test_an_archive_from_another_root_is_held(
+        self, root: Path, project: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        archive_id = archive_e1(root, store, tar)
+        other = dataclasses.replace(settings(root, tar, later(13)), original_prefix="untracked/x")
+        result = apply_sweep(store, FakeFacts([]).facts(), other)
+        assert [(o.archive_id, o.outcome) for o in result.expired] == [(archive_id, "held")]
+
+    def test_unfinished_adoptions_are_reported_not_finished(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        event = AdoptEvent(
+            archive_id=new_archive_id(),
+            original_path="untracked/scratch/t.tar",
+            tarball="t.tar",
+            at=NOW.isoformat(),
+        )
+        store.append_event(event)
+        result = apply_sweep(store, FakeFacts([]).facts(), settings(root, tar))
+        assert result.unfinished_adoptions == (event,)
+        assert any("unfinished adoption" in note for note in result.notes)
+
+    def test_a_failed_record_append_leaves_the_claim_for_the_next_run(
+        self, root: Path, store: ArchiveStore, tar: TarTool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        entry(root, "e1")
+        before = snapshot(root / "e1")
+
+        def refuse(record: object) -> None:
+            raise StoreRefused("disk full")
+
+        monkeypatch.setattr(store, "append", refuse)
+        result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
+        assert outcome_of(result, "e1").outcome == "left-claimed"
+        monkeypatch.undo()
+        again = apply_sweep(store, FakeFacts([]).facts(), settings(root, tar))
+        assert [r.outcome for r in again.resumed] == ["renamed-back"]
+        assert snapshot(root / "e1") == before
+        assert again.audit.unrecorded_archives
