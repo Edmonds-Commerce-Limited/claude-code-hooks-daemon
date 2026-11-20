@@ -2706,11 +2706,12 @@ class ScratchArchiveConfig(BaseModel):
 
 
 class ScratchKeepConfig(BaseModel):
-    """``scratch.keep``: the longest an agent's pause may last."""
+    """``scratch.keep``: the longest an agent's pause may last, and how many one archive may carry."""
 
     model_config = ConfigDict(extra="forbid")
 
     max_hours: Annotated[int, Field(ge=1)] = Field(default=168)
+    max_keeps: Annotated[int, Field(ge=1)] = Field(default=4)
 
 
 class ScratchFilingConfig(BaseModel):

@@ -219,6 +219,27 @@ class TestEndToEnd:
         assert (tree.root / "old" / "sub" / "b.txt").read_bytes() == b"beta"
         assert archive_id in capsys.readouterr().out
 
+    def test_the_keep_cap_comes_from_scratch_keep_max_keeps(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        _old_entry(tree, now)
+        project = _project(tree)
+        (project / ".claude" / "hooks-daemon.yaml").write_text(
+            'version: "2.0"\nscratch:\n  keep:\n    max_keeps: 1\n'
+        )
+        assert _run(_parse(project, "--apply", "--json"), now=now) == 0
+        document = json.loads(capsys.readouterr().out)
+        (outcome,) = [row for row in document["entries"] if row["name"] == "old"]
+        archive_id = outcome["archive_id"]
+        # Each keep must extend the expiry (held up to 168 hours from the pack).
+        later = now + _DAY
+        first = ("keep", archive_id, "--reason", "first", "--hours", "150")
+        second = ("keep", archive_id, "--reason", "second", "--hours", "160")
+        assert _run(_parse(project, *first), now=later) == 0
+        assert _run(_parse(project, *second), now=later) == 1
+        assert "cap of 1 keeps" in capsys.readouterr().err
+
     def test_a_live_entry_is_not_archived(
         self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
     ) -> None:

@@ -33,6 +33,7 @@ class TestDefaults:
         assert config.archive.disposable_hours == 12
         assert config.archive.uncertain_hours == 168
         assert config.keep.max_hours == 168
+        assert config.keep.max_keeps == 4
         assert config.filing.max_bytes == 262144
 
     def test_cap_defaults(self) -> None:
@@ -83,6 +84,7 @@ class TestBounds:
             {"archive": {"disposable_hours": 0}},
             {"archive": {"uncertain_hours": 0}},
             {"keep": {"max_hours": 0}},
+            {"keep": {"max_keeps": 0}},
             {"filing": {"max_bytes": 0}},
             {"caps": {"pressure_idle_minutes": 0}},
             {"caps": {"project_directories": {"warn_percent": 0, "block_percent": 75}}},

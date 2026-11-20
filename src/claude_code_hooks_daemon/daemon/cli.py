@@ -6785,10 +6785,6 @@ def cmd_scratch_sweep(
     return _scratch_apply(args, sources, sweep_root)
 
 
-#: The most keeps one archive may carry; a further keep is refused (Plan 00627 Task 3.8).
-SCRATCH_KEEP_MAX_KEEPS: Final[int] = 4
-
-
 @dataclass(frozen=True)
 class _ScratchSources:
     """Where ``scratch-sweep`` reads its facts; each method reads them FRESH."""
@@ -7056,7 +7052,7 @@ def _scratch_keep(args: argparse.Namespace, sources: _ScratchSources) -> int:
                 until=now + datetime.timedelta(hours=hours),
                 now=now,
                 max_hours=float(max_hours),
-                max_keeps=SCRATCH_KEEP_MAX_KEEPS,
+                max_keeps=sources.config.scratch.keep.max_keeps,
                 retention_hours=sources.retention_hours(),
                 entry=args.entry,
             )
