@@ -111,3 +111,29 @@ class TestAHandTypedLinkOrCopyIsDenied:
         decision, reason = _result(project, command)
         assert decision == Decision.DENY
         assert RuleID.SECRET_BASH_MENTION in reason
+
+
+class TestTheSameShapesWithAnUnprotectedNameAreAllowed:
+    """Controls: the pin fails on the protected NAME, not on the shape or the cwd."""
+
+    @pytest.fixture(autouse=True)
+    def _plain_file(self, project: Path) -> None:
+        (project / "plain.txt").write_text("ordinary\n", encoding="utf-8")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"ln -s {_UP}/plain.txt {_WORKTREE}/plain.txt",
+            f"ln plain.txt {_WORKTREE}/plain.txt",
+            f"cp plain.txt {_WORKTREE}/",
+        ],
+    )
+    def test_from_the_main_checkout(self, project: Path, command: str) -> None:
+        assert _result(project, command)[0] == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "command",
+        [f"ln -s {_UP}/plain.txt plain.txt", f"cp {_UP}/plain.txt ."],
+    )
+    def test_from_inside_the_worktree(self, project: Path, command: str) -> None:
+        assert _result(project / _WORKTREE, command)[0] == Decision.ALLOW

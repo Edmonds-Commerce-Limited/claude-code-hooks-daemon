@@ -83,7 +83,8 @@ own worktree files came from a peer and is not verified here.
 - [x] ✅ **Task 2.3**: (Done: a pin, not red-first.) A test pins that a
   hand-typed `ln -s`, `ln` or `cp`
   naming a protected path is still denied by `R-SECRET-BASH-MENTION`.
-- [x] ✅ **Task 2.4**: (Done: callout 009 in the pending release notes.)
+- [x] ✅ **Task 2.4**: (Done: callout 009 in the pending release notes, and
+  pre-upgrade task 01 for the config a project must change.)
   Release note for 2.1 and 2.2 (a config that seeds a
   protected file in copy mode now refuses; say what to change).
 - [x] ✅ **Task 2.5**: (Done.) `check-worktree-seed` reports the copies
@@ -110,9 +111,11 @@ journalled (a delegated ruling is not sufficient for it).
   journalled: the Task 2.3 pin and two handler wiring tests for 2.2.)
 - [ ] No text advising a protected seed or hand link ships before the Phase 3 gate.
 - [x] Release-bound consequences recorded in the pending release notes
-  (`CLAUDE/UPGRADES/UNRELEASED/release-notes/009-*`).
+  (`CLAUDE/UPGRADES/UNRELEASED/release-notes/009-*`) and the pre-upgrade
+  tasks (`CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/01-*`).
 
 ## Delivery & Milestones
 
 - Filed from a peer report; no delivery yet.
-- Design questions Q0 to Q5 settled by delegated ruling; Phase 2 is ready to build.
+- Design questions Q0 to Q5 settled by delegated ruling.
+- Phase 2 built on its work branch, not yet merged; Phase 3 waits for its gate.
