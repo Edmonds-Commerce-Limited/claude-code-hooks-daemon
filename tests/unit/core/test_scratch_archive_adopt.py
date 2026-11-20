@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
+import gzip
+import io
+import lzma
 import os
 import shutil
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
+
+from claude_code_hooks_daemon.core import scratch_archive_pack as pack_mod
+from claude_code_hooks_daemon.core.scratch_archive_pack import (
+    PackRefused,
+    compression_flags,
+    compression_of,
+    require_decompressor,
+    tarfile_mode,
+)
 
 TAR = shutil.which("tar")
 _ENV = {"LC_ALL": "C", "PATH": "/usr/bin:/bin"}
@@ -134,3 +147,87 @@ def test_probe_compare_without_a_compression_flag_refuses_a_gzip_stream(
     archive, tree = pair
     proc = _tar(["--compare", "--file=-", "--strip-components=1"], tree, stdin=archive)
     assert proc.returncode != 0
+
+
+# --- the shared compression sniff -------------------------------------------------
+
+
+def _fd_of(path: Path) -> int:
+    return os.open(path, os.O_RDONLY)
+
+
+def _plain_tar_bytes(fmt: int = tarfile.GNU_FORMAT) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=fmt) as archive:
+        info = tarfile.TarInfo("./a")
+        info.size = 1
+        archive.addfile(info, io.BytesIO(b"x"))
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("payload", "kind"),
+    [
+        (gzip.compress(b"anything"), "gzip"),
+        (lzma.compress(b"anything", format=lzma.FORMAT_XZ), "xz"),
+        (_plain_tar_bytes(), "none"),
+        (_plain_tar_bytes(tarfile.PAX_FORMAT), "none"),
+    ],
+    ids=["gzip", "xz", "gnu-tar", "pax-tar"],
+)
+def test_compression_is_chosen_from_the_first_bytes(
+    tmp_path: Path, payload: bytes, kind: str
+) -> None:
+    path = tmp_path / "x"
+    path.write_bytes(payload)
+    fd = _fd_of(path)
+    try:
+        assert compression_of(fd) == kind
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [b"", b"\x1f", b"BZh91AY&SY" + b"\0" * 600, b"\0" * 1024, b"not an archive at all"],
+    ids=["empty", "short-gzip", "bzip2", "zeros", "text"],
+)
+def test_an_unknown_or_short_format_is_refused(tmp_path: Path, payload: bytes) -> None:
+    path = tmp_path / "x"
+    path.write_bytes(payload)
+    fd = _fd_of(path)
+    try:
+        with pytest.raises(PackRefused, match="format"):
+            compression_of(fd)
+    finally:
+        os.close(fd)
+
+
+def test_the_sniff_reads_from_the_start_whatever_the_offset(tmp_path: Path) -> None:
+    path = tmp_path / "x"
+    path.write_bytes(gzip.compress(b"z" * 4096))
+    fd = _fd_of(path)
+    try:
+        os.lseek(fd, 100, os.SEEK_SET)
+        assert compression_of(fd) == "gzip"
+    finally:
+        os.close(fd)
+
+
+def test_the_tar_flag_and_stream_mode_are_explicit() -> None:
+    assert compression_flags("gzip") == ("--gzip",)
+    assert compression_flags("xz") == ("--xz",)
+    assert compression_flags("none") == ()
+    assert {tarfile_mode(k) for k in ("gzip", "xz", "none")} == {"r|gz", "r|xz", "r|"}
+
+
+@pytest.mark.parametrize("kind", ["gzip", "xz"])
+def test_a_missing_decompressor_is_a_refusal(kind: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pack_mod.shutil, "which", lambda *_a, **_k: None)
+    with pytest.raises(PackRefused, match="decompressor"):
+        require_decompressor(kind)
+
+
+def test_a_plain_tar_needs_no_decompressor(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pack_mod.shutil, "which", lambda *_a, **_k: None)
+    require_decompressor("none")

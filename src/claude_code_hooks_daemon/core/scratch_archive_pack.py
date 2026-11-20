@@ -27,6 +27,7 @@ Every refusal discards the unrecorded archive; the caller renames the entry back
 from __future__ import annotations
 
 import hashlib
+import importlib
 import os
 import posixpath
 import shutil
@@ -35,7 +36,7 @@ import tarfile
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import IO
+from typing import IO, Literal
 
 from claude_code_hooks_daemon.core.scratch_archive import ArchiveStore, StoreRefused
 from claude_code_hooks_daemon.core.scratch_archive_claim import (
@@ -346,6 +347,61 @@ def _batches(names: list[str], budget: int) -> Iterator[tuple[str, ...]]:
         yield tuple(batch)
 
 
+Compression = Literal["gzip", "xz", "none"]
+
+_GZIP_MAGIC = b"\x1f\x8b"
+_XZ_MAGIC = b"\xfd7zXZ\x00"
+_USTAR_OFFSET = 257
+_USTAR_MAGIC = b"ustar"
+_FLAGS: dict[Compression, tuple[str, ...]] = {"gzip": ("--gzip",), "xz": ("--xz",), "none": ()}
+StreamMode = Literal["r|gz", "r|xz", "r|"]
+_STREAM_MODES: dict[Compression, StreamMode] = {"gzip": "r|gz", "xz": "r|xz", "none": "r|"}
+_DECOMPRESSORS: dict[Compression, tuple[str, str]] = {
+    "gzip": ("gzip", "zlib"),
+    "xz": ("xz", "lzma"),
+}
+
+
+def compression_of(fd: int) -> Compression:
+    """Choose an archive's compression from its first bytes (read with ``pread``, offset 0).
+
+    Gzip and xz by their magic numbers, a plain tar by ``ustar`` at offset 257
+    (the GNU, ustar and pax formats all carry it). Anything else, a short file
+    included, raises :class:`PackRefused`: nothing is ever guessed.
+    """
+    head = os.pread(fd, _USTAR_OFFSET + len(_USTAR_MAGIC), 0)
+    if head.startswith(_GZIP_MAGIC):
+        return "gzip"
+    if head.startswith(_XZ_MAGIC):
+        return "xz"
+    if head[_USTAR_OFFSET:] == _USTAR_MAGIC:
+        return "none"
+    raise PackRefused("the archive format is not a plain, gzip or xz tar")
+
+
+def compression_flags(kind: Compression) -> tuple[str, ...]:
+    """tar's explicit decompression flag for ``kind`` (none for a plain tar)."""
+    return _FLAGS[kind]
+
+
+def tarfile_mode(kind: Compression) -> StreamMode:
+    """The explicit :func:`tarfile.open` stream mode for ``kind``; never ``r|*``."""
+    return _STREAM_MODES[kind]
+
+
+def require_decompressor(kind: Compression) -> None:
+    """Raise :class:`PackRefused` unless tar's decompressor program and Python's module exist."""
+    if kind == "none":
+        return
+    program, module = _DECOMPRESSORS[kind]
+    if shutil.which(program, path=_TAR_ENV["PATH"]) is None:
+        raise PackRefused(f"the {program} decompressor is not installed")
+    try:
+        importlib.import_module(module)
+    except ImportError as exc:
+        raise PackRefused(f"the {module} decompressor module is unavailable: {exc}") from exc
+
+
 def digest_fd(fd: int) -> tuple[int, str]:
     """Return the size and SHA-256 of an open archive, read from its start."""
     return _digest(fd)
@@ -376,9 +432,12 @@ def batched_compare(
     *,
     tar: TarTool,
     timeout: float,
+    flags: tuple[str, ...] = (),
 ) -> None:
     """Run ``tar --compare`` in ``dir_fd`` restricted to ``names``, in argv-bounded batches.
 
+    ``flags`` go before the operands: a decompression flag (:func:`compression_flags`),
+    and ``--strip-components=1`` for a P6 archive compared inside its entry.
     Raises :class:`VerifyFailed` on any difference, :class:`TarDidNotRun` when tar cannot run.
     """
     for batch in _batches(names, COMPARE_ARGV_BUDGET):
@@ -387,7 +446,7 @@ def batched_compare(
         try:
             proc = _run_tar(
                 tar,
-                ["--compare", "--file=-", *_COMMON, *_LITERAL_OPERANDS, "--", *batch],
+                ["--compare", *flags, "--file=-", *_COMMON, *_LITERAL_OPERANDS, "--", *batch],
                 cwd_fd=cwd_fd,
                 stdin=archive_fd,
                 stdout=None,

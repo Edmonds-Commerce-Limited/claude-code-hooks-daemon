@@ -14,6 +14,7 @@ import hashlib
 import io
 import os
 import shutil
+import subprocess
 import tarfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -36,8 +37,14 @@ from claude_code_hooks_daemon.core.scratch_archive_claim import (
     fingerprint_at,
     open_dir,
     rename_noreplace_between,
+    walk_tree,
 )
-from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu_tar, pack
+from claude_code_hooks_daemon.core.scratch_archive_pack import (
+    TarTool,
+    find_gnu_tar,
+    members_of,
+    pack,
+)
 from claude_code_hooks_daemon.core.scratch_archive_restore import (
     STAGING_PREFIX,
     Restored,
@@ -336,6 +343,119 @@ class TestRoundTrip:
         assert _staging(store) == []
 
 
+# --- the P6 ``name/...`` layout (Task 3.7) ------------------------------------------
+
+_P6_FLAGS = {"none": "-cf", "gzip": "-czf", "xz": "-cJf"}
+
+
+def _install_p6(
+    root: Path,
+    store: ArchiveStore,
+    tar: TarTool,
+    name: str,
+    compression: str = "gzip",
+    *,
+    record_name: str | None = None,
+) -> str:
+    """Pack ``root/name`` by hand as ``name/...`` (the P6 layout), store it, then remove it."""
+    if compression == "xz" and shutil.which("xz", path="/usr/bin:/bin") is None:
+        pytest.skip("xz is not installed")
+    proc = subprocess.run(
+        [tar.path, "--format=gnu", _P6_FLAGS[compression], "-", "--", name],
+        cwd=root,
+        capture_output=True,
+        check=True,
+    )
+    payload = proc.stdout
+    root_fd = open_dir(root)
+    try:
+        counts = members_of(walk_tree(root_fd, name, max_inodes=1000), name).counts
+    finally:
+        os.close(root_fd)
+    archive_id = new_archive_id()
+    fd = store.create_archive(archive_id)
+    os.write(fd, payload)
+    os.close(fd)
+    store.append(
+        _record(
+            archive_id,
+            path=f"untracked/scratch/{record_name or name}",
+            counts=counts,
+            size=len(payload),
+            sha=hashlib.sha256(payload).hexdigest(),
+        )
+    )
+    for path in [root / name, *(root / name).rglob("*")]:
+        if path.is_dir() and not path.is_symlink():
+            path.chmod(0o755)
+    shutil.rmtree(root / name)
+    return archive_id
+
+
+class TestAdoptedLayout:
+    @pytest.mark.parametrize("compression", ["gzip", "none", "xz"])
+    def test_a_hand_packed_archive_comes_back_whole(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool, compression: str
+    ) -> None:
+        before = _make_entry(root)
+        archive_id = _install_p6(root, store, tar, "e1", compression)
+        result = _restore(store, root_fd, tar, archive_id)
+        assert (result.name, result.layout) == ("e1", "adopted")
+        assert _tree(root / "e1") == before
+        assert _names(root) == ["e1"]
+        assert _staging(store) == []
+
+    def test_a_read_only_root_comes_back_with_its_mode(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _make_entry(root)
+        (root / "e1" / "sub").chmod(0o500)
+        (root / "e1").chmod(0o550)
+        archive_id = _install_p6(root, store, tar, "e1")
+        _restore(store, root_fd, tar, archive_id)
+        assert (root / "e1").stat().st_mode & 0o777 == 0o550
+        assert (root / "e1" / "sub").stat().st_mode & 0o777 == 0o500
+        (root / "e1").chmod(0o755)
+        (root / "e1" / "sub").chmod(0o755)
+
+    def test_a_hostile_name_round_trips(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        name = "-rf --to-command=x \n 'q\"\\"
+        (root / name).mkdir()
+        (root / name / "--checkpoint-action=exec=x").write_text("payload")
+        archive_id = _install_p6(root, store, tar, name)
+        _restore(store, root_fd, tar, archive_id)
+        assert (root / name / "--checkpoint-action=exec=x").read_text() == "payload"
+
+    def test_a_root_named_other_than_the_record_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _make_entry(root)
+        archive_id = _install_p6(root, store, tar, "e1", record_name="e2")
+        _refused_cleanly(store, root, root_fd, tar, archive_id, "layout")
+
+    def test_an_unknown_archive_format_is_refused_before_staging(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        payload = b"BZh91AY&SY" + b"\0" * 2000
+        archive_id = new_archive_id()
+        fd = store.create_archive(archive_id)
+        os.write(fd, payload)
+        os.close(fd)
+        sha = hashlib.sha256(payload).hexdigest()
+        store.append(
+            _record(
+                archive_id,
+                path="untracked/scratch/e1",
+                counts={"dir": 1},
+                size=len(payload),
+                sha=sha,
+            )
+        )
+        _refused_cleanly(store, root, root_fd, tar, archive_id, "format")
+
+
 # --- refusals before staging ------------------------------------------------------
 
 
@@ -485,7 +605,21 @@ class TestRefusals:
             ([_member(f"./{CLAIM_PREFIX}e1", data=b"x")], {"symlink": 1}),
             ([_member(f"./{CLAIM_PREFIX}other", data=b"x")], {"file": 1}),
             ([_member("./a", data=b"x")], {"file": 1}),
-            ([_member("e1/", tarfile.DIRTYPE), _member("e1/a", data=b"x")], {"dir": 1}),
+            (
+                [_member("other/", tarfile.DIRTYPE), _member("other/a", data=b"x")],
+                {"dir": 1, "file": 1},
+            ),
+            ([_member("e1/", tarfile.DIRTYPE), _member("e1/a", data=b"x")], {"dir": 2}),
+            ([_member("e1/a", data=b"x")], {"file": 1}),
+            ([_member("e1", data=b"x")], {"file": 1}),
+            (
+                [_member("e1/", tarfile.DIRTYPE), _member("./a", data=b"x")],
+                {"dir": 1, "file": 1},
+            ),
+            (
+                [_member("./", tarfile.DIRTYPE), _member("e1/a", data=b"x")],
+                {"dir": 1, "file": 1},
+            ),
         ],
         ids=[
             "counts-differ",
@@ -493,7 +627,12 @@ class TestRefusals:
             "kind-differs",
             "wrong-member",
             "unclaimed-name",
-            "p6-layout",
+            "p6-other-root",
+            "p6-counts-differ",
+            "p6-no-root-member",
+            "p6-root-not-a-dir",
+            "p6-mixed-with-dot",
+            "dot-mixed-with-p6",
         ],
     )
     def test_a_layout_that_disagrees_with_the_record_is_refused(

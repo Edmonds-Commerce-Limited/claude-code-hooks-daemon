@@ -13,9 +13,14 @@ must agree with the record:
 * a ``.`` root member: a directory entry, its member counts by kind equal to
   the record's, its other kinds equal to the record's skipped files;
 * only ``./.sweeping-<name>`` members: a loose file or a batch, of which the
-  member for the record's name is restored, its kind equal to the record's.
+  member for the record's name is restored, its kind equal to the record's;
+* only ``<name>`` (one directory) and ``<name>/...`` members, ``<name>`` the
+  record's: a P6 adopted archive (Task 3.7), its counts equal to the record's.
 
-Anything else (the P6 ``name/...`` layout included, Task 3.7) is refused.
+A mixture of prefix styles, or anything else, is refused. The compression
+(plain, gzip or xz) is chosen from the archive's first bytes and passed to tar
+and to :mod:`tarfile` explicitly; an unknown format or a missing decompressor
+is a refusal.
 
 Then tar extracts into a fresh staging directory in the store
 (``.restoring-<random>``), the staged tree is verified against the archive
@@ -56,14 +61,19 @@ from claude_code_hooks_daemon.core.scratch_archive_claim import (
 from claude_code_hooks_daemon.core.scratch_archive_expire import Incomplete, complete_records
 from claude_code_hooks_daemon.core.scratch_archive_pack import (
     DEFAULT_TAR_TIMEOUT_SECONDS,
+    Compression,
     PackRefused,
     TarDidNotRun,
     TarTool,
     VerifyFailed,
     batched_compare,
+    compression_flags,
+    compression_of,
     digest_fd,
     members_of,
+    require_decompressor,
     run_tar,
+    tarfile_mode,
 )
 
 #: The prefix of a restore's staging directory in the store.
@@ -86,7 +96,7 @@ _EXTRACT = (
     "--preserve-permissions",
 )
 
-Layout = Literal["directory", "member"]
+Layout = Literal["directory", "member", "adopted"]
 
 
 class RestoreRefused(Exception):
@@ -116,6 +126,7 @@ class _Plan:
     layout: Layout
     member: str
     headers: tuple[Header, ...]
+    compression: Compression = "none"
 
 
 def leftover_staging(store: ArchiveStore) -> tuple[str, ...]:
@@ -124,17 +135,20 @@ def leftover_staging(store: ArchiveStore) -> tuple[str, ...]:
 
 
 def _name_ok(name: str) -> bool:
+    """``.``, ``./<plain>...``, or (the P6 layout) ``<plain>[/<plain>...]``."""
     if name == ".":
         return True
     parts = name.split("/")
-    return parts[0] == "." and len(parts) > 1 and all(p not in ("", ".", "..") for p in parts[1:])
+    if parts[0] == ".":
+        return len(parts) > 1 and all(p not in ("", ".", "..") for p in parts[1:])
+    return all(p not in ("", ".", "..") for p in parts)
 
 
-def read_headers(handle: IO[bytes]) -> tuple[Header, ...]:
+def read_headers(handle: IO[bytes], compression: Compression = "none") -> tuple[Header, ...]:
     """Read every header; raise :class:`RestoreRefused` on any unsafe member."""
     headers: list[Header] = []
     try:
-        with tarfile.open(fileobj=handle, mode="r|") as archive:
+        with tarfile.open(fileobj=handle, mode=tarfile_mode(compression)) as archive:
             for member in archive:
                 kind = _KINDS.get(member.type)
                 if kind is None:
@@ -142,7 +156,7 @@ def read_headers(handle: IO[bytes]) -> tuple[Header, ...]:
                 if not _name_ok(member.name):
                     raise RestoreRefused(f"member {member.name!r} escapes the entry")
                 headers.append(Header(member.name, kind, stat.S_IMODE(member.mode)))
-    except tarfile.TarError as exc:
+    except (tarfile.TarError, OSError, EOFError) as exc:
         raise RestoreRefused(f"archive member headers cannot be read: {exc}") from exc
     names = [h.name for h in headers]
     if len(names) != len(set(names)):
@@ -155,17 +169,36 @@ def read_headers(handle: IO[bytes]) -> tuple[Header, ...]:
     return tuple(headers)
 
 
-def _plan(record: ArchiveRecord, headers: tuple[Header, ...], dest_name: str) -> _Plan:
-    """Derive the layout from the headers; refuse when it disagrees with the record."""
+def _check_counts(record: ArchiveRecord, headers: tuple[Header, ...]) -> None:
+    found = Counter(h.kind for h in headers)
+    stored = all(found[k] == record.counts.get(k, 0) for k in _STORED_KINDS)
+    other = sum(v for k, v in record.counts.items() if k not in _STORED_KINDS)
+    if not stored or other != len(record.skipped):
+        raise RestoreRefused("layout: the member counts disagree with the record")
+
+
+def _plan(
+    record: ArchiveRecord,
+    headers: tuple[Header, ...],
+    dest_name: str,
+    compression: Compression = "none",
+) -> _Plan:
+    """Derive the layout from the headers; refuse when it disagrees with the record.
+
+    Every header must share one prefix style: ``.``/``./...`` for a directory,
+    ``./.sweeping-<name>`` for a loose file or batch, ``<name>``/``<name>/...``
+    for a P6 adopted archive. A mixture is refused.
+    """
     if headers and headers[0].name == ".":
         if headers[0].kind != "dir" or any(h.name == "." for h in headers[1:]):
             raise RestoreRefused("layout: the root member is not one directory")
-        found = Counter(h.kind for h in headers)
-        stored = all(found[k] == record.counts.get(k, 0) for k in _STORED_KINDS)
-        other = sum(v for k, v in record.counts.items() if k not in _STORED_KINDS)
-        if not stored or other != len(record.skipped):
-            raise RestoreRefused("layout: the member counts disagree with the record")
-        return _Plan("directory", ".", headers)
+        for header in headers[1:]:
+            if not header.name.startswith("./"):
+                raise RestoreRefused(f"layout: member {header.name!r} is not under the root")
+        _check_counts(record, headers)
+        return _Plan("directory", ".", headers, compression)
+    if headers and not headers[0].name.startswith("./"):
+        return _plan_adopted(record, headers, dest_name, compression)
     wanted = f"./{CLAIM_PREFIX}{dest_name}"
     for header in headers:
         parts = header.name.split("/")
@@ -176,7 +209,26 @@ def _plan(record: ArchiveRecord, headers: tuple[Header, ...], dest_name: str) ->
         raise RestoreRefused(f"layout: the archive has no member for {dest_name!r}")
     if dict(record.counts) != {match[0].kind: 1}:
         raise RestoreRefused("layout: the member's kind disagrees with the record")
-    return _Plan("member", wanted, headers)
+    return _Plan("member", wanted, headers, compression)
+
+
+def _plan_adopted(
+    record: ArchiveRecord,
+    headers: tuple[Header, ...],
+    dest_name: str,
+    compression: Compression,
+) -> _Plan:
+    """The P6 layout: one ``<name>`` directory member and only ``<name>/...`` beside it."""
+    for header in headers:
+        if header.name != dest_name and not header.name.startswith(dest_name + "/"):
+            raise RestoreRefused(f"layout: member {header.name!r} is not under {dest_name!r}")
+    roots = [h for h in headers if h.name == dest_name]
+    if len(roots) != 1 or roots[0].kind != "dir":
+        raise RestoreRefused(f"layout: the archive has no directory member {dest_name!r}")
+    if record.skipped:
+        raise RestoreRefused("layout: an adopted archive cannot have skipped files")
+    _check_counts(record, headers)
+    return _Plan("adopted", dest_name, headers, compression)
 
 
 def _select(records: tuple[ArchiveRecord, ...], entry: str | None) -> ArchiveRecord:
@@ -204,8 +256,10 @@ def _check_destination(store: ArchiveStore, dest_parent_fd: int, dest_name: str)
         raise RestoreRefused("the destination is on another device than the store")
 
 
-def _checked_archive(store: ArchiveStore, record: ArchiveRecord) -> tuple[int, tuple[Header, ...]]:
-    """Open the archive, check its size and hash, and read its headers through one descriptor."""
+def _checked_archive(
+    store: ArchiveStore, record: ArchiveRecord
+) -> tuple[int, tuple[Header, ...], Compression]:
+    """Open the archive, check its size, hash and format, and read its headers, all via one fd."""
     try:
         fd = store.open_archive(record.archive_id)
     except StoreRefused as exc:
@@ -214,13 +268,18 @@ def _checked_archive(store: ArchiveStore, record: ArchiveRecord) -> tuple[int, t
         size, sha = digest_fd(fd)
         if (size, sha) != (record.archive_size, record.sha256):
             raise RestoreRefused("the archive's size or SHA-256 differs from its record")
+        try:
+            compression = compression_of(fd)
+            require_decompressor(compression)
+        except PackRefused as exc:
+            raise RestoreRefused(str(exc)) from exc
         os.lseek(fd, 0, os.SEEK_SET)
         with os.fdopen(os.dup(fd), "rb") as handle:
-            headers = read_headers(handle)
+            headers = read_headers(handle, compression)
     except BaseException:
         os.close(fd)
         raise
-    return fd, headers
+    return fd, headers, compression
 
 
 def restore(
@@ -249,9 +308,9 @@ def restore(
     except ValueError as exc:
         raise RestoreRefused(f"the record's name cannot be restored: {exc}") from exc
     _check_destination(store, dest_parent_fd, dest_name)
-    archive_fd, headers = _checked_archive(store, record)
+    archive_fd, headers, compression = _checked_archive(store, record)
     try:
-        plan = _plan(record, headers, dest_name)
+        plan = _plan(record, headers, dest_name, compression)
         _stage_and_move(
             store,
             archive_fd,
@@ -296,8 +355,7 @@ def _stage_and_move(
                 max_depth=max_depth,
                 timeout=timeout,
             )
-            root_mode = plan.headers[0].mode if plan.layout == "directory" else None
-            _move(staging_fd, target, dest_parent_fd, dest_name, root_mode)
+            _move(staging_fd, target, dest_parent_fd, dest_name, _root_mode(plan))
         except Exception as exc:
             _clean_staging(store, staging, ident, max_depth=max_depth)
             if isinstance(exc, RestoreRefused):
@@ -321,10 +379,14 @@ def _extract_and_verify(
 ) -> str:
     """Extract into staging and verify it; return the staged name to move."""
     operands: tuple[str, ...] = ()
+    flags = compression_flags(plan.compression)
     if plan.layout == "directory":
         os.mkdir(_STAGED_ROOT, 0o700, dir_fd=staging_fd)
         cwd_fd = os.open(_STAGED_ROOT, _DIR_FLAGS, dir_fd=staging_fd)
         target = _STAGED_ROOT
+    elif plan.layout == "adopted":
+        cwd_fd = os.dup(staging_fd)
+        target = plan.member
     else:
         cwd_fd = os.dup(staging_fd)
         target = plan.member[2:]
@@ -333,7 +395,7 @@ def _extract_and_verify(
         os.lseek(archive_fd, 0, os.SEEK_SET)
         proc = run_tar(
             tar,
-            [*_EXTRACT, *operands],
+            [*_EXTRACT, *flags, *operands],
             cwd_fd=cwd_fd,
             stdin=archive_fd,
             stdout=None,
@@ -347,7 +409,7 @@ def _extract_and_verify(
         try:
             names = _staged_members(staging_fd, target, plan, max_inodes, max_depth)
             if names:
-                batched_compare(cwd_fd, archive_fd, names, tar=tar, timeout=timeout)
+                batched_compare(cwd_fd, archive_fd, names, tar=tar, timeout=timeout, flags=flags)
         except (VerifyFailed, TarDidNotRun, WalkRefused, PackRefused) as exc:
             raise RestoreRefused(f"the staged tree failed verification: {exc}") from exc
     finally:
@@ -363,12 +425,30 @@ def _staged_members(
         if sorted(list_names(staging_fd)) != [target]:
             raise VerifyFailed("staging holds other names than the restored member")
         return [plan.member]
+    if plan.layout == "adopted" and sorted(list_names(staging_fd)) != [target]:
+        raise VerifyFailed("staging holds other names than the adopted root")
     listing = walk_tree(staging_fd, target, max_inodes=max_inodes, max_depth=max_depth)
     members = members_of(listing, target)
     staged = {(n.rstrip("/") or ".") for n in members.names}
+    if plan.layout == "adopted":
+        # tar extracted the root itself, so it is compared too: "./x" names "<root>/x".
+        staged = {target if n == "." else f"{target}/{n[2:]}" for n in staged}
+        if members.skipped or staged != {h.name for h in plan.headers}:
+            raise VerifyFailed("the staged member set differs from the archive")
+        return sorted(staged)
     if members.skipped or staged != {h.name for h in plan.headers}:
         raise VerifyFailed("the staged member set differs from the archive")
     return [n for n in members.names if n != "./"]
+
+
+def _root_mode(plan: _Plan) -> int | None:
+    """The archived root directory's mode, which the move must restore; ``None`` for a member."""
+    if plan.layout == "member":
+        return None
+    for header in plan.headers:
+        if header.name == plan.member:
+            return header.mode
+    raise RestoreRefused("layout: the root member is missing")
 
 
 def _move(
