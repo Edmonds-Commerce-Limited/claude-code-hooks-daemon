@@ -64,6 +64,7 @@ from claude_code_hooks_daemon.core.branch_records import (
 )
 from claude_code_hooks_daemon.utils.git_repo import (
     GitResult,
+    IsolatedGitEnv,
     parse_worktree_porcelain,
     run_git,
 )
@@ -82,16 +83,19 @@ class GitRunner(Protocol):
 #: ``(project, remote, branch names) -> {name: live tip}``; an absent name is unverified.
 LiveTips = Callable[[Path, str, list[str]], dict[str, str]]
 
-#: The environment of every git run inside a nested repository.
-NESTED_GIT_ENV: Final[Mapping[str, str]] = {
-    "GIT_CONFIG_NOSYSTEM": "1",
-    "GIT_CONFIG_GLOBAL": "/dev/null",
-    "GIT_CONFIG_COUNT": "0",
-    "GIT_ATTR_NOSYSTEM": "1",
-    "GIT_TERMINAL_PROMPT": "0",
-    "GIT_NO_LAZY_FETCH": "1",
-    "GIT_OPTIONAL_LOCKS": "0",
-}
+#: The environment of every git run inside a nested repository. Isolated: no
+#: inherited ``GIT_*`` variable reaches it (D-EXEC 1, Task 3.9).
+NESTED_GIT_ENV: Final[Mapping[str, str]] = IsolatedGitEnv(
+    {
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_COUNT": "0",
+        "GIT_ATTR_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_NO_LAZY_FETCH": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+    }
+)
 
 #: Flags before the subcommand of every git run inside a nested repository.
 NESTED_GIT_FLAGS: Final[tuple[str, ...]] = (

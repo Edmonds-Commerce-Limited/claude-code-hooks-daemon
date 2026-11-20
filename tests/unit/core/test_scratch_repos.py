@@ -209,6 +209,20 @@ class TestUntrustedConfig:
         assert findings.stuck
         assert not sentinel.exists()
 
+    def test_a_clean_filter_from_the_inherited_environment_is_never_run(
+        self, gp: GitProject, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D-EXEC 1 (Task 3.9): an inherited GIT_CONFIG_PARAMETERS must not reach nested git."""
+        script, sentinel = self._sentinel_script(gp)
+        repo = gp.clone("e")
+        (repo / ".gitattributes").write_text("*.py filter=evil\n")
+        # Same size, new mtime: git must hash (so filter) the file to compare it.
+        (repo / "src" / "app.py").write_text("print('APP')\n")
+        os.utime(repo / "src" / "app.py", (2_000_000_000, 2_000_000_000))
+        monkeypatch.setenv("GIT_CONFIG_PARAMETERS", f"'filter.evil.clean'='{script}'")
+        _classify(gp, "e")
+        assert not sentinel.exists()
+
     def test_a_clean_filter_on_an_inner_gitlinked_repository_is_never_run(
         self, gp: GitProject
     ) -> None:
