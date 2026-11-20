@@ -26,17 +26,26 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.config.models import ScratchConfig
-from claude_code_hooks_daemon.core.scratch_clock import NO_BIRTH_NOTE, entry_age
+from claude_code_hooks_daemon.core.scratch_clock import NO_BIRTH_NOTE, EntryAge, entry_age
 from claude_code_hooks_daemon.core.scratch_liveness import LivenessInputs, entry_liveness
-from claude_code_hooks_daemon.core.scratch_repos import ProjectGit, RepoFindings, classify_entry
+from claude_code_hooks_daemon.core.scratch_repos import (
+    ProjectGit,
+    RepoFindings,
+    blob_id,
+    blob_length,
+    classify_entry,
+)
 from claude_code_hooks_daemon.core.scratch_verdict import (
     NOT_EVALUATED,
+    Judgement,
     Proof,
     RepositoryMarker,
     Verdict,
     judge,
+    uncovered_nodes,
 )
 from claude_code_hooks_daemon.core.scratch_walk import (
+    EntryStats,
     NodeKind,
     ScandirFn,
     WalkBudget,
@@ -44,6 +53,7 @@ from claude_code_hooks_daemon.core.scratch_walk import (
     walk_entry,
 )
 from claude_code_hooks_daemon.core.untracked_roots import SweepRoot
+from claude_code_hooks_daemon.utils.bounded_walk import Bounded
 from claude_code_hooks_daemon.utils.path_containment import (
     path_is_relative_to,
     path_relative_to,
@@ -71,6 +81,33 @@ _REPOSITORY_LABEL = {
     RepositoryMarker.NONE: "-",
     RepositoryMarker.UNKNOWN: "unknown (walk incomplete)",
 }
+
+
+#: P3's per-sweep hashing bounds (DESIGN.md section 3.2): files and bytes read.
+P3_MAX_FILES = 20_000
+P3_MAX_BYTES = 256 * 1024 * 1024
+
+
+@dataclass
+class HashBudget:
+    """How many files and bytes P3 may still hash in this sweep."""
+
+    max_files: int = P3_MAX_FILES
+    max_bytes: int = P3_MAX_BYTES
+    spent: bool = False
+
+    def take(self, size: int) -> bool:
+        """Spend one file of ``size`` bytes; False (and spent) when it does not fit."""
+        if self.spent or self.max_files < 1 or size > self.max_bytes:
+            self.spent = True
+            return False
+        self.max_files -= 1
+        self.max_bytes -= size
+        return True
+
+
+#: Said when P3's hashing budget ran out: files left are not proved, never STUCK.
+P3_BUDGET_NOTE = "the P3 hashing budget ran out: later files were not hashed and stay UNCERTAIN"
 
 
 @dataclass(frozen=True)
@@ -138,6 +175,7 @@ def run_sweep(
     project_root: Path,
     project_git: ProjectGit | None,
     scandir: ScandirFn = os.scandir,
+    hash_budget: HashBudget | None = None,
 ) -> SweepReport:
     """Judge every entry of a resolved sweep root; read only.
 
@@ -164,6 +202,7 @@ def run_sweep(
     resolved_root = root.resolve()
     relative_root = _relative(resolved_root, project_root.resolve())
     tracked = _tracked_by_entry(project_git, project_root, relative_root)
+    hashing = hash_budget or HashBudget()
     if project_git is not None and project_git.verified_note:
         notes.append(f"remote proof: {project_git.verified_note}")
     rows = [
@@ -176,11 +215,13 @@ def run_sweep(
             budget,
             inputs,
             scandir,
-            _EntryGit(project_git, None if tracked is None else tracked.get(name, ())),
+            _EntryGit(project_git, None if tracked is None else tracked.get(name, ()), hashing),
         )
         for name in listing.value
         if name not in sweep_root.skip
     ]
+    if hashing.spent:
+        notes.append(P3_BUDGET_NOTE)
     if rows:
         # Phase 1 records no birth for any entry, so the note holds for every row: said once.
         notes.append(NO_BIRTH_NOTE)
@@ -221,6 +262,7 @@ class _EntryGit:
 
     project: ProjectGit | None
     tracked: tuple[str, ...] | None
+    hashing: HashBudget
 
 
 @dataclass(frozen=True)
@@ -267,6 +309,8 @@ def _judge_entry(
             project=git.project,
         )
     judgement = judge(walk, age=age, liveness=liveness, repos=repos, tracked=git.tracked)
+    if judgement.verdict is Verdict.UNCERTAIN:
+        judgement = _with_p3(root, walk, age, repos, git, judgement)
     return EntryRow(
         name=name,
         kind=stats.kind,
@@ -284,6 +328,38 @@ def _judge_entry(
         uncovered=judgement.uncovered,
         uncovered_count=judgement.uncovered_count,
     )
+
+
+def _with_p3(
+    root: Path,
+    walk: Bounded[EntryStats],
+    age: EntryAge,
+    repos: RepoFindings | None,
+    git: _EntryGit,
+    judgement: Judgement,
+) -> Judgement:
+    """Re-judge an UNCERTAIN entry once its uncovered regular files are hashed (P3).
+
+    Nothing is hashed when the remote-held blob set is unknown, or when an
+    uncovered node is not a regular file (the entry stays UNCERTAIN whatever
+    the hashes say). The walk's node list bounds what is read.
+    """
+    blobs = git.project.remote_blobs if git.project is not None else None
+    length = blob_length(blobs)
+    if blobs is None or length is None:
+        return judgement
+    nodes = uncovered_nodes(walk.value.nodes, repos)
+    if any(node.kind is not NodeKind.FILE for node in nodes):
+        return judgement
+    held: set[str] = set()
+    for node in nodes:
+        if not git.hashing.take(node.size):
+            return judgement
+        if blob_id(root / node.path, sha_length=length) in blobs:
+            held.add(node.path)
+    if len(held) < len(nodes):
+        return judgement
+    return judge(walk, age=age, liveness=(), repos=repos, tracked=git.tracked, p3=frozenset(held))
 
 
 def _printable(text: str) -> str:
@@ -356,7 +432,11 @@ def report_json(report: SweepReport) -> dict[str, Any]:
 
 __all__ = [
     "NO_CWDS_NOTE",
+    "P3_BUDGET_NOTE",
+    "P3_MAX_BYTES",
+    "P3_MAX_FILES",
     "EntryRow",
+    "HashBudget",
     "SweepReport",
     "render_table",
     "report_json",

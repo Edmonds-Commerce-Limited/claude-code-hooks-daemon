@@ -33,6 +33,7 @@ no hook or fsmonitor (:data:`NESTED_GIT_ENV`, :data:`NESTED_GIT_FLAGS`).
 from __future__ import annotations
 
 import enum
+import hashlib
 import os
 import re
 import stat
@@ -253,6 +254,58 @@ def build_project_git(
         if tree.returncode == 0:
             blobs = _tree_blobs(tree.stdout)
     return ProjectGit(project_root, remote, runner, worktrees, verified, note, blobs)
+
+
+_HASHES: Final[Mapping[int, Callable[[bytes], hashlib._Hash]]] = {
+    40: hashlib.sha1,
+    64: hashlib.sha256,
+}
+_READ_CHUNK: Final[int] = 1 << 20
+
+
+def blob_length(blobs: frozenset[str] | None) -> int | None:
+    """The sha length of a blob set, or None when it is empty, absent or mixed."""
+    lengths = {len(sha) for sha in blobs or ()}
+    return lengths.pop() if len(lengths) == 1 else None
+
+
+def blob_id(path: Path, *, sha_length: int) -> str | None:
+    """Git's ``hash-object --no-filters`` id of a regular file, never through a link.
+
+    The last component is opened ``O_NOFOLLOW | O_NONBLOCK``, so a link swapped
+    in after the walk's ``lstat`` fails to open and a FIFO never blocks; the
+    descriptor must be a regular file. A parent directory swapped for a link is
+    NOT caught here: this is a dry-run proof only, and ``--apply`` re-classifies
+    the claimed tree through directory descriptors (DESIGN.md section 5.2).
+    A short or long read, an unknown sha length, or any error proves nothing.
+    """
+    factory = _HASHES.get(sha_length)
+    if factory is None:
+        return None
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            return None
+        digest = factory(f"blob {info.st_size}\0".encode())
+        remaining = info.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(_READ_CHUNK, remaining))
+            if not chunk:
+                return None
+            digest.update(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            return None
+        return digest.hexdigest()
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
 
 
 def _tree_blobs(output: str) -> frozenset[str] | None:
@@ -530,18 +583,11 @@ def _dirty_problems(repo: _Repo, project: ProjectGit, root: Path) -> list[str]:
         return problems
     if project.remote_blobs is None or len(to_hash) > MAX_DIRTY_PATHS:
         return [f"{len(to_hash)} edited tracked file(s) not proved held by the remote"]
-    if not all(_regular_file(path) for path in to_hash):
-        return ["an edited tracked path is not a regular file"]
-    hashed = project.runner(
-        project.root, "hash-object", "--no-filters", "--", *(str(path) for path in to_hash)
-    )
-    shas = _shas(_checked(hashed, "hashing edited files"))
-    if shas is None or len(shas) != len(to_hash):
-        raise _Broken("hashing edited files gave an unparseable answer")
+    length = blob_length(project.remote_blobs)
     return [
         f"an edited tracked file the remote does not hold ({path.relative_to(root).as_posix()})"
-        for path, sha in zip(to_hash, shas, strict=True)
-        if sha not in project.remote_blobs
+        for path in to_hash
+        if length is None or blob_id(path, sha_length=length) not in project.remote_blobs
     ]
 
 
@@ -736,6 +782,8 @@ __all__ = [
     "ProjectGit",
     "RepoFindings",
     "RepoKind",
+    "blob_id",
+    "blob_length",
     "build_project_git",
     "classify_entry",
 ]

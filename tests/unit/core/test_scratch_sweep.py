@@ -10,10 +10,13 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import AbstractContextManager
 from pathlib import Path
+from typing import Any
 
 from claude_code_hooks_daemon.config.models import ScratchConfig
 from claude_code_hooks_daemon.core.scratch_liveness import BackgroundRecords, LivenessInputs
+from claude_code_hooks_daemon.core.scratch_repos import build_project_git
 from claude_code_hooks_daemon.core.scratch_sweep import (
+    HashBudget,
     SweepReport,
     render_table,
     report_json,
@@ -21,7 +24,15 @@ from claude_code_hooks_daemon.core.scratch_sweep import (
 )
 from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
 from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
-from tests.support.scratch_tree import ScratchTree, build_scratch_tree, quiet_project_git
+from tests.support.scratch_tree import (
+    GitProject,
+    ScratchTree,
+    build_git_project,
+    build_scratch_tree,
+    commit_file,
+    git,
+    quiet_project_git,
+)
 
 _DAY = 86400.0
 
@@ -324,3 +335,82 @@ class TestTrackedListing:
         assert not report.complete
         assert any("tracked files" in reason for reason in report.incomplete_reasons)
         assert _verdicts(report) == {"a.log": "STUCK"}
+
+
+class TestP3IdenticalCopy:
+    """DESIGN.md section 3.2 P3 and section 14 (Plan 00627 Task 2.3)."""
+
+    def _sweep(self, gp: GitProject, now: float, **kwargs: Any) -> SweepReport:
+        config = ScratchConfig()
+        project_git = build_project_git(gp.project, remote="origin", default_branch="main")
+        return run_sweep(
+            resolve_sweep_root(
+                gp.tree.root,
+                project_root=gp.project,
+                config=config,
+                reference_roots=("untracked/repos",),
+            ),
+            config=config,
+            now=now,
+            budget=WalkBudget(seconds=60, max_inodes=10_000),
+            inputs=LivenessInputs(
+                cwds={1: Path("/elsewhere")},
+                background=BackgroundRecords((), ""),
+                min_age_minutes=30,
+                now=now,
+            ),
+            project_root=gp.project,
+            project_git=project_git,
+            **kwargs,
+        )
+
+    def test_a_copy_of_a_file_on_the_pushed_default_tip_is_disposable(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        now = _now()
+        gp.tree.file("copy/app.py", b"print('app')\n")
+        _old(gp.tree, now)
+        report = self._sweep(gp, now)
+        row = report.rows[0]
+        assert (row.verdict.value, [p.value for p in row.proofs]) == ("DISPOSABLE", ["P3"])
+
+    def test_a_blob_only_on_an_unpushed_branch_proves_nothing(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        git(gp.project, "checkout", "-q", "-b", "local")
+        commit_file(gp.project, "local.txt", "only local\n")
+        git(gp.project, "checkout", "-q", "main")
+        now = _now()
+        gp.tree.file("copy/local.txt", b"only local\n")
+        _old(gp.tree, now)
+        assert _verdicts(self._sweep(gp, now)) == {"copy": "UNCERTAIN"}
+
+    def test_a_blob_in_history_but_not_on_the_default_tip_proves_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        gp = build_git_project(tmp_path)
+        commit_file(gp.project, "src/app.py", "print('v2')\n")
+        git(gp.project, "push", "-q", "origin", "main")
+        git(gp.project, "fetch", "-q", "origin")
+        now = _now()
+        gp.tree.file("copy/app.py", b"print('app')\n")
+        _old(gp.tree, now)
+        assert _verdicts(self._sweep(gp, now)) == {"copy": "UNCERTAIN"}
+
+    def test_a_link_beside_a_copy_leaves_the_entry_uncertain_unhashed(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        now = _now()
+        gp.tree.file("copy/app.py", b"print('app')\n")
+        (gp.tree.root / "copy" / "link").symlink_to(gp.tree.outside)
+        _old(gp.tree, now)
+        assert _verdicts(self._sweep(gp, now)) == {"copy": "UNCERTAIN"}
+
+    def test_an_exhausted_hash_budget_leaves_files_uncertain_with_a_note(
+        self, tmp_path: Path
+    ) -> None:
+        gp = build_git_project(tmp_path)
+        now = _now()
+        gp.tree.file("a/app.py", b"print('app')\n")
+        gp.tree.file("b/app.py", b"print('app')\n")
+        _old(gp.tree, now)
+        report = self._sweep(gp, now, hash_budget=HashBudget(max_files=1, max_bytes=1_000_000))
+        assert sorted(_verdicts(report).values()) == ["DISPOSABLE", "UNCERTAIN"]
+        assert any("P3" in note for note in report.notes)

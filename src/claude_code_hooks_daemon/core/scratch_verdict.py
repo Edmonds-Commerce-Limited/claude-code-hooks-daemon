@@ -17,7 +17,8 @@ from a walk that did not finish:
    outside the entry, or is related and holds work no remote holds (R6); or
    the entry holds a file the project tracks.
 5. REFERENCED: not evaluated yet (Task 2.4).
-6. DISPOSABLE when every file is covered by P1, P2, P4, P5 or P7; else UNCERTAIN.
+6. DISPOSABLE when every file is covered by P1, P2, P3, P4, P5 or P7; else
+   UNCERTAIN. P3 is computed by the caller (it hashes files) and passed in.
    P4 covers a clean pushed related repository's git directory and tracked
    files. P7 covers a standalone repository's work tree and git directory: the
    coordinator's ruling applying the owner's "scratch repo ... no value"
@@ -99,6 +100,7 @@ class Proof(enum.Enum):
 
     P1 = "P1"
     P2 = "P2"
+    P3 = "P3"
     P4 = "P4"
     P5 = "P5"
     P7 = "P7"
@@ -179,7 +181,9 @@ def _p7(path: str, repos: RepoFindings | None) -> bool:
 
 
 def _coverage(
-    nodes: Sequence[Node], repos: RepoFindings | None = None
+    nodes: Sequence[Node],
+    repos: RepoFindings | None = None,
+    p3: frozenset[str] = frozenset(),
 ) -> tuple[tuple[Proof, ...], list[str]]:
     venvs = _venv_directories(nodes)
     used: set[Proof] = set()
@@ -193,11 +197,20 @@ def _coverage(
             proof = Proof.P7
         else:
             proof = _proof_for(node, venvs)
+            if proof is None and node.path in p3 and node.kind is NodeKind.FILE:
+                proof = Proof.P3
         if proof is None:
             uncovered.append(node.path)
         else:
             used.add(proof)
     return tuple(proof for proof in Proof if proof in used), uncovered
+
+
+def uncovered_nodes(nodes: Sequence[Node], repos: RepoFindings | None) -> list[Node]:
+    """Every node no proof but P3 could still cover (the whole list, never capped)."""
+    _proofs, uncovered = _coverage(nodes, repos)
+    wanted = set(uncovered)
+    return [node for node in nodes if node.path in wanted]
 
 
 #: Said when an entry holds a repository and no classification was run.
@@ -214,11 +227,13 @@ def judge(
     liveness: tuple[str, ...],
     repos: RepoFindings | None = None,
     tracked: tuple[str, ...] | None = (),
+    p3: frozenset[str] = frozenset(),
 ) -> Judgement:
     """Judge one walked entry, given its age and any liveness reasons.
 
     ``repos`` is the entry's repository classification (None: not run).
     ``tracked`` lists the entry's paths the project tracks (None: unknown).
+    ``p3`` holds the regular files whose blob the remote's default tip holds.
     """
     stats = walk.value
     markers = stats.git_markers
@@ -255,7 +270,7 @@ def judge(
             Verdict.PROTECTED,
             f"holds {len(tracked)} file(s) the project tracks, first {tracked[0]}",
         )
-    proofs, uncovered = _coverage(stats.nodes, repos)
+    proofs, uncovered = _coverage(stats.nodes, repos, p3)
     if not uncovered:
         return result(Verdict.DISPOSABLE, "every file is covered by a proof", proofs=proofs)
     return Judgement(
@@ -282,4 +297,5 @@ __all__ = [
     "RepositoryMarker",
     "Verdict",
     "judge",
+    "uncovered_nodes",
 ]

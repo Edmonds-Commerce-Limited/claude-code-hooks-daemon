@@ -7,6 +7,7 @@ nested repositories under its scratch root. The remote is a local path, so
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 from collections.abc import Mapping
@@ -20,6 +21,7 @@ from claude_code_hooks_daemon.core.scratch_repos import (
     ProjectGit,
     RepoFindings,
     RepoKind,
+    blob_id,
     build_project_git,
     classify_entry,
 )
@@ -404,3 +406,39 @@ class TestWrongVerdictControls:
         findings = _classify(gp, "e")
         assert findings.kinds == {"e/b.git": RepoKind.RELATED}
         assert findings.protected
+
+
+class TestBlobId:
+    """The in-process blob hash P3 and the dirty-file check use (Plan 00627 Task 2.3)."""
+
+    @pytest.mark.parametrize(
+        "content", [b"", b"line\r\nother\r\n", b"\x00\xffbinary", b"plain text\n"]
+    )
+    def test_it_matches_git_hash_object_no_filters(self, tmp_path: Path, content: bytes) -> None:
+        path = tmp_path / "f"
+        path.write_bytes(content)
+        expected = git(tmp_path, "hash-object", "--no-filters", "--", str(path)).strip()
+        assert blob_id(path, sha_length=40) == expected
+
+    def test_it_matches_a_sha256_repository(self, tmp_path: Path) -> None:
+        path = tmp_path / "f"
+        path.write_bytes(b"abc\n")
+        expected = hashlib.sha256(b"blob 4\x00abc\n").hexdigest()
+        assert blob_id(path, sha_length=64) == expected
+
+    def test_a_link_is_never_followed(self, tmp_path: Path) -> None:
+        target = tmp_path / "target"
+        target.write_bytes(b"x")
+        (tmp_path / "link").symlink_to(target)
+        assert blob_id(tmp_path / "link", sha_length=40) is None
+
+    def test_a_fifo_is_not_hashed(self, tmp_path: Path) -> None:
+        os.mkfifo(tmp_path / "fifo")
+        assert blob_id(tmp_path / "fifo", sha_length=40) is None
+
+    def test_an_unknown_sha_length_proves_nothing(self, tmp_path: Path) -> None:
+        (tmp_path / "f").write_bytes(b"x")
+        assert blob_id(tmp_path / "f", sha_length=41) is None
+
+    def test_a_missing_file_proves_nothing(self, tmp_path: Path) -> None:
+        assert blob_id(tmp_path / "absent", sha_length=40) is None
