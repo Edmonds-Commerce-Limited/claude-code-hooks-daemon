@@ -7956,7 +7956,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open, low priority; needs the reporting seat to name the handler. If it is a shipped handler, it must judge only command words, never the contents of a quoted argument to another program. If it is a project handler, the shared command-word parsing helpers already exist for the same purpose and it should use them.
 
-### N673 — playbook probe #125 (rsync from a worktree) fails whenever the acceptance harness runs inside a worktree
+### N677 — playbook probe #125 (rsync from a worktree) fails whenever the acceptance harness runs inside a worktree
 
 **Source**: Plan 00623 acceptance-harness diagnosis (`tests/acceptance/test_playbook_harness.py`).
 
@@ -7964,7 +7964,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open, low priority. The fix belongs to the harness or the probe, not to either handler: give the probe a cwd that is the daemon's project root, or have the harness skip or report this probe when it runs in a worktree.
 
-### N674 — secret_file_guard: a `/proc` path that reaches the shell's own view without spelling `/proc/self` is placed as the daemon's
+### N678 — secret_file_guard: a `/proc` path that reaches the shell's own view without spelling `/proc/self` is placed as the daemon's
 
 **Source**: Plan 00623 review 3 (`CLAUDE/Plan/00623-secret-guard-structural-fail-closed-walks-and-link-index/subagent-reports/261119-review3-loosenings.md`).
 

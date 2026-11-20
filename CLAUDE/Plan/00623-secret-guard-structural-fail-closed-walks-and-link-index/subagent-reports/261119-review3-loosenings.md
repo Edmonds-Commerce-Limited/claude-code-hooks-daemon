@@ -163,7 +163,7 @@ Examples:
     landing repo's config are the same class.
   - Closing it means dropping `commit` from the carve-out, which costs probes
     #350/#351. That is the owner's call.
-- **Pre-existing `/proc` escapes, ledgered as N674 and not introduced by (A).**
+- **Pre-existing `/proc` escapes, ledgered as N678 and not introduced by (A).**
   All of these were allowed on main and on the prior tip, and all leaked:
   - `cat /proc/$$/cwd/flink`
   - `cat /proc/$BASHPID/cwd/flink`
