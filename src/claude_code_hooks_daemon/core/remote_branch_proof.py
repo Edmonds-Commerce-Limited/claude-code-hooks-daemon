@@ -468,9 +468,7 @@ def _surviving_content(
         return None
     if base.returncode != 0:
         raise ProofUnavailableError(f"git merge-base failed for {tracking_ref}")
-    changes = _net_change(
-        directory, base.stdout.strip(), tracking_ref, timeout=Timeout.GIT_CONTEXT
-    )
+    changes = _net_change(directory, base.stdout.strip(), tracking_ref, timeout=Timeout.GIT_CONTEXT)
     content = [change for change in changes if not change.deleted]
     if not content or len(changes) > MAX_PROOF_PATHS:
         return None
@@ -483,7 +481,11 @@ def _surviving_content(
     used: dict[str, None] = {}
     for change in content:
         holder = next(
-            (ref for ref, entries in held if entries.get(change.path) == (change.mode, change.blob)),
+            (
+                ref
+                for ref, entries in held
+                if entries.get(change.path) == (change.mode, change.blob)
+            ),
             None,
         )
         if holder is None:
@@ -745,9 +747,7 @@ def _merged_tracking_tips(
                 continue
             finding: _ContentFinding | None
             try:
-                finding = _surviving_content(
-                    directory, tracking[name], tracking_default, holders
-                )
+                finding = _surviving_content(directory, tracking[name], tracking_default, holders)
             except ProofUnavailableError as exc:
                 log_and_continue(
                     logger,
