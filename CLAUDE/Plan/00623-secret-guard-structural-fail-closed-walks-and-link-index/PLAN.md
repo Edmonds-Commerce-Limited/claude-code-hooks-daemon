@@ -1,6 +1,6 @@
 # Plan 00623: secret guard structural fail closed walks and link index
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-18
 **Owner**: joseph
 **Priority**: High
@@ -32,19 +32,19 @@ This plan removes the cause rather than raising the cap: one shared result type 
 
 ### Phase 1: Shared result type and handler
 
-- [ ] ⬜ **Task 1.1**: Write failing tests for each walk that stops early today (link scan, directory walk, placement including N663, nesting depth including N664), asserting a deny.
-- [ ] ⬜ **Task 1.2**: Introduce the shared "finished or not" result type and convert every bounded walk to return it.
-- [ ] ⬜ **Task 1.3**: Introduce the shared fail-closed handler and route both guards through it.
+- [x] ✅ **Task 1.1**: Write failing tests for each walk that stops early today (link scan, directory walk, placement including N663, nesting depth including N664), asserting a deny.
+- [x] ✅ **Task 1.2**: Introduce the shared "finished or not" result type and convert every bounded walk to return it.
+- [x] ✅ **Task 1.3**: Introduce the shared fail-closed handler and route both guards through it.
 
 ### Phase 2: Link index
 
-- [ ] ⬜ **Task 2.1**: Build the link index once per project, invalidated on change, and read it instead of walking per command.
-- [ ] ⬜ **Task 2.2**: Place `~`, `$HOME` and `$TMPDIR` so a move that lands outside the project is not denied.
-- [ ] ⬜ **Task 2.3**: Add the review report's 5 usability examples as tests in a project past 512 directories where no link reaches a protected path.
+- [x] ✅ **Task 2.1**: Build the link index once per project, invalidated on change, and read it instead of walking per command.
+- [x] ✅ **Task 2.2**: Place `~`, `$HOME` and `$TMPDIR` so a move that lands outside the project is not denied.
+- [x] ✅ **Task 2.3**: Add the review report's 5 usability examples as tests in a project past 512 directories where no link reaches a protected path.
 
 ### Phase 3: Merge and review
 
-- [ ] ⬜ **Task 3.1**: Rebase or merge the Plan 00614 branch onto this work and resolve conflicts.
+- [x] ✅ **Task 3.1**: Rebase or merge the Plan 00614 branch onto this work and resolve conflicts.
 - [ ] ⬜ **Task 3.2**: Run the DENY-to-ALLOW comparison against main and an independent adversarial review.
 
 ## Success Criteria
@@ -52,9 +52,11 @@ This plan removes the cause rather than raising the cap: one shared result type 
 - [ ] 0 DENY-to-ALLOW against main over the existing corpus plus the Plan 00614 probes.
 - [ ] The usability examples in the second review report are allowed again in a project past 512 directories where no link reaches a protected path.
 - [ ] An independent adversarial review passes.
-- [ ] A pending-release holding-area release note is written.
+- [x] A pending-release holding-area release note is written (`CLAUDE/UPGRADES/UNRELEASED/release-notes/004-…`).
 - [ ] N663 and N664 are closed in the niggles ledger.
 
 ## Delivery & Milestones
 
-- Not started.
+- Phases 1 and 2 are built and Plan 00614's branch is this branch. The adversarial review (`subagent-reports/261119-adversarial-review.md`) found 0 DENY-to-ALLOW against main after its F1 to F4 fixes.
+- The >512 link-holding-directory follow-up (`subagent-reports/261119-many-link-directories.md`) needs its own independent review before Task 3.2 is ticked.
+- Usability is not met in this repository: its tree overflows the index's 200,000-directory cap (ledger N670). That is an owner decision, outside this plan's tasks.

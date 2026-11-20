@@ -39,10 +39,12 @@ RESEARCH-read-routes.md for the class-(b)/(c)/(d) route classification.
 
 import ast
 import logging
+import os
 import re
 import textwrap
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -55,6 +57,7 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import grep_input_for, grep_targets
 from claude_code_hooks_daemon.utils import (
     encrypted_at_rest,
+    link_index,
     protected_file_index,
     recursive_search,
     shell_expansion,
@@ -68,6 +71,11 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 )
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.protected_file_index import ProtectedFileIndex, TreeView
+from claude_code_hooks_daemon.utils.resolution_failure import (
+    ResolutionFailedError,
+    fail_closed_finding,
+    refuse_process_view,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
 
 logger = logging.getLogger(__name__)
@@ -154,13 +162,81 @@ _SEARCH_REMEDY: Final[str] = (
 # told, loudly, that this call got no protection from the guard.
 _ADVISORY_ROUTE: Final[str] = "advisory"
 _NOT_JUDGED_PATTERN: Final[str] = "<not-judged>"
+#: The token of a finding whose words could not be placed (review 614b).
+_UNRESOLVED_TOKEN: Final[str] = "<unresolved>"
+_UNRESOLVED_CAUSE: Final[str] = (
+    "Denied because where this command's paths lead could not be worked out: placing "
+    "a directory it moves to, a link or a glob raised an error. A read that cannot be "
+    "checked is denied rather than allowed. Rewrite the command with plain paths, or "
+    "split it into smaller commands."
+)
+#: The token of a finding for a scan that gave up beside a search or glob (review 614c P2).
+_GAVE_UP_TOKEN: Final[str] = "<gave-up>"
+_GAVE_UP_CAUSE: Final[str] = (
+    "Denied because the scan of this command stopped before it finished (it reached a "
+    "size limit or its deadline, met a word it could not read, or failed internally), "
+    "and the command holds a recursive search or a glob. "
+    "Only the full scan can tell which files those read, so they are denied rather than "
+    "allowed unchecked. Split the command into smaller ones, or drop the large brace "
+    "expansion or wide pattern beside the search. In a program given inline or as a "
+    "heredoc, `*`, `?` and `[` count as glob characters wherever they appear, code "
+    "included: write the program to a file and run the file."
+)
 _NO_INDEX_REASON: Final[str] = (
     "a recursive search, directory read or wildcard path was not checked, because the "
     "index of protected files is not available yet (the daemon has just started, or the "
     "project is not a git repository)"
 )
+#: The deny cause of each finding that names no protected word.
+_CAUSE_BY_TOKEN: Final[dict[str, str]] = {
+    _UNRESOLVED_TOKEN: _UNRESOLVED_CAUSE,
+    _GAVE_UP_TOKEN: _GAVE_UP_CAUSE,
+}
 #: A command with none of these has no glob for the index to judge.
 _MAY_GLOB: Final[re.Pattern[str]] = re.compile(r"[*?\[]")
+#: Where a search is placed from when the hook gave no cwd: only whether one exists is asked.
+_PLACEHOLDER_CWD: Final[str] = "/"
+
+
+def _holds_search_or_glob(hook_input: dict[str, Any]) -> bool:
+    """Does this call hold a recursive search or a glob? True when that cannot be told.
+
+    Asked only after the full scan gave up (review 614c P2). The Grep tool is a
+    recursive search. In a Bash call, a glob character anywhere outside a quoted
+    text-fed heredoc counts, and so does any search
+    :func:`recursive_search.search_reads` finds, which has no deadline or cap.
+    """
+    tool_name = hook_input.get(HookInputField.TOOL_NAME)
+    if tool_name == ToolName.GREP:
+        return True
+    tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+    command = tool_input.get(_FIELD_COMMAND) if isinstance(tool_input, dict) else None
+    if tool_name != ToolName.BASH or not isinstance(command, str):
+        return False
+    raw_cwd = hook_input.get(HookInputField.CWD)
+    cwd = raw_cwd if isinstance(raw_cwd, str) and Path(raw_cwd).is_absolute() else _PLACEHOLDER_CWD
+    try:
+        stripped = strip_quoted_heredoc_bodies(command, text_readers_only=True)
+        return bool(_MAY_GLOB.search(stripped)) or bool(
+            recursive_search.search_reads(stripped, cwd)
+        )
+    except Exception as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="a scan that already gave up cannot rule a search or glob out, so the command is judged as holding one (fail closed)",
+            level=logging.ERROR,
+        )
+        return True
+
+
+def _linked_cwd(cwd: str | None) -> str:
+    """``cwd`` when it is absolute and passes through a link, else ``""``."""
+    if not cwd or not Path(cwd).is_absolute():
+        return ""
+    return cwd if os.path.realpath(cwd) != os.path.normpath(cwd) else ""
+
+
 _ADVISORY_HEADLINE: Final[str] = (
     "secret_file_guard could NOT fully judge this call, so it was ALLOWED. "
     "No protected path was found by the checks that did run."
@@ -1337,25 +1413,32 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         """``(pattern, token, route)`` for this tool call, or ``None``. NEVER raises.
 
         The single dispatch point shared by ``matches()`` and ``handle()``. It
-        denies only on a positive finding (Plan 00483 A1). A cap, the deadline,
-        a command the reader cannot parse or an internal error ends the full
-        scan; the call is then judged on the literal paths in its text alone, and
-        if none is found it is allowed with an advisory (the ``advisory`` route).
+        denies on a positive finding (Plan 00483 A1). A cap, the deadline, a
+        command the reader cannot parse or an internal error ends the full scan;
+        the call is then judged on the literal paths in its text alone, and if
+        none is found it is allowed with an advisory (the ``advisory`` route).
+        Any of those beside a recursive search or a glob is denied instead
+        (review 614c P2): only the full scan can judge what those read.
         """
         try:
-            return self._evaluate(hook_input)
+            # The project's link scan is reused within this call only (review D5).
+            with sfm.link_scan_scope():
+                return self._evaluate(hook_input)
+        except ResolutionFailedError:
+            logger.exception("secret_file_guard: placing the command's words raised; denying")
+            return self._unresolved_finding(hook_input)
         except shell_expansion.UnresolvableBraceQuotingError as exc:
             logger.info("secret_file_guard: command not fully readable (%s)", type(exc).__name__)
-            return self._literal_finding_or_advisory(hook_input, "the command could not be parsed")
+            return self._gave_up_finding_or_advisory(hook_input, "the command could not be parsed")
         except TimeoutError:
             logger.info("secret_file_guard: scan deadline passed")
-            return self._literal_finding_or_advisory(hook_input, "the scan deadline passed")
+            return self._gave_up_finding_or_advisory(hook_input, "the scan deadline passed")
         except shell_expansion.TooManyToEnumerateError:
             logger.info("secret_file_guard: scan hit a size limit")
-            return self._literal_finding_or_advisory(hook_input, "the scan reached a size limit")
+            return self._gave_up_finding_or_advisory(hook_input, "the scan reached a size limit")
         except Exception as exc:
             logger.exception("secret_file_guard: evaluation raised; allowing with an advisory")
-            return self._literal_finding_or_advisory(
+            return self._gave_up_finding_or_advisory(
                 hook_input, f"an internal error ({type(exc).__name__})"
             )
 
@@ -1371,6 +1454,9 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 literal = sfm.find_protected_mention_strict(
                     command, self._patterns(), raw_cwd if isinstance(raw_cwd, str) else None
                 )
+            except ResolutionFailedError:
+                logger.exception("secret_file_guard: the literal re-check could not place a word")
+                return self._unresolved_finding(hook_input)
             except Exception as exc:
                 log_and_continue(
                     logger,
@@ -1383,9 +1469,38 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 return (literal, literal, "bash")
         return (_NOT_JUDGED_PATTERN, reason, _ADVISORY_ROUTE)
 
+    def _gave_up_finding_or_advisory(
+        self, hook_input: dict[str, Any], reason: str
+    ) -> tuple[str, str, str]:
+        """The literal fallback, then a finding when a search or glob was left unjudged (review 614c P2)."""
+        found = self._literal_finding_or_advisory(hook_input, reason)
+        if found[2] != _ADVISORY_ROUTE or not _holds_search_or_glob(hook_input):
+            return found
+        patterns = self._patterns()
+        route = "bash" if hook_input.get(HookInputField.TOOL_NAME) == ToolName.BASH else "read"
+        return (patterns[0] if patterns else _NOT_JUDGED_PATTERN, _GAVE_UP_TOKEN, route)
+
+    def _unresolved_finding(self, hook_input: dict[str, Any]) -> tuple[str, str, str]:
+        """A finding for a call whose words could not be placed (review 614b): it is denied."""
+        patterns = self._patterns()
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name == ToolName.BASH:
+            route = "bash"
+        elif tool_name in (ToolName.WRITE, ToolName.EDIT):
+            route = "script"
+        else:
+            route = "read"
+        finding = fail_closed_finding(patterns, _UNRESOLVED_TOKEN)
+        if finding is None:
+            return (_NOT_JUDGED_PATTERN, _UNRESOLVED_TOKEN, route)
+        return (*finding, route)
+
     def prewarm_index(self) -> None:
-        """Start building the protected-file index now; never waits for it."""
+        """Start building the protected-file and link indexes now; never waits for them."""
         self._index(self._patterns())
+        root = resolve_project_root()
+        if root is not None:
+            link_index.prewarm(root)
 
     def _index(self, patterns: tuple[str, ...]) -> ProtectedFileIndex | None:
         """The protected-file index for this project, or None while there is none."""
@@ -1482,7 +1597,9 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # the flag-position check re-tests bare consumer arguments, and
             # testing the shipped defaults there would blind it to every
             # project-configured pattern — all of them under mode: replace.
-            if sfm.is_exempt_invocation(command, self._consumers(), patterns, deadline=deadline):
+            if sfm.is_exempt_invocation(
+                command, self._consumers(), patterns, deadline=deadline, cwd=cwd
+            ):
                 return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
             if sfm.is_encrypted_target_invocation(
                 command, patterns, cwd=cwd, is_encrypted=self._is_encrypted, deadline=deadline
@@ -1493,7 +1610,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # -- only a FILE-TARGET argument is (see the function's own
             # docstring for the position-based distinction and every shape
             # this must NOT unlock).
-            if sfm.is_grep_pattern_only_mention(command, patterns, deadline=deadline):
+            if sfm.is_grep_pattern_only_mention(command, patterns, deadline=deadline, cwd=cwd):
                 return self._search_reach(command, patterns, cwd, glob_unjudged=glob_unjudged)
             return (mention[0], mention[1], "bash")
 
@@ -1501,7 +1618,16 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         if path_field is None:
             return None
         path = str(tool_input.get(path_field, ""))
+        # A relative path is judged from the hook's cwd too: the daemon's own
+        # cwd is `/`, so a link resolved only from there leads nowhere (Plan 00614).
+        placed = sfm.resolve_against_cwd(path, cwd) if path else None
+        # N668: through /proc/self the daemon would resolve its own cwd, not the agent's.
+        for spelled in (path, placed):
+            if spelled:
+                refuse_process_view(spelled)
         protecting = sfm.protecting_pattern(path, patterns)
+        if protecting is None and placed is not None and placed != path:
+            protecting = sfm.protecting_pattern(placed, patterns)
         if protecting is not None:
             # Ciphertext is not the secret (Plan 00459). Checked on EVERY
             # call, so a file decrypted in place is denied at the next one.
@@ -1509,11 +1635,16 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             if absolute is None or not self._is_encrypted(absolute):
                 return (protecting, path, "read")
 
-        if tool_name == ToolName.GREP and path:
+        if tool_name == ToolName.GREP:
             # A Grep rooted at an ancestor of a protected file reads its
             # content without naming it. Every indexed file under the root
             # counts (the Grep tool's own ignore handling is not relied on).
-            return self._directory_reach(path, patterns)
+            # With no path it searches the hook cwd. That is judged only when
+            # the cwd passes through a link (review D6): a session inside a
+            # link out of the project. A plain cwd is left as before.
+            root = placed or path or _linked_cwd(cwd)
+            if root:
+                return self._directory_reach(root, patterns)
 
         if tool_name in (ToolName.WRITE, ToolName.EDIT):
             script_mention = self._script_content_mention(path, tool_input, patterns, cwd)
@@ -1732,8 +1863,17 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         rule_route = "read" if route == _SEARCH_ROUTE else route
         rule = _rules_by_route()[rule_route]
         message = self._disclosed(hook_input, rule)
+        if token in _CAUSE_BY_TOKEN:
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=f"{message}\n\n{_CAUSE_BY_TOKEN[token]}",
+                rule=rule.rule_id,
+            )
+        cause = self._link_cause(hook_input, token)
+        if cause is not None:
+            message += f"\n\n{cause}"
         message += f"\n\nMatched protected glob: `{pattern}`"
-        if route == _SEARCH_ROUTE:
+        if route == _SEARCH_ROUTE and cause is None:
             message += f"\n{_SEARCH_REMEDY}"
         # Naming the TOKEN turns a bisection hunt into a read (Plan 00356):
         # the glob alone does not say which of a command's -- or a whole
@@ -1748,6 +1888,46 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             message += f"\nMatched on this token from your input: `{token}`"
 
         return GatingResult(decision=Decision.DENY, reason=message, rule=rule.rule_id)
+
+    def _link_cause(self, hook_input: dict[str, Any], token: str) -> str | None:
+        """Why a deny that no protected NAME caused was given: a link out, or too many cds.
+
+        Review F4, message only: the decision was already taken. A token that
+        spells a protected path needs no other cause. The link is found by the
+        same index test the decision used (:meth:`ProtectedFileIndex.link_out_of`).
+        The way out offered is the checkout that holds the target, never the real
+        path: a path outside the project is judged by its name alone.
+        """
+        patterns = self._patterns()
+        if not token or sfm.protecting_pattern(token, patterns) is not None:
+            return None
+        index = self._index(patterns)
+        if index is None:
+            return None
+        cwd = hook_input.get(HookInputField.CWD)
+        cwd = cwd if isinstance(cwd, str) and Path(cwd).is_absolute() else None
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT) or {}
+        command = tool_input.get("command") if isinstance(tool_input, dict) else None
+        bases = sfm.effective_cwds(command, cwd) if isinstance(command, str) else (cwd or "",)
+        link = index.link_out_of(token, [base for base in bases if base])
+        if link is not None:
+            shown = link
+            if command is not None and cwd is not None and link.startswith(cwd.rstrip("/") + "/"):
+                shown = os.path.relpath(link, cwd)
+            return (
+                f"Denied because `{shown}` is a link to a directory outside the project. "
+                "The protected-file index lists only this "
+                "project, so a glob or search through that link cannot be checked, and it is "
+                "denied whether or not the target holds a protected file. To read it, run the "
+                "command from the checkout that holds the target."
+            )
+        if isinstance(bases, sfm.CwdSet) and bases.overflowed and not token.startswith("/"):
+            return (
+                f"Denied because the command moves into more than {sfm.LINK_DIRECTORY_CAP} "
+                "existing directories, so a relative word that could pass through a link is "
+                "denied rather than resolved from each. Split the command into smaller ones."
+            )
+        return None
 
     @staticmethod
     def _disclosed(hook_input: dict[str, Any], rule: Rule) -> str:
