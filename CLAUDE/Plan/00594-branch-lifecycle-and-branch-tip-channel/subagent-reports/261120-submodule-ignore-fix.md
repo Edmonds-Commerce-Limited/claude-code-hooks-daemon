@@ -24,6 +24,8 @@ the tracked `.gitmodules` says `ignore = all`, or when any config level sets
     `_HELD_PER_PATH`, and surviving-content)
   - the `branch_cleanup` worktree status
   - the `branch_stop_guard` dirty check
+  - the `worktree_reaping.collect_worktree_states` uncommitted check (follow-up commit, found
+    when the audit was finished)
 - The new `remote_branch_proof.gitlink_change_held` returns True when the net change moves no
   pointer, or when the target's history holds the whole net change. It returns False when there is
   no merge base. `branch_safety.classify_branch` now requires it, through `_gitlinks_held` (any
@@ -53,9 +55,31 @@ RED: 13 failed, 3 passed. GREEN: 19 passed. Regression: 812 passed across the pl
 proof, cleanup, safety, stop-guard, inventory, destructive_git and remote-delete files, plus
 `test_git_repo.py`. ruff, black and mypy are clean on the changed files.
 
+## Audit of other callers
+
+- The only callers of `patch_equivalent` are `classify_branch` (now gated) and the remote
+  `_judge_offline` (already gated on the net change).
+- `cherry_unique_shas` is also read by `branch_inventory` (a state for counts and advice) and
+  `worktree_reaping` (`unlanded_patches`). Neither one decides a delete on its own:
+  - inventory states are advisory, and every delete re-proves through `classify_branch` or
+    `prove_remote_merged`;
+  - reaping also requires `commits_ahead_of_base == 0`, which cherry cannot fool.
+- User-visible change: a worktree whose submodule was silenced with
+  `ignore = dirty | untracked | all` now reports that submodule as dirty to removal, reaping and
+  the stop guard. This is intended, because that state is lost on removal.
+- A pointer bump refused at the local tier reads "0 commit(s) not upstream by patch-id" before the
+  content tier names the reason. This is cosmetic and not changed.
+
 ## Out of scope (not a "nothing is lost" decision)
 
+- `utils/git_sync.working_tree_clean` (auto-pull guard; a pull does not destroy submodule state)
+
+- `goal_loop` status
+
 - `branch_inventory._shortstat_lines` (`diff --shortstat`, a size fact for display)
+
 - `utils/merge_scope` (`diff --name-only`, QA scope)
+
 - `utils/git_facts` diffs (commit-gate staged facts)
+
 - `reference_repo_freshness`

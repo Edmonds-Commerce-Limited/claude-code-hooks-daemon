@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.core.remote_branch_proof import (
     holds_net_change,
     prove_remote_merged,
 )
+from claude_code_hooks_daemon.core.worktree_reaping import collect_worktree_states, is_reapable
 from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_PATCH_EQUIVALENT,
     _gitlinks_held,
@@ -215,11 +216,16 @@ class TestGitlinkGateFailsClosed:
         assert _gitlinks_held(outside, "main", "refs/heads/feat") is False
 
 
-def _worktree_with_moved_submodule(tmp_path: Path, gitmodules: str) -> Path:
-    """A worktree whose populated ``sub`` is checked out at a commit the index does not record."""
+def _worktree_with_moved_submodule(
+    tmp_path: Path, gitmodules: str, relative: str | None = None
+) -> Path:
+    """A worktree whose populated ``sub`` is checked out at a commit the index does not record.
+
+    ``relative`` places it inside the repository (an agent worktree path) instead of beside it.
+    """
     repo = _repo(tmp_path, gitmodules)
     _git(repo, "branch", "work", "main")
-    worktree = tmp_path / "wt"
+    worktree = tmp_path / "wt" if relative is None else repo / relative
     _git(repo, "worktree", "add", "-q", str(worktree), "work")
     sub = worktree / "sub"
     sub.mkdir(exist_ok=True)
@@ -240,6 +246,16 @@ class TestWorktreeRemoval:
         _ignore_all_globally(tmp_path)
         dirty, _ignored = worktree_blocker_groups(worktree, ())
         assert "sub" in dirty
+
+    def test_a_moved_submodule_keeps_an_agent_worktree_from_being_reaped(
+        self, tmp_path: Path
+    ) -> None:
+        _worktree_with_moved_submodule(
+            tmp_path, _IGNORE_ALL_GITMODULES, ".claude/worktrees/agent-abc123"
+        )
+        (state,) = collect_worktree_states(tmp_path / "repo", "main")
+        assert "sub" in state.uncommitted_paths
+        assert is_reapable(state) is False
 
 
 class TestStopGuard:
