@@ -1553,8 +1553,17 @@ def _private_tmp_subdir(warn_message: str) -> Path:
     private = _SHARED_TMP / f"hooks-daemon-{os.geteuid()}"
     try:
         private.mkdir(mode=0o700)
-    except FileExistsError:
-        logger.debug("Short-path directory %s already exists; verifying it", private)
+    except FileExistsError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                f"the short-path directory {private} already exists, which is the ordinary "
+                "case on every start after the first; the check just below refuses it "
+                "unless it is a real directory owned by this user with mode 0700"
+            ),
+            level=logging.DEBUG,
+        )
     if not _is_private_dir(private):
         raise UnsafeRuntimeDirError(
             f"The project path is too long for an AF_UNIX socket, no private runtime "

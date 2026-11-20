@@ -36,7 +36,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Final
 
-from claude_code_hooks_daemon.utils import linear_shlex
+from claude_code_hooks_daemon.utils import linear_shlex, path_exclusion
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import GIT_GLOBAL_OPTIONS_TAKING_SEPARATE_VALUE
 from claude_code_hooks_daemon.utils.command_position import SHELL_NAMES
@@ -47,10 +47,25 @@ from claude_code_hooks_daemon.utils.grep_option_grammar import (
     grammar_for,
     parse_arguments,
 )
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.protected_file_index import (
     ExemptHook,
     ProtectedFileIndex,
     TreeView,
+)
+from claude_code_hooks_daemon.utils.resolution_failure import IncompleteScanError, fails_closed
+from claude_code_hooks_daemon.utils.secret_file_matching import (
+    CDPATH_VARIABLE,
+    EXTGLOB_OPENERS,
+    LINK_DIRECTORY_CAP,
+    chdir_wrapper_targets,
+    directory_ancestors,
+    expand_directory_glob,
+    link_scan_scope,
+    place_outside_project,
+    scan_project_links,
+    toplevel_move_length,
+    toplevel_relocated,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
@@ -63,6 +78,12 @@ from claude_code_hooks_daemon.utils.shell_snapshot import default_glob_semantics
 _rg_config_named: Final[contextvars.ContextVar[bool]] = contextvars.ContextVar(
     "rg_config_named", default=False
 )
+# Whether the command being read names a variable that steers git (its config, its
+# editor, its home): set by :func:`search_reads`. Unset, git is assumed steered.
+_git_environment_named: Final[contextvars.ContextVar[bool]] = contextvars.ContextVar(
+    "git_environment_named", default=True
+)
+_GIT_STEERING_VARIABLE: Final[re.Pattern[str]] = re.compile(r"GIT_|HOME|EDITOR|VISUAL")
 
 TOOL_GREP: Final[str] = "grep"
 TOOL_RG: Final[str] = "rg"
@@ -491,6 +512,7 @@ class Read:
     default_expansion: bool = False
 
 
+@fails_closed
 def search_reads(command: str, cwd: str | None) -> list[Read]:
     """Every tree a recursive search anywhere in ``command`` reads.
 
@@ -498,10 +520,16 @@ def search_reads(command: str, cwd: str | None) -> list[Read]:
     precedes the search; with no absolute directory to place them from they are
     left out, because a guess at where a search reads is worse than no answer.
     """
+    bases = (cwd,) if cwd is not None and posixpath.isabs(cwd) else ()
     reset = _rg_config_named.set(RG_CONFIG_ENV in command)
+    git_reset = _git_environment_named.set(_GIT_STEERING_VARIABLE.search(command) is not None)
+    tracker = _SearchCwds(cwd, cdpath=CDPATH_VARIABLE in command, command=command)
     try:
-        reads = list(_reads(command, cwd, 0))
+        # One link scan for the command's many computed moves, even outside a guard's scope.
+        with link_scan_scope():
+            reads = list(dict.fromkeys(_reads(command, bases, 0, tracker)))
     finally:
+        _git_environment_named.reset(git_reset)
         _rg_config_named.reset(reset)
     if not any(read.glob for read in reads):
         return reads
@@ -548,6 +576,86 @@ def _directories_read(read: Read, index: ProtectedFileIndex) -> list[Read]:
 # Nested wrappers (`bash -c "bash -c ..."`) end here rather than recursing for ever.
 _MAX_WRAPPER_DEPTH: Final[int] = 4
 _DIRECTORY_CHANGERS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
+#: How many directories a search is placed from before it is judged over every indexed file.
+SEARCH_DIRECTORY_CAP: Final[int] = 64
+#: Wrappers with an option that runs the wrapped command elsewhere.
+_CHDIR_WRAPPERS: Final[frozenset[str]] = frozenset({"env", "sudo"})
+_BUILTIN: Final[str] = "builtin"
+_EXEC: Final[str] = "exec"
+#: ``exec -a NAME``: the option whose value is the next word.
+_EXEC_NAME_OPTION: Final[str] = "-a"
+_GLOB_CHARACTERS: Final[frozenset[str]] = frozenset("*?[")
+#: A redirection with its file glued on (``>/dev/null``, ``2>&1``), and one without (``2>``).
+_REDIRECTION_WORD: Final[re.Pattern[str]] = re.compile(r"\d*(?:&>>?|>>?|<>?|>&|<&)\S+")
+_BARE_REDIRECTION: Final[re.Pattern[str]] = re.compile(r"\d*(?:&>>?|>>?|<>?|>&|<&)")
+
+
+#: A segment head that opens a subshell: a ``cd`` behind it ADDS a directory.
+_SUBSHELL_HEAD: Final[re.Pattern[str]] = re.compile(r"\s*(?:[A-Za-z_][A-Za-z0-9_]*=)?(?:\$\(|`|\()")
+#: A segment head bash reads past to the command name, in the current shell.
+_RESERVED_HEAD: Final[re.Pattern[str]] = re.compile(
+    r"\s*(?:[{!]|if|then|else|elif|do|while|until|time)(?:\s+|$)"
+)
+_TRAILING_CLOSERS: Final[re.Pattern[str]] = re.compile(r"[\s)}`]+$")
+_QUOTED_SUBSTITUTION: Final[tuple[tuple[str, str], ...]] = (("$(", ")"), ("`", "`"))
+
+
+def _unwrapped(segment: str) -> tuple[str, int, int]:
+    """``segment`` without the group and keyword words around its command.
+
+    Also how many subshells (``(``, ``$(``, a backtick) open before it and close
+    after it. Review F1: ``(cd x``, ``{ cd x``, ``if cd x``, ``x=$(cd x`` and
+    ``grep -r . l)`` are how a list split on its operators hands a wrapped
+    command over.
+    """
+    opens = 0
+    while True:
+        opened = _SUBSHELL_HEAD.match(segment)
+        if opened:
+            segment, opens = segment[opened.end() :], opens + 1
+            continue
+        reserved = _RESERVED_HEAD.match(segment)
+        if not reserved:
+            break
+        segment = segment[reserved.end() :]
+    closers = _TRAILING_CLOSERS.search(segment)
+    if closers is None:
+        return segment, opens, 0
+    tail = closers.group(0)
+    return segment[: closers.start()], opens, tail.count(")") + tail.count("`")
+
+
+def _substitution_bodies(segment: str) -> list[str]:
+    """The command text inside a ``$( )`` or backtick pair a segment holds whole (quoted)."""
+    bodies: list[str] = []
+    for opener, closer in _QUOTED_SUBSTITUTION:
+        start = segment.find(opener)
+        end = segment.rfind(closer)
+        if start != -1 and end > start + len(opener):
+            body = segment[start + len(opener) : end]
+            if " " in body:
+                bodies.append(body)
+    return bodies
+
+
+def _directory_change(
+    words: list[str], start: int, current: tuple[str, ...], cwds: "_SearchCwds"
+) -> tuple[str, ...]:
+    """Where a ``cd``/``pushd`` at ``words[start - 1]`` leaves the search, from each of ``current``."""
+    operands = _operands(words[start:])
+    if not operands or operands[0] == "-":
+        return cwds.indeterminate()
+    spelled = words[start:]
+    while spelled and spelled[0].startswith("-"):
+        spelled = spelled[1:]
+    if toplevel_move_length(spelled, cwds.command) and current and not toplevel_relocated(current):
+        # An ancestor of where the search is, each one kept, besides the computed-move
+        # judgement, which still fails closed: config or environment the guard cannot
+        # read (a split-spelled GIT_WORK_TREE, a written core.worktree) moves the top level.
+        root = path_exclusion.resolve_project_root()
+        above = (ancestor for base in current for ancestor in directory_ancestors(base, root))
+        return tuple(dict.fromkeys((*above, *cwds.indeterminate())))
+    return cwds.moved(operands[0], current)
 
 
 _POPD: Final[str] = "popd"
@@ -582,51 +690,266 @@ def _after_directory_change(words: list[str], current: str | None) -> str | None
     return _place(operands[0], current)
 
 
-def _reads(command: str, cwd: str | None, depth: int) -> Iterator[Read]:
-    """Every tree a search anywhere in ``command`` reads."""
+@dataclass
+class _SearchCwds:
+    """The directories a search may run in, and every ``cd`` target the command named."""
+
+    hook_cwd: str | None
+    targets: list[str] = field(default_factory=list)
+    # A `cd` to a tilde the hook cannot place (`~-`) was seen: later reads judge every file.
+    lost: bool = False
+    # The directories passed SEARCH_DIRECTORY_CAP: later moves are not followed.
+    overflowed: bool = False
+    # The command names CDPATH: a relative cd may land in any directory it lists.
+    cdpath: bool = False
+    # A computed move's link scan did not finish: a later reader is denied (review D2).
+    unscanned: bool = False
+    # The whole command, for what a move's spelling depends on (git's top level).
+    command: str = ""
+    # The directory links a computed move's scan found: a later reader may pass through one.
+    computed_links: list[str] = field(default_factory=list)
+
+    def indeterminate(self) -> tuple[str, ...]:
+        """A move that cannot be placed: the project root, every named target and the hook cwd.
+
+        A scan that did not finish marks the search ``unscanned``, also when the
+        caller placed the move too (git's top level, ``~``): that placement rests
+        on state the command can change (Plan 00623 review).
+        """
+        root = path_exclusion.resolve_project_root()
+        # Reviews 614b R4, 614c N1: every project directory holding a link, and every directory link.
+        scan = scan_project_links(root) if root else None
+        if scan is not None and not scan.complete:
+            self.unscanned = True
+        if scan is not None:
+            self.computed_links.extend(scan.value.directory_links)
+        if scan is not None and scan.value.named is not None:
+            # Past the scan cap (N669/N670) the holding directories are not listed as
+            # places: as past SEARCH_DIRECTORY_CAP, every later read is judged over
+            # every indexed file, and each directory link is read as a root.
+            self.lost = self.overflowed = True
+        linked = scan.value.directories if scan is not None else ()
+        found = [root, *self.targets, self.hook_cwd, *linked]
+        return tuple(dict.fromkeys(path for path in found if path and posixpath.isabs(path)))
+
+    def moved(self, target: str, current: tuple[str, ...]) -> tuple[str, ...]:
+        outside = place_outside_project(target, self.command)
+        if outside:
+            # Plan 00623: ~, $HOME or $TMPDIR outside the project is placed there, and
+            # is still judged as computed, failing closed: the shell's value can differ.
+            self.targets.extend(outside)
+            return tuple(dict.fromkeys((*outside, *current, *self.indeterminate())))
+        if any(opener in target for opener in EXTGLOB_OPENERS):
+            # Review 614c N3: an extended glob names no directory this walk can list.
+            return tuple(dict.fromkeys((*self.indeterminate(), *current)))
+        if self.cdpath and not posixpath.isabs(target):
+            # Review 614c N3: bash may find a relative operand under a CDPATH entry instead.
+            return tuple(dict.fromkeys((*self._moved(target, current), *self.indeterminate())))
+        return self._moved(target, current)
+
+    def _moved(self, target: str, current: tuple[str, ...]) -> tuple[str, ...]:
+        bases: tuple[str | None, ...] = current or (None,)
+        if any(char in _GLOB_CHARACTERS for char in target):
+            return self._globbed(target, bases)
+        placed = [(base, _place(target, base)) for base in bases]
+        result = tuple(dict.fromkeys(path for _base, path in placed if path is not None))
+        if not result:
+            return self.indeterminate()
+        self.targets.extend(result)
+        # A cd to what is not a directory fails, and a command after `;` or `||`
+        # then runs where the shell already was (review 614b): that place stays.
+        stayed = [
+            base
+            for base, path in placed
+            if base is not None and (path is None or not path_is_dir(path, unreadable_means=False))
+        ]
+        return tuple(dict.fromkeys((*result, *stayed)))
+
+    def _globbed(self, target: str, bases: tuple[str | None, ...]) -> tuple[str, ...]:
+        """The directories a globbed ``cd`` target matches from each base, as bash expands it."""
+        stayed = tuple(base for base in bases if base is not None)
+        matched: dict[str, None] = {}
+        for base in bases:
+            placed = _place(target, base)
+            if placed is None:
+                continue
+            found = expand_directory_glob("/", placed)
+            if found.complete:
+                matched.update(dict.fromkeys(found.value))
+            if not found.complete or len(matched) > LINK_DIRECTORY_CAP:
+                # Too wide to follow (reviews 614b, 614c X1): judged as a computed
+                # move, and bash refuses a cd with several matches, so the bases stay.
+                return tuple(dict.fromkeys((*self.indeterminate(), *stayed)))
+        if not matched:
+            return self.indeterminate()
+        self.targets.extend(matched)
+        # The cd may still fail (several matches are too many arguments): the base stays too.
+        return tuple(dict.fromkeys((*matched, *stayed)))
+
+
+def _reads(command: str, cwds: tuple[str, ...], depth: int, tracker: _SearchCwds) -> Iterator[Read]:
+    """Every tree a search anywhere in ``command`` reads, from each of ``cwds``.
+
+    A ``cd`` REPLACES the directories, inside a subshell (``(``, ``$(``, a
+    backtick) as at the top level. When a subshell closes, the directories it
+    left are ADDED to those it started from rather than dropped: the list is
+    split on its operators, so which closer ends which group is a guess, and
+    a wrong guess must over-approximate (``(cd a && true); cd b && cat l``).
+    """
     if depth > _MAX_WRAPPER_DEPTH:
+        # N664 (Plan 00623): a body past the limit is not walked, so one that could
+        # read a tree is unknown, never "no read"; a harmless body still ends here.
+        if _could_read(command):
+            raise IncompleteScanError("a search is nested deeper than the walk follows")
         return
     feeder: tuple[str, ...] | None = None
-    current = cwd
-    # A `cd ~-` (a tilde the hook cannot place) loses the directory: every later read fails closed.
-    lost = False
-    for segment, piped_in in command_segments(command):
-        words = _command_words(segment)
+    current = cwds
+    saved: list[tuple[str, ...]] = []
+    for raw, piped_in in command_segments(command):
+        for body in _substitution_bodies(raw):
+            yield from _reads(body, current, depth + 1, tracker)
+        segment, opens, closes = _unwrapped(raw)
+        saved.extend([current] * opens)
         fed_by = feeder if piped_in else None
-        # A stage that is not a `find` passes the producer's roots on (`find d | sort | xargs cat`).
-        feeder = fed_by
-        if not words:
-            continue
-        relocating_env = _assigns_a_relocating_variable(segment, words)
-        head = posixpath.basename(words[0])
-        if lost and head not in _DIRECTORY_CHANGERS and _reads_files(words, head):
-            yield Read(_EVERYTHING, view=TreeView.ALL)
-        if head in _DIRECTORY_CHANGERS:
-            lost = lost or any(unknown_tilde(word) for word in words[1:])
-            current = _after_directory_change(words, current)
-        elif head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
-            inner = words[words.index(_SHELL_COMMAND_FLAG, 1) + 1]
-            yield from _reads(inner, current, depth + 1)
-        elif head == _EVAL:
-            yield from _reads(" ".join(words[1:]), current, depth + 1)
-        elif head == _FIND:
-            feeder = _find_roots(words)
-            if _find_execs_a_reader(words):
-                yield from _reads_of_roots(feeder, current)
-        elif head == _XARGS:
-            inner_words = _xargs_command(words)
-            if inner_words and _is_search(inner_words):
-                yield from _search_reads(inner_words, current, piped_in=True)
-            if _runs_a_reader(inner_words):
-                # Fed by `find`, xargs reads what `find` lists. Fed by anything else the paths are
-                # unknown, so the tree it runs in is judged.
-                yield from _reads_of_roots(fed_by or (".",), current)
-        elif (directory_roots := _directory_reader_roots(words)) is not None:
-            yield from _reads_of_roots(directory_roots, current)
-        elif _is_search(words):
-            yield from _search_reads(
-                words, current, piped_in=piped_in, relocating_env=relocating_env
-            )
+        # The segment as written is judged too: unwrapping is a guess that can
+        # misread one (`FOO=$(true) grep -r x .`, `grep -r x a\(1\)`), and it
+        # may only ever add reads.
+        for judged in dict.fromkeys((raw, segment)):
+            yield from _segment_reads(judged, piped_in, fed_by, current, depth, tracker)
+        feeder, current = _segment_state(segment, fed_by, current, tracker)
+        if len(current) > SEARCH_DIRECTORY_CAP:
+            # Each failed `cd` keeps its base beside its target, so the set can double
+            # per `cd`. Past the cap every later read is judged over every indexed file.
+            # Where a read is placed then makes no difference, so the set is cut.
+            tracker.lost = tracker.overflowed = True
+            current = current[:SEARCH_DIRECTORY_CAP]
+        for _ in range(min(closes, len(saved))):
+            current = tuple(dict.fromkeys((*saved.pop(), *current)))
+
+
+def _segment_state(
+    segment: str, fed_by: tuple[str, ...] | None, current: tuple[str, ...], tracker: _SearchCwds
+) -> tuple[tuple[str, ...] | None, tuple[str, ...]]:
+    """The roots a segment feeds the next one, and the directories it leaves the command in.
+
+    A stage that is not a ``find`` passes the producer's roots on
+    (``find d | sort | xargs cat``).
+    """
+    words = _command_words(segment)
+    if not words:
+        return fed_by, current
+    head = posixpath.basename(words[0])
+    if head in _DIRECTORY_CHANGERS:
+        # A `cd ~-` (a tilde the hook cannot place) loses the directory: every later read fails closed.
+        tracker.lost = tracker.lost or any(unknown_tilde(word) for word in words[1:])
+        if tracker.overflowed:
+            # Every later read is judged over every indexed file: the move is not followed.
+            return fed_by, current
+        return fed_by, _directory_change(words, 1, current, tracker)
+    if head == _FIND:
+        return _find_roots(words), current
+    return fed_by, current
+
+
+def _segment_reads(
+    segment: str,
+    piped_in: bool,
+    fed_by: tuple[str, ...] | None,
+    current: tuple[str, ...],
+    depth: int,
+    tracker: _SearchCwds,
+) -> Iterator[Read]:
+    """The trees the one command of ``segment`` reads, from each of ``current``."""
+    words = _command_words(segment)
+    if not words:
+        return
+    here = current
+    relocating_env = _assigns_a_relocating_variable(segment, words)
+    # `env -C dir cmd` runs cmd in dir; the wrapper is peeled from `words`. The
+    # segment already split cleanly into `words`, so this split cannot raise.
+    raw_words = _past_command_prefix(linear_shlex.split(segment))
+    wrapper = posixpath.basename(raw_words[0]) if raw_words else ""
+    if wrapper in _CHDIR_WRAPPERS:
+        for target in chdir_wrapper_targets(wrapper, raw_words, 1):
+            here = tracker.moved(target, here)
+        # The scan reads a `-C` of the wrapped command as the wrapper's too
+        # (`env git -C d grep`), and git places its own `-C`: where the command
+        # started stays a base, so a move read twice never loses the real one.
+        here = tuple(dict.fromkeys((*here, *current)))
+    head = posixpath.basename(words[0])
+    if tracker.unscanned and head not in _DIRECTORY_CHANGERS and _reads_files(words, head):
+        # Review D2: the reader may run from a directory the unfinished scan never reached.
+        raise IncompleteScanError(
+            "a computed directory change's link scan stopped before it finished"
+        )
+    if tracker.computed_links and head not in _DIRECTORY_CHANGERS and _reads_files(words, head):
+        # Round 6 class sweep: after a computed move the shell may sit above a directory
+        # link, and a deeper root (`sub/a/dl`) reaches it; each such link is read as a root.
+        for link in dict.fromkeys(tracker.computed_links):
+            yield Read(link, view=TreeView.ALL)
+    if tracker.lost and head not in _DIRECTORY_CHANGERS and _reads_files(words, head):
+        yield Read(_EVERYTHING, view=TreeView.ALL)
+        # A directory link out of the project is under no indexed file: each place a
+        # move could have reached, the links among them, is read as a root too.
+        for directory in tracker.indeterminate():
+            yield Read(directory, view=TreeView.ALL)
+    if head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
+        inner = words[words.index(_SHELL_COMMAND_FLAG, 1) + 1]
+        yield from _reads(inner, here, depth + 1, tracker)
+    elif head == _EVAL:
+        yield from _reads(" ".join(words[1:]), here, depth + 1, tracker)
+    elif head == _FIND:
+        if _find_execs_a_reader(words):
+            yield from _reads_from_each(_find_roots(words), here)
+    elif head == _XARGS:
+        inner_words = _xargs_command(words)
+        if inner_words and _is_search(inner_words):
+            for base in here or (None,):
+                yield from _search_reads(inner_words, base, piped_in=True)
+        if _runs_a_reader(inner_words):
+            # Fed by `find`, xargs reads what `find` lists. Fed by anything else the paths are
+            # unknown, so the tree it runs in is judged.
+            yield from _reads_from_each(fed_by or (".",), here)
+    elif (directory_roots := _directory_reader_roots(words)) is not None:
+        yield from _reads_from_each(directory_roots, here)
+    elif _is_search(words):
+        for base in here or (None,):
+            yield from _search_reads(words, base, piped_in=piped_in, relocating_env=relocating_env)
+
+
+def _reads_from_each(roots: tuple[str, ...], bases: tuple[str, ...]) -> Iterator[Read]:
+    for base in bases or (None,):
+        yield from _reads_of_roots(roots, base)
+
+
+def _could_read(command: str) -> bool:
+    """Could any command in ``command``, or in a body nested inside it, read a tree?
+
+    A ``bash -c`` or ``eval`` body is looked into rather than counted as a reader,
+    so a harmless body stays harmless however deep; each level is shorter text,
+    so this ends.
+    """
+    for raw, _piped_in in command_segments(command):
+        if any(_could_read(body) for body in _substitution_bodies(raw)):
+            return True
+        for text in dict.fromkeys((raw, _unwrapped(raw)[0])):
+            words = _command_words(text)
+            if not words:
+                continue
+            head = posixpath.basename(words[0])
+            if head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
+                inner = words[words.index(_SHELL_COMMAND_FLAG, 1) + 1]
+                # A body no shorter than its command is not looked into: it may read.
+                if len(inner) >= len(command) or _could_read(inner):
+                    return True
+                continue
+            if head == _EVAL:
+                if _could_read(" ".join(words[1:])):
+                    return True
+                continue
+            if _reads_files(words, head):
+                return True
+    return False
 
 
 def _reads_files(words: list[str], head: str) -> bool:
@@ -635,8 +958,168 @@ def _reads_files(words: list[str], head: str) -> bool:
         head in (_FIND, _XARGS, _EVAL)
         or (head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1])
         or _directory_reader_roots(words) is not None
-        or _is_search(words)
+        or (_is_search(words) and not _git_reads_no_tree(words))
     )
+
+
+@dataclass(frozen=True)
+class _GitOptionGrammar:
+    """The options of one subcommand trusted to print no file content.
+
+    An allowlist, not a denylist of diff options: an option this does not
+    name, an abbreviation included, keeps the command a reader.
+    """
+
+    flags: frozenset[str]
+    long_flags: frozenset[str]
+    long_valued: frozenset[str] = frozenset()
+    short_valued: frozenset[str] = frozenset()
+    # A short option whose value is the rest of its word only (`-uno`).
+    short_attached: frozenset[str] = frozenset()
+    message_options: frozenset[str] = frozenset()
+
+
+# Subcommands that read the index and lstat the work tree, never through a link
+# (Plan 00623 probes #350/#351). A commit is trusted only with a message
+# given, so no editor shows its template, and with no dry run, which under
+# `commit.verbose` from any config git reads prints the diff (review 3).
+_GIT_TREELESS_GRAMMARS: Final[dict[str, _GitOptionGrammar]] = {
+    "status": _GitOptionGrammar(
+        flags=frozenset("sbz"),
+        short_attached=frozenset("u"),
+        long_flags=frozenset(
+            {
+                "short",
+                "branch",
+                "porcelain",
+                "long",
+                "null",
+                "show-stash",
+                "ahead-behind",
+                "no-ahead-behind",
+                "untracked-files",
+                "ignored",
+                "ignore-submodules",
+                "column",
+                "no-column",
+                "renames",
+                "no-renames",
+                "find-renames",
+            }
+        ),
+    ),
+    "commit": _GitOptionGrammar(
+        flags=frozenset("aqsn"),
+        short_valued=frozenset("mF"),
+        long_flags=frozenset(
+            {
+                "all",
+                "quiet",
+                "signoff",
+                "no-signoff",
+                "no-verify",
+                "verify",
+                "allow-empty",
+                "allow-empty-message",
+                "amend",
+                "no-edit",
+                "include",
+                "only",
+                "reset-author",
+                "no-gpg-sign",
+            }
+        ),
+        long_valued=frozenset({"message", "file", "author", "date", "cleanup"}),
+        message_options=frozenset({"m", "F", "message", "file"}),
+    ),
+}
+# Global options that change only how git prints.
+_GIT_PRINT_ONLY_OPTIONS: Final[frozenset[str]] = frozenset({"--no-pager", "-P"})
+# Characters through which bash may turn a word into another (`$V`, `$'-v'`,
+# `{-v,-v}`, a glob): a word holding one may become a diff option.
+_GIT_NON_LITERAL: Final[re.Pattern[str]] = re.compile(r"[$`*?\[\]{}\\~()!]")
+
+
+def _git_reads_no_tree(words: list[str]) -> bool:
+    """Is ``words`` a ``git commit``/``git status`` that recurses into no tree and prints no file?
+
+    ``git`` is otherwise a possible reader after a computed move, so every
+    directory link is judged as a root of it. Only a literal subcommand, after
+    print-only global options, with every option in its allowlist and every
+    word literal, is trusted; and only in a command naming no variable that
+    steers git (``GIT_*``, ``HOME``, an editor). A file operand (``-F``, a
+    pathspec) is a word the mention scan resolves through every link from
+    every effective cwd, which this does not change.
+    """
+    if _git_environment_named.get() or posixpath.basename(words[0]) != TOOL_GIT:
+        return False
+    position = 1
+    while position < len(words) and words[position] in _GIT_PRINT_ONLY_OPTIONS:
+        position += 1
+    if position >= len(words):
+        return False
+    grammar = _GIT_TREELESS_GRAMMARS.get(words[position])
+    if grammar is None:
+        return False
+    named = _git_options_named(words[position + 1 :], grammar)
+    if named is None:
+        return False
+    return not grammar.message_options or bool(named & grammar.message_options)
+
+
+def _git_options_named(arguments: list[str], grammar: _GitOptionGrammar) -> set[str] | None:
+    """The options ``arguments`` name, or ``None`` when one is outside ``grammar`` or not literal."""
+    named: set[str] = set()
+    expects_value = False
+    for word in arguments:
+        if _GIT_NON_LITERAL.search(word):
+            return None
+        if expects_value:
+            expects_value = False
+            continue
+        if word == _END_OF_OPTIONS:
+            break
+        if word.startswith("--"):
+            name, has_value, _value = word[2:].partition("=")
+            if name in grammar.long_valued:
+                expects_value = not has_value
+            elif name not in grammar.long_flags or (has_value and name not in _GIT_OPTIONAL_VALUED):
+                return None
+            named.add(name)
+        elif word.startswith("-") and len(word) > 1:
+            cluster = _git_short_cluster(word[1:], grammar)
+            if cluster is None:
+                return None
+            letters, expects_value = cluster
+            named.update(letters)
+    return None if expects_value else named
+
+
+# Long status options whose value is optional and attached (`--porcelain=v2`).
+_GIT_OPTIONAL_VALUED: Final[frozenset[str]] = frozenset(
+    {
+        "porcelain",
+        "untracked-files",
+        "ignored",
+        "ignore-submodules",
+        "column",
+        "find-renames",
+    }
+)
+
+
+def _git_short_cluster(cluster: str, grammar: _GitOptionGrammar) -> tuple[set[str], bool] | None:
+    """The letters of a short cluster and whether the next word is its value, or ``None``."""
+    letters: set[str] = set()
+    for index, letter in enumerate(cluster):
+        letters.add(letter)
+        if letter in grammar.short_attached:
+            return letters, False
+        if letter in grammar.short_valued:
+            return letters, index == len(cluster) - 1
+        if letter not in grammar.flags:
+            return None
+    return letters, False
 
 
 def _assigns_a_relocating_variable(segment: str, words: list[str]) -> bool:
@@ -667,13 +1150,48 @@ def _command_words(segment: str) -> list[str]:
     except ValueError:
         return []
     while True:
-        while words and _ASSIGNMENT.match(words[0]):
-            words = words[1:]
+        words = _past_command_prefix(words)
         _names, start = peel_command_wrappers(words)
         if start == 0:
             return words
         # ``env VAR=x rg ...``: assignments can follow a wrapper too.
         words = words[start:]
+
+
+def _past_command_prefix(words: list[str]) -> list[str]:
+    """``words`` from the command name: past assignments, redirections and ``builtin``.
+
+    Review 614b R3: ``>/dev/null cd x`` and ``builtin cd x`` run ``cd``.
+    """
+    while words:
+        head = words[0]
+        if head == _EXEC:
+            # Review D4: `exec [-cl] [-a NAME] cmd` runs cmd.
+            words = words[1:]
+            while words and words[0].startswith("-") and words[0] != "-":
+                words = words[2:] if words[0] == _EXEC_NAME_OPTION else words[1:]
+        elif _ASSIGNMENT.match(head) or head == _BUILTIN or _REDIRECTION_WORD.fullmatch(head):
+            words = words[1:]
+        elif _BARE_REDIRECTION.fullmatch(words[0]):
+            words = words[2:]
+        else:
+            break
+    return words
+
+
+def _operands(words: list[str]) -> list[str]:
+    """The words of ``words`` that are operands: not options, redirections or their files."""
+    operands: list[str] = []
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if _BARE_REDIRECTION.fullmatch(word):
+            index += 2
+            continue
+        if not _REDIRECTION_WORD.fullmatch(word) and (not word.startswith("-") or word == "-"):
+            operands.append(word)
+        index += 1
+    return operands
 
 
 def _is_search(words: list[str]) -> bool:

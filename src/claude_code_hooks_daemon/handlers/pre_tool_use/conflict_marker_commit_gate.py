@@ -745,17 +745,21 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
                 requires_main_thread=True,
             ),
             AcceptanceTest(
-                title="conflict-marker commit gate - dry runs record nothing",
-                command="git commit --dry-run && cd - && git commit --dry-run",
+                title="conflict-marker commit gate - a commit chained after a commit and cd -",
+                command=(
+                    "git commit -m acceptance -- no-such-acceptance-path"
+                    " && cd - && git commit -m acceptance -- no-such-acceptance-path"
+                ),
                 dispatch_as_bash=True,
                 description=(
-                    "`--dry-run` records nothing, so neither half is judged. Without "
-                    "`--dry-run` the `cd -` would make this a DENY whatever the tree "
-                    "holds, so an ALLOW here shows the dry runs really were skipped"
+                    "Neither commit names a path the index holds, so the first half "
+                    "records nothing and is not judged, and the second half follows a "
+                    "`cd -` the daemon cannot place. The command is ALLOWED, the second "
+                    "commit with the advisory that it was NOT checked"
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="--dry-run never creates a commit or modifies the index.",
+                safety_notes=("The pathspec matches no file, so git refuses and records nothing."),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

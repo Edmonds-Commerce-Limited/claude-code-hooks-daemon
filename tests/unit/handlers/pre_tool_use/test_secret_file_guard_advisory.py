@@ -92,15 +92,18 @@ class TestAnErrorIsAnAdvisory:
         hook_input = _hook_input("Write", {"file_path": "scripts/x.py", "content": "print('hi')"})
         assert "RuntimeError" in _advisory(handler.handle(hook_input))
 
-    def test_a_directory_walk_exception(
+    def test_a_directory_walk_exception_on_a_search_denies(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Review 614c P2: the Grep tool is a search, so a scan that failed on it is denied."""
         monkeypatch.setattr(guard_module, "resolve_project_root", lambda: tmp_path)
         index_project(tmp_path, SecretFileGuardHandler()._patterns())
         monkeypatch.setattr(protected_file_index.ProtectedFileIndex, "find_under", _raise(OSError))
         handler = SecretFileGuardHandler()
         hook_input = _hook_input("Grep", {"path": str(tmp_path), "pattern": "x"})
-        assert "OSError" in _advisory(handler.handle(hook_input))
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert "stopped before it finished" in str(result.reason)
 
     @pytest.mark.parametrize("error", [TimeoutError, OSError])
     def test_the_scan_deadline_is_an_advisory(

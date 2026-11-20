@@ -1,6 +1,6 @@
 # Plan 00621: actions qa ci advisory and workflow lint on edit
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-18
 **Owner**: joseph
 **Priority**: Medium
