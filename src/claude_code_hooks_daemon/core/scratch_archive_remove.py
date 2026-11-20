@@ -27,8 +27,9 @@ from __future__ import annotations
 import errno
 import os
 import stat
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import PurePosixPath
 
 from claude_code_hooks_daemon.core.scratch_archive import (
@@ -51,6 +52,11 @@ from claude_code_hooks_daemon.core.scratch_archive_claim import (
     open_child_dir,
     rename_noreplace,
     walk_tree,
+)
+from claude_code_hooks_daemon.core.scratch_archive_expire import (
+    Due,
+    Incomplete,
+    require_not_due,
 )
 from claude_code_hooks_daemon.core.scratch_archive_pack import (
     DEFAULT_TAR_TIMEOUT_SECONDS,
@@ -121,6 +127,30 @@ def _index(store: ArchiveStore) -> tuple[ArchiveRecord, ...]:
         return store.read_index().records
     except StoreRefused as exc:
         raise RemoveRefused(str(exc)) from exc
+
+
+def _removable(
+    store: ArchiveStore,
+    archive_id: str,
+    clock: Callable[[], datetime],
+    retention_hours: Mapping[str, float],
+) -> None:
+    """Refuse an archive the events file says is expired, due or not complete.
+
+    Read under the store lock the removal holds, so the answer stands for the
+    whole removal. Any doubt (a torn tail, a bad clock, an unparsable keep)
+    refuses: a tree is never removed against an archive expiry may delete.
+    """
+    try:
+        now = clock()
+    except Exception as exc:
+        raise RemoveRefused(f"the clock failed: {exc}") from exc
+    if not isinstance(now, datetime):
+        raise RemoveRefused("the clock did not return an instant")
+    try:
+        require_not_due(store.read_index(), store.read_events(), archive_id, now, retention_hours)
+    except (Incomplete, Due, StoreRefused, ValueError) as exc:
+        raise RemoveRefused(f"archive {archive_id} may not authorise a removal: {exc}") from exc
 
 
 def _names_entry(record: ArchiveRecord, name: str) -> bool:
@@ -332,16 +362,23 @@ def remove_claimed(
     tar: TarTool,
     max_inodes: int,
     max_depth: int = DEFAULT_MAX_DEPTH,
+    clock: Callable[[], datetime],
+    retention_hours: Mapping[str, float],
     expected: Fingerprint | None = None,
     timeout: float = DEFAULT_TAR_TIMEOUT_SECONDS,
 ) -> Removed:
-    """Remove a claimed entry whose archive is recorded and verifies; raise :class:`RemoveRefused`."""
+    """Remove a claimed entry whose archive is recorded and verifies; raise :class:`RemoveRefused`.
+
+    ``clock`` and ``retention_hours`` are required: an archive that is
+    expired, due for expiry or not complete never authorises a removal.
+    """
     name = entry_name_of(claimed_name)
     records = _index(store)
     if record not in records:
         raise RemoveRefused(f"archive {record.archive_id} is not in the index as given")
     if not _names_entry(record, name):
         raise RemoveRefused(f"archive {record.archive_id} names another entry")
+    _removable(store, record.archive_id, clock, retention_hours)
     # A batch archive (Task 3.5) is shared by one record per loose file: each
     # file is proved by its own member (the restricted compare), never by the
     # whole archive's member set.
@@ -373,6 +410,8 @@ def resume_claimed(
     checkout: str,
     tar: TarTool,
     max_inodes: int,
+    clock: Callable[[], datetime],
+    retention_hours: Mapping[str, float],
     max_depth: int = DEFAULT_MAX_DEPTH,
     timeout: float = DEFAULT_TAR_TIMEOUT_SECONDS,
 ) -> Resumed:
@@ -380,7 +419,10 @@ def resume_claimed(
 
     Each record of this checkout naming the entry is tried, newest first, whole
     and then as a partly removed tree; the first that verifies authorises the
-    removal. When none does, the tree is renamed back; when its name is taken,
+    removal. An archive that is expired, due or not complete authorises
+    nothing: against an intact tree it is skipped, and against a partly removed
+    tree it leaves the claim stuck for a human to restore from it (never
+    removed, never renamed back). When none verifies, the tree is renamed back; when its name is taken,
     it stays claimed and is reported stuck. A record that could not be checked at
     all (tar did not run) also leaves it stuck: a partly removed tree is never
     renamed back for want of a check. Nothing is removed without a record.
@@ -396,6 +438,11 @@ def resume_claimed(
     candidates = [r for r in reversed(records) if r.checkout == checkout and _names_entry(r, name)]
     unchecked = False
     for record in candidates:
+        try:
+            _removable(store, record.archive_id, clock, retention_hours)
+            blocked: str | None = None
+        except RemoveRefused as exc:
+            blocked = str(exc)
         for partial in (False, True):
             try:
                 proof = _prove(
@@ -414,6 +461,14 @@ def resume_claimed(
                 continue
             except RemoveRefused:
                 continue
+            if blocked is not None:
+                if not partial:
+                    # The tree is intact: this archive cannot authorise its
+                    # removal, and renaming it back loses nothing.
+                    break
+                return Resumed(
+                    name, "stuck", f"partly removed; {blocked}; a human restores from it"
+                )
             try:
                 removed = _remove(parent_fd, proof, max_depth=max_depth)
             except RemoveRefused as exc:

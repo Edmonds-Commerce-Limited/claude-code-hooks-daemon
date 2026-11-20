@@ -18,6 +18,7 @@ import stat
 import subprocess
 import tarfile
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,8 +28,11 @@ import claude_code_hooks_daemon
 from claude_code_hooks_daemon.core import scratch_archive_pack as pack_mod
 from claude_code_hooks_daemon.core import scratch_archive_remove as remove_mod
 from claude_code_hooks_daemon.core.scratch_archive import (
+    EVENTS_NAME,
     ArchiveRecord,
     ArchiveStore,
+    ExpiredEvent,
+    KeepEvent,
     new_archive_id,
 )
 from claude_code_hooks_daemon.core.scratch_archive_claim import (
@@ -131,15 +135,43 @@ def _archived(
     return handle, record
 
 
+NOW = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
+RETENTION: dict[str, float] = {"DISPOSABLE": 24.0}
+
+
+def clock() -> datetime:
+    return NOW
+
+
+#: The required removal policy (unit 1): a clock and the verdict retention.
+POLICY: dict[str, Any] = {"clock": clock, "retention_hours": RETENTION}
+
+
 def _remove(
     root_fd: int, store: ArchiveStore, tar: TarTool, record: ArchiveRecord, name: str = "e1"
 ) -> Removed:
-    return remove_claimed(root_fd, CLAIM_PREFIX + name, store, record, tar=tar, max_inodes=MAX)
+    return remove_claimed(
+        root_fd,
+        CLAIM_PREFIX + name,
+        store,
+        record,
+        tar=tar,
+        max_inodes=MAX,
+        clock=clock,
+        retention_hours=RETENTION,
+    )
 
 
 def _resume(root_fd: int, store: ArchiveStore, tar: TarTool, name: str = "e1") -> Resumed:
     return resume_claimed(
-        root_fd, CLAIM_PREFIX + name, store, checkout=CHECKOUT, tar=tar, max_inodes=MAX
+        root_fd,
+        CLAIM_PREFIX + name,
+        store,
+        checkout=CHECKOUT,
+        tar=tar,
+        max_inodes=MAX,
+        clock=clock,
+        retention_hours=RETENTION,
     )
 
 
@@ -232,7 +264,7 @@ class TestRemoveClaimed:
         _handle, record = _archived(root_fd, store, tar)
         before = _snapshot(root)
         with pytest.raises(RemoveRefused):
-            remove_claimed(root_fd, bad, store, record, tar=tar, max_inodes=MAX)
+            remove_claimed(root_fd, bad, store, record, tar=tar, max_inodes=MAX, **POLICY)
         assert _snapshot(root) == before
 
     def test_refuses_without_the_store_lock(
@@ -363,7 +395,14 @@ class TestRemoveClaimed:
         before = _snapshot(root)
         with pytest.raises(RemoveRefused, match="fingerprint"):
             remove_claimed(
-                root_fd, handle.claimed_name, store, record, tar=tar, max_inodes=MAX, expected=stale
+                root_fd,
+                handle.claimed_name,
+                store,
+                record,
+                tar=tar,
+                max_inodes=MAX,
+                expected=stale,
+                **POLICY,
             )
         assert _snapshot(root) == before
 
@@ -380,6 +419,7 @@ class TestRemoveClaimed:
             tar=tar,
             max_inodes=MAX,
             expected=handle.fingerprint,
+            **POLICY,
         )
         assert list(root.iterdir()) == []
 
@@ -391,7 +431,14 @@ class TestRemoveClaimed:
         before = _snapshot(root)
         with pytest.raises(RemoveRefused):
             remove_claimed(
-                root_fd, CLAIM_PREFIX + "e1", store, record, tar=tar, max_inodes=MAX, max_depth=1
+                root_fd,
+                CLAIM_PREFIX + "e1",
+                store,
+                record,
+                tar=tar,
+                max_inodes=MAX,
+                max_depth=1,
+                **POLICY,
             )
         assert _snapshot(root) == before
 
@@ -724,7 +771,13 @@ class TestResume:
         _entry(root)
         _archived(root_fd, store, tar)
         resumed = resume_claimed(
-            root_fd, CLAIM_PREFIX + "e1", store, checkout="other", tar=tar, max_inodes=MAX
+            root_fd,
+            CLAIM_PREFIX + "e1",
+            store,
+            checkout="other",
+            tar=tar,
+            max_inodes=MAX,
+            **POLICY,
         )
         assert resumed.outcome == "renamed-back"
         assert (root / "e1" / "a.txt").exists()
@@ -734,7 +787,7 @@ class TestResume:
     ) -> None:
         _entry(root)
         handle, old = _archived(root_fd, store, tar)
-        remove_claimed(root_fd, handle.claimed_name, store, old, tar=tar, max_inodes=MAX)
+        remove_claimed(root_fd, handle.claimed_name, store, old, tar=tar, max_inodes=MAX, **POLICY)
         entry = root / "e1"
         entry.mkdir()
         (entry / "new.txt").write_text("new content")
@@ -749,7 +802,7 @@ class TestResume:
         (root / "e1").mkdir()
         (root / "e1" / "old.txt").write_text("old")
         handle, old = _archived(root_fd, store, tar)
-        remove_claimed(root_fd, handle.claimed_name, store, old, tar=tar, max_inodes=MAX)
+        remove_claimed(root_fd, handle.claimed_name, store, old, tar=tar, max_inodes=MAX, **POLICY)
         _entry(root)
         _archived(root_fd, store, tar)
         assert _resume(root_fd, store, tar).outcome == "removed"
@@ -781,7 +834,9 @@ class TestResume:
         self, root_fd: int, store: ArchiveStore, tar: TarTool
     ) -> None:
         with pytest.raises(RemoveRefused):
-            resume_claimed(root_fd, "e1", store, checkout=CHECKOUT, tar=tar, max_inodes=MAX)
+            resume_claimed(
+                root_fd, "e1", store, checkout=CHECKOUT, tar=tar, max_inodes=MAX, **POLICY
+            )
 
     def test_refuses_without_the_store_lock(
         self, tmp_path: Path, root: Path, root_fd: int, tar: TarTool
@@ -792,6 +847,147 @@ class TestResume:
             with pytest.raises(RemoveRefused, match="lock"):
                 _resume(root_fd, opened, tar)
         assert _claimed_exists(root)
+
+
+PAST = "2026-11-19T00:00:00Z"
+FUTURE = "2026-12-01T00:00:00Z"
+
+
+def _archived_with(
+    root_fd: int, store: ArchiveStore, tar: TarTool, **changes: Any
+) -> tuple[Claimed, ArchiveRecord]:
+    handle = _claim(root_fd, "e1")
+    record = dataclasses.replace(_record("e1", store, handle, tar), **changes)
+    store.append(record)
+    return handle, record
+
+
+def _due(root_fd: int, store: ArchiveStore, tar: TarTool) -> tuple[Claimed, ArchiveRecord]:
+    """An archive whose expiry (``expires_at`` and packed + 24h) is before NOW."""
+    return _archived_with(root_fd, store, tar, expires_at=PAST, packed_at="2026-11-18T00:00:00Z")
+
+
+def _archive_path(store: ArchiveStore, record: ArchiveRecord) -> Path:
+    return store.path / f"{record.archive_id}.tar"
+
+
+class TestRemovalReadsTheEvents:
+    """Unit 1: removal refuses an archive that is expired, due or incomplete."""
+
+    def test_an_expired_event_refuses_removal(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        store.append_event(ExpiredEvent(archive_id=record.archive_id, at=PAST))
+        before = _snapshot(root)
+        with pytest.raises(RemoveRefused, match="expired"):
+            _remove(root_fd, store, tar, record)
+        assert _snapshot(root) == before
+
+    def test_a_retention_due_archive_refuses_removal(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, record = _due(root_fd, store, tar)
+        before = _snapshot(root)
+        with pytest.raises(RemoveRefused, match="due"):
+            _remove(root_fd, store, tar, record)
+        assert _snapshot(root) == before
+
+    def test_a_keep_that_extends_the_expiry_allows_removal(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, record = _due(root_fd, store, tar)
+        store.append_event(
+            KeepEvent(
+                archive_id=record.archive_id,
+                original_path=record.original_path,
+                reason="still wanted",
+                kept_at=PAST,
+                until=FUTURE,
+            )
+        )
+        _remove(root_fd, store, tar, record)
+        assert list(root.iterdir()) == []
+
+    def test_a_not_yet_due_archive_allows_removal(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived_with(root_fd, store, tar, expires_at=FUTURE)
+        _remove(root_fd, store, tar, record)
+        assert list(root.iterdir()) == []
+
+    def test_a_null_expiry_allows_removal(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        assert record.expires_at is None
+        _remove(root_fd, store, tar, record)
+        assert list(root.iterdir()) == []
+
+    def test_a_torn_events_tail_refuses_removal(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        with open(store.path / EVENTS_NAME, "ab") as handle:
+            handle.write(b'{"kind": "exp')
+        before = _snapshot(root)
+        with pytest.raises(RemoveRefused, match="torn"):
+            _remove(root_fd, store, tar, record)
+        assert _snapshot(root) == before
+
+    @pytest.mark.parametrize("bad_clock", ["raises", "naive"])
+    def test_a_bad_clock_refuses_removal(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool, bad_clock: str
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived_with(root_fd, store, tar, expires_at=FUTURE)
+
+        def broken() -> datetime:
+            if bad_clock == "raises":
+                raise OSError("no clock")
+            return datetime(2026, 11, 20, 12, 0)
+
+        before = _snapshot(root)
+        with pytest.raises(RemoveRefused, match="clock"):
+            remove_claimed(
+                root_fd,
+                CLAIM_PREFIX + "e1",
+                store,
+                record,
+                tar=tar,
+                max_inodes=MAX,
+                clock=broken,
+                retention_hours=RETENTION,
+            )
+        assert _snapshot(root) == before
+
+    def test_resume_of_an_intact_tree_with_a_due_archive_renames_back(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _due(root_fd, store, tar)
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "a.txt").read_text() == "alpha"
+
+    def test_resume_of_a_partly_removed_tree_with_a_due_archive_is_stuck(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, record = _due(root_fd, store, tar)
+        (root / (CLAIM_PREFIX + "e1") / "sub" / "b.bin").unlink()
+        before = _snapshot(root)
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "stuck"
+        assert "a human restores" in resumed.reason
+        assert _snapshot(root) == before
+        assert _archive_path(store, record).exists()
 
 
 class _Crash(Exception):

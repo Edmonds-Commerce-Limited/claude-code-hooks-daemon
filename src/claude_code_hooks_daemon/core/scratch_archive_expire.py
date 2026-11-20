@@ -62,6 +62,10 @@ class ExpiryRefused(Exception):
     """The expiry run did not start; nothing was changed."""
 
 
+class Due(Exception):
+    """The archive's effective expiry has passed; it belongs to expiry now."""
+
+
 class _Hold(Exception):
     """This archive does not expire now."""
 
@@ -136,6 +140,32 @@ def effective_expiry(
             raise _Hold(f"an instant of {record.original_path!r} does not parse: {exc}") from exc
     instants.extend(parse_instant(k.until) for k in keeps)
     return max(instants)
+
+
+def require_not_due(
+    index: IndexRead,
+    events: EventsRead,
+    archive_id: str,
+    now: datetime,
+    retention_hours: Mapping[str, float],
+) -> None:
+    """Return when ``archive_id`` is complete and not due at ``now``; raise otherwise.
+
+    Removal's own check (DESIGN section 13): a torn events tail or an
+    incomplete id raises :class:`Incomplete`; an effective expiry at or before
+    ``now`` raises :class:`Due`. An archive that never expires (a
+    hold) is not due. A keep ``until`` that does not parse raises ``ValueError``.
+    """
+    if events.torn_tail:
+        raise Incomplete("the events file has a torn final line; expiry is unknown")
+    records = complete_records(index, events, archive_id)
+    _aware(now, "the clock")
+    try:
+        due = effective_expiry(records, _keeps(events, archive_id), retention_hours)
+    except _Hold:
+        return
+    if due <= now:
+        raise Due(f"archive {archive_id} is due for expiry since {due.isoformat()}")
 
 
 def keep(

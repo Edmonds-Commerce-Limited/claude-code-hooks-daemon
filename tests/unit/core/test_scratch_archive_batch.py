@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 import tarfile
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -37,6 +39,14 @@ from claude_code_hooks_daemon.core.scratch_archive_remove import (
 
 MAX = 1000
 CHECKOUT = "main"
+
+
+def _clock() -> datetime:
+    return datetime(2026, 11, 20, 6, 0, tzinfo=UTC)
+
+
+#: Removal's required policy: the batch records below are not due at this clock.
+POLICY: dict[str, Any] = {"clock": _clock, "retention_hours": {"DISPOSABLE": 24.0}}
 HOSTILE = ("-rf", "--files-from=x", "new\nline", "sp ace", "ünï", "a\\b", "*")
 
 
@@ -164,7 +174,9 @@ class TestPackBatch:
         for name, data in content.items():
             assert archived[f"./{CLAIM_PREFIX}{name}"] == data
         for name, record in zip(names, records, strict=True):
-            remove_claimed(root_fd, CLAIM_PREFIX + name, store, record, tar=tar, max_inodes=MAX)
+            remove_claimed(
+                root_fd, CLAIM_PREFIX + name, store, record, tar=tar, max_inodes=MAX, **POLICY
+            )
         assert sorted(p.name for p in root.iterdir()) == []
         assert _store_files(store) == [f"{records[0].archive_id}.tar"]
 
@@ -241,7 +253,9 @@ class TestBatchRemoval:
             store.append(record)
         (root / (CLAIM_PREFIX + "g")).write_bytes(b"changed")
         with pytest.raises(RemoveRefused):
-            remove_claimed(root_fd, CLAIM_PREFIX + "g", store, records[1], tar=tar, max_inodes=MAX)
+            remove_claimed(
+                root_fd, CLAIM_PREFIX + "g", store, records[1], tar=tar, max_inodes=MAX, **POLICY
+            )
         assert (root / (CLAIM_PREFIX + "g")).read_bytes() == b"changed"
 
     def test_one_files_record_does_not_remove_another_file(
@@ -252,7 +266,9 @@ class TestBatchRemoval:
         for record in records:
             store.append(record)
         with pytest.raises(RemoveRefused):
-            remove_claimed(root_fd, CLAIM_PREFIX + "g", store, records[0], tar=tar, max_inodes=MAX)
+            remove_claimed(
+                root_fd, CLAIM_PREFIX + "g", store, records[0], tar=tar, max_inodes=MAX, **POLICY
+            )
         assert (root / (CLAIM_PREFIX + "g")).exists()
 
 
@@ -283,14 +299,24 @@ def test_a_crash_after_each_step_converges(
         for record in records[1:]:
             store.append(record)
     if stop_at in ("one-removed", "done"):
-        remove_claimed(root_fd, CLAIM_PREFIX + "f", store, records[0], tar=tar, max_inodes=MAX)
+        remove_claimed(
+            root_fd, CLAIM_PREFIX + "f", store, records[0], tar=tar, max_inodes=MAX, **POLICY
+        )
     if stop_at == "done":
         for name, record in zip(names[1:], records[1:], strict=True):
-            remove_claimed(root_fd, CLAIM_PREFIX + name, store, record, tar=tar, max_inodes=MAX)
+            remove_claimed(
+                root_fd, CLAIM_PREFIX + name, store, record, tar=tar, max_inodes=MAX, **POLICY
+            )
     for _round in (1, 2):
         for name in names:
             resume_claimed(
-                root_fd, CLAIM_PREFIX + name, store, checkout=CHECKOUT, tar=tar, max_inodes=MAX
+                root_fd,
+                CLAIM_PREFIX + name,
+                store,
+                checkout=CHECKOUT,
+                tar=tar,
+                max_inodes=MAX,
+                **POLICY,
             )
     recorded = {r.original_path.rpartition("/")[2] for r in store.read_index().records}
     archived = _archive_files(store, result.archive_id)
