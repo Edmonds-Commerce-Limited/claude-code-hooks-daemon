@@ -781,6 +781,19 @@ def _after_directory_change(words: list[str], current: str | None) -> str | None
     return _place(operands[0], current)
 
 
+@dataclass(frozen=True)
+class _MadeLink:
+    """A link a statement of the command creates: where it leads, where it is placed.
+
+    ``destinations`` is None when the place cannot be told, so any later reader
+    may pass through it. ``origin`` is the creating statement's own words.
+    """
+
+    sources: tuple[str, ...]
+    destinations: tuple[str, ...] | None
+    origin: tuple[str, ...]
+
+
 @dataclass
 class _SearchCwds:
     """The directories a search may run in, and every ``cd`` target the command named."""
@@ -799,6 +812,8 @@ class _SearchCwds:
     command: str = ""
     # The directory links a computed move's scan found: a later reader may pass through one.
     computed_links: list[str] = field(default_factory=list)
+    # Links earlier statements of the command create: the filesystem the hook sees lacks them.
+    made_links: list[_MadeLink] = field(default_factory=list)
 
     def indeterminate(self) -> tuple[str, ...]:
         """A move that cannot be placed: the project root, every named target and the hook cwd.
@@ -984,6 +999,10 @@ def _segment_reads(
         # move could have reached, the links among them, is read as a root too.
         for directory in tracker.indeterminate():
             yield Read(directory, view=TreeView.ALL)
+    yield from _reads_through_made_links(words, head, here, tracker)
+    made = _made_link(words, here)
+    if made is not None and made not in tracker.made_links:
+        tracker.made_links.append(made)
     if head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
         inner = words[words.index(_SHELL_COMMAND_FLAG, 1) + 1]
         yield from _reads(inner, here, depth + 1, tracker)
@@ -1011,6 +1030,140 @@ def _segment_reads(
     elif _is_search(words):
         for base in here or (None,):
             yield from _search_reads(words, base, piped_in=piped_in, relocating_env=relocating_env)
+
+
+# --- A link made earlier in the same command (Plan 00613 F-BYPS F5) ------------------------------
+#
+# The hook judges the filesystem as it is before the command runs, so a link the command makes
+# (`ln -s main/conf conf2 && cat conf2/vault.txt`) does not exist yet when a later statement is
+# placed. Each link-making statement is recorded with where it leads and where it lands; a later
+# statement that names that place, or a place above or below it, is judged as a read of where
+# the link leads. A link that leads outside the project fails closed (see `Read.physical`).
+
+_LN: Final[str] = "ln"
+_SYMBOLIC_LONG: Final[dict[str, str]] = {"ln": "--symbolic", "cp": "--symbolic-link"}
+_TARGET_DIRECTORY_OPTIONS: Final[frozenset[str]] = frozenset({"-t", "--target-directory"})
+_SUFFIX_OPTIONS: Final[frozenset[str]] = frozenset({"-S", "--suffix"})
+_SEED_WORKTREE: Final[str] = "seed-worktree"
+_HOOKS_DAEMON: Final[str] = "hooks-daemon"
+
+
+def _made_link(words: list[str], here: tuple[str, ...]) -> _MadeLink | None:
+    """The link a statement creates (``ln -s``, ``cp -s``, ``hooks-daemon seed-worktree``), or None."""
+    head = posixpath.basename(words[0])
+    if head == _HOOKS_DAEMON:
+        operands = _link_operands(words[1:])[0]
+        if not operands or operands[0] != _SEED_WORKTREE:
+            return None
+        destinations = _places(operands[1:2], here)
+        # What a seed list links is the project's configuration: every file may be behind one.
+        return _MadeLink((_EVERYTHING,), destinations, tuple(words))
+    if head not in _SYMBOLIC_LONG or not _makes_symbolic_links(head, words[1:]):
+        return None
+    operands, target_directory = _link_operands(words[1:])
+    if target_directory is not None:
+        sources, destination_words = operands, [target_directory]
+    elif len(operands) >= 2:
+        sources, destination_words = operands[:-1], [operands[-1]]
+    elif operands:
+        sources, destination_words = operands, [posixpath.basename(operands[0])]
+    else:
+        return None
+    destinations = _places(destination_words, here)
+    # A link's relative target is read from the directory the link lands in.
+    anchors = (
+        *here,
+        *(posixpath.dirname(place) for place in destinations or ()),
+        *(destinations or ()),
+    )
+    placed: dict[str, None] = {}
+    for source in sources:
+        found = [
+            place
+            for anchor in dict.fromkeys(anchors or (None,))
+            if (place := _place(source, anchor)) is not None
+        ]
+        placed.update(dict.fromkeys(found or [_EVERYTHING]))
+    return _MadeLink(tuple(placed), destinations, tuple(words))
+
+
+def _makes_symbolic_links(head: str, arguments: list[str]) -> bool:
+    """Does an ``ln``/``cp`` carry its symbolic-link option (``-s``, ``-sf``, ``--symbolic``)?"""
+    for word in arguments:
+        if word == _END_OF_OPTIONS:
+            return False
+        if word == _SYMBOLIC_LONG[head]:
+            return True
+        if word.startswith("-") and not word.startswith("--") and "s" in word[1:]:
+            return True
+    return False
+
+
+def _link_operands(arguments: list[str]) -> tuple[list[str], str | None]:
+    """The operands of an ``ln``/``cp``/``hooks-daemon`` command, and its ``-t`` directory."""
+    operands: list[str] = []
+    target_directory: str | None = None
+    options_ended = False
+    skip_value = False
+    take_target = False
+    for word in arguments:
+        if skip_value:
+            skip_value = False
+            if take_target:
+                target_directory = word
+            continue
+        if options_ended or not word.startswith("-") or word == _LONE_DASH:
+            operands.append(word)
+        elif word == _END_OF_OPTIONS:
+            options_ended = True
+        elif word in _TARGET_DIRECTORY_OPTIONS or word in _SUFFIX_OPTIONS:
+            skip_value, take_target = True, word in _TARGET_DIRECTORY_OPTIONS
+        elif word.startswith("--target-directory="):
+            target_directory = word.partition("=")[2]
+    return operands, target_directory
+
+
+def _places(words: list[str], here: tuple[str, ...]) -> tuple[str, ...] | None:
+    """Where each of ``words`` lies from each of ``here``; None when one cannot be placed."""
+    placed: dict[str, None] = {}
+    for base in here or (None,):
+        for word in words:
+            place = _place(word, base)
+            if place is None:
+                return None
+            placed[place] = None
+    return tuple(placed)
+
+
+def _reads_through_made_links(
+    words: list[str], head: str, here: tuple[str, ...], tracker: _SearchCwds
+) -> Iterator[Read]:
+    """The places earlier-made links lead to, when this statement names where they land."""
+    if not tracker.made_links or head in _DIRECTORY_CHANGERS or not _runs_a_reader(words):
+        return
+    recursive = _reads_files(words, head)
+    named: list[str | None] = []
+    for base in here or (None,):
+        candidates = [*_path_operands(words[1:]), *(["."] if recursive else [])]
+        named.extend(_place(word, base) for word in candidates)
+    for link in tracker.made_links:
+        if link.origin == tuple(words):
+            continue
+        if link.destinations is None or any(
+            place is None or any(_overlaps(place, landed) for landed in link.destinations)
+            for place in named
+        ):
+            for source in link.sources:
+                yield Read(source, view=TreeView.ALL, physical=True)
+
+
+def _overlaps(place: str, landed: str) -> bool:
+    """Is ``place`` the directory ``landed``, below it, or above it?"""
+    return (
+        place == landed
+        or place.startswith(landed.rstrip("/") + "/")
+        or landed.startswith(place.rstrip("/") + "/")
+    )
 
 
 def _reads_from_each(

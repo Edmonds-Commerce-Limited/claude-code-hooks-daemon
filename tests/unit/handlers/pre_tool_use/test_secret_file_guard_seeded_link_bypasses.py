@@ -200,8 +200,8 @@ class TestALinkMadeEarlierInTheCommand:
         [
             "ln -s @ROOT/conf conf2",
             "ln -s @ROOT/conf conf2 && ls conf2",
-            "ln -s @ROOT/docs docs2 && cat docs2/notes.txt",
-            "ln -s @ROOT/docs docs2 && grep -R ordinary docs",
+            "ln -s docs docs2 && cat docs2/notes.txt",
+            "ln -s docs docs2 && grep -R ordinary docs",
             "ln -s plain.txt alias.txt && cat alias.txt",
             "cat plain.txt && ln -s @ROOT/conf conf2",
             "ln -s @ROOT/docs docs2 && cat @ROOT/docs/notes.txt",
