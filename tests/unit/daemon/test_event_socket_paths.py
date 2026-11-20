@@ -28,6 +28,9 @@ from claude_code_hooks_daemon.daemon.paths import (
     get_socket_path,
 )
 
+# Captured before any test class patches ``Path.mkdir``.
+_REAL_MKDIR = Path.mkdir
+
 
 class _EventSocketPathTestBase(unittest.TestCase):
     """Mocks ``Path.mkdir`` and pins ``$HOSTNAME`` for deterministic suffixes."""
@@ -141,18 +144,28 @@ class TestEventSocketDirFallback(_EventSocketPathTestBase):
         # The run-user root is pointed at a directory that does not exist, so a
         # host that really has a private /run/user/<uid> (a CI runner) cannot
         # answer for the case this test names.
+        # The shared tmp is pointed at a fixture too: a CI runner can already hold
+        # a /tmp/hooks-daemon-<uid> that is not private, which the code refuses.
+        # Path.mkdir is mocked by this class, so the private subdir is made with
+        # os.mkdir.
         with tempfile.TemporaryDirectory() as scratch:
             missing_run_user_root = Path(scratch) / "no-run-user"
+            shared_tmp = Path(scratch) / "shared-tmp"
+            private_sub = shared_tmp / f"hooks-daemon-{os.geteuid()}"
+            _REAL_MKDIR(shared_tmp, mode=0o700)
+            _REAL_MKDIR(private_sub, mode=0o700)
+            private_sub.chmod(0o700)
             with (
                 patch.dict("os.environ", {}, clear=False),
                 patch(
                     "claude_code_hooks_daemon.daemon.paths._RUN_USER_ROOT",
                     missing_run_user_root,
                 ),
+                patch("claude_code_hooks_daemon.daemon.paths._SHARED_TMP", shared_tmp),
             ):
                 os.environ.pop("XDG_RUNTIME_DIR", None)
                 events_dir = get_event_socket_dir_from_untracked(self._DEEP_UNTRACKED_DIR)
-        self.assertTrue(str(events_dir).startswith("/tmp/"))
+            self.assertTrue(str(events_dir).startswith(str(shared_tmp) + "/"))
         self.assertIn("-events", events_dir.name)
 
     def test_fallback_dir_is_deterministic_for_same_untracked_dir(self) -> None:
