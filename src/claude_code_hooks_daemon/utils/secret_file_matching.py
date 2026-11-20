@@ -4768,9 +4768,7 @@ def effective_cwds(command: str, cwd: str | None) -> CwdSet:
     names again (``bash n.md``) is still walked.
     """
     walk = _DirectoryWalk(cwd, cdpath=CDPATH_VARIABLE in command, command=command)
-    run_text = (
-        strip_never_run_heredoc_bodies(command) if _HEREDOC_OPERATOR in command else command
-    )
+    run_text = strip_never_run_heredoc_bodies(command) if _HEREDOC_OPERATOR in command else command
     # One scan for the command's many computed moves, even outside a guard's scope.
     with link_scan_scope():
         _walk_directory_changes(run_text, walk, 0)
