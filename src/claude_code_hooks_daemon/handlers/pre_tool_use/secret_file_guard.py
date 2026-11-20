@@ -178,7 +178,9 @@ _GAVE_UP_CAUSE: Final[str] = (
     "and the command holds a recursive search or a glob. "
     "Only the full scan can tell which files those read, so they are denied rather than "
     "allowed unchecked. Split the command into smaller ones, or drop the large brace "
-    "expansion or wide pattern beside the search."
+    "expansion or wide pattern beside the search. In a program given inline or as a "
+    "heredoc, `*`, `?` and `[` count as glob characters wherever they appear, code "
+    "included: write the program to a file and run the file."
 )
 _NO_INDEX_REASON: Final[str] = (
     "a recursive search, directory read or wildcard path was not checked, because the "

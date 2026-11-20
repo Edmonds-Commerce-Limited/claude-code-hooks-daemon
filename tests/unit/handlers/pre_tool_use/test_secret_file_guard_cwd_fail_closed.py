@@ -751,6 +751,68 @@ class TestAScanThatGivesUpBesideASearchOrGlob:
         assert self._GAVE_UP not in text
 
 
+#: Python that is also a shell glob word reaching the in-project dummy.
+_CODE_THAT_IS_A_GLOB = f"own = id_rs = a = 1\nprint(own/{_PROTECTED[:-1]}[a])"
+#: Ordinary Python whose only glob characters are a subscript and a product.
+_ORDINARY_CODE = "x = [1]\nprint(x[0] * 2)"
+
+
+class TestAGivenUpScanOfAPythonProgram:
+    """Ledger N678, ruled: glob characters in Python CODE still deny after a give-up.
+
+    A program can read its own text back and hand it to a shell, so a word of
+    code is a glob whenever the shell would read it as one, and only the full
+    scan judges which files it reaches. No test on the word itself tells a
+    subscript from a glob: ``x[0]`` is both. Braces are not glob characters.
+    """
+
+    _GAVE_UP = "stopped before"
+    _REMEDY = "write the program to a file"
+
+    @pytest.mark.parametrize(
+        "command",
+        [f"python3 - <<'EOF'\n{_CODE_THAT_IS_A_GLOB}\nEOF", f"python3 -c '{_CODE_THAT_IS_A_GLOB}'"],
+    )
+    def test_the_full_scan_judges_a_glob_spelled_in_code(self, tree: Tree, command: str) -> None:
+        decision, text = _result(tree, command)
+        assert decision is Decision.DENY, text
+        assert self._GAVE_UP not in text
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"python3 - <<'EOF'\n{_ORDINARY_CODE}\nEOF",
+            f"python3 -c '{_ORDINARY_CODE}'",
+            f"python3 - <<'EOF'\n{_CODE_THAT_IS_A_GLOB}\nEOF",
+            "python3 - <<'EOF'\n# -*- coding: utf-8 -*-\nx = 1\nEOF",
+            "python3 - <<'EOF'\nimport os\nos.system('cat o*/*')\nEOF",
+        ],
+    )
+    def test_a_deadline_hit_denies_a_glob_character_in_a_program(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch, command: str
+    ) -> None:
+        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", -1.0)
+        decision, text = _result(tree, command)
+        assert decision is Decision.DENY, text
+        assert self._GAVE_UP in text
+        assert self._REMEDY in text
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "python3 - <<'EOF'\nx = 1\nprint(f'{x}-0', {'k': 0}, {0,1})\nEOF",
+            "python3 -c 'x = 1; print({x: 0}, {0,1})'",
+        ],
+    )
+    def test_a_deadline_hit_on_braces_alone_stays_an_advisory(
+        self, tree: Tree, monkeypatch: pytest.MonkeyPatch, command: str
+    ) -> None:
+        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", -1.0)
+        decision, text = _result(tree, command)
+        assert decision is Decision.ALLOW
+        assert "could NOT fully judge" in text
+
+
 #: A word the brace reader cannot resolve: the full scan gives up on it as unparseable.
 _UNPARSEABLE = 'echo .p-{"$(case a in a) echo;; esac)",q}'
 
