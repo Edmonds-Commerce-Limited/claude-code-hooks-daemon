@@ -566,6 +566,8 @@ class Read:
     default_expansion: bool = False
     #: The links below ``root`` the reader follows; ALL unless proven otherwise (Plan 00613).
     follows: LinkFollow = LinkFollow.ALL
+    #: ``root`` is where a ``link/..`` root really points; outside the project nothing is indexed.
+    physical: bool = False
 
 
 @fails_closed
@@ -607,6 +609,10 @@ def protected_reached(
     (Plan 00613: a worktree's seeded links into the main checkout).
     """
     for read in reads:
+        if read.physical and _outside_project(read.root, index):
+            # `link/..` stepped out of a link to a place the project's index never listed
+            # (a worktree-root daemon, the main checkout): no file there is vouched for.
+            return (index.patterns[0], read.root) if index.patterns else None
         for searched in _directories_read(read, index):
             hit = index.find_under(
                 searched.root, view=searched.view, skip=searched.skip, is_exempt=is_exempt
@@ -620,6 +626,12 @@ def protected_reached(
         if hit is not None:
             return hit, root
     return None
+
+
+def _outside_project(path: str, index: ProtectedFileIndex) -> bool:
+    """Does ``path`` lie outside the project ``index`` lists, however either is spelled?"""
+    tops = {index.project_root, os.path.realpath(index.project_root)}
+    return not any(path == top or path.startswith(top.rstrip("/") + "/") for top in tops)
 
 
 def _glob_literal_directory(pattern: str) -> str:
@@ -1802,7 +1814,11 @@ def _reads_of_roots(
         physical = _physical_root(root, cwd)
         if physical is not None and physical not in placed:
             yield Read(
-                physical, view=_view_for(rules), skip=rules.predicate(physical), follows=follows
+                physical,
+                view=_view_for(rules),
+                skip=rules.predicate(physical),
+                follows=follows,
+                physical=True,
             )
 
 

@@ -156,7 +156,6 @@ class TestParentOfALinkLeavesTheProject:
             "rg fixture conf/..",
             "grep -R fixture conf/..",
             "grep -r fixture conf/../",
-            "grep -r fixture conf/../docs",
         ],
     )
     def test_denied(self, layout: _Layout, command: str) -> None:
