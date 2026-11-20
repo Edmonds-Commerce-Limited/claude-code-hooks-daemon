@@ -834,6 +834,34 @@ class TestIdleCompactThresholdCheck:
     def test_unparseable_warns(self, handler: Any) -> None:
         assert self._check(handler, {"env": {self.VAR: "lots"}})["passed"] is False
 
+    def test_unparseable_value_is_reported_as_not_a_number(self, handler: Any) -> None:
+        check = self._check(handler, {"env": {self.VAR: "lots"}})
+        assert check["warn"] is True
+        assert "'lots'" in check["current"]
+        assert "not a whole number" in check["current"]
+        assert "above the" not in check["current"]
+
+    def test_unreadable_project_settings_is_logged_and_skipped(
+        self, handler: Any, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "settings.json").write_text("{not json")
+        with caplog.at_level(
+            "DEBUG",
+            logger="claude_code_hooks_daemon.handlers.session_start.optimal_config_checker",
+        ):
+            # Read directly: through `_run_checks` the idle compaction check
+            # already reports the unreadable file, which makes this one N/A.
+            with patch.object(
+                handler, "_read_global_settings", return_value={"env": {self.VAR: "100000"}}
+            ):
+                found = handler._idle_threshold_value(tmp_path)
+        assert found == ("100000", "~/.claude/settings.json")
+        assert any(
+            "settings.json" in record.getMessage() and record.exc_info is not None
+            for record in caplog.records
+        )
+
     def test_shell_env_wins(self, handler: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(self.VAR, "100000")
         assert self._check(handler, {"env": {self.VAR: "300000"}})["passed"] is True
