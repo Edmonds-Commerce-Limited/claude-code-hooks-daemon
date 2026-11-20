@@ -47,14 +47,21 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - trusted system tool (git), list form, no shell
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from fnmatch import fnmatchcase
 from pathlib import Path
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.branch_park import walk_park_range
-from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
+from claude_code_hooks_daemon.utils.git_repo import (
+    GIT_COMMAND_ERRORS,
+    branch_ref,
+    parse_worktree_porcelain,
+    run_git,
+    strip_branch_ref,
+)
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.remote_refs import (
     LazyRemoteRefs,
@@ -909,6 +916,43 @@ def classify_branch(
     )
 
 
+def _worktree_holding(repo: Path, name: str) -> tuple[Path, bool] | None:
+    """``(path, is_main_checkout)`` of the worktree that has ``name`` checked out, or None."""
+    listing = _git(repo, "worktree", "list", "--porcelain", check=False)
+    if listing.returncode != 0:
+        return None
+    records = parse_worktree_porcelain(listing.stdout)
+    for index, record in enumerate(records):
+        if record.branch == name:
+            return record.path, index == 0
+    return None
+
+
+def _explain_worktree_refusal(
+    repo: Path, refused: BranchClassification, proof: BranchClassification
+) -> BranchClassification:
+    """``refused`` with its detail naming the proof found and the step that unblocks it.
+
+    The refusal itself never changes: git will not delete a checked-out branch, and
+    the delete re-proves with the worktree gone. ``proof`` is the same classification
+    made with ``ignore_worktree``; only a SAFE one earns a ``git worktree remove``
+    step, and never for the main checkout, which cannot be removed.
+    """
+    if not proof.is_safe:
+        return refused
+    holding = _worktree_holding(repo, refused.name)
+    rerun = daemon_cli_command_for_docs("delete-branch", refused.name)
+    proven = f"proven {proof.tier} ({proof.detail})"
+    if holding is None:
+        return replace(refused, detail=f"{refused.detail}; {proven}")
+    path, is_main = holding
+    if is_main:
+        step = f"switch the main checkout {path} to another branch, then run `{rerun}`"
+    else:
+        step = f"run `git worktree remove {path}`, then `{rerun}`"
+    return replace(refused, detail=f"{refused.detail} ({path}); {proven}; to delete it, {step}")
+
+
 def delete_branches(
     repo: Path,
     names: Sequence[str],
@@ -950,20 +994,36 @@ def delete_branches(
             outside the fetched refs. None makes no network call.
     """
     listing = LazyRemoteRefs(repo, remote) if remote is not None else None
-    classifications = tuple(
-        classify_branch(
+
+    def classify(name: str, *, ignore_worktree: bool = False) -> BranchClassification:
+        return classify_branch(
             repo,
             name,
             protected_ref=protected_ref,
             protected_names=protected_names,
             targets=targets,
+            ignore_worktree=ignore_worktree,
             content_tier=content_tier,
             line_names=line_names,
             line_targets=line_targets,
             remote_listing=listing,
         )
-        for name in names
-    )
+
+    def explained(verdict: BranchClassification) -> BranchClassification:
+        # A worktree refusal stays a refusal; the proof made with the worktree
+        # ignored only decides what the message tells the human to do next.
+        if verdict.refusal != REFUSAL_WORKTREE:
+            return verdict
+        try:
+            proof = classify(verdict.name, ignore_worktree=True)
+        except GIT_COMMAND_ERRORS as exc:
+            return replace(
+                verdict,
+                detail=f"{verdict.detail}; the proof with the worktree ignored failed ({exc})",
+            )
+        return _explain_worktree_refusal(repo, verdict, proof)
+
+    classifications = tuple(explained(classify(name)) for name in names)
 
     blockers = tuple(
         f"{c.name}: {c.detail}"

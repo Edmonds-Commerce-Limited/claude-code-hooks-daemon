@@ -86,12 +86,15 @@ MERGED_TIERS = frozenset({TIER_MERGED, TIER_MERGED_UNPUSHED, TIER_MERGED_NOT_IN_
 #: Inventory states ``branch-sweep --clean`` considers, a park marker over work the
 #: default holds included: ``classify_branch`` proves its local delete and
 #: :func:`prove_remote_merged` its remote one (``park-carried``, Plan 00617).
+#: ``content-preserved`` comes only from the ``prove_content`` inventory ``--clean``
+#: builds, and is re-proved by ``classify_branch``'s content tier before any delete.
 CLEAN_STATES = frozenset(
     {
         BranchState.MERGED_DEFAULT,
         BranchState.MERGED_LINE,
         BranchState.PATCH_EQUIVALENT,
         BranchState.PARK_CARRIED,
+        BranchState.CONTENT_PRESERVED,
     }
 )
 
@@ -601,14 +604,16 @@ def _classify(
     lines: Sequence[str] = (),
     line_targets: Sequence[str] | None = None,
     ignore_worktree: bool = False,
+    content_tier: bool = False,
 ) -> BranchClassification:
+    """``classify_branch`` for cleanup; ``content_tier`` is True only from ``--clean``."""
     return classify_branch(
         repo,
         name,
         protected_names=never_work,
         targets=targets,
         ignore_worktree=ignore_worktree,
-        content_tier=False,
+        content_tier=content_tier,
         line_names=lines,
         line_targets=line_targets,
     )
@@ -869,7 +874,7 @@ def clean_sweep(
     unhurried = config.model_copy(
         update={"sweep": config.sweep.model_copy(update={"budget_ms": BULK_SWEEP_BUDGET_MS})}
     )
-    inventory = branch_inventory.build_inventory(repo, unhurried)
+    inventory = branch_inventory.build_inventory(repo, unhurried, prove_content=True)
     default = inventory.default_branch
     if default is None:
         raise ValueError("cannot determine the default branch; set branches.default")
@@ -919,6 +924,7 @@ def clean_sweep(
             lines=config.integration_lines,
             line_targets=line_targets,
             ignore_worktree=held_by is not None,
+            content_tier=True,
         )
         if not verdict.is_safe:
             skipped.append(f"{name}: {verdict.detail}")
@@ -1085,12 +1091,14 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
     deleted: tuple[str, ...] = ()
     if local:
         before = _park_snapshot(repo, local)
+        # The content tier, as in the plan: a content-preserved branch is re-proved
+        # here, so the delete never rests on the inventory's (or a cache's) word.
         report = delete_branches(
             repo,
             local,
             protected_names=plan.never_work,
             targets=plan.targets,
-            content_tier=False,
+            content_tier=True,
             line_names=config.integration_lines,
             line_targets=plan.line_targets,
         )
