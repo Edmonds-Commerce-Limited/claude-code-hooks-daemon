@@ -8013,3 +8013,19 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: the protected-path set is put into the environment once, at session start. The test compares it with a fresh `checkout_roots()` read. The py3.13 leg ran for about 80 minutes. During that run, `untracked/worktrees/plan-00613-00594-rulings` was merged and removed (main reflog, 2026-11-19 21:54). The snapshot still held its two paths, so the comparison failed. It passes on a rerun in the same worktree. The branch does not touch the jail code.
 
 **Status**: ⬜ Open, low priority. Compare the snapshot against the roots that existed when the session started, or assert only that every root still present is protected.
+
+### N680 — two remote-branch delete routes carry no proof at all: `gh pr close N --delete-branch` and `gh api -X DELETE .../git/refs/heads/<name>`
+
+**Source**: Plan 00594 F-BYPS review (`CLAUDE/Plan/00594-branch-lifecycle-and-branch-tip-channel/subagent-reports/f-byps-remote-delete-surviving-content-review.md`), on branch `agent-a20c91c23eca4e56e-43e33957`.
+
+**Evidence**: both commands delete a remote branch. No handler reads them and the loosening corpus has no row for them, so the remote-delete proof of Plan 00626 (remote default only, cherry route) is never asked. The gap is on main, not introduced by Plan 00594.
+
+**Status**: ⬜ Open, medium priority. Add the two shapes to the destructive-git remote-delete handler so they run the same proof as `git push --delete`, with corpus rows for each.
+
+### N681 — Plan 00628 rough edges left after the merge (long socket path)
+
+**Source**: Plan 00628 close-out.
+
+**Evidence**: (1) `status`/`stop`/`restart` print a traceback, not a clean message, when the fallback directory is unsafe. (2) `init.sh` keeps polling after a failed daemon start. (3) A discovery-file delete can race a restart. (4) On a host whose `XDG_RUNTIME_DIR` is not private, an upgrade can leave the old daemon running beside the new one; stop it by hand once. (5) The `/tmp` fallback has no sticky-bit check. (6) Other length checks in `daemon/paths.py` still count characters, not bytes. (7) `init.sh` prints "started successfully" for a daemon that died while binding.
+
+**Status**: ⬜ Open, low to medium priority. One item per fix, test first; (7) and (1) are the ones a user sees first.
