@@ -595,9 +595,7 @@ def remote_delete_advice(
         proof = prove_remote_merged(repo, remote, [name], default, config)
         problem = proof.problems.get(name)
         if problem is None and name in proof.tips:
-            return daemon_cli_command_for_docs(
-                "delete-branch", "--remote-only", shlex.quote(name)
-            )
+            return daemon_cli_command_for_docs("delete-branch", "--remote-only", shlex.quote(name))
         problem = problem or "the proof did not accept it"
     return f"remote delete of {remote}/{name} is for the owner: {problem}"
 
