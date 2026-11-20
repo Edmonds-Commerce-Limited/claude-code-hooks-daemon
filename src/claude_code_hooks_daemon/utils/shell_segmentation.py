@@ -1528,7 +1528,7 @@ def strip_unrun_heredoc_bodies(command: str) -> str:
 def strip_never_run_heredoc_bodies(command: str) -> str:
     """:func:`strip_unrun_heredoc_bodies`, keeping a ``.md`` body the command names again.
 
-    Release 3.76.0 review 2 F4: ``cat > n.md <<'EOF' … EOF; bash n.md`` runs
+    Release review 2 F4: ``cat > n.md <<'EOF' … EOF; bash n.md`` runs
     the body it wrote. A prose body is blanked only when ``.md`` appears no
     more often than the bodies that blanking removes (once per target),
     so any later word naming a markdown file again keeps every body.

@@ -1613,7 +1613,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
     ) -> tuple[str, str, str] | None:
         """The Bash verdict, with a process-view word judged where a protected name is.
 
-        Release 3.76.0 review F2: a word through the calling process's own view
+        Release review F2: a word through the calling process's own view
         (N668) is a mention, so the grep-PATTERN exemption that clears a
         protected name clears it too, while every position that opens it still
         denies. A quoted heredoc body written only to ``.md`` files is prose no
@@ -1689,7 +1689,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             return (*one_liner_mention, "bash")
         # The consumer and encrypted-target exemptions vouch for a file the
         # command OPENS; a process-view word is one the daemon cannot place,
-        # so neither may clear a command holding one (release 3.76.0 F2).
+        # so neither may clear a command holding one (release review F2).
         opens_a_view = mention[0] == sfm.PROCESS_VIEW_PATTERN or any(
             pattern == sfm.PROCESS_VIEW_PATTERN
             for pattern, _token in sfm.iter_protected_mentions(

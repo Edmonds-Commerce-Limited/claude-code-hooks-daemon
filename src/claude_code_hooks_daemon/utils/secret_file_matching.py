@@ -96,7 +96,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ── Process-view words in the Bash mention scan (release 3.76.0 review F2) ───
+# ── Process-view words in the Bash mention scan (release review F2) ──────────
 class ProcessViewMode(Enum):
     """How the mention scan treats a word through the calling process's own view.
 
@@ -4635,7 +4635,7 @@ _QUOTE_CHARACTERS: Final[frozenset[str]] = frozenset("'\"")
 def _quote_opened_words(segment: str) -> frozenset[str]:
     """The words a quote in an unbalanced ``segment`` may open a command with.
 
-    Release 3.76.0 review 2 F4 (b): a segment split out of a quoted body
+    Release review 2 F4 (b): a segment split out of a quoted body
     (``bash -c 'cd d``) has lost its quotes, so where its commands start is
     unknown. A command can start just inside a quote, never in the middle of
     prose (``it's sudo -D x``), so the first word after each quote character
@@ -4761,7 +4761,7 @@ def effective_cwds(command: str, cwd: str | None) -> CwdSet:
     (:func:`_may_change_directory`), not every line of a large authored script
     (ledger 00474 N465).
 
-    Release 3.76.0 review 2 F4: a quoted heredoc body that nothing runs, now
+    Release review 2 F4: a quoted heredoc body that nothing runs, now
     or later (:func:`strip_never_run_heredoc_bodies`), is not walked. It is
     data, so a ``cd`` in it moves nothing. A body that is executed, written to
     a file that could be run later, or written to a ``.md`` file the command

@@ -46,7 +46,7 @@ class ProcessViewRefusedError(ResolutionFailedError):
 
     A subclass so the Bash mention scan can tell this refusal from every other
     placement failure and judge it as a mention, in the positions a protected
-    name is judged (release 3.76.0 review F2). Everywhere else it is a plain
+    name is judged (release review F2). Everywhere else it is a plain
     :class:`ResolutionFailedError`.
     """
 
