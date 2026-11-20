@@ -78,7 +78,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 
 ### Phase 3: The archive store and `--apply`
 
-- [ ] ⬜ **Task 3.0**: Prerequisite for Tasks 3.8 and 3.9. Close DESIGN.md section 13 rows N1 (alternates lender PROTECTED), N2 (`--separate-git-dir`), N3 (venv layout and `_is_venv`), N4 (`./` and `//` sub-root spelling) and the reflog/`ORIG_HEAD` row, test-first (a failing test per row, then the fix). From the 261120 re-review: Phases 1-2 are safe to merge as a dry run only; DISPOSABLE is not yet safe to act on.
+- [x] ✅ **Task 3.0**: Prerequisite for Tasks 3.8 and 3.9. Close DESIGN.md section 13 rows N1 (alternates lender PROTECTED), N2 (`--separate-git-dir`), N3 (venv layout and `_is_venv`), N4 (`./` and `//` sub-root spelling) and the reflog/`ORIG_HEAD` row, test-first (a failing test per row, then the fix). From the 261120 re-review: Phases 1-2 are safe to merge as a dry run only; DISPOSABLE is not yet safe to act on.
 - [ ] ⬜ **Task 3.1**: Add the store: flat layout, mode 0700, `index.jsonl`, `flock`.
 - [ ] ⬜ **Task 3.2**: Add claim-by-rename through a directory descriptor, with the fingerprint re-check and rename-back.
 - [ ] ⬜ **Task 3.3**: Add pack and bidirectional verify (GNU tar by argv, `tar --compare`, member count, SHA-256, `fsync`), including the special-file skip list and the link-count refusal.
@@ -87,7 +87,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [ ] ⬜ **Task 3.6**: Add expiry by verdict retention, `restore <id>` and `keep` (bounded, reasoned, no repeated reason).
 - [ ] ⬜ **Task 3.7**: Add proof P6 (adopt a tarball beside its original).
 - [ ] ⬜ **Task 3.8** (depends on Task 3.0): Wire `--apply`, rebuilding every per-sweep git fact for the run (DESIGN.md section 5.2 step 1: tracked files, worktrees, verified tips and blobs, references). Add the crash-safety tests (a failure after each step), the escape tests and the property test of DESIGN.md section 14.
-- [ ] ⬜ **Task 3.9** (depends on Task 3.0): Independent adversarial review of Phases 1 to 3 (data loss, link escapes, TOCTOU) before any later phase runs `--apply` outside tests. It must rule on the open reflog/`ORIG_HEAD` row of DESIGN.md section 13.
+- [ ] ⬜ **Task 3.9** (depends on Task 3.0): Independent adversarial review of Phases 1 to 3 (data loss, link escapes, TOCTOU) before any later phase runs `--apply` outside tests. It must review the Task 3.0 fixes for the N1-N4 and reflog/`ORIG_HEAD` rows of DESIGN.md section 13.
 
 ### Phase 4: The session directory convention
 
