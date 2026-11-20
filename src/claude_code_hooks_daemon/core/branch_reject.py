@@ -502,6 +502,29 @@ class RejectStore:
     def write_dispatch(self, record: DispatchRecord) -> None:
         self._write(_DISPATCHES, record.nonce, record.to_dict())
 
+    def create_dispatch(self, record: DispatchRecord) -> None:
+        """Write the dispatch record only if none exists for its nonce.
+
+        ``os.link`` of a complete temp file is atomic and fails on an existing name, so
+        two parallel dispatches of one prompt cannot both be admitted, and the second
+        never overwrites the first. Raises RejectRefusedError when the record exists.
+        """
+        path = self._path(_DISPATCHES, record.nonce)
+        tmp = path.with_name(f".{path.name}.{new_id()}.tmp")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(record.to_dict(), sort_keys=True), encoding="utf-8")
+            os.link(tmp, path)
+        except FileExistsError as exc:
+            raise RejectRefusedError(
+                f"nonce {record.nonce} is already dispatched; one request binds one agent"
+            ) from exc
+        except OSError as exc:
+            raise RejectError(f"could not write {path}: {exc}") from exc
+        finally:
+            with suppress(FileNotFoundError, NotADirectoryError):
+                tmp.unlink()
+
     def read_dispatch(self, nonce: str) -> DispatchRecord | None:
         data = self._read(_DISPATCHES, nonce)
         return None if data is None else DispatchRecord.from_dict(data)
@@ -878,6 +901,128 @@ def prompt_nonce(prompt: str) -> str | None:
 def prompt_digest(prompt: str) -> str:
     """The sha256 the dispatch gate compares a dispatched prompt against."""
     return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+
+# --- the dispatch gate (PreToolUse / PostToolUse ``Agent``) ---------------------------
+
+
+@dataclass(frozen=True)
+class DispatchCall:
+    """What the dispatch gate reads from one PreToolUse ``Agent`` call."""
+
+    session_id: str
+    tool_use_id: str
+    subagent_type: str
+    prompt: str
+    #: The family ``dispatch_tier`` predicts the call runs on; None when unknown.
+    predicted_family: str | None
+    #: True when the call asks to resume an earlier agent rather than start fresh.
+    resume: bool
+    #: True when the deployed reviewer definition is the shipped, CURRENT one.
+    definition_current: bool
+
+
+def is_reviewer_dispatch(subagent_type: str, prompt: str) -> bool:
+    """Whether a dispatch is the gate's business: the reviewer type, or a review prompt.
+
+    Cheap and store-free, so a damaged store never blocks an unrelated dispatch.
+    """
+    return subagent_type == REVIEWER_AGENT_TYPE or prompt.startswith(PROMPT_MARKER)
+
+
+def _call_problems(call: DispatchCall) -> list[str]:
+    problems: list[str] = []
+    if call.subagent_type != REVIEWER_AGENT_TYPE:
+        problems.append(
+            f"a review prompt is dispatched only to the {REVIEWER_AGENT_TYPE} type, "
+            f"not {call.subagent_type or '(none)'}"
+        )
+    if not call.session_id or not call.tool_use_id:
+        problems.append("the call carries no session id or tool_use_id to bind")
+    floor = family_rank(OPUS)
+    rank = family_rank(call.predicted_family) if call.predicted_family else None
+    if rank is None or floor is None or rank < floor:
+        problems.append(
+            f"the dispatch is predicted to run on {call.predicted_family or 'an unknown model'}, "
+            "below Opus; drop the per-call model parameter"
+        )
+    if call.resume:
+        problems.append("a review is a fresh agent, never a resumed one")
+    if not call.definition_current:
+        problems.append(
+            f"the deployed {REVIEWER_AGENT_TYPE} definition is not the shipped one; "
+            "redeploy it (hooks-daemon upgrade) before a review"
+        )
+    return problems
+
+
+def dispatch_problems(call: DispatchCall, store: RejectStore) -> list[str]:
+    """Every reason to deny a reviewer dispatch; an empty list is the only pass.
+
+    The prompt must be byte-equal to an outstanding request's prompt (its sha256), and
+    the nonce must not already be dispatched. A store that cannot be read is a problem.
+    """
+    problems = _call_problems(call)
+    nonce = prompt_nonce(call.prompt)
+    if nonce is None:
+        problems.append(
+            "the prompt is not a daemon-composed review prompt; dispatch the reviewer only "
+            "with the exact prompt `hooks-daemon branch-reject request <branch>` prints"
+        )
+        return problems
+    try:
+        request = store.read_request(nonce)
+        dispatched = store.read_dispatch(nonce)
+    except RejectError as exc:
+        return [*problems, f"the review state is unreadable: {exc}"]
+    if request is None:
+        problems.append(f"no outstanding request carries nonce {nonce}")
+    elif prompt_digest(call.prompt) != request.prompt_sha256:
+        problems.append(
+            "the prompt differs from the one the request printed; pass it byte for byte, "
+            "with nothing added or removed"
+        )
+    if dispatched is not None:
+        problems.append(
+            f"nonce {nonce} is already dispatched; run `branch-reject request` again for a "
+            "fresh prompt"
+        )
+    return problems
+
+
+def admit_dispatch(call: DispatchCall, store: RejectStore) -> DispatchRecord:
+    """Admit a reviewer dispatch and record it, unbound, or raise RejectRefusedError.
+
+    The record is created exclusively, so of two parallel dispatches of one prompt only
+    one is admitted. Never touches the ledger.
+    """
+    problems = dispatch_problems(call, store)
+    nonce = prompt_nonce(call.prompt)
+    if problems or nonce is None:
+        raise RejectRefusedError("; ".join(problems))
+    record = DispatchRecord(
+        nonce=nonce, session_id=call.session_id, tool_use_id=call.tool_use_id, agent_id=""
+    )
+    store.create_dispatch(record)
+    return record
+
+
+def bind_agent(
+    store: RejectStore, nonce: str, *, session_id: str, tool_use_id: str, agent_id: str
+) -> bool:
+    """Fill the dispatch record's ``agent_id`` from PostToolUse; True when it bound.
+
+    Binds only an unbound record whose session and ``tool_use_id`` match the call, and
+    only to a non-empty agent id. Anything else is a no-op. Raises RejectError for a
+    malformed nonce or an unreadable record.
+    """
+    record = store.read_dispatch(nonce)
+    if record is None or record.agent_id or not agent_id:
+        return False
+    if (record.session_id, record.tool_use_id) != (session_id, tool_use_id):
+        return False
+    store.write_dispatch(DispatchRecord(nonce, session_id, tool_use_id, agent_id))
+    return True
 
 
 def _check_quotable(label: str, text: str) -> None:
