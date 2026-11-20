@@ -230,6 +230,14 @@ def _holds_search_or_glob(hook_input: dict[str, Any]) -> bool:
         return True
 
 
+def _judged_bash_command(command: str) -> str:
+    """The Bash command text the guard judges: quoted bodies only a text reader reads, blanked.
+
+    One source for the decision and for the deny reason's cause (review 2 F4 c).
+    """
+    return strip_quoted_heredoc_bodies(command, text_readers_only=True)
+
+
 def _linked_cwd(cwd: str | None) -> str:
     """``cwd`` when it is absolute and passes through a link, else ``""``."""
     if not cwd or not Path(cwd).is_absolute():
@@ -1554,9 +1562,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # expands none of it and nothing opens its words as paths, so it
             # is neither judged nor glob-walked (Plan 00474 N256). Only the
             # body is blanked; the command part of the line is still judged.
-            command = strip_quoted_heredoc_bodies(
-                str(tool_input.get(_FIELD_COMMAND, "")), text_readers_only=True
-            )
+            command = _judged_bash_command(str(tool_input.get(_FIELD_COMMAND, "")))
             return self._judge_bash_with_views(hook_input, command, patterns, cwd)
 
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
@@ -1971,8 +1977,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         cwd = hook_input.get(HookInputField.CWD)
         cwd = cwd if isinstance(cwd, str) and Path(cwd).is_absolute() else None
         tool_input = hook_input.get(HookInputField.TOOL_INPUT) or {}
-        command = tool_input.get("command") if isinstance(tool_input, dict) else None
-        bases = sfm.effective_cwds(command, cwd) if isinstance(command, str) else (cwd or "",)
+        raw_command = tool_input.get(_FIELD_COMMAND) if isinstance(tool_input, dict) else None
+        # Review 2 F4 (c): the cause is computed from the text the decision judged.
+        command = _judged_bash_command(raw_command) if isinstance(raw_command, str) else None
+        bases = sfm.effective_cwds(command, cwd) if command is not None else (cwd or "",)
         link = index.link_out_of(token, [base for base in bases if base])
         if link is not None:
             shown = link

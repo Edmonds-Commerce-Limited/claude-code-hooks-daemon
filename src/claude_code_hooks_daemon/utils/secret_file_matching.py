@@ -83,6 +83,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     shell_word_spans,
     split_unquoted_spans,
     strip_inert_spans,
+    strip_unrun_heredoc_bodies,
     substitution_inner_spans,
 )
 from claude_code_hooks_daemon.utils.shell_snapshot import default_glob_semantics
@@ -3799,6 +3800,8 @@ EXTGLOB_OPENERS: Final[tuple[str, ...]] = ("@(", "+(", "!(", "*(", "?(")
 CDPATH_VARIABLE: Final[str] = "CDPATH"
 #: A command substitution's opener, glued to the word that starts its body.
 _SUBSTITUTION_OPENERS: Final[tuple[str, ...]] = ("$(", "`")
+#: The operator that opens a heredoc; a command without it has no body to blank.
+_HEREDOC_OPERATOR: Final[str] = "<<"
 #: Nested ``bash -c`` / quoted ``$( )`` bodies are walked this deep, no further.
 _MAX_DIRECTORY_CHANGE_DEPTH: Final[int] = 4
 #: How many existing directories a relative word is resolved from (review F5).
@@ -4614,14 +4617,52 @@ def _walk_directory_changes(text: str, walk: _DirectoryWalk, depth: int) -> None
             continue
         words = _shell_words(segment)
         loose = words is None
+        restarts: frozenset[str] = frozenset()
         if words is None:
             # Unbalanced here (a quoted body split at an operator): read without
-            # quotes, count a change anywhere in it, and read from the root too.
+            # quotes, count a change at a command start or just inside a quote,
+            # and read from the root too.
             words = _shell_words(segment.translate(_SHLEX_REMOVED_CHARS)) or []
-        _walk_words(words, walk, depth, loose=loose)
+            restarts = _quote_opened_words(segment)
+        _walk_words(words, walk, depth, loose=loose, restarts=restarts)
 
 
-def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bool) -> None:
+#: The word just inside a quote: the leading run up to a blank or another quote.
+_QUOTE_OPENED_WORD: Final[re.Pattern[str]] = re.compile(r"""\s*([^\s'"]+)""")
+_QUOTE_CHARACTERS: Final[frozenset[str]] = frozenset("'\"")
+
+
+def _quote_opened_words(segment: str) -> frozenset[str]:
+    """The words a quote in an unbalanced ``segment`` may open a command with.
+
+    Release 3.76.0 review 2 F4 (b): a segment split out of a quoted body
+    (``bash -c 'cd d``) has lost its quotes, so where its commands start is
+    unknown. A command can start just inside a quote, never in the middle of
+    prose (``it's sudo -D x``), so the first word after each quote character
+    is a command start. Matched by value, so every occurrence of that word
+    counts: a misreading only adds a move.
+    """
+    opened: set[str] = set()
+    for index, char in enumerate(segment):
+        if char not in _QUOTE_CHARACTERS:
+            continue
+        match = _QUOTE_OPENED_WORD.match(segment, index + 1)
+        if match is None:
+            continue
+        words = _shell_words(match.group(1).translate(_SHLEX_REMOVED_CHARS))
+        if words:
+            opened.add(words[0])
+    return frozenset(opened)
+
+
+def _walk_words(
+    words: list[str],
+    walk: _DirectoryWalk,
+    depth: int,
+    *,
+    loose: bool,
+    restarts: frozenset[str] = frozenset(),
+) -> None:
     at_start = True
     prefixed = False
     redirect_file = False
@@ -4647,6 +4688,8 @@ def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bo
         if word and all(char in _SHELL_OPERATOR_CHARS for char in word):
             at_start, prefixed = True, False
             continue
+        if word in restarts:
+            at_start, prefixed, prefix_value = True, False, False
         if prefix_value:
             # The value of `exec -a NAME`: the command is the word after it.
             prefix_value = False
@@ -4662,7 +4705,7 @@ def _walk_words(words: list[str], walk: _DirectoryWalk, depth: int, *, loose: bo
                 head, opened = head.rsplit(opener, 1)[1], True
         if index == wrapped_at:
             at_start = True
-        if at_start or opened or loose:
+        if at_start or opened:
             moves: list[str | None] = []
             # `/usr/bin/env -C d` is env: the command is named by its last component.
             name = Path(head).name
@@ -4717,11 +4760,17 @@ def effective_cwds(command: str, cwd: str | None) -> CwdSet:
     Only a segment that could make such a move is tokenised
     (:func:`_may_change_directory`), not every line of a large authored script
     (ledger 00474 N465).
+
+    Release 3.76.0 review 2 F4: a quoted heredoc body that nothing runs, now
+    or later (:func:`strip_unrun_heredoc_bodies`), is not walked. It is data,
+    so a ``cd`` in it moves nothing. A body that is executed, or written to a
+    file that could be run later, is still walked.
     """
     walk = _DirectoryWalk(cwd, cdpath=CDPATH_VARIABLE in command, command=command)
+    run_text = strip_unrun_heredoc_bodies(command) if _HEREDOC_OPERATOR in command else command
     # One scan for the command's many computed moves, even outside a guard's scope.
     with link_scan_scope():
-        _walk_directory_changes(command, walk, 0)
+        _walk_directory_changes(run_text, walk, 0)
     return walk.result()
 
 
