@@ -42,7 +42,7 @@ The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in 
 ### Phase 2: Build (each slice is defined in RULINGS.md section 5)
 
 - [x] ✅ **Task 2.1**: Slice 1, no change to delete behaviour. The live dispatch probe (journalled, passed); [DESIGN.md](DESIGN.md) with the verdict record, ledger line, review prompt and state layout; a pure module for inventory, verdict validation, bundle write and verify, ledger append and rate count, tests first; failing tests for forged, reused, stale, wrong-tip and self-written verdicts and for a verdict with no verified bundle, committed red.
-- [ ] 🔄 **Task 2.2**: Slice 2. The reviewer agent definition, the `branch-reject request` command, the dispatch gate and the SubagentStop record, and the `delete-branch` wiring under the `rejected-bundled` tier. The red tests of Task 2.1 turn green.
+- [x] ✅ **Task 2.2**: Slice 2. The reviewer agent definition, the `branch-reject request` command, the dispatch gate and the SubagentStop record, and the `delete-branch` wiring under the `rejected-bundled` tier. The red tests of Task 2.1 turn green.
 - [ ] ⬜ **Task 2.3**: Slice 3. The `branch-reject digest` command and the session-start count of undigested removals.
 - [ ] ⬜ **Task 2.4**: Slice 4. Independent loosening review, adversarial forge attempt, targeted QA, CI green, merge, release note.
 
@@ -61,4 +61,4 @@ The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in 
 
 - Plan filed from the owner's proposal; feasibility established; open questions ruled under delegation. The points left for the owner's glance are in RULINGS.md section 4.
 - Slice 1 built: `core/branch_reject.py` with its tests green, `branches.reject` config, and the delete-path tests committed red for slice 2 (`tests/unit/core/test_branch_reject_delete.py`). Delete behaviour unchanged.
-- Slice 2 in progress: `delete_branches(reject_route=...)` wired and the red tests green (DESIGN.md section 10); `delete-branch` builds the route from `branches.reject`; `branch-reject request` admits a review and prints the daemon-composed prompt(s); the `hooks-daemon-branch-reject-reviewer` agent ships. Still to come: the dispatch gate and the SubagentStop recorder ([handoff](subagent-reports/261120-task-2.2-handoff.md)).
+- Slice 2 built: `delete_branches(reject_route=...)` wired and the red tests green (DESIGN.md section 10); `delete-branch` builds the route from `branches.reject`; `branch-reject request` admits a review and prints the daemon-composed prompt(s); the `hooks-daemon-branch-reject-reviewer` agent ships; `branch_reject_dispatch_gate` (PreToolUse 59), `branch_reject_agent_binder` (PostToolUse 33) and `branch_reject_verdict_recorder` (SubagentStop 13) are registered. Targeted QA is still owed before the Task 2.4 merge ([handoff](subagent-reports/261120-task-2.2-handoff.md)).
