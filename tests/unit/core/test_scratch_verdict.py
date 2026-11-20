@@ -392,6 +392,108 @@ class TestP2:
         )
         assert _judge(walk) is Verdict.UNCERTAIN
 
+    def test_a_real_venv_layout_is_covered(self) -> None:
+        """What ``python -m venv`` writes: .gitignore, a lib64 link, include/, bin/."""
+        walk = finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/venv", D, 0),
+                Node("e/venv/pyvenv.cfg", F, 50),
+                Node("e/venv/.gitignore", F, 70),
+                Node("e/venv/lib64", L, 3),
+                Node("e/venv/include", D, 0, empty=True),
+                Node("e/venv/bin", D, 0),
+                Node("e/venv/bin/python3", L, 7),
+                Node("e/venv/bin/activate", F, 2000),
+                Node("e/venv/lib", D, 0),
+                Node("e/venv/lib/python3.13/site-packages/x.py", F, 9),
+            )
+        )
+        assert _judge(walk) is Verdict.DISPOSABLE
+
+    def test_a_windows_venv_layout_is_covered(self) -> None:
+        walk = finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/venv", D, 0),
+                Node("e/venv/pyvenv.cfg", F, 50),
+                Node("e/venv/Scripts", D, 0),
+                Node("e/venv/Scripts/python.exe", F, 70),
+                Node("e/venv/Lib", D, 0),
+                Node("e/venv/Lib/site-packages/x.py", F, 9),
+            )
+        )
+        assert _judge(walk) is Verdict.DISPOSABLE
+
+    def test_a_lone_pyvenv_cfg_covers_nothing_beside_it(self) -> None:
+        """F-BYPS 4: ``pyvenv.cfg`` beside work files is not a venv."""
+        walk = finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/pyvenv.cfg", F, 50),
+                Node("e/findings.md", F, 500),
+                Node("e/harness.py", F, 500),
+            )
+        )
+        judgement = judge(walk, age=_DUE, liveness=())
+        assert judgement.verdict is Verdict.UNCERTAIN
+        assert "e/findings.md" in judgement.uncovered
+        assert "e/harness.py" in judgement.uncovered
+
+    def test_a_lone_pyvenv_cfg_is_not_itself_covered(self) -> None:
+        walk = finished(_stats(Node("e", D, 0), Node("e/pyvenv.cfg", F, 50)))
+        assert _judge(walk) is Verdict.UNCERTAIN
+
+    @pytest.mark.parametrize(
+        "missing",
+        ["bin", "lib"],
+    )
+    def test_a_partial_venv_shape_covers_nothing(self, missing: str) -> None:
+        nodes = [
+            Node("e", D, 0),
+            Node("e/pyvenv.cfg", F, 50),
+            Node("e/bin", D, 0),
+            Node("e/bin/python", L, 7),
+            Node("e/lib", D, 0),
+            Node("e/lib/python3.13/site.py", F, 9),
+        ]
+        kept = [node for node in nodes if not node.path.startswith(f"e/{missing}")]
+        assert _judge(finished(_stats(*kept))) is Verdict.UNCERTAIN
+
+    def test_a_full_venv_shape_leaves_its_siblings_uncovered(self) -> None:
+        """F-BYPS 4: ``python -m venv .`` in a work directory covers only the venv layout."""
+        walk = finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/pyvenv.cfg", F, 50),
+                Node("e/bin", D, 0),
+                Node("e/bin/python", L, 7),
+                Node("e/lib", D, 0),
+                Node("e/lib/python3.13/site.py", F, 9),
+                Node("e/findings.md", F, 500),
+                Node("e/notes", D, 0),
+                Node("e/notes/a.txt", F, 5),
+            )
+        )
+        judgement = judge(walk, age=_DUE, liveness=())
+        assert judgement.verdict is Verdict.UNCERTAIN
+        assert set(judgement.uncovered) == {"e/findings.md", "e/notes/a.txt"}
+
+    def test_a_regular_file_named_like_a_layout_directory_is_a_sibling(self) -> None:
+        walk = finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/pyvenv.cfg", F, 50),
+                Node("e/bin", D, 0),
+                Node("e/bin/python", L, 7),
+                Node("e/lib", D, 0),
+                Node("e/lib/python3.13/site.py", F, 9),
+                Node("e/share", F, 500),
+            )
+        )
+        judgement = judge(walk, age=_DUE, liveness=())
+        assert judgement.uncovered == ("e/share",)
+
     def test_pyvenv_cfg_covers_only_its_own_directory(self) -> None:
         walk = finished(
             _stats(

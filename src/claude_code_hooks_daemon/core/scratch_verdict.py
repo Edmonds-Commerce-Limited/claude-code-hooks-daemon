@@ -29,7 +29,8 @@ from a walk that did not finish:
 
 Coverage is judged over every non-directory node and every empty directory.
 P1 trusts a regular file's own basename only; P2 covers anything, links and
-special files included, inside a regenerable directory; P5 covers a zero-byte
+special files included, inside a regenerable directory, and in a virtual
+environment only the venv's own layout, never a file beside it; P5 covers a zero-byte
 regular file or an empty directory.
 """
 
@@ -133,19 +134,63 @@ class Judgement:
     uncovered_count: int = 0
 
 
+#: Top-level files a venv tool writes beside ``pyvenv.cfg`` (``python -m venv``, uv).
+VENV_FILES: tuple[str, ...] = (VENV_MARKER, ".gitignore", "CACHEDIR.TAG")
+
+#: Top-level names whose whole subtree is the venv's own layout.
+VENV_LAYOUT_DIRECTORIES: tuple[str, ...] = (
+    "bin",
+    "Scripts",
+    "lib",
+    "lib64",
+    "lib32",
+    "Lib",
+    "include",
+    "Include",
+    "share",
+)
+
+
+def _is_venv(venv: str, paths: Sequence[str]) -> bool:
+    """The real venv shape: an interpreter under bin/ (or a Scripts/ tree) and a lib tree."""
+    has_interpreter = any(
+        path.startswith((f"{venv}/bin/python", f"{venv}/Scripts/")) for path in paths
+    )
+    has_lib = any(path.startswith((f"{venv}/lib/", f"{venv}/Lib/")) for path in paths)
+    return has_interpreter and has_lib
+
+
 def _venv_directories(nodes: Sequence[Node]) -> tuple[str, ...]:
+    """Directories that hold a regular ``pyvenv.cfg`` AND the venv's own layout (F-BYPS 4)."""
     suffix = f"/{VENV_MARKER}"
-    return tuple(
+    paths = [node.path for node in nodes]
+    candidates = (
         node.path[: -len(suffix)]
         for node in nodes
         if node.kind is NodeKind.FILE and node.path.endswith(suffix)
     )
+    return tuple(venv for venv in candidates if _is_venv(venv, paths))
+
+
+def _in_venv_layout(node: Node, venv: str) -> bool:
+    """True only for the venv's own files and layout trees, never a sibling beside them.
+
+    A top-level regular FILE named like a layout directory (``share``) is a sibling.
+    """
+    if not node.path.startswith(f"{venv}/"):
+        return False
+    top, _, below = node.path[len(venv) + 1 :].partition("/")
+    if below:
+        return top in VENV_LAYOUT_DIRECTORIES
+    if node.kind is NodeKind.FILE:
+        return top in VENV_FILES
+    return top in VENV_LAYOUT_DIRECTORIES
 
 
 def _proof_for(node: Node, venvs: Sequence[str]) -> Proof | None:
     regenerable_path = f"{node.path}/" if node.kind is NodeKind.DIRECTORY else node.path
     if is_regenerable(regenerable_path, REGENERABLE_DIRECTORIES) or any(
-        node.path.startswith(f"{venv}/") for venv in venvs
+        _in_venv_layout(node, venv) for venv in venvs
     ):
         return Proof.P2
     if node.kind is NodeKind.FILE:
@@ -304,6 +349,8 @@ __all__ = [
     "NOT_EVALUATED",
     "REGENERABLE_DIRECTORIES",
     "TRACKED_UNKNOWN",
+    "VENV_FILES",
+    "VENV_LAYOUT_DIRECTORIES",
     "VENV_MARKER",
     "Judgement",
     "Proof",
