@@ -430,6 +430,27 @@ class TestVerdictChain:
         )
         assert any("dispatch" in p for p in _problems(repo, store, verdict, config))
 
+    def test_an_unbound_dispatch_never_matches_an_empty_reviewer_agent(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        """PreToolUse writes the record with an empty agent id; that is not a binding."""
+        verdict = _issue(repo, store, reviewer=_reviewer(agent_id=""))
+        store.write_dispatch(
+            DispatchRecord(nonce=verdict.nonce, session_id="s1", tool_use_id="t", agent_id="")
+        )
+        assert any("dispatch" in p for p in _problems(repo, store, verdict, config))
+
+    def test_a_dispatch_with_an_empty_session_is_a_problem(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        verdict = _issue(repo, store, reviewer=replace(_reviewer(), session_id=""))
+        store.write_dispatch(
+            DispatchRecord(
+                nonce=verdict.nonce, session_id="", tool_use_id="t", agent_id="reviewer1"
+            )
+        )
+        assert any("dispatch" in p for p in _problems(repo, store, verdict, config))
+
     def test_a_verdict_disagreeing_with_its_request_is_a_problem(
         self, repo: Path, store: RejectStore, config: BranchRejectConfig
     ) -> None:

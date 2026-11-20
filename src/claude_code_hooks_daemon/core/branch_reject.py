@@ -624,6 +624,10 @@ def _chain_problems(verdict: Verdict, store: RejectStore) -> list[str]:
                 problems.append(f"the verdict disagrees with its request on {field_name}")
     if dispatch is None:
         problems.append("no dispatch record binds this nonce to a reviewer agent")
+    elif not dispatch.session_id or not dispatch.agent_id:
+        # PreToolUse writes the record with an empty agent id; only PostToolUse binds
+        # one. An unbound record is no binding, whatever the verdict claims.
+        problems.append("the dispatch record for this nonce is not bound to a reviewer agent")
     elif (dispatch.session_id, dispatch.agent_id) != (
         verdict.reviewer.session_id,
         verdict.reviewer.agent_id,
