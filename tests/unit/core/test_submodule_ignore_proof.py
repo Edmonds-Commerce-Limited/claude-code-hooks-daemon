@@ -14,6 +14,7 @@ so a developer's own ``diff.ignoreSubmodules`` can neither pass nor fail them.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from pathlib import Path
@@ -132,7 +133,7 @@ def ignoring_repo(request: pytest.FixtureRequest, tmp_path: Path) -> Path:
 class TestNetChange:
     def test_the_gitlink_row_is_returned(self, ignoring_repo: Path) -> None:
         base = _git(ignoring_repo, "merge-base", "main", "feat").strip()
-        changes = _net_change(ignoring_repo, base, "feat", timeout=30)
+        changes = _net_change(ignoring_repo, base, "feat", timeout=Timeout.GIT_CONTEXT)
         by_path = {change.path: change for change in changes}
         assert set(by_path) == {"f.txt", "sub"}
         assert (by_path["sub"].mode, by_path["sub"].blob) == (_GITLINK, _NEW_POINTER)
@@ -147,7 +148,8 @@ class TestNetChange:
         _ignore_all_globally(tmp_path)
         _bump_and_add_held_file(repo)
         base = _git(repo, "merge-base", "main", "feat").strip()
-        assert "sub" in {c.path for c in _net_change(repo, base, "feat", timeout=30)}
+        changes = _net_change(repo, base, "feat", timeout=Timeout.GIT_CONTEXT)
+        assert "sub" in {c.path for c in changes}
 
 
 class TestRemoteDelete:
@@ -209,6 +211,21 @@ class TestGitlinkGateFailsClosed:
 
         monkeypatch.setattr(remote_branch_proof, "gitlink_change_held", unavailable)
         assert _gitlinks_held(ignoring_repo, "main", "refs/heads/feat") is False
+
+    def test_an_unavailable_proof_is_logged_as_a_refusal(
+        self,
+        ignoring_repo: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        def unavailable(*_args: object, **_kwargs: object) -> bool:
+            raise ProofUnavailableError("git failed")
+
+        monkeypatch.setattr(remote_branch_proof, "gitlink_change_held", unavailable)
+        with caplog.at_level(logging.INFO, logger="claude_code_hooks_daemon.daemon.branch_safety"):
+            _gitlinks_held(ignoring_repo, "main", "refs/heads/feat")
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("stays refused" in m and "git failed" in m for m in messages), messages
 
     def test_no_repository_is_not_held(self, tmp_path: Path) -> None:
         outside = tmp_path / "not-a-repo"

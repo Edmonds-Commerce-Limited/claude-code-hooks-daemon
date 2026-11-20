@@ -55,6 +55,7 @@ from pathlib import Path
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.branch_park import walk_park_range
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
 from claude_code_hooks_daemon.utils.remote_refs import (
@@ -672,7 +673,15 @@ def _gitlinks_held(repo: Path, target: str, tip_ref: str) -> bool:
             Path(top_level), target, tip_ref, timeout=_safety_timeout()
         )
     except remote_branch_proof.ProofUnavailableError as exc:
-        logger.info("branch_safety: submodule pointers of %s unchecked: %s", tip_ref, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                f"branch_safety: submodule pointers of {tip_ref} unchecked, so the branch "
+                "is reported NOT held and stays refused; an unproven delete fails closed"
+            ),
+            level=logging.INFO,
+        )
         return False
 
 
