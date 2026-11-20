@@ -525,6 +525,9 @@ _INERT_DEVICES: frozenset[str] = frozenset({"/dev/null", "/dev/stdout", "/dev/st
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 #: Pathname-expansion characters: a word holding one may name a file it never spells.
 _GLOB_CHARS: Final[str] = "*?["
+#: Characters that let a word name a file it never spells: an expansion or
+#: substitution (``$``, a backtick), a brace expansion, a quote or an escape.
+_RESPELLING_CHARS: Final[str] = "$`{'\"\\"
 _DEVICE_ROOTS: tuple[str, ...] = ("/dev/", "/proc/")
 #: fds a redirect may duplicate onto and stay inert: stdout, stderr, closed.
 _INERT_FD_TARGETS: frozenset[str] = frozenset({"1", "2", "-"})
@@ -1535,16 +1538,38 @@ def strip_never_run_heredoc_bodies(command: str) -> str:
     more often than the bodies that blanking removes (once per target),
     so any later word naming a markdown file again keeps every body. A glob
     character outside the blanked bodies (``sh n.m?``, ``cp n.* r.sh``) may
-    expand to that file too, so it keeps every body as well.
+    expand to that file too, so it keeps every body as well. So does any
+    character that lets a word name the file without spelling ``.md``
+    (:data:`_RESPELLING_CHARS`: ``$(ls)``, ``${f}d``, ``n.{md,}``,
+    ``n.m''d``, ``n.m\\d``) or a process substitution, outside the heredoc
+    operators' own quoted delimiters. Over-keeping costs only a scan of prose.
     """
     readers = strip_quoted_heredoc_bodies(command, text_readers_only=True)
     prose = strip_unrun_heredoc_bodies(readers)
     blanked = prose.count(_INERT_BODY_PLACEHOLDER) - readers.count(_INERT_BODY_PLACEHOLDER)
     if blanked == 0:
         return prose
-    if prose.count(_MARKDOWN_SUFFIX) > blanked or any(char in prose for char in _GLOB_CHARS):
+    words = _without_heredoc_operators(prose)
+    if words.count(_MARKDOWN_SUFFIX) > blanked or any(
+        marker in words for marker in (*_GLOB_CHARS, *_RESPELLING_CHARS, *_REROUTING_MARKERS)
+    ):
         return readers
     return prose
+
+
+def _without_heredoc_operators(command: str) -> str:
+    """``command`` with every heredoc operator (``<<'EOF'``) cut out.
+
+    A quoted delimiter's quotes respell no file name, so they must not count
+    as the quoting :func:`strip_never_run_heredoc_bodies` looks for.
+    """
+    pieces: list[str] = []
+    copied_to = 0
+    for heredoc in scan_heredocs(command).heredocs:
+        pieces.append(command[copied_to : heredoc.operator.start])
+        copied_to = heredoc.operator.end
+    pieces.append(command[copied_to:])
+    return "".join(pieces)
 
 
 def strip_quoted_heredoc_bodies(

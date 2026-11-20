@@ -68,3 +68,37 @@ def test_never_run_blanks_a_markdown_body_named_once(command: str) -> None:
 def test_never_run_keeps_a_body_the_command_may_run(command: str) -> None:
     """Review 2 F4: a markdown file the command names again may be run by it."""
     assert _BODY in strip_never_run_heredoc_bodies(command)
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "bash $(ls -t | sort -r)",
+        "bash `ls -t`",
+        "for f in $(ls); do bash $f; done",
+        "bash n.{md,}",
+        "bash n.m''d",
+        'bash n.m""d',
+        "bash n.m\\d",
+        "bash ${f}d",
+        "bash $f",
+        "bash <(cat n.m)",
+    ],
+)
+def test_never_run_keeps_a_body_a_respelt_word_may_run(runner: str) -> None:
+    """A substitution, expansion, brace, quote or escape may spell the ``.md`` file unseen."""
+    command = f"cat > n.md <<'EOF'\n{_BODY}\nEOF\n{runner}"
+    assert _BODY in strip_never_run_heredoc_bodies(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f'cat > n.md <<"EOF"\n{_BODY}\nEOF',
+        f"cat > n.md <<-'EOF'\n{_BODY}\nEOF",
+        f"cat <<'EOF' > n.md\n{_BODY}\nEOF\necho done",
+    ],
+)
+def test_never_run_ignores_the_quotes_of_the_heredoc_delimiter(command: str) -> None:
+    """The delimiter's own quotes respell no file name, so they keep nothing."""
+    assert _BODY not in strip_never_run_heredoc_bodies(command)

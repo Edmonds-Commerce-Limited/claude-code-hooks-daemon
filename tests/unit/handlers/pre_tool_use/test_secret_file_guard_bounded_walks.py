@@ -287,6 +287,13 @@ class TestProcSelf:
             "sh n.m?",
             "sh n.*",
             "cp n.m? r.sh; . ./r.sh",
+            "bash $(ls -t | sort -r)",
+            "for f in $(ls); do bash $f; done",
+            # Doubled braces: the command passes through ``str.format`` in ``_views``.
+            "bash n.{{md,}}",
+            "bash n.m''d",
+            "bash n.m\\d",
+            "bash ${{f}}d",
         ],
     )
     def test_a_markdown_body_the_command_then_runs_is_still_denied(
