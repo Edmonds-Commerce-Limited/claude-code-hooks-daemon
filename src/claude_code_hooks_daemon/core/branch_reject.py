@@ -12,7 +12,8 @@ This module answers questions and writes the records; it grants nothing. It hold
 - the state store of requests, dispatch bindings, verdicts and keeps (:class:`RejectStore`);
 - verdict validation (:func:`verdict_problems`, :func:`verdict_set_problems`), where an
   empty list is the only pass and every failure to read is a problem, never a pass;
-- request admission from the keep history and the removal rate (:func:`admit_request`);
+- request admission from the keep history, the removal rate and the unresolved review
+  attempts (:func:`admit_request`, :func:`unresolved_attempts`);
 - the recovery bundle, always under the MAIN checkout (:func:`write_bundle`,
   :func:`bundle_problems`);
 - the append-only removal ledger (:func:`append_ledger`, :func:`read_ledger`).
@@ -92,6 +93,7 @@ _STOPS = "stops"
 _CONSUMED = "consumed"
 _CONSUMED_AGENTS = "consumed-agents"
 _CANCELLED = "cancelled"
+_FAILURES = "failures"
 _DIGEST_FILE = "digest.json"
 _ENTRY_KEY = re.compile(r"[0-9a-f]{64}")
 
@@ -480,6 +482,47 @@ class ConsumedRecord:
         )
 
 
+#: Why a dispatched reviewer's stop produced no verdict (``failures/<nonce>.json``).
+FAILURE_DAMAGED_TRANSCRIPT = "damaged-transcript"
+FAILURE_REPLY_MISMATCH = "reply-mismatch"
+FAILURE_UNPARSEABLE_REPLY = "unparseable-reply"
+
+
+@dataclass(frozen=True)
+class FailureRecord:
+    """A trace that a dispatched review ended with no verdict (F-BYPS F2).
+
+    It only restricts: each one is an unresolved attempt on its request's work.
+    """
+
+    nonce: str
+    reason: str
+    branch: str
+    tip: str
+    recorded_at: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": SCHEMA_VERSION,
+            "nonce": self.nonce,
+            "reason": self.reason,
+            "branch": self.branch,
+            "tip": self.tip,
+            "recorded_at": self.recorded_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> FailureRecord:
+        _schema(data)
+        return cls(
+            nonce=_str(data, "nonce"),
+            reason=_str(data, "reason"),
+            branch=_str(data, "branch"),
+            tip=_str(data, "tip"),
+            recorded_at=_float(data, "recorded_at"),
+        )
+
+
 def agent_key(agent_id: str) -> str:
     """The record id a reviewer agent's consumed marker is filed under."""
     return hashlib.sha256(agent_id.encode("utf-8")).hexdigest()[: _ID_BYTES * 2]
@@ -599,6 +642,30 @@ class RejectStore:
     def read_dispatch(self, nonce: str) -> DispatchRecord | None:
         data = self._read(_DISPATCHES, nonce)
         return None if data is None else DispatchRecord.from_dict(data)
+
+    def dispatches(self) -> list[DispatchRecord]:
+        """Every dispatch record; raises RejectError on damage or a misnamed file."""
+        records: list[DispatchRecord] = []
+        for path, data in self._all_with_paths(_DISPATCHES):
+            record = DispatchRecord.from_dict(data)
+            if record.nonce != path.stem:
+                raise RejectError(f"the dispatch record {path} is not named by its nonce")
+            records.append(record)
+        return records
+
+    def write_failure(self, record: FailureRecord) -> None:
+        """Record a review that ended with no verdict; an existing record is kept."""
+        self._create(_FAILURES, record.nonce, record.to_dict())
+
+    def failures(self) -> list[FailureRecord]:
+        """Every failure record; raises RejectError on damage or a misnamed file."""
+        records: list[FailureRecord] = []
+        for path, data in self._all_with_paths(_FAILURES):
+            record = FailureRecord.from_dict(data)
+            if record.nonce != path.stem:
+                raise RejectError(f"the failure record {path} is not named by its nonce")
+            records.append(record)
+        return records
 
     def write_verdict(self, verdict: Verdict) -> None:
         self._write(_VERDICTS, verdict.verdict_id, verdict.to_dict())
@@ -990,16 +1057,75 @@ def reviewers_for_rate(removals: int, config: BranchRejectConfig) -> int | None:
     return 1
 
 
+#: Reviews of one piece of work that may end with no verdict before the route closes
+#: for it. Each one short of this adds a required reviewer (F-BYPS F2).
+MAX_UNRESOLVED_REVIEWS = 2
+
+
+def same_work(
+    branch: str,
+    tip: str,
+    commits: Iterable[str],
+    other_branch: str,
+    other_tip: str,
+    other_commits: Iterable[str],
+) -> bool:
+    """Whether two reviews concern the same WORK: same name, same tip, or a shared commit.
+
+    The one relation the keep history and the unresolved-attempt count both use, so a
+    rename or an empty commit on top earns no fresh start (RULINGS.md Q5).
+    """
+    return branch == other_branch or tip == other_tip or bool(set(commits) & set(other_commits))
+
+
 def related_keeps(
     branch: str, tip: str, inventory: Inventory, keeps: Iterable[KeepRecord]
 ) -> list[KeepRecord]:
-    """Keep records on the same WORK: same name, same tip, or any shared unique commit."""
-    commits = set(inventory.commits)
+    """Keep records on the same WORK (:func:`same_work`)."""
     return [
         keep
         for keep in keeps
-        if keep.branch == branch or keep.tip == tip or commits & set(keep.commits)
+        if same_work(branch, tip, inventory.commits, keep.branch, keep.tip, keep.commits)
     ]
+
+
+def _resolved_by_own_verdict(store: RejectStore, request: RejectRequest) -> bool:
+    """Whether the request's nonce holds a verdict that is that request's own.
+
+    Raises RejectError when the verdict file is damaged. A verdict for another branch
+    or tip, or under another id, does not resolve the attempt.
+    """
+    verdict = store.read_verdict(request.nonce)
+    return (
+        verdict is not None
+        and verdict.verdict_id == request.nonce
+        and verdict.nonce == request.nonce
+        and (verdict.branch, verdict.tip) == (request.branch, request.tip)
+    )
+
+
+def unresolved_attempts(store: RejectStore, branch: str, tip: str, inventory: Inventory) -> int:
+    """Reviews of this WORK that were dispatched and ended with no verdict of their own.
+
+    Derived, not only recorded: every dispatch with no verdict counts, which covers a
+    failed reply, a killed reviewer that never stopped, a withdrawn verdict and a
+    review still in flight. Unioned by nonce with the ``failures/`` records, which count
+    even beside a verdict file. Fails closed: a dispatch or failure whose request is
+    missing, or any damaged record, raises RejectError.
+    """
+    candidates = {record.nonce: False for record in store.dispatches()}
+    candidates.update((record.nonce, True) for record in store.failures())
+    unresolved = 0
+    for nonce, failed in candidates.items():
+        request = store.read_request(nonce)
+        if request is None:
+            raise RejectError(f"review {nonce[:12]} was dispatched or failed with no request")
+        related = same_work(
+            branch, tip, inventory.commits, request.branch, request.tip, request.inventory.commits
+        )
+        if related and (failed or not _resolved_by_own_verdict(store, request)):
+            unresolved += 1
+    return unresolved
 
 
 def admit_request(
@@ -1009,11 +1135,15 @@ def admit_request(
     keeps: Iterable[KeepRecord],
     removals_in_window_count: int,
     config: BranchRejectConfig,
+    *,
+    unresolved_attempts: int,
 ) -> int:
-    """The reviewers a new request needs (1 or 2); raises RejectRefusedError when refused.
+    """The reviewers a new request needs; raises RejectRefusedError when refused.
 
     A keep is related to this request by name, by tip, or by sharing any unique commit,
-    so renaming a branch earns no fresh start (RULINGS.md Q5).
+    so renaming a branch earns no fresh start (RULINGS.md Q5). Each unresolved review
+    attempt on the same work adds one reviewer to the larger of the keep and rate
+    requirements, and ``MAX_UNRESOLVED_REVIEWS`` of them close the route (F-BYPS F2).
     """
     related = related_keeps(branch, tip, inventory, keeps)
     if any(keep.tip == tip for keep in related):
@@ -1022,6 +1152,12 @@ def admit_request(
         raise RejectRefusedError(
             "the route is closed for this work: it has two keep verdicts already"
         )
+    if unresolved_attempts >= MAX_UNRESOLVED_REVIEWS:
+        raise RejectRefusedError(
+            f"the route is closed for this work: {unresolved_attempts} reviews of it ended "
+            "with no verdict (failed, killed, withdrawn or still running); a human must "
+            "decide what happens to it"
+        )
     needed = 2 if related else 1
     by_rate = reviewers_for_rate(removals_in_window_count, config)
     if by_rate is None:
@@ -1029,7 +1165,7 @@ def admit_request(
             f"the removal rate is at the limit ({removals_in_window_count} removals in "
             f"{config.window_days} days, refuse_after {config.refuse_after})"
         )
-    return max(needed, by_rate)
+    return max(needed, by_rate) + unresolved_attempts
 
 
 # --- the review request and its prompt (DESIGN.md section 9) ---------------------------
@@ -1389,6 +1525,18 @@ def _identified(
     return request
 
 
+def _record_failure(store: RejectStore, request: RejectRequest, reason: str, *, now: float) -> None:
+    store.write_failure(
+        FailureRecord(
+            nonce=request.nonce,
+            reason=reason,
+            branch=request.branch,
+            tip=request.tip,
+            recorded_at=now,
+        )
+    )
+
+
 def record_review_stop(
     store: RejectStore, stop: ReviewStop, facts: TranscriptFacts, *, now: float
 ) -> str:
@@ -1398,7 +1546,9 @@ def record_review_stop(
     reviewer takes an exclusive ``stops/<nonce>`` marker before anything else; any later
     stop, or one with ``stop_hook_active`` (a stop hook blocked an earlier one), withdraws
     the nonce's verdict and writes nothing. The verdict id is the nonce, so a nonce has
-    at most one verdict. A keep record is never withdrawn: it only restricts.
+    at most one verdict. A keep record is never withdrawn: it only restricts. A first
+    stop with a damaged transcript, a reply that differs from it, or an unparseable
+    reply writes a ``failures/<nonce>`` record, which also only restricts.
 
     Never writes the dispatch record's agent id and never touches the ledger. Raises
     RejectError when a record cannot be read or written.
@@ -1411,10 +1561,13 @@ def record_review_stop(
         store.withdraw_verdict(request.nonce)
         return STOP_WITHDRAWN
     if facts.damaged or facts.last_assistant_text != stop.reply:
+        reason = FAILURE_DAMAGED_TRANSCRIPT if facts.damaged else FAILURE_REPLY_MISMATCH
+        _record_failure(store, request, reason, now=now)
         return STOP_IGNORED
     try:
         items, overall = parse_verdict_reply(stop.reply, request)
     except RejectRefusedError:
+        _record_failure(store, request, FAILURE_UNPARSEABLE_REPLY, now=now)
         return STOP_IGNORED
     verdict = Verdict(
         verdict_id=request.nonce,
@@ -1576,7 +1729,15 @@ def issue_requests(repo: Path, branch: str, route: RejectRoute) -> list[IssuedRe
         raise RejectError("the branch or the default moved while the inventory was computed")
     keeps = route.store.keeps()
     removals = used_state(entries, route.store, now=route.now, config=route.config).removals
-    required = admit_request(branch, tip, inventory, keeps, removals, route.config)
+    required = admit_request(
+        branch,
+        tip,
+        inventory,
+        keeps,
+        removals,
+        route.config,
+        unresolved_attempts=unresolved_attempts(route.store, branch, tip, inventory),
+    )
     keep_reasons = tuple(
         reason for keep in related_keeps(branch, tip, inventory, keeps) for reason in keep.reasons
     )
@@ -2050,9 +2211,10 @@ def approve_removal(
 ) -> RemovalApproval:
     """Recompute every fact the route rests on; raise RejectRefusedError or RejectError.
 
-    In order: the ledger reads cleanly; the admission rules (keep history and the
-    removal rate, both re-read NOW, never trusted from the request) give the number
-    of reviewers; any stored verdict for this tip judging ``keep`` refuses outright;
+    In order: the ledger reads cleanly; the admission rules (keep history, the
+    removal rate and the unresolved review attempts, all re-read NOW, never trusted
+    from the request) give the number of reviewers, so an older no-value verdict
+    cannot meet a count a later failed review raised; any stored verdict for this tip judging ``keep`` refuses outright;
     the remaining verdicts each validate in full; the valid set meets the number from
     distinct agents; and, unless ``write`` is False, the bundle is written and
     verified against the default as it stands now.
@@ -2065,7 +2227,15 @@ def approve_removal(
     default_sha = _resolve(repo, _full_ref(default_ref))
     inventory = compute_inventory(repo, branch, default_ref)
     removals = pending + used.removals
-    required = admit_request(branch, tip, inventory, route.store.keeps(), removals, route.config)
+    required = admit_request(
+        branch,
+        tip,
+        inventory,
+        route.store.keeps(),
+        removals,
+        route.config,
+        unresolved_attempts=unresolved_attempts(route.store, branch, tip, inventory),
+    )
     verdicts = route.store.verdicts_for(branch, tip)
     if not verdicts:
         raise RejectRefusedError("no reviewer verdict is on file for this tip")

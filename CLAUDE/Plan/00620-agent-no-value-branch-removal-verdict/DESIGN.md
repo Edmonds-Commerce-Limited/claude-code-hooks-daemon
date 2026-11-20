@@ -62,6 +62,7 @@ judge, and the bundle keeps the whole tip regardless.
 | `consumed/<verdict_id>.json` | `record_removal` (review fix 1)      | `ConsumedRecord`: verdict_id, removal (first verdict id), branch, tip, reviewer_agent_ids, removed_at      |
 | `consumed-agents/<key>.json` | `record_removal` (review fix 1)      | Marker: schema, agent_id, removal. `<key>` is `sha256(agent_id)[:32]`                                      |
 | `cancelled/<removal>.json`   | `record_git_refusal` (review fix 1)  | Marker: schema, removal. The removal no longer counts toward the rate                                      |
+| `failures/<nonce>.json`      | SubagentStop recorder (review fix 3) | `FailureRecord`: nonce, reason, branch, tip, recorded_at. A first stop that produced no verdict            |
 
 **Single use and the rate are shared across checkouts.** The ledger is a tracked file, so
 each worktree has its own copy until a merge. The three marker kinds live in the main
@@ -82,8 +83,11 @@ only from a clean, final stop. The first stop of an identified reviewer creates
 `stops/<nonce>.json` before anything else. A later stop of the same nonce, or any stop
 whose `stop_hook_active` is not literally `false`, withdraws (unlinks) the nonce's verdict
 and records nothing. A stop hook that blocked the first reply therefore leaves no verdict.
-A keep record is never withdrawn, because it only restricts. The recorder never writes the
-dispatch record's agent id and never touches the ledger.
+A keep record is never withdrawn, because it only restricts. A first stop whose transcript
+is damaged, whose reply differs from the transcript's, or whose reply does not parse writes
+`failures/<nonce>.json` (exclusive create; reasons `damaged-transcript`, `reply-mismatch`,
+`unparseable-reply`). A failure record also only restricts (section 6). The recorder never
+writes the dispatch record's agent id and never touches the ledger.
 
 A record is believed only through its chain. A verdict counts only when a request with its
 nonce exists, a dispatch record binds that nonce to the verdict's reviewer agent, and the
@@ -162,16 +166,37 @@ distinct; disagreement is `keep`.
 
 ## 6. Request admission and the keep history
 
-`admit_request(branch, tip, inventory, keeps, removals_in_window, config)` returns the
-number of reviewers required (1 or 2) or raises `RejectRefused` naming why:
+`admit_request(branch, tip, inventory, keeps, removals_in_window, config, *, unresolved_attempts)` returns the number of reviewers required or raises `RejectRefused`
+naming why. `unresolved_attempts` is REQUIRED and keyword-only, so no caller can forget it:
 
 - a keep record for this tip (by name, or by sharing a commit): refused, a keep is final for
   its tip;
 - related keep records (same name, or sharing any unique commit with this inventory, so a
   rename earns nothing): one earlier keep makes this a re-review needing two reviewers, two
   or more close the route;
+- `unresolved_attempts` at `MAX_UNRESOLVED_REVIEWS` (2): refused, the route is closed for
+  this work and the message says a human must decide;
 - the rate rule of section 1;
-- the larger requirement wins.
+- the larger of the keep and rate requirements wins, PLUS one reviewer per unresolved
+  attempt.
+
+**Unresolved attempts (review fix 3, F-BYPS F2).** A review that ends with no verdict used
+to leave no trace, so the requester could ask again for the same tip, and older `no-value`
+verdicts still met the old count: opinion shopping by killing or garbling an unwelcome
+review. `unresolved_attempts(store, branch, tip, inventory)` is DERIVED from the store, not
+only recorded. It counts every nonce that has a `dispatches/` record and no verdict of its
+own (`verdicts/<nonce>.json` with that id, nonce, branch and tip), unioned by nonce with the
+`failures/` records (a failure counts even beside a verdict file), restricted to the same
+WORK by `same_work`, the one relation `related_keeps` also uses (same name, same tip, or a
+shared inventory commit), so a rename or an empty commit on top does not reset it. That
+covers a garbled reply, a killed reviewer that never stopped, a withdrawn verdict and a
+review still in flight. Blocking on an in-flight review is intended: approving or
+re-requesting while a reviewer is still running is refused (or needs one more reviewer)
+until it stops with a verdict. The `dispatches/` and `failures/` listings fail closed like
+`verdicts_for`: a file not named by its nonce raises, damage raises, and a dispatch or
+failure whose request is missing raises. Both `issue_requests` and `approve_removal`
+recompute the count, and the latter is what stops an older `no-value` verdict meeting the
+raised count. An unresolved attempt never expires; like a keep, it is keyed on the work.
 
 ## 7. The recovery bundle
 

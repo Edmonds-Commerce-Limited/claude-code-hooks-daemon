@@ -64,7 +64,9 @@ The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in 
 
 - Slug collision: `a/b` and `a-b` at one tip share a bundle path; the second removal is refused (fails closed), so `a-b` cannot use the route while that bundle exists.
 
-- A killed reviewer keeps its verdict, an unreadable second-stop transcript cannot withdraw a verdict, and an agent can mark digest entries read (this hides them only). Not yet pinned by tests.
+- **Resolved (review fix 3, F-BYPS F2): a review with no verdict is not a free retry.** A dispatched review that ends without a verdict of its own (garbled or unparseable reply, damaged transcript, killed or still-running reviewer, withdrawn verdict) counts as an unresolved attempt on the same work, unioned with the `failures/` records the recorder now writes. Each adds a reviewer, and two close the route until a human decides; `issue_requests` and `approve_removal` both recompute it (DESIGN.md section 6, `tests/unit/core/test_branch_reject_unresolved.py`). An in-flight review blocks approval by design, and an unresolved attempt never expires.
+
+- An unreadable second-stop transcript cannot withdraw a verdict, and an agent can mark digest entries read (this hides them only). Not yet pinned by tests.
 
 ## Success Criteria
 

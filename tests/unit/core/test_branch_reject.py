@@ -720,25 +720,33 @@ class TestAdmission:
 
     def test_a_clean_request_needs_one(self, repo: Path, config: BranchRejectConfig) -> None:
         inventory = compute_inventory(repo, "feat", "main")
-        assert admit_request("feat", _tip(repo), inventory, [], 0, config) == 1
+        assert (
+            admit_request("feat", _tip(repo), inventory, [], 0, config, unresolved_attempts=0) == 1
+        )
 
     def test_a_keep_on_this_tip_is_final(self, repo: Path, config: BranchRejectConfig) -> None:
         inventory = compute_inventory(repo, "feat", "main")
         keep = self._keep(tip=_tip(repo), commits=inventory.commits)
         with pytest.raises(RejectRefusedError, match="final"):
-            admit_request("feat", _tip(repo), inventory, [keep], 0, config)
+            admit_request("feat", _tip(repo), inventory, [keep], 0, config, unresolved_attempts=0)
 
     def test_one_earlier_keep_on_another_tip_needs_two(
         self, repo: Path, config: BranchRejectConfig
     ) -> None:
         inventory = compute_inventory(repo, "feat", "main")
         keep = self._keep(tip="9" * 40, commits=inventory.commits)
-        assert admit_request("feat", _tip(repo), inventory, [keep], 0, config) == 2
+        assert (
+            admit_request("feat", _tip(repo), inventory, [keep], 0, config, unresolved_attempts=0)
+            == 2
+        )
 
     def test_a_rename_earns_no_fresh_start(self, repo: Path, config: BranchRejectConfig) -> None:
         inventory = compute_inventory(repo, "feat", "main")
         keep = self._keep(branch="old-name", tip="9" * 40, commits=inventory.commits)
-        assert admit_request("feat", _tip(repo), inventory, [keep], 0, config) == 2
+        assert (
+            admit_request("feat", _tip(repo), inventory, [keep], 0, config, unresolved_attempts=0)
+            == 2
+        )
 
     def test_a_rename_at_the_same_tip_is_still_final(
         self, repo: Path, config: BranchRejectConfig
@@ -746,7 +754,7 @@ class TestAdmission:
         inventory = compute_inventory(repo, "feat", "main")
         keep = self._keep(branch="old-name", tip=_tip(repo), commits=inventory.commits)
         with pytest.raises(RejectRefusedError, match="final"):
-            admit_request("feat", _tip(repo), inventory, [keep], 0, config)
+            admit_request("feat", _tip(repo), inventory, [keep], 0, config, unresolved_attempts=0)
 
     def test_two_earlier_keeps_close_the_route(
         self, repo: Path, config: BranchRejectConfig
@@ -754,21 +762,26 @@ class TestAdmission:
         inventory = compute_inventory(repo, "feat", "main")
         keeps = [self._keep(tip="8" * 40, commits=()), self._keep(tip="9" * 40, commits=())]
         with pytest.raises(RejectRefusedError, match="closed"):
-            admit_request("feat", _tip(repo), inventory, keeps, 0, config)
+            admit_request("feat", _tip(repo), inventory, keeps, 0, config, unresolved_attempts=0)
 
     def test_an_unrelated_keep_does_not_count(self, repo: Path, config: BranchRejectConfig) -> None:
         inventory = compute_inventory(repo, "feat", "main")
         keep = self._keep(branch="other", tip="9" * 40, commits=("7" * 40,))
-        assert admit_request("feat", _tip(repo), inventory, [keep], 0, config) == 1
+        assert (
+            admit_request("feat", _tip(repo), inventory, [keep], 0, config, unresolved_attempts=0)
+            == 1
+        )
 
     def test_the_rate_raises_the_requirement(self, repo: Path, config: BranchRejectConfig) -> None:
         inventory = compute_inventory(repo, "feat", "main")
-        assert admit_request("feat", _tip(repo), inventory, [], 3, config) == 2
+        assert (
+            admit_request("feat", _tip(repo), inventory, [], 3, config, unresolved_attempts=0) == 2
+        )
 
     def test_the_rate_refuses(self, repo: Path, config: BranchRejectConfig) -> None:
         inventory = compute_inventory(repo, "feat", "main")
         with pytest.raises(RejectRefusedError, match="rate"):
-            admit_request("feat", _tip(repo), inventory, [], 10, config)
+            admit_request("feat", _tip(repo), inventory, [], 10, config, unresolved_attempts=0)
 
 
 class TestMainCheckout:

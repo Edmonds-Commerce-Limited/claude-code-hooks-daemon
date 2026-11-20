@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.core.branch_reject import (
     VERDICT_BLOCK_END,
     VERDICT_BLOCK_START,
     DispatchCall,
+    FailureRecord,
     Inventory,
     RejectError,
     RejectRefusedError,
@@ -561,7 +562,7 @@ class TestRecordReviewStop:
         "case",
         ["reply-differs", "unparseable-reply", "damaged-transcript"],
     )
-    def test_an_identified_but_unusable_stop_writes_nothing_and_takes_the_marker(
+    def test_an_identified_but_unusable_stop_records_a_failure_and_takes_the_marker(
         self, tmp_path: Path, store: RejectStore, case: str
     ) -> None:
         request, prompt = self._setup(tmp_path, store)
@@ -569,17 +570,30 @@ class TestRecordReviewStop:
         records = _transcript_records(prompt, reply)
         tail = ""
         stop = _stop(reply)
+        reason = "reply-mismatch"
         if case == "reply-differs":
             stop = _stop(reply + "\n")
         elif case == "unparseable-reply":
             records = _transcript_records(prompt, "no block here")
             stop = _stop("no block here")
+            reason = "unparseable-reply"
         else:
             tail = '{"half'
+            reason = "damaged-transcript"
         facts = read_review_transcript(_write_transcript(tmp_path / "t.jsonl", records, tail))
         assert record_review_stop(store, stop, facts, now=NOW) == STOP_IGNORED
         assert _verdict_files(store) == []
         assert _keep_files(store) == []
+        # F-BYPS F2: the failed review leaves a trace, so it raises the next request's bar.
+        assert store.failures() == [
+            FailureRecord(
+                nonce=request.nonce,
+                reason=reason,
+                branch=request.branch,
+                tip=request.tip,
+                recorded_at=NOW,
+            )
+        ]
         # The stop counted: a later clean-looking stop of the same nonce withdraws.
         clean = _facts(tmp_path, prompt, reply)
         assert record_review_stop(store, _stop(reply), clean, now=NOW) == STOP_WITHDRAWN
