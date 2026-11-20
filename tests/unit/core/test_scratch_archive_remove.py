@@ -978,9 +978,11 @@ def test_ctypes_moves_are_only_the_listed_ones() -> None:
     assert _ctypes_moves() == {
         ("scratch_archive_claim.py", "<module>", "_RENAMEAT2"),
         ("scratch_archive_claim.py", "rename_noreplace", "_RENAMEAT2"),
+        ("scratch_archive_claim.py", "rename_noreplace_between", "_RENAMEAT2"),
         ("scratch_archive_claim.py", "claim", "rename_noreplace"),
         ("scratch_archive_claim.py", "release", "rename_noreplace"),
         ("scratch_archive_remove.py", "resume_claimed", "rename_noreplace"),
+        ("scratch_archive_restore.py", "_move", "rename_noreplace_between"),
     }
 
 
@@ -992,4 +994,7 @@ def test_deletion_surfaces_are_only_the_listed_ones() -> None:
         ("scratch_archive_expire.py", "_unlink_expired", "unlink"),
         ("scratch_archive_remove.py", "_delete", "unlink"),
         ("scratch_archive_remove.py", "_delete", "rmdir"),
+        ("scratch_archive_restore.py", "_clean_staging", "rmdir"),
+        ("scratch_archive_restore.py", "_empty_dir", "unlink"),
+        ("scratch_archive_restore.py", "_empty_dir", "rmdir"),
     }

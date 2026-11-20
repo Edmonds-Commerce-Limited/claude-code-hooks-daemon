@@ -1,0 +1,439 @@
+"""Restore an archived entry under its original name (Plan 00627 Task 3.6).
+
+Restore never overwrites anything. Every check runs BEFORE any staging exists:
+the store lock, a complete record (:func:`complete_records`), a plain
+destination name from the record, the destination absent (``lstat``, so a
+dangling link counts as present), the store and destination on one device, the
+archive's size and SHA-256 read through the descriptor later fed to tar, and
+every header: only directories, regular files and symbolic links, each named
+``./...`` with no empty, ``.`` or ``..`` component, none repeated and none
+beneath a symbolic link member. The layout is derived from the headers and
+must agree with the record:
+
+* a ``.`` root member: a directory entry, its member counts by kind equal to
+  the record's, its other kinds equal to the record's skipped files;
+* only ``./.sweeping-<name>`` members: a loose file or a batch, of which the
+  member for the record's name is restored, its kind equal to the record's.
+
+Anything else (the P6 ``name/...`` layout included, Task 3.7) is refused.
+
+Then tar extracts into a fresh staging directory in the store
+(``.restoring-<random>``), the staged tree is verified against the archive
+(member set and ``tar --compare``), and one no-replace rename moves it into
+place. A failure cleans the staging directory it created, through descriptors
+on that inode; a crash leaves it, and :func:`leftover_staging` reports it. The
+archive and its records are never touched.
+"""
+
+from __future__ import annotations
+
+import errno
+import os
+import posixpath
+import secrets
+import stat
+import tarfile
+from collections import Counter
+from dataclasses import dataclass
+from typing import IO, Literal
+
+from claude_code_hooks_daemon.core.scratch_archive import (
+    ArchiveRecord,
+    ArchiveStore,
+    StoreRefused,
+    fsync_dir,
+    list_names,
+)
+from claude_code_hooks_daemon.core.scratch_archive_claim import (
+    CLAIM_PREFIX,
+    DEFAULT_MAX_DEPTH,
+    WalkRefused,
+    check_entry_name,
+    open_child_dir,
+    rename_noreplace_between,
+    walk_tree,
+)
+from claude_code_hooks_daemon.core.scratch_archive_expire import Incomplete, complete_records
+from claude_code_hooks_daemon.core.scratch_archive_pack import (
+    DEFAULT_TAR_TIMEOUT_SECONDS,
+    PackRefused,
+    TarDidNotRun,
+    TarTool,
+    VerifyFailed,
+    batched_compare,
+    digest_fd,
+    members_of,
+    run_tar,
+)
+
+#: The prefix of a restore's staging directory in the store.
+STAGING_PREFIX = ".restoring-"
+
+_STAGED_ROOT = "root"
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+_KINDS = {
+    tarfile.DIRTYPE: "dir",
+    tarfile.REGTYPE: "file",
+    tarfile.AREGTYPE: "file",
+    tarfile.SYMTYPE: "symlink",
+}
+_STORED_KINDS = ("dir", "file", "symlink")
+_EXTRACT = (
+    "--extract",
+    "--file=-",
+    "--keep-old-files",
+    "--no-same-owner",
+    "--preserve-permissions",
+)
+
+Layout = Literal["directory", "member"]
+
+
+class RestoreRefused(Exception):
+    """Nothing was restored; any staging this restore created is gone."""
+
+
+@dataclass(frozen=True)
+class Header:
+    """One tar header: its name as stored, its kind and permission bits."""
+
+    name: str
+    kind: str
+    mode: int
+
+
+@dataclass(frozen=True)
+class Restored:
+    """An entry restored under ``name`` in the destination directory."""
+
+    archive_id: str
+    name: str
+    layout: Layout
+
+
+@dataclass(frozen=True)
+class _Plan:
+    layout: Layout
+    member: str
+    headers: tuple[Header, ...]
+
+
+def leftover_staging(store: ArchiveStore) -> tuple[str, ...]:
+    """Staging directories a crashed restore left in the store; reported, never deleted."""
+    return tuple(sorted(n for n in list_names(store.dir_fd) if n.startswith(STAGING_PREFIX)))
+
+
+def _name_ok(name: str) -> bool:
+    if name == ".":
+        return True
+    parts = name.split("/")
+    return parts[0] == "." and len(parts) > 1 and all(p not in ("", ".", "..") for p in parts[1:])
+
+
+def read_headers(handle: IO[bytes]) -> tuple[Header, ...]:
+    """Read every header; raise :class:`RestoreRefused` on any unsafe member."""
+    headers: list[Header] = []
+    try:
+        with tarfile.open(fileobj=handle, mode="r|") as archive:
+            for member in archive:
+                kind = _KINDS.get(member.type)
+                if kind is None:
+                    raise RestoreRefused(f"member {member.name!r} has a refused type")
+                if not _name_ok(member.name):
+                    raise RestoreRefused(f"member {member.name!r} escapes the entry")
+                headers.append(Header(member.name, kind, stat.S_IMODE(member.mode)))
+    except tarfile.TarError as exc:
+        raise RestoreRefused(f"archive member headers cannot be read: {exc}") from exc
+    names = [h.name for h in headers]
+    if len(names) != len(set(names)):
+        raise RestoreRefused("a member name is repeated")
+    links = {h.name for h in headers if h.kind == "symlink"}
+    for name in names:
+        parts = name.split("/")
+        if any("/".join(parts[:i]) in links for i in range(2, len(parts))):
+            raise RestoreRefused(f"member {name!r} lies beneath a symbolic link member")
+    return tuple(headers)
+
+
+def _plan(record: ArchiveRecord, headers: tuple[Header, ...], dest_name: str) -> _Plan:
+    """Derive the layout from the headers; refuse when it disagrees with the record."""
+    if headers and headers[0].name == ".":
+        if headers[0].kind != "dir" or any(h.name == "." for h in headers[1:]):
+            raise RestoreRefused("layout: the root member is not one directory")
+        found = Counter(h.kind for h in headers)
+        stored = all(found[k] == record.counts.get(k, 0) for k in _STORED_KINDS)
+        other = sum(v for k, v in record.counts.items() if k not in _STORED_KINDS)
+        if not stored or other != len(record.skipped):
+            raise RestoreRefused("layout: the member counts disagree with the record")
+        return _Plan("directory", ".", headers)
+    wanted = f"./{CLAIM_PREFIX}{dest_name}"
+    for header in headers:
+        parts = header.name.split("/")
+        if len(parts) != 2 or not parts[1].startswith(CLAIM_PREFIX):
+            raise RestoreRefused(f"layout: member {header.name!r} is not a claimed loose file")
+    match = [h for h in headers if h.name == wanted]
+    if len(match) != 1:
+        raise RestoreRefused(f"layout: the archive has no member for {dest_name!r}")
+    if dict(record.counts) != {match[0].kind: 1}:
+        raise RestoreRefused("layout: the member's kind disagrees with the record")
+    return _Plan("member", wanted, headers)
+
+
+def _select(records: tuple[ArchiveRecord, ...], entry: str | None) -> ArchiveRecord:
+    if entry is None:
+        if len(records) != 1:
+            raise RestoreRefused("this archive holds several entries; name the entry")
+        return records[0]
+    for record in records:
+        if record.original_path == entry:
+            return record
+    raise RestoreRefused(f"the archive holds no entry {entry!r}")
+
+
+def _check_destination(store: ArchiveStore, dest_parent_fd: int, dest_name: str) -> None:
+    try:
+        os.lstat(dest_name, dir_fd=dest_parent_fd)
+        present = True
+    except FileNotFoundError:
+        present = False
+    except OSError as exc:
+        raise RestoreRefused(f"the destination cannot be checked: {exc}") from exc
+    if present:
+        raise RestoreRefused(f"{dest_name!r} exists; restore never overwrites")
+    if os.fstat(dest_parent_fd).st_dev != os.fstat(store.dir_fd).st_dev:
+        raise RestoreRefused("the destination is on another device than the store")
+
+
+def _checked_archive(store: ArchiveStore, record: ArchiveRecord) -> tuple[int, tuple[Header, ...]]:
+    """Open the archive, check its size and hash, and read its headers through one descriptor."""
+    try:
+        fd = store.open_archive(record.archive_id)
+    except StoreRefused as exc:
+        raise RestoreRefused(str(exc)) from exc
+    try:
+        size, sha = digest_fd(fd)
+        if (size, sha) != (record.archive_size, record.sha256):
+            raise RestoreRefused("the archive's size or SHA-256 differs from its record")
+        os.lseek(fd, 0, os.SEEK_SET)
+        with os.fdopen(os.dup(fd), "rb") as handle:
+            headers = read_headers(handle)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, headers
+
+
+def restore(
+    store: ArchiveStore,
+    archive_id: str,
+    dest_parent_fd: int,
+    *,
+    tar: TarTool,
+    max_inodes: int,
+    entry: str | None = None,
+    max_depth: int = DEFAULT_MAX_DEPTH,
+    timeout: float = DEFAULT_TAR_TIMEOUT_SECONDS,
+) -> Restored:
+    """Restore ``archive_id`` (``entry`` names one of a batch) into ``dest_parent_fd``.
+
+    Raises :class:`RestoreRefused`; the archive and its records are untouched either way.
+    """
+    store.require_lock("restore")
+    try:
+        records = complete_records(store.read_index(), store.read_events(), archive_id)
+    except Incomplete as exc:
+        raise RestoreRefused(str(exc)) from exc
+    record = _select(records, entry)
+    try:
+        dest_name = check_entry_name(posixpath.basename(record.original_path))
+    except ValueError as exc:
+        raise RestoreRefused(f"the record's name cannot be restored: {exc}") from exc
+    _check_destination(store, dest_parent_fd, dest_name)
+    archive_fd, headers = _checked_archive(store, record)
+    try:
+        plan = _plan(record, headers, dest_name)
+        _stage_and_move(
+            store,
+            archive_fd,
+            plan,
+            dest_parent_fd,
+            dest_name,
+            tar=tar,
+            max_inodes=max_inodes,
+            max_depth=max_depth,
+            timeout=timeout,
+        )
+    finally:
+        os.close(archive_fd)
+    return Restored(archive_id=archive_id, name=dest_name, layout=plan.layout)
+
+
+def _stage_and_move(
+    store: ArchiveStore,
+    archive_fd: int,
+    plan: _Plan,
+    dest_parent_fd: int,
+    dest_name: str,
+    *,
+    tar: TarTool,
+    max_inodes: int,
+    max_depth: int,
+    timeout: float,
+) -> None:
+    staging = STAGING_PREFIX + secrets.token_hex(8)
+    os.mkdir(staging, 0o700, dir_fd=store.dir_fd)
+    staging_fd = os.open(staging, _DIR_FLAGS, dir_fd=store.dir_fd)
+    info = os.fstat(staging_fd)
+    ident = (info.st_ino, info.st_dev)
+    try:
+        try:
+            target = _extract_and_verify(
+                staging_fd,
+                archive_fd,
+                plan,
+                tar=tar,
+                max_inodes=max_inodes,
+                max_depth=max_depth,
+                timeout=timeout,
+            )
+            root_mode = plan.headers[0].mode if plan.layout == "directory" else None
+            _move(staging_fd, target, dest_parent_fd, dest_name, root_mode)
+        except Exception as exc:
+            _clean_staging(store, staging, ident, max_depth=max_depth)
+            if isinstance(exc, RestoreRefused):
+                raise
+            raise RestoreRefused(f"restore failed: {exc}") from exc
+        os.fsync(dest_parent_fd)
+        _clean_staging(store, staging, ident, max_depth=max_depth)
+    finally:
+        os.close(staging_fd)
+
+
+def _extract_and_verify(
+    staging_fd: int,
+    archive_fd: int,
+    plan: _Plan,
+    *,
+    tar: TarTool,
+    max_inodes: int,
+    max_depth: int,
+    timeout: float,
+) -> str:
+    """Extract into staging and verify it; return the staged name to move."""
+    operands: tuple[str, ...] = ()
+    if plan.layout == "directory":
+        os.mkdir(_STAGED_ROOT, 0o700, dir_fd=staging_fd)
+        cwd_fd = os.open(_STAGED_ROOT, _DIR_FLAGS, dir_fd=staging_fd)
+        target = _STAGED_ROOT
+    else:
+        cwd_fd = os.dup(staging_fd)
+        target = plan.member[2:]
+        operands = ("--no-wildcards", "--no-unquote", "--", plan.member)
+    try:
+        os.lseek(archive_fd, 0, os.SEEK_SET)
+        proc = run_tar(
+            tar,
+            [*_EXTRACT, *operands],
+            cwd_fd=cwd_fd,
+            stdin=archive_fd,
+            stdout=None,
+            timeout=timeout,
+        )
+        if proc.returncode != 0 or proc.stdout or proc.stderr:
+            raise RestoreRefused(
+                f"tar --extract failed (exit {proc.returncode}, "
+                f"{len(proc.stderr.splitlines())} stderr lines)"
+            )
+        try:
+            names = _staged_members(staging_fd, target, plan, max_inodes, max_depth)
+            if names:
+                batched_compare(cwd_fd, archive_fd, names, tar=tar, timeout=timeout)
+        except (VerifyFailed, TarDidNotRun, WalkRefused, PackRefused) as exc:
+            raise RestoreRefused(f"the staged tree failed verification: {exc}") from exc
+    finally:
+        os.close(cwd_fd)
+    return target
+
+
+def _staged_members(
+    staging_fd: int, target: str, plan: _Plan, max_inodes: int, max_depth: int
+) -> list[str]:
+    """Check the staged member set equals the archive's; return the names to compare."""
+    if plan.layout == "member":
+        if sorted(list_names(staging_fd)) != [target]:
+            raise VerifyFailed("staging holds other names than the restored member")
+        return [plan.member]
+    listing = walk_tree(staging_fd, target, max_inodes=max_inodes, max_depth=max_depth)
+    members = members_of(listing, target)
+    staged = {(n.rstrip("/") or ".") for n in members.names}
+    if members.skipped or staged != {h.name for h in plan.headers}:
+        raise VerifyFailed("the staged member set differs from the archive")
+    return [n for n in members.names if n != "./"]
+
+
+def _move(
+    staging_fd: int, target: str, dest_parent_fd: int, dest_name: str, root_mode: int | None
+) -> None:
+    """The no-replace rename into place.
+
+    A directory (``root_mode`` given: tar leaves its working directory's mode
+    alone) is owner-writable for the move, then takes the archived root's mode.
+    """
+    restore_mode: int | None = None
+    target_fd: int | None = None
+    if root_mode is not None:
+        target_fd = os.open(target, _DIR_FLAGS, dir_fd=staging_fd)
+        os.fchmod(target_fd, stat.S_IMODE(os.fstat(target_fd).st_mode) | stat.S_IWUSR)
+        restore_mode = root_mode
+    try:
+        try:
+            rename_noreplace_between(staging_fd, target, dest_parent_fd, dest_name)
+        except OSError as exc:
+            if exc.errno == errno.EEXIST:
+                raise RestoreRefused(f"{dest_name!r} exists; restore never overwrites") from exc
+            raise RestoreRefused(f"the move into place failed: {exc}") from exc
+        finally:
+            if target_fd is not None and restore_mode is not None:
+                os.fchmod(target_fd, restore_mode)
+    finally:
+        if target_fd is not None:
+            os.close(target_fd)
+
+
+def _clean_staging(
+    store: ArchiveStore, name: str, ident: tuple[int, int], *, max_depth: int
+) -> None:
+    """Remove the staging directory this restore created, only if it is still that inode."""
+    fd = os.open(name, _DIR_FLAGS, dir_fd=store.dir_fd)
+    try:
+        info = os.fstat(fd)
+        if (info.st_ino, info.st_dev) != ident:
+            raise RestoreRefused(f"staging {name!r} changed; it is left in place")
+        _empty_dir(fd, ident[1], 0, max_depth)
+    finally:
+        os.close(fd)
+    info = os.lstat(name, dir_fd=store.dir_fd)
+    if (info.st_ino, info.st_dev) != ident:
+        raise RestoreRefused(f"staging {name!r} changed; it is left in place")
+    os.rmdir(name, dir_fd=store.dir_fd)
+    fsync_dir(store.dir_fd)
+
+
+def _empty_dir(dir_fd: int, dev: int, depth: int, max_depth: int) -> None:
+    """Empty one staged directory through its descriptor, never leaving its device."""
+    if depth > max_depth:
+        raise RestoreRefused("staging is nested too deeply to clean; it is left in place")
+    os.fchmod(dir_fd, 0o700)
+    for child in list_names(dir_fd):
+        info = os.lstat(child, dir_fd=dir_fd)
+        if not stat.S_ISDIR(info.st_mode):
+            os.unlink(child, dir_fd=dir_fd)
+            continue
+        if info.st_dev != dev:
+            raise RestoreRefused("staging holds another device; it is left in place")
+        child_fd = open_child_dir(dir_fd, child, info)
+        try:
+            _empty_dir(child_fd, dev, depth + 1, max_depth)
+        finally:
+            os.close(child_fd)
+        os.rmdir(child, dir_fd=dir_fd)

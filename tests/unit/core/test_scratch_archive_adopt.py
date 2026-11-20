@@ -13,7 +13,9 @@ TAR = shutil.which("tar")
 _ENV = {"LC_ALL": "C", "PATH": "/usr/bin:/bin"}
 
 
-def _tar(args: list[str], cwd: Path, stdin: Path | None = None) -> subprocess.CompletedProcess[bytes]:
+def _tar(
+    args: list[str], cwd: Path, stdin: Path | None = None
+) -> subprocess.CompletedProcess[bytes]:
     assert TAR is not None
     if stdin is None:
         return subprocess.run([TAR, *args], cwd=cwd, env=_ENV, capture_output=True, check=False)

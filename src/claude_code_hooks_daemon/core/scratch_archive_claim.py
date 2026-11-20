@@ -266,6 +266,24 @@ def rename_noreplace(dir_fd: int, src: str, dst: str) -> None:
         raise OSError(err, os.strerror(err), src)
 
 
+def rename_noreplace_between(src_dir_fd: int, src: str, dst_dir_fd: int, dst: str) -> None:
+    """Move plain name ``src`` of ``src_dir_fd`` to ``dst`` of ``dst_dir_fd``, never replacing.
+
+    Fails with ``EEXIST`` if ``dst`` exists (a dangling link included), ``EXDEV``
+    across devices; raises ``ValueError`` for a name that is not one plain entry.
+    """
+    check_name(src)
+    check_name(dst)
+    if _RENAMEAT2 is None:
+        raise ClaimRefused("no-replace rename (renameat2) is unavailable; nothing is moved")
+    result = _RENAMEAT2(
+        src_dir_fd, os.fsencode(src), dst_dir_fd, os.fsencode(dst), _RENAME_NOREPLACE
+    )
+    if result != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), src)
+
+
 class Claimed:
     """A held claim: the entry now lives at ``claimed_name`` under ``parent_fd``."""
 
