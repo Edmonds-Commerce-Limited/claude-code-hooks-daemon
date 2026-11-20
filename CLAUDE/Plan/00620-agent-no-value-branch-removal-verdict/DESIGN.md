@@ -267,7 +267,8 @@ Decided in slice 2 (`approve_removal`, `record_removal`, `record_git_refusal`):
   batch cannot carry several removals past the two-reviewer or refuse threshold.
 - **A crash between the append and git's answer** leaves an uncancelled removal line for
   a branch that may still exist. This is the cost of the ruling's append-first order; the
-  digest (slice 3) should flag a ledger line whose branch still resolves at its tip.
+  digest (section 11) flags every listed removal whose branch still resolves at its
+  recorded tip as `STILL PRESENT at its tip`.
 - **A git refusal after the append** appends a second line,
   `{"outcome": "git-refused", branch, tip, verdict_ids, detail, refused_at}`.
   `read_ledger` returns only removals no refusal cancels (same tip and verdict ids), so
@@ -275,3 +276,31 @@ Decided in slice 2 (`approve_removal`, `record_removal`, `record_git_refusal`):
   digest. The refused attempt's verdicts stay consumed (fail closed: a retry needs a fresh
   review). If even the refusal line cannot be appended, the blocker says the ledger
   wrongly records the removal. A line with an unknown `outcome` raises.
+
+## 11. The digest (slice 3)
+
+`branch-reject digest [--mark-read] [--format text|json]` lists every ledger removal, every
+`git-refused` line and every keep verdict not yet marked read, then the rate line (removals
+in the window and the reviewers the next removal needs, or that the route is refusing).
+
+- **Identity, not position.** The watermark (`<state_dir>/digest.json`) holds the sha256 of
+  each read entry's canonical JSON, and the ids of the read keeps. A line that arrives by a
+  `merge=union` after a digest still shows as undigested.
+- **Listing never advances the watermark.** Only `--mark-read` does, and it marks exactly
+  the entries of the `Digest` that was printed, never one that arrived after the listing.
+  The listing is built and rendered before the mark, so a failure prints nothing and marks
+  nothing.
+- **Strict.** A damaged ledger, keep record or watermark raises `RejectError` (exit 2); an
+  unreadable state never reads as "nothing to digest".
+- **It gates nothing.** `approve_removal` never reads the watermark, so an agent that marks
+  entries read hides them from the digest only and unlocks no delete. The rate counts every
+  removal in the window, marked or not.
+- **Crash flag.** A listed removal whose branch still resolves at its recorded tip is
+  flagged `STILL PRESENT at its tip` (section 10).
+
+**The session-start count.** `branch_sweep` adds one line on every SessionStart source when
+anything is undigested: the counts of removals, git refusals and keeps, and the digest
+command. It reads only (no git call per entry, nothing written) and is independent of the
+branch inventory, so an inventory failure does not hide it. No main checkout (not a
+repository, or bare) is silent; a damaged ledger or watermark prints a loud
+"unreadable" line instead of a count.

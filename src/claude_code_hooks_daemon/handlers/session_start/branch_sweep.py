@@ -17,6 +17,7 @@ fallback for one release (DESIGN.md section 1).
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,12 @@ from claude_code_hooks_daemon.core.branch_creation import (
 from claude_code_hooks_daemon.core.branch_inventory import BranchInventoryError, build_inventory
 from claude_code_hooks_daemon.core.branch_ladder import ladder_notice
 from claude_code_hooks_daemon.core.branch_park import BranchParkError, announce_ended_parks
+from claude_code_hooks_daemon.core.branch_reject import (
+    RejectError,
+    RejectStore,
+    build_digest,
+    main_checkout,
+)
 from claude_code_hooks_daemon.core.branch_sweep import (
     deprecation_line,
     effective_behind_threshold,
@@ -54,6 +61,7 @@ logger = logging.getLogger(__name__)
 
 _ICON = "🌿"
 _NOTICE_ICON = "⚠️"
+_REJECT_ICON = "🗑️"
 
 
 class BranchSweepHandler(SessionStartHandlerBase):
@@ -107,6 +115,7 @@ class BranchSweepHandler(SessionStartHandlerBase):
         context = [
             *self._ended_park_lines(),
             *self._branch_lines(hook_input),
+            *self._reject_digest_lines(),
             *self._claude_md_notice_lines(),
         ]
         return AdvisoryResult(decision=Decision.ALLOW, context=context)
@@ -124,6 +133,47 @@ class BranchSweepHandler(SessionStartHandlerBase):
                 level=logging.DEBUG,
             )
             return []
+
+    def _reject_digest_lines(self) -> list[str]:
+        """The count of no-value removals not yet digested (Plan 00620); empty when none.
+
+        Read-only: no git call per entry and nothing written, so the watermark only
+        moves on an explicit ``branch-reject digest --mark-read``. Outside a checkout
+        it is silent; a damaged ledger or watermark is said out loud rather than read
+        as zero.
+        """
+        root = self._get_project_root()
+        config = self._branches.reject
+        command = daemon_cli_command_for_docs("branch-reject", "digest")
+        try:
+            store = RejectStore(main_checkout(root) / config.state_dir)
+        except RejectError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="no main checkout (not a repository, or bare) holds no removal digest",
+                level=logging.DEBUG,
+            )
+            return []
+        try:
+            digest = build_digest(root / config.ledger_path, store, now=time.time(), config=config)
+        except RejectError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="the removal count is advisory; the loud line below names the damage",
+            )
+            return [
+                f"{_REJECT_ICON}  BRANCH REMOVALS: the ledger or digest state is unreadable "
+                f"({exc}); run `{command}` to see the failure"
+            ]
+        if digest.is_empty:
+            return []
+        return [
+            f"{_REJECT_ICON}  BRANCH REMOVALS: {len(digest.removals)} removal(s), "
+            f"{len(digest.refusals)} git refusal(s) and {len(digest.keeps)} keep verdict(s) "
+            f"not yet digested; review them with `{command}`"
+        ]
 
     def _claude_md_notice_lines(self) -> list[str]:
         """The CLAUDE.md block notices, fresh for this SessionStart; empty when none or unreadable."""
@@ -226,7 +276,12 @@ class BranchSweepHandler(SessionStartHandlerBase):
             "carries a `CLAUDE.MD BLOCK` notice, recomputed at every SessionStart, when the "
             "`<hooksdaemon>` block is stale on a home branch under `branches.home_commit: "
             "false` or no home branch resolves to a local branch (set `branches.home`); this handler is "
-            "the only carrier of that notice, so with it disabled nothing tells an agent. Advisory only."
+            "the only carrier of that notice, so with it disabled nothing tells an agent. "
+            "It also counts the no-value branch removals, git refusals and keep verdicts "
+            "(Plan 00620) the owner has not yet marked read, on every source, and points at "
+            f"`{daemon_cli_command_for_docs('branch-reject', 'digest')}`; the count reads only, "
+            "writes nothing, and says out loud when the ledger or its watermark is unreadable. "
+            "Advisory only."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

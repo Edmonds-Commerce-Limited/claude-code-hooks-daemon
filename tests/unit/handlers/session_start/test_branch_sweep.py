@@ -16,6 +16,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.unit.core.test_branch_reject import _ledger_line
 
 from claude_code_hooks_daemon.config.models import (
     BranchesConfig,
@@ -31,6 +32,12 @@ from claude_code_hooks_daemon.core.branch_park import (
     BranchParkError,
     park_branch,
     read_park_record,
+)
+from claude_code_hooks_daemon.core.branch_reject import (
+    RejectStore,
+    append_ledger,
+    build_digest,
+    mark_digest_read,
 )
 from claude_code_hooks_daemon.handlers.session_start.branch_sweep import BranchSweepHandler
 
@@ -377,3 +384,74 @@ class TestPoolLadderAtSessionStart:
         self._two_open(repo)
         text = "\n".join(_run(self._handler(wip={"cap": 10}), repo, _new()))
         assert "BRANCH POOL" not in text
+
+
+class TestRejectDigestCount:
+    """Plan 00620 Task 2.3: the count of removals not yet digested, read-only, fail open."""
+
+    def _ledger(self, repo: Path) -> Path:
+        return repo / BranchesConfig().reject.ledger_path
+
+    def _store(self, repo: Path) -> RejectStore:
+        return RejectStore(repo / BranchesConfig().reject.state_dir)
+
+    def _record(self, repo: Path, *branches: str) -> None:
+        for branch in branches:
+            append_ledger(self._ledger(repo), _ledger_line(branch=branch))
+
+    def _count_lines(self, repo: Path) -> list[str]:
+        with patch(_BUILD, side_effect=BranchInventoryError("no inventory")):
+            return _run(BranchSweepHandler(), repo, _new())
+
+    def test_the_count_shows_even_when_the_inventory_fails(self, repo: Path) -> None:
+        self._record(repo, "gone-a", "gone-b")
+        text = "\n".join(self._count_lines(repo))
+        assert "2 removal(s)" in text
+        assert "branch-reject digest" in text
+
+    def test_nothing_undigested_is_silent(self, repo: Path) -> None:
+        assert self._count_lines(repo) == []
+
+    def test_entries_marked_read_are_not_counted(self, repo: Path) -> None:
+        self._record(repo, "gone")
+        config = BranchesConfig().reject
+        store = self._store(repo)
+        digest = build_digest(self._ledger(repo), store, now=time.time(), config=config)
+        mark_digest_read(store, digest, now=time.time())
+        assert self._count_lines(repo) == []
+
+    def test_a_damaged_ledger_is_loud(self, repo: Path) -> None:
+        ledger = self._ledger(repo)
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text("not json\n", encoding="utf-8")
+        text = "\n".join(self._count_lines(repo))
+        assert "unreadable" in text
+        assert "branch-reject digest" in text
+
+    def test_a_damaged_watermark_is_loud(self, repo: Path) -> None:
+        self._record(repo, "gone")
+        path = self._store(repo).digest_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{", encoding="utf-8")
+        assert "unreadable" in "\n".join(self._count_lines(repo))
+
+    def test_outside_a_repository_it_is_silent(self, tmp_path: Path) -> None:
+        ledger = self._ledger(tmp_path)
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text("not json\n", encoding="utf-8")
+        assert self._count_lines(tmp_path) == []
+
+    def test_listing_writes_nothing(self, repo: Path) -> None:
+        self._record(repo, "gone")
+        self._count_lines(repo)
+        assert not self._store(repo).digest_path.exists()
+
+    def test_a_resumed_session_is_told_too(self, repo: Path, tmp_path: Path) -> None:
+        self._record(repo, "gone")
+        with patch(_BUILD, side_effect=BranchInventoryError("no inventory")):
+            text = "\n".join(_run(BranchSweepHandler(), repo, _resume(tmp_path)))
+        assert "1 removal(s)" in text
+
+    def test_claude_md_names_the_digest_count(self) -> None:
+        text = BranchSweepHandler().get_claude_md() or ""
+        assert "branch-reject digest" in text
