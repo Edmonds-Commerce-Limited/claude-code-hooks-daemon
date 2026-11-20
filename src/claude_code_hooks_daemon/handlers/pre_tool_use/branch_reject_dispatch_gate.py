@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.install.agent_assets import (
     spec_by_name,
 )
 from claude_code_hooks_daemon.utils.dispatch_tier import classify, dispatch_facts, spawner_model
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _SUBAGENT_TYPE_FIELD: Final[str] = "subagent_type"
 _PROMPT_FIELD: Final[str] = "prompt"
@@ -240,7 +241,7 @@ class BranchRejectDispatchGateHandler(PreToolUseHandlerBase):
                     f"Reply in one line: what does the line '{PROMPT_MARKER}<nonce>' "
                     "mark in a hooks-daemon prompt?\n"
                     "This is not plan work; reply inline, and write any file only to "
-                    "untracked/scratch/branch-reject-near-miss"
+                    f"{acceptance_path('branch-reject-near-miss')}"
                 ),
             },
         )
