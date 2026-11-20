@@ -78,8 +78,9 @@ logger = logging.getLogger(__name__)
 #: Repository-relative path of the per-pair cache.
 CACHE_RELATIVE_PATH = Path("untracked/branch-inventory/cache.json")
 #: Containment never counts tags; a version-2 entry may hold a tag's vouch. Version 5:
-#: a park commit must carry the park writer's exact message (Plan 00617).
-_CACHE_VERSION = 5
+#: a park commit must carry the park writer's exact message (Plan 00617). Version 6:
+#: the net change sees a submodule pointer git was told to ignore (Plan 00594).
+_CACHE_VERSION = 6
 
 _SECONDS_PER_DAY = 86_400
 _REFS = "refs/"

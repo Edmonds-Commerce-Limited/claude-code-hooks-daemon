@@ -62,6 +62,7 @@ from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     GIT_COMMAND_ERRORS,
     HEADS_PREFIX,
+    SEE_SUBMODULES,
     WorktreeRecord,
     branch_ref,
     parse_worktree_porcelain,
@@ -443,7 +444,7 @@ def worktree_blocker_groups(
     agent may delete itself; ``dirty`` also carries a git failure, which no
     delete can clear.
     """
-    status = run_git(path, "status", "--porcelain")
+    status = run_git(path, "status", "--porcelain", SEE_SUBMODULES)
     if status.returncode != 0:
         return ((f"<git status failed: {status.stderr.strip()}>",), ())
     dirty = [line[_STATUS_PREFIX:] for line in status.stdout.splitlines() if line]

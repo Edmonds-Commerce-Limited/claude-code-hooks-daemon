@@ -73,7 +73,7 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     patch_equivalent,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, run_git
+from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, SEE_SUBMODULES, run_git
 from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
 from claude_code_hooks_daemon.utils.remote_refs import list_remote_refs
 
@@ -85,6 +85,9 @@ _NO_MERGE_BASE: Final[int] = 1
 #: Fields of one ``git diff --raw`` record (old mode, new mode, old blob, new blob,
 #: status) and of one ``git ls-tree`` record (mode, type, blob).
 _RAW_META_FIELDS: Final[int] = 5
+
+#: The tree mode of a submodule pointer (a gitlink).
+_GITLINK_MODE: Final[str] = "160000"
 _LS_TREE_META_FIELDS: Final[int] = 3
 
 #: ``run_git`` decodes with ``errors="replace"``; this marks a path it could not decode.
@@ -238,6 +241,7 @@ class _PathChange:
     deleted: bool
     mode: str
     blob: str
+    gitlink: bool = False
 
 
 def _net_change(
@@ -257,6 +261,7 @@ def _net_change(
         "--no-renames",
         "--no-abbrev",
         "--no-ext-diff",
+        SEE_SUBMODULES,
         base,
         tracking_ref,
         timeout=timeout,
@@ -271,9 +276,45 @@ def _net_change(
             raise ProofUnavailableError(f"unreadable git diff --raw output for {tracking_ref}")
         if _REPLACEMENT_CHAR in fields[index + 1]:
             raise ProofUnavailableError(f"{tracking_ref} changes a path that is not valid UTF-8")
-        _old_mode, new_mode, _old_blob, new_blob, status = meta
-        changes.append(_PathChange(fields[index + 1], status.startswith("D"), new_mode, new_blob))
+        old_mode, new_mode, _old_blob, new_blob, status = meta
+        changes.append(
+            _PathChange(
+                fields[index + 1],
+                status.startswith("D"),
+                new_mode,
+                new_blob,
+                _GITLINK_MODE in (old_mode, new_mode),
+            )
+        )
     return changes
+
+
+def gitlink_change_held(
+    directory: Path, target: str, tracking_ref: str, *, timeout: float = Timeout.GIT_CONTEXT
+) -> bool:
+    """Whether patch-id evidence may stand for the branch's submodule pointers.
+
+    ``git cherry`` drops a gitlink from its patch-ids under ``.gitmodules``
+    ``ignore = all``, and takes no flag to undo it, so a commit that adds a file
+    the target has AND moves a submodule pointer reads as already upstream. True
+    when the branch's net change moves no pointer, or when the target's history
+    holds the whole net change path by path (pointer included). No merge base is
+    False: the net change cannot be read, and ``git cherry`` then matches against
+    the whole history. ``directory`` must be the repository top level.
+
+    Raises:
+        ProofUnavailableError: git failed, so there is no answer.
+    """
+    base = run_git(directory, "merge-base", target, tracking_ref, timeout=timeout)
+    if base.returncode == _NO_MERGE_BASE:
+        return False
+    if base.returncode != 0:
+        raise ProofUnavailableError(f"git merge-base failed for {tracking_ref}")
+    changes = _net_change(directory, base.stdout.strip(), tracking_ref, timeout=timeout)
+    if not any(change.gitlink for change in changes):
+        return True
+    state = _net_change_state(directory, target, tracking_ref, timeout=timeout)
+    return state in (_HELD, _HELD_PER_PATH)
 
 
 def _tree_entries(

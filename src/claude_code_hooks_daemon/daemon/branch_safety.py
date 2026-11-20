@@ -45,6 +45,7 @@ the two makes an alarming path count look like data loss when it is not.
 
 from __future__ import annotations
 
+import logging
 import subprocess  # nosec B404 - trusted system tool (git), list form, no shell
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -63,6 +64,8 @@ from claude_code_hooks_daemon.utils.remote_refs import (
     holder_of,
     resolve_source,
 )
+
+logger = logging.getLogger(__name__)
 
 # Proof tiers, strongest first.
 TIER_MERGED = "merged"
@@ -633,6 +636,10 @@ def patch_equivalent(repo: Path, target: str, tip_ref: str) -> tuple[bool, int |
     lossless only by ``empty-commits-only`` (the tip's tree is in the target's
     history) or by the net-change proof.
 
+    A patch-id cannot see a submodule pointer git is told to ignore, so this is
+    never a proof alone: the remote proof requires the net change held first, and
+    :func:`classify_branch` requires :func:`_gitlinks_held`.
+
     Fails CLOSED: a failed ``git cherry``, range walk or merge listing is never
     equivalent, and a range holding a merge commit is never equivalent.
     """
@@ -647,6 +654,26 @@ def patch_equivalent(repo: Path, target: str, tip_ref: str) -> tuple[bool, int |
     if unique:
         return False, len(unique)
     return _has_merge_commits(repo, target, tip_ref) is False, 0
+
+
+def _gitlinks_held(repo: Path, target: str, tip_ref: str) -> bool:
+    """``remote_branch_proof.gitlink_change_held`` from the top level; any failure is False.
+
+    Imported here, not at module level, because that module imports this one.
+    """
+    from claude_code_hooks_daemon.core import remote_branch_proof
+
+    top = _git(repo, "rev-parse", "--show-toplevel", check=False)
+    top_level = top.stdout.strip() if top.returncode == 0 else ""
+    if not top_level:
+        return False
+    try:
+        return remote_branch_proof.gitlink_change_held(
+            Path(top_level), target, tip_ref, timeout=_safety_timeout()
+        )
+    except remote_branch_proof.ProofUnavailableError as exc:
+        logger.info("branch_safety: submodule pointers of %s unchecked: %s", tip_ref, exc)
+        return False
 
 
 def _safety_timeout() -> float:
@@ -827,7 +854,7 @@ def classify_branch(
     known_counts: list[int] = []
     for base in bases:
         equivalent, count = patch_equivalent(repo, base, tip_ref)
-        if equivalent:
+        if equivalent and _gitlinks_held(repo, base, tip_ref):
             return BranchClassification(
                 name=name,
                 tier=TIER_PATCH_EQUIVALENT,
