@@ -290,12 +290,17 @@ class IndexRead:
         return None
 
 
+#: The prefix of a restore's staging directory in the store.
+STAGING_PREFIX = ".restoring-"
+
+
 @dataclass(frozen=True)
 class StoreAudit:
-    """Archives no record names, and records whose archive is gone."""
+    """Archives no record names, records whose archive is gone, and leftover staging."""
 
     unrecorded_archives: tuple[str, ...]
     records_without_archive: tuple[str, ...]
+    staging_dirs: tuple[str, ...] = ()
 
 
 def list_names(dir_fd: int) -> list[str]:
@@ -531,16 +536,21 @@ class ArchiveStore:
         fsync_dir(self._dir_fd)
 
     def audit(self) -> StoreAudit:
-        """Name unrecorded archive files and records whose archive is missing.
+        """Name unrecorded archive files, records whose archive is missing, and staging dirs.
 
         An id an ``expired`` event names is not missing: its archive was deleted on purpose.
+        Every ``.restoring-`` name is listed, whether or not a reclaim would accept it.
         """
         index = self.read_index()
         expired = {e.archive_id for e in self.read_events().events if isinstance(e, ExpiredEvent)}
         recorded = {r.archive_id for r in index.records}
         present: set[str] = set()
         unrecorded: list[str] = []
+        staging: list[str] = []
         for name in sorted(list_names(self._dir_fd)):
+            if name.startswith(STAGING_PREFIX):
+                staging.append(name)
+                continue
             if not name.endswith(ARCHIVE_SUFFIX):
                 continue
             archive_id = name[: -len(ARCHIVE_SUFFIX)]
@@ -555,4 +565,8 @@ class ArchiveStore:
                 if r.archive_id not in present and r.archive_id not in expired
             )
         )
-        return StoreAudit(unrecorded_archives=tuple(unrecorded), records_without_archive=missing)
+        return StoreAudit(
+            unrecorded_archives=tuple(unrecorded),
+            records_without_archive=missing,
+            staging_dirs=tuple(staging),
+        )

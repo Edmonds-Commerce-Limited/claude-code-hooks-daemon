@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.core.scratch_archive import (
     ArchiveRecord,
     ArchiveStore,
     ExpiredEvent,
+    StoreRefused,
     archive_file_name,
     new_archive_id,
 )
@@ -47,9 +48,11 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import (
 )
 from claude_code_hooks_daemon.core.scratch_archive_restore import (
     STAGING_PREFIX,
+    Reclaimed,
     Restored,
     RestoreRefused,
     leftover_staging,
+    reclaim_staging,
     restore,
 )
 
@@ -79,6 +82,7 @@ def root_fd(root: Path) -> Iterator[int]:
 
 @pytest.fixture
 def store(tmp_path: Path) -> Iterator[ArchiveStore]:
+    (tmp_path / "project" / "untracked").mkdir(parents=True, exist_ok=True)
     with ArchiveStore.open(tmp_path / "project" / "untracked" / "scratch-archive") as opened:
         with opened.lock():
             yield opened
@@ -800,3 +804,126 @@ class TestAfterStaging:
             assert _tree(root / "e1") == before
         # A leftover is reported, never deleted by a later run.
         assert leftover_staging(store) == leftovers
+
+
+# --- reclaiming crash-leftover staging (Task 3.8 precondition) ------------------
+
+
+def _crashed_staging(
+    root: Path, root_fd: int, store: ArchiveStore, tar: TarTool, monkeypatch: pytest.MonkeyPatch
+) -> str:
+    """Pack ``e1`` and crash a restore right after extraction; return the leftover name."""
+    _make_entry(root)
+    archive_id = _pack_entry(root, root_fd, store, tar, "e1")
+
+    def crash() -> None:
+        raise Crash
+
+    _after_extract(monkeypatch, crash)
+    with pytest.raises(Crash):
+        _restore(store, root_fd, tar, archive_id)
+    monkeypatch.undo()
+    (leftover,) = leftover_staging(store)
+    return leftover
+
+
+class TestReclaimStaging:
+    def test_needs_the_lock(self, tmp_path: Path) -> None:
+        with ArchiveStore.open(tmp_path / "other-store") as unlocked:
+            with pytest.raises(StoreRefused, match="lock"):
+                reclaim_staging(unlocked)
+
+    def test_a_crashed_restore_staging_is_audited_then_reclaimed(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        leftover = _crashed_staging(root, root_fd, store, tar, monkeypatch)
+        # Make the staged tree awkward: a read-only directory must still be emptied.
+        (store.path / leftover / "root" / "sub").chmod(0o500)
+        assert store.audit().staging_dirs == (leftover,)
+        assert reclaim_staging(store) == (Reclaimed(leftover, "reclaimed", ""),)
+        assert _staging(store) == []
+        assert store.audit().staging_dirs == ()
+        # The archive and its record are untouched.
+        record = store.read_index().records[0]
+        data = (store.path / archive_file_name(record.archive_id)).read_bytes()
+        assert hashlib.sha256(data).hexdigest() == record.sha256
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            STAGING_PREFIX + "x",
+            STAGING_PREFIX + "0123456789ABCDEF",
+            STAGING_PREFIX + "0123456789abcdef0",
+            STAGING_PREFIX + "0123456789abcde",
+        ],
+    )
+    def test_a_name_restore_never_creates_is_foreign_and_untouched(
+        self, store: ArchiveStore, name: str
+    ) -> None:
+        (store.path / name).mkdir()
+        (store.path / name / "keep.txt").write_text("keep")
+        (result,) = reclaim_staging(store)
+        assert (result.name, result.outcome) == (name, "foreign")
+        assert (store.path / name / "keep.txt").read_text() == "keep"
+        assert store.audit().staging_dirs == (name,)
+
+    def test_a_link_is_stuck_and_its_target_untouched(
+        self, tmp_path: Path, store: ArchiveStore
+    ) -> None:
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("keep")
+        name = STAGING_PREFIX + "0123456789abcdef"
+        (store.path / name).symlink_to(outside)
+        (result,) = reclaim_staging(store)
+        assert result.outcome == "stuck"
+        assert "directory" in result.reason
+        assert (outside / "keep.txt").read_text() == "keep"
+        assert (store.path / name).is_symlink()
+
+    def test_a_regular_file_is_stuck_and_untouched(self, store: ArchiveStore) -> None:
+        name = STAGING_PREFIX + "0123456789abcdef"
+        (store.path / name).write_text("keep")
+        (result,) = reclaim_staging(store)
+        assert result.outcome == "stuck"
+        assert (store.path / name).read_text() == "keep"
+
+    def test_a_directory_owned_by_another_user_is_stuck(
+        self, store: ArchiveStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        name = STAGING_PREFIX + "0123456789abcdef"
+        (store.path / name).mkdir()
+        (store.path / name / "keep.txt").write_text("keep")
+        monkeypatch.setattr(restore_mod.os, "geteuid", lambda: os.getuid() + 1)
+        (result,) = reclaim_staging(store)
+        assert result.outcome == "stuck"
+        assert "owned" in result.reason
+        assert (store.path / name / "keep.txt").read_text() == "keep"
+
+    def test_a_cleaner_failure_is_stuck_not_raised(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        leftover = _crashed_staging(root, root_fd, store, tar, monkeypatch)
+
+        def refuse(*_args: Any, **_kwargs: Any) -> None:
+            raise RestoreRefused("staging holds another device; it is left in place")
+
+        monkeypatch.setattr(restore_mod, "_clean_staging", refuse)
+        (result,) = reclaim_staging(store)
+        assert (result.name, result.outcome) == (leftover, "stuck")
+        assert "device" in result.reason
+        assert _staging(store) == [leftover]
+
+    def test_an_empty_store_reclaims_nothing(self, store: ArchiveStore) -> None:
+        assert reclaim_staging(store) == ()
+        assert store.audit().staging_dirs == ()

@@ -26,8 +26,9 @@ Then tar extracts into a fresh staging directory in the store
 (``.restoring-<random>``), the staged tree is verified against the archive
 (member set and ``tar --compare``), and one no-replace rename moves it into
 place. A failure cleans the staging directory it created, through descriptors
-on that inode; a crash leaves it, and :func:`leftover_staging` reports it. The
-archive and its records are never touched.
+on that inode; a crash leaves it, :func:`leftover_staging` and the store audit
+report it, and :func:`reclaim_staging` (under the lock) removes it through the
+same cleaner. The archive and its records are never touched.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from __future__ import annotations
 import errno
 import os
 import posixpath
+import re
 import secrets
 import stat
 import tarfile
@@ -43,6 +45,7 @@ from dataclasses import dataclass
 from typing import IO, Literal
 
 from claude_code_hooks_daemon.core.scratch_archive import (
+    STAGING_PREFIX,
     ArchiveRecord,
     ArchiveStore,
     StoreRefused,
@@ -76,9 +79,20 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import (
     tarfile_mode,
 )
 
-#: The prefix of a restore's staging directory in the store.
-STAGING_PREFIX = ".restoring-"
+__all__ = [
+    "STAGING_PREFIX",
+    "Header",
+    "Reclaimed",
+    "RestoreRefused",
+    "Restored",
+    "leftover_staging",
+    "read_headers",
+    "reclaim_staging",
+    "restore",
+]
 
+#: Exactly the names :func:`_stage_and_move` creates (``secrets.token_hex(8)``).
+_STAGING_NAME = re.compile(re.escape(STAGING_PREFIX) + r"[0-9a-f]{16}")
 _STAGED_ROOT = "root"
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _KINDS = {
@@ -129,9 +143,52 @@ class _Plan:
     compression: Compression = "none"
 
 
+@dataclass(frozen=True)
+class Reclaimed:
+    """What :func:`reclaim_staging` did with one ``.restoring-`` name."""
+
+    name: str
+    outcome: Literal["reclaimed", "stuck", "foreign"]
+    reason: str
+
+
 def leftover_staging(store: ArchiveStore) -> tuple[str, ...]:
-    """Staging directories a crashed restore left in the store; reported, never deleted."""
+    """Staging directories a crashed restore left in the store; a restore never deletes them."""
     return tuple(sorted(n for n in list_names(store.dir_fd) if n.startswith(STAGING_PREFIX)))
+
+
+def reclaim_staging(
+    store: ArchiveStore, *, max_depth: int = DEFAULT_MAX_DEPTH
+) -> tuple[Reclaimed, ...]:
+    """Remove the staging directories crashed restores left; needs the store lock.
+
+    Only a name shaped exactly as a restore creates it qualifies (any other
+    ``.restoring-`` name is ``foreign`` and untouched). It must be a directory,
+    not a link, owned by this user and on the store's device; it is then
+    emptied and removed by :func:`_clean_staging`, through descriptors on that
+    inode and never leaving its device. A failure leaves it ``stuck``.
+    """
+    store.require_lock("reclaiming restore staging")
+    store_dev = os.fstat(store.dir_fd).st_dev
+    results: list[Reclaimed] = []
+    for name in leftover_staging(store):
+        if not _STAGING_NAME.fullmatch(name):
+            results.append(Reclaimed(name, "foreign", "not a name a restore creates"))
+            continue
+        try:
+            info = os.lstat(name, dir_fd=store.dir_fd)
+            if not stat.S_ISDIR(info.st_mode):
+                raise RestoreRefused("not a directory (a link or a file); it is left in place")
+            if info.st_uid != os.geteuid():
+                raise RestoreRefused("owned by another user; it is left in place")
+            if info.st_dev != store_dev:
+                raise RestoreRefused("on another device than the store; it is left in place")
+            _clean_staging(store, name, (info.st_ino, info.st_dev), max_depth=max_depth)
+        except (RestoreRefused, OSError) as exc:
+            results.append(Reclaimed(name, "stuck", str(exc)))
+            continue
+        results.append(Reclaimed(name, "reclaimed", ""))
+    return tuple(results)
 
 
 def _name_ok(name: str) -> bool:
