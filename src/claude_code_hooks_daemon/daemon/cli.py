@@ -226,7 +226,7 @@ from .init_config import generate_config
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from claude_code_hooks_daemon.core.branch_reject import RejectRoute
+    from claude_code_hooks_daemon.core.branch_reject import IssuedRequest, RejectRoute
     from claude_code_hooks_daemon.core.release_slate import (
         CiRunState,
         PlanSummary,
@@ -6961,6 +6961,111 @@ def _delete_reject_route(
     return route, ""
 
 
+def _delete_protected_names(
+    branches: BranchesConfig, protected_ref: str, resolved_default: str
+) -> tuple[str, ...]:
+    """The names ``delete-branch`` refuses outright, whatever the proof says."""
+    return (*branches.protected_names, *branches.exempt, protected_ref, resolved_default)
+
+
+def _print_review_prompts(issued: "Sequence[IssuedRequest]") -> None:
+    from claude_code_hooks_daemon.core.branch_reject import REVIEWER_AGENT_TYPE
+
+    total = len(issued)
+    first = issued[0].request
+    print(f"Review of {first.branch} at {first.tip[:12]} admitted: {total} reviewer(s) required.")
+    print(f"subagent_type: {REVIEWER_AGENT_TYPE}")
+    print(
+        "Dispatch each prompt below to its own fresh agent of that type (not a fork, not "
+        "resumed), byte for byte: the text strictly between the BEGIN and END lines, with "
+        "no trailing newline. Then run delete-branch once every reviewer has replied."
+    )
+    for index, item in enumerate(issued, start=1):
+        print(f"----- BEGIN PROMPT {index} of {total} -----")
+        print(item.prompt)
+        print(f"----- END PROMPT {index} of {total} -----")
+
+
+def cmd_branch_reject_request(args: argparse.Namespace) -> int:
+    """Admit a no-value review of one ``unproven`` branch (Plan 00620, RULINGS.md s3).
+
+    Classifies the branch through ``delete_branches`` (a dry run with no route, so the
+    classification is exactly the one ``delete-branch`` makes), stores one request per
+    reviewer required and prints the exact prompt each must be dispatched with. It
+    takes no free text, deletes nothing and never writes the ledger.
+
+    Returns:
+        0 when the requests are stored, 1 when the branch or the route refuses, 2 when
+        the default branch cannot be resolved or a fact cannot be read.
+    """
+    from claude_code_hooks_daemon.core import branch_cleanup, branch_reject
+    from claude_code_hooks_daemon.daemon.branch_safety import TIER_UNPROVEN, delete_branches
+
+    repo = get_project_path(getattr(args, "project_root", None))
+    branches = _branches_config(repo)
+    name: str = args.branch
+    resolved_default = git_sync.resolve_default_branch(branches, repo)
+    if resolved_default is None:
+        print("ERROR: cannot determine the default branch; set branches.default", file=sys.stderr)
+        return 2
+    report = delete_branches(
+        repo,
+        [name],
+        protected_ref=resolved_default,
+        protected_names=_delete_protected_names(branches, resolved_default, resolved_default),
+        dry_run=True,
+        line_names=branches.integration_lines,
+        line_targets=branch_cleanup.default_targets(repo, branches, resolved_default),
+        remote=branches.remote,
+        reject_route=None,
+    )
+    (classification,) = report.classifications
+    if classification.refusal is not None:
+        print(f"REFUSED: {name}: {classification.detail}", file=sys.stderr)
+        return 1
+    if classification.tier != TIER_UNPROVEN:
+        print(
+            f"REFUSED: {name} is proven ({classification.tier}); nothing needs a review. "
+            f"Run: hooks-daemon delete-branch {name}",
+            file=sys.stderr,
+        )
+        return 1
+    route, unavailable = _delete_reject_route(repo, branches, resolved_default)
+    if route is None:
+        print(f"REFUSED: the no-value route is unavailable here: {unavailable}", file=sys.stderr)
+        return 1
+    try:
+        issued = branch_reject.issue_requests(repo, name, route)
+    except branch_reject.RejectRefusedError as exc:
+        print(f"REFUSED: {name}: {exc}", file=sys.stderr)
+        return 1
+    except branch_reject.RejectError as exc:
+        print(f"ERROR: {name}: {exc}", file=sys.stderr)
+        return 2
+    if issued[0].request.tip != classification.tip:
+        print(f"ERROR: {name} moved while it was classified; run again", file=sys.stderr)
+        return 2
+    if args.format == "json":
+        payload = {
+            "branch": name,
+            "tip": classification.tip,
+            "reviewer_type": branch_reject.REVIEWER_AGENT_TYPE,
+            "reviewers_required": len(issued),
+            "requests": [
+                {
+                    "nonce": item.request.nonce,
+                    "prompt": item.prompt,
+                    "prompt_sha256": item.request.prompt_sha256,
+                }
+                for item in issued
+            ],
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        _print_review_prompts(issued)
+    return 0
+
+
 def cmd_delete_branch(args: argparse.Namespace) -> int:
     """Delete local branches only when their safety can be proven (Plan 00206).
 
@@ -7009,7 +7114,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     # deletable once `protected_ref` (the default) holds every commit, and refused
     # otherwise. The default is resolved by here (an unresolvable one returned
     # above), so there is always something to prove a line against.
-    protected_names = (*branches.protected_names, *branches.exempt, protected_ref, resolved_default)
+    protected_names = _delete_protected_names(branches, protected_ref, resolved_default)
     line_targets = branch_cleanup.default_targets(repo, branches, resolved_default)
     # The no-value route (Plan 00620) judges rejected work against the DEFAULT only,
     # never the integration line `--protected-ref` may name.
@@ -13520,6 +13625,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format: text (default) or json",
     )
     parser_delete_branch.set_defaults(func=cmd_delete_branch)
+
+    # branch-reject command family (Plan 00620)
+    parser_branch_reject = subparsers.add_parser(
+        "branch-reject",
+        help="The no-value removal route for an unproven branch: a reviewer verdict plus a "
+        "verified recovery bundle let delete-branch remove it",
+    )
+    reject_sub = parser_branch_reject.add_subparsers(dest="reject_command", required=True)
+    parser_reject_request = reject_sub.add_parser(
+        "request",
+        help="Admit a review of one unproven branch and print the exact reviewer prompt(s); "
+        "takes no free text",
+    )
+    parser_reject_request.add_argument("branch", help="The local unproven branch to review")
+    parser_reject_request.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    parser_reject_request.set_defaults(func=cmd_branch_reject_request)
 
     # branch-sweep command (Plan 00558 Task 2.2)
     from claude_code_hooks_daemon.core.branch_cleanup import BULK_BATCH_SIZE
