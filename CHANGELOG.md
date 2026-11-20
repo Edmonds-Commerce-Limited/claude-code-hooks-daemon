@@ -11,7 +11,7 @@ _Branch-pool warning ladder (Plan 00619), remote-delete proofs judged against th
 
 ### Added
 
-- Branch pool warning ladder: each pool (open work, parked, merged) warns at 60, 80 and 90 percent of the point where a branch creation is refused, at session start, on the main thread's stop, and at 90 percent on every tool call and prompt; configured by `branches.wip.ladder`, `branches.parked.ladder`, `branches.merged.ladder`. No guard decision changed (Plan 00619).
+- Branch pool warning ladder: each pool (open work, parked, merged) warns at 60, 80 and 90 percent of the point where a branch creation is refused, at session start, on the main thread's stop, and at 90 percent on every tool call and prompt; configured by `branches.wip.ladder`, `branches.parked.ladder`, `branches.merged.ladder`; delivered by the new handlers `branch_pool_pressure_advisor` (PreToolUse) and `branch_pool_pressure_prompt` (UserPromptSubmit), both context-only. No guard decision changed (Plan 00619).
 - Evidence tier `empty-commits-only` for the branch delete proofs: commits that change no file no longer make a merged branch "not merged" (Plan 00622).
 - Proof route for interleaved cherry-picks: a branch whose every non-park commit is found by `git cherry` in the remote default and whose changed paths are held at exact bytes and mode is proven `patch-equivalent` (Plan 00626).
 - `CCY_IDLE_COMPACT_TIER` (`yellow`, `orange`, `red`) for the supervisor's idle compaction (Plan 00603).
@@ -34,7 +34,9 @@ _Branch-pool warning ladder (Plan 00619), remote-delete proofs judged against th
 - A branch whose work is in the default with empty commits on top was refused by `R-GIT-PUSH-DELETE-REMOTE`, `branch-sweep --clean --remote` and `delete-branch` (Plan 00622).
 - A project path long enough to push the natural socket path past the 104-byte AF_UNIX limit denied every tool call with `daemon_startup_failed`; a failed start also deleted a running daemon's discovery file. The discovery file is now written only after the bind and removed only by the daemon that wrote it (Plan 00628).
 - **SECURITY:** a symlink to a protected file read through a relative word, a recursive search or glob through a directory link, a bracket glob, a `..` word after a computed `cd`, or a scan that stopped early was allowed (Plans 00614, 00623).
-- **SECURITY:** a computed `cd` in a project of more than 512 directories denied every later relative word; it is now judged from the link index, and fails closed past its limits (Plan 00623).
+- A computed `cd` in a project of more than 512 directories denied every later relative word; it is now judged from the link index, and fails closed past its limits (Plan 00623).
+
+## [3.75.0] - 2026-11-16
 
 _Branch-pool work (Plan 00594): a proof that counts squash-merged and cherry-picked branches as merged, pools counted per owner, pressure moved to session start and stop, `branch-preflight`, previewed batched `branch-sweep --clean`, signed park commits, and the removal of recovery bundles and of the unproven-delete flags. Also a model ownership statement in the CLAUDE.md block (on by default), `session-state` with versioned JSON Schemas, an opt-in long-running-command guard, supervisor idle compaction (dry-run by default), wrappers with no machine-specific path, relay repair at daemon start, and many secret-guard, `destructive_git` and `pipe_blocker` fixes. New config keys: `claude_md.ownership`, `claude_md.ownership_text`, `daemon.omit_permission_surface`, `branches.wip.creation_grace`, `branches.park.commit`, `branches.park.push`, and two `worktree_create` budget options. Operator-facing CLI changes need a script update: see Changed (**BREAKING**) and Removed._
 
