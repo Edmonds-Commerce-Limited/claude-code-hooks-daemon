@@ -19,7 +19,9 @@ anything is listed:
 
 A protected path that lies inside an accepted root is skipped as an entry and
 named in a note. A root at any depth inside ``untracked/`` takes the TTL of
-its first directory there (``untracked/logs/inner`` is ``logs``). Paths are compared both as
+its first directory there (``untracked/logs/inner`` is ``logs``), but only a
+first-level ``untracked/<key>`` root may be applied, expired or restored into
+(``SweepRoot.apply_refusal``). Paths are compared both as
 given and with links resolved, so a link cannot carry a root past the check.
 """
 
@@ -58,6 +60,12 @@ class SweepRoot:
     #: Entry names that hold a protected path and are never judged.
     skip: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
+    #: Empty when ``--apply``, expiry and ``restore`` may act on this root: only
+    #: a first-level ``untracked/<key>``, in every form. A deeper root is judged
+    #: but never acted on, because protections whose source lies outside it (an
+    #: alternates borrower beside it, a working directory above it) are invisible
+    #: from inside it.
+    apply_refusal: str = ""
 
 
 def _forms(path: Path) -> tuple[Path, ...]:
@@ -114,7 +122,7 @@ def resolve_sweep_root(
     root_forms = _forms(root)
 
     def refused(reason: str) -> SweepRoot:
-        return SweepRoot(Path(root), None, reason)
+        return SweepRoot(Path(root), None, reason, apply_refusal=reason)
 
     for form in root_forms:
         parts = form.parts
@@ -164,7 +172,20 @@ def resolve_sweep_root(
                 skip.add(path_relative_to(guarded, form).parts[0])
     ordered = tuple(sorted(skip))
     notes = tuple(f"entry {name} holds a never-swept path: not judged" for name in ordered)
-    return SweepRoot(Path(root), ttl, "", ordered, notes)
+    first_level = all(
+        any(form.parent == project / _UNTRACKED for project in project_forms)
+        for form in root_forms
+    )
+    apply_refusal = (
+        ""
+        if first_level
+        else (
+            f"{root} is below untracked/{key}: only a first-level untracked/<key> root may "
+            "be applied, expired or restored into (a narrower root cannot see protections "
+            f"whose source lies outside it); use --root untracked/{key}"
+        )
+    )
+    return SweepRoot(Path(root), ttl, "", ordered, notes, apply_refusal)
 
 
 __all__ = ["NEVER_SWEPT", "SCRATCH_KEY", "SweepRoot", "resolve_sweep_root"]

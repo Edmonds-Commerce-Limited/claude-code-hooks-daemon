@@ -201,6 +201,58 @@ class TestRefusals:
         assert not _store(project).exists()
 
 
+class TestFirstLevelRootsOnly:
+    """F-BYPS F1: a protection whose source is outside a narrower root is invisible from it."""
+
+    def _lend(self, tree: ScratchTree, now: float) -> Path:
+        tree.file("lend/lender/a.txt", b"alpha")
+        tree.set_tree_mtime("lend", now - 5 * _DAY)
+        return tree.root / "lend"
+
+    def test_apply_at_a_deeper_root_is_refused_before_the_store_exists(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        lend = self._lend(tree, now)
+        project = _project(tree)
+        assert _run(_parse(project, "--apply", "--root", str(lend)), now=now) == 1
+        assert not _store(project).exists()
+        assert (lend / "lender" / "a.txt").read_bytes() == b"alpha"
+        assert "first-level" in capsys.readouterr().err
+
+    def test_restore_into_a_deeper_root_is_refused(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        lend = self._lend(tree, now)
+        project = _project(tree)
+        _store(project).mkdir(mode=0o700)
+        assert _run(_parse(project, "--root", str(lend), "restore", "x"), now=now) == 1
+        assert "first-level" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("as_json", [False, True])
+    def test_a_dry_run_at_a_deeper_root_says_it_is_not_apply_eligible(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str], as_json: bool
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        lend = self._lend(tree, now)
+        project = _project(tree)
+        flags = ("--json",) if as_json else ()
+        assert _run(_parse(project, *flags, "--root", str(lend)), now=now) == 0
+        out = capsys.readouterr().out
+        assert "not apply-eligible" in out
+        if as_json:
+            assert any("not apply-eligible" in note for note in json.loads(out)["notes"])
+
+    def test_a_dry_run_at_the_first_level_root_has_no_such_note(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        self._lend(tree, now)
+        assert _run(_parse(_project(tree)), now=now) == 0
+        assert "not apply-eligible" not in capsys.readouterr().out
+
+
 class _Stream(io.StringIO):
     def __init__(self, text: str = "", *, tty: bool) -> None:
         super().__init__(text)

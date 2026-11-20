@@ -6937,6 +6937,8 @@ def _scratch_store_refusal(
         return f"{repo} is not the main checkout: {store_rule}"
     if sweep_root.refusal:
         return str(sweep_root.refusal)
+    if (applying or action == "restore") and sweep_root.apply_refusal:
+        return str(sweep_root.apply_refusal)
     path = Path(sweep_root.path)
     if path.is_symlink() or not path.is_dir():
         return f"{path} is not a directory"
