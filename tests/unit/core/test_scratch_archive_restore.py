@@ -303,6 +303,17 @@ class TestRoundTrip:
         _restore(store, root_fd, tar, archive_id)
         assert (root / name / "--checkpoint-action=exec=x").read_text() == "payload"
 
+    def test_a_hostile_loose_file_name_is_never_a_tar_option_or_pattern(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        glob = "".join(chr(c) for c in (42, 63, 91, 97, 93))
+        name = f"--to-command=x \n'q\"\\{glob}"
+        (root / name).write_text("payload")
+        archive_id = _pack_entry(root, root_fd, store, tar, name)
+        _restore(store, root_fd, tar, archive_id)
+        assert (root / name).read_text() == "payload"
+        assert _staging(store) == []
+
     def test_one_entry_of_a_batch_comes_back(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
     ) -> None:
