@@ -107,6 +107,16 @@ def _bash_decision(project: Project, command: str) -> Decision:
     return _decision(_bash(command, project.root))
 
 
+#: The calling process's own views, assembled so this file's new rows never spell one.
+_SELF_VIEW = "/proc/" + "se" + "lf"
+_FD_VIEW = "/dev/" + "fd"
+
+
+def _views(template: str, root: Path | None = None) -> str:
+    """``template`` with ``{self}``, ``{fd}``, ``{protected}`` and ``{root}`` filled in."""
+    return template.format(self=_SELF_VIEW, fd=_FD_VIEW, protected=_PROTECTED, root=root)
+
+
 def _nested(command: str, levels: int) -> str:
     """``command`` inside ``levels`` nested ``bash -c`` bodies."""
     for _ in range(levels):
@@ -225,6 +235,141 @@ class TestProcSelf:
 
     def test_a_proc_path_that_is_not_self_is_allowed(self, project: Project) -> None:
         assert _bash_decision(project, "cat /proc/version") is Decision.ALLOW
+
+    @pytest.mark.parametrize("view", ["{self}/cwd/flink", "{fd}/2"])
+    def test_a_view_in_a_quoted_heredoc_body_written_to_markdown_is_allowed(
+        self, project: Project, view: str
+    ) -> None:
+        """Release 3.76.0 F2: prose written to a .md file opens none of its words."""
+        command = f"cat > {project.root}/n.md <<'EOF'\nsee {view}\nEOF\n"
+        assert _bash_decision(project, _views(command)) is Decision.ALLOW
+
+    @pytest.mark.parametrize("view", ["{self}/cwd/flink", "{fd}/2"])
+    def test_a_view_as_the_grep_pattern_is_allowed(self, project: Project, view: str) -> None:
+        """Release 3.76.0 F2: a search PATTERN is text grep matches, not a file it opens."""
+        command = f"grep -n 'see {view}' readme.txt"
+        assert _bash_decision(project, _views(command)) is Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "tac {self}/cwd/flink",
+            "./tool {self}/cwd/flink",
+            "wc -l < {self}/cwd/flink",
+            "echo x 2>{fd}/3",
+            "grep x {self}/cwd/flink",
+            "grep '{self}/cwd/flink' {self}/cwd/flink",
+            "grep -f {self}/cwd/flink readme.txt",
+            "grep -n 'see {self}/cwd/flink' readme.txt; cat {self}/cwd/flink",
+            "bash <<'EOF'\ncat {self}/cwd/flink\nEOF\n",
+            "cat <<'EOF' | bash\ncat {self}/cwd/flink\nEOF\n",
+            "cat > {root}/n.md <<EOF\nsee {self}/cwd/flink\nEOF\n",
+            "cat > {root}/x.py <<'EOF'\nP = '{self}/cwd/flink'\nEOF\n",
+            "cat > {root}/n.md <<'EOF'\nsee {self}/cwd/flink\nEOF\ncat {self}/cwd/flink",
+            "tee {root}/n.md {root}/x.sh <<'EOF'\ncat {self}/cwd/flink\nEOF\n",
+            "cat /proc/se'lf'/cwd/flink",
+            "ansible-playbook --vault-password-file {self}/cwd/flink site.yml",
+            "cat {self}/cwd/own/{protected}",
+        ],
+    )
+    def test_a_view_in_a_read_position_beside_an_exempt_shape_is_still_denied(
+        self, project: Project, command: str
+    ) -> None:
+        """Near misses for F2: each opens the view, so each stays denied."""
+        assert _bash_decision(project, _views(command, project.root)) is Decision.DENY
+
+    @pytest.mark.parametrize("view", ["{self}/cwd/flink", "{fd}/0"])
+    @pytest.mark.parametrize(
+        "runner",
+        [
+            "bash n.md",
+            ". ./n.md",
+            "sh n.m?",
+            "sh n.*",
+            "cp n.m? r.sh; . ./r.sh",
+            "bash $(ls -t | sort -r)",
+            "for f in $(ls); do bash $f; done",
+            # Doubled braces: the command passes through ``str.format`` in ``_views``.
+            "bash n.{{md,}}",
+            "bash n.m''d",
+            "bash n.m\\d",
+            "bash ${{f}}d",
+        ],
+    )
+    def test_a_markdown_body_the_command_then_runs_is_still_denied(
+        self, project: Project, view: str, runner: str
+    ) -> None:
+        """F2 near miss: a ``.md`` body named again (or by a glob) may be run, so it is judged."""
+        command = _views(f"cat > n.md <<'EOF'\ncat {view}\nEOF\n{runner}")
+        assert _bash_decision(project, command) is Decision.DENY
+
+
+def test_a_view_is_never_confirmed_encrypted(project: Project) -> None:
+    """F2: the encrypted-target check would read a view through the DAEMON's view."""
+    command = _views("cat {self}/cwd/flink")
+    patterns = SecretFileGuardHandler()._patterns()
+    with sfm.process_view_mode(sfm.ProcessViewMode.MENTION):
+        assert not sfm.is_encrypted_target_invocation(
+            command, patterns, cwd=str(project.root), is_encrypted=lambda _path: True
+        )
+
+
+def test_the_default_mode_still_refuses_a_view(project: Project) -> None:
+    """Every caller outside the guard's Bash route keeps the N668 refusal."""
+    patterns = SecretFileGuardHandler()._patterns()
+    with pytest.raises(ResolutionFailedError):
+        sfm.find_protected_mention_detail(
+            _views("cat {self}/cwd/flink"), patterns, cwd=str(project.root)
+        )
+
+
+class TestNothingProtected:
+    """Release 3.76.0 F1: with no protected pattern, a failed placement finds nothing."""
+
+    @staticmethod
+    def _verdict(hook_input: dict[str, Any]) -> Decision:
+        handler = SecretFileGuardHandler()
+        handler._mode = "replace"
+        handler._protected_paths = []
+        assert handler._patterns() == ()
+        if not handler.matches(hook_input):
+            return Decision.ALLOW
+        return handler.handle(hook_input).decision
+
+    def test_an_unplaceable_read_is_allowed(self, project: Project) -> None:
+        hook_input = {
+            "tool_name": "Read",
+            "tool_input": {"file_path": _views("{self}/cwd/readme.txt")},
+            "cwd": str(project.root),
+        }
+        assert self._verdict(hook_input) is Decision.ALLOW
+
+    def test_an_unplaceable_bash_word_is_allowed(
+        self, project: Project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def unplaceable(*_args: object, **_kwargs: object) -> None:
+            raise ResolutionFailedError("synthetic placement failure")
+
+        monkeypatch.setattr(SecretFileGuardHandler, "_evaluate", unplaceable)
+        assert self._verdict(_bash("cat readme.txt", project.root)) is Decision.ALLOW
+
+    def test_a_search_whose_scan_gave_up_is_allowed(
+        self, project: Project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic evaluation failure")
+
+        monkeypatch.setattr(SecretFileGuardHandler, "_evaluate", boom)
+        assert self._verdict(_bash("grep -r x olink", project.root)) is Decision.ALLOW
+
+    def test_the_same_search_is_denied_when_a_pattern_is_set(
+        self, project: Project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic evaluation failure")
+
+        monkeypatch.setattr(SecretFileGuardHandler, "_evaluate", boom)
+        assert _bash_decision(project, "grep -r x olink") is Decision.DENY
 
 
 class TestSilentStops:

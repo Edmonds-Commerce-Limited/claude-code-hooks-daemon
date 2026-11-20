@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/memory
-fetched_at: '2026-11-16T21:15:35.536076+00:00'
+fetched_at: '2026-11-20T09:13:42.050883+00:00'
 fidelity: converted
-source_sha256: 524cff77043d4b230e427dfcebce29a5284fcd2e3f4678abb2ef9b6e856c5ff8
+source_sha256: 4186f2be3c7c25188e957096d3e33421afb09467bc0192aa5685a7cc4d8de88f
 licence: unreviewed
-stale_after: '2027-02-14'
+stale_after: '2027-02-18'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -237,6 +237,8 @@ Use glob patterns in the `paths` field to match files by extension, directory, o
 | `/*.md` | `.md` files directly in the base directory, not in subfolders |
 | `src/components/*.tsx` | `.tsx` files directly in the base directory's `src/components/`, not in subfolders |
 
+Glob syntax treats `[` as the start of a bracket expression such as `[abc]`. A pattern with a `[` that can't be read as a bracket expression, such as `photos [2024/**`, is invalid: it matches nothing, and the rule's other patterns keep working. To match a literal `[` in a file name, escape it inside single quotes, as in `'photos \[2024/**'`.
+
 You can specify multiple patterns and use brace expansion to match multiple extensions in one pattern:
 
 ```markdown theme={null}
@@ -251,8 +253,6 @@ paths:
 Each brace group multiplies the number of expanded patterns: `src/*.{ts,tsx}` expands to two patterns, and `{a,b}/{c,d}/*.{ts,tsx}` to eight. To keep expansion bounded, a rule's whole `paths` list shares one budget of 1,000 expanded patterns and 4 MiB, and patterns without braces don't count against it.
 
 Claude Code uses any pattern that would exceed the budget unexpanded, and its literal braces match no files.
-
-Glob syntax treats `[` as the start of a bracket expression such as `[abc]`. A pattern with a `[` that can't be read as a bracket expression, such as `photos [2024/**`, is invalid: it matches nothing, and the rule's other patterns keep working. To match a literal `[` in a file name, escape it as `photos \[2024/**`.
 
 #### Rule frontmatter reference
 

@@ -8029,3 +8029,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: (1) `status`/`stop`/`restart` print a traceback, not a clean message, when the fallback directory is unsafe. (2) `init.sh` keeps polling after a failed daemon start. (3) A discovery-file delete can race a restart. (4) On a host whose `XDG_RUNTIME_DIR` is not private, an upgrade can leave the old daemon running beside the new one; stop it by hand once. (5) The `/tmp` fallback has no sticky-bit check. (6) Other length checks in `daemon/paths.py` still count characters, not bytes. (7) `init.sh` prints "started successfully" for a daemon that died while binding.
 
 **Status**: ⬜ Open, low to medium priority. One item per fix, test first; (7) and (1) are the ones a user sees first.
+
+### N682 — FACTS G5-01: note that auto-compaction rebuilds the system prompt like /compact (Claude Code 2.1.328)
+
+**Source**: the Claude Code changelog review for release 3.76.0 (`subagent-reports/261120-claude-code-review-v3.76.0.md`), adopt row 2 (optional).
+
+**Evidence**: 2.1.328 "Fixed automatic compaction reusing the session's earlier system prompt instead of rebuilding it the way `/compact` does". `contracts/claude-code-instructions/FACTS.json` G5-01 says project-root CLAUDE.md survives `/compact` (re-read from disk and re-injected) and says nothing about automatic compaction. The fact is extended, not contradicted. Adopt row 1 of the same review (Stop/SubagentStop `background_tasks` list a Monitor's script as `monitor`) was applied in the release commit to `contracts/claude-code-hooks/Stop.json` and `SubagentStop.json`, so it has no entry here.
+
+**Status**: ⬜ Open, low priority. Reread the vendored memory page first; extend G5-01 (statement, and anchor only if the page now says it) to cover automatic compaction, with `min_claude_code_version` 2.1.328 if the page names it, then run `tests/unit/docs_qa/test_instructions_contract.py`.

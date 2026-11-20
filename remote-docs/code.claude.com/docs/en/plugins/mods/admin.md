@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/mods/admin
-fetched_at: '2026-11-16T21:15:40.308740+00:00'
+fetched_at: '2026-11-20T09:13:46.294069+00:00'
 fidelity: converted
-source_sha256: 6797d3f545112f819c5d42cd02fdf05270121835f3b1af0cb41ccffcde4ad90f
+source_sha256: c945e5d535f83ecdff80ae17374ecd29d519e19a8be29f45f8777b67094d7b09
 licence: unreviewed
-stale_after: '2027-02-14'
+stale_after: '2027-02-18'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -51,7 +51,7 @@ With the option set in managed settings:
 
 * **No mod a user brings runs its hooks**: that covers a mod in a plugin the user installed, a mod loaded with `--plugin-dir`, and a mod [Claude wrote during a session](https://code.claude.com/docs/en/plugins/mods/create.md#ask-claude-for-a-mod)
 * **Your organization's mods still run**: a mod that [counts as your organization's](#install-your-organizations-mods) isn't checked. Every other mod counts as a user's and is refused. That includes a mod your organization turns on for its members on claude.ai. If none counts as yours, no installed mod runs its hooks.
-* **Users can't undo it**: the guard reads the option from managed settings only, so the same entry in a user, project, or local settings file, or in a file passed with `--settings`, changes nothing
+* **Claude Code ignores the option in other settings files**: if someone sets it in a user, project, local, or `--settings` file, your value still applies
 * **A file or MDM policy covers every provider**: when you deliver the option as a file or through MDM, it works the same way on Amazon Bedrock, Google Cloud's Agent Platform, and Microsoft Foundry. For delivery from the claude.ai admin console, see [Platform availability](https://code.claude.com/docs/en/server-managed-settings.md#platform-availability)
 * **Users' other customizations keep working**: their [hooks in settings files](https://code.claude.com/docs/en/hooks.md) and in plugins' `hooks/hooks.json`, status lines, and `/goal` aren't affected
 * **Built-in mods keep running**: mods built into Claude Code, such as `AGENTS.md` support, each have [their own switch](https://code.claude.com/docs/en/plugins/mods/overview.md#mods-built-into-claude-code)
@@ -71,22 +71,30 @@ With no mod settings of your own, this is what your users get:
   * The session runs on [`/login` credentials](https://code.claude.com/docs/en/authentication#authentication-precedence) for a Team or Enterprise plan
 
   A user with an API key, or on Amazon Bedrock, Google Cloud's Agent Platform, or Microsoft Foundry, gets the guard only on a machine with managed settings or `managed-mcp.json`. A session that runs on a long-lived [`CLAUDE_CODE_OAUTH_TOKEN`](https://code.claude.com/docs/en/authentication#generate-a-long-lived-token) doesn't count as that login either, even when a Team or Enterprise login is stored on the machine.
-* **The guard protects what you manage.** A user's mod can't change what your managed hooks receive or decide, the system prompt, or your managed `CLAUDE.md` and other managed instructions. It also can't change what any mod reads as settings, or the tools and descriptions of your managed MCP servers once they connect.
+* **When the guard loads, it blocks a user's mod from rewriting:**
+  * The system prompt
+  * Your managed `CLAUDE.md` and other managed instructions
+  * The answer a mod gets when it reads settings
+  * The tool list and tool descriptions of a managed MCP server that has connected
 * **On v2.1.323 or later, a user's mod can keep a managed MCP server from connecting.** In that user's session, `/mcp` lists the server as held by that mod. To prevent it, [stop user-installed mods from loading](#stop-user-installed-mods-from-loading).
-* **Outside what you manage, a user's mod acts as that user.** The mod keeps that user's permissions: it can still read and write files, start processes, and make network requests. It can also rewrite tool calls and prompts, deny a tool call, add or remove tools, and draw in the interface.
-* **Permission rules and `PreToolUse` hooks take precedence over a user's mod.** With the guard loaded, by default a user's mod can't approve a call that a `deny` rule refuses or an `ask` rule prompts for, whichever settings file holds the rule. The mod can't approve a call that any `PreToolUse` hook blocked, either.
-
-  Permission rules and `PreToolUse` hooks apply to Claude's tool calls, not to a mod's [`$.fs` and `$.process` calls](https://code.claude.com/docs/en/plugins/mods/api#reach-files-processes-and-the-network). With `Read(.env)` denied, a mod can still read that file with `$.fs.read` or start a program that does. To limit a mod's own `$.fs` and `$.process` calls, [keep the mod from loading](#stop-user-installed-mods-from-loading) or handle them in a [policy mod](#enforce-a-policy-with-a-mod-of-your-own).
-* **A user's mod can still skip some prompts.** In [auto mode](https://code.claude.com/docs/en/permission-modes.md#eliminate-prompts-with-auto-mode), a call the mod approves runs without a classifier check, unless the guard is loaded and the session runs with [`--permission-prompt-tool`](https://code.claude.com/docs/en/cli-reference#cli-flags) or an Agent SDK [`canUseTool` callback](https://code.claude.com/docs/en/agent-sdk/user-input#handle-tool-approval-requests). There the classifier checks the call first. For the prompts a mod's approval doesn't skip, see [Extend permissions with hooks](https://code.claude.com/docs/en/permissions.md#precedence-among-rules-hooks-and-mods).
+* **Apart from what the guard blocks, a user's mod acts as that user.** The mod keeps that user's permissions: it can still read and write files, start processes, and make network requests. It can also rewrite tool calls and the user's prompts, deny a tool call, add or remove tools, and draw in the interface.
+* **When a user's mod approves Claude's call** with the guard loaded, these outcomes hold [by default](#set-options-on-the-built-in-guard), whichever settings file has the rule or hook:
+  * A call that a `deny` rule refuses stays refused
+  * A call that an `ask` rule would prompt for still prompts
+  * A call that a `PreToolUse` hook blocked stays blocked
+* **A mod's own calls can skip your checks.** To limit a user's mod, [keep it from loading](#stop-user-installed-mods-from-loading) or handle its calls in a [policy mod](#enforce-a-policy-with-a-mod-of-your-own).
+  * **Files and programs**: [`$.fs` and `$.process` calls](https://code.claude.com/docs/en/plugins/mods/api#reach-files-processes-and-the-network) can skip permission rules and `PreToolUse` hooks. With `Read(.env)` denied, a mod can still read that file with `$.fs.read` or start a program that does.
+  * **Tools**: calls such as [`$.tool.call` and `$.mcp.call`](https://code.claude.com/docs/en/plugins/mods/reference#mods-api-methods) can skip permission rules, permission prompts, a hook's `ask`, and the [auto mode](https://code.claude.com/docs/en/permission-modes.md#eliminate-prompts-with-auto-mode) classifier.
+* **Without the guard, a user's mod can skip more checks.** See [what it can skip](https://code.claude.com/docs/en/permissions.md#precedence-among-rules-hooks-and-mods).
 
 The guard's source is public in the [`mods/sec-default` directory of the Claude Code repository](https://github.com/anthropics/claude-code/tree/main/mods/sec-default).
 
 ### Know which controls still apply
 
-Mods don't replace the controls you already have:
+Your existing controls cover mods within these limits:
 
-* **Settings hooks keep working.** Command, HTTP, prompt, and agent hooks in settings files and in plugins' `hooks/hooks.json` run as before, alongside mods.
-* **Deny rules take precedence where the guard loads.** A user's mod can't approve a call that a `deny` rule refuses, unless you set [`allowModsToOverrideDenyRules`](#set-options-on-the-built-in-guard).
+* **Hooks in settings files run alongside mods.** See [where settings hooks run in the order](https://code.claude.com/docs/en/plugins/mods/events.md#where-settings-hooks-run-in-the-order).
+* **For Claude's calls, deny rules take precedence over a user's mod where the [guard](#know-what-happens-by-default) loads.** To let a user's mod approve some calls that a `deny` rule refuses, set [`allowModsToOverrideDenyRules`](#set-options-on-the-built-in-guard).
 * **Managed hooks run first.** A `PreToolUse` hook in managed settings runs before any mod's [`tool.call`](https://code.claude.com/docs/en/plugins/mods/reference#tools) hook, and when that managed hook blocks a tool call, no mod's `tool.call` hook runs for that call. If the call goes ahead and a mod rewrites it, your managed hooks run again on the rewritten call, so by default they can still block it.
 
   `PreToolUse` hooks from other settings files and from plugins run after the last mod. If a mod answers the tool call itself, the tool never runs and neither do those hooks. See [The order mods run in](https://code.claude.com/docs/en/plugins/mods/events.md#the-order-mods-run-in).
@@ -100,7 +108,7 @@ Mods don't replace the controls you already have:
 
   None of these covers a program the mod starts with `$.process.run`, which reaches the network with the user's own access.
 * **Plugin controls cover mods.** A mod is a plugin, so the [settings that restrict what users can install](https://code.claude.com/docs/en/plugins/org.md#restrict-what-users-can-install), such as `strictKnownMarketplaces`, decide whether it can be installed at all.
-* **Mods can't change the permission prompt.** A mod can restyle much of Claude Code's interface, but not the permission prompt, so it can't change what a prompt shows. A mod can still approve or deny a tool call before the prompt appears, as [Know what happens by default](#know-what-happens-by-default) describes.
+* **The permission prompt appears as Claude Code draws it.** For what a mod can redraw, see [Change what Claude Code already draws](https://code.claude.com/docs/en/plugins/mods/interface.md#change-what-claude-code-already-draws).
 * **Trust prompts come first.** In an interactive session in a directory the user hasn't trusted yet, no mod loads until they answer the trust prompt.
 * **`--safe-mode` turns installed mods off, yours included.** Start a session with `claude --safe-mode` to check whether a mod caused a problem.
 
@@ -119,6 +127,7 @@ Where the [built-in guard](#know-what-happens-by-default) loads, a hook that a u
 | `prompt.attachment` | A message Claude Code adds for Claude, such as a reminder |
 | `skill.prompt` | A skill's text as it's expanded for Claude |
 | `attribution.text` | Commit or pull request attribution text |
+| [`telemetry.log`](https://code.claude.com/docs/en/plugins/mods/reference#telemetry) | A record bound for an OpenTelemetry collector. Passed over in v2.1.328 or later |
 | [`session.compact`](https://code.claude.com/docs/en/plugins/mods/reference#session) | A compaction of the conversation |
 | `settings.read` | A read of settings, such as a mod's `$.settings.read` call |
 | `session.append{door=attachment}` | The stored row for a message Claude Code adds for Claude |
@@ -155,7 +164,7 @@ What a user can load as a mod depends on the plugin controls you already have:
 | A marketplace allowlist | A mod from the marketplaces you allow, or from any directory with `--plugin-dir`. A mod Claude writes during a session loads only when the allowlist [includes `skills-dir`](https://code.claude.com/docs/en/plugins/org#keep-skills-directory-plugins-loading). |
 | A marketplace allowlist and `disableSideloadFlags` | A mod from the marketplaces you allow |
 
-[Manage plugins for your organization](https://code.claude.com/docs/en/plugins/org.md) lists the ways a plugin loads and the setting that controls each.
+With any of these, users can also load a mod in a plugin [synced from claude.ai](https://code.claude.com/docs/en/plugins/loading.md#synced-plugins), or in a [skills-directory plugin](https://code.claude.com/docs/en/plugins/org.md#keep-skills-directory-plugins-loading) unless your allowlist leaves out `skills-dir`. [Manage plugins for your organization](https://code.claude.com/docs/en/plugins/org.md) lists the ways a plugin loads and the setting that controls each.
 
 To check the mods in a marketplace before your users install them, see [Review what a mod can do](#review-what-a-mod-can-do). To keep users' mods out until you've done that, see [Stop user-installed mods from loading](#stop-user-installed-mods-from-loading).
 
@@ -188,7 +197,7 @@ Don't approve a mod that fails this command, because some failures don't stop it
 | `$.http.fetch` | Makes network requests |
 | `$.env.get`, `$.settings.read` | Reads environment variables and settings, which can hold API keys. An `env reads:` line in the output names each variable. |
 | `$.env.set` | Sets an environment variable for Claude Code and for every command and MCP server it starts afterward, which can change what those programs run. An `env writes:` line names each variable. |
-| `$.mcp.call` | Calls a tool on a connected MCP server, with no permission prompt. Claude Code refuses the call under a deny rule or a managed ask rule. It also refuses a call to a tool marked [`requiresUserInteraction`](https://code.claude.com/docs/en/mcp#require-approval-for-a-specific-tool), or to one your organization [set to `ask`](https://code.claude.com/docs/en/mcp#organization-controls-on-connector-tools) where that setting reaches Claude Code. |
+| `$.mcp.call` | Calls a tool on a connected MCP server, with no permission prompt |
 | `$.model.complete` | Uses the user's plan or API key for model calls |
 | `$.prompt.submit` | Submits a prompt, and can send it as the user's own words |
 | `$.session.send` | Sends a message that another session's, subagent's, or [teammate's](https://code.claude.com/docs/en/agent-teams.md) Claude reads |
@@ -204,7 +213,7 @@ Mod policies range from no installed mods at all to any mod a user chooses, with
 | No installed mod runs, with settings hooks untouched | Set [`allowManagedModsOnly`](#set-options-on-the-built-in-guard) and deploy no mods of your own |
 | No installed mods and no hooks at all, your managed hooks included | Set `disableAllHooks` to `true` |
 | Only your organization's mods | Set the guard's [`allowManagedModsOnly` option](#stop-user-installed-mods-from-loading), and [install your mods](#install-your-organizations-mods) so that they count as yours |
-| Any mod from marketplaces you approve | Keep your [marketplace restrictions](https://code.claude.com/docs/en/plugins/org.md#restrict-what-users-can-install), and set `disableSideloadFlags` to `true` |
+| Any mod from marketplaces you approve outside claude.ai | Set a [marketplace allowlist](https://code.claude.com/docs/en/plugins/org.md#restrict-what-users-can-install) without `skills-dir`, set `disableSideloadFlags` to `true`, and set [`syncClaudeAiPlugins`](https://code.claude.com/docs/en/settings-reference#syncclaudeaiplugins) to `false` |
 | Any mod, with your own mod checking the others | [Install your mod](#install-your-organizations-mods), and list it with `sec-default@builtin` in `prependPlugins` |
 
 What each setting does:
@@ -279,8 +288,8 @@ The table gives what your users get with each option unset and with it set to `t
 These rules decide whether an option takes effect:
 
 * **The id has one form here**: Claude Code reads the options only under `cc-plugin-sec-default@builtin`. `prependPlugins` accepts `sec-default@builtin` as well, and `pluginConfigs` doesn't.
-* **Only managed settings count**: the same entry in a user, project, or local settings file, or in a file passed with `--settings`, neither sets an option nor loosens one
-* **The guard has to load**: if you set `prependPlugins`, [name the guard in the list](#install-your-organizations-mods). Where the guard doesn't load, neither option applies.
+* **Claude Code ignores the options in other settings files**: the same entry in a user, project, or local settings file, or in a file passed with `--settings`, neither sets an option nor loosens one
+* **The guard has to load**: if you set `prependPlugins`, [name the guard in the list](#install-your-organizations-mods). Where the guard doesn't load, no option applies.
 * **The guard fails closed**: if the guard can't read managed settings, it refuses every user's mod at load. If it can't check the deny rules for a call that a user's mod approved, it refuses the call.
 
 The [messages from the built-in guard](https://code.claude.com/docs/en/plugins/mods/troubleshoot.md#messages-from-the-built-in-guard) are what your users see when either option applies.
@@ -385,7 +394,7 @@ Each time another mod is about to load, your mod receives the list that `claude 
 >
 > On v2.1.323 or later, a `ui.focus` hook needs a wider matcher to receive other mods' `$.ui.focus` calls. See [Hook other mods' drawings and controls](https://code.claude.com/docs/en/plugins/mods/events.md#hook-other-mods-drawings-and-controls).
 
-This policy mod refuses any user's mod whose own code calls `$.process.run` or `$.process.spawn`. It also keeps an audit log, writing each tool call and each file a mod writes to the debug log. Because it runs first, the log records what was requested, before any user's mod changes it. Save it as `acme-guard/hooks/register.js`:
+This policy mod stops any user's mod whose own code calls `$.process.run` or `$.process.spawn`, and lets the rest of the user's plugin load. It also keeps an audit log, writing each tool call and each file a mod writes to the debug log. Because it runs first, the log records what was requested, before any user's mod changes it. Save it as `acme-guard/hooks/register.js`:
 
 ```javascript acme-guard/hooks/register.js theme={null}
 // The methods no user's mod may call, each spelled namespace.method
@@ -397,7 +406,9 @@ export function register(on) {
     // Keep the calls in that mod's code that are on the blocked list
     const blocked = e.uses.calls.filter((call) => BLOCKED_CALLS.includes(call))
     if (e.tier === 'user' && blocked.length > 0) {
-      // Returning refuse keeps the mod from loading, and the text is the reason
+      // v2.1.326 or later: leave out the hooks module and load the rest of the plugin
+      if (e.provides) return next({ ...e, provides: { ...e.provides, modules: [] } })
+      // Earlier versions: refuse leaves out the hooks module, and the text is the reason
       return { refuse: 'Acme policy: mods may not call ' + blocked.join(', ') }
     }
     // Let every other mod load
@@ -420,16 +431,21 @@ export function register(on) {
 
 The file registers three hooks:
 
-* **`plugin.register`**: decides whether another mod loads. It refuses a user's mod that calls a blocked method and passes every other mod on.
+* **`plugin.register`**: decides whether another mod loads. It stops a user's mod that calls a blocked method and passes every other mod on.
 * **`tool.call`**: writes a line such as `audit tool.call Bash` to the debug log for each tool call, and changes nothing
 * **`fs.write`**: writes a line such as `audit fs.write by reader "/tmp/notes.md"` for each `$.fs.write` call another mod makes, and changes nothing. The mod's name comes first and the path is quoted, so a path that a mod picks can't pass for another field of the line.
 
-The `plugin.register` hook reads two fields of the event:
+The `plugin.register` hook reads three fields of the event:
 
 * **`e.tier`**: where the mod would run, one of `prepend`, `user`, `append`, or `builtin`. Every mod a person installs is `user`.
 * **`e.uses.calls`**: the mods API methods the mod calls, each written `namespace.method` such as `process.run`, without the `$.` that `claude plugin validate` prints
+* **`e.provides`**: the plugin's parts by kind, such as `modules`. To load everything but the [hooks module](https://code.claude.com/docs/en/plugins/mods/create.md#write-a-mod-yourself), pass `next` the event with `provides.modules` emptied. Requires Claude Code v2.1.326 or later.
 
-When a user installs a mod that calls `$.process.run`, the mod doesn't load, and their debug log has a line that ends with `refused by acme-guard:` and your reason. The refusal also reaches the transcript in a [session that hot-reloads a plugin directory](https://code.claude.com/docs/en/plugins/mods/troubleshoot.md#find-out-why-a-mod-does-nothing).
+When a user installs a mod that calls `$.process.run`, the mod doesn't load, and their debug log has a line that includes `hooks module left out by acme-guard`. The line also reaches the transcript in a [session that hot-reloads a plugin directory](https://code.claude.com/docs/en/plugins/mods/troubleshoot.md#find-out-why-a-mod-does-nothing). Before v2.1.326, look for `refused by acme-guard:` and your reason instead.
+
+> [!NOTE]
+>
+> When you return `{ refuse }` on v2.1.326 or later, the whole plugin stays out, including its MCP servers and the hooks in its `hooks/hooks.json`. If you wrote a policy mod for an earlier version, add the example's `if (e.provides)` line ahead of each refusal that should stop only the mod. For a `.catch` handler, see [Refuse mods when your check fails](#refuse-mods-when-your-check-fails).
 
 To block a call without refusing the whole mod, return `{ deny: 'your reason' }` from a hook on that call's name, after you [check who made the call](https://code.claude.com/docs/en/plugins/mods/reference.md#mods-api-calls).
 
@@ -441,7 +457,7 @@ A session can run without your mod. If the worker thread that runs installed mod
 
 #### Refuse mods when your check fails
 
-If your `plugin.register` hook throws or exceeds its time limit, Claude Code skips the hook, so the check fails open and the mod it was checking loads. To fail closed and refuse users' mods, move the check into a named function and add a `.catch` handler that returns the refusal. This version of the file shows the `plugin.register` hook only, so keep the two audit hooks from the first version in `register`:
+If your `plugin.register` hook throws or exceeds its time limit, Claude Code skips the hook, so the check fails open and the mod it was checking loads. To fail closed when the check throws, move it into a named function and add a `.catch` handler. This version of the file shows the `plugin.register` hook only, so keep the two audit hooks from the first version in `register`:
 
 ```javascript acme-guard/hooks/register.js theme={null}
 const BLOCKED_CALLS = ['process.run', 'process.spawn']
@@ -450,23 +466,27 @@ const BLOCKED_CALLS = ['process.run', 'process.spawn']
 async function checkMod($, e, next) {
   const blocked = e.uses.calls.filter((call) => BLOCKED_CALLS.includes(call))
   if (e.tier === 'user' && blocked.length > 0) {
+    if (e.provides) return next({ ...e, provides: { ...e.provides, modules: [] } })
     return { refuse: 'Acme policy: mods may not call ' + blocked.join(', ') }
   }
   return next(e)
 }
 
 export function register(on) {
-  // The handler runs only when checkMod throws or exceeds its time limit
+  // The handler runs when checkMod throws
   on('plugin.register', checkMod).catch(async ($, e, next) => {
     // Let your organization's mods and built-in mods load
     if (e.tier !== 'user') return next(e)
-    // Refuse the user's mod that couldn't be checked
+    // Stop the unchecked mod, not its whole plugin
+    if (e.provides && !next.called) return next({ ...e, provides: { ...e.provides, modules: [] } })
     return { refuse: 'Acme policy check failed, so this mod was not loaded' }
   })
 }
 ```
 
-With the handler in place, a mod that was being checked when the check threw or timed out doesn't load, and the refusal line carries the second reason, as in `refused by acme-guard: Acme policy check failed, so this mod was not loaded`. The handler passes every mod outside the `user` tier to `next(e)`, so a failed check doesn't stop the mods your organization lists. [Handle a hook that fails](https://code.claude.com/docs/en/plugins/mods/events.md#handle-a-hook-that-fails) covers `.catch` for other events.
+With the handler in place, a user's mod doesn't load when the check throws. If the check throws after it calls `next`, the handler falls back to `refuse`. Don't rely on the handler for a check that exceeds its time limit.
+
+The handler passes every mod outside the `user` tier to `next(e)`, so a failed check doesn't stop the mods your organization lists. [Handle a hook that fails](https://code.claude.com/docs/en/plugins/mods/events.md#handle-a-hook-that-fails) covers `.catch` for other events.
 
 ## Next steps
 

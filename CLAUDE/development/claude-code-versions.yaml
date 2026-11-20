@@ -197,3 +197,21 @@ releases:
       entry, so only 2.1.323 and 2.1.325 were reviewed. One adopt row and
       three conflict rows (each a check, not a known break), filed as
       niggles N645 to N648. No instruction-loading change.
+  v3.76.0:
+    claude_code_version: unknown
+    evidence: ""
+    review_date: "2026-11-20"
+    reviewed_through: "2.1.329"
+    review_report: CLAUDE/Plan/00474-niggles-ledger-seventeen/subagent-reports/261120-claude-code-review-v3.76.0.md
+    note: >-
+      The release host ran Claude Code 2.1.329, but the hook contract
+      (contracts/claude-code-hooks/META.json) has not been re-audited at that
+      version: contract-status reports the upstream hooks page CHANGED since
+      the 2.1.296 audit, so 2.1.329 is not recorded as the tested version.
+      The review ran FROM 2.1.325 to 2.1.329. Two adopt rows: row 1 (Stop and
+      SubagentStop background_tasks list a Monitor's script as `monitor`) was
+      applied as a targeted edit to Stop.json and SubagentStop.json, not a
+      full re-audit; row 2 (FACTS G5-01, auto-compaction rebuilds the system
+      prompt) is filed as niggle N682. No redundant or conflict row. No
+      instruction-loading refresh; that contract's META is re-audited at
+      2.1.329 against the re-captured memory page.
