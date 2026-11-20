@@ -109,8 +109,15 @@ def names_whole_root(relative_root: str) -> bool:
     return relative_root.count("/") >= 2
 
 
+#: Between two components of the root: any run of ``/`` and ``./`` (N4: ``//``, ``/./``).
+_SEPARATOR: Final[str] = "/+([.]/+)*"
+
+
 def _pattern(relative_root: str) -> str:
-    escaped = relative_root.replace(".", "[.]").replace("+", "[+]")
+    """The root, each separator spelled any way a path resolves the same (N4)."""
+    escaped = _SEPARATOR.join(
+        part.replace(".", "[.]").replace("+", "[+]") for part in relative_root.split("/")
+    )
     if names_whole_root(relative_root):
         return f"{escaped}{PATH_CLASS}*"
     return f"{escaped}/{PATH_CLASS}+"
@@ -120,13 +127,23 @@ def _strip_forms(match: str) -> set[str]:
     return {match, match.rstrip("./"), match.rstrip(_TRAILING)}
 
 
+def _tidy(path: str) -> str:
+    """``path`` with empty and ``.`` segments dropped; ``..`` is kept (N4)."""
+    return "/".join(part for part in path.split("/") if part not in ("", "."))
+
+
+def _spellings(match: str) -> set[str]:
+    """Every path a match could mean: each stripped form, tidied and dot-resolved."""
+    forms: set[str] = set()
+    for form in _strip_forms(match):
+        if form:
+            forms.update((_tidy(form), posixpath.normpath(form)))
+    return forms
+
+
 def _names_root(match: str, relative_root: str) -> bool:
-    """A match that, stripped or dot-resolved, is the root itself."""
-    return any(
-        form == relative_root or posixpath.normpath(form) == relative_root
-        for form in _strip_forms(match)
-        if form
-    )
+    """A match that, stripped, tidied or dot-resolved, is the root itself."""
+    return relative_root in _spellings(match)
 
 
 def _branch_listing(project: ProjectGit, *extra: str) -> list[tuple[str, str]]:
@@ -204,21 +221,16 @@ def _records(output: str, record: re.Pattern[str]) -> list[tuple[str | None, str
 
 
 def _entries_named(match: str, relative_root: str) -> set[str]:
-    """Every entry name a matched path could mean; stripping only adds candidates."""
+    """Every entry name a matched path could mean; each spelling only adds candidates.
+
+    A match whose every spelling lies outside the root (a sibling sharing the
+    root's prefix, or ``..`` climbing out) names nothing.
+    """
     prefix = f"{relative_root}/"
-    if not match.startswith(prefix):
-        if names_whole_root(relative_root) and match.startswith(relative_root):
-            return set()  # the root itself, or a sibling sharing its prefix (``sub`` vs ``subway``)
-        raise _Unknown("git grep returned a match outside the root")
-    rest = match[len(prefix) :]
     names: set[str] = set()
-    for form in _strip_forms(rest):
-        candidates = [form]
-        resolved = posixpath.normpath(f"{relative_root}/{form}")
-        if resolved.startswith(prefix):
-            candidates.append(resolved[len(prefix) :])
-        for candidate in candidates:
-            first = candidate.split("/", 1)[0]
+    for spelling in _spellings(match):
+        if spelling.startswith(prefix):
+            first = spelling[len(prefix) :].split("/", 1)[0]
             if first not in ("", ".", ".."):
                 names.add(first)
     return names

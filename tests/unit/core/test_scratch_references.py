@@ -210,6 +210,52 @@ class TestSubRoot:
         sites = build_references(_project_git(gp), _SUB).for_entry("a").sites
         assert sites == ("HEAD:docs/ref.md:1",)
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "untracked/scratch/./sub/run.log",
+            "untracked/scratch//sub/run.log",
+            "untracked//scratch/sub/run.log",
+            "untracked/./scratch//sub//run.log",
+            "./untracked/scratch/sub/./run.log",
+        ],
+    )
+    def test_n4_an_odd_spelling_names_the_entry_under_the_sub_root(
+        self, gp: GitProject, text: str
+    ) -> None:
+        """N4: the same spelling must name the entry under --root as under the default root."""
+        commit_file(gp.project, "docs/ref.md", f"see {text} here\n")
+        assert _referenced(build_references(_project_git(gp), _SUB), "run.log")
+        assert _referenced(_refs(gp), "sub")
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "untracked/scratch/./sub",
+            "untracked/scratch//sub/",
+            "untracked//scratch/sub/.",
+            "untracked/scratch/sub//.",
+        ],
+    )
+    def test_n4_an_odd_spelling_of_the_root_itself_names_every_entry(
+        self, gp: GitProject, text: str
+    ) -> None:
+        commit_file(gp.project, "docs/ref.md", f"see {text} here\n")
+        refs = build_references(_project_git(gp), _SUB)
+        assert refs.unknown == ""
+        assert refs.for_entry("run.log").sites == ("HEAD:docs/ref.md:1",)
+
+    @pytest.mark.parametrize(
+        "text", ["untracked/scratch//subway/x", "untracked//scratch/./other/x"]
+    )
+    def test_n4_an_odd_spelling_of_a_sibling_names_no_entry(
+        self, gp: GitProject, text: str
+    ) -> None:
+        commit_file(gp.project, "docs/ref.md", f"mention {text} here\n")
+        refs = build_references(_project_git(gp), _SUB)
+        assert refs.unknown == ""
+        assert not _referenced(refs, "run.log")
+
     def test_the_default_root_ignores_a_bare_mention_of_itself(self, gp: GitProject) -> None:
         commit_file(gp.project, "docs/ref.md", "files go in untracked/scratch/ always\n")
         assert not _referenced(_refs(gp), "anything")
