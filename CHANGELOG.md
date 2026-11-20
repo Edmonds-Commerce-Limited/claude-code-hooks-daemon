@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.76.0] - 2026-11-20
+
+_Branch-pool warning ladder (Plan 00619), remote-delete proofs judged against the remote default only (Plans 00622, 00626), a long project path no longer breaks the daemon socket (Plan 00628), supervisor idle compaction keyed on the orange tier (Plan 00603), and a much harder secret guard: links judged from the hook's directory, a link index and fail-closed bounded walks (Plans 00614, 00623). New config keys: `branches.wip.ladder`, `branches.parked.ladder`, `branches.merged.ladder`; new supervisor setting `CCY_IDLE_COMPACT_TIER`. Several behaviour changes (stricter secret-guard denials, a new socket fallback directory, remote deletes need a tracking default); no removed commands or renamed config keys._
+
+### Added
+
+- Branch pool warning ladder: each pool (open work, parked, merged) warns at 60, 80 and 90 percent of the point where a branch creation is refused, at session start, on the main thread's stop, and at 90 percent on every tool call and prompt; configured by `branches.wip.ladder`, `branches.parked.ladder`, `branches.merged.ladder`; delivered by the new handlers `branch_pool_pressure_advisor` (PreToolUse) and `branch_pool_pressure_prompt` (UserPromptSubmit), both context-only. No guard decision changed (Plan 00619).
+- Evidence tier `empty-commits-only` for the branch delete proofs: commits that change no file no longer make a merged branch "not merged" (Plan 00622).
+- Proof route for interleaved cherry-picks: a branch whose every non-park commit is found by `git cherry` in the remote default and whose changed paths are held at exact bytes and mode is proven `patch-equivalent` (Plan 00626).
+- `CCY_IDLE_COMPACT_TIER` (`yellow`, `orange`, `red`) for the supervisor's idle compaction (Plan 00603).
+- `fit_socket_path` / `fit_pid_path`: one function decides the daemon socket and PID path for every caller (Plan 00628).
+- An in-memory, filesystem-checked index of the project's directories and links, built in the background at daemon start, used to judge a computed `cd` followed by a reader in large projects (Plan 00623).
+
+### Changed
+
+- **Behaviour change:** idle compaction fires at the ORANGE context tier or higher after 600 seconds of true idle (was a fixed 30 percent after 60); `CCY_IDLE_COMPACT_PCT` is unset by default and, when set, replaces the tier gate; the compaction waits for queued supervisor work. Still dry-run by default (Plan 00603).
+- **Behaviour change:** every remote-delete proof judges the remote-tracking default alone, and `branches.default: auto` reads the remote default from `refs/remotes/<remote>/HEAD` only; a cached positive proof no longer authorises a remote delete. Clones without that ref need `git remote set-head <remote> --auto` or `branches.default` (Plan 00626).
+- Every git call the daemon makes in the delete proofs reads stored objects: replace refs, `.git/info/grafts` and the commit-graph cache are ignored; the proof cache key version moved, so earlier refusals are judged afresh (Plan 00622).
+- **Behaviour change (security):** the daemon's short socket fallback directory must be a real directory owned by the daemon's user with mode 0700; otherwise `/tmp/hooks-daemon-<uid>` (0700) is used and a non-private one fails the start closed. Restart the daemon once after upgrading (Plan 00628).
+- **Behaviour change (security):** `secret_file_guard` and the quarantine-artefact guard resolve relative links from the hook's `cwd` and every `cd` target, deny recursive searches and globs through a directory link that leaves the project, follow `cd`, `env -C`, `git -C`, `sudo -D` and `tar -C` wherever bash runs them, deny paths through `/proc/self` and `/dev/fd`, and deny when a scan stops early beside a glob or recursive search (Plans 00614, 00623).
+- A move to `~`, `$HOME` or `$TMPDIR` outside the project is now placed using the daemon's own value; `cd "$(git rev-parse --show-toplevel)"` is placed at the command's ancestors unless git config or `GIT_` variables relocate the tree (Plan 00623).
+
+### Fixed
+
+- **SECURITY:** a branch merged only into a local default whose push had not landed was listed as proven and deletable on the remote (`R-GIT-PUSH-DELETE-REMOTE`, `branch-sweep --clean --remote`) (Plan 00626).
+- A branch with cherry-picked commits and a default that changed one of the same files between the picks was refused as "not merged" (Plan 00626).
+- A branch whose work is in the default with empty commits on top was refused by `R-GIT-PUSH-DELETE-REMOTE`, `branch-sweep --clean --remote` and `delete-branch` (Plan 00622).
+- A project path long enough to push the natural socket path past the 104-byte AF_UNIX limit denied every tool call with `daemon_startup_failed`; a failed start also deleted a running daemon's discovery file. The discovery file is now written only after the bind and removed only by the daemon that wrote it (Plan 00628).
+- **SECURITY:** a symlink to a protected file read through a relative word, a recursive search or glob through a directory link, a bracket glob, a `..` word after a computed `cd`, or a scan that stopped early was allowed (Plans 00614, 00623).
+- A computed `cd` in a project of more than 512 directories denied every later relative word; it is now judged from the link index, and fails closed past its limits (Plan 00623).
+
 ## [3.75.0] - 2026-11-16
 
 _Branch-pool work (Plan 00594): a proof that counts squash-merged and cherry-picked branches as merged, pools counted per owner, pressure moved to session start and stop, `branch-preflight`, previewed batched `branch-sweep --clean`, signed park commits, and the removal of recovery bundles and of the unproven-delete flags. Also a model ownership statement in the CLAUDE.md block (on by default), `session-state` with versioned JSON Schemas, an opt-in long-running-command guard, supervisor idle compaction (dry-run by default), wrappers with no machine-specific path, relay repair at daemon start, and many secret-guard, `destructive_git` and `pipe_blocker` fixes. New config keys: `claude_md.ownership`, `claude_md.ownership_text`, `daemon.omit_permission_surface`, `branches.wip.creation_grace`, `branches.park.commit`, `branches.park.push`, and two `worktree_create` budget options. Operator-facing CLI changes need a script update: see Changed (**BREAKING**) and Removed._

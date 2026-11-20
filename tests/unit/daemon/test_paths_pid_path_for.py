@@ -47,7 +47,8 @@ def test_a_long_root_is_relocated_exactly_as_get_pid_path_relocates_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = tmp_path / "run"
-    runtime.mkdir()
+    # 0700: only a private directory is accepted, whatever the umask.
+    runtime.mkdir(mode=0o700)
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
     root = tmp_path / ("d" * 120) / "project"
     root.mkdir(parents=True)
