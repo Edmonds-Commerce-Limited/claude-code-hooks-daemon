@@ -281,9 +281,10 @@ class BranchRecord:
     #: Author of a FOREIGN branch's tip.
     author: str | None = None
     author_email: str | None = None
-    #: The done state a FOREIGN branch was proven in (merged, merged-into-line or
-    #: patch-equivalent), so ``--clean --remote`` can still delete it: proof
-    #: matters more than ownership.
+    #: The done state a FOREIGN branch was proven in (any ``_DONE_RANK`` state:
+    #: merged, merged-into-line, patch-equivalent, park-carried, or content-preserved
+    #: when built with ``prove_content``), so ``--clean --remote`` can still delete
+    #: it, gated by the live remote-delete proof: proof matters more than ownership.
     proof_state: BranchState | None = None
 
     @property

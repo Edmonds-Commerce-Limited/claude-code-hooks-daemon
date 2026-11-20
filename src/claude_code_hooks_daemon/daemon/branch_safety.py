@@ -45,6 +45,7 @@ the two makes an alarming path count look like data loss when it is not.
 
 from __future__ import annotations
 
+import shlex
 import subprocess  # nosec B404 - trusted system tool (git), list form, no shell
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
@@ -348,7 +349,11 @@ class DeletionReport:
         holds the commit, and not a recovery copy a delete may lean on.
         """
         tips = {c.name: c.tip for c in self.classifications}
-        return tuple(f"git branch {name} {tips[name]}" for name in self.deleted if tips.get(name))
+        return tuple(
+            f"git branch {shlex.quote(name)} {tips[name]}"
+            for name in self.deleted
+            if tips.get(name)
+        )
 
 
 def _git(
@@ -941,7 +946,7 @@ def _explain_worktree_refusal(
     if not proof.is_safe:
         return refused
     holding = _worktree_holding(repo, refused.name)
-    rerun = daemon_cli_command_for_docs("delete-branch", refused.name)
+    rerun = daemon_cli_command_for_docs("delete-branch", shlex.quote(refused.name))
     proven = f"proven {proof.tier} ({proof.detail})"
     if holding is None:
         return replace(refused, detail=f"{refused.detail}; {proven}")
@@ -949,7 +954,7 @@ def _explain_worktree_refusal(
     if is_main:
         step = f"switch the main checkout {path} to another branch, then run `{rerun}`"
     else:
-        step = f"run `git worktree remove {path}`, then `{rerun}`"
+        step = f"run `git worktree remove {shlex.quote(str(path))}`, then `{rerun}`"
     return replace(refused, detail=f"{refused.detail} ({path}); {proven}; to delete it, {step}")
 
 

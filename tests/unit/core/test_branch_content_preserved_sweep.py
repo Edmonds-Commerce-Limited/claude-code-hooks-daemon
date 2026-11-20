@@ -313,3 +313,102 @@ class TestCleanupAfterMergeStaysAncestryOnly:
         )
         assert report.deleted == ()
         assert _has_branch(held_no_worktree, _RC)
+
+
+def _make_foreign(seed: Path) -> None:
+    """``_RC`` becomes another author's: remote-only, tip authored by someone else."""
+    _git(seed, "branch", "-D", _RC)
+    _git(seed, "config", "user.email", "someone-else@hooks-daemon.invalid")
+
+
+class TestForeignContentPreservedRemoteDelete:
+    def test_the_inventory_carries_the_content_proof_for_a_foreign_branch(
+        self, held_no_worktree: Path
+    ) -> None:
+        _make_foreign(held_no_worktree)
+        inventory = branch_inventory.build_inventory(held_no_worktree, _CONFIG, prove_content=True)
+        record = inventory.records[_RC]
+        assert record.state == BranchState.FOREIGN
+        assert record.proof_state == BranchState.CONTENT_PRESERVED
+        assert record.cleanup_state in branch_cleanup.REMOTE_CLEAN_STATES
+
+    def test_clean_remote_deletes_an_unmoved_foreign_branch(self, held_no_worktree: Path) -> None:
+        _make_foreign(held_no_worktree)
+        report = branch_cleanup.clean_sweep(held_no_worktree, _CONFIG, dry_run=False, remote=True)
+        assert f"origin/{_RC}" in report.deleted_remote, report.skipped
+        assert _RC not in _git(held_no_worktree, "ls-remote", "--heads", "origin")
+
+    def test_a_remote_tip_moved_after_planning_is_not_deleted(
+        self, held_no_worktree: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed = held_no_worktree
+        _make_foreign(seed)
+        remote_url = _git(seed, "remote", "get-url", "origin")
+        other = tmp_path / "other-clone"
+        _git(tmp_path, "clone", "-q", "-b", _RC, remote_url, str(other))
+        real = branch_cleanup._push_deletes
+
+        def moved_first(repo: Path, remote: str, tips: Any) -> Any:
+            _git(other, "commit", "-q", "--allow-empty", "-m", "new work after the proof")
+            _git(other, "push", "-q", "origin", _RC)
+            return real(repo, remote, tips)
+
+        monkeypatch.setattr(branch_cleanup, "_push_deletes", moved_first)
+        report = branch_cleanup.clean_sweep(seed, _CONFIG, dry_run=False, remote=True)
+        assert f"origin/{_RC}" not in report.deleted_remote
+        moved = _git(other, "rev-parse", "HEAD")
+        assert moved in _git(seed, "ls-remote", "--heads", "origin", _RC)
+
+
+def _park(repo: Path, *, commit: bool) -> None:
+    from claude_code_hooks_daemon.core.branch_park import park_branch
+
+    park_branch(repo, _RC, reason="waiting on the audit", remote="origin", commit=commit)
+
+
+class TestParkedContentPreservedIsSpared:
+    @pytest.mark.parametrize("commit", [True, False], ids=["trailer", "record-only"])
+    def test_a_parked_branch_is_not_cleaned_and_the_reason_is_reported(
+        self, held_no_worktree: Path, commit: bool
+    ) -> None:
+        seed = held_no_worktree
+        _park(seed, commit=commit)
+        dry = branch_cleanup.clean_sweep(seed, _CONFIG, dry_run=True, remote=True)
+        assert not any(_RC in line for line in dry.commands), dry.commands
+        assert any("waiting on the audit" in line for line in dry.skipped), dry.skipped
+        report = branch_cleanup.clean_sweep(seed, _CONFIG, dry_run=False, remote=True)
+        assert _RC not in report.deleted
+        assert f"origin/{_RC}" not in report.deleted_remote
+        assert _has_branch(seed, _RC)
+        assert _RC in _git(seed, "ls-remote", "--heads", "origin")
+        assert any("waiting on the audit" in line for line in report.skipped)
+
+    def test_a_park_trailer_alone_still_spares_the_branch(self, held_no_worktree: Path) -> None:
+        from claude_code_hooks_daemon.core.branch_park import clear_park_record
+
+        seed = held_no_worktree
+        _park(seed, commit=True)
+        clear_park_record(seed, _RC)
+        report = branch_cleanup.clean_sweep(seed, _CONFIG, dry_run=False, remote=True)
+        assert _RC not in report.deleted
+        assert any("waiting on the audit" in line for line in report.skipped)
+
+
+class TestApplyRechecksTheWorktree:
+    def test_a_worktree_switched_after_planning_is_left_alone(
+        self, held: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed, tree = held
+        real = branch_cleanup._apply_in_batches
+
+        def switched_first(*args: Any, **kwargs: Any) -> Any:
+            _git(tree, "switch", "-q", "-c", "fresh-claim", "main")
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(branch_cleanup, "_apply_in_batches", switched_first)
+        report = branch_cleanup.clean_sweep(seed, _CONFIG, dry_run=False)
+        assert tree.is_dir()
+        assert tree not in report.removed_worktrees
+        assert _RC not in report.deleted
+        assert _has_branch(seed, _RC)
+        assert any(_RC in line and "fresh-claim" in line for line in report.skipped), report.skipped

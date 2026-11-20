@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +37,7 @@ from claude_code_hooks_daemon.core.agent_ownership import (
 )
 from claude_code_hooks_daemon.core.branch_inventory import BranchRecord, BranchState
 from claude_code_hooks_daemon.core.branch_park import (
+    BranchParkError,
     ParkRecord,
     clear_park_record,
     read_park_records,
@@ -590,7 +592,7 @@ def remote_delete_advice(
         proof = prove_remote_merged(repo, remote, [name], default, config)
         problem = proof.problems.get(name)
         if problem is None and name in proof.tips:
-            return f"git push {remote} --delete {name}"
+            return f"git push {shlex.quote(remote)} --delete {shlex.quote(name)}"
         problem = problem or "the proof did not accept it"
     return f"remote delete of {remote}/{name} is for the owner: {problem}"
 
@@ -676,9 +678,12 @@ def cleanup_after_merge(
     skipped: list[str] = []
     commands: list[str] = []
     park_cleared: list[str] = []
-    delete_command = (
-        daemon_cli_command_for_docs("delete-branch") + " {name} --protected-ref " + target
-    )
+
+    def delete_command(name: str) -> str:
+        return daemon_cli_command_for_docs(
+            "delete-branch", shlex.quote(name), "--protected-ref", shlex.quote(target)
+        )
+
     for name in names:
         refusal = policy_refusal(name, config, protected_default, refuse_lines=refuse_lines)
         if refusal is not None:
@@ -707,10 +712,13 @@ def cleanup_after_merge(
         if held_by is not None:
             park_cleared += _clear_parks(repo, [name])
             skipped.append(f"{name}: checked out in the worktree {held_by}")
-            commands += [f"git worktree remove {held_by}", delete_command.format(name=name)]
+            commands += [
+                f"git worktree remove {shlex.quote(str(held_by))}",
+                delete_command(name),
+            ]
         elif mode == "advise":
             park_cleared += _clear_parks(repo, [name])
-            commands.append(delete_command.format(name=name))
+            commands.append(delete_command(name))
         else:
             before = _park_snapshot(repo, [name])
             report = delete_branches(
@@ -727,7 +735,7 @@ def cleanup_after_merge(
                 continue
             park_cleared += _clear_parks(repo, [name], before)
             deleted.append(name)
-            commands.append(f"git branch {name} {verdict.tip}")
+            commands.append(f"git branch {shlex.quote(name)} {verdict.tip}")
         remote = remote_delete_advice(repo, config, protected_default, name, prove=False)
         if remote is not None:
             commands.append(remote)
@@ -801,7 +809,7 @@ def delete_if_merged(
     if name not in report.deleted:
         return CleanupReport(skipped=tuple(f"{name}: {b}" for b in report.blockers))
     park_cleared = _clear_parks(repo, [name], before)
-    commands = [f"git branch {name} {verdict.tip}"]
+    commands = [f"git branch {shlex.quote(name)} {verdict.tip}"]
     remote = remote_delete_advice(repo, config, default, name, prove=False)
     if remote is not None:
         commands.append(remote)
@@ -892,7 +900,7 @@ def clean_sweep(
         for name in {*inventory.records, *worktree_records}
         if (why := _agent_owned(name, worktree_records, holds)) is not None
     }
-    spared = _spared(config, inventory.records)
+    spared = _spared(config, inventory.records, repo)
     candidates = sorted(
         name
         for name, record in inventory.records.items()
@@ -951,7 +959,7 @@ def clean_sweep(
             f"{config.remote}/{name}: {spared[name]}"
             for name in sorted(spared)
             if inventory.records[name].remote_tip is not None
-            and inventory.records[name].state in CLEAN_STATES
+            and inventory.records[name].cleanup_state in REMOTE_CLEAN_STATES
         ]
     apply_command = sweep_clean_command(remote=remote)
     if dry_run:
@@ -1068,6 +1076,13 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
     """
     repo, config = plan.repo, plan.config
     local: list[str] = []
+    # The plan's worktree map is as old as its proofs: re-read it once per batch, so
+    # a worktree switched to another branch (or claimed afresh) is never removed.
+    now_held = (
+        {name: record.path for name, record in linked_worktree_records(repo).items()}
+        if any(name in plan.worktrees for name in batch)
+        else {}
+    )
     for name in batch:
         if name not in plan.proven:
             continue
@@ -1076,6 +1091,9 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             continue
         held_by = plan.worktrees.get(name)
         if held_by is not None:
+            if now_held.get(name) != held_by:
+                outcome.skipped.append(_worktree_changed_line(name, held_by, now_held))
+                continue
             # The proof ran long ago; work may have landed in the worktree since.
             blockers = worktree_blockers(held_by, config.cleanup_after_merge.regenerable)
             if blockers:
@@ -1114,7 +1132,8 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
         outcome.deleted_remote += [f"{config.remote}/{name}" for name in gone]
         outcome.remaining += [name for name in tips if name not in gone]
         outcome.commands += [
-            f"git push {config.remote} {tips[name]}:{branch_ref(name)}" for name in gone
+            f"git push {shlex.quote(config.remote)} {shlex.quote(f'{tips[name]}:{branch_ref(name)}')}"
+            for name in gone
         ]
     for name in deleted:
         advice = remote_delete_advice(repo, config, plan.default, name)
@@ -1122,19 +1141,62 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             outcome.commands.append(advice)
 
 
-def _spared(config: BranchesConfig, records: Mapping[str, BranchRecord]) -> dict[str, str]:
+def _worktree_changed_line(name: str, planned: Path, now_held: Mapping[str, Path]) -> str:
+    """Why a planned worktree removal was dropped: the worktree no longer holds ``name``."""
+    holder = next((branch for branch, path in now_held.items() if path == planned), None)
+    now = f"now holds {holder}" if holder is not None else "no longer holds it"
+    return f"{name}: the worktree {planned} {now} (changed since the plan); rerun the sweep"
+
+
+def _spared(
+    config: BranchesConfig, records: Mapping[str, BranchRecord], repo: Path
+) -> dict[str, str]:
     """``name -> reason`` for every branch ``--clean`` must leave alone on both sides.
 
-    A keep inside its age, and any ``bot_owned`` name (defence in depth: the
-    inventory already gives those a state outside CLEAN_STATES).
+    A keep inside its age, any ``bot_owned`` name (defence in depth: the inventory
+    already gives those a state outside CLEAN_STATES), and a parked content-preserved
+    branch: it was never merged, so its park is a standing decision the sweep must
+    not erase. A merged tier still ends a park, as a merge does.
     """
+    parks: Mapping[str, ParkRecord] | None
+    try:
+        parks = read_park_records(repo)
+    except BranchParkError as exc:
+        logger.warning("branch cleanup: park records unreadable: %s", exc)
+        parks = None
     spared: dict[str, str] = {}
     for name, record in records.items():
         if matches_any_glob(name, config.bot_owned):
             spared[name] = "bot-owned (branches.bot_owned)"
         elif record.kept_reason is not None and not record.stale:
             spared[name] = f"kept: {record.kept_reason}"
+        elif record.cleanup_state == BranchState.CONTENT_PRESERVED:
+            why = _park_reason(name, record, parks)
+            if why is not None:
+                spared[name] = (
+                    f"parked ({why}), only content-preserved; clear the park with "
+                    f"{daemon_cli_command_for_docs('branch-park', shlex.quote(name), '--clear')} "
+                    "to clean it"
+                )
     return spared
+
+
+def _park_reason(
+    name: str, record: BranchRecord, parks: Mapping[str, ParkRecord] | None
+) -> str | None:
+    """Why a branch is parked: its tip's trailer, or a record on that tip; else None.
+
+    Unreadable park records (``parks`` None) count as parked: the sweep cannot rule
+    a park out, so it keeps the branch.
+    """
+    if record.parked_reason is not None:
+        return record.parked_reason
+    if parks is None:
+        return "park records unreadable"
+    standing = parks.get(name)
+    if standing is not None and standing.sha in (record.local_tip, record.remote_tip):
+        return standing.reason
+    return None
 
 
 def _proven_remote(
