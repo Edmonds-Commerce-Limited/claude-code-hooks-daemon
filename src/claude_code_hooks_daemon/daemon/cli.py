@@ -226,7 +226,7 @@ from .init_config import generate_config
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from claude_code_hooks_daemon.core.branch_reject import IssuedRequest, RejectRoute
+    from claude_code_hooks_daemon.core.branch_reject import Digest, IssuedRequest, RejectRoute
     from claude_code_hooks_daemon.core.release_slate import (
         CiRunState,
         PlanSummary,
@@ -7066,6 +7066,90 @@ def cmd_branch_reject_request(args: argparse.Namespace) -> int:
     return 0
 
 
+def _format_epoch(epoch: float | None) -> str:
+    if epoch is None:
+        return "never"
+    return datetime.datetime.fromtimestamp(epoch, tz=datetime.UTC).strftime("%Y-%m-%d %H:%M:%SZ")
+
+
+def _digest_payload(digest: "Digest", present: Sequence[bool]) -> dict[str, Any]:
+    return {
+        "removals": [
+            {**line.to_dict(), "still_present_at_tip": still}
+            for line, still in zip(digest.removals, present, strict=True)
+        ],
+        "refusals": [refusal.to_dict() for refusal in digest.refusals],
+        "keeps": [keep.to_dict() for keep in digest.keeps],
+        "removals_in_window": digest.removals_in_window,
+        "reviewers_next": digest.reviewers_next,
+        "last_marked_at": digest.last_marked_at,
+    }
+
+
+def _digest_text(digest: "Digest", present: Sequence[bool], window_days: int) -> list[str]:
+    lines = [f"Branch-reject digest (last marked read: {_format_epoch(digest.last_marked_at)})"]
+    if digest.is_empty:
+        lines.append("Nothing new since the last mark.")
+    for line, still in zip(digest.removals, present, strict=True):
+        flag = "  STILL PRESENT at its tip: git never removed it" if still else ""
+        lines.append(
+            f"REMOVED {line.branch} at {line.tip[:12]} on {_format_epoch(line.removed_at)}{flag}"
+        )
+        lines.append(f"  reviewers: {', '.join(line.reviewer_agent_ids)}")
+        lines.extend(f"  restore: {command}" for command in line.restore_commands)
+    for refusal in digest.refusals:
+        lines.append(
+            f"GIT REFUSED {refusal.branch} at {refusal.tip[:12]} on "
+            f"{_format_epoch(refusal.refused_at)}: {refusal.detail}"
+        )
+    for keep in digest.keeps:
+        lines.append(f"KEPT {keep.branch} at {keep.tip[:12]}: {'; '.join(keep.reasons)}")
+    rate = f"{digest.removals_in_window} removal(s) in the last {window_days} day(s); "
+    if digest.reviewers_next is None:
+        rate += "the route is refusing every removal until the window clears"
+    else:
+        rate += f"the next removal needs {digest.reviewers_next} reviewer(s)"
+    lines.append(rate)
+    return lines
+
+
+def cmd_branch_reject_digest(args: argparse.Namespace) -> int:
+    """List removals, git refusals and keeps not yet marked read (Plan 00620 Task 2.3).
+
+    Listing writes nothing. ``--mark-read`` adds exactly the listed entries to the
+    watermark, which hides them from later digests and gates nothing: the delete
+    route never reads it. A removal whose branch still resolves at its recorded tip is
+    flagged, since that is what a crash between the ledger append and git leaves.
+
+    Returns:
+        0 on success; 2 when the ledger or digest state cannot be read, a git lookup
+        fails, or there is no main checkout to hold the state.
+    """
+    from claude_code_hooks_daemon.core import branch_reject
+
+    repo = get_project_path(getattr(args, "project_root", None))
+    config = _branches_config(repo).reject
+    now = time.time()
+    try:
+        store = branch_reject.RejectStore(branch_reject.main_checkout(repo) / config.state_dir)
+        digest = branch_reject.build_digest(
+            repo / config.ledger_path, store, now=now, config=config
+        )
+        present = [branch_reject.branch_still_at_tip(repo, line) for line in digest.removals]
+        rendered = (
+            json.dumps(_digest_payload(digest, present), indent=2)
+            if args.format == "json"
+            else "\n".join(_digest_text(digest, present, config.window_days))
+        )
+        if args.mark_read:
+            branch_reject.mark_digest_read(store, digest, now=now)
+    except branch_reject.RejectError as exc:
+        print(f"ERROR: the branch-reject digest cannot be read: {exc}", file=sys.stderr)
+        return 2
+    print(rendered)
+    return 0
+
+
 def cmd_delete_branch(args: argparse.Namespace) -> int:
     """Delete local branches only when their safety can be proven (Plan 00206).
 
@@ -13646,6 +13730,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format: text (default) or json",
     )
     parser_reject_request.set_defaults(func=cmd_branch_reject_request)
+    parser_reject_digest = reject_sub.add_parser(
+        "digest",
+        help="List removals, git refusals and keeps not yet marked read, and the removal "
+        "rate; writes nothing unless --mark-read",
+    )
+    parser_reject_digest.add_argument(
+        "--mark-read",
+        action="store_true",
+        help="Mark exactly the listed entries read. This hides them from later digests "
+        "only; it unlocks nothing",
+    )
+    parser_reject_digest.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    parser_reject_digest.set_defaults(func=cmd_branch_reject_digest)
 
     # branch-sweep command (Plan 00558 Task 2.2)
     from claude_code_hooks_daemon.core.branch_cleanup import BULK_BATCH_SIZE
