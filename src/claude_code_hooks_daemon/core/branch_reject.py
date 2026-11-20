@@ -551,9 +551,7 @@ class RejectStore:
         """Remove the verdict, if any. Raises RejectError when it cannot be removed."""
         path = self._path(_VERDICTS, verdict_id)
         try:
-            path.unlink()
-        except FileNotFoundError:
-            return
+            path.unlink(missing_ok=True)
         except OSError as exc:
             raise RejectError(f"could not withdraw {path}: {exc}") from exc
 

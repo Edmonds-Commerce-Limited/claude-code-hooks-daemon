@@ -663,3 +663,19 @@ class TestEndToEnd:
             )
             == []
         )
+
+
+class TestWithdrawVerdict:
+    """Withdrawing is idempotent, and a verdict that cannot be removed fails loudly."""
+
+    def test_withdrawing_an_absent_verdict_is_a_no_op(self, store: RejectStore) -> None:
+        store.withdraw_verdict(new_id())
+        assert store.read_verdict(new_id()) is None
+
+    def test_a_verdict_that_cannot_be_removed_raises(self, store: RejectStore) -> None:
+        verdict_id = new_id()
+        blocker = store.root / "verdicts" / f"{verdict_id}.json"
+        blocker.mkdir(parents=True)
+        with pytest.raises(RejectError, match="could not withdraw"):
+            store.withdraw_verdict(verdict_id)
+        assert blocker.exists()
