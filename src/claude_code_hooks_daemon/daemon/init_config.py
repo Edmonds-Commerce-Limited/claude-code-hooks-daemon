@@ -526,6 +526,7 @@ class ConfigTemplate:
             "    subagent_report_path_verifier: {enabled: true, priority: 8}  # Block a stop whose final message claims a report file that is not on disk\n"
             "    subagent_cache_aggregator: {enabled: true, priority: 9}  # Sensor: record this agent's prompt-cache totals so the coordinator's status line can show SUB alongside MAIN\n"
             "    branch_subagent_stop_guard: {enabled: true, priority: 12}  # SubagentStop twin of branch_stop_guard: judge the branches this agent touched (Plan 00558)\n"
+            "    branch_reject_verdict_recorder: {enabled: true, priority: 13}  # Record a branch-reject reviewer's verdict from its final stop (silent)\n"
             "    subagent_handoff_gate: {enabled: true, priority: 11}  # An agent past subagent_context_budget's hard_tokens writes its handoff before it stops\n"
             "    subagent_report_persistence: {enabled: true, priority: 10}  # Sensor: auto-save every sub-agent's final reply to a gitignored file, before the terminal size blocker below looks it up\n"
             "    subagent_report_size_blocker: {enabled: true, priority: 15}  # Block an oversized subagent final message\n"

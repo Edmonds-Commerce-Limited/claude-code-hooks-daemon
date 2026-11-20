@@ -1022,6 +1022,10 @@ handlers:
       enabled: true
       priority: 12
 
+    branch_reject_verdict_recorder:  # Records a branch-reject reviewer's verdict from its final stop; silent, never blocks
+      enabled: true  # Disabling it fails closed: no verdict is recorded, so no removal is unlocked
+      priority: 13   # Below the terminal size blocker (15)
+
     cron_subagent_stop_enforcer:  # SubagentStop twin of cron_stop_enforcer above (Plan 00416)
       enabled: true                 # Silent unless persistent_crons.enabled AND a job is declared
       priority: 7

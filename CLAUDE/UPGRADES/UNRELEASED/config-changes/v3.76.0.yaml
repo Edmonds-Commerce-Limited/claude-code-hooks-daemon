@@ -41,6 +41,24 @@ config_changes:
             branch_reject_agent_binder:
               enabled: true
               priority: 33
+    - key: handlers.subagent_stop.branch_reject_verdict_recorder
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00620). Silent SubagentStop sensor: turns the branch-reject
+        reviewer's final, clean stop into a verdict (and a keep record on keep).
+        A second stop of the same review, or a stop-hook re-entry, withdraws the
+        verdict. Never blocks. Disabling it fails closed (no verdict is recorded,
+        so no removal can be unlocked).
+      example_yaml: |
+        handlers:
+          subagent_stop:
+            branch_reject_verdict_recorder:
+              enabled: true
+              priority: 13
+      migration_note: >-
+        Keep it below the terminal subagent_report_size_blocker (15); a handler
+        after a terminal one never runs.
     - key: branches.wip.ladder
       recommended: false
       dormant: false

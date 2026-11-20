@@ -1278,6 +1278,10 @@ handlers:
       enabled: true
       priority: 12
 
+    branch_reject_verdict_recorder:  # Records a branch-reject reviewer's verdict from its stop (Plan 00620); silent
+      enabled: true  # Never blocks; disabling it fails closed (no verdict, no removal)
+      priority: 13   # Below the terminal size blocker (15) -- see test_stop_chain_terminal_shadowing.py
+
     subagent_report_size_blocker:  # Blocks an oversized subagent final message
       enabled: true
       priority: 15
