@@ -3298,6 +3298,29 @@ handlers:
 
 ---
 
+#### branch_reject_dispatch_gate
+
+| Property       | Value                         |
+| -------------- | ----------------------------- |
+| **Config key** | `branch_reject_dispatch_gate` |
+| **Priority**   | 59                            |
+| **Type**       | Blocking (terminal)           |
+| **Event**      | PreToolUse                    |
+
+**Description:** Guards the dispatch of the branch-reject reviewer agent (rule `R-BRANCH-REJECT-DISPATCH`, Plan 00620). It admits a reviewer dispatch only with the exact prompt `hooks-daemon branch-reject request` printed, once per nonce, on Opus or above, as a fresh (not resumed, not forked) agent of the current shipped definition. On admission it records the dispatch. It denies the reviewer type with any other prompt, and a review prompt sent under any other agent type. A failure to judge denies. It sits at 59, after every other handler that can deny an `Agent` call, because its allow records the dispatch and a later deny would burn the nonce. Disabling it fails closed: no dispatch is recorded, so no verdict can chain.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    branch_reject_dispatch_gate:
+      enabled: true
+      priority: 59
+```
+
+---
+
 #### npm_command
 
 | Property       | Value         |
@@ -4172,6 +4195,29 @@ handlers:
 
 ---
 
+#### branch_reject_agent_binder
+
+| Property       | Value                        |
+| -------------- | ---------------------------- |
+| **Config key** | `branch_reject_agent_binder` |
+| **Priority**   | 33                           |
+| **Type**       | Sensor                       |
+| **Event**      | PostToolUse                  |
+
+**Description:** Fills the agent id of a branch-reject reviewer dispatch record from the `Agent` call's `tool_response.agentId` (Plan 00620). It binds only a record that is still unbound and whose session and `tool_use_id` match the call. Silent; never blocks. A failure leaves the record unbound, and disabling the handler has the same effect: an unbound dispatch chains no verdict, so it fails closed.
+
+**Config example:**
+
+```yaml
+handlers:
+  post_tool_use:
+    branch_reject_agent_binder:
+      enabled: true
+      priority: 33
+```
+
+---
+
 ## SessionStart Handlers
 
 These handlers run when a new Claude Code session begins. They provide environment information and configuration checks.
@@ -4829,6 +4875,17 @@ These handlers run when a subagent (Task tool agent) completes.
 
 **Description:** The sub-agent twin of `branch_stop_guard` (rule `R-BRANCH-SUBAGENT-STOP-GUARD`): refuses a sub-agent stop while a branch that sub-agent touched is dirty, unpushed or merged but undeleted. A written handoff waives the merged-not-deleted finding. `branches.stop_guard.unpushed_subagent` (`block`, `advise`, `off`) sets how unpushed commits are treated; this repository uses `advise` because its sub-agents are told not to push.
 
+#### branch_reject_verdict_recorder
+
+| Property       | Value                            |
+| -------------- | -------------------------------- |
+| **Config key** | `branch_reject_verdict_recorder` |
+| **Priority**   | 13                               |
+| **Type**       | Sensor                           |
+| **Event**      | SubagentStop                     |
+
+**Description:** Turns the branch-reject reviewer's final, clean stop into a verdict, and writes a keep record when the verdict is keep (Plan 00620). It reads the reviewer's own transcript and `meta.json`, and takes the reply only from `last_assistant_message`. The core then checks that the stop belongs to a requested and dispatched review. One review nonce has at most one verdict. A second stop of the same review, or a stop with `stop_hook_active` set, withdraws the verdict, so a reply that a stop hook blocked never counts. Silent; never blocks. It sits at 13 because no handler may follow the terminal `subagent_report_size_blocker` (15). Disabling it fails closed: no verdict is recorded, so no removal is unlocked.
+
 #### subagent_report_size_blocker
 
 | Property       | Value                          |
@@ -5334,92 +5391,95 @@ A value that fails validation is reported at session start and that option runs 
 
 Priorities below are the **shipped defaults** from `constants/priority.py`. Several handlers share a priority; ties run in registration order.
 
-| Config Key                      | Event             | Priority | What It Blocks                                                                 |
-| ------------------------------- | ----------------- | -------- | ------------------------------------------------------------------------------ |
-| `destructive_git`               | PreToolUse        | 10       | git reset --hard, clean -f, push --force, branch -D, etc.                      |
-| `sed_blocker`                   | PreToolUse        | 10       | the word sed in a Bash command, bar four narrow exemptions                     |
-| `curl_pipe_shell`               | PreToolUse        | 10       | curl/wget piped to bash/sh                                                     |
-| `lock_file_edit_blocker`        | PreToolUse        | 10       | Direct editing of lock files                                                   |
-| `write_protected_paths`         | PreToolUse        | 18       | Agent writes to a configured read-only path                                    |
-| `pip_break_system`              | PreToolUse        | 10       | pip --break-system-packages                                                    |
-| `sudo_pip`                      | PreToolUse        | 10       | sudo pip install                                                               |
-| `host_command_guard`            | PreToolUse        | 10       | docker host-root mount, gh auth token, non-PyPI pip index, crontab -r          |
-| `ask_user_question_blocker`     | PreToolUse        | 10       | AskUserQuestion without an `ASKING BECAUSE:` prefix                            |
-| `daemon_location_guard`         | PreToolUse        | 11       | cd/pushd into .claude/hooks-daemon/                                            |
-| `absolute_path`                 | PreToolUse        | 12       | Relative paths in Read/Write/Edit                                              |
-| `error_hiding_blocker`          | PreToolUse        | 13       | Code that silently swallows errors                                             |
-| `project_containment`           | PreToolUse        | 14       | Writes whose target is named outside the repository root                       |
-| `security_antipattern`          | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds)           |
-| `artifact_publish_blocker`      | PreToolUse        | 14       | Publishing an artefact (a claude.ai URL outside the project)                   |
-| `issue_filing_gate`             | PreToolUse        | 14       | gh issue create against the daemon's tracker with a hand-written body          |
-| `subagent_cron_delete_blocker`  | PreToolUse        | 14       | CronDelete inside a subagent (the coordinator's own is unaffected)             |
-| `subagent_worktree_write_guard` | PreToolUse        | 14       | A subagent's Write/Edit into another checkout of its repository                |
-| `write_clobber_guard`           | PreToolUse        | 16       | Write to an existing file not read this session                                |
-| `worktree_file_copy`            | PreToolUse        | 15       | cp/mv/rsync between worktrees                                                  |
-| `pipe_blocker`                  | PreToolUse        | 15       | Expensive commands piped to tail/head                                          |
-| `dangerous_permissions`         | PreToolUse        | 15       | chmod 777, chmod a+rwx                                                         |
-| `tdd_enforcement`               | PreToolUse        | 15       | Production code without tests (11 languages)                                   |
-| `root_recursion_guard`          | PreToolUse        | 13       | Recursive scans rooted at /, /home, $HOME, ...                                 |
-| `self_matching_process_probe`   | PreToolUse        | 17       | A pgrep/pkill/ps-grep probe that matches the calling shell's own argv          |
-| `long_running_command_guard`    | PreToolUse        | 40       | A long foreground Bash call in the main thread (opt-in; use run_in_background) |
-| `github_auto_close_keywords`    | PreToolUse        | 18       | GitHub auto-closing keyword refs (Fixes #N) in git/gh pr messages              |
-| `git_stash`                     | PreToolUse        | 20       | git stash creation (deny by default; configurable)                             |
-| `git_message_backtick`          | PreToolUse        | 20       | Backticks in a double-quoted git -m (bash executes them)                       |
-| `ancestry_preserving_merge`     | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)            |
-| `merge_to_main_approval`        | PreToolUse        | 20       | git merge/pull/gh pr merge into main without a human's approval (opt-in)       |
-| `qa_suppression`                | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)                    |
-| `plan_number_helper`            | PreToolUse        | 30       | Broken plan number discovery commands                                          |
-| `plan_status_snapshot`          | PreToolUse        | 30       | Records a PLAN.md's pre-write status for `goal_injection` (never blocks)       |
-| `plan_journal_guard`            | PreToolUse        | 31       | A plan journal entry written by hand (use `mkplan.bash --journal`)             |
-| `comment_changelog`             | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries)           |
-| `subagent_full_qa_blocker`      | PreToolUse        | 32       | A declared full-suite QA run inside a sub-agent (opt-in)                       |
-| `comment_size`                  | PreToolUse        | 33       | Over-long comments growing past the size limit                                 |
-| `markdown_organization`         | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                          |
-| `lsp_enforcement`               | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                                      |
-| `reference_repo_freshness`      | PreToolUse        | 39       | Reading a governed reference clone that is stale or unverified                 |
-| `subagent_context_budget`       | PreToolUse        | 39       | A subagent's non-handoff tool calls past hard_tokens (hard band off)           |
-| `resume_guard`                  | PreToolUse        | 39       | A SendMessage cold-resuming a large stopped agent (mode: deny)                 |
-| `subagent_handoff_gate`         | SubagentStop      | 11       | An over-hard-budget agent's stop with no handoff file (three blocks max)       |
-| `branch_creation_guard`         | PreToolUse        | 40       | a new branch while open work branches are at branches.wip.cap                  |
-| `gh_issue_comments`             | PreToolUse        | 40       | gh issue view without --comments                                               |
-| `gh_pr_comments`                | PreToolUse        | 40       | gh pr view without --comments                                                  |
-| `plan_time_estimates`           | PreToolUse        | 40       | Time estimates in plan docs                                                    |
-| `npm_command`                   | PreToolUse        | 50       | Non-llm: npm commands                                                          |
-| `github_issue_assignment_guard` | PreToolUse        | 53       | Issue-tied work on an unclaimed, foreign or unapproved-author issue            |
-| `validate_instruction_content`  | PreToolUse        | 50       | Ephemeral content in CLAUDE.md                                                 |
-| `auto_continue_stop`            | Stop              | 15       | Stops after confirmation questions                                             |
-| `auto_approve_reads`            | PermissionRequest | 10       | (Approves) read-only tools in bypassPermissions mode                           |
+| Config Key                      | Event             | Priority | What It Blocks                                                                  |
+| ------------------------------- | ----------------- | -------- | ------------------------------------------------------------------------------- |
+| `destructive_git`               | PreToolUse        | 10       | git reset --hard, clean -f, push --force, branch -D, etc.                       |
+| `sed_blocker`                   | PreToolUse        | 10       | the word sed in a Bash command, bar four narrow exemptions                      |
+| `curl_pipe_shell`               | PreToolUse        | 10       | curl/wget piped to bash/sh                                                      |
+| `lock_file_edit_blocker`        | PreToolUse        | 10       | Direct editing of lock files                                                    |
+| `write_protected_paths`         | PreToolUse        | 18       | Agent writes to a configured read-only path                                     |
+| `pip_break_system`              | PreToolUse        | 10       | pip --break-system-packages                                                     |
+| `sudo_pip`                      | PreToolUse        | 10       | sudo pip install                                                                |
+| `host_command_guard`            | PreToolUse        | 10       | docker host-root mount, gh auth token, non-PyPI pip index, crontab -r           |
+| `ask_user_question_blocker`     | PreToolUse        | 10       | AskUserQuestion without an `ASKING BECAUSE:` prefix                             |
+| `daemon_location_guard`         | PreToolUse        | 11       | cd/pushd into .claude/hooks-daemon/                                             |
+| `absolute_path`                 | PreToolUse        | 12       | Relative paths in Read/Write/Edit                                               |
+| `error_hiding_blocker`          | PreToolUse        | 13       | Code that silently swallows errors                                              |
+| `project_containment`           | PreToolUse        | 14       | Writes whose target is named outside the repository root                        |
+| `security_antipattern`          | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds)            |
+| `artifact_publish_blocker`      | PreToolUse        | 14       | Publishing an artefact (a claude.ai URL outside the project)                    |
+| `issue_filing_gate`             | PreToolUse        | 14       | gh issue create against the daemon's tracker with a hand-written body           |
+| `subagent_cron_delete_blocker`  | PreToolUse        | 14       | CronDelete inside a subagent (the coordinator's own is unaffected)              |
+| `subagent_worktree_write_guard` | PreToolUse        | 14       | A subagent's Write/Edit into another checkout of its repository                 |
+| `write_clobber_guard`           | PreToolUse        | 16       | Write to an existing file not read this session                                 |
+| `worktree_file_copy`            | PreToolUse        | 15       | cp/mv/rsync between worktrees                                                   |
+| `pipe_blocker`                  | PreToolUse        | 15       | Expensive commands piped to tail/head                                           |
+| `dangerous_permissions`         | PreToolUse        | 15       | chmod 777, chmod a+rwx                                                          |
+| `tdd_enforcement`               | PreToolUse        | 15       | Production code without tests (11 languages)                                    |
+| `root_recursion_guard`          | PreToolUse        | 13       | Recursive scans rooted at /, /home, $HOME, ...                                  |
+| `self_matching_process_probe`   | PreToolUse        | 17       | A pgrep/pkill/ps-grep probe that matches the calling shell's own argv           |
+| `long_running_command_guard`    | PreToolUse        | 40       | A long foreground Bash call in the main thread (opt-in; use run_in_background)  |
+| `github_auto_close_keywords`    | PreToolUse        | 18       | GitHub auto-closing keyword refs (Fixes #N) in git/gh pr messages               |
+| `git_stash`                     | PreToolUse        | 20       | git stash creation (deny by default; configurable)                              |
+| `git_message_backtick`          | PreToolUse        | 20       | Backticks in a double-quoted git -m (bash executes them)                        |
+| `ancestry_preserving_merge`     | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)             |
+| `merge_to_main_approval`        | PreToolUse        | 20       | git merge/pull/gh pr merge into main without a human's approval (opt-in)        |
+| `qa_suppression`                | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)                     |
+| `plan_number_helper`            | PreToolUse        | 30       | Broken plan number discovery commands                                           |
+| `plan_status_snapshot`          | PreToolUse        | 30       | Records a PLAN.md's pre-write status for `goal_injection` (never blocks)        |
+| `plan_journal_guard`            | PreToolUse        | 31       | A plan journal entry written by hand (use `mkplan.bash --journal`)              |
+| `comment_changelog`             | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries)            |
+| `subagent_full_qa_blocker`      | PreToolUse        | 32       | A declared full-suite QA run inside a sub-agent (opt-in)                        |
+| `comment_size`                  | PreToolUse        | 33       | Over-long comments growing past the size limit                                  |
+| `markdown_organization`         | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                           |
+| `lsp_enforcement`               | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                                       |
+| `reference_repo_freshness`      | PreToolUse        | 39       | Reading a governed reference clone that is stale or unverified                  |
+| `subagent_context_budget`       | PreToolUse        | 39       | A subagent's non-handoff tool calls past hard_tokens (hard band off)            |
+| `resume_guard`                  | PreToolUse        | 39       | A SendMessage cold-resuming a large stopped agent (mode: deny)                  |
+| `subagent_handoff_gate`         | SubagentStop      | 11       | An over-hard-budget agent's stop with no handoff file (three blocks max)        |
+| `branch_creation_guard`         | PreToolUse        | 40       | a new branch while open work branches are at branches.wip.cap                   |
+| `gh_issue_comments`             | PreToolUse        | 40       | gh issue view without --comments                                                |
+| `gh_pr_comments`                | PreToolUse        | 40       | gh pr view without --comments                                                   |
+| `plan_time_estimates`           | PreToolUse        | 40       | Time estimates in plan docs                                                     |
+| `npm_command`                   | PreToolUse        | 50       | Non-llm: npm commands                                                           |
+| `github_issue_assignment_guard` | PreToolUse        | 53       | Issue-tied work on an unclaimed, foreign or unapproved-author issue             |
+| `validate_instruction_content`  | PreToolUse        | 50       | Ephemeral content in CLAUDE.md                                                  |
+| `branch_reject_dispatch_gate`   | PreToolUse        | 59       | A branch-reject reviewer dispatch without its exact, unused, Opus review prompt |
+| `auto_continue_stop`            | Stop              | 15       | Stops after confirmation questions                                              |
+| `auto_approve_reads`            | PermissionRequest | 10       | (Approves) read-only tools in bypassPermissions mode                            |
 
 ### All Advisory Handlers
 
-| Config Key                 | Event            | Priority | What It Does                                     |
-| -------------------------- | ---------------- | -------- | ------------------------------------------------ |
-| `verification_result_gate` | PreToolUse       | 34       | Verifier result unconsumed before a mutator      |
-| `bash_safe_mode`           | PreToolUse       | 36       | Opt-in safe-prelude forcer (ships disabled)      |
-| `staged_lint_gate`         | PreToolUse       | 43       | Cheap syntax check over staged files             |
-| `plan_close_approval`      | PreToolUse       | 43       | A human closes a plan when the key says so       |
-| `global_npm_advisor`       | PreToolUse       | 40       | Suggests npx over global installs                |
-| `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation                       |
-| `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years                |
-| `british_english`          | PreToolUse       | 60       | Warns about American spellings                   |
-| `spawn_rate_advisor`       | PreToolUse       | 60       | Live-agent cap and five-hour limit on a spawn    |
-| `review_round_advisor`     | PreToolUse       | 60       | Review round count per plan or branch (opt-in)   |
-| `subagent_tier_advisor`    | PreToolUse       | 60       | Cheaper tier, or a floor, on a dispatch          |
-| `workflow_fanout_advisor`  | PreToolUse       | 60       | A Workflow script's fan-out and tier             |
-| `dispatch_model_recorder`  | PostToolUse      | 33       | Joins the resolved model onto the tier row       |
-| `background_task_recorder` | Stop             | 9        | Records finished agent tasks for the live count  |
-| `spend_meter`              | StatusLine       | 17       | Running subagents, unmeasured calls (red)        |
-| `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes                |
-| `command_hints`            | PostToolUse      | 28       | Config-driven reminder after a command           |
-| `goal_injection`           | PostToolUse      | 30       | Goal-intent signal on plan flip to In Progress   |
-| `optimal_config_checker`   | SessionStart     | 52       | Audits Claude Code settings                      |
-| `git_filemode_checker`     | SessionStart     | 53       | Warns when core.fileMode=false                   |
-| `suggest_status_line`      | SessionStart     | 55       | Suggests status line setup                       |
-| `version_check`            | SessionStart     | 55       | Checks for daemon updates                        |
-| `plan_qa_sweep`            | SessionStart     | 57       | Reports plan-tree drift once a session           |
-| `contract_staleness`       | SessionStart     | 60       | Advises a hooks-contract audit or review refresh |
-| `git_context_injector`     | UserPromptSubmit | 20       | Injects git status context                       |
-| `nitpick.hedging_language` | Nitpick          | 20       | Detects guessing language per turn               |
+| Config Key                       | Event            | Priority | What It Does                                     |
+| -------------------------------- | ---------------- | -------- | ------------------------------------------------ |
+| `verification_result_gate`       | PreToolUse       | 34       | Verifier result unconsumed before a mutator      |
+| `bash_safe_mode`                 | PreToolUse       | 36       | Opt-in safe-prelude forcer (ships disabled)      |
+| `staged_lint_gate`               | PreToolUse       | 43       | Cheap syntax check over staged files             |
+| `plan_close_approval`            | PreToolUse       | 43       | A human closes a plan when the key says so       |
+| `global_npm_advisor`             | PreToolUse       | 40       | Suggests npx over global installs                |
+| `plan_workflow`                  | PreToolUse       | 45       | Guidance for plan creation                       |
+| `web_search_year`                | PreToolUse       | 55       | Warns about outdated search years                |
+| `british_english`                | PreToolUse       | 60       | Warns about American spellings                   |
+| `spawn_rate_advisor`             | PreToolUse       | 60       | Live-agent cap and five-hour limit on a spawn    |
+| `review_round_advisor`           | PreToolUse       | 60       | Review round count per plan or branch (opt-in)   |
+| `subagent_tier_advisor`          | PreToolUse       | 60       | Cheaper tier, or a floor, on a dispatch          |
+| `workflow_fanout_advisor`        | PreToolUse       | 60       | A Workflow script's fan-out and tier             |
+| `dispatch_model_recorder`        | PostToolUse      | 33       | Joins the resolved model onto the tier row       |
+| `branch_reject_agent_binder`     | PostToolUse      | 33       | Binds a reviewer dispatch to its agent id        |
+| `branch_reject_verdict_recorder` | SubagentStop     | 13       | Records a reviewer's verdict from its stop       |
+| `background_task_recorder`       | Stop             | 9        | Records finished agent tasks for the live count  |
+| `spend_meter`                    | StatusLine       | 17       | Running subagents, unmeasured calls (red)        |
+| `validate_eslint_on_write`       | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes                |
+| `command_hints`                  | PostToolUse      | 28       | Config-driven reminder after a command           |
+| `goal_injection`                 | PostToolUse      | 30       | Goal-intent signal on plan flip to In Progress   |
+| `optimal_config_checker`         | SessionStart     | 52       | Audits Claude Code settings                      |
+| `git_filemode_checker`           | SessionStart     | 53       | Warns when core.fileMode=false                   |
+| `suggest_status_line`            | SessionStart     | 55       | Suggests status line setup                       |
+| `version_check`                  | SessionStart     | 55       | Checks for daemon updates                        |
+| `plan_qa_sweep`                  | SessionStart     | 57       | Reports plan-tree drift once a session           |
+| `contract_staleness`             | SessionStart     | 60       | Advises a hooks-contract audit or review refresh |
+| `git_context_injector`           | UserPromptSubmit | 20       | Injects git status context                       |
+| `nitpick.hedging_language`       | Nitpick          | 20       | Detects guessing language per turn               |
 
 ---
 
