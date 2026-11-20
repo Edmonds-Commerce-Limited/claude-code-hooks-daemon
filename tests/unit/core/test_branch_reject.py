@@ -191,7 +191,7 @@ def _issue(
         )
     )
     verdict = Verdict(
-        verdict_id=new_id(),
+        verdict_id=nonce,
         nonce=nonce,
         branch=branch,
         tip=request.tip,

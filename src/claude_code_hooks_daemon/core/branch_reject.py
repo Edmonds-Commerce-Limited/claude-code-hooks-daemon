@@ -487,11 +487,14 @@ class RejectStore:
         return self._load(path)
 
     def _all(self, kind: str) -> list[Mapping[str, Any]]:
+        return [data for _, data in self._all_with_paths(kind)]
+
+    def _all_with_paths(self, kind: str) -> list[tuple[Path, Mapping[str, Any]]]:
         directory = self.root / kind
         if not directory.is_dir():
             return []
         return [
-            self._load(path)
+            (path, self._load(path))
             for path in sorted(directory.glob("*.json"))
             if _ID.fullmatch(path.stem)
         ]
@@ -566,8 +569,17 @@ class RejectStore:
         return None if data is None else Verdict.from_dict(data)
 
     def verdicts_for(self, branch: str, tip: str) -> list[Verdict]:
-        """Every stored verdict naming this branch and tip, oldest file name first."""
-        verdicts = [Verdict.from_dict(data) for data in self._all(_VERDICTS)]
+        """Every stored verdict naming this branch and tip, oldest file name first.
+
+        Raises RejectError when any verdict file's name is not its own id: the recorder
+        files a verdict under its id, so a mismatch is a copy, and the store is not trusted.
+        """
+        verdicts: list[Verdict] = []
+        for path, data in self._all_with_paths(_VERDICTS):
+            verdict = Verdict.from_dict(data)
+            if verdict.verdict_id != path.stem:
+                raise RejectError(f"the verdict file {path} is not named by its own id")
+            verdicts.append(verdict)
         return [v for v in verdicts if v.branch == branch and v.tip == tip]
 
     def write_keep(self, keep: KeepRecord) -> None:
@@ -650,6 +662,10 @@ def _shape_problems(verdict: Verdict) -> list[str]:
     problems: list[str] = []
     if not _ID.fullmatch(verdict.verdict_id) or not _ID.fullmatch(verdict.nonce):
         problems.append("the verdict id or nonce is not a record id")
+    if verdict.verdict_id != verdict.nonce:
+        # Single use is keyed on the id; only an id bound to the nonce (one stop per
+        # nonce) stops a used verdict being re-filed under a fresh id and used again.
+        problems.append("the verdict id is not its nonce; the recorder never wrote it")
     if verdict.overall not in DECISIONS:
         problems.append(f"overall decision {verdict.overall!r} is neither no-value nor keep")
     for item in verdict.items:
@@ -827,7 +843,7 @@ def verdict_problems(
     problems += _git_problems(verdict, repo, default_ref)
     problems += _citation_problems(verdict, repo, default_ref)
     problems += _time_problems(verdict, now, config)
-    if verdict.verdict_id in consumed:
+    if verdict.verdict_id in consumed or verdict.nonce in consumed:
         problems.append("the verdict was already used for a removal")
     problems += _reviewer_problems(verdict.reviewer)
     problems += _independence_problems(verdict, repo)
