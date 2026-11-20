@@ -2624,9 +2624,9 @@ class TestGrepPatternOnlyMentionDenies:
         calls: list[str] = []
         real_realpath_if_resolvable = sfm._realpath_if_resolvable
 
-        def counting_realpath_if_resolvable(token: str) -> str | None:
+        def counting_realpath_if_resolvable(token: str, word: str | None = None) -> str | None:
             calls.append(token)
-            return real_realpath_if_resolvable(token)
+            return real_realpath_if_resolvable(token, word)
 
         monkeypatch.setattr(sfm, "_realpath_if_resolvable", counting_realpath_if_resolvable)
         assert not sfm.is_grep_pattern_only_mention(
@@ -3529,23 +3529,8 @@ class TestConsumerOptionsAreJudged:
 
 def _unfiltered_effective_cwds(command: str, cwd: str | None) -> tuple[str, ...]:
     """``effective_cwds`` without the N465 prefilter: every segment tokenised."""
-    directories: list[str] = [cwd] if cwd is not None and Path(cwd).is_absolute() else []
-    for segment in sfm._COMMAND_SEGMENT_SEPARATORS.split(command):
-        words = sfm._shell_words(segment)
-        if words is None or len(words) < 2 or words[0] not in sfm._DIRECTORY_CHANGE_COMMANDS:
-            continue
-        operands = [word for word in words[1:] if not word.startswith("-") or word == "-"]
-        if not operands:
-            continue
-        target = operands[0]
-        if target == "-" or any(char in sfm._WORD_EXPANDING_CHARACTERS for char in target):
-            continue
-        if not Path(target).is_absolute():
-            if not directories:
-                continue
-            target = str(Path(directories[-1]) / target)
-        directories.append(os.path.normpath(target))
-    return tuple(dict.fromkeys(directories))
+    with patch.object(sfm, "_may_change_directory", return_value=True):
+        return sfm.effective_cwds(command, cwd)
 
 
 #: Segments that do, or nearly do, tokenise to a directory change: quoting,

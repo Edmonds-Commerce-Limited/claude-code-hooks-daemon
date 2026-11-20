@@ -290,22 +290,37 @@ class TestSweepVerdictIsHostIndependent:
         assert sfm.SCAN_DEADLINE_SECONDS >= _HOST_INDEPENDENT_DEADLINE_SECONDS
 
     @pytest.mark.parametrize("size", [12_500, 100_000])
-    def test_an_expired_scan_deadline_allows_a_wildcard_command_with_an_advisory(
+    def test_an_expired_scan_deadline_denies_a_wildcard_command(
         self, size: int, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """When time runs out the guard allows the call and says it did not
-        finish (Plan 00483 A1): a scan that gave up is not a finding."""
+        """A scan that gave up beside a glob is denied (review 614c P2, Plan 00623):
+        the literal fallback cannot see what a glob expands to, so what the scan
+        never reached is unknown, not harmless. The deadline is far above any
+        host's scan time, so this verdict is still the same on every host."""
         monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", -1.0)
         matched, decision, _warned = _regime(
             SecretFileGuardHandler(), _bash_input(_hostile_bash_command_at("wildcards", size))
         )
         assert matched is True
-        assert decision == "allow"
+        assert decision == "deny"
 
-    def test_the_advisory_names_the_deadline(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_the_deny_names_the_deadline(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", -1.0)
         handler = SecretFileGuardHandler()
         result = handler.handle(_bash_input(_hostile_bash_command_at("wildcards", 12_500)))
+        assert "deadline" in str(result.reason)
+
+    def test_an_expired_deadline_without_a_glob_allows_with_an_advisory(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No glob and no recursive search: the literal fallback judged every word
+        (Plan 00483 A1), so the call is allowed and the advisory names the deadline."""
+        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", -1.0)
+        handler = SecretFileGuardHandler()
+        hook_input = _bash_input("git commit -m 'x' && echo " + "word " * 2_500)
+        assert handler.matches(hook_input)
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"
         assert result.context
         assert "deadline" in result.context[0]
 

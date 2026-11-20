@@ -1172,7 +1172,12 @@ COMMAND_WRAPPERS: Final[dict[str, CommandWrapper]] = {
         positional_operands=1,
     ),
     "nohup": CommandWrapper(value_flags=frozenset()),
-    "sudo": CommandWrapper(value_flags=frozenset({"-u", "-g", "-p"})),
+    # `-D`/`--chdir` take a directory: without them `sudo -D d cmd` was read as running `d`.
+    "sudo": CommandWrapper(
+        value_flags=frozenset(
+            {"-u", "-g", "-p", "-D", "--chdir", "-R", "--chroot", "-C", "-T", "-U", "-r", "-t"}
+        )
+    ),
     "env": CommandWrapper(
         value_flags=frozenset({"-u", "--unset", "-C", "--chdir"}), lone_dash_is_flag=True
     ),

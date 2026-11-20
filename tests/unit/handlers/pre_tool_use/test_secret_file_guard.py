@@ -1800,6 +1800,25 @@ _MANY_BRACES_PROGRAM = "x = 1\n" + "\n".join(
     f"print(f'{{x}}-{i}', {{'k': {i}}}, {{{i},{i + 1}}})" for i in range(600)
 )
 
+#: A scan deadline no host is slow enough to cross, for tests whose subject is
+#: the verdict on a large input rather than the deadline itself.
+_HOST_INDEPENDENT_DEADLINE_SECONDS = 120.0
+
+
+@pytest.fixture
+def host_independent_scan_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Judge a large program on its content, never on how loaded the host is.
+
+    A scan that passes its deadline gives up, and a given-up scan of a
+    command holding a glob character is denied (review 614c P2). The brace
+    programs above hold such characters and scan in about a second, so on a
+    loaded QA host the wall-clock deadline alone turned an allow-test into a
+    deny (Plan 00623 full gate, py3.13). The deadline is read on this
+    process's CPU clock and set generously; production is untouched.
+    """
+    monkeypatch.setattr(time, "monotonic", time.process_time)
+    monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", _HOST_INDEPENDENT_DEADLINE_SECONDS)
+
 
 def _through_chain(tool_name: str, tool_input: dict[str, Any]) -> tuple[Decision, str]:
     chain = HandlerChain()
@@ -1828,6 +1847,7 @@ class TestTextTheShellNeverExpandsIsNotEnumerated:
     past the cap.
     """
 
+    @pytest.mark.usefixtures("host_independent_scan_deadline")
     def test_python_heredoc_with_many_brace_groups_is_allowed(self) -> None:
         command = f"python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF"
         decision, reason = _through_chain("Bash", {"command": command})
@@ -1990,6 +2010,7 @@ class TestTheExemptionIsOnlyPythonProgramTextNoShellReads:
         assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
 
 
+@pytest.mark.usefixtures("host_independent_scan_deadline")
 class TestRoundOneFalsePositivesStayAllowed:
     """The N101 false positives: ordinary Python programs whose code braces
     exceeded the expander's caps. None names a protected path."""
@@ -2016,10 +2037,6 @@ class TestRoundOneFalsePositivesStayAllowed:
 #: A heredoc program whose only braces are code: exempt on its own, so a
 #: construct that withdraws the exemption is seen as a fail-closed deny.
 _CODE_BRACES_HEREDOC = f"python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF"
-
-#: A scan deadline no host is slow enough to cross, for tests whose subject is
-#: the verdict on a large input rather than the deadline itself.
-_HOST_INDEPENDENT_DEADLINE_SECONDS = 120.0
 
 
 class TestRoundTwoFindingsAreClosed:
@@ -2086,6 +2103,7 @@ _BRACE_OPEN_HALF = "cat /proj/.vault-p{a,"
 _BRACE_CLOSE_HALF = "x}ss"
 
 
+@pytest.mark.usefixtures("host_independent_scan_deadline")
 class TestRoundThreeFindingsAreClosed:
     """Plan 00466 N101 round 4: every D-RULE and D-SEC round-3 finding,
     through the real handler. Each command was allowed at 775864b38."""
@@ -2155,9 +2173,7 @@ class TestRoundThreeFindingsAreClosed:
         decision, reason = _through_chain("Bash", {"command": f"{sibling}\n{_CODE_BRACES_HEREDOC}"})
         assert decision != Decision.DENY, reason
 
-    def test_a_realistic_dict_and_f_string_program_stays_allowed(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_realistic_dict_and_f_string_program_stays_allowed(self) -> None:
         """The field shape N101 was filed for: building hook inputs as
         dicts with f-strings, past the 500-word discovery cap.
 
@@ -2166,9 +2182,8 @@ class TestRoundThreeFindingsAreClosed:
         it and denied (Plan 00466 N101). The deadline is therefore injected
         generously here, and read on this process's CPU clock, so the verdict
         depends on what the scan decides and not on host speed. The
-        production deadline is untouched and the assertion is unchanged."""
-        monkeypatch.setattr(time, "monotonic", time.process_time)
-        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", _HOST_INDEPENDENT_DEADLINE_SECONDS)
+        production deadline is untouched and the assertion is unchanged. The
+        class's ``host_independent_scan_deadline`` fixture does this."""
         command = _realistic_program_command(300)
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision != Decision.DENY, reason
@@ -2189,6 +2204,7 @@ def _realistic_program_command(events: int) -> str:
     return "python3 - <<'EOF'\n" + "\n".join(lines) + "\nEOF"
 
 
+@pytest.mark.usefixtures("host_independent_scan_deadline")
 class TestScanCostIsBoundedByInputSize:
     """Ledger 00474 N265: the scan spent about 2.2s of CPU on the realistic
     program above, because every bracket-expanded spelling of every token was
@@ -2202,12 +2218,6 @@ class TestScanCostIsBoundedByInputSize:
     #: wildcard of its own needs no grid at all; the wildcarded shapes the
     #: realistic program does not contain keep the full DP.
     _CELLS_PER_CHARACTER = 2
-
-    @pytest.fixture(autouse=True)
-    def _cpu_clock_and_generous_deadline(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Count work, not time: the verdict must not depend on host load."""
-        monkeypatch.setattr(time, "monotonic", time.process_time)
-        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", _HOST_INDEPENDENT_DEADLINE_SECONDS)
 
     def _cells(self, command: str) -> int:
         with sfm.dp_cell_counter() as cells:

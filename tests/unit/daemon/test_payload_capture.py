@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.daemon.payload_capture import (
     capture_payload,
     resolve_capture_dir,
@@ -248,3 +250,20 @@ class TestProtectedPathExclusion:
             hook_input=hook_input,
         )
         assert result is not None
+
+
+class TestAPlacementFailureIsNotCaptured:
+    """Plan 00623: a command whose words cannot be placed may touch a protected path."""
+
+    def test_an_unplaceable_command_counts_as_touching_a_protected_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.daemon import payload_capture
+        from claude_code_hooks_daemon.utils.resolution_failure import ResolutionFailedError
+
+        def unplaceable(*_args: object, **_kwargs: object) -> str | None:
+            raise ResolutionFailedError("could not place")
+
+        monkeypatch.setattr(payload_capture.sfm, "find_protected_mention", unplaceable)
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "cat x"}}
+        assert payload_capture._touches_protected_path(hook_input, ("**/.env",))

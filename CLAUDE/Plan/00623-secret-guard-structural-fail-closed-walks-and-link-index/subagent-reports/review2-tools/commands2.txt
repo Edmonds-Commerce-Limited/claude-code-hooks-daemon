@@ -1,0 +1,36 @@
+shopt -s extglob<NL>cd "$D" && cat zz/+(l)ate
+shopt -s extglob<NL>cat w19/zz/+(l)ate
+shopt -s extglob<NL>cat w19/zz/!(dl)
+shopt -s extglob<NL>cat w19/zz/@(late)
+cat w19/zz/${X:-late}
+cat w19/zz/${X-late}
+cat w19/zz/l${X}ate
+cat w19/zz/[l]ate
+cat w19/zz/la[t]e
+cat w19/z[z]/late
+cat w1[9]/zz/late
+cat [w]19/zz/late
+cat w19/zz/l?te
+cat w19/zz/*
+cat inner/[i]d_rsa
+cat inner/id_rs[a]
+cat inner/id_rs?
+cat inner/id_r*
+cat inner/${X:-id_rsa}
+cat w19/zz/dl/[i]d_rsa
+cat w19/zz/dl/id_rs[a]
+cd w19/zz && cat [l]ate
+cd w19/zz/dl && cat [i]d_rsa
+cd "$D" && cat zz/[l]ate
+cd "$D" && cat zz/la[t]e
+cd "$D" && cat .bin/../zz/late
+cd "$D" && cat zz/${X:-late}
+ln -s w19/zz n && cat n/late
+ln -s w19/zz/late n && cat n
+ln -sf "$TMPDIR" n && cat n/*
+ln -s ../outside n && cat n/i*
+mkdir q && ln -s ../../outside q/o && cat q/o/id_rsa
+cp -rs "$PWD"/w19/zz q && cat q/late
+cat w19/zz/late
+cat w19/zz/dl/id_rsa
+cat r.md
