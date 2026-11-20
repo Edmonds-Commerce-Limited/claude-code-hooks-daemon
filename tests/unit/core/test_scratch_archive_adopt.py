@@ -38,6 +38,7 @@ from claude_code_hooks_daemon.core.scratch_archive_adopt import (
 )
 from claude_code_hooks_daemon.core.scratch_archive_claim import open_dir
 from claude_code_hooks_daemon.core.scratch_archive_pack import (
+    Compression,
     PackRefused,
     TarTool,
     compression_flags,
@@ -248,7 +249,9 @@ def test_the_tar_flag_and_stream_mode_are_explicit() -> None:
 
 
 @pytest.mark.parametrize("kind", ["gzip", "xz"])
-def test_a_missing_decompressor_is_a_refusal(kind: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_missing_decompressor_is_a_refusal(
+    kind: Compression, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(pack_mod.shutil, "which", lambda *_a, **_k: None)
     with pytest.raises(PackRefused, match="decompressor"):
         require_decompressor(kind)

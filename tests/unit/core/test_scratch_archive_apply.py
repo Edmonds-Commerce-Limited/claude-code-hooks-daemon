@@ -73,7 +73,7 @@ class FakeFacts:
     live: set[str] = field(default_factory=set)
     referenced: set[str] = field(default_factory=set)
     classified: int = 0
-    on_classify: Callable[[], None] | None = None
+    on_classify: Callable[[], object] | None = None
 
     def classify(self) -> SweepReport:
         self.classified += 1
