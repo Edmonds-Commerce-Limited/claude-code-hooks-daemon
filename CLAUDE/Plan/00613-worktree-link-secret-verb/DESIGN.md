@@ -365,10 +365,18 @@ coordinator should treat Q5 as a merge gate.
   handler and not a live daemon socket: links placed by `seed_worktree`, hook
   cwd in the worktree, are refused for Read, Edit, Grep and relative Bash
   reads, including a file covered only by a project glob, with the daemon root
-  at the main checkout or at the worktree. One gap is known and pinned
-  strict-xfail: `grep -R` from the worktree descends a directory link to a
-  file only a project glob covers. It is allowed on main and on the Plan 00623
-  branch alike. Not done: the live-socket check, and a fix for that gap.
+  at the main checkout or at the worktree. The gap the 261120 handoff pinned
+  (`grep -R` from the worktree descending a directory link to a file only a
+  project glob covers) is closed: `utils/link_reach.py` judges what lies
+  behind each link below the root of every recursive read not proven to
+  follow no link, failing closed on what it cannot resolve. Not done: the
+  live-socket check.
+- **Residual 1 (builder, narrowed).** `seed-worktree` places a link entry
+  whose source is, holds or links to a protected path (by the working or the
+  committed config) only when the config committed at `HEAD` of the main
+  checkout lists the same entry. An agent's uncommitted seed-list edit is
+  refused; an agent that also commits the edit is not stopped, so the route
+  now leaves a commit behind rather than being closed.
 - **Small points (builder), each journalled:** the audit line records the
   route (`verb`); the command checks the worktree against git's own list by
   realpath, refuses the main checkout, a subdirectory, a prunable entry, a

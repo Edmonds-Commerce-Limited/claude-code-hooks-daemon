@@ -157,7 +157,9 @@ _SEARCH_REMEDY: Final[str] = (
     "This recursive search would read a protected file under its roots. Search a "
     "narrower subdirectory, or exclude the directory that holds it "
     "(`grep -r --exclude-dir=<dir>`, `rg -g '!<dir>'`). `rg` and `ag` already skip "
-    "hidden and gitignored files; `--hidden`, `-u` and `--no-ignore` make them read those."
+    "hidden and gitignored files; `--hidden`, `-u` and `--no-ignore` make them read those. "
+    "A reader that follows links (`grep -R`, `find -L`, `zip`) is also judged on what each "
+    "link below its root leads to; `grep -r` and `rg` follow none."
 )
 
 # The route of a call the guard could not judge (Plan 00483 A1). It is NOT a
@@ -2091,7 +2093,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "against an INDEX of the protected files that exist, built at "
             "session start and refreshed in the background, so a protected "
             "file created since the last build is not seen until the next "
-            "one. A glob of only wildcards (`ls */*/*`) names no place and is "
+            "one. A recursive read that FOLLOWS links below its root "
+            "(`grep -R`, `rg -L`, `find -L`, `find -exec`, `zip`, `tar`, `cp`) "
+            "is also judged on what lies behind each link, so a seeded "
+            "worktree link to a protected file or directory denies it; use "
+            "`grep -r` or `rg`, which follow no link below their root. A glob of only wildcards (`ls */*/*`) names no place and is "
             "not judged. NOT covered: "
             "string-assembled paths, shell state carried across invocations, "
             "pre-existing hard links or copies made before the guard was "
