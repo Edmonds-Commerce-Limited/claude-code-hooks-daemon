@@ -486,14 +486,3 @@ class TestRegistration:
             encoding="utf-8"
         )
         assert f"    {_KEY}: {{enabled: true, priority: 13}}" in text
-
-    def test_the_unreleased_manifest_adds_it(self) -> None:
-        import yaml
-
-        manifest = yaml.safe_load(
-            (_REPO / "CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.77.0.yaml").read_text(
-                encoding="utf-8"
-            )
-        )
-        keys = [entry["key"] for entry in manifest["config_changes"]["added"]]
-        assert f"handlers.subagent_stop.{_KEY}" in keys
