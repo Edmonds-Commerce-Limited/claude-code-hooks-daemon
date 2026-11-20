@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.strategies.lint.github_workflow_strategy import (
     GitHubWorkflowLintStrategy,
@@ -181,7 +182,7 @@ class TestProbesAgainstTheRealLinter:
                 [_REAL_LINTER, "check", "--file", str(target)],
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=Timeout.QA_TEST_TIMEOUT,
                 check=False,
             )
             assert result.returncode == expected_exit[test.expected_decision], (
