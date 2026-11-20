@@ -40,7 +40,7 @@ import socket
 import subprocess  # nosec B404 - subprocess used for daemon management (systemctl) only
 import sys
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal, TextIO, cast
@@ -224,8 +224,6 @@ from claude_code_hooks_daemon.utils.settings_repair import repair_settings_regis
 from .init_config import generate_config
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from claude_code_hooks_daemon.core.release_slate import (
         CiRunState,
         PlanSummary,
@@ -6712,6 +6710,69 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     notice = branch_sweep.deprecation_line(branches, legacy)
     if notice is not None:
         print(notice)
+    return 0
+
+
+#: ``scratch-sweep``'s default budget: the whole run, not one entry (Plan 00627 Task 1.7).
+SCRATCH_SWEEP_DEFAULT_SECONDS: Final[float] = 300.0
+SCRATCH_SWEEP_DEFAULT_MAX_INODES: Final[int] = 5_000_000
+
+
+def cmd_scratch_sweep(
+    args: argparse.Namespace,
+    *,
+    scandir: Callable[[str], Any] = os.scandir,
+    wall_clock: Callable[[], float] = time.time,
+    budget_clock: Callable[[], float] = time.monotonic,
+    process_cwds: Callable[[], Mapping[int, Path]] | None = None,
+) -> int:
+    """``scratch-sweep [--json] [--root PATH]``: judge every scratch entry; change nothing.
+
+    A Phase 1 dry run (Plan 00627 Task 1.7). It never creates the scratch root,
+    writes no cache or state, prints no file content and suggests no removal.
+    The keyword parameters exist for tests.
+
+    Returns:
+        0 for a report, complete or not.
+    """
+    from claude_code_hooks_daemon.core import scratch_sweep
+    from claude_code_hooks_daemon.core.scratch_liveness import (
+        LivenessInputs,
+        read_background_records,
+    )
+    from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
+    from claude_code_hooks_daemon.core.worktree_reaping import default_process_cwds
+
+    repo = get_project_path(getattr(args, "project_root", None))
+    scratch = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml").scratch
+    root = Path(args.root) if args.root is not None else repo / "untracked" / "scratch"
+    if not root.is_absolute():
+        root = repo / root
+    now = wall_clock()
+    inputs = LivenessInputs(
+        cwds=(process_cwds or default_process_cwds)(),
+        background=read_background_records(
+            _daemon_untracked_dir(repo) / "background-processes.jsonl"
+        ),
+        min_age_minutes=scratch.min_age_minutes,
+        now=now,
+    )
+    report = scratch_sweep.run_sweep(
+        root,
+        config=scratch,
+        now=now,
+        budget=WalkBudget(
+            seconds=args.budget_seconds, max_inodes=args.max_inodes, clock=budget_clock
+        ),
+        inputs=inputs,
+        project_root=repo,
+        scandir=scandir,
+    )
+    if args.json:
+        print(json.dumps(scratch_sweep.report_json(report), indent=2))
+        return 0
+    for line in scratch_sweep.render_table(report, max_listed=scratch.sweep.max_listed):
+        print(line)
     return 0
 
 
@@ -13545,6 +13606,47 @@ def build_parser() -> argparse.ArgumentParser:
         "(a positive integer); branches not measured in time stay unclassified",
     )
     parser_branch_sweep.set_defaults(func=cmd_branch_sweep)
+
+    # scratch-sweep command (Plan 00627 Task 1.7): a dry run only.
+    parser_scratch_sweep = subparsers.add_parser(
+        "scratch-sweep",
+        help="Judge every scratch entry (LIVE, STUCK, REPOSITORY, DISPOSABLE, UNCERTAIN); "
+        "a read-only report that changes nothing",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Exit 0 for a report, complete or not. The report says when the walk "
+            "budget ran out or a directory could not be read.\n\n"
+            "KEPT, PROTECTED and REFERENCED are not evaluated yet; an entry holding a "
+            ".git marker is reported 'repository, not judged'."
+        ),
+    )
+    parser_scratch_sweep.add_argument(
+        "--json", action="store_true", help="Print every entry's record as JSON"
+    )
+    parser_scratch_sweep.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="The scratch root to judge (default: untracked/scratch/ of the project)",
+    )
+    parser_scratch_sweep.add_argument(
+        "--budget-seconds",
+        type=_positive_seconds,
+        default=SCRATCH_SWEEP_DEFAULT_SECONDS,
+        metavar="N",
+        help="Time budget for the whole walk "
+        f"(default {SCRATCH_SWEEP_DEFAULT_SECONDS:g}); entries past it are reported STUCK",
+    )
+    parser_scratch_sweep.add_argument(
+        "--max-inodes",
+        type=_positive_int,
+        default=SCRATCH_SWEEP_DEFAULT_MAX_INODES,
+        metavar="N",
+        help="Inode cap for the whole walk "
+        f"(default {SCRATCH_SWEEP_DEFAULT_MAX_INODES}); entries past it are reported STUCK",
+    )
+    parser_scratch_sweep.set_defaults(func=cmd_scratch_sweep)
 
     # branch-preflight command (Plan 00594 Task 4.1)
     parser_branch_preflight = subparsers.add_parser(

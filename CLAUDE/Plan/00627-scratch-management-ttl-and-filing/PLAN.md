@@ -63,7 +63,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [x] ✅ **Task 1.4**: Add the TTL clock (DESIGN.md section 4): newest mtime, root ctime, birth time, future mtimes, maximum lifetime.
 - [x] ✅ **Task 1.5**: Add liveness: process working directories (reusing `default_process_cwds`), background-process records, minimum age.
 - [x] ✅ **Task 1.6**: Add the verdict type and the ordering, with proofs P1, P2 and P5 (the ones that need no git).
-- [ ] ⬜ **Task 1.7**: Add `hooks-daemon scratch-sweep` as a dry run only: the table and `--json`. Test that a run changes no inode (snapshot before and after).
+- [x] ✅ **Task 1.7**: Add `hooks-daemon scratch-sweep` as a dry run only: the table and `--json`. Test that a run changes no inode (snapshot before and after).
 
 ### Phase 2: Git proofs and references
 
