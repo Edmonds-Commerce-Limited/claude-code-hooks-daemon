@@ -87,6 +87,7 @@ class TestWorkflowIsLinted:
         _stub_linter(stub_bin, exit_code=1, output="actionsqaci.pushConcurrency: no concurrency")
         result = handler.handle(_hook_input(_workflow(tmp_path)))
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert "actionsqaci.pushConcurrency: no concurrency" in result.reason
         assert "GitHub Workflow lint FAILED for ci.yml" in result.reason
 
