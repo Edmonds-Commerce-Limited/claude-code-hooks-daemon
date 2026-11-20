@@ -198,21 +198,35 @@ class TestAProjectGlobIsJudgedThroughTheLinkNotBySpelling:
         )
         assert decision == Decision.DENY
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "KNOWN GAP (Plan 00613 handoff 261120): `grep -R` follows every directory "
-            "link below its root, and a project glob whose basename matches no default "
-            "is not found through the link. Allowed on main and on the Plan 00623 "
-            "branch alike. Strict, so the fix turns this red and it must be removed."
-        ),
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # The read gap the Plan 00613 handoff 261120 recorded: these FOLLOW every
+            # link below their root, so the linked directory is read whole.
+            "grep -R secret .",
+            "grep -RnI secret .",
+            "grep --dereference-recursive secret .",
+            "grep -R secret ..",
+            "cd .. && grep -R secret .",
+            "rg -L secret",
+            "rg --follow secret .",
+            "find -L . -type f -exec cat {} +",
+            "find -L . -type f | xargs cat",
+            "zip -r out.zip .",
+            "diff -r . /dev/null",
+            "tar -chf out.tar .",
+            "cp -rL . ../copy",
+        ],
     )
-    def test_dereferencing_recursive_grep_from_the_worktree(
-        self, project_glob_worktree: Path
+    def test_link_following_reads_from_the_worktree(
+        self, project_glob_worktree: Path, command: str
     ) -> None:
-        decision = _decision(
-            project_glob_worktree, "Bash", {"command": "grep -R secret ."}, _PROJECT_GLOBS
-        )
+        decision = _decision(project_glob_worktree, "Bash", {"command": command}, _PROJECT_GLOBS)
+        assert decision == Decision.DENY
+
+    def test_an_absolute_root_above_the_link(self, project_glob_worktree: Path) -> None:
+        command = f"grep -R secret {project_glob_worktree}"
+        decision = _decision(project_glob_worktree, "Bash", {"command": command}, _PROJECT_GLOBS)
         assert decision == Decision.DENY
 
     def test_read_tool(self, project_glob_worktree: Path) -> None:
@@ -225,4 +239,99 @@ class TestAProjectGlobIsJudgedThroughTheLinkNotBySpelling:
         # (Rooted at the worktree, ripgrep does not descend a directory link.)
         tool_input = {"path": str(project_glob_worktree / "conf"), "pattern": "secret"}
         decision = _decision(project_glob_worktree, "Grep", tool_input, _PROJECT_GLOBS)
+        assert decision == Decision.DENY
+
+
+class TestNonFollowingReadersAndUnprotectedLinksStayAllowed:
+    """Controls: only a reader that follows the link into a protected file is denied."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # grep -r and rg follow no link below their root; git grep reads git's view.
+            "grep -r secret .",
+            "rg secret",
+            "rg secret .",
+            "git grep secret",
+            "cat plain.txt",
+        ],
+    )
+    def test_non_following_reads(self, project_glob_worktree: Path, command: str) -> None:
+        (project_glob_worktree / "plain.txt").write_text("ordinary\n", encoding="utf-8")
+        decision = _decision(project_glob_worktree, "Bash", {"command": command}, _PROJECT_GLOBS)
+        assert decision == Decision.ALLOW
+
+    def test_grep_tool_rooted_at_the_worktree(self, project_glob_worktree: Path) -> None:
+        tool_input = {"path": str(project_glob_worktree), "pattern": "secret"}
+        decision = _decision(project_glob_worktree, "Grep", tool_input, _PROJECT_GLOBS)
+        assert decision == Decision.ALLOW
+
+    def test_a_following_read_of_a_sibling_without_links(self, project_glob_worktree: Path) -> None:
+        (project_glob_worktree / "src").mkdir()
+        (project_glob_worktree / "src" / "a.txt").write_text("ordinary\n", encoding="utf-8")
+        decision = _decision(
+            project_glob_worktree, "Bash", {"command": "grep -R secret src"}, _PROJECT_GLOBS
+        )
+        assert decision == Decision.ALLOW
+
+
+@pytest.fixture()
+def unprotected_link_worktree(tmp_path: Path) -> Iterator[Path]:
+    """A worktree whose only seeded link leads to a directory holding no protected file."""
+    root = tmp_path / "project"
+    (root / "docs").mkdir(parents=True)
+    (root / "docs" / "readme.txt").write_text("ordinary\n", encoding="utf-8")
+    tree = root / _WORKTREE
+    tree.mkdir(parents=True)
+    (tree / "docs").symlink_to(root / "docs")
+    protected_file_index.reset_index_cache()
+    with patch.object(guard_module, "resolve_project_root", return_value=str(root)):
+        handler = SecretFileGuardHandler()
+        handler._protected_paths = _PROJECT_GLOBS
+        index_project(root, handler._patterns())
+        yield tree
+    protected_file_index.reset_index_cache()
+
+
+class TestAnUnprotectedLinkIsUnaffected:
+    @pytest.mark.parametrize("command", ["grep -R ordinary .", "find -L . -exec cat {} +"])
+    def test_following_reads(self, unprotected_link_worktree: Path, command: str) -> None:
+        decision = _decision(
+            unprotected_link_worktree, "Bash", {"command": command}, _PROJECT_GLOBS
+        )
+        assert decision == Decision.ALLOW
+
+
+@pytest.fixture(params=["main-checkout-root", "worktree-root"])
+def project_glob_file_link_worktree(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> Iterator[Path]:
+    """A project-protected FILE seeded as a file link (its parent is a real directory)."""
+    root = tmp_path / "project"
+    (root / "conf").mkdir(parents=True)
+    (root / _PROJECT_FILE).write_bytes(b"not-a-real-secret\n")
+    tree = root / _WORKTREE
+    (tree / "conf").mkdir(parents=True)
+    (tree / _PROJECT_FILE).symlink_to(root / _PROJECT_FILE)
+    daemon_root = root if request.param == "main-checkout-root" else tree
+    protected_file_index.reset_index_cache()
+    with patch.object(guard_module, "resolve_project_root", return_value=str(daemon_root)):
+        handler = SecretFileGuardHandler()
+        handler._protected_paths = _PROJECT_GLOBS
+        index_project(daemon_root, handler._patterns())
+        yield tree
+    protected_file_index.reset_index_cache()
+
+
+class TestAProjectGlobFileLink:
+    @pytest.mark.parametrize(
+        "command",
+        ["grep -R secret .", "find . -type l -exec cat {} +", "find . -exec cat {} +"],
+    )
+    def test_following_reads_are_denied(
+        self, project_glob_file_link_worktree: Path, command: str
+    ) -> None:
+        decision = _decision(
+            project_glob_file_link_worktree, "Bash", {"command": command}, _PROJECT_GLOBS
+        )
         assert decision == Decision.DENY

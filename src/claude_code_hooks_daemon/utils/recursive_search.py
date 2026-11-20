@@ -47,6 +47,7 @@ from claude_code_hooks_daemon.utils.grep_option_grammar import (
     grammar_for,
     parse_arguments,
 )
+from claude_code_hooks_daemon.utils.link_reach import LinkFollow, reached_through_links
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.protected_file_index import (
     ExemptHook,
@@ -84,6 +85,11 @@ _git_environment_named: Final[contextvars.ContextVar[bool]] = contextvars.Contex
     "git_environment_named", default=True
 )
 _GIT_STEERING_VARIABLE: Final[re.Pattern[str]] = re.compile(r"GIT_|HOME|EDITOR|VISUAL")
+# Whether the command could redefine what a later search word runs (a function, an alias,
+# GREP_OPTIONS): set by :func:`search_reads`; no search is then proven to follow no link.
+_follow_steering_named: Final[contextvars.ContextVar[bool]] = contextvars.ContextVar(
+    "follow_steering_named", default=True
+)
 
 TOOL_GREP: Final[str] = "grep"
 TOOL_RG: Final[str] = "rg"
@@ -510,6 +516,8 @@ class Read:
     glob: bool = False
     rules: _Rules = field(default_factory=_Rules)
     default_expansion: bool = False
+    #: The links below ``root`` the reader follows; ALL unless proven otherwise (Plan 00613).
+    follows: LinkFollow = LinkFollow.ALL
 
 
 @fails_closed
@@ -523,12 +531,14 @@ def search_reads(command: str, cwd: str | None) -> list[Read]:
     bases = (cwd,) if cwd is not None and posixpath.isabs(cwd) else ()
     reset = _rg_config_named.set(RG_CONFIG_ENV in command)
     git_reset = _git_environment_named.set(_GIT_STEERING_VARIABLE.search(command) is not None)
+    follow_reset = _follow_steering_named.set(_FOLLOW_STEERING.search(command) is not None)
     tracker = _SearchCwds(cwd, cdpath=CDPATH_VARIABLE in command, command=command)
     try:
         # One link scan for the command's many computed moves, even outside a guard's scope.
         with link_scan_scope():
             reads = list(dict.fromkeys(_reads(command, bases, 0, tracker)))
     finally:
+        _follow_steering_named.reset(follow_reset)
         _git_environment_named.reset(git_reset)
         _rg_config_named.reset(reset)
     if not any(read.glob for read in reads):
@@ -544,7 +554,9 @@ def protected_reached(
 ) -> tuple[str, str] | None:
     """``(pattern, searched root)`` when one of ``reads`` reaches a protected file in ``index``.
 
-    ``is_exempt`` skips a protected file the caller confirmed safe to read.
+    ``is_exempt`` skips a protected file the caller confirmed safe to read. A read
+    that follows links is also judged on what lies behind each link below its root
+    (Plan 00613: a worktree's seeded links into the main checkout).
     """
     for read in reads:
         for searched in _directories_read(read, index):
@@ -553,7 +565,26 @@ def protected_reached(
             )
             if hit is not None:
                 return hit, searched.root
+        if read.follows is LinkFollow.NONE:
+            continue
+        root = _glob_literal_directory(read.root) if read.glob else read.root
+        hit = reached_through_links(root, read.follows, index, is_exempt=is_exempt)
+        if hit is not None:
+            return hit, root
     return None
+
+
+def _glob_literal_directory(pattern: str) -> str:
+    """The directory an absolute glob spells before its first wildcard component.
+
+    Every link a recursive reader of the glob's matches can follow lies below it.
+    """
+    literal: list[str] = []
+    for part in pattern.split("/"):
+        if any(char in part for char in _GLOB_CHARACTERS):
+            break
+        literal.append(part)
+    return "/".join(literal) or "/"
 
 
 def _directories_read(read: Read, index: ProtectedFileIndex) -> list[Read]:
@@ -900,7 +931,7 @@ def _segment_reads(
         yield from _reads(" ".join(words[1:]), here, depth + 1, tracker)
     elif head == _FIND:
         if _find_execs_a_reader(words):
-            yield from _reads_from_each(_find_roots(words), here)
+            yield from _reads_from_each(_find_roots(words), here, follows=_find_link_follow(words))
     elif head == _XARGS:
         inner_words = _xargs_command(words)
         if inner_words and _is_search(inner_words):
@@ -917,9 +948,11 @@ def _segment_reads(
             yield from _search_reads(words, base, piped_in=piped_in, relocating_env=relocating_env)
 
 
-def _reads_from_each(roots: tuple[str, ...], bases: tuple[str, ...]) -> Iterator[Read]:
+def _reads_from_each(
+    roots: tuple[str, ...], bases: tuple[str, ...], *, follows: LinkFollow = LinkFollow.ALL
+) -> Iterator[Read]:
     for base in bases or (None,):
-        yield from _reads_of_roots(roots, base)
+        yield from _reads_of_roots(roots, base, follows=follows)
 
 
 def _could_read(command: str) -> bool:
@@ -1224,7 +1257,8 @@ def _search_reads(
         if scan.uncertain
         else _tool_rules(posixpath.basename(words[0]), words[start:], scan)
     )
-    yield from _reads_of_roots(roots, cwd, rules)
+    follows = _search_link_follow(posixpath.basename(words[start - 1]), words[start:], scan)
+    yield from _reads_of_roots(roots, cwd, rules, follows=follows)
 
 
 def _relocated_git_grep_reads(
@@ -1273,8 +1307,10 @@ def _git_grep_reads(
     roots = tuple(c for c in candidates if not c.startswith(_PATHSPEC_MAGIC_PREFIX))
     if not roots or scan.default_root_possible:
         roots = (*roots, ".")
+    # git reads a tracked link as a link; only a working-tree read is not proven so.
+    follows = LinkFollow.ALL if view is TreeView.ALL else LinkFollow.NONE
     for root in _placed(roots, cwd):
-        yield Read(root, view=view)
+        yield Read(root, view=view, follows=follows)
 
 
 def _exists(operand: str, cwd: str | None) -> bool:
@@ -1598,20 +1634,90 @@ def _view_for(rules: _Rules) -> TreeView:
 
 
 def _reads_of_roots(
-    roots: tuple[str, ...], cwd: str | None, rules: _Rules = _NO_RULES
+    roots: tuple[str, ...],
+    cwd: str | None,
+    rules: _Rules = _NO_RULES,
+    *,
+    follows: LinkFollow = LinkFollow.ALL,
 ) -> Iterator[Read]:
     if any(unknown_tilde(root) for root in roots):
         # `~-`/`~N` is a real directory this hook cannot see: judge every indexed file.
-        yield Read(_EVERYTHING, view=TreeView.ALL)
+        yield Read(_EVERYTHING, view=TreeView.ALL, follows=follows)
     for root in roots:
         glob_root = _place_directory_glob(root, cwd)
         if glob_root is not None:
             # Answered from the index when judged: no directory is listed here.
-            yield Read(glob_root, view=_view_for(rules), glob=True, rules=rules)
+            yield Read(glob_root, view=_view_for(rules), glob=True, rules=rules, follows=follows)
     placed = _placed(roots, cwd)
     for root in placed:
-        yield Read(root, view=_view_for(rules), skip=rules.predicate(root))
+        yield Read(root, view=_view_for(rules), skip=rules.predicate(root), follows=follows)
     for root in roots:
         physical = _physical_root(root, cwd)
         if physical is not None and physical not in placed:
-            yield Read(physical, view=_view_for(rules), skip=rules.predicate(physical))
+            yield Read(
+                physical, view=_view_for(rules), skip=rules.predicate(physical), follows=follows
+            )
+
+
+# --- Which links below its roots a reader follows (Plan 00613) -----------------------------------
+#
+# Every reader follows every link unless its own options prove otherwise: a miss here is a
+# protected file read through a seeded link, so only the shapes below are proven not to.
+
+#: Short options that make a grep-family tool follow every link it meets while recursing.
+_GREP_FOLLOW_SHORT: Final[dict[str, str]] = {
+    "grep": "R",
+    "egrep": "R",
+    "fgrep": "R",
+    "zgrep": "R",
+    "ugrep": "RS",
+    "ug": "RS",
+    "rg": "L",
+    "ag": "f",
+}
+#: Long options (and any abbreviation of them) that make one follow links.
+_FOLLOW_LONG: Final[tuple[str, ...]] = (
+    "--dereference-recursive",
+    "--dereference-files",
+    "--dereference",
+    "--follow",
+)
+#: Words that let a command change what a later ``grep``/``rg`` word runs or reads.
+_FOLLOW_STEERING: Final[re.Pattern[str]] = re.compile(
+    r"GREP_OPTIONS|\(\s*\)|\bfunction\b|\balias\b"
+)
+#: A ``find`` option that follows links below its starting points.
+_FIND_FOLLOW_WORDS: Final[frozenset[str]] = frozenset({"-L", "-follow"})
+
+
+def _search_link_follow(tool: str, arguments: list[str], scan: SearchArguments) -> LinkFollow:
+    """Which links a grep-family search follows; ALL unless its words prove it follows none.
+
+    ``grep -r``, ``rg`` and ``ag`` skip every link below their roots (a root named on
+    the command line is resolved by :meth:`ProtectedFileIndex.find_under` itself).
+    An option that could be a follow flag, an abbreviation of one, an uncertain parse,
+    a ripgrep config, or a command that defines a function or alias proves nothing.
+    """
+    shorts = _GREP_FOLLOW_SHORT.get(tool)
+    steered = _follow_steering_named.get()
+    if shorts is None or scan.uncertain or steered or _rg_config_named.get():
+        return LinkFollow.ALL
+    for word in arguments:
+        if word == _END_OF_OPTIONS:
+            break
+        if word.startswith("--"):
+            name = word.partition("=")[0]
+            if len(name) > 2 and any(
+                full.startswith(name) or name.startswith(full) for full in _FOLLOW_LONG
+            ):
+                return LinkFollow.ALL
+        elif word.startswith("-") and any(flag in word[1:] for flag in shorts):
+            return LinkFollow.ALL
+    return LinkFollow.NONE
+
+
+def _find_link_follow(words: list[str]) -> LinkFollow:
+    """``find`` descends no directory link without ``-L``/``-follow``, but its reader opens file links."""
+    if any(word in _FIND_FOLLOW_WORDS for word in words) or _follow_steering_named.get():
+        return LinkFollow.ALL
+    return LinkFollow.FILES
