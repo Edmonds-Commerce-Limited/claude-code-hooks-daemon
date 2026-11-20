@@ -71,9 +71,16 @@ def worktree(tmp_path: Path) -> Iterator[Path]:
     protected_file_index.reset_index_cache()
 
 
-def _decision(cwd: Path, tool_name: str, tool_input: dict[str, Any]) -> Decision:
+def _decision(
+    cwd: Path,
+    tool_name: str,
+    tool_input: dict[str, Any],
+    protected_paths: list[str] | None = None,
+) -> Decision:
     hook_input: dict[str, Any] = {"tool_name": tool_name, "tool_input": tool_input, "cwd": str(cwd)}
     handler = SecretFileGuardHandler()
+    if protected_paths is not None:
+        handler._protected_paths = protected_paths
     if not handler.matches(hook_input):
         return Decision.ALLOW
     return handler.handle(hook_input).decision
@@ -125,3 +132,97 @@ class TestAnUnprotectedNeighbourStaysReadable:
     def test_plain_file_in_the_worktree(self, worktree: Path) -> None:
         (worktree / "plain.txt").write_text("ordinary\n", encoding="utf-8")
         assert _decision(worktree, "Bash", {"command": "cat plain.txt"}) == Decision.ALLOW
+
+
+# A project glob whose basename matches no shipped default, so a read through the
+# link can only be denied by RESOLVING it, never by its spelling.
+_PROJECT_FILE = "conf/vault.txt"
+_PROJECT_GLOBS = [_PROJECT_FILE]
+
+
+def _seed_project_file(root: Path, tree: Path, patterns: tuple[str, ...]) -> None:
+    (root / "conf").mkdir()
+    (root / _PROJECT_FILE).write_bytes(b"not-a-real-secret\n")
+    seed_worktree(
+        root,
+        tree,
+        [SeedEntry(path="conf", mode=SEED_MODE_SYMLINK)],
+        audit=LinkAudit(
+            log_path=root.parent / "audit.jsonl",
+            protected_patterns=lambda: patterns,
+            session_id=None,
+        ),
+    )
+    assert (tree / "conf").is_symlink()
+
+
+@pytest.fixture(params=["main-checkout-root", "worktree-root"])
+def project_glob_worktree(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Path]:
+    """A project-protected file reached through a seeded directory link.
+
+    The daemon's project root is the main checkout, or the worktree itself (the
+    configuration Plan 00613 Task 1.1 found its directory-link gap in).
+    """
+    root = tmp_path / "project"
+    root.mkdir()
+    tree = root / _WORKTREE
+    tree.mkdir(parents=True)
+    daemon_root = root if request.param == "main-checkout-root" else tree
+    protected_file_index.reset_index_cache()
+    with patch.object(guard_module, "resolve_project_root", return_value=str(daemon_root)):
+        handler = SecretFileGuardHandler()
+        handler._protected_paths = _PROJECT_GLOBS
+        patterns = handler._patterns()
+        _seed_project_file(root, tree, patterns)
+        # The daemon indexes its OWN project root, whichever that is.
+        index_project(daemon_root, patterns)
+        yield tree
+    protected_file_index.reset_index_cache()
+
+
+class TestAProjectGlobIsJudgedThroughTheLinkNotBySpelling:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"cat {_PROJECT_FILE}",
+            f"cat ./{_PROJECT_FILE}",
+            "cat conf/*",
+            # A command-line link is followed by -r.
+            "grep -r secret conf",
+            f"cp -L {_PROJECT_FILE} plain.txt",
+        ],
+    )
+    def test_relative_bash_reads(self, project_glob_worktree: Path, command: str) -> None:
+        decision = _decision(
+            project_glob_worktree, "Bash", {"command": command}, protected_paths=_PROJECT_GLOBS
+        )
+        assert decision == Decision.DENY
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "KNOWN GAP (Plan 00613 handoff 261120): `grep -R` follows every directory "
+            "link below its root, and a project glob whose basename matches no default "
+            "is not found through the link. Allowed on main and on the Plan 00623 "
+            "branch alike. Strict, so the fix turns this red and it must be removed."
+        ),
+    )
+    def test_dereferencing_recursive_grep_from_the_worktree(
+        self, project_glob_worktree: Path
+    ) -> None:
+        decision = _decision(
+            project_glob_worktree, "Bash", {"command": "grep -R secret ."}, _PROJECT_GLOBS
+        )
+        assert decision == Decision.DENY
+
+    def test_read_tool(self, project_glob_worktree: Path) -> None:
+        tool_input = {"file_path": str(project_glob_worktree / _PROJECT_FILE)}
+        decision = _decision(project_glob_worktree, "Read", tool_input, _PROJECT_GLOBS)
+        assert decision == Decision.DENY
+
+    def test_grep_tool_rooted_at_the_linked_directory(self, project_glob_worktree: Path) -> None:
+        # Rooted AT the link, so the search starts inside the protected target.
+        # (Rooted at the worktree, ripgrep does not descend a directory link.)
+        tool_input = {"path": str(project_glob_worktree / "conf"), "pattern": "secret"}
+        decision = _decision(project_glob_worktree, "Grep", tool_input, _PROJECT_GLOBS)
+        assert decision == Decision.DENY
