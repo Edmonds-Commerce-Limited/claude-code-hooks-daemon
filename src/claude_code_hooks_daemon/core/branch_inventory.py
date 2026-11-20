@@ -1341,6 +1341,7 @@ def _content_preserved(run: _Pass, context: _Context, row: _RefRow) -> str | Non
     top_level = top.stdout.strip() if top.returncode == 0 else ""
     if not top_level:
         return None
+    held = False
     try:
         held = remote_branch_proof.holds_net_change(
             Path(top_level),
@@ -1350,7 +1351,6 @@ def _content_preserved(run: _Pass, context: _Context, row: _RefRow) -> str | Non
         )
     except remote_branch_proof.ProofUnavailableError as exc:
         log_and_continue(logger, exc, reason="an unanswered proof leaves the branch LIVE")
-        return None
     return tracking if held else None
 
 

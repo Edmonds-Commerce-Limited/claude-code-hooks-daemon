@@ -1091,7 +1091,12 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             now_held = {name: rec.path for name, rec in linked_worktree_records(repo).items()}
         except RuntimeError as exc:
             # Fail closed: an unread listing cannot show the worktree still holds it.
-            logger.warning("branch cleanup: worktree list unreadable at apply: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="branch cleanup: worktree list unreadable at apply, so every "
+                "worktree-held branch in this batch is kept (fail closed)",
+            )
             now_held = None
     for name in batch:
         if name not in plan.proven:
@@ -1177,7 +1182,12 @@ def _spared(
     try:
         parks = read_park_records(repo)
     except BranchParkError as exc:
-        logger.warning("branch cleanup: park records unreadable: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="branch cleanup: park records unreadable, so every content-preserved "
+            "branch counts as parked and is spared (fail closed)",
+        )
         parks = None
     spared: dict[str, str] = {}
     for name, record in records.items():
