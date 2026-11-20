@@ -145,6 +145,8 @@ def _advice(workflow_count: int, unreadable: list[str]) -> list[str]:
         "(docs-only pushes, missing push concurrency, workflow_run fan-out, schedule "
         "budget) on top of actionlint.",
         f"Once `actions-qa` is on PATH, every workflow edit is linted. Releases: {RELEASES_URL}",
+        f"This note repeats each new session until a workflow uses {_PROJECT}; to silence "
+        "it, set handlers.session_start.workflow_linter_advisor enabled: false.",
     ]
     if unreadable:
         lines.append(

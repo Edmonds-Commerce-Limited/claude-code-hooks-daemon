@@ -3054,6 +3054,12 @@ session, a merge, a commit of pre-existing changes) is never linted before it
 lands. This handler catches that at the one point guaranteed to see it -- the
 commit itself.
 
+**Staged workflows** (Plan 00621): a file directly in `.github/workflows/` has
+no syntax tier; it is run through the optional `actions-qa check --file` linter
+on the working-tree copy (15s budget). Only its findings exit (1) is a failure;
+any other exit, a missing linter or a timeout never affects the commit and is
+only logged.
+
 **Fires when:** a Bash command's command string contains a `git commit`
 invocation in any segment (evasion-resistant via `GIT_INVOCATION`/`ENV_PREFIX`
 -- `git -C <path> commit`, `env git commit`, and line-continued spellings are
@@ -3981,7 +3987,7 @@ handlers:
 | **Type**       | Blocking       |
 | **Event**      | PostToolUse    |
 
-**Description:** Runs a language-aware lint check on source files after they are written, and DENIES on failure. Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) then an optional deeper linter (`ruff`, `shellcheck`, `golangci-lint`, `rubocop`, …). Tools resolve from the daemon's venv before `PATH`. A linter that is not installed ALLOWs with an advisory — that message means the check was skipped, not that it passed. `.ts`/`.tsx` files are handled by `validate_eslint_on_write` instead, which is stricter.
+**Description:** Runs a language-aware lint check on source files after they are written, and DENIES on failure. Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) then an optional deeper linter (`ruff`, `shellcheck`, `golangci-lint`, `rubocop`, …). Tools resolve from the daemon's venv before `PATH`. A linter that is not installed ALLOWs with an advisory — that message means the check was skipped, not that it passed (the optional workflow linter, below, is silent instead). `.ts`/`.tsx` files are handled by `validate_eslint_on_write` instead, which is stricter.
 
 **Bash-authored files**: as for `validate_eslint_on_write` above — authoring routes are linted, relocation routes are not. A command that authors several files (`tee a.py b.py`) has each linted, and the first failure is reported.
 
@@ -5405,7 +5411,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | -------------------------- | ---------------- | -------- | ------------------------------------------------ |
 | `verification_result_gate` | PreToolUse       | 34       | Verifier result unconsumed before a mutator      |
 | `bash_safe_mode`           | PreToolUse       | 36       | Opt-in safe-prelude forcer (ships disabled)      |
-| `staged_lint_gate`         | PreToolUse       | 43       | Cheap syntax check over staged files             |
+| `staged_lint_gate`         | PreToolUse       | 43       | Syntax check (workflows: actions-qa) over staged |
 | `plan_close_approval`      | PreToolUse       | 43       | A human closes a plan when the key says so       |
 | `global_npm_advisor`       | PreToolUse       | 40       | Suggests npx over global installs                |
 | `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation                       |

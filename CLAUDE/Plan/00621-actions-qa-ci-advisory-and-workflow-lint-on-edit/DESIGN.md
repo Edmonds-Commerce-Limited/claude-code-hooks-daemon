@@ -182,3 +182,11 @@ is kept until the owner says otherwise.
   allowed with a "NOT checked" advisory quoting `no lane analyses`. Narrowing to repository
   roots would need a `.git` probe in `handles_file`; it was not done because such files are
   rare (GitHub runs none of them) and the advisory states the truth. Revisit if it is noisy.
+- **The advisory speaks in one case outside 2.4's trigger.** When `.github/workflows/` exists
+  but cannot be listed, `workflow_linter_advisor` says so, since whether a workflow uses the
+  linter is unknown. An unreadable workflow file is named and never counts as using it.
+- **"Once per session" is the sibling convention.** It is `not is_resume_session(...)`, which
+  is based on transcript size. A resume is silent. Behaviour after `/compact` or `/clear`
+  was not measured. The advisory also tells the reader how to silence it.
+- **It fires in this repository.** None of the four workflows here uses `actions-qa-ci`, so
+  the dogfood session sees the suggestion until one does or the handler is disabled.

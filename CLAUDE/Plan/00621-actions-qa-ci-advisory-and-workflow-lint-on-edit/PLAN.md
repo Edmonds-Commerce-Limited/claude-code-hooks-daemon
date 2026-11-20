@@ -76,4 +76,5 @@ three. The tool was run on 2026-11-20 (Task 1.1); the design fails open on any b
 
 ## Delivery & Milestones
 
-- Filed on request of a peer project; design ruled under delegation; Task 2.1 is ready to build.
+- Filed on request of a peer project; design ruled under delegation; Tasks 1.1 to 2.3 built on the plan's branch, which
+  awaits the coordinator's merge.

@@ -145,6 +145,14 @@ class TestFires:
         for install_word in ("install.sh", "curl", "wget", "go install", "| sh", "| bash"):
             assert install_word not in text
 
+    def test_text_says_what_silences_it(self, tmp_path: Path) -> None:
+        (_workflows(tmp_path) / "ci.yml").write_text(_PLAIN)
+
+        text = _context(_handler(tmp_path))
+
+        assert "workflow_linter_advisor" in text
+        assert "enabled: false" in text
+
     def test_an_unreadable_workflow_is_named_and_not_counted_as_a_user(
         self, tmp_path: Path
     ) -> None:

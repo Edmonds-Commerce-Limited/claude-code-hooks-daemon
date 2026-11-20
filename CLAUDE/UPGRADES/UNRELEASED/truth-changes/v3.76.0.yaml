@@ -1,0 +1,16 @@
+# Drafted by Plan 00621.
+version: "3.76.0"
+
+truth_changes:
+  - topic: blocking-handlers
+    was: >
+      `lint_on_edit` and `staged_lint_gate` leave `.github/workflows/` files
+      alone: no YAML is linted except Ansible plays, and a linter that is not
+      installed always says so in an advisory.
+    now: >
+      A file directly in `.github/workflows/` is run through the optional
+      `actions-qa check --file` linter (the `actions-qa-ci` project) on edit
+      and, by `staged_lint_gate`, at commit. Only its findings exit (1) is a
+      lint failure; any other exit allows the edit with a "NOT checked"
+      advisory. When `actions-qa` is not installed nothing is printed on an
+      edit; the new `workflow_linter_advisor` suggests it at session start.
