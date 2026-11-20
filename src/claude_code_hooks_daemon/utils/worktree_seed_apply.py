@@ -26,6 +26,7 @@ import yaml
 
 from claude_code_hooks_daemon.config.models import Config, handler_options
 from claude_code_hooks_daemon.config.yaml_loading import safe_load_yaml
+from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.worktree_seed import SeedEntry, parse_seed_config
 from claude_code_hooks_daemon.utils import git_sync
@@ -58,7 +59,7 @@ _CONFIG_NAMES = ("hooks-daemon.yaml", "hooks-daemon.yml")
 
 _HANDLER_KEY = "worktree_create"
 _SEED_OPTION = "seed"
-_SECRET_GUARD_KEY = "secret_file_guard"
+_FILE_GUARD_HANDLER = HandlerID.SECRET_FILE_GUARD.config_key
 
 
 class SeedApplyRefused(RuntimeError):
@@ -218,15 +219,16 @@ def _committed_config(main: Path, ref: str) -> Config | None:
         shown = run_git(main, "show", f"{ref}:.claude/{name}", timeout=Timeout.GIT_WORKTREE)
         if shown.returncode != 0:
             continue
+        parsed: Config | None = None
         try:
-            return Config.model_validate(safe_load_yaml(shown.stdout) or {})
+            parsed = Config.model_validate(safe_load_yaml(shown.stdout) or {})
         except (RuntimeError, ValueError, yaml.YAMLError) as exc:
             log_and_continue(
                 logger,
                 exc,
                 reason="a committed config that does not parse is no baseline (fail closed)",
             )
-            return None
+        return parsed
     return None
 
 
@@ -254,7 +256,7 @@ def _working_protected_patterns(main: Path, number: int) -> tuple[str, ...]:
         config = _load_config(main)
     except SeedApplyRefused as exc:
         raise WorktreeSeedError(_UNJUDGEABLE_REFUSAL.format(number=number, why=exc)) from exc
-    options = handler_options(config.handlers.pre_tool_use.get(_SECRET_GUARD_KEY))
+    options = handler_options(config.handlers.pre_tool_use.get(_FILE_GUARD_HANDLER))
     try:
         return sfm.protected_patterns_from_options(options)
     except sfm.ProtectedSetUnreadable as exc:
@@ -298,7 +300,7 @@ def refuse_uncommitted_protected_links(main: Path, entries: list[SeedEntry]) -> 
         *_working_protected_patterns(main, pending[0][0]),
     )
     if committed is not None:
-        committed_guard = handler_options(committed.handlers.pre_tool_use.get(_SECRET_GUARD_KEY))
+        committed_guard = handler_options(committed.handlers.pre_tool_use.get(_FILE_GUARD_HANDLER))
         try:
             patterns = (*patterns, *sfm.protected_patterns_from_options(committed_guard))
         except sfm.ProtectedSetUnreadable as exc:
@@ -349,7 +351,7 @@ def _seed_existing_worktree(worktree: Path, project_root: Path) -> list[Path]:
     entries = _seed_entries(config)
     if not entries:
         return []
-    guard_options = handler_options(config.handlers.pre_tool_use.get(_SECRET_GUARD_KEY))
+    guard_options = handler_options(config.handlers.pre_tool_use.get(_FILE_GUARD_HANDLER))
 
     def protected_patterns() -> tuple[str, ...]:
         return sfm.protected_patterns_from_options(guard_options)
