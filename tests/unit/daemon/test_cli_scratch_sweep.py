@@ -101,10 +101,6 @@ class TestParser:
         with pytest.raises(SystemExit):
             build_parser().parse_args(["scratch-sweep", flag, "0"])
 
-    def test_there_is_no_apply_flag_yet(self) -> None:
-        with pytest.raises(SystemExit):
-            build_parser().parse_args(["scratch-sweep", "--apply"])
-
 
 class TestReadOnly:
     @pytest.mark.parametrize("as_json", [False, True])

@@ -1,22 +1,23 @@
-"""No CLI flag reaches the archive modules yet (Plan 00627 Tasks 3.1-3.4).
+"""Only the ``scratch-sweep`` CLI reaches the archive modules (Plan 00627 Task 3.8).
 
-Task 3.8 wires ``--apply`` after the Task 3.9 review. Until then the archive,
-claim, pack and removal modules must be unreachable from every entry point, so
-the dry run stays the only reachable behaviour. Two checks: no module outside
-``core/scratch_archive*`` imports or names them, and ``scratch-sweep`` has no
-flag beyond the dry run's.
+The archive, claim, pack, removal and apply modules can delete from a scratch
+root. Their one entry point is ``daemon/cli.py`` (``scratch-sweep --apply``,
+``restore``, ``keep``); no handler, hook or other module may import or name
+them, so the deleting path cannot be reached without the explicit command. The
+flag surface itself is pinned in ``tests/unit/daemon/test_cli_scratch_apply.py``.
 """
 
 from __future__ import annotations
 
-import argparse
 import ast
 from pathlib import Path
 
 import claude_code_hooks_daemon
-from claude_code_hooks_daemon.daemon.cli import build_parser
 
 _PACKAGE = Path(claude_code_hooks_daemon.__file__).parent
+
+#: Every module outside ``core/scratch_archive*`` allowed to import or name them.
+ALLOWED = ["daemon/cli.py"]
 
 
 def _is_archive_module(path: Path) -> bool:
@@ -34,21 +35,22 @@ def _imported(tree: ast.AST) -> set[str]:
     return found
 
 
-def test_only_archive_modules_import_or_name_archive_modules() -> None:
-    offenders = []
+def _naming_modules() -> list[str]:
+    found = []
     for path in sorted(_PACKAGE.rglob("*.py")):
         if _is_archive_module(path):
             continue
         text = path.read_text(encoding="utf-8")
         names = _imported(ast.parse(text))
         if any("scratch_archive" in name for name in names) or "scratch_archive" in text:
-            offenders.append(str(path.relative_to(_PACKAGE)))
-    assert offenders == []
+            found.append(path.relative_to(_PACKAGE).as_posix())
+    return found
 
 
-def test_scratch_sweep_has_only_dry_run_flags() -> None:
-    parser = build_parser()
-    subparsers = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
-    sweep = subparsers[0].choices["scratch-sweep"]
-    flags = {opt for action in sweep._actions for opt in action.option_strings}
-    assert flags == {"-h", "--help", "--json", "--root", "--budget-seconds", "--max-inodes"}
+def test_only_the_cli_imports_or_names_archive_modules() -> None:
+    assert _naming_modules() == ALLOWED
+
+
+def test_the_cli_reaches_the_apply_module() -> None:
+    names = _imported(ast.parse((_PACKAGE / "daemon" / "cli.py").read_text(encoding="utf-8")))
+    assert "claude_code_hooks_daemon.core.scratch_archive_apply" in names
