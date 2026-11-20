@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.handlers.session_start.branch_sweep import BranchS
 
 _ROOT = "claude_code_hooks_daemon.handlers.session_start.branch_sweep.ProjectContext.project_root"
 _BUILD = "claude_code_hooks_daemon.handlers.session_start.branch_sweep.build_inventory"
+_DIGEST = "claude_code_hooks_daemon.handlers.session_start.branch_sweep.build_digest"
 DAY = 86_400
 
 
@@ -427,6 +428,20 @@ class TestRejectDigestCount:
         text = "\n".join(self._count_lines(repo))
         assert "unreadable" in text
         assert "branch-reject digest" in text
+
+    @pytest.mark.parametrize("target", ["ledger", "watermark"])
+    def test_bytes_that_are_not_utf8_are_loud(self, repo: Path, target: str) -> None:
+        self._record(repo, "gone")
+        path = self._ledger(repo) if target == "ledger" else self._store(repo).digest_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\xff\xfe\n")
+        assert "unreadable" in "\n".join(self._count_lines(repo))
+
+    def test_an_unexpected_failure_is_loud_and_never_raises(self, repo: Path) -> None:
+        self._record(repo, "gone")
+        with patch(_DIGEST, side_effect=OSError("disk gone")):
+            text = "\n".join(self._count_lines(repo))
+        assert "unreadable" in text
 
     def test_a_damaged_watermark_is_loud(self, repo: Path) -> None:
         self._record(repo, "gone")

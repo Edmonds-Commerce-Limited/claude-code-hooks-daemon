@@ -999,6 +999,14 @@ class TestLedger:
         with pytest.raises(RejectError):
             read_ledger(path)
 
+    def test_bytes_that_are_not_utf8_raise_reject_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.jsonl"
+        append_ledger(path, _ledger_line())
+        with path.open("ab") as handle:
+            handle.write(b"\xff\xfe\n")
+        with pytest.raises(RejectError, match="could not read the ledger"):
+            read_ledger(path)
+
     def test_a_line_missing_a_field_raises(self, tmp_path: Path) -> None:
         path = tmp_path / "ledger.jsonl"
         path.write_text(json.dumps({"schema": 1, "branch": "x"}) + "\n", encoding="utf-8")

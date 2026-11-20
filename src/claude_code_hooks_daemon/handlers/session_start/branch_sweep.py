@@ -157,7 +157,7 @@ class BranchSweepHandler(SessionStartHandlerBase):
             return []
         try:
             digest = build_digest(root / config.ledger_path, store, now=time.time(), config=config)
-        except RejectError as exc:
+        except Exception as exc:  # advisory must never break SessionStart
             log_and_continue(
                 logger,
                 exc,

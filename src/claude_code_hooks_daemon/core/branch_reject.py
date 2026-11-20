@@ -1803,7 +1803,7 @@ def read_ledger_entries(path: Path) -> list[LedgerEntry]:
         return []
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise RejectError(f"could not read the ledger {path}: {exc}") from exc
     entries: list[LedgerEntry] = []
     for number, raw in enumerate(text.splitlines(), start=1):
