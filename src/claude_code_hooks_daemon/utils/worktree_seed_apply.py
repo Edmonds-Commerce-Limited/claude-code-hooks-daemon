@@ -20,7 +20,6 @@ never overwrites an existing destination, so a second run places nothing.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from pathlib import Path
 
 import yaml
@@ -29,9 +28,15 @@ from claude_code_hooks_daemon.config.models import Config, handler_options
 from claude_code_hooks_daemon.config.yaml_loading import safe_load_yaml
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.worktree_seed import SeedEntry, parse_seed_config
+from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-from claude_code_hooks_daemon.utils.git_repo import GitRepo, parse_worktree_porcelain, run_git
+from claude_code_hooks_daemon.utils.git_repo import (
+    GitRepo,
+    branch_ref,
+    parse_worktree_porcelain,
+    run_git,
+)
 from claude_code_hooks_daemon.utils.worktree_seeding import (
     LinkAudit,
     SeedPlacementError,
@@ -181,15 +186,36 @@ def _committed_seed_baseline(committed: Config) -> set[SeedEntry]:
     return set(parse_seed_config(handler_options(block).get(_SEED_OPTION)))
 
 
-def _committed_config(main: Path) -> Config | None:
-    """The daemon config committed at ``HEAD`` of the main checkout; None when there is none.
+def _baseline_ref(main: Path) -> tuple[str | None, str]:
+    """The default branch's ref when the main checkout is on it, else None and why.
+
+    Re-review R5: ``HEAD`` is movable (``git checkout --detach <any commit>``),
+    so the baseline is the tip of the repository's default branch, and only
+    while the main checkout is attached to it. The default comes from git
+    (``<remote>/HEAD``, else a local ``main``/``master``), never from the
+    working config this check exists to distrust. The ref is fully qualified,
+    so a tag of the same name cannot stand in for the branch.
+    """
+    head = run_git(main, "symbolic-ref", "--quiet", "HEAD", timeout=Timeout.GIT_WORKTREE)
+    if head.returncode != 0:
+        return None, "the main checkout's HEAD is detached"
+    default = git_sync.default_branch(main)
+    if default is None:
+        return None, "the repository's default branch cannot be told"
+    if head.stdout.strip() != branch_ref(default):
+        return None, "the main checkout is not on the default branch"
+    return branch_ref(default), ""
+
+
+def _committed_config(main: Path, ref: str) -> Config | None:
+    """The daemon config committed at ``ref``; None when there is none.
 
     Found by the names the daemon accepts, in its order. A config git cannot show,
     or one that does not parse, is no baseline: the caller then refuses every
     protected link.
     """
     for name in _CONFIG_NAMES:
-        shown = run_git(main, "show", f"HEAD:.claude/{name}", timeout=Timeout.GIT_WORKTREE)
+        shown = run_git(main, "show", f"{ref}:.claude/{name}", timeout=Timeout.GIT_WORKTREE)
         if shown.returncode != 0:
             continue
         try:
@@ -205,59 +231,80 @@ def _committed_config(main: Path) -> Config | None:
 
 
 _UNCOMMITTED_REFUSAL = (
-    "seed entry #{number}: it links a protected path, and the config committed at HEAD "
-    "of the main checkout does not list it. Commit the config change first; nothing was "
-    "placed"
+    "seed entry #{number}: it links a protected path, and the config committed on the "
+    "default branch, with the main checkout on that branch, does not list it{why}. Commit "
+    "the config change to the default branch first; nothing was placed"
 )
 
 
-def refuse_uncommitted_protected_links(
-    main: Path, entries: list[SeedEntry], protected_patterns: Callable[[], tuple[str, ...]]
-) -> None:
-    """Refuse a protected seed entry the config committed at ``HEAD`` does not list.
+def _working_protected_patterns(main: Path, number: int) -> tuple[str, ...]:
+    """The protected set the main checkout's config on disk declares, read STRICTLY.
 
-    The ONE check both seeding routes run before anything is placed: the
-    creation hook (whose list is the daemon's loaded config, so an uncommitted
-    edit takes effect after a restart) and ``seed-worktree`` (which reads the
-    config fresh from disk). An entry whose source is, holds or links to a path
-    protected by the shipped defaults, the working config or the committed
-    config is placed only when the committed config lists the same entry
-    (security review F6; Plan 00613 handoff 261120, residual 1). This NARROWS
-    the route to one that leaves a commit behind; it does not close it.
+    Re-review R6: both routes judge with this one source, so a daemon whose own
+    config differs (a worktree-root daemon's) cannot change the verdict. An
+    unreadable config, or unreadable guard options, refuses (fail closed).
+    """
+    try:
+        config = _load_config(main)
+    except SeedApplyRefused as exc:
+        raise WorktreeSeedError(
+            _UNCOMMITTED_REFUSAL.format(number=number, why="") + f" ({exc})"
+        ) from exc
+    options = handler_options(config.handlers.pre_tool_use.get(_SECRET_GUARD_KEY))
+    try:
+        return sfm.protected_patterns_from_options(options)
+    except sfm.ProtectedSetUnreadable as exc:
+        raise WorktreeSeedError(
+            _UNCOMMITTED_REFUSAL.format(number=number, why="")
+            + " (the secret_file_guard options in the main checkout's config could not be read)"
+        ) from exc
 
-    A working protected set that cannot be read contributes nothing beyond the
-    shipped defaults; committed guard options that cannot be read refuse every
-    entry the baseline does not list (fail closed).
+
+def refuse_uncommitted_protected_links(main: Path, entries: list[SeedEntry]) -> None:
+    """Refuse a protected seed entry the config committed on the default branch does not list.
+
+    The ONE check both seeding routes run before anything is placed, with the
+    same arguments and the same config source: the creation hook (whose list
+    is the daemon's loaded config, so an uncommitted edit takes effect after a
+    restart) and ``seed-worktree``. An entry whose source is, holds or links to
+    a path protected by the shipped defaults, the main checkout's config on
+    disk or the committed config is placed only when the committed config
+    lists the same entry (security review F6). This NARROWS the route to one
+    that leaves a commit on the default branch behind; it does not close it.
+
+    The baseline is the default branch's tip, and only while the main checkout
+    is on it (re-review R5): detached, or on another branch, there is none.
+    An entry the baseline lists needs nothing more; for any other entry an
+    unreadable main config or unreadable guard options refuse (re-review R6).
 
     Raises:
         WorktreeSeedError: the first such entry, named by position only.
     """
-    committed = _committed_config(main)
+    ref, why = _baseline_ref(main)
+    committed = _committed_config(main, ref) if ref is not None else None
     baseline = _committed_seed_baseline(committed) if committed is not None else set()
     pending = [(n, e) for n, e in enumerate(entries, start=1) if e not in baseline]
     if not pending:
         return
-    patterns: tuple[str, ...] = sfm.DEFAULT_PROTECTED_PATTERNS
-    try:
-        patterns = (*patterns, *protected_patterns())
-    except sfm.ProtectedSetUnreadable as exc:
-        log_and_continue(
-            logger, exc, reason="the shipped defaults and the committed set still judge the entry"
-        )
+    why = f" ({why})" if why else ""
+    patterns: tuple[str, ...] = (
+        *sfm.DEFAULT_PROTECTED_PATTERNS,
+        *_working_protected_patterns(main, pending[0][0]),
+    )
     if committed is not None:
         committed_guard = handler_options(committed.handlers.pre_tool_use.get(_SECRET_GUARD_KEY))
         try:
             patterns = (*patterns, *sfm.protected_patterns_from_options(committed_guard))
         except sfm.ProtectedSetUnreadable as exc:
             raise WorktreeSeedError(
-                _UNCOMMITTED_REFUSAL.format(number=pending[0][0])
+                _UNCOMMITTED_REFUSAL.format(number=pending[0][0], why=why)
                 + " (the committed secret_file_guard options could not be read)"
             ) from exc
     patterns = tuple(dict.fromkeys(patterns))
     for number, entry in pending:
         # A source that could not be walked is judged protected (fail closed).
         if protecting_pattern_for_source(main, entry.path, patterns) is not None:
-            raise WorktreeSeedError(_UNCOMMITTED_REFUSAL.format(number=number))
+            raise WorktreeSeedError(_UNCOMMITTED_REFUSAL.format(number=number, why=why))
 
 
 def seed_existing_worktree(worktree: Path, *, project_root: Path) -> list[Path]:
@@ -312,7 +359,7 @@ def _seed_existing_worktree(worktree: Path, project_root: Path) -> list[Path]:
     _refuse_redirected_parents(target, entries)
     try:
         validate_seed_sources(main, entries, protected_patterns=protected_patterns)
-        refuse_uncommitted_protected_links(main, entries, protected_patterns)
+        refuse_uncommitted_protected_links(main, entries)
         return seed_worktree(
             main,
             target,

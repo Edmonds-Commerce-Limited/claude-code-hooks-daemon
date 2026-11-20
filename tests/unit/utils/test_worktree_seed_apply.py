@@ -29,12 +29,17 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.core.worktree_seed import SeedEntry
 from claude_code_hooks_daemon.utils.worktree_seed_apply import (
     SEED_APPLY_VERB,
     SeedApplyRefused,
+    refuse_uncommitted_protected_links,
     seed_existing_worktree,
 )
-from claude_code_hooks_daemon.utils.worktree_seeding import seed_link_audit_path
+from claude_code_hooks_daemon.utils.worktree_seeding import (
+    WorktreeSeedError,
+    seed_link_audit_path,
+)
 
 VAULT = "." + "vault" + "-pass"
 _CONFIG = ".claude/hooks-daemon.yaml"
@@ -384,3 +389,75 @@ class TestAProtectedLinkMustBeInTheCommittedConfig:
         with pytest.raises(SeedApplyRefused, match="committed"):
             seed_existing_worktree(worktree, project_root=repo)
         assert not (worktree / "conf").exists()
+
+
+class TestTheBaselineIsTheDefaultBranchTip:
+    """Re-review R5: the committed baseline is the default branch's tip, not whatever HEAD is.
+
+    The main checkout must be ON the repository's default branch (attached): a
+    detached HEAD, or a checkout of another branch, is no baseline, so every
+    protected link entry refuses. The branch is read as ``refs/heads/<name>``,
+    so a tag of the same name cannot stand in for it.
+    """
+
+    @staticmethod
+    def _side_commit_listing_conf(repo: Path) -> None:
+        """A commit on branch ``side`` whose config lists the protected ``conf`` link."""
+        (repo / "conf").mkdir()
+        (repo / "conf" / VAULT).write_text("not-a-real-secret\n", encoding="utf-8")
+        added = "            - path: conf\n              mode: symlink\n"
+        _git(repo, "checkout", "-q", "-b", "side")
+        (repo / _CONFIG).write_text(_config(_LINK_PLAIN + added), encoding="utf-8")
+        _git(repo, "commit", "-q", "-am", "list conf")
+
+    def test_a_detached_main_checkout_is_no_baseline(self, repo: Path, worktree: Path) -> None:
+        self._side_commit_listing_conf(repo)
+        _git(repo, "checkout", "-q", "--detach", "side")
+        with pytest.raises(SeedApplyRefused, match="detached"):
+            seed_existing_worktree(worktree, project_root=repo)
+        assert not (worktree / "conf").exists()
+
+    def test_a_main_checkout_on_another_branch_is_no_baseline(
+        self, repo: Path, worktree: Path
+    ) -> None:
+        self._side_commit_listing_conf(repo)
+        with pytest.raises(SeedApplyRefused, match="default branch"):
+            seed_existing_worktree(worktree, project_root=repo)
+        assert not (worktree / "conf").exists()
+
+    def test_a_tag_named_like_the_default_branch_is_not_the_baseline(
+        self, repo: Path, worktree: Path
+    ) -> None:
+        self._side_commit_listing_conf(repo)
+        _git(repo, "tag", "main", "side")
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "checkout", "-q", "side", "--", _CONFIG)
+        with pytest.raises(SeedApplyRefused, match="committed"):
+            seed_existing_worktree(worktree, project_root=repo)
+        assert not (worktree / "conf").exists()
+
+    def test_committed_on_the_default_branch_is_placed(self, repo: Path, worktree: Path) -> None:
+        self._side_commit_listing_conf(repo)
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "merge", "-q", "--ff-only", "side")
+        assert (worktree.resolve() / "conf") in seed_existing_worktree(worktree, project_root=repo)
+
+
+class TestTheSharedCheckReadsTheMainCheckoutConfig:
+    """Re-review R6: the shared check reads its own config source and fails closed."""
+
+    def test_an_unreadable_main_config_refuses_an_uncommitted_entry(self, repo: Path) -> None:
+        (repo / _CONFIG).write_text("handlers: [unclosed\n", encoding="utf-8")
+        with pytest.raises(WorktreeSeedError, match="could not be"):
+            refuse_uncommitted_protected_links(repo, [SeedEntry(path="local2.env", mode="symlink")])
+
+    def test_unreadable_guard_options_in_the_main_config_refuse(self, repo: Path) -> None:
+        broken = "  pre_tool_use:\n    secret_file_guard:\n      options:\n        mode: 7\n"
+        text = _config(_LINK_PLAIN).replace("handlers:\n", "handlers:\n" + broken)
+        (repo / _CONFIG).write_text(text, encoding="utf-8")
+        with pytest.raises(WorktreeSeedError, match="could not be read"):
+            refuse_uncommitted_protected_links(repo, [SeedEntry(path="local2.env", mode="symlink")])
+
+    def test_a_fully_committed_list_needs_no_working_config(self, repo: Path) -> None:
+        (repo / _CONFIG).write_text("handlers: [unclosed\n", encoding="utf-8")
+        refuse_uncommitted_protected_links(repo, [SeedEntry(path=VAULT, mode="symlink")])

@@ -210,11 +210,10 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             validate_seed_sources(
                 Path(root), entries, protected_patterns=sfm.load_protected_patterns_strict
             )
-            # The same committed-config check as `seed-worktree` (review F6):
-            # the loaded list may carry an uncommitted edit after a restart.
-            refuse_uncommitted_protected_links(
-                Path(root), entries, sfm.load_protected_patterns_strict
-            )
+            # The same committed-config check as `seed-worktree`, with the same
+            # config source (review F6, re-review R6): the loaded list may carry
+            # an uncommitted edit after a restart.
+            refuse_uncommitted_protected_links(Path(root), entries)
 
             path.parent.mkdir(parents=True, exist_ok=True)
             self._git_worktree_add(

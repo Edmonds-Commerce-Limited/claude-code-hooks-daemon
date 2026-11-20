@@ -36,11 +36,18 @@ from claude_code_hooks_daemon.utils.worktree_seeding import WorktreeSeedError, s
 
 
 def _init_repo(root: Path) -> None:
-    """Create a git repo with one commit so worktrees can branch from HEAD."""
-    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    """Create a git repo with one commit so worktrees can branch from HEAD.
+
+    It is on ``main`` (the default branch the committed seed baseline is read
+    from) and carries a daemon config, as an installed project does: the shared
+    seed check reads the main checkout's config and refuses when it cannot.
+    """
+    subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
     subprocess.run(["git", "-C", str(root), "config", "user.email", "t@t.t"], check=True)
     subprocess.run(["git", "-C", str(root), "config", "user.name", "t"], check=True)
     (root / "README.md").write_text("hi\n", encoding="utf-8")
+    (root / ".claude").mkdir()
+    (root / ".claude" / "hooks-daemon.yaml").write_text("version: '2.0'\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "init"], check=True)
 
@@ -347,7 +354,7 @@ class TestLinkedWorktreeCwd:
 
         path = Path(result.worktree_path or "")
         assert str(path).startswith(f"{repo}/.claude/worktrees/")
-        assert not (linked / ".claude").exists()
+        assert not (linked / ".claude" / "worktrees").exists()
         assert (path / ".env.local").read_text(encoding="utf-8") == "SECRET=canonical\n"
 
     def test_subdirectory_of_a_linked_worktree_anchors_to_the_main_checkout(
@@ -696,10 +703,10 @@ class TestProtectedCopyOnCreate:
 
         self._assert_nothing_created(repo)
 
-    def test_an_uncommitted_protected_link_aborts_even_with_an_unreadable_guard_config(
+    def test_an_uncommitted_protected_link_aborts_whatever_the_daemon_config(
         self, repo: Path
     ) -> None:
-        """The shipped defaults still judge the entry when the working set cannot be read."""
+        """The check reads the main checkout's config, not the daemon's (re-review R6)."""
         (repo / self._VAULT).write_text("hush\n", encoding="utf-8")
         handler = WorktreeCreateHandler()
         handler._seed = {"entries": [self._VAULT]}
@@ -711,6 +718,85 @@ class TestProtectedCopyOnCreate:
             handler.handle(self._input(repo))
 
         self._assert_nothing_created(repo)
+
+    def test_an_unreadable_main_checkout_config_aborts_an_uncommitted_link(
+        self, repo: Path, guard_config: Path
+    ) -> None:
+        """Re-review R6: the creation route fails closed on an unreadable config, too."""
+        (repo / ".env.local").write_text("PLAIN=1\n", encoding="utf-8")
+        (repo / ".claude" / "hooks-daemon.yaml").write_text("handlers: [x\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [".env.local"]}
+
+        with pytest.raises(WorktreeSeedError, match="could not be"):
+            handler.handle(self._input(repo))
+
+        self._assert_nothing_created(repo)
+
+    def test_a_detached_main_checkout_aborts_a_protected_link(
+        self, repo: Path, guard_config: Path
+    ) -> None:
+        """Re-review R5: a commit checked out detached is no baseline at creation either."""
+        (repo / self._VAULT).write_text("hush\n", encoding="utf-8")
+        self._commit_seed(repo, self._VAULT)
+        subprocess.run(["git", "-C", str(repo), "checkout", "-q", "--detach"], check=True)
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [self._VAULT]}
+
+        with pytest.raises(WorktreeSeedError, match="detached"):
+            handler.handle(self._input(repo))
+
+        self._assert_nothing_created(repo)
+
+    def test_both_routes_judge_with_the_main_checkout_config(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """R6 parity: a daemon config that unprotects the path changes neither route.
+
+        The daemon's own config (a worktree-root daemon's) drops nothing from the
+        set the main checkout's config protects, so both routes refuse alike.
+        """
+        from claude_code_hooks_daemon.utils.worktree_seed_apply import (
+            SeedApplyRefused,
+            seed_existing_worktree,
+        )
+
+        (repo / "conf").mkdir()
+        (repo / "conf" / "app.txt").write_text("hush\n", encoding="utf-8")
+        self._commit_seed(repo)
+        working = repo / ".claude" / "hooks-daemon.yaml"
+        working.write_text(
+            "version: '2.0'\nhandlers:\n"
+            "  pre_tool_use:\n    secret_file_guard:\n      options:\n"
+            "        protected_paths:\n          - conf/app.txt\n"
+            "  worktree_create:\n    worktree_create:\n"
+            "      options:\n        seed:\n          entries:\n"
+            "            - path: conf\n              mode: symlink\n",
+            encoding="utf-8",
+        )
+        daemon_config = tmp_path / "daemon-config" / ".claude" / "hooks-daemon.yaml"
+        daemon_config.parent.mkdir(parents=True)
+        daemon_config.write_text("version: '2.0'\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": ["conf"]}
+        with (
+            patch.object(ProjectContext, "is_initialized", return_value=True),
+            patch.object(ProjectContext, "config_path", return_value=daemon_config),
+            pytest.raises(WorktreeSeedError) as by_hook,
+        ):
+            handler.handle(self._input(repo))
+
+        hand_made = tmp_path / "hand-made"
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "hand", str(hand_made)],
+            check=True,
+        )
+        with pytest.raises(SeedApplyRefused) as by_verb:
+            seed_existing_worktree(hand_made, project_root=repo)
+
+        assert str(by_hook.value) == str(by_verb.value)
+        assert "committed" in str(by_hook.value)
+        assert not (hand_made / "conf").exists()
 
     def test_both_routes_refuse_the_same_uncommitted_protected_entry(
         self, repo: Path, guard_config: Path, tmp_path: Path
