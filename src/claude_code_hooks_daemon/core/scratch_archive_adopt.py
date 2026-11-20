@@ -34,6 +34,11 @@ the same inode, singly linked, with the same digest, and the record is
 appended. A moved file that fails that check was swapped in by someone else: it
 is moved back under its old name (:class:`AdoptRefused`), or, if that fails, it
 stays in the store unrecorded and named by the event (:class:`AdoptStuck`).
+
+A crash after the event but before the record is found by
+:func:`unfinished_adoptions`; :func:`finish_adoption` proves the archive
+already in the store against the original the same way and appends the
+record, or refuses (:class:`AdoptRefused`) leaving the archive in place.
 """
 
 from __future__ import annotations
@@ -50,6 +55,7 @@ from claude_code_hooks_daemon.core.scratch_archive import (
     AdoptEvent,
     ArchiveRecord,
     ArchiveStore,
+    ExpiredEvent,
     StoreRefused,
     archive_file_name,
     fsync_dir,
@@ -193,6 +199,132 @@ def adopt(
         sha256=sha,
         counts=dict(counts),
     )
+
+
+def unfinished_adoptions(store: ArchiveStore) -> tuple[AdoptEvent, ...]:
+    """``adopt`` events no record and no ``expired`` event name; needs the store lock.
+
+    Each is a crash between the event and the record: the archive is in the store
+    unrecorded (:func:`finish_adoption` finishes it), or the tarball never moved.
+    """
+    store.require_lock("listing unfinished adoptions")
+    events = store.read_events().events
+    recorded = {r.archive_id for r in store.read_index().records}
+    expired = {e.archive_id for e in events if isinstance(e, ExpiredEvent)}
+    found: dict[str, AdoptEvent] = {}
+    for event in events:
+        if isinstance(event, AdoptEvent) and event.archive_id not in recorded | expired:
+            found.setdefault(event.archive_id, event)
+    return tuple(found.values())
+
+
+def finish_adoption(
+    store: ArchiveStore,
+    parent_fd: int,
+    entry_name: str,
+    archive_id: str,
+    *,
+    checkout: str,
+    verdict: str,
+    proof_ids: tuple[str, ...],
+    expires_at: str | None,
+    restore_command: str,
+    tar: TarTool,
+    max_inodes: int,
+    max_depth: int = DEFAULT_MAX_DEPTH,
+    timeout: float = DEFAULT_TAR_TIMEOUT_SECONDS,
+) -> Adopted:
+    """Record an adoption a crash left with an ``adopt`` event but no record.
+
+    The archive already in the store is proved against the original
+    ``entry_name`` in ``parent_fd`` exactly as :func:`adopt` proves a tarball,
+    then the record is appended with ``packed_at`` the event's time. Nothing is
+    moved. Any failure raises :class:`AdoptRefused` naming why, and the archive
+    stays where it is, named by its event, which ``discard_unrecorded`` refuses.
+    """
+    store.require_lock("finishing an adoption")
+    event = _unfinished_event(store, archive_id)
+    try:
+        check_entry_name(entry_name)
+    except ValueError as exc:
+        raise AdoptRefused(f"not a plain entry name: {exc}") from exc
+    if posixpath.basename(event.original_path) != entry_name:
+        raise AdoptRefused("the adopt event's path does not name the entry")
+    fd = _open_stored(store, archive_id)
+    try:
+        compression, size, sha, counts = _prove(
+            parent_fd,
+            entry_name,
+            fd,
+            tar=tar,
+            max_inodes=max_inodes,
+            max_depth=max_depth,
+            timeout=timeout,
+        )
+        if os.fstat(fd).st_nlink != 1:
+            raise AdoptRefused("the stored archive gained a hard link while it was proved")
+    finally:
+        os.close(fd)
+    store.append(
+        ArchiveRecord(
+            archive_id=archive_id,
+            original_path=event.original_path,
+            checkout=checkout,
+            verdict=verdict,
+            proof_ids=tuple(dict.fromkeys((*proof_ids, PROOF_ID))),
+            packed_at=event.at,
+            expires_at=expires_at,
+            counts=dict(counts),
+            archive_size=size,
+            sha256=sha,
+            skipped=(),
+            restore_command=restore_command,
+        )
+    )
+    return Adopted(
+        archive_id=archive_id,
+        original_path=event.original_path,
+        tarball=event.tarball,
+        compression=compression,
+        size=size,
+        sha256=sha,
+        counts=dict(counts),
+    )
+
+
+def _unfinished_event(store: ArchiveStore, archive_id: str) -> AdoptEvent:
+    """The ``adopt`` event for ``archive_id``, refusing a torn, recorded or expired id."""
+    events = store.read_events()
+    if events.torn_tail:
+        raise AdoptRefused("the events file has a torn final line; a human must look first")
+    index = store.read_index()
+    if index.torn_tail:
+        raise AdoptRefused("the index has a torn final line; a human must look first")
+    if any(r.archive_id == archive_id for r in index.records):
+        raise AdoptRefused(f"archive {archive_id} is already recorded")
+    if any(isinstance(e, ExpiredEvent) and e.archive_id == archive_id for e in events.events):
+        raise AdoptRefused(f"archive {archive_id} has an expired event")
+    for event in events.events:
+        if isinstance(event, AdoptEvent) and event.archive_id == archive_id:
+            return event
+    raise AdoptRefused(f"no adopt event names archive {archive_id}")
+
+
+def _open_stored(store: ArchiveStore, archive_id: str) -> int:
+    """Open the stored archive: a regular file, not a link, singly linked."""
+    try:
+        os.lstat(archive_file_name(archive_id), dir_fd=store.dir_fd)
+    except FileNotFoundError as exc:
+        raise AdoptRefused(f"archive {archive_id} is not in the store; the move never ran") from exc
+    try:
+        fd = store.open_archive(archive_id)
+    except StoreRefused as exc:
+        raise AdoptRefused(str(exc)) from exc
+    links = os.fstat(fd).st_nlink
+    if links != 1:
+        os.close(fd)
+        raise AdoptRefused(f"the stored archive has {links} hard links")
+    return fd
 
 
 def _check_names(entry_name: str, tarball_name: str, original_path: str, now: datetime) -> None:

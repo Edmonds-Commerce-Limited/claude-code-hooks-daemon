@@ -21,8 +21,10 @@ from claude_code_hooks_daemon.core import scratch_archive_adopt as adopt_mod
 from claude_code_hooks_daemon.core import scratch_archive_pack as pack_mod
 from claude_code_hooks_daemon.core.scratch_archive import (
     ARCHIVE_SUFFIX,
+    EVENTS_NAME,
     AdoptEvent,
     ArchiveStore,
+    ExpiredEvent,
     StoreRefused,
     archive_file_name,
 )
@@ -31,6 +33,8 @@ from claude_code_hooks_daemon.core.scratch_archive_adopt import (
     AdoptRefused,
     AdoptStuck,
     adopt,
+    finish_adoption,
+    unfinished_adoptions,
 )
 from claude_code_hooks_daemon.core.scratch_archive_claim import open_dir
 from claude_code_hooks_daemon.core.scratch_archive_pack import (
@@ -701,3 +705,201 @@ class TestAdoptCrashes:
         assert store.read_index().records == ()
         with pytest.raises(StoreRefused, match="adopt"):
             store.discard_unrecorded(event.archive_id)
+
+
+# --- finishing an adoption a crash left without a record (Task 3.8 precondition) --
+
+
+def _crash_before_record(
+    root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool, monkeypatch: pytest.MonkeyPatch
+) -> AdoptEvent:
+    """Adopt ``e1`` and crash at the index append; return the adopt event."""
+    _make(root)
+    _pack_by_hand(root)
+
+    def crash(*_args: Any, **_kwargs: Any) -> None:
+        raise Crash
+
+    monkeypatch.setattr(store, "append", crash)
+    with pytest.raises(Crash):
+        _adopt(store, root_fd, gnu_tar)
+    monkeypatch.undo()
+    (event,) = store.read_events().events
+    assert isinstance(event, AdoptEvent)
+    return event
+
+
+def _finish(
+    store: ArchiveStore, root_fd: int, gnu_tar: TarTool, archive_id: str, name: str = "e1"
+) -> Adopted:
+    return finish_adoption(
+        store,
+        root_fd,
+        name,
+        archive_id,
+        checkout="main",
+        verdict="DISPOSABLE",
+        proof_ids=("P6",),
+        expires_at="2026-11-21T00:00:00+00:00",
+        restore_command="hooks-daemon scratch-restore",
+        tar=gnu_tar,
+        max_inodes=1000,
+    )
+
+
+class TestFinishAdoption:
+    def test_needs_the_lock(self, tmp_path: Path, root: Path, root_fd: int) -> None:
+        with ArchiveStore.open(tmp_path / "other-store") as unlocked:
+            with pytest.raises(StoreRefused, match="lock"):
+                _finish(unlocked, root_fd, find_gnu_tar(), "0" * 32)
+            with pytest.raises(StoreRefused, match="lock"):
+                unfinished_adoptions(unlocked)
+
+    def test_a_crash_before_the_record_is_finished_and_then_restores(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        event = _crash_before_record(root, root_fd, store, gnu_tar, monkeypatch)
+        before = _tree(root / "e1")
+        assert unfinished_adoptions(store) == (event,)
+        result = _finish(store, root_fd, gnu_tar, event.archive_id)
+        assert (result.archive_id, result.original_path, result.tarball) == (
+            event.archive_id,
+            event.original_path,
+            event.tarball,
+        )
+        (record,) = store.read_index().records
+        assert record.archive_id == event.archive_id
+        assert record.packed_at == event.at
+        assert "P6" in record.proof_ids
+        assert record.sha256 == result.sha256
+        assert unfinished_adoptions(store) == ()
+        audit = store.audit()
+        assert (audit.unrecorded_archives, audit.records_without_archive) == ((), ())
+        _remove_tree(root / "e1")
+        restore(store, event.archive_id, root_fd, tar=gnu_tar, max_inodes=1000)
+        assert _tree(root / "e1") == before
+
+    def test_a_changed_original_is_refused_and_the_archive_stays(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        event = _crash_before_record(root, root_fd, store, gnu_tar, monkeypatch)
+        name = archive_file_name(event.archive_id)
+        data = (store.path / name).read_bytes()
+        (root / "e1" / "a.txt").write_text("changed since")
+        with pytest.raises(AdoptRefused, match="differ"):
+            _finish(store, root_fd, gnu_tar, event.archive_id)
+        assert store.read_index().records == ()
+        assert (store.path / name).read_bytes() == data
+        assert unfinished_adoptions(store) == (event,)
+
+    def test_a_recorded_id_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool
+    ) -> None:
+        _make(root)
+        _pack_by_hand(root)
+        adopted = _adopt(store, root_fd, gnu_tar)
+        with pytest.raises(AdoptRefused, match="recorded"):
+            _finish(store, root_fd, gnu_tar, adopted.archive_id)
+        assert len(store.read_index().records) == 1
+
+    def test_an_unknown_id_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, gnu_tar: TarTool
+    ) -> None:
+        _make(root)
+        with pytest.raises(AdoptRefused, match="no adopt event"):
+            _finish(store, root_fd, gnu_tar, "0" * 32)
+        assert store.read_index().records == ()
+
+    def test_an_expired_id_is_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        event = _crash_before_record(root, root_fd, store, gnu_tar, monkeypatch)
+        store.append_event(ExpiredEvent(archive_id=event.archive_id, at=event.at))
+        assert unfinished_adoptions(store) == ()
+        with pytest.raises(AdoptRefused, match="expired"):
+            _finish(store, root_fd, gnu_tar, event.archive_id)
+        assert store.read_index().records == ()
+
+    def test_another_entry_name_is_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        event = _crash_before_record(root, root_fd, store, gnu_tar, monkeypatch)
+        _make(root, "e2")
+        with pytest.raises(AdoptRefused, match="does not name"):
+            _finish(store, root_fd, gnu_tar, event.archive_id, name="e2")
+        assert store.read_index().records == ()
+
+    def test_a_crash_before_the_move_has_no_archive_to_finish(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _make(root)
+        tarball = _pack_by_hand(root)
+
+        def crash(*_args: Any, **_kwargs: Any) -> None:
+            raise Crash
+
+        monkeypatch.setattr(adopt_mod, "rename_noreplace_between", crash)
+        with pytest.raises(Crash):
+            _adopt(store, root_fd, gnu_tar)
+        monkeypatch.undo()
+        (event,) = unfinished_adoptions(store)
+        with pytest.raises(AdoptRefused, match="not in the store"):
+            _finish(store, root_fd, gnu_tar, event.archive_id)
+        assert tarball.exists()
+        assert store.read_index().records == ()
+
+    def test_a_multi_linked_store_archive_is_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        event = _crash_before_record(root, root_fd, store, gnu_tar, monkeypatch)
+        name = archive_file_name(event.archive_id)
+        os.link(store.path / name, store.path / "extra-link")
+        with pytest.raises(AdoptRefused, match="hard links"):
+            _finish(store, root_fd, gnu_tar, event.archive_id)
+        assert store.read_index().records == ()
+        assert (store.path / name).exists()
+
+    def test_a_torn_events_file_is_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        event = _crash_before_record(root, root_fd, store, gnu_tar, monkeypatch)
+        with (store.path / EVENTS_NAME).open("a") as handle:
+            handle.write('{"kind": "exp')
+        with pytest.raises(AdoptRefused, match="torn"):
+            _finish(store, root_fd, gnu_tar, event.archive_id)
+        assert store.read_index().records == ()
