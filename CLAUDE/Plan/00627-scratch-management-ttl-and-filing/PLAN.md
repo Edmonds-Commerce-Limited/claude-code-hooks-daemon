@@ -82,7 +82,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [x] ✅ **Task 3.1**: Add the store: flat layout, mode 0700, `index.jsonl`, `flock`.
 - [x] ✅ **Task 3.2**: Add claim-by-rename through a directory descriptor, with the fingerprint re-check and rename-back.
 - [x] ✅ **Task 3.3**: Add pack and bidirectional verify (GNU tar by argv, `tar --compare`, member count, SHA-256, `fsync`), including the special-file skip list and the link-count refusal.
-- [ ] ⬜ **Task 3.4**: Add descriptor-based removal of a claimed tree, and resumption of a leftover `.sweeping-` tree.
+- [x] ✅ **Task 3.4**: Add descriptor-based removal of a claimed tree, and resumption of a leftover `.sweeping-` tree.
 - [ ] ⬜ **Task 3.5**: Add batch packing of loose files by run and verdict.
 - [ ] ⬜ **Task 3.6**: Add expiry by verdict retention, `restore <id>` and `keep` (bounded, reasoned, no repeated reason).
 - [ ] ⬜ **Task 3.7**: Add proof P6 (adopt a tarball beside its original).
