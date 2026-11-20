@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.handlers.subagent_stop import (
 from claude_code_hooks_daemon.handlers.subagent_stop.branch_reject_verdict_recorder import (
     BranchRejectVerdictRecorderHandler,
 )
+from claude_code_hooks_daemon.install.config_migrations import unreleased_manifests_dir
 
 OPUS = "claude-opus-5-5"
 SESSION = "s1"
@@ -487,13 +488,18 @@ class TestRegistration:
         )
         assert f"    {_KEY}: {{enabled: true, priority: 13}}" in text
 
-    def test_the_unreleased_manifest_adds_it(self) -> None:
+    def test_a_config_changes_manifest_adds_it(self) -> None:
+        """Staged or released: release prep moves the manifest, so either location counts."""
         import yaml
 
-        manifest = yaml.safe_load(
-            (_REPO / "CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.77.0.yaml").read_text(
-                encoding="utf-8"
+        released = _REPO / "CLAUDE/UPGRADES/config-changes"
+        manifests = [*released.glob("v*.yaml"), *unreleased_manifests_dir(released).glob("v*.yaml")]
+        keys = {
+            entry["key"]
+            for path in manifests
+            for entry in (
+                yaml.safe_load(path.read_text(encoding="utf-8"))["config_changes"].get("added")
+                or []
             )
-        )
-        keys = [entry["key"] for entry in manifest["config_changes"]["added"]]
+        }
         assert f"handlers.subagent_stop.{_KEY}" in keys
