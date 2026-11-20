@@ -6,17 +6,21 @@ Paths are under `src/claude_code_hooks_daemon/` unless stated. Code claims were 
 
 **The owner's words (verbatim, in session, 19 November 2026):** "use fable - we need a full scratch management system. scratch files should have TTL, old files MUST be filed properly or deleted. I suggest 24 hours. has value - keep (plan folder, main project script etc), no value - delete".
 
-Every ruling below marked **R** is **settled by a fable sub-agent under the owner's delegation, 2026-11-19**. The owner may overturn any of them; each is written so that overturning it changes one section.
+**The owner's words on repositories in scratch (verbatim, in session, 20 November 2026), answering R7:** "why are we having repos in scratch at all? no special rules for repos. untracked/repos for reference repos which are kept around - scratch repo - i dont know what this is for but its presumably for testing stuff etc - no value". This overturns R7 (below).
+
+**The owner's words on TTLs for the rest of `untracked/` (verbatim, in session, 20 November 2026):** "regards untracked - how about we have default/configurable TTL for untracked paths: untracked-ttl: repos: * (means unlimited, never clear); scratch: 7d; other-dir: 36h". This is R16 (below, section 4.1).
+
+Every other ruling below marked **R** is **settled by a fable sub-agent under the owner's delegation, 2026-11-19**. The owner may overturn any of them; each is written so that overturning it changes one section.
 
 | Id  | Ruling                                                                                                                                                                                                                                                             | Section |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
 | R1  | An entry past its TTL has exactly four possible fates: stay (it is live or protected), be filed (a tracked home), be archived (one verified tarball, held, then removed), or be removed after a hold. Nothing past TTL stays as a directory tree unless protected. | 3, 5    |
-| R2  | TTL is 24 hours by default, configurable, and the clock is the newest mtime inside the entry, with three backstops (birth marker, a maximum lifetime, a live-process check).                                                                                       | 4       |
+| R2  | TTL is 24 hours by default, configurable per `untracked/` directory (R16), and the clock is the newest mtime inside the entry, with three backstops (birth marker, a maximum lifetime, a live-process check).                                                      | 4       |
 | R3  | Deletion needs a machine proof. An agent's statement that something has no value is never an input. What cannot be proved valueless is UNCERTAIN, and UNCERTAIN is packed, verified, held for longer, announced, and only then removed.                            | 3       |
 | R4  | The sweep proposes filing and never performs it. Filing is authorship (a name, a destination, a commit) and must pass the content guards, which see only `Write` and `Edit`.                                                                                       | 6       |
 | R5  | Nothing is removed directly. Every removal goes through the archive store, and the store is flat (no directory trees), so it never adds to the link index.                                                                                                         | 5       |
 | R6  | A repository or worktree holding unpushed commits or dirty tracked content is never packed and never removed by the sweep. "Unpushed" is defined only for a repository that has somewhere to push (a remote, or shared history with the project).                  | 3.3     |
-| R7  | A standalone repository (no remote, history unrelated to the project) is UNCERTAIN, never DISPOSABLE: packed whole, held for the long retention.                                                                                                                   | 3.3     |
+| R7  | **Overturned by the owner, 2026-11-20** ("no special rules for repos"). A standalone repository (no remote, history unrelated to the project) has no repository rule: it is judged by the same ladder as any other content (section 3.3).                          | 3.3     |
 | R8  | A reference from a tracked file protects an entry from removal, not from packing. A referenced entry past TTL becomes one archive with no expiry until it is filed or the reference goes.                                                                          | 3.4     |
 | R9  | Scratch is written inside a per-session directory the daemon creates and marks. The TTL unit is a child of that directory.                                                                                                                                         | 7       |
 | R10 | Caps are judged on directories, bytes and entries. Above the warn cap the session is told; above the block cap, directory-creating commands into scratch are denied and the sweep may pack idle entries before their TTL. Message files are never denied.          | 8       |
@@ -25,6 +29,7 @@ Every ruling below marked **R** is **settled by a fable sub-agent under the owne
 | R13 | The housekeeping step that applies the sweep acts without confirmation. This amends Plan 00330 Decision 6 for this one step, because every removal trails a hold window.                                                                                           | 10      |
 | R14 | A worktree's scratch is evacuated into the main checkout's archive store before the worktree is reaped; a protected entry still refuses the reap.                                                                                                                  | 11      |
 | R15 | Only a human may pin an entry for ever (`.scratch-keep`); an agent may only pause it, for a bounded time, with a reason.                                                                                                                                           | 3.5     |
+| R16 | The owner's request: each directory directly under `untracked/` has a configurable TTL (`"*"` = never cleared). `repos` and every reference-repository root are never swept whatever the config says. An unlisted directory falls through to `"*"`.                | 4.1     |
 
 ## 1. Relationship to Plan 00560
 
@@ -91,13 +96,13 @@ P1 is the only proof that trusts a name, and it trusts it only in the direction 
 
 Every `.git` directory or file found at any depth in an entry is a repository to judge. The walk finds them; it does not run git inside a path it has not classified.
 
-| Kind                                                                       | Test                                                                                                                                                                                                                                                                                                                                       | Verdict for the entry                                                                     |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| Registered worktree of the project                                         | Its path is in the main repository's `git worktree list --porcelain`                                                                                                                                                                                                                                                                       | PROTECTED. Removal goes through `git worktree remove` and its guard, never a tree delete. |
-| `.git` file pointing outside the entry, not registered                     | The `gitdir:` target is not inside the entry                                                                                                                                                                                                                                                                                               | PROTECTED. It is part of some other repository; a human decides.                          |
-| Related repository: has a remote, or shares a root commit with the project | (a) `git status --porcelain --untracked-files=no` is empty, or every dirty file's blob passes P3; (b) no stash; (c) every ref tip and HEAD is an ancestor of a **live-verified remote tip** (section 3.3.1)                                                                                                                                | All three hold: P4 applies. Any fails: PROTECTED.                                         |
-| Standalone repository: no remote, no shared root commit                    | None. It has nowhere to push, so "unpushed" does not apply (R6). **Its local commits and any dirty tracked content are packed with it and removed when the hold ends**: this is the one place the design narrows "never delete a repository with unpushed commits or dirty tracked content", and the ruling the owner should look at first | UNCERTAIN (R7). Packed whole with its `.git`. Never DISPOSABLE.                           |
-| Linked worktree of a nested repository, inside the same entry              | The `gitdir:` target is inside the entry                                                                                                                                                                                                                                                                                                   | Judged with its parent.                                                                   |
+| Kind                                                                       | Test                                                                                                                                                                                                                                                                                                              | Verdict for the entry                                                                                                                                               |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Registered worktree of the project                                         | Its path is in the main repository's `git worktree list --porcelain`                                                                                                                                                                                                                                              | PROTECTED. Removal goes through `git worktree remove` and its guard, never a tree delete.                                                                           |
+| `.git` file pointing outside the entry, not registered                     | The `gitdir:` target is not inside the entry                                                                                                                                                                                                                                                                      | PROTECTED. It is part of some other repository; a human decides.                                                                                                    |
+| Related repository: has a remote, or shares a root commit with the project | (a) `git status --porcelain --untracked-files=no` is empty, or every dirty file's blob passes P3; (b) no stash; (c) every ref tip and HEAD is an ancestor of a **live-verified remote tip** (section 3.3.1)                                                                                                       | All three hold: P4 applies. Any fails: PROTECTED.                                                                                                                   |
+| Standalone repository: no remote, no shared root commit                    | None. The owner ruled "no special rules for repos" (R7 overturned). Its `.git` is ordinary content: it has nowhere to push, so "unpushed" does not apply (R6). Standalone must be proved for **every** marker in the entry: one marker of another kind, or any git failure, decides the entry by that row instead | The ordinary ladder: DISPOSABLE only if every file, `.git` included, passes P1, P2, P3 or P5; otherwise UNCERTAIN. No repository-specific proof makes it DISPOSABLE |
+| Linked worktree of a nested repository, inside the same entry              | The `gitdir:` target is inside the entry                                                                                                                                                                                                                                                                          | Judged with its parent.                                                                                                                                             |
 
 The clone's own refs are never the proof. The measurement found a clone with 47 commits "on no remote-tracking ref" that were probably stale refs; the clone's refs prove nothing either way.
 
@@ -110,7 +115,7 @@ The main repository's remote-tracking refs are a cache too, and a cached positiv
 - **Remote-held blob set (P3).** Built once per sweep as the blobs in the tree of the verified default-branch tip (`git ls-tree -r`), keyed by blob hash. A scratch file passes when `git hash-object` of its content is in that set. Historical blobs are deliberately left out: the set stays small, and a copy of the current tree is the case that occurs.
 - Every failure and timeout is a reason, never a pass (the module's own rule).
 
-A standalone repository's dirty or committed content is not proved by any of this; that is why it is UNCERTAIN and never DISPOSABLE.
+A standalone repository's dirty or committed content is not proved by any of this, and needs no proof: it goes down the same ladder as a loose file (owner, R7 overturned).
 
 A git command that times out, fails or is refused makes the entry STUCK, never DISPOSABLE.
 
@@ -142,7 +147,7 @@ Legacy content has neither mark. For it, the long retention of UNCERTAIN is the 
 | Review output                       | `00622-review3/` (findings text plus generated fixtures)               | REFERENCED if cited, else UNCERTAIN       | Findings and case lists: `<plan>/subagent-reports/`. Fixtures: not filed          |
 | Probe harnesses and scripts         | `*.py`, `*.sh`, `*.bash`                                               | UNCERTAIN                                 | `scripts/` (tooling) or `tests/` (a harness, with its test first)                 |
 | Generated fixture trees             | `rv614c/`, `probe-run/`, `tmpXXXX/`                                    | UNCERTAIN (or P3/P5 where they hold)      | Not filed. The generator, if worth keeping, is a script (row above)               |
-| Throwaway repositories              | `proj-*`, `gitprobe`, repositories with links to dummy protected files | UNCERTAIN (standalone, R7)                | Not filed                                                                         |
+| Throwaway repositories              | `proj-*`, `gitprobe`, repositories with links to dummy protected files | The ordinary ladder (no repository rule)  | Not filed                                                                         |
 | Clones and worktrees of the project | `w609-*`, `r614c*`                                                     | P4 if clean and pushed, else PROTECTED    | Push the commits (`git push origin HEAD:refs/heads/<name>`), then it is P4        |
 | Caches and venvs                    | `__pycache__/`, a venv                                                 | DISPOSABLE (P2)                           | Not filed                                                                         |
 | Release-bound notes                 | a draft release note or upgrade task                                   | UNCERTAIN                                 | `CLAUDE/UPGRADES/UNRELEASED/`                                                     |
@@ -151,11 +156,32 @@ Legacy content has neither mark. For it, the long retention of UNCERTAIN is the 
 
 ## 4. TTL and liveness
 
-- **TTL** = `scratch.ttl_hours`, default 24. An entry may carry a longer one in the session manifest (section 7), bounded by `scratch.max_ttl_hours` (default 72).
+- **TTL** = the root's value in `scratch.untracked_ttl` (section 4.1); for `untracked/scratch/` the default is `24h`. An entry may carry a longer one in the session manifest (section 7), bounded by `scratch.max_ttl_hours` (default 72) or the root's TTL, whichever is longer. The maximum lifetime is likewise never shorter than the root's TTL.
 - **Clock** = now minus the newest of: the mtime of every file and directory in the entry (`lstat`, links never followed), the entry root's ctime, and the session manifest's birth time for that entry. An mtime in the future is ignored for that inode and its ctime is used.
 - **Why three inputs.** `cp -a` and `tar -x` restore old mtimes, so a fresh copy can look expired: the root's ctime and the birth time cover that. `touch` keeps an entry young for ever: `scratch.max_lifetime_hours` (default 168) is measured from birth, or from the first time the inventory saw an unmarked entry, and past it the mtime is no longer consulted.
 - **LIVE regardless of age** when: a process has its working directory inside the entry (`default_process_cwds`); or a tracked background process's command names the entry's path (`background_process_tracker` records); or the entry is younger than `scratch.min_age_minutes` (default 30) by birth or ctime.
 - **Past TTL means due.** A due entry must leave by one of the four fates in R1. The sweep makes that true for every verdict except PROTECTED and KEPT, which it reports until a human or an agent acts.
+
+### 4.1 TTLs for the directories under `untracked/` (R16)
+
+The owner asked for "default/configurable TTL for untracked paths". The config is a map, `scratch.untracked_ttl`, keyed by one directory name directly under `untracked/`, plus `scratch.untracked_default_ttl` for any directory the map does not name:
+
+```yaml
+scratch:
+  untracked_ttl:
+    repos: "*"        # never cleared
+    scratch: 24h
+  untracked_default_ttl: "*"
+```
+
+- **Values** are `<N>h`, `<N>d` (N a positive whole number) or `"*"` (never cleared). `*` must be quoted: unquoted it is YAML alias syntax and the file does not parse.
+- **A malformed value** (`7 days`, a bare `36`, `0h`, `-1d`, empty, a number) is not an error that stops the config loading, and it is never read as `*`: it is replaced by that key's built-in default (`repos` `"*"`, `scratch` `24h`, any other key the fallthrough's built-in default) and a warning is logged. A key that is not a single directory name (`a/b`, `.`, `..`, empty) is dropped with a warning.
+- **Never swept, whatever the config says**: `repos`, every path in `reference_repos.roots`, and the archive store (`scratch-archive`, section 5.1). A config that gives one of them a finite TTL is overridden and the sweep says so. A sweep root equal to or inside one of them is refused before it is listed; a protected path inside a sweep root is skipped as an entry and named in a note.
+- **The scratch default stays 24 hours.** The owner typed "I suggest 24 hours" on 19 November and gave `scratch: 7d` on 20 November as an example in a request about the shape of the config. The example is a valid value (`scratch: 7d` loads), but the default is the owner's earlier explicit figure until the owner says otherwise.
+- **An unlisted directory falls through to `"*"`, not to a finite TTL.** In self-install mode the daemon's own runtime directory is `untracked/` itself, so its venvs, `logs/`, `worktrees/`, `spend-ledger/`, `supervise/` and the rest sit beside `scratch/`, and no registry of them exists to exclude them by. A finite fallthrough would make each of them a sweep root, and `logs/*.log` already passes P1. The fallthrough is configurable; a client project whose `untracked/` holds only agent-written directories can set it.
+- **A TTL only makes an entry due.** Every directory swept under this map goes through the same ladder (section 3), the same proofs and the same archive hold as scratch. Nothing is removed on age alone.
+- `sweep.extra_roots` is retired in favour of the map (neither has shipped). Loose files directly under `untracked/` are not a directory, so the map does not reach them; they are left to Task 6.1.
+- The default run sweeps `untracked/scratch/` only; `--root untracked/<dir>` sweeps another and takes that directory's TTL. Sweeping every finite-TTL directory in one run belongs with Task 6.1.
 
 ## 5. Removal: the archive store
 
@@ -265,12 +291,14 @@ Config, added to 00560's single top-level block:
 
 ```yaml
 scratch:
-  ttl_hours: 24
+  untracked_ttl:                 # one directory directly under untracked/ -> "<N>h" | "<N>d" | "*" (section 4.1)
+    repos: "*"
+    scratch: 24h
+  untracked_default_ttl: "*"     # any untracked/ directory the map does not name
   max_ttl_hours: 72
   max_lifetime_hours: 168
   min_age_minutes: 30
   sweep:
-    extra_roots: []              # other agent-written ignored directories to judge the same way
     max_listed: 50
     unowned_entry: advise        # advise | block | off
   archive:
@@ -289,7 +317,7 @@ scratch:
     mode: block                  # block | advise | off
 ```
 
-This repository sets `sweep.extra_roots` to the loose files directly under `untracked/`, `untracked/briefs/`, `untracked/reports/` and `untracked/agent-reports/` (not its `auto/` store, which has its own pruning).
+This repository may give `briefs`, `reports` and `agent-reports` a finite TTL in `untracked_ttl` (not `agent-reports/auto/`, which has its own pruning). The loose files directly under `untracked/` wait for Task 6.1 (section 4.1).
 
 ## 11. Worktrees
 
@@ -360,7 +388,7 @@ All test-first, with fake trees under pytest's `tmp_path`, an injected clock, in
 | X4  | `utils/regenerable_paths.py:59`, `config/models.py:2462`                                                | `NEVER_REGENERABLE` makes any worktree with scratch content refuse removal, with no way to empty it                                                                             | Section 11                                                              |
 | X5  | `handlers/pre_tool_use/subagent_context_budget.py:87`                                                   | `DEFAULT_HANDOFF_GLOBS` accepts `untracked/scratch/**` as a handoff home; a handoff there now expires                                                                           | Guidance: plan work hands off into `subagent-reports/`                  |
 | X6  | `issue_report/reproduction.py:51-55`                                                                    | Tells agents a fixture under scratch "survives"; it survives a restart and then the TTL                                                                                         | Wording (Task 7.1)                                                      |
-| X7  | `daemon/housekeeping.py:30`                                                                             | Housekeeping step reports default to `untracked/reports`, an ignored directory that nothing prunes                                                                              | Listed in `extra_roots` for this repository; ledgered                   |
+| X7  | `daemon/housekeeping.py:30`                                                                             | Housekeeping step reports default to `untracked/reports`, an ignored directory that nothing prunes                                                                              | A finite `untracked_ttl` entry for this repository; ledgered            |
 | X8  | `daemon/housekeeping.py` module docstring, Decision 6                                                   | Only the two formatters act without confirmation                                                                                                                                | Amended by R13                                                          |
 | X9  | `utils/link_index.py` (00623 branch) `BUILD_DIRECTORY_CAP`                                              | The index fails whole at the cap with no warning below it                                                                                                                       | Section 8 and 9                                                         |
 | X10 | Plan 00560 non-goal, Q4 baseline, DESIGN.md section 6                                                   | No automatic removal; backlog exempt                                                                                                                                            | R12                                                                     |
