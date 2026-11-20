@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.core.worktree_seed import (
     SeedEntry,
     parse_seed_config,
 )
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
@@ -58,7 +59,13 @@ from claude_code_hooks_daemon.utils.git_repo import (
 )
 from claude_code_hooks_daemon.utils.load_scaling import describe_load, scaled_timeout
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
-from claude_code_hooks_daemon.utils.worktree_seeding import seed_worktree, validate_seed_sources
+from claude_code_hooks_daemon.utils.worktree_seed_apply import refuse_uncommitted_protected_links
+from claude_code_hooks_daemon.utils.worktree_seeding import (
+    LinkAudit,
+    seed_link_audit_path,
+    seed_worktree,
+    validate_seed_sources,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +205,15 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             # BEFORE creation: an unusable entry must abandon the whole
             # operation rather than leave a worktree missing files its agent
             # cannot know are absent. Both calls no-op on an empty list.
-            validate_seed_sources(Path(root), entries)
+            # A copy-mode entry is judged against the guard config read
+            # STRICTLY: unreadable refuses the copy (Plan 00613 ruling Q3).
+            validate_seed_sources(
+                Path(root), entries, protected_patterns=sfm.load_protected_patterns_strict
+            )
+            # The same committed-config check as `seed-worktree`, with the same
+            # config source (review F6, re-review R6): the loaded list may carry
+            # an uncommitted edit after a restart.
+            refuse_uncommitted_protected_links(Path(root), entries)
 
             path.parent.mkdir(parents=True, exist_ok=True)
             self._git_worktree_add(
@@ -218,7 +233,18 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
                 WORKTREE_CREATE_ROUTE,
             )
 
-            seed_worktree(Path(root), path, entries)
+            # Each link to a protected source is audited in the MAIN checkout's
+            # daemon untracked dir before it is made (Plan 00613 Task 2.2).
+            seed_worktree(
+                Path(root),
+                path,
+                entries,
+                audit=LinkAudit(
+                    log_path=seed_link_audit_path(Path(root)),
+                    protected_patterns=sfm.load_protected_patterns_strict,
+                    session_id=str(session_id) if session_id else None,
+                ),
+            )
 
         return AdvisoryResult(worktree_path=str(path))
 
@@ -602,7 +628,10 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             "re-seeds over an agent's own edits. A configured path that has since "
             "disappeared ABORTS creation rather than handing you a quietly "
             f"under-seeded worktree — run `{daemon_cli_command_for_docs('check-worktree-seed')}` to "
-            "see which entries are stale and which local files are not yet covered."
+            "see which entries are stale and which local files are not yet covered. "
+            "A worktree made by hand (`git worktree add`) is not seeded; run "
+            f"`{daemon_cli_command_for_docs('seed-worktree')} <worktree>` to apply this "
+            "same list to it (it takes no path of its own)."
         )
         return "".join(lines)
 

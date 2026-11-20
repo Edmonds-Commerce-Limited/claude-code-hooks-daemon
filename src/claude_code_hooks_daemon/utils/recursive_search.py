@@ -32,6 +32,7 @@ import fnmatch
 import os
 import posixpath
 import re
+import stat
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Final
@@ -47,6 +48,7 @@ from claude_code_hooks_daemon.utils.grep_option_grammar import (
     grammar_for,
     parse_arguments,
 )
+from claude_code_hooks_daemon.utils.link_reach import LinkFollow, reached_through_links
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.protected_file_index import (
     ExemptHook,
@@ -62,10 +64,15 @@ from claude_code_hooks_daemon.utils.secret_file_matching import (
     directory_ancestors,
     expand_directory_glob,
     link_scan_scope,
+    path_mention_words,
     place_outside_project,
     scan_project_links,
     toplevel_move_length,
     toplevel_relocated,
+)
+from claude_code_hooks_daemon.utils.shell_expansion import (
+    TooManyToEnumerateError,
+    expand_braces,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
@@ -84,6 +91,11 @@ _git_environment_named: Final[contextvars.ContextVar[bool]] = contextvars.Contex
     "git_environment_named", default=True
 )
 _GIT_STEERING_VARIABLE: Final[re.Pattern[str]] = re.compile(r"GIT_|HOME|EDITOR|VISUAL")
+# Whether the command could redefine what a later search word runs (a function, an alias,
+# GREP_OPTIONS): set by :func:`search_reads`; no search is then proven to follow no link.
+_follow_steering_named: Final[contextvars.ContextVar[bool]] = contextvars.ContextVar(
+    "follow_steering_named", default=True
+)
 
 TOOL_GREP: Final[str] = "grep"
 TOOL_RG: Final[str] = "rg"
@@ -122,7 +134,51 @@ _XARGS: Final[str] = "xargs"
 _XARGS_VALUE_FLAGS: Final[frozenset[str]] = frozenset(
     {"-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a", "-J"}
 )
-_FIND: Final[str] = "find"
+#: Walkers with ``find``'s grammar: roots first, then an expression with ``-exec`` actions.
+_FIND_COMMANDS: Final[frozenset[str]] = frozenset({"find", "gfind", "bfs"})
+#: Walkers that run a command on each file they list: ``fd [OPTIONS] [PATTERN] [PATH]...``.
+_FD_COMMANDS: Final[frozenset[str]] = frozenset({"fd", "fdfind"})
+#: ``fd``'s options that run a command per file (``-x``) or once for all files (``-X``).
+_FD_EXEC_LONG: Final[tuple[str, ...]] = ("--exec", "--exec-batch")
+_FD_EXEC_TERMINATOR: Final[str] = ";"
+#: ``fd`` options whose value is the next word (so it is neither the pattern nor a path).
+_FD_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
+    {
+        "-d",
+        "-e",
+        "-E",
+        "-t",
+        "-c",
+        "-j",
+        "-S",
+        "-o",
+        "--max-depth",
+        "--min-depth",
+        "--exact-depth",
+        "--extension",
+        "--exclude",
+        "--type",
+        "--color",
+        "--threads",
+        "--size",
+        "--owner",
+        "--changed-within",
+        "--changed-before",
+        "--newer",
+        "--older",
+        "--path-separator",
+        "--ignore-file",
+        "--batch-size",
+        "--max-results",
+        "--hyperlink",
+        "--and",
+        "--format",
+        "--strip-cwd-prefix",
+    }
+)
+_BRACE_OPEN: Final[str] = "{"
+_FD_SEARCH_PATH: Final[str] = "--search-path"
+_FD_BASE_DIRECTORY: Final[str] = "--base-directory"
 _FIND_LEADING_OPTIONS: Final[frozenset[str]] = frozenset({"-H", "-L", "-P"})
 _FIND_EXPRESSION_STARTS: Final[frozenset[str]] = frozenset({"(", "!", ")"})
 # git grep reads the working tree instead of the index with either of these.
@@ -510,6 +566,10 @@ class Read:
     glob: bool = False
     rules: _Rules = field(default_factory=_Rules)
     default_expansion: bool = False
+    #: The links below ``root`` the reader follows; ALL unless proven otherwise (Plan 00613).
+    follows: LinkFollow = LinkFollow.ALL
+    #: ``root`` is where a ``link/..`` root really points; outside the project nothing is indexed.
+    physical: bool = False
 
 
 @fails_closed
@@ -523,12 +583,14 @@ def search_reads(command: str, cwd: str | None) -> list[Read]:
     bases = (cwd,) if cwd is not None and posixpath.isabs(cwd) else ()
     reset = _rg_config_named.set(RG_CONFIG_ENV in command)
     git_reset = _git_environment_named.set(_GIT_STEERING_VARIABLE.search(command) is not None)
+    follow_reset = _follow_steering_named.set(_FOLLOW_STEERING.search(command) is not None)
     tracker = _SearchCwds(cwd, cdpath=CDPATH_VARIABLE in command, command=command)
     try:
         # One link scan for the command's many computed moves, even outside a guard's scope.
         with link_scan_scope():
             reads = list(dict.fromkeys(_reads(command, bases, 0, tracker)))
     finally:
+        _follow_steering_named.reset(follow_reset)
         _git_environment_named.reset(git_reset)
         _rg_config_named.reset(reset)
     if not any(read.glob for read in reads):
@@ -544,16 +606,47 @@ def protected_reached(
 ) -> tuple[str, str] | None:
     """``(pattern, searched root)`` when one of ``reads`` reaches a protected file in ``index``.
 
-    ``is_exempt`` skips a protected file the caller confirmed safe to read.
+    ``is_exempt`` skips a protected file the caller confirmed safe to read. A read
+    that follows links is also judged on what lies behind each link below its root
+    (Plan 00613: a worktree's seeded links into the main checkout).
     """
     for read in reads:
+        if read.physical and _outside_project(read.root, index):
+            # `link/..` stepped out of a link to a place the project's index never listed
+            # (a worktree-root daemon, the main checkout): no file there is vouched for.
+            return (index.patterns[0], read.root) if index.patterns else None
         for searched in _directories_read(read, index):
             hit = index.find_under(
                 searched.root, view=searched.view, skip=searched.skip, is_exempt=is_exempt
             )
             if hit is not None:
                 return hit, searched.root
+        if read.follows is LinkFollow.NONE:
+            continue
+        root = _glob_literal_directory(read.root) if read.glob else read.root
+        hit = reached_through_links(root, read.follows, index, is_exempt=is_exempt)
+        if hit is not None:
+            return hit, root
     return None
+
+
+def _outside_project(path: str, index: ProtectedFileIndex) -> bool:
+    """Does ``path`` lie outside the project ``index`` lists, however either is spelled?"""
+    tops = {index.project_root, os.path.realpath(index.project_root)}
+    return not any(path == top or path.startswith(top.rstrip("/") + "/") for top in tops)
+
+
+def _glob_literal_directory(pattern: str) -> str:
+    """The directory an absolute glob spells before its first wildcard component.
+
+    Every link a recursive reader of the glob's matches can follow lies below it.
+    """
+    literal: list[str] = []
+    for part in pattern.split("/"):
+        if any(char in part for char in _GLOB_CHARACTERS):
+            break
+        literal.append(part)
+    return "/".join(literal) or "/"
 
 
 def _directories_read(read: Read, index: ProtectedFileIndex) -> list[Read]:
@@ -690,6 +783,19 @@ def _after_directory_change(words: list[str], current: str | None) -> str | None
     return _place(operands[0], current)
 
 
+@dataclass(frozen=True)
+class _MadeLink:
+    """A link a statement of the command creates: where it leads, where it is placed.
+
+    ``destinations`` is None when the place cannot be told, so any later reader
+    may pass through it. ``origin`` is the creating statement's own words.
+    """
+
+    sources: tuple[str, ...]
+    destinations: tuple[str, ...] | None
+    origin: tuple[str, ...]
+
+
 @dataclass
 class _SearchCwds:
     """The directories a search may run in, and every ``cd`` target the command named."""
@@ -708,6 +814,8 @@ class _SearchCwds:
     command: str = ""
     # The directory links a computed move's scan found: a later reader may pass through one.
     computed_links: list[str] = field(default_factory=list)
+    # Links earlier statements of the command create: the filesystem the hook sees lacks them.
+    made_links: list[_MadeLink] = field(default_factory=list)
 
     def indeterminate(self) -> tuple[str, ...]:
         """A move that cannot be placed: the project root, every named target and the hook cwd.
@@ -846,7 +954,7 @@ def _segment_state(
             # Every later read is judged over every indexed file: the move is not followed.
             return fed_by, current
         return fed_by, _directory_change(words, 1, current, tracker)
-    if head == _FIND:
+    if head in _FIND_COMMANDS:
         return _find_roots(words), current
     return fed_by, current
 
@@ -862,6 +970,8 @@ def _segment_reads(
     """The trees the one command of ``segment`` reads, from each of ``current``."""
     words = _command_words(segment)
     if not words:
+        # `$(<file)` runs no command word and still reads its redirect (re-review R4).
+        yield from _reads_through_made_links(words, segment, current, tracker)
         return
     here = current
     relocating_env = _assigns_a_relocating_variable(segment, words)
@@ -893,14 +1003,23 @@ def _segment_reads(
         # move could have reached, the links among them, is read as a root too.
         for directory in tracker.indeterminate():
             yield Read(directory, view=TreeView.ALL)
+    yield from _reads_through_made_links(words, segment, here, tracker)
+    made = _made_link(words, here, segment)
+    if made is not None and made not in tracker.made_links:
+        tracker.made_links.append(made)
     if head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1]:
         inner = words[words.index(_SHELL_COMMAND_FLAG, 1) + 1]
         yield from _reads(inner, here, depth + 1, tracker)
     elif head == _EVAL:
         yield from _reads(" ".join(words[1:]), here, depth + 1, tracker)
-    elif head == _FIND:
+    elif head in _FIND_COMMANDS:
         if _find_execs_a_reader(words):
+            # find hands each link it lists to its command, which may follow it
+            # (`-exec grep -r {}`, `-exec cat {}/x`): no find proves it follows none.
             yield from _reads_from_each(_find_roots(words), here)
+    elif (fd_roots := _fd_exec_roots(words)) is not None:
+        # fd hands each file it lists to its `-x`/`-X` command, as find does.
+        yield from _reads_from_each(fd_roots, here)
     elif head == _XARGS:
         inner_words = _xargs_command(words)
         if inner_words and _is_search(inner_words):
@@ -917,9 +1036,258 @@ def _segment_reads(
             yield from _search_reads(words, base, piped_in=piped_in, relocating_env=relocating_env)
 
 
-def _reads_from_each(roots: tuple[str, ...], bases: tuple[str, ...]) -> Iterator[Read]:
+# --- A link made earlier in the same command (Plan 00613 F-BYPS F5) ------------------------------
+#
+# The hook judges the filesystem as it is before the command runs, so a link the command makes
+# (`ln -s main/conf conf2 && cat conf2/vault.txt`) does not exist yet when a later statement is
+# placed. Each link-making statement is recorded with where it leads and where it lands; a later
+# statement that names that place, or a place above or below it, is judged as a read of where
+# the link leads. A link that leads outside the project fails closed (see `Read.physical`).
+
+#: Every ``ln``/``link`` makes a link, whatever its flags (re-review R4: an
+#: abbreviated ``--sym`` is still ``--symbolic``, and a hard link is a link too).
+_LINK_COMMANDS: Final[frozenset[str]] = frozenset({"ln", "link"})
+_SYMBOLIC_COPY: Final[str] = "cp"
+_SYMBOLIC_COPY_LONG: Final[str] = "--symbolic-link"
+#: ``install -l <flags>`` (BSD) links instead of copying; ``-l`` takes a value.
+_INSTALL: Final[str] = "install"
+_INSTALL_LINK_OPTION: Final[str] = "-l"
+#: ``mv`` relocates an existing link (a seeded one): its target is read from where it lands.
+_MOVE: Final[str] = "mv"
+#: Multi-call binaries that run the applet named by their first argument.
+_MULTI_CALL: Final[frozenset[str]] = frozenset({"busybox", "toybox"})
+_TARGET_DIRECTORY_OPTIONS: Final[frozenset[str]] = frozenset({"-t", "--target-directory"})
+_SUFFIX_OPTIONS: Final[frozenset[str]] = frozenset({"-S", "--suffix"})
+_SEED_WORKTREE: Final[str] = "seed-worktree"
+_HOOKS_DAEMON: Final[str] = "hooks-daemon"
+_INPUT_REDIRECT: Final[str] = "<"
+#: An interpreter one-liner that may make a link: its operands cannot be placed (N683 class),
+#: so the link is judged as leading anywhere and landing anywhere.
+_INTERPRETER: Final[re.Pattern[str]] = re.compile(
+    r"(?:python|pypy)[0-9.]*|node(?:js)?|deno|bun|perl|ruby|php|lua"
+)
+#: A call of a link-making function (``os.symlink(``, ``fs.symlinkSync(``,
+#: ``Path.symlink_to(``, ``os.link(``, perl ``symlink "a", "b"``) or an ``ln``
+#: run as a quoted program; ``unlink``/``readlink``/``islink``/``is_symlink``
+#: are not link-makers, hence the lookbehind.
+_INTERPRETER_LINK_CALL: Final[re.Pattern[str]] = re.compile(
+    r"(?<![A-Za-z_])(?:symlink(?:Sync|_to)?|(?:hard)?link(?:Sync|_to)?)(?=\s*[(\"'$])" r"|[\"']ln\b"
+)
+
+
+def _made_link(words: list[str], here: tuple[str, ...], segment: str) -> _MadeLink | None:
+    """The link a statement creates or relocates, or None.
+
+    ``ln``/``link`` (any flags), ``cp -s``, ``install -l``, ``mv`` of what may be a
+    link, an interpreter one-liner calling a link function, and
+    ``hooks-daemon seed-worktree``; a ``busybox``/``toybox`` applet is its applet.
+    """
+    head = posixpath.basename(words[0])
+    if head in _MULTI_CALL and len(words) > 1:
+        words = words[1:]
+        head = posixpath.basename(words[0])
+    if head == _HOOKS_DAEMON:
+        operands = _link_operands(words[1:])[0]
+        if not operands or operands[0] != _SEED_WORKTREE:
+            return None
+        destinations = _places(operands[1:2], here)
+        # What a seed list links is the project's configuration: every file may be behind one.
+        return _MadeLink((_EVERYTHING,), destinations, tuple(words))
+    if _INTERPRETER.fullmatch(head) and _INTERPRETER_LINK_CALL.search(segment):
+        return _MadeLink((_EVERYTHING,), None, tuple(words))
+    if head == _MOVE:
+        return _moved_link(words, here)
+    if not _makes_a_link(head, words[1:]):
+        return None
+    valued = frozenset({_INSTALL_LINK_OPTION}) if head == _INSTALL else frozenset()
+    operands, target_directory = _link_operands(words[1:], valued)
+    if target_directory is not None:
+        sources, destination_words = operands, [target_directory]
+    elif len(operands) >= 2:
+        sources, destination_words = operands[:-1], [operands[-1]]
+    elif operands:
+        sources, destination_words = operands, [posixpath.basename(operands[0])]
+    else:
+        return None
+    destinations = _places(destination_words, here)
+    # A link's relative target is read from the directory the link lands in.
+    anchors = (
+        *here,
+        *(posixpath.dirname(place) for place in destinations or ()),
+        *(destinations or ()),
+    )
+    placed: dict[str, None] = {}
+    for source in sources:
+        found = [
+            place
+            for anchor in dict.fromkeys(anchors or (None,))
+            if (place := _place(source, anchor)) is not None
+        ]
+        placed.update(dict.fromkeys(found or [_EVERYTHING]))
+    return _MadeLink(tuple(placed), destinations, tuple(words))
+
+
+def _makes_a_link(head: str, arguments: list[str]) -> bool:
+    """Does the command make a link: any ``ln``, a ``cp -s``, an ``install -l``?
+
+    A ``cp`` long option is matched by any unambiguous abbreviation (``--sy``),
+    as GNU getopt accepts one.
+    """
+    if head in _LINK_COMMANDS:
+        return True
+    if head not in (_SYMBOLIC_COPY, _INSTALL):
+        return False
+    letter = "s" if head == _SYMBOLIC_COPY else _INSTALL_LINK_OPTION[1]
+    for word in arguments:
+        if word == _END_OF_OPTIONS:
+            return False
+        name = word.partition("=")[0]
+        if head == _SYMBOLIC_COPY and len(name) > 3 and _SYMBOLIC_COPY_LONG.startswith(name):
+            return True
+        if word.startswith("-") and not word.startswith("--") and letter in word[1:]:
+            return True
+    return False
+
+
+def _moved_link(words: list[str], here: tuple[str, ...]) -> _MadeLink | None:
+    """What an ``mv`` relocates, judged as a link made where it lands.
+
+    A renamed link keeps its target text, and a relative target is then read
+    from the new directory; a moved directory may hold such links. A link or a
+    directory that changes directory is judged as leading anywhere; one renamed
+    in place, or a plain file, leads where the source does now.
+    """
+    operands, target_directory = _link_operands(words[1:])
+    if target_directory is not None:
+        sources, destination_words = operands, [target_directory]
+    elif len(operands) >= 2:
+        sources, destination_words = operands[:-1], [operands[-1]]
+    else:
+        return None
+    destinations = _places(destination_words, here)
+    stays = target_directory is None and len(sources) == 1
+    placed: dict[str, None] = {}
+    for base in here or (None,):
+        for source in sources:
+            place = _place(source, base)
+            if place is None:
+                placed[_EVERYTHING] = None
+                continue
+            same_parent = (
+                stays
+                and destinations is not None
+                and all(
+                    posixpath.dirname(landed) == posixpath.dirname(place) for landed in destinations
+                )
+            )
+            relocates = _may_hold_links(place) and not same_parent
+            placed[_EVERYTHING if relocates else place] = None
+    return _MadeLink(tuple(placed), destinations, tuple(words))
+
+
+def _may_hold_links(path: str) -> bool:
+    """Is ``path`` a link or a directory (which may hold links)? Unreadable counts."""
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return stat.S_ISLNK(mode) or stat.S_ISDIR(mode)
+
+
+def _link_operands(
+    arguments: list[str], valued: frozenset[str] = frozenset()
+) -> tuple[list[str], str | None]:
+    """The operands of an ``ln``/``cp``/``mv``/``hooks-daemon`` command, and its ``-t`` directory.
+
+    ``valued`` names further options that take the next word as their value.
+    """
+    operands: list[str] = []
+    target_directory: str | None = None
+    options_ended = False
+    skip_value = False
+    take_target = False
+    for word in arguments:
+        if skip_value:
+            skip_value = False
+            if take_target:
+                target_directory = word
+            continue
+        if options_ended or not word.startswith("-") or word == _LONE_DASH:
+            operands.append(word)
+        elif word == _END_OF_OPTIONS:
+            options_ended = True
+        elif word in _TARGET_DIRECTORY_OPTIONS or word in _SUFFIX_OPTIONS or word in valued:
+            skip_value, take_target = True, word in _TARGET_DIRECTORY_OPTIONS
+        elif word.startswith("--target-directory="):
+            target_directory = word.partition("=")[2]
+    return operands, target_directory
+
+
+def _places(words: list[str], here: tuple[str, ...]) -> tuple[str, ...] | None:
+    """Where each of ``words`` lies from each of ``here``; None when one cannot be placed."""
+    placed: dict[str, None] = {}
+    for base in here or (None,):
+        for word in words:
+            place = _place(word, base)
+            if place is None:
+                return None
+            placed[place] = None
+    return tuple(placed)
+
+
+def _reads_through_made_links(
+    words: list[str], segment: str, here: tuple[str, ...], tracker: _SearchCwds
+) -> Iterator[Read]:
+    """The places earlier-made links lead to, when this statement names where they land.
+
+    Besides the operands, every path-shaped word of the statement counts, split
+    as the direct mention scan splits it (re-review R4): a leading or attached
+    redirect, ``dd if=``, an interpreter literal, a ``file://`` URL. Any input
+    redirect makes the statement a reader, whatever its command: ``$(<file)``
+    reads even with no command word, or inside an ``echo``.
+    """
+    if not tracker.made_links:
+        return
+    head = posixpath.basename(words[0]) if words else ""
+    if words and head in _DIRECTORY_CHANGERS:
+        return
+    if _INPUT_REDIRECT not in segment and not _runs_a_reader(words):
+        return
+    recursive = bool(words) and _reads_files(words, head)
+    candidates = [*_path_operands(words[1:]), *(["."] if recursive else [])]
+    mentioned = path_mention_words(segment)
+    named: list[str | None] = []
+    for base in here or (None,):
+        named.extend(_place(word, base) for word in candidates)
+        # A crude word that cannot be placed is not a path operand: it is dropped.
+        named.extend(place for word in mentioned if (place := _place(word, base)) is not None)
+    for link in tracker.made_links:
+        if link.origin == tuple(words):
+            continue
+        if link.destinations is None or any(
+            place is None or any(_overlaps(place, landed) for landed in link.destinations)
+            for place in named
+        ):
+            for source in link.sources:
+                yield Read(source, view=TreeView.ALL, physical=True)
+
+
+def _overlaps(place: str, landed: str) -> bool:
+    """Is ``place`` the directory ``landed``, below it, or above it?"""
+    return (
+        place == landed
+        or place.startswith(landed.rstrip("/") + "/")
+        or landed.startswith(place.rstrip("/") + "/")
+    )
+
+
+def _reads_from_each(
+    roots: tuple[str, ...], bases: tuple[str, ...], *, follows: LinkFollow = LinkFollow.ALL
+) -> Iterator[Read]:
     for base in bases or (None,):
-        yield from _reads_of_roots(roots, base)
+        yield from _reads_of_roots(roots, base, follows=follows)
 
 
 def _could_read(command: str) -> bool:
@@ -955,7 +1323,9 @@ def _could_read(command: str) -> bool:
 def _reads_files(words: list[str], head: str) -> bool:
     """Could the segment ``words`` read a tree, by any of the routes :func:`_reads` judges?"""
     return (
-        head in (_FIND, _XARGS, _EVAL)
+        head in _FIND_COMMANDS
+        or head in (_XARGS, _EVAL)
+        or _fd_exec_roots(words) is not None
         or (head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1])
         or _directory_reader_roots(words) is not None
         or (_is_search(words) and not _git_reads_no_tree(words))
@@ -1224,7 +1594,8 @@ def _search_reads(
         if scan.uncertain
         else _tool_rules(posixpath.basename(words[0]), words[start:], scan)
     )
-    yield from _reads_of_roots(roots, cwd, rules)
+    follows = _search_link_follow(posixpath.basename(words[start - 1]), words[start:], scan)
+    yield from _reads_of_roots(roots, cwd, rules, follows=follows)
 
 
 def _relocated_git_grep_reads(
@@ -1273,8 +1644,10 @@ def _git_grep_reads(
     roots = tuple(c for c in candidates if not c.startswith(_PATHSPEC_MAGIC_PREFIX))
     if not roots or scan.default_root_possible:
         roots = (*roots, ".")
+    # git reads a tracked link as a link; only a working-tree read is not proven so.
+    follows = LinkFollow.ALL if view is TreeView.ALL else LinkFollow.NONE
     for root in _placed(roots, cwd):
-        yield Read(root, view=view)
+        yield Read(root, view=view, follows=follows)
 
 
 def _exists(operand: str, cwd: str | None) -> bool:
@@ -1303,6 +1676,73 @@ def _find_execs_a_reader(words: list[str]) -> bool:
         if _runs_a_reader(words[index + 1 : end]):
             return True
     return False
+
+
+def _fd_exec_roots(words: list[str]) -> tuple[str, ...] | None:
+    """Where ``fd`` walks when it runs a reader on each file, or None when it does not.
+
+    ``fd [OPTIONS] [PATTERN] [PATH]...``: the first operand is the pattern, the
+    rest (and each ``--search-path``) are roots, and with none it walks the
+    current directory. ``-x``/``--exec`` and ``-X``/``--exec-batch`` take a
+    command up to ``;``. An option this does not know is read as an operand,
+    which can only add a root.
+    """
+    if posixpath.basename(words[0]) not in _FD_COMMANDS:
+        return None
+    operands: list[str] = []
+    searched: list[str] = []
+    base = ""
+    runs_reader = False
+    index = 1
+    while index < len(words):
+        word = words[index]
+        index += 1
+        if word == _END_OF_OPTIONS:
+            operands.extend(words[index:])
+            break
+        command_start = _fd_exec_start(word)
+        if command_start is not None:
+            first = [command_start] if command_start else []
+            end = next(
+                (i for i in range(index, len(words)) if words[i] == _FD_EXEC_TERMINATOR),
+                len(words),
+            )
+            runs_reader = runs_reader or _runs_a_reader([*first, *words[index:end]])
+            index = end + 1
+        elif word in (_FD_SEARCH_PATH, _FD_BASE_DIRECTORY) and index < len(words):
+            if word == _FD_SEARCH_PATH:
+                searched.append(words[index])
+            else:
+                base = words[index]
+            index += 1
+        elif word.startswith(_FD_SEARCH_PATH + "="):
+            searched.append(word.partition("=")[2])
+        elif word.startswith(_FD_BASE_DIRECTORY + "="):
+            base = word.partition("=")[2]
+        elif word in _FD_VALUE_OPTIONS:
+            index += 1
+        elif not word.startswith("-") or word == _LONE_DASH:
+            operands.append(word)
+    if not runs_reader:
+        return None
+    roots = (*operands[1:], *searched) or (".",)
+    return tuple(posixpath.join(base, root) for root in roots) if base else roots
+
+
+def _fd_exec_start(word: str) -> str | None:
+    """The first word of the command an ``fd`` option runs, ``""`` when it follows, else None.
+
+    ``-x``, ``-X`` (also clustered, ``-uX``), ``--exec`` and ``--exec-batch`` take
+    the command from the next words; ``--exec=cat`` carries its first word.
+    """
+    if word.startswith("--"):
+        name, equals, value = word.partition("=")
+        if name not in _FD_EXEC_LONG:
+            return None
+        return value if equals else ""
+    if word.startswith("-") and len(word) > 1 and word[1:].isalpha() and word[-1] in "xX":
+        return ""
+    return None
 
 
 def _xargs_command(words: list[str]) -> list[str]:
@@ -1597,21 +2037,112 @@ def _view_for(rules: _Rules) -> TreeView:
     return TreeView.UNIGNORED if rules.honour_ignore else TreeView.ALL
 
 
+def _brace_spellings(roots: tuple[str, ...]) -> tuple[str, ...]:
+    """``roots`` with each brace operand replaced by the words bash expands it to.
+
+    The shell expands ``{conf,docs}`` before any search sees it, so the search
+    reads each spelling: a file read judges them the same way. Raises
+    :class:`TooManyToEnumerateError` when one cannot be listed.
+    """
+    spelled: dict[str, None] = {}
+    for root in roots:
+        if _BRACE_OPEN not in root:
+            spelled[root] = None
+            continue
+        spelled.update(dict.fromkeys(expand_braces(root)))
+    return tuple(spelled)
+
+
 def _reads_of_roots(
-    roots: tuple[str, ...], cwd: str | None, rules: _Rules = _NO_RULES
+    roots: tuple[str, ...],
+    cwd: str | None,
+    rules: _Rules = _NO_RULES,
+    *,
+    follows: LinkFollow = LinkFollow.ALL,
 ) -> Iterator[Read]:
+    try:
+        roots = _brace_spellings(roots)
+    except TooManyToEnumerateError:
+        # Brace operands are judged as each spelling; one that cannot be listed
+        # (past the cap, or quoting that hides a group) fails closed.
+        yield Read(_EVERYTHING, view=TreeView.ALL, follows=follows)
+        return
     if any(unknown_tilde(root) for root in roots):
         # `~-`/`~N` is a real directory this hook cannot see: judge every indexed file.
-        yield Read(_EVERYTHING, view=TreeView.ALL)
+        yield Read(_EVERYTHING, view=TreeView.ALL, follows=follows)
     for root in roots:
         glob_root = _place_directory_glob(root, cwd)
         if glob_root is not None:
-            # Answered from the index when judged: no directory is listed here.
+            # Answered from the index when judged: no directory is listed here. The shell
+            # expands it to command-line operands, which every reader follows, so it is
+            # judged as following every link below its literal directory.
             yield Read(glob_root, view=_view_for(rules), glob=True, rules=rules)
     placed = _placed(roots, cwd)
     for root in placed:
-        yield Read(root, view=_view_for(rules), skip=rules.predicate(root))
+        yield Read(root, view=_view_for(rules), skip=rules.predicate(root), follows=follows)
     for root in roots:
         physical = _physical_root(root, cwd)
         if physical is not None and physical not in placed:
-            yield Read(physical, view=_view_for(rules), skip=rules.predicate(physical))
+            yield Read(
+                physical,
+                view=_view_for(rules),
+                skip=rules.predicate(physical),
+                follows=follows,
+                physical=True,
+            )
+
+
+# --- Which links below its roots a reader follows (Plan 00613) -----------------------------------
+#
+# Every reader follows every link unless its own options prove otherwise: a miss here is a
+# protected file read through a seeded link, so only the shapes below are proven not to.
+
+#: Short options that make a grep-family tool follow every link it meets while recursing
+#: (``S`` too for grep: BSD grep's ``-S`` follows every link under ``-r``).
+_GREP_FOLLOW_SHORT: Final[dict[str, str]] = {
+    "grep": "RS",
+    "egrep": "RS",
+    "fgrep": "RS",
+    "zgrep": "RS",
+    "ugrep": "RS",
+    "ug": "RS",
+    "rg": "L",
+    "ag": "f",
+}
+#: Long options (and any abbreviation of them) that make one follow links.
+_FOLLOW_LONG: Final[tuple[str, ...]] = (
+    "--dereference-recursive",
+    "--dereference-files",
+    "--dereference",
+    "--follow",
+)
+#: Words that let a command change what a later ``grep``/``rg`` word runs or reads.
+_FOLLOW_STEERING: Final[re.Pattern[str]] = re.compile(
+    r"GREP_OPTIONS|\(\s*\)|\bfunction\b|\balias\b"
+)
+
+
+def _search_link_follow(tool: str, arguments: list[str], scan: SearchArguments) -> LinkFollow:
+    """Which links a grep-family search follows; ALL unless its words prove it follows none.
+
+    ``grep -r``, ``rg`` and ``ag`` skip every link below their roots (a root named on
+    the command line is resolved by :meth:`ProtectedFileIndex.find_under` itself).
+    An option that could be a follow flag, an abbreviation of one, an uncertain parse,
+    a ripgrep config, or a command that defines a function or alias proves nothing.
+    """
+    shorts = _GREP_FOLLOW_SHORT.get(tool)
+    steered = _follow_steering_named.get()
+    if shorts is None or scan.uncertain or steered or _rg_config_named.get():
+        return LinkFollow.ALL
+    for word in arguments:
+        if word == _END_OF_OPTIONS:
+            break
+        if word.startswith("--"):
+            name = word.partition("=")[0]
+            if len(name) > 2 and any(
+                full.startswith(name) or name.startswith(full) for full in _FOLLOW_LONG
+            ):
+                return LinkFollow.ALL
+        elif word.startswith("-") and any(flag in word[1:] for flag in shorts):
+            return LinkFollow.ALL
+    return LinkFollow.NONE

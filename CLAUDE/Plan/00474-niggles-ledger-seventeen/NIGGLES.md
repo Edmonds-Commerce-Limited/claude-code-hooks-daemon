@@ -7843,6 +7843,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 - A glob matching a file link (`cat lin[k]1.txt`): the "wildcard names the link" rule covers directory links only.
 - An absolute glob outside the project (`cat /other/checkout/sub/*`).
 - `CDPATH` inherited from the environment rather than named in the command.
+- Plan 00613 F-BYPS re-review R3 (`/workspace/untracked/agent-reports/00613-F-BYPS-re-review.md`, probe `h4.out`): Plan 00613's F4 fix makes a `link/..` OPERAND root physical, but the cwd walker (`_directory_change` in `recursive_search.py`) still places a physical move lexically. Allowed under both daemon roots, and confirmed in a real bash to land in the main checkout: `cd -P conf/.. && grep -r fixture .`, `cd -P conf && cd .. && grep -r fixture .`, `cd conf && cd -P .. && grep -r fixture .`, `cd -P conf/.. && rg fixture`, `set -P; cd conf/..; grep -r fixture .`. The same shape needs no seeded link (any directory link out of the project), so the coordinator ruled it a generic gap kept here, not a Plan 00613 blocker. Detector: a pin row per daemon root for `cd -P <link>/.. && grep -r x .`; in code, treat `cd -P`/`pushd -P`/`set -P`/`set -o physical` with a link component as the F4 operand is treated.
 
 **Status**: ⬜ Open. Apply the link-out rule to a physical root and honour `cd -P` in the text walker; judge a glob's matches that are file links; decide whether an absolute glob outside the project is in scope.
 
@@ -8037,3 +8038,32 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: 2.1.328 "Fixed automatic compaction reusing the session's earlier system prompt instead of rebuilding it the way `/compact` does". `contracts/claude-code-instructions/FACTS.json` G5-01 says project-root CLAUDE.md survives `/compact` (re-read from disk and re-injected) and says nothing about automatic compaction. The fact is extended, not contradicted. Adopt row 1 of the same review (Stop/SubagentStop `background_tasks` list a Monitor's script as `monitor`) was applied in the release commit to `contracts/claude-code-hooks/Stop.json` and `SubagentStop.json`, so it has no entry here.
 
 **Status**: ⬜ Open, low priority. Reread the vendored memory page first; extend G5-01 (statement, and anchor only if the page now says it) to cover automatic compaction, with `min_claude_code_version` 2.1.328 if the page names it, then run `tests/unit/docs_qa/test_instructions_contract.py`.
+
+### N683 — secret guard: an interpreter one-liner that walks or copies a tree with a literal root dereferences a seeded link unjudged
+
+**Source**: Plan 00613, F-BYPS review finding F2 (`/workspace/untracked/agent-reports/00613-F-BYPS-seeded-link-review.md`); not fixed by the Plan 00613 security-review fixes (`subagent-reports/261120-security-review-fixes.md`).
+
+**Evidence**: an interpreter one-liner is judged only on the literal file operands the one-liner scan extracts (`_bash_interpreter_one_liner_mention` in `secret_file_guard.py`), never as a recursive read. These are allowed with the daemon rooted at the main checkout or at a worktree whose `conf` is a seeded link to a protected directory, while every shell equivalent (`cp -r`, `find -L -exec cat`, `grep -R`) is denied: `python3 -c "import shutil; shutil.copytree('.', '../c3')"` (default `symlinks=False` copies the bytes behind every link), `node -e "require('fs').cpSync('.', '../c4', {recursive:true, dereference:true})"`, and `python3 -c "import os; [print(open(os.path.join(d, f)).read()) for d, _, fs in os.walk('.', followlinks=True) for f in fs]"`. A later `cat ../c3/conf/vault.txt` IS denied by spelling, so the copy's content is reached only by a route that is itself a gap. Not extended cheaply: the one-liner route extracts string literals and does not model a library call's root, so a rule over `copytree`/`cpSync`/`os.walk`/`rglob` names would be noisy (`copytree` is common in tests and build scripts) and would need to be a rule over the literal root reaching a seeded link or a protected path, which is a new interpreter model, not an extension.
+
+**Status**: ⬜ Open, medium priority (the `os.walk` form is borderline under the guard's own "string-assembled is not covered" guidance; copytree and cpSync with a literal `'.'` are in scope). Candidate remedy: an interpreter-walker table (library call, root argument, follows-links default) feeding `recursive_search` the literal root as a `Read` with `follows=ALL`, plus dangerous-invocation corpus rows for each shape, each either denied or accepted by the owner.
+
+**Re-review** (`/workspace/untracked/agent-reports/00613-F-BYPS-re-review.md`): F2 is still open, unchanged. Interpreter link-MAKERS are now covered by the made-link tracker without modelling them: a one-liner of a known interpreter whose text names a link call (`symlink`, `link_to`, `link(`, `linkSync`, `ln`) is judged as a link leading anywhere and landing anywhere, so a later reader in the same command is denied (an over-deny on the word, accepted). Interpreter RELOCATION of an existing link (`os.rename`, `shutil.move`, `fs.renameSync`) is not covered and belongs here.
+
+### N684 — secret guard: `fd`/`fdfind` feeding `xargs` is not a feeder, so xargs judges its cwd instead of fd's roots
+
+**Source**: Plan 00613 F-BYPS re-review R1 (`/workspace/untracked/agent-reports/00613-F-BYPS-re-review.md`, probes `h3.out`, `cmp.out` under `/workspace/untracked/scratch/fbyps-probe/r2/`). Same class as N661 (a path-handing walker modelled at one site and not its sibling). Allowed at the Plan 00613 base too: not a regression.
+
+**Evidence**: `_segment_state` in `recursive_search.py` records a feeder only for `head in _FIND_COMMANDS`; `fd`/`fdfind` never are, so a downstream `xargs` falls back to `fed_by or (".",)`, the CWD. From cwd `wt/docs`, under both daemon roots: `fd . ../conf | xargs cat`, `fd -0 . ../conf | xargs -0 cat`, `fd -L . .. | xargs cat`, `fdfind . ../conf | xargs cat`, and with no link at all `fd . <main>/conf | xargs cat` (a direct-path bypass under a main-root daemon). `find ../conf -type f | xargs cat` is denied. The coordinator ruled it a generic long-tail shape (it exists identically on the direct path), not a Plan 00613 blocker.
+
+**Status**: ⬜ Open. Make `_segment_state` record `_fd_exec_roots`-style roots for any fd stage (exec or not), and pin a declared pair: `_FIND_COMMANDS ∪ _FD_COMMANDS` equals the feeder set. Corpus rows for `fd . <dir> | xargs cat`.
+
+### N685 — secret guard: `parallel` is not a reader runner, and two fd options are parsed as taking a separate value
+
+**Source**: Plan 00613 F-BYPS re-review R2 (`/workspace/untracked/agent-reports/00613-F-BYPS-re-review.md`, probes `h1.out`, `fdgram.out`, `cmp.out`). Same class as N661 and N684. `parallel` is allowed at the Plan 00613 base too; the fd grammar arrived with the F1 fix but only ever under-denies.
+
+**Evidence**:
+
+- Only `xargs` runs a fed reader (`_segment_reads` in `recursive_search.py`); `parallel` appears only in `_SUBSTITUTING_RUNNERS` (git placement). Allowed under both daemon roots: `find conf/ -type f | parallel cat` (worktree cwd), `find ../conf -type f | parallel cat` (docs cwd), and the direct-path `find <main>/conf -type f | parallel cat`. `parallel cat ::: conf/*` is denied.
+- `_FD_VALUE_OPTIONS` lists `--hyperlink` and `--strip-cwd-prefix` as taking the next word. In current fd both take an OPTIONAL value with a required `=` (unverified: fd is not installed here), so `fd --strip-cwd-prefix fixture ../conf -x cat` is parsed with `../conf` as the pattern and root `.`, and is allowed from `wt/docs` under both roots.
+
+**Status**: ⬜ Open. Model `parallel` (and `parallel --pipe`/`:::` forms) as a runner of a fed command like `xargs`; check `_FD_VALUE_OPTIONS` against `fd --help` for the pinned fd versions and drop the optional-value options. Corpus rows for `find d | parallel cat` and `fd --strip-cwd-prefix x d -x cat`.

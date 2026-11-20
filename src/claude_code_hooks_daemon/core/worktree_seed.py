@@ -11,8 +11,11 @@ paths to seed, and how, under the ``worktree_create`` handler's ``seed`` option:
         default_mode: symlink        # symlink | copy
         entries:
           - .env.local               # uses default_mode
-          - path: .secrets
+          - path: .claude/settings.local.json
             mode: copy               # explicit override
+
+A path the secret guard protects may not be seeded with ``mode: copy``:
+worktree creation refuses it (Plan 00613).
 
 This module owns only the **vocabulary and the parse**. It performs no I/O and
 knows nothing about worktrees, mirroring :mod:`core.worktree_naming`, so the

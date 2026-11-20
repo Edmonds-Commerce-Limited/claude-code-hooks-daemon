@@ -5344,6 +5344,34 @@ def cmd_check_worktree_seed(args: argparse.Namespace) -> int:
     return 1 if result["has_drift"] else 0
 
 
+def cmd_seed_worktree(args: argparse.Namespace) -> int:
+    """Apply the project's configured seed list to a worktree made by hand.
+
+    The only argument is the worktree: what is placed, and how, comes from the
+    ``worktree_create`` seed list in the project's config, never from the
+    command line (Plan 00613). Exit 0 on success (including nothing to place),
+    1 when refused.
+    """
+    from claude_code_hooks_daemon.utils.worktree_seed_apply import (
+        SeedApplyRefused,
+        seed_existing_worktree,
+    )
+
+    project_root = get_project_path(getattr(args, "project_root", None))
+    try:
+        placed = seed_existing_worktree(Path(args.worktree), project_root=Path(project_root))
+    except SeedApplyRefused as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        for dest in exc.placed:
+            print(f"placed: {dest}")
+        return 1
+    if not placed:
+        print("Nothing to place: no seed entry is configured, or each is already present.")
+    for dest in placed:
+        print(f"placed: {dest}")
+    return 0
+
+
 def cmd_check_truth_changes(args: argparse.Namespace) -> int:
     """Show truth-changes (was → now) to reconcile across a version range.
 
@@ -12639,6 +12667,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Repository root to scan (default: auto-detect)",
     )
     parser_check_worktree_seed.set_defaults(func=cmd_check_worktree_seed)
+
+    # seed-worktree command: one positional, no options (Plan 00613; pinned by test)
+    parser_seed_worktree = subparsers.add_parser(
+        "seed-worktree",
+        help="Apply the configured worktree_create seed list to a worktree made by hand",
+    )
+    parser_seed_worktree.add_argument(
+        "worktree",
+        help="A linked worktree of this repository (its top directory)",
+    )
+    parser_seed_worktree.set_defaults(func=cmd_seed_worktree)
 
     # check-truth-changes command
     parser_check_truth = subparsers.add_parser(

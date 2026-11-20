@@ -28,10 +28,41 @@ from claude_code_hooks_daemon.core.worktree_seed import (
     SeedEntry,
 )
 from claude_code_hooks_daemon.utils.worktree_seeding import (
+    LinkAudit,
     WorktreeSeedError,
-    seed_worktree,
-    validate_seed_sources,
+    seed_link_audit_path,
 )
+from claude_code_hooks_daemon.utils.worktree_seeding import (
+    seed_worktree as _seed_worktree,
+)
+from claude_code_hooks_daemon.utils.worktree_seeding import (
+    validate_seed_sources as _validate_seed_sources,
+)
+
+
+def _nothing_protected() -> tuple[str, ...]:
+    return ()
+
+
+def seed_worktree(root: Path, worktree: Path, entries: list[SeedEntry]) -> list[Path]:
+    """Placement alone, with an empty protected set, so no link is audited.
+
+    The audit line has its own module (``test_worktree_seed_link_audit.py``).
+    """
+    audit = LinkAudit(
+        log_path=seed_link_audit_path(root), protected_patterns=_nothing_protected, session_id=None
+    )
+    return _seed_worktree(root, worktree, entries, audit=audit)
+
+
+def validate_seed_sources(root: Path, entries: list[SeedEntry]) -> None:
+    """The shape checks alone, with an empty protected set.
+
+    These tests are about where a seed may live, not about the secret guard;
+    the protected-set refusal has its own module
+    (``test_worktree_seed_protected_copy.py``).
+    """
+    _validate_seed_sources(root, entries, protected_patterns=_nothing_protected)
 
 
 @pytest.fixture

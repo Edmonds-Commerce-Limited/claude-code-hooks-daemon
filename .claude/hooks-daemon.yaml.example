@@ -1204,17 +1204,23 @@ handlers:
       #     #   symlink — shared with the main checkout. One source of truth,
       #     #             but a write from INSIDE a worktree flows back.
       #     #   copy    — isolated. Safe to overwrite; may drift from the
-      #     #             canonical file after creation.
+      #     #             canonical file after creation. REFUSED for a path
+      #     #             the secret_file_guard protects (creation aborts):
+      #     #             seed such a file with symlink; the guard judges a
+      #     #             read through the link as a read of the file.
       #     default_mode: symlink
       #     entries:
       #       # Repository-root-relative. Files or directories; no globs.
       #       - .env.local
-      #       - path: .secrets       # anything an agent may WRITE to
+      #       - path: .claude/settings.local.json   # anything an agent may WRITE to
       #         mode: copy
       #
       #   # Seeding happens once, at creation. A re-fired event never re-seeds
       #   # over an agent's own edits, and a listed path that does not exist
       #   # ABORTS creation rather than yielding a quietly under-seeded worktree.
+      #   # A worktree made by hand (`git worktree add`) skips this hook; run
+      #   #   bin/hooks-daemon seed-worktree <worktree>
+      #   # to apply this same list to it.
 
   worktree_remove:  # WorktreeRemove event (worktree teardown)
     worktree_remove:  # Prunes stale worktree registrations; removes a named worktree

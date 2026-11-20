@@ -36,7 +36,12 @@ from claude_code_hooks_daemon.core.worktree_seed import (
     parse_seed_config,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.secret_file_matching import (
+    ProtectedSetUnreadable,
+    protected_patterns_from_options,
+)
 from claude_code_hooks_daemon.utils.worktree_seed_suggestions import diff_seed_config
+from claude_code_hooks_daemon.utils.worktree_seeding import protected_copy_refusals
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +56,15 @@ SEED_CONFIG_KEY: Final = _KEY_SEPARATOR.join(
         HandlerID.WORKTREE_CREATE.config_key,
         ConfigKey.OPTIONS,
         SEED_OPTION_KEY,
+    )
+)
+
+#: The secret guard's handler block, whose options decide which copies are refused.
+GUARD_CONFIG_KEY: Final = _KEY_SEPARATOR.join(
+    (
+        ConfigKey.HANDLERS,
+        EventID.PRE_TOOL_USE.config_key,
+        HandlerID.SECRET_FILE_GUARD.config_key,
     )
 )
 
@@ -75,17 +89,21 @@ class WorktreeSeedReport:
             all. A project that configured an empty list has made a decision; a
             project with no key has never seen the option, and the two deserve
             different remediation text.
+        refused_copies: One refusal per ``mode: copy`` entry that worktree
+            creation would refuse for the secret guard's protected set, in the
+            executor's own words (Plan 00613). Urgent, like ``missing``.
     """
 
     configured: tuple[SeedEntry, ...] = ()
     unconfigured: tuple[SeedEntry, ...] = ()
     missing: tuple[SeedEntry, ...] = ()
     seed_key_configured: bool = False
+    refused_copies: tuple[str, ...] = ()
 
     @property
     def has_drift(self) -> bool:
         """True when there is anything worth a human's attention."""
-        return bool(self.unconfigured or self.missing)
+        return bool(self.unconfigured or self.missing or self.refused_copies)
 
 
 def _value_at_key(key: str, config: dict[str, Any]) -> Any | None:
@@ -164,7 +182,31 @@ def build_seed_report(root: Path, config: dict[str, Any]) -> WorktreeSeedReport:
         unconfigured=drift.unconfigured,
         missing=drift.missing,
         seed_key_configured=raw_seed is not None,
+        refused_copies=tuple(
+            protected_copy_refusals(
+                root, configured, protected_patterns=lambda: _guard_patterns(config)
+            )
+        ),
     )
+
+
+def _guard_patterns(config: dict[str, Any]) -> tuple[str, ...]:
+    """The secret guard's effective globs from THIS config, read strictly.
+
+    The guard block of the file the command was given, not the daemon's own
+    config: the report is about that file. A block whose ``options`` is
+    present but not a mapping is unreadable, not empty, so a copy is refused
+    rather than judged against the shipped defaults.
+
+    Raises:
+        ProtectedSetUnreadable: the guard options cannot be read.
+    """
+    block = _value_at_key(GUARD_CONFIG_KEY, config)
+    if block is None:
+        return protected_patterns_from_options(None)
+    if not isinstance(block, dict):
+        raise ProtectedSetUnreadable("the secret_file_guard config block is not a mapping")
+    return protected_patterns_from_options(block.get(ConfigKey.OPTIONS))
 
 
 def configured_seed_entries(root: Path) -> list[SeedEntry]:
@@ -244,6 +286,17 @@ def format_report_for_llm(report: WorktreeSeedReport) -> str:
 
     lines: list[str] = ["Worktree seed config drift", ""]
 
+    if report.refused_copies:
+        lines.append("REFUSED — copy-mode entries that worktree creation will refuse:")
+        lines.extend(f"  - {refusal}" for refusal in report.refused_copies)
+        lines.append("")
+        lines.append(
+            "  Each aborts the NEXT worktree creation. A file the secret guard "
+            "protects may not be seeded with mode: copy, because the copy puts "
+            "its content under a second path. Remove each such entry."
+        )
+        lines.append("")
+
     if report.missing:
         lines.append("MISSING — configured, but no longer present in the repository:")
         lines.extend(f"  - {entry.path} ({entry.mode})" for entry in report.missing)
@@ -274,7 +327,8 @@ def format_report_for_llm(report: WorktreeSeedReport) -> str:
         lines.append(
             "  Nothing has been written — the config is the project's. Choose "
             "`copy` instead of `symlink` for anything an agent may overwrite, "
-            "because a symlinked file writes back to the main checkout."
+            "because a symlinked file writes back to the main checkout; a file "
+            "the secret guard protects may not be copied."
         )
 
     return "\n".join(lines).rstrip() + "\n"
