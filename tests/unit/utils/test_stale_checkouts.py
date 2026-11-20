@@ -459,7 +459,8 @@ class TestFindStaleDaemons:
         """The default lookup finds the file ``get_pid_path`` really names, not its twin."""
         monkeypatch.delenv("CLAUDE_HOOKS_PID_PATH", raising=False)
         runtime = tmp_path / "run"
-        runtime.mkdir()
+        # 0700: only a private directory is accepted, whatever the umask.
+        runtime.mkdir(mode=0o700)
         monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
         root = tmp_path / ("d" * 120) / "project"
         root.mkdir(parents=True)

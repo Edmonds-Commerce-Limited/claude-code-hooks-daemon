@@ -706,7 +706,8 @@ class TestRuntimeFilesGoOnlyUnderTheStartLockAndOnlyWhileDead:
         monkeypatch.delenv("CLAUDE_HOOKS_PID_PATH", raising=False)
         base = Path(tempfile.mkdtemp(prefix="hd-cv-"))
         runtime = base / "run"
-        runtime.mkdir()
+        # 0700: only a private directory is accepted, whatever the umask.
+        runtime.mkdir(mode=0o700)
         monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
         tail = "/.claude/hooks-daemon/untracked/daemon-cvhost.pid"
         padding = _UNIX_SOCKET_PATH_LIMIT - len(f"{base}/{tail}")

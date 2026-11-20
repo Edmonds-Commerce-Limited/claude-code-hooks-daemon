@@ -138,9 +138,19 @@ class TestEventSocketDirFallback(_EventSocketPathTestBase):
         self.assertIn("-events", events_dir.name)
 
     def test_deep_path_over_limit_uses_tmp_when_no_xdg_or_run_user(self) -> None:
-        with patch.dict("os.environ", {}, clear=False):
-            os.environ.pop("XDG_RUNTIME_DIR", None)
-            with patch.object(Path, "is_dir", return_value=False):
+        # The run-user root is pointed at a directory that does not exist, so a
+        # host that really has a private /run/user/<uid> (a CI runner) cannot
+        # answer for the case this test names.
+        with tempfile.TemporaryDirectory() as scratch:
+            missing_run_user_root = Path(scratch) / "no-run-user"
+            with (
+                patch.dict("os.environ", {}, clear=False),
+                patch(
+                    "claude_code_hooks_daemon.daemon.paths._RUN_USER_ROOT",
+                    missing_run_user_root,
+                ),
+            ):
+                os.environ.pop("XDG_RUNTIME_DIR", None)
                 events_dir = get_event_socket_dir_from_untracked(self._DEEP_UNTRACKED_DIR)
         self.assertTrue(str(events_dir).startswith("/tmp/"))
         self.assertIn("-events", events_dir.name)
