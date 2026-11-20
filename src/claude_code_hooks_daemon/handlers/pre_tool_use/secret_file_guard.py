@@ -76,7 +76,10 @@ from claude_code_hooks_daemon.utils.resolution_failure import (
     fail_closed_finding,
     refuse_process_view,
 )
-from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    strip_never_run_heredoc_bodies,
+    strip_quoted_heredoc_bodies,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1616,15 +1619,15 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         Release review F2: a word through the calling process's own view
         (N668) is a mention, so the grep-PATTERN exemption that clears a
         protected name clears it too, while every position that opens it still
-        denies. A quoted heredoc body written only to ``.md`` files is prose no
-        command opens, so process-view words there are not judged: the names
-        pass reads the whole command with such words naming nothing, and the
-        views pass reads only the command with those bodies blanked. A
-        process-view finding is reported as the unresolved finding it was.
+        denies. A quoted heredoc body written only to ``.md`` files that the
+        command never names again (nor reaches by a glob) is prose no command
+        opens, so process-view words there are not judged: the names pass reads
+        the whole command with such words naming nothing, and the views pass
+        reads only the command with those bodies blanked. A body the command
+        may then run (``bash n.md``) stays in the views pass. A process-view
+        finding is reported as the unresolved finding it was.
         """
-        prose_blanked = strip_quoted_heredoc_bodies(
-            command, text_readers_only=True, prose_sinks=True
-        )
+        prose_blanked = strip_never_run_heredoc_bodies(command)
         if prose_blanked == command:
             with sfm.process_view_mode(sfm.ProcessViewMode.MENTION):
                 found = self._judge_bash(command, patterns, cwd)

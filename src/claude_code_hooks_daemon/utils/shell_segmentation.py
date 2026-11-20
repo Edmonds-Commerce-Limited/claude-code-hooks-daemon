@@ -523,6 +523,8 @@ _REROUTING_MARKERS: tuple[str, ...] = ("$(", "<(", ">(", "`")
 _INERT_DEVICES: frozenset[str] = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr"})
 #: A file written with this suffix is prose no command runs.
 _MARKDOWN_SUFFIX: Final[str] = ".md"
+#: Pathname-expansion characters: a word holding one may name a file it never spells.
+_GLOB_CHARS: Final[str] = "*?["
 _DEVICE_ROOTS: tuple[str, ...] = ("/dev/", "/proc/")
 #: fds a redirect may duplicate onto and stay inert: stdout, stderr, closed.
 _INERT_FD_TARGETS: frozenset[str] = frozenset({"1", "2", "-"})
@@ -1531,12 +1533,16 @@ def strip_never_run_heredoc_bodies(command: str) -> str:
     Release review 2 F4: ``cat > n.md <<'EOF' … EOF; bash n.md`` runs
     the body it wrote. A prose body is blanked only when ``.md`` appears no
     more often than the bodies that blanking removes (once per target),
-    so any later word naming a markdown file again keeps every body.
+    so any later word naming a markdown file again keeps every body. A glob
+    character outside the blanked bodies (``sh n.m?``, ``cp n.* r.sh``) may
+    expand to that file too, so it keeps every body as well.
     """
     readers = strip_quoted_heredoc_bodies(command, text_readers_only=True)
     prose = strip_unrun_heredoc_bodies(readers)
     blanked = prose.count(_INERT_BODY_PLACEHOLDER) - readers.count(_INERT_BODY_PLACEHOLDER)
-    if prose.count(_MARKDOWN_SUFFIX) > blanked:
+    if blanked == 0:
+        return prose
+    if prose.count(_MARKDOWN_SUFFIX) > blanked or any(char in prose for char in _GLOB_CHARS):
         return readers
     return prose
 

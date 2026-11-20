@@ -60,6 +60,9 @@ def test_never_run_blanks_a_markdown_body_named_once(command: str) -> None:
         f"tee a.md b.md <<'EOF'\n{_BODY}\nEOF",
         f"cat > t.sh <<'EOF'\n{_BODY}\nEOF",
         f"bash <<'EOF'\n{_BODY}\nEOF",
+        f"cat > n.md <<'EOF'\n{_BODY}\nEOF\nsh n.m?",
+        f"cat > n.md <<'EOF'\n{_BODY}\nEOF\nsh n.*",
+        f"cat > n.md <<'EOF'\n{_BODY}\nEOF\ncp n.[m]d r.sh; . ./r.sh",
     ],
 )
 def test_never_run_keeps_a_body_the_command_may_run(command: str) -> None:

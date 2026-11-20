@@ -278,6 +278,24 @@ class TestProcSelf:
         """Near misses for F2: each opens the view, so each stays denied."""
         assert _bash_decision(project, _views(command, project.root)) is Decision.DENY
 
+    @pytest.mark.parametrize("view", ["{self}/cwd/flink", "{fd}/0"])
+    @pytest.mark.parametrize(
+        "runner",
+        [
+            "bash n.md",
+            ". ./n.md",
+            "sh n.m?",
+            "sh n.*",
+            "cp n.m? r.sh; . ./r.sh",
+        ],
+    )
+    def test_a_markdown_body_the_command_then_runs_is_still_denied(
+        self, project: Project, view: str, runner: str
+    ) -> None:
+        """F2 near miss: a ``.md`` body named again (or by a glob) may be run, so it is judged."""
+        command = _views(f"cat > n.md <<'EOF'\ncat {view}\nEOF\n{runner}")
+        assert _bash_decision(project, command) is Decision.DENY
+
 
 def test_a_view_is_never_confirmed_encrypted(project: Project) -> None:
     """F2: the encrypted-target check would read a view through the DAEMON's view."""
