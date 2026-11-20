@@ -786,6 +786,78 @@ class TestIdleCompactionCheck:
         assert "2.1.290" in why
 
 
+class TestIdleCompactThresholdCheck:
+    """Encourage the lowest idle compaction threshold, 100000."""
+
+    NAME = "Idle Compaction Threshold"
+    VAR = "CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS"
+
+    @pytest.fixture
+    def handler(self) -> Any:
+        from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (
+            OptimalConfigCheckerHandler,
+        )
+
+        return OptimalConfigCheckerHandler()
+
+    @pytest.fixture(autouse=True)
+    def _no_ambient(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name in (*_IDLE_DISABLER_ENV, self.VAR):
+            monkeypatch.delenv(name, raising=False)
+
+    def _check(self, handler: Any, user: dict[str, Any], root: Path = _NO_PROJECT) -> Any:
+        with patch.object(handler, "_read_global_settings", return_value=user):
+            checks = handler._run_checks(root)
+        return next(c for c in checks if c["name"] == self.NAME)
+
+    def test_unset_warns_with_exact_fix(self, handler: Any) -> None:
+        check = self._check(handler, {})
+        assert check["passed"] is False
+        assert check["warn"] is True
+        assert '"CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS": "100000"' in check["fix"]
+        assert "default 200000" in check["current"]
+
+    def test_user_settings_100000_passes(self, handler: Any) -> None:
+        assert self._check(handler, {"env": {self.VAR: "100000"}})["passed"] is True
+
+    def test_int_value_passes(self, handler: Any) -> None:
+        assert self._check(handler, {"env": {self.VAR: 100000}})["passed"] is True
+
+    def test_below_floor_passes(self, handler: Any) -> None:
+        assert self._check(handler, {"env": {self.VAR: "50000"}})["passed"] is True
+
+    def test_above_floor_warns_and_names_value(self, handler: Any) -> None:
+        check = self._check(handler, {"env": {self.VAR: "150000"}})
+        assert check["passed"] is False
+        assert "150000" in check["current"]
+
+    def test_unparseable_warns(self, handler: Any) -> None:
+        assert self._check(handler, {"env": {self.VAR: "lots"}})["passed"] is False
+
+    def test_shell_env_wins(self, handler: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(self.VAR, "100000")
+        assert self._check(handler, {"env": {self.VAR: "300000"}})["passed"] is True
+
+    def test_project_settings_value_counts(self, handler: Any, tmp_path: Path) -> None:
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "settings.json").write_text(
+            json.dumps({"env": {self.VAR: "100000"}})
+        )
+        assert self._check(handler, {}, tmp_path)["passed"] is True
+
+    def test_idle_compaction_off_is_not_flagged(self, handler: Any) -> None:
+        check = self._check(handler, {"idleCompaction": False})
+        assert check["passed"] is True
+        assert "off" in check["current"]
+
+    def test_never_auto_written(self, handler: Any, tmp_path: Path) -> None:
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({"env": {self.VAR: "250000"}}))
+        with patch.object(handler, "_get_settings_path", return_value=settings):
+            handler._enforce_settings_sync()
+        assert json.loads(settings.read_text())["env"][self.VAR] == "250000"
+
+
 class TestHandleOutput:
     """Test handle() output formatting."""
 
