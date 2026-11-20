@@ -189,7 +189,14 @@ class TestArchivesWhatIsActionable:
         assert datetime.fromisoformat(record.expires_at or "") == expected_expiry
         fd = open_dir(root)
         try:
-            restore(store, record.archive_id, fd, tar=tar, max_inodes=MAX)
+            restore(
+                store,
+                record.archive_id,
+                fd,
+                root_path="untracked/scratch",
+                tar=tar,
+                max_inodes=MAX,
+            )
         finally:
             os.close(fd)
         assert snapshot(root / "e1") == before

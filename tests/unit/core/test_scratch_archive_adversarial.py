@@ -217,7 +217,7 @@ def records_naming(store: ArchiveStore, name: str) -> list[ArchiveRecord]:
 def restore_into(root: Path, store: ArchiveStore, archive_id: str, tar: TarTool) -> None:
     fd = open_dir(root)
     try:
-        restore(store, archive_id, fd, tar=tar, max_inodes=MAX)
+        restore(store, archive_id, fd, root_path="untracked/scratch", tar=tar, max_inodes=MAX)
     finally:
         os.close(fd)
 

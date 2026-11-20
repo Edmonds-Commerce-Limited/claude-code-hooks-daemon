@@ -401,7 +401,14 @@ class TestAdopt:
         audit = store.audit()
         assert (audit.unrecorded_archives, audit.records_without_archive) == ((), ())
         _remove_tree(root / "e1")
-        restored = restore(store, result.archive_id, root_fd, tar=gnu_tar, max_inodes=1000)
+        restored = restore(
+            store,
+            result.archive_id,
+            root_fd,
+            root_path="untracked/scratch",
+            tar=gnu_tar,
+            max_inodes=1000,
+        )
         assert restored.layout == "adopted"
         assert _tree(root / "e1") == before
 
@@ -781,7 +788,14 @@ class TestFinishAdoption:
         audit = store.audit()
         assert (audit.unrecorded_archives, audit.records_without_archive) == ((), ())
         _remove_tree(root / "e1")
-        restore(store, event.archive_id, root_fd, tar=gnu_tar, max_inodes=1000)
+        restore(
+            store,
+            event.archive_id,
+            root_fd,
+            root_path="untracked/scratch",
+            tar=gnu_tar,
+            max_inodes=1000,
+        )
         assert _tree(root / "e1") == before
 
     def test_a_changed_original_is_refused_and_the_archive_stays(

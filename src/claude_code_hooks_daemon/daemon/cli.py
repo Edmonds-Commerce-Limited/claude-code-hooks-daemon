@@ -7049,8 +7049,9 @@ def _scratch_restore(args: argparse.Namespace, sources: _ScratchSources, sweep_r
 
     try:
         tar = find_gnu_tar()
+        _resolved, relative = _scratch_relative_root(sources, sweep_root)
         root_fd = open_dir(Path(sweep_root.path))
-    except (PackRefused, OSError) as exc:
+    except (PackRefused, OSError, ValueError) as exc:
         print(f"scratch-sweep: refused: {exc}", file=sys.stderr)
         return 1
     try:
@@ -7059,6 +7060,7 @@ def _scratch_restore(args: argparse.Namespace, sources: _ScratchSources, sweep_r
                 store,
                 args.archive_id,
                 root_fd,
+                root_path=relative,
                 tar=tar,
                 max_inodes=sources.max_inodes,
                 entry=args.entry,

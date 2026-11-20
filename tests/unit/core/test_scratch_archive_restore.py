@@ -193,7 +193,15 @@ def _names(path: Path) -> list[str]:
 def _restore(
     store: ArchiveStore, root_fd: int, tar: TarTool, archive_id: str, entry: str | None = None
 ) -> Restored:
-    return restore(store, archive_id, root_fd, entry=entry, tar=tar, max_inodes=1000)
+    return restore(
+        store,
+        archive_id,
+        root_fd,
+        root_path="untracked/scratch",
+        entry=entry,
+        tar=tar,
+        max_inodes=1000,
+    )
 
 
 def _tree(path: Path) -> dict[str, str]:
@@ -541,6 +549,26 @@ class TestRefusals:
         )
         _refused_cleanly(store, root, root_fd, tar, archive_id, "entry")
         _refused_cleanly(store, root, root_fd, tar, archive_id, "entry", "untracked/scratch/z")
+
+    @pytest.mark.parametrize("path", ["untracked/other/e1", "untracked/scratch/sub/e1", "e1"])
+    def test_a_record_from_another_root_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool, path: str
+    ) -> None:
+        archive_id = _install(store, [_member("./e1", data=b"x")], path=path, counts={"file": 1})
+        _refused_cleanly(store, root, root_fd, tar, archive_id, "another root")
+
+    def test_a_batch_entry_from_another_root_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        members = [_member(f"./{CLAIM_PREFIX}a", data=b"1"), _member(f"./{CLAIM_PREFIX}b")]
+        archive_id = _install(
+            store,
+            members,
+            path="untracked/other/a",
+            counts={"file": 1},
+            extra_records=("untracked/other/b",),
+        )
+        _refused_cleanly(store, root, root_fd, tar, archive_id, "another root", "untracked/other/a")
 
     @pytest.mark.parametrize("path", ["untracked/scratch/..", "untracked/", "x/.", "/"])
     def test_a_hostile_original_path_is_refused(

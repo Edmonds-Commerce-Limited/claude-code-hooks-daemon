@@ -367,6 +367,7 @@ def restore(
     archive_id: str,
     dest_parent_fd: int,
     *,
+    root_path: str,
     tar: TarTool,
     max_inodes: int,
     entry: str | None = None,
@@ -374,6 +375,10 @@ def restore(
     timeout: float = DEFAULT_TAR_TIMEOUT_SECONDS,
 ) -> Restored:
     """Restore ``archive_id`` (``entry`` names one of a batch) into ``dest_parent_fd``.
+
+    ``root_path`` is the project-relative path of the root ``dest_parent_fd`` is
+    open on; a record whose ``original_path`` lies in any other directory is
+    refused, so an entry only ever goes back to the root it was taken from.
 
     Raises :class:`RestoreRefused` when nothing was restored. Returns
     :class:`RestoredWithLeftovers` when the entry WAS moved into place but a later
@@ -389,6 +394,12 @@ def restore(
         dest_name = check_entry_name(posixpath.basename(record.original_path))
     except ValueError as exc:
         raise RestoreRefused(f"the record's name cannot be restored: {exc}") from exc
+    recorded_root = posixpath.dirname(record.original_path)
+    if recorded_root != root_path:
+        raise RestoreRefused(
+            f"{record.original_path!r} was taken from another root ({recorded_root!r}),"
+            f" not {root_path!r}; restore it with --root naming that root"
+        )
     _check_destination(store, dest_parent_fd, dest_name)
     archive_fd, headers, compression = _checked_archive(store, record)
     try:
