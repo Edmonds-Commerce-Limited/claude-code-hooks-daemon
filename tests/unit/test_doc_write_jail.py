@@ -22,9 +22,9 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.cli import cmd_init_config
 from tests.jail_site import doc_write_jail as jail
+from tests.support.git_fixtures import git_setup_timeout
 
 _JAIL_SITE_DIR = Path(jail.__file__).resolve().parent
 
@@ -363,7 +363,7 @@ class TestSessionWiring:
             capture_output=True,
             text=True,
             check=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         ).stdout.strip()
         return Path(common_dir).resolve().parent
 

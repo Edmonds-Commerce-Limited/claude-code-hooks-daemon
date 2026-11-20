@@ -41,6 +41,7 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     _gitlinks_held,
     classify_branch,
 )
+from tests.support.git_fixtures import git_setup_timeout
 
 _OLD_POINTER = "1" * 40
 _NEW_POINTER = "2" * 40
@@ -133,7 +134,7 @@ def ignoring_repo(request: pytest.FixtureRequest, tmp_path: Path) -> Path:
 class TestNetChange:
     def test_the_gitlink_row_is_returned(self, ignoring_repo: Path) -> None:
         base = _git(ignoring_repo, "merge-base", "main", "feat").strip()
-        changes = _net_change(ignoring_repo, base, "feat", timeout=Timeout.GIT_CONTEXT)
+        changes = _net_change(ignoring_repo, base, "feat", timeout=git_setup_timeout())
         by_path = {change.path: change for change in changes}
         assert set(by_path) == {"f.txt", "sub"}
         assert (by_path["sub"].mode, by_path["sub"].blob) == (_GITLINK, _NEW_POINTER)
@@ -148,7 +149,7 @@ class TestNetChange:
         _ignore_all_globally(tmp_path)
         _bump_and_add_held_file(repo)
         base = _git(repo, "merge-base", "main", "feat").strip()
-        changes = _net_change(repo, base, "feat", timeout=Timeout.GIT_CONTEXT)
+        changes = _net_change(repo, base, "feat", timeout=git_setup_timeout())
         assert "sub" in {c.path for c in changes}
 
 
