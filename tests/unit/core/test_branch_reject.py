@@ -647,9 +647,7 @@ class TestVerdictSet:
         second = _issue(repo, store)
         assert any("distinct" in p for p in verdict_set_problems([first, second], required=2))
 
-    def test_two_distinct_agreeing_reviewers_meet_two(
-        self, repo: Path, store: RejectStore
-    ) -> None:
+    def test_two_distinct_agreeing_reviewers_meet_two(self, repo: Path, store: RejectStore) -> None:
         first = _issue(repo, store)
         second = _issue(repo, store, reviewer=_reviewer(agent_id="reviewer2"))
         assert verdict_set_problems([first, second], required=2) == []
@@ -665,9 +663,7 @@ class TestVerdictSet:
 
 class TestRate:
     @pytest.mark.parametrize(("count", "required"), [(0, 1), (2, 1), (3, 2), (9, 2), (10, None)])
-    def test_thresholds(
-        self, config: BranchRejectConfig, count: int, required: int | None
-    ) -> None:
+    def test_thresholds(self, config: BranchRejectConfig, count: int, required: int | None) -> None:
         assert reviewers_for_rate(count, config) == required
 
     def test_only_the_window_counts(self, config: BranchRejectConfig) -> None:
@@ -734,16 +730,12 @@ class TestAdmission:
         with pytest.raises(RejectRefusedError, match="closed"):
             admit_request("feat", _tip(repo), inventory, keeps, 0, config)
 
-    def test_an_unrelated_keep_does_not_count(
-        self, repo: Path, config: BranchRejectConfig
-    ) -> None:
+    def test_an_unrelated_keep_does_not_count(self, repo: Path, config: BranchRejectConfig) -> None:
         inventory = compute_inventory(repo, "feat", "main")
         keep = self._keep(branch="other", tip="9" * 40, commits=("7" * 40,))
         assert admit_request("feat", _tip(repo), inventory, [keep], 0, config) == 1
 
-    def test_the_rate_raises_the_requirement(
-        self, repo: Path, config: BranchRejectConfig
-    ) -> None:
+    def test_the_rate_raises_the_requirement(self, repo: Path, config: BranchRejectConfig) -> None:
         inventory = compute_inventory(repo, "feat", "main")
         assert admit_request("feat", _tip(repo), inventory, [], 3, config) == 2
 

@@ -13,6 +13,7 @@ from claude_code_hooks_daemon.core.branch_records import (
     ROUTE_KEY,
     TOUCHED_KEY,
     WORKTREE_CREATE_ROUTE,
+    branch_identities,
     creator_route,
     identity,
     record_creation,
@@ -197,3 +198,25 @@ class TestTouchedBranches:
         (bad / ".git").write_text("gitdir: /nonexistent\n")
         with pytest.raises(RuntimeError):
             touched_branches(bad, "s1", None)
+
+
+class TestBranchIdentities:
+    """Plan 00620: the no-value reviewer must be neither the creator nor a toucher."""
+
+    def test_creator_and_every_toucher_are_returned(self, repo: Path, untracked: Path) -> None:
+        _git(repo, "branch", "feat")
+        _git(repo, "config", f"branch.feat.{CREATOR_KEY}", "s1:creator")
+        record_touch(repo, "feat", session_id="s1", agent_id="a1", untracked=untracked)
+        record_touch(repo, "feat", session_id="s2", agent_id=None, untracked=untracked)
+        assert branch_identities(repo, "feat") == frozenset({"s1:creator", "s1:a1", "s2:"})
+
+    def test_a_branch_with_no_record_has_no_identities(self, repo: Path) -> None:
+        _git(repo, "branch", "feat")
+        assert branch_identities(repo, "feat") == frozenset()
+
+    def test_unreadable_repository_raises(self, tmp_path: Path) -> None:
+        bad = tmp_path / "bad"
+        bad.mkdir()
+        (bad / ".git").write_text("gitdir: /nonexistent\n")
+        with pytest.raises(RuntimeError):
+            branch_identities(bad, "feat")

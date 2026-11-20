@@ -1,0 +1,1034 @@
+"""The no-value removal route's pure core (Plan 00620, DESIGN.md).
+
+An ``unproven`` branch is never deleted on an agent's word. This route lets one go
+only when TWO independent facts hold at delete time: a verdict written by a separate,
+at-least-Opus reviewer agent (judging every unique commit and content-unique path),
+and a recovery bundle the guard itself wrote and verified. Neither is sufficient
+alone (RULINGS.md section 1).
+
+This module answers questions and writes the records; it grants nothing. It holds:
+
+- the inventory a reviewer judges and the guard recomputes (:func:`compute_inventory`);
+- the state store of requests, dispatch bindings, verdicts and keeps (:class:`RejectStore`);
+- verdict validation (:func:`verdict_problems`, :func:`verdict_set_problems`), where an
+  empty list is the only pass and every failure to read is a problem, never a pass;
+- request admission from the keep history and the removal rate (:func:`admit_request`);
+- the recovery bundle, always under the MAIN checkout (:func:`write_bundle`,
+  :func:`bundle_problems`);
+- the append-only removal ledger (:func:`append_ledger`, :func:`read_ledger`).
+
+Slice 2 wires it into ``delete-branch`` (via :class:`RejectRoute`), the
+``branch-reject`` CLI, the dispatch gate and the SubagentStop recorder.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import secrets
+import shlex
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
+from contextlib import suppress
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+from claude_code_hooks_daemon.config.models import BranchRejectConfig
+from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.branch_records import branch_identities, identity
+from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git
+from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
+from claude_code_hooks_daemon.utils.model_tiers import OPUS, family_rank, resolve_model_family
+
+#: The tier ``delete-branch`` reports for a removal this route made (slice 2).
+TIER_REJECTED_BUNDLED = "rejected-bundled"
+
+DECISION_NO_VALUE = "no-value"
+DECISION_KEEP = "keep"
+DECISIONS = frozenset({DECISION_NO_VALUE, DECISION_KEEP})
+
+KIND_COMMIT = "commit"
+KIND_PATH = "path"
+KINDS = frozenset({KIND_COMMIT, KIND_PATH})
+
+CITE_COMMIT = "commit:"
+CITE_PATH = "path:"
+
+SCHEMA_VERSION = 1
+
+_ID = re.compile(r"[0-9a-f]{32}")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+_OBJECT = re.compile(r"[0-9a-f]{7,64}")
+_SLUG_UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
+_ID_BYTES = 16
+_TIP_IN_NAME = 12
+_SECONDS_PER_HOUR = 3600.0
+_SECONDS_PER_DAY = 86_400.0
+_HASH_CHUNK = 1 << 20
+_LEDGER_MODE = 0o644
+_GIT_DIR_NAME = ".git"
+_HEADS = "refs/"
+
+_REQUESTS = "requests"
+_DISPATCHES = "dispatches"
+_VERDICTS = "verdicts"
+_KEEPS = "keeps"
+
+#: Path parts, name markers and suffixes a reviewer may judge worthless only with a
+#: citation of what supersedes them (PLAN.md goal "doubt means keep").
+_TEST_DIRS = frozenset({"tests", "test", "__tests__", "spec"})
+_DOC_DIRS = frozenset({"docs", "doc"})
+_DOC_SUFFIXES = frozenset({".md", ".rst", ".adoc"})
+_CONFIG_SUFFIXES = frozenset({".yaml", ".yml", ".toml", ".json", ".ini", ".cfg", ".conf"})
+_PLAN_PREFIX = ("CLAUDE", "Plan")
+_JOURNAL_DIR = "JOURNAL"
+
+
+class RejectError(RuntimeError):
+    """A record, a git fact or a file this route rests on could not be read or written."""
+
+
+class RejectRefusedError(RuntimeError):
+    """The route refuses this request (a final keep, a closed route, the rate rule)."""
+
+
+def new_id() -> str:
+    """A fresh nonce or verdict id: 32 lowercase hex characters."""
+    return secrets.token_hex(_ID_BYTES)
+
+
+def _git_budget() -> float:
+    return scaled_timeout(Timeout.GIT_BRANCH_SAFETY, Timeout.GIT_BRANCH_SAFETY_MAX)
+
+
+def _git_out(repo: Path, *args: str) -> str:
+    """Stdout of a git call; raises RejectError on any failure."""
+    result = run_git(repo, *args, timeout=_git_budget())
+    if result.returncode != 0:
+        raise RejectError(f"git {' '.join(args)} failed: {result.stderr.strip() or 'no detail'}")
+    return result.stdout
+
+
+def _git_ok(repo: Path, *args: str) -> bool:
+    return run_git(repo, *args, timeout=_git_budget()).returncode == 0
+
+
+def _full_ref(ref: str) -> str:
+    return ref if ref.startswith(_HEADS) else branch_ref(ref)
+
+
+def _resolve(repo: Path, ref: str) -> str:
+    return _git_out(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").strip()
+
+
+def branch_tip(repo: Path, branch: str) -> str:
+    """The branch's current commit; raises RejectError when it does not resolve."""
+    return _resolve(repo, branch_ref(branch))
+
+
+# --- strict field readers: a wrong type is a RejectError, never a default ----------
+
+
+def _str(data: Mapping[str, Any], key: str) -> str:
+    value = data.get(key)
+    if not isinstance(value, str):
+        raise RejectError(f"record field {key!r} is not a string")
+    return value
+
+
+def _float(data: Mapping[str, Any], key: str) -> float:
+    value = data.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RejectError(f"record field {key!r} is not a number")
+    return float(value)
+
+
+def _int(data: Mapping[str, Any], key: str) -> int:
+    value = data.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RejectError(f"record field {key!r} is not an integer")
+    return value
+
+
+def _bool(data: Mapping[str, Any], key: str) -> bool:
+    value = data.get(key)
+    if not isinstance(value, bool):
+        raise RejectError(f"record field {key!r} is not a boolean")
+    return value
+
+
+def _strs(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = data.get(key)
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise RejectError(f"record field {key!r} is not a list of strings")
+    return tuple(value)
+
+
+def _mapping(data: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    value = data.get(key)
+    if not isinstance(value, dict):
+        raise RejectError(f"record field {key!r} is not an object")
+    return value
+
+
+def _schema(data: Mapping[str, Any]) -> None:
+    if _int(data, "schema") != SCHEMA_VERSION:
+        raise RejectError(f"record schema is not {SCHEMA_VERSION}")
+
+
+# --- records -------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Inventory:
+    """What the branch holds that the default lacks: unique commits and content-unique paths."""
+
+    commits: tuple[str, ...]
+    paths: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"commits": list(self.commits), "paths": list(self.paths)}
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> Inventory:
+        return cls(commits=_strs(data, "commits"), paths=_strs(data, "paths"))
+
+
+@dataclass(frozen=True)
+class Item:
+    """The reviewer's judgement of one commit or one path."""
+
+    kind: str
+    ref: str
+    decision: str
+    reason: str
+    superseded_by: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "ref": self.ref,
+            "decision": self.decision,
+            "reason": self.reason,
+            "superseded_by": list(self.superseded_by),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> Item:
+        return cls(
+            kind=_str(data, "kind"),
+            ref=_str(data, "ref"),
+            decision=_str(data, "decision"),
+            reason=_str(data, "reason"),
+            superseded_by=_strs(data, "superseded_by"),
+        )
+
+
+@dataclass(frozen=True)
+class Reviewer:
+    """The reviewer agent, as the SubagentStop recorder read it from the agent transcript."""
+
+    session_id: str
+    agent_id: str
+    models: tuple[str, ...]
+    downgraded: bool
+    fork: bool
+    user_turns: int
+    reply_sha256: str
+
+    @property
+    def identity(self) -> str:
+        """``<session>:<agent>``, the form the creator and touch records use."""
+        return identity(self.session_id, self.agent_id)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "agent_id": self.agent_id,
+            "models": list(self.models),
+            "downgraded": self.downgraded,
+            "fork": self.fork,
+            "user_turns": self.user_turns,
+            "reply_sha256": self.reply_sha256,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> Reviewer:
+        return cls(
+            session_id=_str(data, "session_id"),
+            agent_id=_str(data, "agent_id"),
+            models=_strs(data, "models"),
+            downgraded=_bool(data, "downgraded"),
+            fork=_bool(data, "fork"),
+            user_turns=_int(data, "user_turns"),
+            reply_sha256=_str(data, "reply_sha256"),
+        )
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """One reviewer's verdict on one branch tip (DESIGN.md section 4)."""
+
+    verdict_id: str
+    nonce: str
+    branch: str
+    tip: str
+    default_sha: str
+    inventory: Inventory
+    items: tuple[Item, ...]
+    overall: str
+    issued_at: float
+    reviewer: Reviewer
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": SCHEMA_VERSION,
+            "verdict_id": self.verdict_id,
+            "nonce": self.nonce,
+            "branch": self.branch,
+            "tip": self.tip,
+            "default_sha": self.default_sha,
+            "inventory": self.inventory.to_dict(),
+            "items": [item.to_dict() for item in self.items],
+            "overall": self.overall,
+            "issued_at": self.issued_at,
+            "reviewer": self.reviewer.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> Verdict:
+        _schema(data)
+        raw_items = data.get("items")
+        if not isinstance(raw_items, list) or not all(isinstance(i, dict) for i in raw_items):
+            raise RejectError("record field 'items' is not a list of objects")
+        return cls(
+            verdict_id=_str(data, "verdict_id"),
+            nonce=_str(data, "nonce"),
+            branch=_str(data, "branch"),
+            tip=_str(data, "tip"),
+            default_sha=_str(data, "default_sha"),
+            inventory=Inventory.from_dict(_mapping(data, "inventory")),
+            items=tuple(Item.from_dict(item) for item in raw_items),
+            overall=_str(data, "overall"),
+            issued_at=_float(data, "issued_at"),
+            reviewer=Reviewer.from_dict(_mapping(data, "reviewer")),
+        )
+
+
+@dataclass(frozen=True)
+class RejectRequest:
+    """An outstanding review request, recorded by ``branch-reject request``."""
+
+    nonce: str
+    branch: str
+    tip: str
+    default_sha: str
+    inventory: Inventory
+    reviewers_required: int
+    prompt_sha256: str
+    created_at: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": SCHEMA_VERSION,
+            "nonce": self.nonce,
+            "branch": self.branch,
+            "tip": self.tip,
+            "default_sha": self.default_sha,
+            "inventory": self.inventory.to_dict(),
+            "reviewers_required": self.reviewers_required,
+            "prompt_sha256": self.prompt_sha256,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> RejectRequest:
+        _schema(data)
+        return cls(
+            nonce=_str(data, "nonce"),
+            branch=_str(data, "branch"),
+            tip=_str(data, "tip"),
+            default_sha=_str(data, "default_sha"),
+            inventory=Inventory.from_dict(_mapping(data, "inventory")),
+            reviewers_required=_int(data, "reviewers_required"),
+            prompt_sha256=_str(data, "prompt_sha256"),
+            created_at=_float(data, "created_at"),
+        )
+
+
+@dataclass(frozen=True)
+class DispatchRecord:
+    """The daemon-observed binding of a request nonce to the reviewer agent it dispatched."""
+
+    nonce: str
+    session_id: str
+    tool_use_id: str
+    agent_id: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": SCHEMA_VERSION,
+            "nonce": self.nonce,
+            "session_id": self.session_id,
+            "tool_use_id": self.tool_use_id,
+            "agent_id": self.agent_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> DispatchRecord:
+        _schema(data)
+        return cls(
+            nonce=_str(data, "nonce"),
+            session_id=_str(data, "session_id"),
+            tool_use_id=_str(data, "tool_use_id"),
+            agent_id=_str(data, "agent_id"),
+        )
+
+
+@dataclass(frozen=True)
+class KeepRecord:
+    """A ``keep`` verdict, kept so a later request on the same WORK is a re-review."""
+
+    verdict_id: str
+    branch: str
+    tip: str
+    commits: tuple[str, ...]
+    reasons: tuple[str, ...]
+    recorded_at: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": SCHEMA_VERSION,
+            "verdict_id": self.verdict_id,
+            "branch": self.branch,
+            "tip": self.tip,
+            "commits": list(self.commits),
+            "reasons": list(self.reasons),
+            "recorded_at": self.recorded_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> KeepRecord:
+        _schema(data)
+        return cls(
+            verdict_id=_str(data, "verdict_id"),
+            branch=_str(data, "branch"),
+            tip=_str(data, "tip"),
+            commits=_strs(data, "commits"),
+            reasons=_strs(data, "reasons"),
+            recorded_at=_float(data, "recorded_at"),
+        )
+
+
+# --- the state store -----------------------------------------------------------------
+
+
+class RejectStore:
+    """One JSON file per record under ``root`` (DESIGN.md section 3).
+
+    Reads fail closed: a file that exists but cannot be parsed raises RejectError, so
+    a damaged record never reads as "absent" or as a pass. A file whose name is not a
+    record id is never opened.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    @staticmethod
+    def _check_id(record_id: str) -> None:
+        if not _ID.fullmatch(record_id):
+            raise RejectError(f"not a record id: {record_id!r}")
+
+    def _path(self, kind: str, record_id: str) -> Path:
+        self._check_id(record_id)
+        return self.root / kind / f"{record_id}.json"
+
+    def _write(self, kind: str, record_id: str, data: Mapping[str, Any]) -> None:
+        path = self._path(kind, record_id)
+        tmp = path.with_name(f".{path.name}.{new_id()}.tmp")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(data, sort_keys=True), encoding="utf-8")
+            tmp.replace(path)
+        except OSError as exc:
+            raise RejectError(f"could not write {path}: {exc}") from exc
+        finally:
+            with suppress(FileNotFoundError, NotADirectoryError):
+                tmp.unlink()
+
+    @staticmethod
+    def _load(path: Path) -> Mapping[str, Any]:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise RejectError(f"could not read {path}: {exc}") from exc
+        if not isinstance(data, dict):
+            raise RejectError(f"{path} does not hold a JSON object")
+        return data
+
+    def _read(self, kind: str, record_id: str) -> Mapping[str, Any] | None:
+        path = self._path(kind, record_id)
+        if not path.exists():
+            return None
+        return self._load(path)
+
+    def _all(self, kind: str) -> list[Mapping[str, Any]]:
+        directory = self.root / kind
+        if not directory.is_dir():
+            return []
+        return [
+            self._load(path)
+            for path in sorted(directory.glob("*.json"))
+            if _ID.fullmatch(path.stem)
+        ]
+
+    def write_request(self, request: RejectRequest) -> None:
+        self._write(_REQUESTS, request.nonce, request.to_dict())
+
+    def read_request(self, nonce: str) -> RejectRequest | None:
+        data = self._read(_REQUESTS, nonce)
+        return None if data is None else RejectRequest.from_dict(data)
+
+    def write_dispatch(self, record: DispatchRecord) -> None:
+        self._write(_DISPATCHES, record.nonce, record.to_dict())
+
+    def read_dispatch(self, nonce: str) -> DispatchRecord | None:
+        data = self._read(_DISPATCHES, nonce)
+        return None if data is None else DispatchRecord.from_dict(data)
+
+    def write_verdict(self, verdict: Verdict) -> None:
+        self._write(_VERDICTS, verdict.verdict_id, verdict.to_dict())
+
+    def read_verdict(self, verdict_id: str) -> Verdict | None:
+        data = self._read(_VERDICTS, verdict_id)
+        return None if data is None else Verdict.from_dict(data)
+
+    def verdicts_for(self, branch: str, tip: str) -> list[Verdict]:
+        """Every stored verdict naming this branch and tip, oldest file name first."""
+        verdicts = [Verdict.from_dict(data) for data in self._all(_VERDICTS)]
+        return [v for v in verdicts if v.branch == branch and v.tip == tip]
+
+    def write_keep(self, keep: KeepRecord) -> None:
+        self._write(_KEEPS, keep.verdict_id, keep.to_dict())
+
+    def keeps(self) -> list[KeepRecord]:
+        return [KeepRecord.from_dict(data) for data in self._all(_KEEPS)]
+
+
+@dataclass(frozen=True)
+class RejectRoute:
+    """What ``delete_branches`` needs to consult the route (slice 2, DESIGN.md section 10)."""
+
+    store: RejectStore
+    ledger_path: Path
+    config: BranchRejectConfig
+    now: float
+
+
+# --- the inventory -------------------------------------------------------------------
+
+
+def compute_inventory(repo: Path, branch: str, default_ref: str) -> Inventory:
+    """The unique commits (merges included) and content-unique paths of ``branch``.
+
+    Measured against ``default_ref`` only (DESIGN.md section 2). Every git failure
+    raises RejectError: a failed walk must never read as an empty inventory.
+    """
+    from claude_code_hooks_daemon.daemon import branch_safety
+
+    tip_ref = branch_ref(branch)
+    default = _full_ref(default_ref)
+    tip = _resolve(repo, tip_ref)
+    base = _resolve(repo, default)
+    unique = branch_safety.cherry_unique_shas(repo, base, tip, timeout=_git_budget())
+    if unique is None:
+        raise RejectError(f"git cherry {default} {tip_ref} failed")
+    merges = _git_out(repo, "rev-list", "--merges", f"{base}..{tip}").split()
+    try:
+        reachable = branch_safety.reachable_object_shas(repo, base)
+        paths = branch_safety.content_unique_paths_of(repo, tip, reachable)
+    except Exception as exc:
+        raise RejectError(f"the content walk of {tip_ref} failed: {exc}") from exc
+    if not reachable:
+        raise RejectError(f"no objects are reachable from {default}; the walk failed")
+    return Inventory(commits=tuple(sorted({*unique, *merges})), paths=tuple(sorted(paths)))
+
+
+def is_keep_by_default(path: str) -> bool:
+    """Whether ``path`` is a test, plan or journal file, a doc, or config."""
+    pure = PurePosixPath(path)
+    parts = pure.parts
+    name = pure.name
+    suffix = pure.suffix.lower()
+    is_test = (
+        any(part in _TEST_DIRS for part in parts[:-1])
+        or name.startswith("test_")
+        or pure.stem.endswith("_test")
+        or ".test." in name
+        or ".spec." in name
+    )
+    is_plan = parts[: len(_PLAN_PREFIX)] == _PLAN_PREFIX or _JOURNAL_DIR in parts[:-1]
+    is_doc = any(part in _DOC_DIRS for part in parts[:-1]) or suffix in _DOC_SUFFIXES
+    return is_test or is_plan or is_doc or suffix in _CONFIG_SUFFIXES
+
+
+# --- verdict validation --------------------------------------------------------------
+
+
+def _shape_problems(verdict: Verdict) -> list[str]:
+    problems: list[str] = []
+    if not _ID.fullmatch(verdict.verdict_id) or not _ID.fullmatch(verdict.nonce):
+        problems.append("the verdict id or nonce is not a record id")
+    if verdict.overall not in DECISIONS:
+        problems.append(f"overall decision {verdict.overall!r} is neither no-value nor keep")
+    for item in verdict.items:
+        if item.kind not in KINDS:
+            problems.append(f"item {item.ref!r} has an unknown kind {item.kind!r}")
+        if item.decision not in DECISIONS:
+            problems.append(f"item {item.ref!r} has an unknown decision {item.decision!r}")
+        if not item.reason.strip():
+            problems.append(f"item {item.ref!r} gives no reason")
+    if verdict.overall == DECISION_KEEP:
+        problems.append("the overall verdict is keep; a keep verdict never removes a branch")
+    elif any(item.decision == DECISION_KEEP for item in verdict.items):
+        problems.append("the overall verdict is no-value but an item is judged keep")
+    return problems
+
+
+def _chain_problems(verdict: Verdict, store: RejectStore) -> list[str]:
+    try:
+        request = store.read_request(verdict.nonce)
+        dispatch = store.read_dispatch(verdict.nonce)
+    except RejectError as exc:
+        return [f"the request or dispatch record is unreadable: {exc}"]
+    problems: list[str] = []
+    if request is None:
+        problems.append("no outstanding request carries this verdict's nonce")
+    else:
+        for field_name in ("branch", "tip", "default_sha", "inventory"):
+            if getattr(request, field_name) != getattr(verdict, field_name):
+                problems.append(f"the verdict disagrees with its request on {field_name}")
+    if dispatch is None:
+        problems.append("no dispatch record binds this nonce to a reviewer agent")
+    elif (dispatch.session_id, dispatch.agent_id) != (
+        verdict.reviewer.session_id,
+        verdict.reviewer.agent_id,
+    ):
+        problems.append("the dispatch record binds this nonce to another agent")
+    return problems
+
+
+def _coverage_problems(verdict: Verdict) -> list[str]:
+    keys = [(item.kind, item.ref) for item in verdict.items]
+    problems = [
+        f"duplicate item {kind} {ref}" for (kind, ref), count in Counter(keys).items() if count > 1
+    ]
+    expected = {(KIND_COMMIT, sha) for sha in verdict.inventory.commits} | {
+        (KIND_PATH, path) for path in verdict.inventory.paths
+    }
+    missing = sorted(expected - set(keys))
+    extra = sorted(set(keys) - expected)
+    if missing or extra:
+        problems.append(
+            f"the items do not cover the inventory exactly: missing {missing}, extra {extra}"
+        )
+    return problems
+
+
+def _git_problems(verdict: Verdict, repo: Path, default_ref: str) -> list[str]:
+    try:
+        tip = branch_tip(repo, verdict.branch)
+    except RejectError as exc:
+        return [f"{verdict.branch} no longer resolves to a branch tip: {exc}"]
+    if tip != verdict.tip:
+        return [
+            f"the tip moved: the verdict is for {verdict.tip[:12]}, the branch is at {tip[:12]}"
+        ]
+    try:
+        current = compute_inventory(repo, verdict.branch, default_ref)
+    except RejectError as exc:
+        return [f"the inventory could not be recomputed: {exc}"]
+    if current != verdict.inventory:
+        return ["the inventory recomputed from git does not equal the verdict's inventory"]
+    return []
+
+
+def citation_resolves(repo: Path, citation: str, default_ref: str) -> bool:
+    """Whether a ``commit:<sha>`` or ``path:<path>`` citation resolves on the default."""
+    default = _full_ref(default_ref)
+    if citation.startswith(CITE_COMMIT):
+        sha = citation[len(CITE_COMMIT) :]
+        return bool(_OBJECT.fullmatch(sha)) and _git_ok(
+            repo, "merge-base", "--is-ancestor", sha, default
+        )
+    if citation.startswith(CITE_PATH):
+        path = citation[len(CITE_PATH) :]
+        if not path or path.startswith("-"):
+            return False
+        return _git_ok(repo, "cat-file", "-e", f"{default}:{path}")
+    return False
+
+
+def _citation_problems(verdict: Verdict, repo: Path, default_ref: str) -> list[str]:
+    problems: list[str] = []
+    for item in verdict.items:
+        if (
+            item.kind == KIND_PATH
+            and item.decision == DECISION_NO_VALUE
+            and is_keep_by_default(item.ref)
+            and not item.superseded_by
+        ):
+            problems.append(
+                f"{item.ref} is kept by default (test, plan, doc or config) and no "
+                "superseding citation is given"
+            )
+        problems.extend(
+            f"citation {citation!r} on {item.ref} does not resolve on the default branch"
+            for citation in item.superseded_by
+            if not citation_resolves(repo, citation, default_ref)
+        )
+    return problems
+
+
+def _time_problems(verdict: Verdict, now: float, config: BranchRejectConfig) -> list[str]:
+    if verdict.issued_at > now:
+        return ["the verdict is issued in the future"]
+    if now >= verdict.issued_at + config.verdict_lifetime_hours * _SECONDS_PER_HOUR:
+        return ["the verdict has expired"]
+    return []
+
+
+def _reviewer_problems(reviewer: Reviewer) -> list[str]:
+    problems: list[str] = []
+    floor = family_rank(OPUS)
+    if not reviewer.models:
+        problems.append("the reviewer record names no model")
+    for model in reviewer.models:
+        resolved = resolve_model_family(model)
+        if resolved is None or floor is None or resolved[1] < floor:
+            problems.append(f"reviewer model {model!r} is below Opus or unknown")
+    if reviewer.downgraded:
+        problems.append("the reviewer ran under a model downgrade")
+    if reviewer.fork:
+        problems.append("the reviewer is a fork, not a fresh context")
+    if reviewer.user_turns != 1:
+        problems.append(
+            f"the reviewer was resumed or re-prompted ({reviewer.user_turns} human turns, "
+            "exactly 1 is required)"
+        )
+    if not _SHA256.fullmatch(reviewer.reply_sha256):
+        problems.append("the reviewer reply digest is not a sha256")
+    return problems
+
+
+def _independence_problems(verdict: Verdict, repo: Path) -> list[str]:
+    try:
+        identities = branch_identities(repo, verdict.branch)
+    except RuntimeError as exc:
+        return [f"the branch's creator and touch records are unreadable: {exc}"]
+    if verdict.reviewer.identity in identities:
+        return [f"reviewer {verdict.reviewer.identity} is the branch's creator or touched it"]
+    return []
+
+
+def verdict_problems(
+    verdict: Verdict,
+    *,
+    repo: Path,
+    store: RejectStore,
+    default_ref: str,
+    now: float,
+    consumed: frozenset[str],
+    config: BranchRejectConfig,
+) -> list[str]:
+    """Every reason ``verdict`` cannot unlock a delete; an empty list is the only pass.
+
+    Runs every check (DESIGN.md section 5) rather than stopping at the first, so a
+    refusal names everything wrong at once.
+    """
+    problems = _shape_problems(verdict)
+    problems += _chain_problems(verdict, store)
+    problems += _coverage_problems(verdict)
+    problems += _git_problems(verdict, repo, default_ref)
+    problems += _citation_problems(verdict, repo, default_ref)
+    problems += _time_problems(verdict, now, config)
+    if verdict.verdict_id in consumed:
+        problems.append("the verdict was already used for a removal")
+    problems += _reviewer_problems(verdict.reviewer)
+    problems += _independence_problems(verdict, repo)
+    return problems
+
+
+def verdict_set_problems(verdicts: Sequence[Verdict], *, required: int) -> list[str]:
+    """Problems with the SET of individually valid verdicts offered for one removal.
+
+    Disagreement is keep, and two verdicts from one agent count once.
+    """
+    if not verdicts:
+        return ["no verdict is offered"]
+    problems: list[str] = []
+    if any(v.overall != DECISION_NO_VALUE for v in verdicts):
+        problems.append("a reviewer judged keep; disagreement between reviewers is keep")
+    agents = {v.reviewer.identity for v in verdicts}
+    if len(agents) < required:
+        problems.append(
+            f"{required} verdict(s) from distinct reviewer agents are required, "
+            f"{len(agents)} distinct reviewer(s) found"
+        )
+    return problems
+
+
+# --- admission: keep history and rate -------------------------------------------------
+
+
+def reviewers_for_rate(removals: int, config: BranchRejectConfig) -> int | None:
+    """Reviewers the next removal needs given ``removals`` in the window; None refuses."""
+    if removals >= config.refuse_after:
+        return None
+    if removals >= config.two_reviewer_after:
+        return 2
+    return 1
+
+
+def admit_request(
+    branch: str,
+    tip: str,
+    inventory: Inventory,
+    keeps: Iterable[KeepRecord],
+    removals_in_window_count: int,
+    config: BranchRejectConfig,
+) -> int:
+    """The reviewers a new request needs (1 or 2); raises RejectRefusedError when refused.
+
+    A keep is related to this request by name, by tip, or by sharing any unique commit,
+    so renaming a branch earns no fresh start (RULINGS.md Q5).
+    """
+    commits = set(inventory.commits)
+    related = [
+        keep
+        for keep in keeps
+        if keep.branch == branch or keep.tip == tip or commits & set(keep.commits)
+    ]
+    if any(keep.tip == tip for keep in related):
+        raise RejectRefusedError(f"a keep verdict on tip {tip[:12]} is final for that tip")
+    if len(related) >= 2:
+        raise RejectRefusedError(
+            "the route is closed for this work: it has two keep verdicts already"
+        )
+    needed = 2 if related else 1
+    by_rate = reviewers_for_rate(removals_in_window_count, config)
+    if by_rate is None:
+        raise RejectRefusedError(
+            f"the removal rate is at the limit ({removals_in_window_count} removals in "
+            f"{config.window_days} days, refuse_after {config.refuse_after})"
+        )
+    return max(needed, by_rate)
+
+
+# --- the recovery bundle -------------------------------------------------------------
+
+
+def main_checkout(repo: Path) -> Path:
+    """The MAIN checkout of ``repo``'s repository; raises RejectError when there is none."""
+    if _git_out(repo, "rev-parse", "--is-bare-repository").strip() == "true":
+        raise RejectError(f"{repo} is a bare repository; there is no main checkout")
+    common = Path(_git_out(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+    if common.name != _GIT_DIR_NAME:
+        raise RejectError(f"the git common directory {common} is not a checkout's .git")
+    return common.parent.resolve()
+
+
+def bundle_path_for(repo: Path, config: BranchRejectConfig, branch: str, tip: str) -> Path:
+    """``<main>/<bundle_dir>/<branch-slug>-<tip12>.bundle``."""
+    slug = _SLUG_UNSAFE.sub("-", branch)
+    return main_checkout(repo) / config.bundle_dir / f"{slug}-{tip[:_TIP_IN_NAME]}.bundle"
+
+
+def sha256_of(path: Path) -> str:
+    """The file's sha256; raises RejectError when it cannot be read."""
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(_HASH_CHUNK), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise RejectError(f"could not read {path}: {exc}") from exc
+    return digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class BundleRecord:
+    """A bundle the guard wrote, and what it recorded about it at write time."""
+
+    path: Path
+    sha256: str
+    tip: str
+
+
+def bundle_problems(repo: Path, record: BundleRecord, branch: str) -> list[str]:
+    """Every reason the bundle cannot back a removal; an empty list is the only pass."""
+    if not record.path.is_file():
+        return [f"the bundle file is missing: {record.path}"]
+    problems: list[str] = []
+    if sha256_of(record.path) != record.sha256:
+        problems.append("the bundle's sha256 differs from the one recorded when it was written")
+    verify = run_git(repo, "bundle", "verify", str(record.path), timeout=_git_budget())
+    if verify.returncode != 0:
+        problems.append(f"git bundle verify failed: {verify.stderr.strip() or 'no detail'}")
+    heads = run_git(repo, "bundle", "list-heads", str(record.path), timeout=_git_budget())
+    wanted = f"{record.tip} {branch_ref(branch)}"
+    if heads.returncode != 0 or wanted not in heads.stdout.splitlines():
+        problems.append(f"the bundle does not list {record.tip[:12]} as {branch_ref(branch)}")
+    return problems
+
+
+def write_bundle(
+    repo: Path, branch: str, tip: str, default_sha: str, config: BranchRejectConfig
+) -> BundleRecord:
+    """Write (or reuse) the branch's recovery bundle in the main checkout and verify it.
+
+    Never overwrites: an existing file at the path is verified and reused, and one
+    that does not verify refuses. Raises RejectError on every failure.
+    """
+    current = branch_tip(repo, branch)
+    if current != tip:
+        raise RejectError(f"{branch} is at {current[:12]}, not the expected {tip[:12]}")
+    path = bundle_path_for(repo, config, branch, tip)
+    if not path.exists():
+        _create_bundle(repo, branch, default_sha, path)
+    record = BundleRecord(path=path, sha256=sha256_of(path), tip=tip)
+    problems = bundle_problems(repo, record, branch)
+    if problems:
+        raise RejectError(f"the bundle at {path} is not sound: {'; '.join(problems)}")
+    return record
+
+
+def _create_bundle(repo: Path, branch: str, default_sha: str, path: Path) -> None:
+    tmp = path.with_name(f".{path.name}.{new_id()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _git_out(repo, "bundle", "create", str(tmp), branch_ref(branch), f"^{default_sha}")
+        path.hardlink_to(tmp)
+    except OSError as exc:
+        raise RejectError(f"could not write the bundle {path}: {exc}") from exc
+    finally:
+        with suppress(FileNotFoundError, NotADirectoryError):
+            tmp.unlink()
+
+
+def restore_commands(branch: str, tip: str, bundle: Path) -> tuple[str, str]:
+    """The fetch from the bundle, and ``git branch <name> <tip>``."""
+    ref = shlex.quote(f"{branch_ref(branch)}:{branch_ref(branch)}")
+    return (
+        f"git fetch {shlex.quote(str(bundle))} {ref}",
+        f"git branch {shlex.quote(branch)} {tip}",
+    )
+
+
+# --- the ledger ----------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LedgerLine:
+    """One removal, as the tracked ledger records it (RULINGS.md Q8)."""
+
+    branch: str
+    tip: str
+    default_sha: str
+    verdict_ids: tuple[str, ...]
+    reviewer_agent_ids: tuple[str, ...]
+    reviewer_models: tuple[str, ...]
+    reply_sha256s: tuple[str, ...]
+    bundle_path: str
+    bundle_sha256: str
+    restore_commands: tuple[str, ...]
+    removed_at: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": SCHEMA_VERSION,
+            "branch": self.branch,
+            "tip": self.tip,
+            "default_sha": self.default_sha,
+            "verdict_ids": list(self.verdict_ids),
+            "reviewer_agent_ids": list(self.reviewer_agent_ids),
+            "reviewer_models": list(self.reviewer_models),
+            "reply_sha256s": list(self.reply_sha256s),
+            "bundle_path": self.bundle_path,
+            "bundle_sha256": self.bundle_sha256,
+            "restore_commands": list(self.restore_commands),
+            "removed_at": self.removed_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> LedgerLine:
+        _schema(data)
+        return cls(
+            branch=_str(data, "branch"),
+            tip=_str(data, "tip"),
+            default_sha=_str(data, "default_sha"),
+            verdict_ids=_strs(data, "verdict_ids"),
+            reviewer_agent_ids=_strs(data, "reviewer_agent_ids"),
+            reviewer_models=_strs(data, "reviewer_models"),
+            reply_sha256s=_strs(data, "reply_sha256s"),
+            bundle_path=_str(data, "bundle_path"),
+            bundle_sha256=_str(data, "bundle_sha256"),
+            restore_commands=_strs(data, "restore_commands"),
+            removed_at=_float(data, "removed_at"),
+        )
+
+
+def append_ledger(path: Path, line: LedgerLine) -> None:
+    """Append one line with a single ``O_APPEND`` write, then fsync."""
+    payload = (json.dumps(line.to_dict(), sort_keys=True) + "\n").encode("utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, _LEDGER_MODE)
+        try:
+            os.write(descriptor, payload)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    except OSError as exc:
+        raise RejectError(f"could not append to the ledger {path}: {exc}") from exc
+
+
+def read_ledger(path: Path) -> list[LedgerLine]:
+    """Every ledger line; a missing ledger is empty, a damaged one raises RejectError."""
+    if not path.exists():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RejectError(f"could not read the ledger {path}: {exc}") from exc
+    lines: list[LedgerLine] = []
+    for number, raw in enumerate(text.splitlines(), start=1):
+        if not raw.strip():
+            continue
+        try:
+            data = json.loads(raw)
+        except ValueError as exc:
+            raise RejectError(f"{path} line {number} is not JSON: {exc}") from exc
+        if not isinstance(data, dict):
+            raise RejectError(f"{path} line {number} is not a JSON object")
+        try:
+            lines.append(LedgerLine.from_dict(data))
+        except RejectError as exc:
+            raise RejectError(f"{path} line {number}: {exc}") from exc
+    return lines
+
+
+def consumed_verdict_ids(lines: Iterable[LedgerLine]) -> frozenset[str]:
+    """Every verdict id a recorded removal has already used."""
+    return frozenset(verdict_id for line in lines for verdict_id in line.verdict_ids)
+
+
+def removals_in_window(
+    lines: Iterable[LedgerLine], *, now: float, config: BranchRejectConfig
+) -> int:
+    """Removals within the last ``window_days`` up to ``now``."""
+    start = now - config.window_days * _SECONDS_PER_DAY
+    return sum(1 for line in lines if start <= line.removed_at <= now)
