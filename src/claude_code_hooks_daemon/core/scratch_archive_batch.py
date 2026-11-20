@@ -23,6 +23,7 @@ batch (through :meth:`ArchiveStore.discard_unrecorded`).
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess  # nosec B404 - argv only, never a shell
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -275,9 +276,17 @@ def batch_records(
             archive_size=result.size,
             sha256=result.sha256,
             skipped=(),
-            restore_command=(
-                f"hooks-daemon scratch-sweep restore {result.archive_id} "
-                f"--entry {f'{directory}/{name}'!r}"
+            # POSIX-quoted, never repr: repr double-quotes a name holding `'`,
+            # and a pasted "$(...)" would run (D-EXEC 2).
+            restore_command=shlex.join(
+                [
+                    "hooks-daemon",
+                    "scratch-sweep",
+                    "restore",
+                    result.archive_id,
+                    "--entry",
+                    f"{directory}/{name}",
+                ]
             ),
         )
         for name, kind in zip(result.entries, result.kinds, strict=True)

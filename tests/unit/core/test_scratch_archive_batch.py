@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import tarfile
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -17,6 +18,7 @@ from claude_code_hooks_daemon.core.scratch_archive import (
     new_archive_id,
 )
 from claude_code_hooks_daemon.core.scratch_archive_batch import (
+    BatchPackResult,
     BatchRefused,
     LooseFile,
     batch_records,
@@ -328,3 +330,33 @@ def test_a_crash_after_each_step_converges(
             assert name in recorded
             assert archived[f"./{CLAIM_PREFIX}{name}"] == content[name]
         assert not (root / (CLAIM_PREFIX + name)).exists()
+
+
+@pytest.mark.parametrize("name", ["it's $(id).txt", "a`b`.txt", "$HOME.txt", "plain.txt"])
+def test_the_printed_restore_command_is_shell_quoted(name: str) -> None:
+    """D-EXEC 2 (Task 3.9): the command round-trips through a shell, so pasting it
+    names the entry and runs nothing."""
+    result = BatchPackResult(
+        archive_id="A1", entries=(name,), kinds=("file",), size=1, sha256="0" * 64
+    )
+    (record,) = batch_records(
+        result,
+        directory="untracked/scratch",
+        checkout=CHECKOUT,
+        verdict="DISPOSABLE",
+        proof_ids=("P1",),
+        packed_at="2026-11-20T00:00:00Z",
+        expires_at=None,
+    )
+    # shlex.split never expands, so it cannot catch a double-quoted `$(...)`:
+    # the command must be exactly the POSIX-quoted argv.
+    argv = [
+        "hooks-daemon",
+        "scratch-sweep",
+        "restore",
+        "A1",
+        "--entry",
+        f"untracked/scratch/{name}",
+    ]
+    assert record.restore_command == shlex.join(argv)
+    assert shlex.split(record.restore_command) == argv
