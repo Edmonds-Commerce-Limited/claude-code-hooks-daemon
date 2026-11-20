@@ -620,6 +620,13 @@ class TestRefusals:
                 [_member("./", tarfile.DIRTYPE), _member("e1/a", data=b"x")],
                 {"dir": 1, "file": 1},
             ),
+            (
+                [
+                    _member(f"./{CLAIM_PREFIX}e1", data=b"x"),
+                    _member(f"x/{CLAIM_PREFIX}y", data=b"y"),
+                ],
+                {"file": 1},
+            ),
         ],
         ids=[
             "counts-differ",
@@ -633,6 +640,7 @@ class TestRefusals:
             "p6-root-not-a-dir",
             "p6-mixed-with-dot",
             "dot-mixed-with-p6",
+            "member-mixed-with-p6",
         ],
     )
     def test_a_layout_that_disagrees_with_the_record_is_refused(

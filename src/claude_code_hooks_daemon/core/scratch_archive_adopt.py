@@ -58,6 +58,7 @@ from claude_code_hooks_daemon.core.scratch_archive import (
 from claude_code_hooks_daemon.core.scratch_archive_claim import (
     CLAIM_PREFIX,
     DEFAULT_MAX_DEPTH,
+    ClaimRefused,
     WalkRefused,
     check_entry_name,
     check_name,
@@ -326,7 +327,7 @@ def _move_in(store: ArchiveStore, parent_fd: int, tarball_name: str, archive_id:
         rename_noreplace_between(
             parent_fd, tarball_name, store.dir_fd, archive_file_name(archive_id)
         )
-    except OSError as exc:
+    except (OSError, ClaimRefused) as exc:
         raise AdoptRefused(f"the move into the store failed: {exc}") from exc
     fsync_dir(store.dir_fd)
     fsync_dir(parent_fd)
@@ -366,8 +367,9 @@ def _move_back(
         rename_noreplace_between(
             store.dir_fd, archive_file_name(archive_id), parent_fd, tarball_name
         )
-    except OSError as exc:
-        reason = "its old name is taken" if exc.errno == errno.EEXIST else str(exc)
+    except (OSError, ClaimRefused) as exc:
+        taken = isinstance(exc, OSError) and exc.errno == errno.EEXIST
+        reason = "its old name is taken" if taken else str(exc)
         raise AdoptStuck(
             f"the moved file failed its check ({why}) and stays in the store as "
             f"{archive_id}, named by its adopt event: {reason}"

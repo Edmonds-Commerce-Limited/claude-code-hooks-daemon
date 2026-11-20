@@ -26,7 +26,12 @@ from claude_code_hooks_daemon.core.scratch_archive import (
     StoreRefused,
     archive_file_name,
 )
-from claude_code_hooks_daemon.core.scratch_archive_adopt import Adopted, AdoptRefused, adopt
+from claude_code_hooks_daemon.core.scratch_archive_adopt import (
+    Adopted,
+    AdoptRefused,
+    AdoptStuck,
+    adopt,
+)
 from claude_code_hooks_daemon.core.scratch_archive_claim import open_dir
 from claude_code_hooks_daemon.core.scratch_archive_pack import (
     PackRefused,
@@ -661,3 +666,38 @@ class TestAdoptCrashes:
         assert tarball.read_bytes() == b"someone else's file"
         assert _store_files(store) == []
         assert store.read_index().records == ()
+
+    def test_a_swapped_file_whose_old_name_is_retaken_stays_named_in_the_store(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _make(root)
+        tarball = _pack_by_hand(root)
+        real = adopt_mod.rename_noreplace_between
+        calls: list[str] = []
+
+        def swap_then_move(src_fd: int, src: str, dst_fd: int, dst: str) -> None:
+            if not calls:
+                (root / "swap").write_bytes(b"someone else's file")
+                (root / "swap").replace(tarball)
+            calls.append(src)
+            real(src_fd, src, dst_fd, dst)
+            if len(calls) == 1:
+                tarball.write_bytes(b"a newer file under the old name")
+
+        monkeypatch.setattr(adopt_mod, "rename_noreplace_between", swap_then_move)
+        with pytest.raises(AdoptStuck, match="adopt event"):
+            _adopt(store, root_fd, gnu_tar)
+        monkeypatch.undo()
+        assert tarball.read_bytes() == b"a newer file under the old name"
+        (event,) = store.read_events().events
+        assert isinstance(event, AdoptEvent)
+        name = archive_file_name(event.archive_id)
+        assert (store.path / name).read_bytes() == b"someone else's file"
+        assert store.read_index().records == ()
+        with pytest.raises(StoreRefused, match="adopt"):
+            store.discard_unrecorded(event.archive_id)

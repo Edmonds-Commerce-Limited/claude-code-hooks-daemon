@@ -202,7 +202,7 @@ def _plan(
     wanted = f"./{CLAIM_PREFIX}{dest_name}"
     for header in headers:
         parts = header.name.split("/")
-        if len(parts) != 2 or not parts[1].startswith(CLAIM_PREFIX):
+        if len(parts) != 2 or parts[0] != "." or not parts[1].startswith(CLAIM_PREFIX):
             raise RestoreRefused(f"layout: member {header.name!r} is not a claimed loose file")
     match = [h for h in headers if h.name == wanted]
     if len(match) != 1:
