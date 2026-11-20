@@ -21,16 +21,16 @@ The owner decided (2026-11-20, quoted in
 into a worktree is allowed and needed, in link mode only. The route is owned by
 the project config (the `worktree_create` seed list) and run by the creation
 hook or by `hooks-daemon seed-worktree <worktree>` for a hand-made worktree;
-neither lets an agent name a path to link. The secret guard's code is
-unchanged; a read through the link is judged as a read of the file, with one
-known gap recorded in the 261120 handoff.
+neither lets an agent name a path to link. A read through the link is judged
+as a read of the file, including a recursive read that follows links below its
+root (`utils/link_reach.py`, closing the gap the 261120 handoff recorded).
 
 ## Goals
 
 - A protected file can be seeded into a worktree as a relative link, by the
   creation hook and, for a hand-made worktree, by `seed-worktree`.
 - Copy mode stays refused for a protected source; each protected link is audited.
-- Reads through a seeded link stay denied (pinned; one known gap, open).
+- Reads through a seeded link stay denied, including link-following recursive reads.
 
 ## Non-Goals
 
@@ -66,15 +66,19 @@ known gap recorded in the 261120 handoff.
 - [x] ✅ **Task 3.1**: (Done: a pin,
   `test_secret_file_guard_seeded_link_reads.py`.) DESIGN section 8 group C
   against links `seed_worktree` placed, hook cwd in the worktree: Read, Edit,
-  Grep and relative Bash reads denied, with one known gap pinned strict-xfail
-  (`grep -R`, project-glob-only file). Run through the handler, not a live
+  Grep and relative Bash reads denied. Run through the handler, not a live
   daemon socket.
+- [x] ✅ **Task 3.1b**: (Done.) Close the link-following read gap: a recursive
+  reader that follows links (`grep -R`, `find -L`, `find -exec`, `zip`, ...) is
+  judged on what lies behind each link below its root (`utils/link_reach.py`);
+  the strict-xfail is now passing cases with controls.
 - [x] ✅ **Task 3.2**: (Done.) Documentation: HANDLER_REFERENCE, the example
   config, the handler's CLAUDE.md guidance, callout 009 and task 01 now point
   a protected copy at symlink mode.
 - [x] ✅ **Task 3.3**: (Done.) `hooks-daemon seed-worktree <worktree>` applies
   the configured list to a hand-made worktree; one positional, no options;
-  release note 016.
+  release note 018. A protected link entry must also be listed in the config
+  committed at HEAD (residual 1 of the 261120 handoff, narrowed).
 - [ ] ⬜ **Task 3.4**: Reply to the peer project with the route (coordinator).
 
 ## Success Criteria
@@ -87,11 +91,10 @@ known gap recorded in the 261120 handoff.
   `seed-worktree` CLI wrapper test.)
 - [x] The guard denies every mention it denied before.
 - [ ] Every read through a seeded link is denied, verified through a live daemon
-  socket. (Through the handler: all denied but one known gap, `grep -R` into
-  a linked directory for a project-glob-only file, pinned strict-xfail; a
-  merge gate for the coordinator.)
+  socket. (Through the handler: all pinned cases denied, the link-following
+  gap included; the live-socket check is still open.)
 - [x] Release-bound consequences recorded in the pending release notes
-  (`CLAUDE/UPGRADES/UNRELEASED/release-notes/009-*` and `016-*`) and the
+  (`CLAUDE/UPGRADES/UNRELEASED/release-notes/009-*` and `018-*`) and the
   pre-upgrade tasks (`CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/01-*`).
 
 ## Delivery & Milestones
