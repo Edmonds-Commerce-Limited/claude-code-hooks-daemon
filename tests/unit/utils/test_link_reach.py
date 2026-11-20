@@ -175,3 +175,15 @@ class TestFailClosed:
         index = ProtectedFileIndex(project_root=str(project), patterns=(), files=())
         (project / "tree" / "conf").symlink_to(project / "conf")
         assert reached_through_links(str(project / "tree"), LinkFollow.ALL, index) is None
+
+
+class TestRootsThatHoldNoLinks:
+    """A copier's destination or a file operand is a root too, and holds no link below it."""
+
+    def test_a_missing_root(self, project: Path) -> None:
+        found = reached_through_links(str(project / "absent"), LinkFollow.ALL, _index(project))
+        assert found is None
+
+    def test_a_file_root(self, project: Path) -> None:
+        root = project / "docs" / "readme.txt"
+        assert reached_through_links(str(root), LinkFollow.ALL, _index(project)) is None
