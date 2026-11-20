@@ -1188,12 +1188,13 @@ handlers:
       #     #   symlink — shared with the main checkout. One source of truth,
       #     #             but a write from INSIDE a worktree flows back.
       #     #   copy    — isolated. Safe to overwrite; may drift from the
-      #     #             canonical file after creation.
+      #     #             canonical file after creation. REFUSED for a path
+      #     #             the secret_file_guard protects (creation aborts).
       #     default_mode: symlink
       #     entries:
       #       # Repository-root-relative. Files or directories; no globs.
       #       - .env.local
-      #       - path: .secrets       # anything an agent may WRITE to
+      #       - path: .claude/settings.local.json   # anything an agent may WRITE to
       #         mode: copy
       #
       #   # Seeding happens once, at creation. A re-fired event never re-seeds

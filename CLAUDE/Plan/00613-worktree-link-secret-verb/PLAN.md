@@ -74,14 +74,21 @@ own worktree files came from a peer and is not verified here.
   and the seed by role. A config that cannot be read refuses the protected
   decision rather than falling back. An unprotected seed and a protected seed
   in link mode behave as today.
-- [ ] ⬜ **Task 2.2**: Test-first: each protected source seeded as a link
+- [x] ✅ **Task 2.2**: (Done: `seed_worktree` takes a required `LinkAudit`;
+  log `worktree-seed-protected-links.jsonl`; see the journal.) Test-first:
+  each protected source seeded as a link
   appends one audit line (DESIGN section 7 fields; never content, size or
   digest) to a daemon-owned log under the primary checkout's daemon
   `untracked/` directory.
-- [ ] ⬜ **Task 2.3**: A test pins that a hand-typed `ln -s`, `ln` or `cp`
+- [x] ✅ **Task 2.3**: (Done: a pin, not red-first.) A test pins that a
+  hand-typed `ln -s`, `ln` or `cp`
   naming a protected path is still denied by `R-SECRET-BASH-MENTION`.
-- [ ] ⬜ **Task 2.4**: Release note for 2.1 and 2.2 (a config that seeds a
+- [x] ✅ **Task 2.4**: (Done: callout 009 in the pending release notes.)
+  Release note for 2.1 and 2.2 (a config that seeds a
   protected file in copy mode now refuses; say what to change).
+- [x] ✅ **Task 2.5**: (Done.) `check-worktree-seed` reports the copies
+  creation would refuse, and the shipped copy-mode examples name an
+  unprotected file.
 
 ### Phase 3: Advise the link (gated)
 
@@ -98,10 +105,12 @@ journalled (a delegated ruling is not sufficient for it).
 ## Success Criteria
 
 - [x] The decision is on record before any code (a delegated ruling, see Task 1.3).
-- [ ] The copy refusal and the audit line are tested, each test seen failing
-  first, and the guard denies every mention it denied before.
+- [x] The copy refusal and the audit line are tested, each test seen failing
+  first, and the guard denies every mention it denied before. (Exceptions,
+  journalled: the Task 2.3 pin and two handler wiring tests for 2.2.)
 - [ ] No text advising a protected seed or hand link ships before the Phase 3 gate.
-- [ ] Release-bound consequences recorded in the pending release notes.
+- [x] Release-bound consequences recorded in the pending release notes
+  (`CLAUDE/UPGRADES/UNRELEASED/release-notes/009-*`).
 
 ## Delivery & Milestones
 
