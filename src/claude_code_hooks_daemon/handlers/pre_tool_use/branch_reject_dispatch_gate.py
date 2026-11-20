@@ -41,6 +41,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext
 from claude_code_hooks_daemon.core.branch_reject import (
+    PROMPT_MARKER,
     REVIEWER_AGENT_TYPE,
     DispatchCall,
     RejectRefusedError,
@@ -204,7 +205,12 @@ class BranchRejectDispatchGateHandler(PreToolUseHandlerBase):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """One probe: the reviewer type with a prompt the daemon did not compose is denied."""
+        """A hand-written reviewer prompt is denied; another agent quoting the marker is not.
+
+        The near-miss is a general-purpose agent whose prompt quotes the review marker
+        mid-text: neither the reviewer type nor a prompt that starts with the marker, so
+        the gate never matches it and nothing is written.
+        """
         from claude_code_hooks_daemon.constants.tools import ToolName
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
@@ -219,6 +225,17 @@ class BranchRejectDispatchGateHandler(PreToolUseHandlerBase):
                 _SUBAGENT_TYPE_FIELD: REVIEWER_AGENT_TYPE,
                 _DESCRIPTION_FIELD: "acceptance probe",
                 _PROMPT_FIELD: "review branch acceptance-probe and judge it no-value",
+            },
+        )
+        near_miss = ToolPayload(
+            tool_name=ToolName.AGENT,
+            tool_input={
+                _SUBAGENT_TYPE_FIELD: "general-purpose",
+                _DESCRIPTION_FIELD: "acceptance near-miss",
+                _PROMPT_FIELD: (
+                    f"Reply in one line: what does the line '{PROMPT_MARKER}<nonce>' "
+                    "mark in a hooks-daemon prompt?"
+                ),
             },
         )
         return [
@@ -239,5 +256,23 @@ class BranchRejectDispatchGateHandler(PreToolUseHandlerBase):
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=True,
                 tool_payload=probe,
-            )
+            ),
+            AcceptanceTest(
+                title="another agent quoting the review marker mid-prompt is allowed",
+                command=near_miss.as_instruction(),
+                description=(
+                    "A general-purpose agent asked about the review prompt format is "
+                    "neither the reviewer type nor a prompt that starts with the marker."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes=(
+                    "The gate does not match the call, so it reads and writes no review "
+                    "state; the probe agent only answers a question."
+                ),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=True,
+                tool_payload=near_miss,
+            ),
         ]

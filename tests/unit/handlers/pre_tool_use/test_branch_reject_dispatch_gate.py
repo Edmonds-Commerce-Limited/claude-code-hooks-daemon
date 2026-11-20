@@ -354,5 +354,21 @@ class TestGuidance:
 
     def test_acceptance_probe_denies(self, handler: BranchRejectDispatchGateHandler) -> None:
         tests = handler.get_acceptance_tests()
-        assert tests
-        assert all(t.expected_decision == Decision.DENY for t in tests)
+        assert [t.expected_decision for t in tests].count(Decision.DENY) == 1
+
+    def test_acceptance_declares_a_near_miss_allow(
+        self, handler: BranchRejectDispatchGateHandler
+    ) -> None:
+        """A non-reviewer agent quoting the marker mid-prompt is not the gate's business."""
+        allows = [
+            t for t in handler.get_acceptance_tests() if t.expected_decision == Decision.ALLOW
+        ]
+        assert len(allows) == 1
+        payload = allows[0].tool_payload
+        assert payload is not None
+        prompt = payload.tool_input["prompt"]
+        assert PROMPT_MARKER in prompt
+        assert not prompt.startswith(PROMPT_MARKER)
+        assert payload.tool_input["subagent_type"] != REVIEWER_AGENT_TYPE
+        hook_input = {"tool_name": payload.tool_name, "tool_input": payload.tool_input}
+        assert handler.matches(hook_input) is False
