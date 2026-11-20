@@ -1,4 +1,4 @@
-# Optimal-config check encourages the lowest idle compaction threshold
+# Callout: Optimal-config check encourages the lowest idle compaction threshold
 
 **Audience**: client projects
 
