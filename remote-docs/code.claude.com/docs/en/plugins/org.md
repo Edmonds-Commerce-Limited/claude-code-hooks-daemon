@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/plugins/org
-fetched_at: '2026-11-16T21:15:45.587115+00:00'
+fetched_at: '2026-11-20T09:13:52.985025+00:00'
 fidelity: converted
-source_sha256: 447f35e4a60e1cb0f1b80b0bf8c5bd747c1bd357420f94d3a63175e9bc1ddd85
+source_sha256: 5cdc89aa61839c0fa4f8c30bff12852701a23bafebc75646f27443ea60067eef
 licence: unreviewed
-stale_after: '2027-02-14'
+stale_after: '2027-02-18'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -99,7 +99,7 @@ To cover one repository's contributors instead of your whole fleet, set `extraKn
 * **Interactive sessions**: Claude Code registers the marketplace only after the contributor accepts the [workspace trust dialog](https://code.claude.com/docs/en/permissions.md#what-runs-before-you-trust-a-folder) for that folder.
 * **[Non-interactive `-p` runs](https://code.claude.com/docs/en/headless)**: the entries apply only in a folder whose trust the user already accepted interactively, or whose `hasTrustDialogAccepted` flag you set in `~/.claude.json`.
 
-Setting `enabledPlugins` in the repository doesn't install the plugin. Once the marketplace is registered, ask each contributor to run `claude plugin install <name>@<marketplace> --scope project`. Until they do, the `/plugin` **Errors** tab can show `Plugin "<name>" is enabled in project settings but isn't installed here` or [`not cached`](https://code.claude.com/docs/en/plugins/troubleshooting#plugin-not-cached-at). Contributors don't need the install when a local `directory` or `file` marketplace lists the plugin with a [relative-path `source`](https://code.claude.com/docs/en/plugins/marketplace-reference#plugin-sources).
+Setting `enabledPlugins` in the repository doesn't install the plugin. Once the marketplace is registered, ask each contributor to run `claude plugin install <name>@<marketplace> --scope project`. Until they do, the `/plugin` **Errors** tab can show a line ending in [`isn't installed here`](https://code.claude.com/docs/en/plugins/troubleshooting#plugin-is-enabled-in-project-settings-but-isnt-installed-here). Contributors don't need the install when a local `directory` or `file` marketplace lists the plugin with a [relative-path `source`](https://code.claude.com/docs/en/plugins/marketplace-reference#plugin-sources).
 
 If you use a local `directory` or `file` source with a relative path, the path resolves against your repository's main checkout. When you run Claude Code from a git worktree, the path still points at the main checkout, so all worktrees share the same marketplace location.
 
@@ -158,7 +158,8 @@ To verify a seed, run `claude -p` with `--output-format stream-json --verbose` i
 Seed marketplaces follow these rules:
 
 * **Read-only**: Claude Code never writes to the seed and forces `autoUpdate` off for seed marketplaces.
-* **Seed entries take precedence**: on each startup, a marketplace declared in the seed overwrites the user's entry of the same name. Users opt out of a seed plugin with `claude plugin disable`, not by removing the marketplace.
+* **Build from the declared source**: if user or managed settings declare a seed marketplace's name in `extraKnownMarketplaces`, build the seed from that source and `ref`.
+* **Opting out**: when the repository's settings enable a seed plugin, users opt out with `claude plugin disable`, not by removing the marketplace.
 * **Update and remove fail**: `claude plugin marketplace update <name>` and `remove` without `--scope` on a seed marketplace fail with a message that names the seed directory.
 * **Policy still applies**: the [allowlist and blocklist](#restrict-what-users-can-install) check a seed marketplace's recorded source too. Allow the source you built the seed from.
 
@@ -177,7 +178,9 @@ Both lists apply before anything downloads and again at session start:
 
 Where the two lists are enforced depends on where you set them:
 
-* **The claude.ai admin console**: Claude Code enforces both lists in the sessions that [read server-managed settings](https://code.claude.com/docs/en/managed-settings.md#where-and-when-a-policy-applies). claude.ai also checks them when anyone in your organization adds a new marketplace from a git repository on claude.ai, or from **Customize** in the Claude Desktop app outside its Code tab. That covers a marketplace a member adds for their own account and one added for the whole organization under [**Organization settings > Plugins**](https://claude.ai/admin-settings/plugins). claude.ai refuses a repository that the allowlist doesn't admit or that the blocklist names. It doesn't re-check a marketplace that was added in either place before you set the lists, and it doesn't check uploaded plugins.
+* **The claude.ai admin console**: Claude Code enforces both lists in the sessions that [read server-managed settings](https://code.claude.com/docs/en/managed-settings.md#where-and-when-a-policy-applies). claude.ai also checks them when anyone in your organization adds a marketplace from a git repository on claude.ai, or from **Customize** in the Desktop app outside its Code tab.
+
+  That covers a marketplace a member adds for their own account and one added for the whole organization under [**Organization settings > Plugins & skills**](https://claude.ai/admin-settings/skills?tab=marketplaces). claude.ai refuses a repository that the allowlist doesn't admit or that the blocklist names. It doesn't re-check a marketplace that was added in either place before you set the lists, and it doesn't check uploaded plugins.
 * **A managed settings file, OS-level policy, or other managed source**: Claude Code enforces both lists where it reads that source. claude.ai doesn't read it.
 
 While any allowlist is set, or a blocklist names any source other than [`skills-dir`](#blocklist-with-blockedmarketplaces), a plugin whose marketplace Claude Code can't find doesn't load. `/plugin` shows the policy error for it rather than a not-found error. The common case is a stale `enabledPlugins` entry for a marketplace nobody registered.
@@ -374,7 +377,7 @@ Suggestions from a marketplace appear only when it's registered on the user's ma
 
 > [!NOTE]
 >
-> In a cloud session's conversation, Claude can suggest plugins whether or not you set `pluginSuggestionMarketplaces`. To turn those suggestions off, see [Turn off plugin suggestions](https://code.claude.com/docs/en/claude-code-on-the-web.md#turn-off-plugin-suggestions).
+> In a cloud session's conversation or the desktop app's Code tab, Claude can suggest plugins whether or not you set `pluginSuggestionMarketplaces`. To turn those suggestions off, see [Turn off plugin suggestions](https://code.claude.com/docs/en/claude-code-on-the-web.md#turn-off-plugin-suggestions).
 
 ## Audit and review
 
