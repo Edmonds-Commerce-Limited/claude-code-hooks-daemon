@@ -232,9 +232,15 @@ class BranchRejectDispatchGateHandler(PreToolUseHandlerBase):
             tool_input={
                 _SUBAGENT_TYPE_FIELD: "general-purpose",
                 _DESCRIPTION_FIELD: "acceptance near-miss",
+                # The second line keeps the probe ALLOW under a strict
+                # dispatch_declaration: 'not plan work' plus a destination keyword
+                # and a path token in one clause (no '.' in the path, which would
+                # split the clause).
                 _PROMPT_FIELD: (
                     f"Reply in one line: what does the line '{PROMPT_MARKER}<nonce>' "
-                    "mark in a hooks-daemon prompt?"
+                    "mark in a hooks-daemon prompt?\n"
+                    "This is not plan work; reply inline, and write any file only to "
+                    "untracked/scratch/branch-reject-near-miss"
                 ),
             },
         )

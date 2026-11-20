@@ -372,3 +372,29 @@ class TestGuidance:
         assert payload.tool_input["subagent_type"] != REVIEWER_AGENT_TYPE
         hook_input = {"tool_name": payload.tool_name, "tool_input": payload.tool_input}
         assert handler.matches(hook_input) is False
+
+    def test_the_near_miss_passes_a_strict_dispatch_declaration(
+        self, handler: BranchRejectDispatchGateHandler, tmp_path: Path
+    ) -> None:
+        """A live run of the ALLOW probe must not be denied by another PreToolUse guard.
+
+        ``dispatch_declaration`` in strict mode denies a dispatch that names no plan
+        folder and no 'not plan work' destination, which would turn the ALLOW probe
+        into a DENY under a project that opted in.
+        """
+        from claude_code_hooks_daemon.handlers.pre_tool_use.dispatch_declaration import (
+            DispatchDeclarationHandler,
+        )
+
+        (near_miss,) = [
+            t for t in handler.get_acceptance_tests() if t.expected_decision == Decision.ALLOW
+        ]
+        payload = near_miss.tool_payload
+        assert payload is not None
+        strict = DispatchDeclarationHandler()
+        strict._strict = True
+        strict._project_root = tmp_path / "declaration-project"
+        strict._config_dir = tmp_path / "declaration-config"
+        hook_input = {"tool_name": payload.tool_name, "tool_input": payload.tool_input}
+        assert strict.matches(hook_input) is True
+        assert strict.handle(hook_input).decision != Decision.DENY
