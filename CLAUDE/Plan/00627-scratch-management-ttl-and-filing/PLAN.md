@@ -87,7 +87,8 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [x] ✅ **Task 3.6**: Add expiry by verdict retention, `restore <id>` and `keep` (bounded, reasoned, no repeated reason).
 - [x] ✅ **Task 3.7**: Add proof P6 (adopt a tarball beside its original).
 - [x] ✅ **Task 3.8** (depends on Task 3.0): Wire `--apply`, rebuilding every per-sweep git fact for the run (DESIGN.md section 5.2 step 1: tracked files, worktrees, verified tips and blobs, references). Add the crash-safety tests (a failure after each step), the escape tests and the property test of DESIGN.md section 14.
-- [ ] ⬜ **Task 3.9** (depends on Task 3.0): Independent adversarial review of Phases 1 to 3 (data loss, link escapes, TOCTOU) before any later phase runs `--apply` outside tests. It must review the Task 3.0 fixes for the N1-N4 and reflog/`ORIG_HEAD` rows of DESIGN.md section 13.
+- [ ] ⬜ **Task 3.9** (depends on Task 3.0): Independent adversarial review of Phases 1 to 3 (data loss, link escapes, TOCTOU) before any later phase runs `--apply` outside tests. It must review the Task 3.0 fixes for the N1-N4 and reflog/`ORIG_HEAD` rows of DESIGN.md section 13. Review fixes landed (DESIGN.md section 13, Task 3.9 rows): D-EXEC 1-3, D-PATH F1 and F2, and a malformed TTL refusing its root (section 4.1) are closed; F-BYPS F1 is closed at first-level roots and OPEN for a borrower in another first-level root or `untracked/repos`; F-BYPS F2 is held by the interim TTY-confirm gate on `--apply`, whose removal is an owner decision after Tasks 4.4 and 5.2.
+- [ ] ⬜ **Task 3.10**: Add `scratch-sweep status`: list the live archives (id, original path, verdict, effective expiry with keeps applied, reusing the expiry module's computation). Read-only: it never creates the store and takes no lock it does not need.
 
 ### Phase 4: The session directory convention
 
