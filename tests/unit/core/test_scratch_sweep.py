@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.config.models import ScratchConfig
+from claude_code_hooks_daemon.core.scratch_filing import HINT_TRACKED
 from claude_code_hooks_daemon.core.scratch_liveness import BackgroundRecords, LivenessInputs
 from claude_code_hooks_daemon.core.scratch_repos import build_project_git
 from claude_code_hooks_daemon.core.scratch_sweep import (
@@ -476,6 +477,18 @@ class TestFilingProposals:
         row = _git_sweep(gp, now, plan_dir="CLAUDE/Plan").rows[0]
         assert row.verdict.value == "PROTECTED"
         assert row.filing_destination.startswith("commit and push to a branch on the remote")
+
+    def test_an_entry_holding_a_tracked_file_is_for_a_human(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        self._plan(gp)
+        gp.tree.file("00627-held/x.txt", b"tracked\n")
+        git(gp.project, "add", "-f", "--", "untracked/scratch/00627-held/x.txt")
+        git(gp.project, "commit", "-q", "-m", "track")
+        now = _now()
+        _old(gp.tree, now)
+        row = _git_sweep(gp, now, plan_dir="CLAUDE/Plan").rows[0]
+        assert row.verdict.value == "PROTECTED"
+        assert (row.filing_destination, row.filing_command) == (HINT_TRACKED, "")
 
     def test_the_proposals_section_is_bounded(self, tmp_path: Path) -> None:
         gp = build_git_project(tmp_path)
