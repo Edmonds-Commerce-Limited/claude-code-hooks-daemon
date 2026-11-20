@@ -228,3 +228,30 @@ class TestHome:
 
     def test_exact_names_are_accepted(self) -> None:
         assert BranchesConfig(home=["main", "release/2.0"]).home == ["main", "release/2.0"]
+
+
+class TestReject:
+    """Plan 00620 RULINGS Q5 and Q8: the reject route's numbers and paths are config."""
+
+    def test_defaults(self) -> None:
+        reject = BranchesConfig().reject
+        assert reject.verdict_lifetime_hours == 24
+        assert reject.window_days == 7
+        assert (reject.two_reviewer_after, reject.refuse_after) == (3, 10)
+        assert reject.ledger_path == ".claude/branch-removals.jsonl"
+        assert reject.bundle_dir == "untracked/branch-rejects"
+        assert reject.state_dir == "untracked/branch-reject-state"
+
+    def test_refuse_must_not_precede_two_reviewers(self) -> None:
+        with pytest.raises(ValidationError, match="refuse_after"):
+            BranchesConfig.model_validate({"reject": {"two_reviewer_after": 5, "refuse_after": 4}})
+
+    @pytest.mark.parametrize("key", ["ledger_path", "bundle_dir", "state_dir"])
+    @pytest.mark.parametrize("value", ["/etc/x", "../outside", "a/../../b", ""])
+    def test_an_absolute_or_escaping_path_is_rejected(self, key: str, value: str) -> None:
+        with pytest.raises(ValidationError):
+            BranchesConfig.model_validate({"reject": {key: value}})
+
+    def test_unknown_key_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            BranchesConfig.model_validate({"reject": {"override": True}})

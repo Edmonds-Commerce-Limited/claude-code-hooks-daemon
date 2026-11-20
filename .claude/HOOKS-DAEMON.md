@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (84 handlers)
+### PreToolUse (85 handlers)
 
 | Priority | Handler                         | Behaviour    | Description                                                                              |
 | -------- | ------------------------------- | ------------ | ---------------------------------------------------------------------------------------- |
@@ -86,6 +86,7 @@
 | 55       | web_search_year                 | ADVISORY     | Validate WebSearch queries don't use outdated years                                      |
 | 57       | daemon_docs_guard               | ADVISORY     | Warn when reading from the hooks-daemon internal CLAUDE/ docs directory                  |
 | 58       | flaggable_work_advisor          | ADVISORY     | Advise delegating safeguard-flaggable work BEFORE opening the content                    |
+| 59       | branch_reject_dispatch_gate     | BLOCKING     | Admit a branch-reject reviewer dispatch only on the daemon's prompt; else deny           |
 | 59       | merge_qa_advisor                | ADVISORY     | Advise the static checks to run before merging a work branch with no recorded green run  |
 | 60       | british_english                 | ADVISORY     | Warn about American English spellings in content files (non-blocking)                    |
 | 60       | review_round_advisor            | ADVISORY     | Advise from the `advise_at`-th review dispatch on one plan or branch                     |
@@ -93,7 +94,7 @@
 | 60       | subagent_tier_advisor           | ADVISORY     | Advise a cheaper tier on an unchosen or up-overridden dispatch, and a floor below it     |
 | 60       | workflow_fanout_advisor         | ADVISORY     | Advise on a Workflow script's agent count, inherited sites and per-family ceiling        |
 
-### PostToolUse (19 handlers)
+### PostToolUse (20 handlers)
 
 | Priority | Handler                    | Behaviour    | Description                                                                         |
 | -------- | -------------------------- | ------------ | ----------------------------------------------------------------------------------- |
@@ -106,6 +107,7 @@
 | 30       | goal_injection             | ADVISORY     | Write a goal-intent signal when a plan TRANSITIONS to In Progress                   |
 | 31       | markdown_table_formatter   | NON-TERMINAL | Auto-format markdown tables after Write/Edit of .md files                           |
 | 32       | budget_exhaustion_detector | ADVISORY     | Advisory PostToolUse handler that flags budget-exhaustion messaging                 |
+| 33       | branch_reject_agent_binder | NON-TERMINAL | Fill a review dispatch record's agent id from the Agent call's result               |
 | 33       | dispatch_model_recorder    | NON-TERMINAL | Merge `resolvedModel`, `modelsUsed` and `agentId` onto the dispatch's tier row      |
 | 33       | model_downgrade_recorder   | ADVISORY     | Publish Claude Code's own automatic model-downgrade record, silently                |
 | 34       | merge_qa_report            | ADVISORY     | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced          |
@@ -207,17 +209,18 @@
 | 9        | teammate_reap_advisor         | ADVISORY     | Report the Stop payload's `background_tasks` count and name `TaskStop`           |
 | 10       | auto_continue_stop            | TERMINAL     | Intercept Stop events and enforce explicit stop reasons or auto-continue         |
 
-### SubagentStop (7 handlers)
+### SubagentStop (8 handlers)
 
-| Priority | Handler                       | Behaviour    | Description                                                             |
-| -------- | ----------------------------- | ------------ | ----------------------------------------------------------------------- |
-| 7        | cron_subagent_stop_enforcer   | BLOCKING     | Block a SubagentStop while a declared persistent cron is missing        |
-| 8        | subagent_report_path_verifier | BLOCKING     | Block a SubagentStop whose claimed report file does not exist           |
-| 9        | subagent_cache_aggregator     | NON-TERMINAL | Record a stopping sub-agent's prompt-cache totals for the status line   |
-| 10       | subagent_report_persistence   | NON-TERMINAL | Persist every stopping sub-agent's final reply to a gitignored file     |
-| 11       | subagent_handoff_gate         | BLOCKING     | Block an over-hard-budget subagent's stop until its handoff file exists |
-| 12       | branch_subagent_stop_guard    | BLOCKING     | SubagentStop: judge the branches this sub-agent touched                 |
-| 15       | subagent_report_size_blocker  | TERMINAL     | Block a SubagentStop whose `last_assistant_message` is oversized        |
+| Priority | Handler                        | Behaviour    | Description                                                             |
+| -------- | ------------------------------ | ------------ | ----------------------------------------------------------------------- |
+| 7        | cron_subagent_stop_enforcer    | BLOCKING     | Block a SubagentStop while a declared persistent cron is missing        |
+| 8        | subagent_report_path_verifier  | BLOCKING     | Block a SubagentStop whose claimed report file does not exist           |
+| 9        | subagent_cache_aggregator      | NON-TERMINAL | Record a stopping sub-agent's prompt-cache totals for the status line   |
+| 10       | subagent_report_persistence    | NON-TERMINAL | Persist every stopping sub-agent's final reply to a gitignored file     |
+| 11       | subagent_handoff_gate          | BLOCKING     | Block an over-hard-budget subagent's stop until its handoff file exists |
+| 12       | branch_subagent_stop_guard     | BLOCKING     | SubagentStop: judge the branches this sub-agent touched                 |
+| 13       | branch_reject_verdict_recorder | NON-TERMINAL | Record a branch-reject reviewer's verdict from its final, clean stop    |
+| 15       | subagent_report_size_blocker   | TERMINAL     | Block a SubagentStop whose `last_assistant_message` is oversized        |
 
 ### Status (19 handlers)
 

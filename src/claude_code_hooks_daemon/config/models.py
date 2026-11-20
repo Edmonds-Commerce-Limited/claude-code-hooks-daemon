@@ -2485,6 +2485,50 @@ class BranchSweepConfig(BaseModel):
     )
 
 
+class BranchRejectConfig(BaseModel):
+    """``branches.reject``: the no-value removal route (Plan 00620, DESIGN.md section 1).
+
+    With ``n`` removals already in the window, the next needs two reviewers when
+    ``n >= two_reviewer_after`` and is refused when ``n >= refuse_after``.
+    ``ledger_path`` (the human-readable record) is relative to the checkout the
+    delete runs in; ``bundle_dir`` and ``state_dir`` are relative to the MAIN
+    checkout, so a removed linked worktree never takes a bundle or a verdict with
+    it, and single use and the rate (kept in ``state_dir``) hold across worktrees.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdict_lifetime_hours: Annotated[int, Field(ge=1)] = Field(
+        default=24, description="How long a verdict is valid from its issue time"
+    )
+    window_days: Annotated[int, Field(ge=1)] = Field(
+        default=7, description="Rolling window the removal rate is counted over"
+    )
+    two_reviewer_after: Annotated[int, Field(ge=0)] = Field(
+        default=3, description="Removals in the window after which two reviewers are required"
+    )
+    refuse_after: Annotated[int, Field(ge=1)] = Field(
+        default=10, description="Removals in the window after which the route refuses"
+    )
+    ledger_path: str = Field(default=".claude/branch-removals.jsonl")
+    bundle_dir: str = Field(default="untracked/branch-rejects")
+    state_dir: str = Field(default="untracked/branch-reject-state")
+
+    @field_validator("ledger_path", "bundle_dir", "state_dir")
+    @classmethod
+    def _relative_inside_repo(cls, value: str) -> str:
+        normalised = _normalise_repo_relative_path(value, "branches.reject path")
+        if normalised == ".":
+            raise ValueError("branches.reject paths must name a file or directory, not the root")
+        return normalised
+
+    @model_validator(mode="after")
+    def _refuse_not_before_two_reviewers(self) -> Self:
+        if self.refuse_after < self.two_reviewer_after:
+            raise ValueError("branches.reject.refuse_after must be >= two_reviewer_after")
+        return self
+
+
 class BranchesConfig(BaseModel):
     """Branch WIP limit and hygiene policy (Plan 00558, DESIGN.md section 1).
 
@@ -2544,6 +2588,7 @@ class BranchesConfig(BaseModel):
         default_factory=BranchCleanupAfterMergeConfig
     )
     sweep: BranchSweepConfig = Field(default_factory=BranchSweepConfig)
+    reject: BranchRejectConfig = Field(default_factory=BranchRejectConfig)
 
     #: The retired ``branch_sweep`` option ``max_open_branches``, set by ``Config``.
     _legacy_wip_cap: int | None = PrivateAttr(default=None)

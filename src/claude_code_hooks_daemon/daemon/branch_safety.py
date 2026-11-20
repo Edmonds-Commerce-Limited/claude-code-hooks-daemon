@@ -48,12 +48,13 @@ from __future__ import annotations
 import logging
 import subprocess  # nosec B404 - trusted system tool (git), list form, no shell
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from fnmatch import fnmatchcase
 from pathlib import Path
 
 from claude_code_hooks_daemon.config.models import BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core import branch_reject
 from claude_code_hooks_daemon.core.branch_park import walk_park_range
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
@@ -203,7 +204,9 @@ def tip_moved_since_proof(repo: Path, classification: BranchClassification) -> s
     the refusal to remove a branch checked out in a linked worktree, which a peer
     can create after classification WITHOUT moving the tip, making it invisible to
     this check. Keeping git's own delete keeps every such check; see Plan 00254
-    Decision 1.
+    Decision 1. The no-value route (Plan 00620) is the exception: its ``unproven``
+    branch holds work no ref keeps, so it uses the compare-and-delete and makes the
+    worktree and symref checks itself, immediately before (``_compare_and_delete``).
     """
     if not classification.tip:
         return None
@@ -316,6 +319,8 @@ class BranchClassification:
     proven_against: str = ""
     #: ``<remote>: <ref>`` that proved ``remote-held``; "" otherwise.
     held_by: str = ""
+    #: The verified recovery bundle a ``rejected-bundled`` removal wrote; "" otherwise.
+    recovery_bundle: str = ""
 
     @property
     def is_safe(self) -> bool:
@@ -350,8 +355,17 @@ class DeletionReport:
         its net change) or on a remote, so this is a pointer back to the exact tip, valid while git still
         holds the commit, and not a recovery copy a delete may lean on.
         """
-        tips = {c.name: c.tip for c in self.classifications}
-        return tuple(f"git branch {name} {tips[name]}" for name in self.deleted if tips.get(name))
+        by_name = {c.name: c for c in self.classifications}
+        lines: list[str] = []
+        for name in self.deleted:
+            c = by_name.get(name)
+            if c is None or not c.tip:
+                continue
+            if c.recovery_bundle:
+                lines.extend(branch_reject.restore_commands(name, c.tip, Path(c.recovery_bundle)))
+            else:
+                lines.append(f"git branch {name} {c.tip}")
+        return tuple(lines)
 
 
 def _git(
@@ -951,6 +965,172 @@ def classify_branch(
     )
 
 
+def _rejected_bundled(
+    classification: BranchClassification, approval: branch_reject.RemovalApproval
+) -> BranchClassification:
+    """The classification an approved no-value removal reports (Plan 00620)."""
+    reviewers = ", ".join(v.reviewer.identity for v in approval.verdicts)
+    bundle = approval.bundle
+    where = (
+        f"the work is in the verified bundle {bundle.path}"
+        if bundle is not None
+        else "the bundle is written and verified at delete time"
+    )
+    return replace(
+        classification,
+        tier=branch_reject.TIER_REJECTED_BUNDLED,
+        detail=f"judged no-value by {reviewers}; {where}",
+        recovery_bundle=str(bundle.path) if bundle is not None else "",
+    )
+
+
+def _remove_branch_config(repo: Path, name: str) -> None:
+    """Drop ``branch.<name>.*`` as ``git branch -D`` does; never raises.
+
+    Called only after the ref is gone, so a failure here cannot undo the removal and
+    must not be reported as a refusal (that would cancel a real removal in the rate).
+    It is logged instead: a stale section is inherited by a later branch of the name.
+    """
+    listing = _git(repo, "config", "--local", "--name-only", "--list", check=False)
+    if listing.returncode != 0:
+        logger.warning(
+            "branch %s removed, but its config could not be listed: %s",
+            name,
+            listing.stderr.strip() or "no detail",
+        )
+        return
+    prefix = f"branch.{name}."
+    if not any(key.startswith(prefix) for key in listing.stdout.splitlines()):
+        return
+    result = _git(repo, "config", "--remove-section", f"branch.{name}", check=False)
+    if result.returncode != 0:
+        logger.warning(
+            "branch %s removed, but its config section branch.%s could not be removed: %s",
+            name,
+            name,
+            result.stderr.strip() or "no detail",
+        )
+
+
+def _read_state_file(path: Path) -> str | None:
+    """A git state file's text; None when absent. Any other read failure raises."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+
+
+def _operation_holding_branch(repo: Path, name: str) -> str | None:
+    """Why a rebase or bisect in any worktree holds ``name``; None when none does.
+
+    Both detach that worktree's HEAD, so ``worktree list`` has no ``branch`` line for
+    it, yet ``git branch -D`` refuses the branch and the operation writes it back at
+    the end. git records the branch in the worktree's admin dir (the common dir for
+    the main worktree, ``worktrees/<id>`` for a linked one): ``rebase-merge`` or
+    ``rebase-apply`` ``/head-name`` (full ref), ``rebase-merge/update-refs`` (every
+    third line a full ref) and ``BISECT_START`` (short name). A merge, cherry-pick or
+    revert keeps HEAD attached, so the ``branch`` line already covers it.
+
+    Fails closed: an unreadable admin dir or state file is returned as a reason.
+    """
+    common = _git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False)
+    if common.returncode != 0:
+        detail = common.stderr.strip() or "no detail"
+        return f"could not read the git dir to look for a rebase or bisect: {detail}"
+    common_dir = Path(common.stdout.strip())
+    ref = branch_ref(name)
+    try:
+        linked = common_dir / "worktrees"
+        admin_dirs = [common_dir]
+        if linked.is_dir():
+            admin_dirs += sorted(p for p in linked.iterdir() if p.is_dir())
+        for admin in admin_dirs:
+            for state in ("rebase-merge", "rebase-apply"):
+                head_name = _read_state_file(admin / state / "head-name")
+                if head_name is not None and head_name.strip() == ref:
+                    return f"{name} is being rebased in the worktree recorded at {admin}"
+            update_refs = _read_state_file(admin / "rebase-merge" / "update-refs")
+            if update_refs is not None and ref in update_refs.splitlines()[::3]:
+                return f"{name} is being rebased (--update-refs) in the worktree at {admin}"
+            bisect = _read_state_file(admin / "BISECT_START")
+            if bisect is not None and branch_ref(bisect.strip().removeprefix("refs/heads/")) == ref:
+                return f"{name} is being bisected in the worktree recorded at {admin}"
+    except OSError as exc:
+        return f"could not read the rebase or bisect state under {common_dir}: {exc}"
+    return None
+
+
+def _compare_and_delete(repo: Path, name: str, tip: str) -> str | None:
+    """Delete ``refs/heads/<name>`` only while it is still ``tip``; None when it went.
+
+    ``git update-ref --no-deref -d <ref> <tip>`` is a compare-and-delete: git refuses
+    under the ref's lock when the ref no longer equals ``tip``, so a branch moved after
+    the tip re-check keeps the commits no verdict covered (D-EXEC F1). It skips two
+    checks ``git branch -D`` makes, so they are made here, immediately before it:
+
+    - a symbolic ref is refused. ``--no-deref`` removes only the alias, never its
+      target, but it also skips the old-value compare for a symref (measured on git
+      2.47), so a symref is never what the verdict judged;
+    - a branch checked out in any worktree is refused, as ``git branch -D`` would;
+    - so is a branch a rebase or bisect holds in any worktree
+      (:func:`_operation_holding_branch`), which ``worktree list`` does not show.
+
+    Returns git's or the re-check's reason when nothing was deleted.
+    """
+    ref = branch_ref(name)
+    symref = _git(repo, "symbolic-ref", "--quiet", ref, check=False)
+    if symref.returncode == 0:
+        return f"{ref} is now a symbolic ref to {symref.stdout.strip()}"
+    if symref.returncode != 1:
+        return f"could not tell whether {ref} is a symbolic ref: {symref.stderr.strip()}"
+    try:
+        checked_out = name in worktree_branches(repo)
+    except subprocess.CalledProcessError as exc:
+        return f"could not list the worktrees: {(exc.stderr or '').strip() or 'no detail'}"
+    if checked_out:
+        return f"{name} {_REFUSAL_DETAIL[REFUSAL_WORKTREE]} since it was proved"
+    held = _operation_holding_branch(repo, name)
+    if held is not None:
+        return held
+    result = _git(repo, "update-ref", "--no-deref", "-d", ref, tip, check=False)
+    if result.returncode != 0:
+        return result.stderr.strip() or "no detail"
+    _remove_branch_config(repo, name)
+    return None
+
+
+def _delete_rejected(
+    repo: Path,
+    classification: BranchClassification,
+    approval: branch_reject.RemovalApproval,
+    route: branch_reject.RejectRoute,
+) -> str | None:
+    """Ledger line, then the compare-and-delete; a failure message, or None when it went.
+
+    The line goes in BEFORE git is asked (RULINGS.md section 1 item 5). Should git
+    then refuse, a ``git-refused`` line cancels it, so the ledger never reports a
+    removal that did not happen; if even that append fails, the message says so. The
+    delete is keyed to ``approval.tip``, the exact sha the verdicts and bundle cover.
+    """
+    try:
+        line = branch_reject.record_removal(repo, approval, route)
+    except branch_reject.RejectError as exc:
+        return f"{classification.name}: nothing deleted; the no-value route refused: {exc}"
+    refused = _compare_and_delete(repo, classification.name, approval.tip)
+    if refused is None:
+        return None
+    detail = f"git refused the delete: {refused}"
+    message = f"{classification.name}: {detail} (proven {classification.tier})"
+    try:
+        branch_reject.record_git_refusal(line, detail, route)
+    except branch_reject.RejectError as exc:
+        return (
+            f"{message}\n      AND the git-refused line could not be appended ({exc}); "
+            f"the ledger {route.ledger_path} wrongly records this branch as removed"
+        )
+    return f"{message}; the ledger records the refusal"
+
+
 def delete_branches(
     repo: Path,
     names: Sequence[str],
@@ -963,6 +1143,7 @@ def delete_branches(
     line_names: Sequence[str] = (),
     line_targets: Sequence[str] | None = None,
     remote: str | None = None,
+    reject_route: branch_reject.RejectRoute | None = None,
 ) -> DeletionReport:
     """Classify every branch, then delete the batch.
 
@@ -980,9 +1161,15 @@ def delete_branches(
     an honest one.
 
     An ``unproven`` branch is never deleted: only a machine-checked tier deletes,
-    and the caller's own assertion is not a tier.
+    and the caller's own assertion is not a tier. The one exception is the no-value
+    route (Plan 00620), consulted only when ``reject_route`` is given: it needs a valid
+    reviewer verdict for the current tip AND a recovery bundle the guard wrote and
+    verified itself, and reports the removal as ``rejected-bundled``.
 
     Args:
+        reject_route: The no-value route's store, ledger and config. None, the
+            default, never consults a verdict, so every other caller keeps today's
+            behaviour. A dry run validates the verdicts and writes nothing.
         targets: Passed to :func:`classify_branch`; the default ref plus the
             integration-line refs. ``protected_ref`` alone when None.
         content_tier: Passed to :func:`classify_branch`.
@@ -1007,13 +1194,35 @@ def delete_branches(
         for name in names
     )
 
-    blockers = tuple(
-        f"{c.name}: {c.detail}"
+    approvals: dict[str, branch_reject.RemovalApproval] = {}
+    blocker_list: list[str] = []
+    for c in classifications:
+        if c.refusal is not None:
+            blocker_list.append(f"{c.name}: {c.detail}")
+        elif c.tier == TIER_UNPROVEN:
+            if reject_route is None:
+                blocker_list.append(f"{c.name}: {c.detail}")
+                continue
+            try:
+                approvals[c.name] = branch_reject.approve_removal(
+                    repo,
+                    c.name,
+                    c.tip,
+                    reject_route,
+                    default_ref=reject_route.default_ref or protected_ref,
+                    write=not dry_run,
+                    pending=len(approvals),
+                )
+            except (branch_reject.RejectError, branch_reject.RejectRefusedError) as exc:
+                blocker_list.append(f"{c.name}: {c.detail}; the no-value route refused: {exc}")
+    if blocker_list:
+        return DeletionReport(
+            classifications=classifications, refused=True, blockers=tuple(blocker_list)
+        )
+    classifications = tuple(
+        _rejected_bundled(c, approvals[c.name]) if c.name in approvals else c
         for c in classifications
-        if c.refusal is not None or c.tier == TIER_UNPROVEN
     )
-    if blockers:
-        return DeletionReport(classifications=classifications, refused=True, blockers=blockers)
 
     if dry_run:
         return DeletionReport(classifications=classifications)
@@ -1026,6 +1235,14 @@ def delete_branches(
         moved = tip_moved_since_proof(repo, classification)
         if moved is not None:
             failures.append(moved)
+            continue
+        approval = approvals.get(classification.name)
+        if approval is not None and reject_route is not None:
+            outcome = _delete_rejected(repo, classification, approval, reject_route)
+            if outcome is None:
+                deleted.append(classification.name)
+            else:
+                failures.append(outcome)
             continue
         # Defer to git's own check whenever it is capable of making it — and
         # ACCEPT a refusal rather than raising on it (Plan 00249). git's `-d`

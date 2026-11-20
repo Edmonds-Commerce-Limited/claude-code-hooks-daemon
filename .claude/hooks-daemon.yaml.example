@@ -425,6 +425,10 @@ handlers:
       enabled: true
       priority: 42
 
+    branch_reject_dispatch_gate:  # Admits a branch-reject reviewer only on the daemon's exact prompt
+      enabled: true          # Off fails closed: no reviewer verdict can unlock a removal
+      priority: 59           # After every handler that can deny an Agent call
+
     dispatch_declaration:  # Advises/enforces a file-handoff declaration on Task dispatch
       enabled: true          # On by default (Plan 00307 Task 4.3); set false to opt out
       priority: 48
@@ -646,6 +650,10 @@ handlers:
       #   tail_bytes: 1048576                  # bounded transcript tail scanned per tool call (default shown)
 
     dispatch_model_recorder:  # Joins an Agent dispatch's resolvedModel/modelsUsed onto its tier row for `hooks-daemon tiers`; silent
+      enabled: true
+      priority: 33
+
+    branch_reject_agent_binder:  # Binds a branch-reject reviewer dispatch to the agent it started; silent, never blocks
       enabled: true
       priority: 33
 
@@ -1017,6 +1025,10 @@ handlers:
     branch_subagent_stop_guard:  # SubagentStop twin of branch_stop_guard (Plan 00558 Task 4.4)
       enabled: true
       priority: 12
+
+    branch_reject_verdict_recorder:  # Records a branch-reject reviewer's verdict from its final stop; silent, never blocks
+      enabled: true  # Disabling it fails closed: no verdict is recorded, so no removal is unlocked
+      priority: 13   # Below the terminal size blocker (15)
 
     cron_subagent_stop_enforcer:  # SubagentStop twin of cron_stop_enforcer above (Plan 00416)
       enabled: true                 # Silent unless persistent_crons.enabled AND a job is declared

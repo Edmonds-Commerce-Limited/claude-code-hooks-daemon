@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.branch_reject import is_reviewer_dispatch
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils.option_coercion import coerce_bool_option
@@ -243,7 +244,15 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         if not isinstance(tool_input, dict):
             return False
 
-        return bool(tool_input.get("prompt"))
+        prompt = tool_input.get("prompt")
+        subagent_type = tool_input.get("subagent_type")
+        if isinstance(prompt, str) and is_reviewer_dispatch(
+            subagent_type if isinstance(subagent_type, str) else "", prompt
+        ):
+            # Plan 00620: a branch-reject review prompt is daemon-composed and must
+            # reach the reviewer byte for byte; branch_reject_dispatch_gate judges it.
+            return False
+        return bool(prompt)
 
     def _has_declaration(self, prompt: str) -> bool:
         """True if the prompt names a plan folder OR a non-plan-work destination."""

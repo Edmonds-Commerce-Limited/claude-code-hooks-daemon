@@ -218,6 +218,10 @@ class Priority:
     # Plan 00558 Task 4.4: non-terminal, so it sits below the terminal size
     # blocker (15) and the handoff gate (11) and one stop reports all of them.
     BRANCH_SUBAGENT_STOP_GUARD = 12
+    # Plan 00620: records a branch-reject reviewer's verdict; never blocks. 13,
+    # not after the terminal size blocker (15): test_stop_chain_terminal_shadowing.py
+    # forbids that. Order does not matter: a re-entry stop withdraws the verdict.
+    BRANCH_REJECT_VERDICT_RECORDER = 13
     # Plan 00558 Task 4.4: Stop twin; ahead of the terminal auto_continue_stop.
     BRANCH_STOP_GUARD = 9
     # Plan 00460 Task 1.6: runs ahead of the terminal size blocker (15) so a
@@ -317,6 +321,9 @@ class Priority:
     # Plan 00472 T1: a silent sensor of the same kind beside it, joining the
     # model an Agent dispatch resolved to onto its PreToolUse tier row.
     DISPATCH_MODEL_RECORDER = 33
+    # Plan 00620: another silent sensor on the same Agent result, filling a
+    # branch-reject dispatch record's agent id. It never denies.
+    BRANCH_REJECT_AGENT_BINDER = 33
 
     # Merge QA report (Priority: 34 - PostToolUse advisory; Plan 00373 Phase
     # 3, next free slot in the PostToolUse advisory band after
@@ -529,6 +536,11 @@ class Priority:
     # dispatch prompts -- sits after the docs_qa pair (47) and before
     # npm_command (50), a sibling gate on a disjoint tool shape (Task).
     DISPATCH_DECLARATION = 48
+
+    # Plan 00620: its ALLOW records the nonce's dispatch, and an allow never ends
+    # the chain, so a later deny would burn the nonce. It runs after every handler
+    # that can deny an Agent call (39, 40, 48); only advisories (60) follow it.
+    BRANCH_REJECT_DISPATCH_GATE = 59
 
     # Plan 00412 class 2a: the guard-config half of the commit gate. Shares the
     # band with the other staged-tree gates and sits last among them -- it only
