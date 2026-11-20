@@ -19,22 +19,29 @@ never overwrites an existing destination, so a second run places nothing.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
 
 from claude_code_hooks_daemon.config.models import Config, handler_options
+from claude_code_hooks_daemon.config.yaml_loading import safe_load_yaml
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.worktree_seed import SeedEntry, parse_seed_config
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import parse_worktree_porcelain, run_git
 from claude_code_hooks_daemon.utils.worktree_seeding import (
     LinkAudit,
     WorktreeSeedError,
+    protecting_pattern_for_source,
     seed_link_audit_path,
     seed_worktree,
     validate_seed_sources,
 )
+
+logger = logging.getLogger(__name__)
 
 #: The audit verb of a link placed by this route, distinct from creation's.
 SEED_APPLY_VERB = "seed-worktree"
@@ -143,6 +150,63 @@ def _refuse_redirected_parents(worktree: Path, entries: list[SeedEntry]) -> None
                 break
 
 
+def _committed_config(main: Path) -> Config | None:
+    """The daemon config committed at ``HEAD`` of the main checkout; None when there is none.
+
+    Found by the names the daemon accepts, in its order. A config git cannot show,
+    or one that does not parse, is no baseline: the caller then refuses every
+    protected link.
+    """
+    for name in _CONFIG_NAMES:
+        shown = run_git(main, "show", f"HEAD:.claude/{name}", timeout=Timeout.GIT_WORKTREE)
+        if shown.returncode != 0:
+            continue
+        try:
+            return Config.model_validate(safe_load_yaml(shown.stdout) or {})
+        except (RuntimeError, ValueError, yaml.YAMLError) as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="a committed config that does not parse is no baseline (fail closed)",
+            )
+            return None
+    return None
+
+
+def _refuse_uncommitted_protected_links(
+    main: Path, entries: list[SeedEntry], protected_patterns: Callable[[], tuple[str, ...]]
+) -> None:
+    """Refuse a protected link entry the config committed at ``HEAD`` does not list.
+
+    ``seed-worktree`` reads the config fresh from disk, so an agent's uncommitted
+    edit to the seed list would otherwise place a link to any protected path in
+    one command (Plan 00613 handoff 261120, residual 1). An entry whose source
+    is, holds or links to a path either config protects is placed only when the
+    committed config lists the same entry. This NARROWS the route to one that
+    leaves a commit behind; it does not close it.
+    """
+    committed = _committed_config(main)
+    baseline: set[SeedEntry] = set()
+    patterns = protected_patterns()
+    if committed is not None:
+        baseline = set(_seed_entries(committed))
+        committed_guard = handler_options(committed.handlers.pre_tool_use.get(_SECRET_GUARD_KEY))
+        patterns = tuple(
+            dict.fromkeys((*patterns, *sfm.protected_patterns_from_options(committed_guard)))
+        )
+    for number, entry in enumerate(entries, start=1):
+        if entry in baseline:
+            continue
+        # A source that could not be walked is judged protected (fail closed).
+        if protecting_pattern_for_source(main, entry.path, patterns) is None:
+            continue
+        raise SeedApplyRefused(
+            f"seed entry #{number}: it links a protected path, and the config committed "
+            "at HEAD of the main checkout does not list it. Commit the config change "
+            "first; nothing was placed"
+        )
+
+
 def seed_existing_worktree(worktree: Path) -> list[Path]:
     """Place the configured seed entries into the registered ``worktree``.
 
@@ -174,6 +238,7 @@ def seed_existing_worktree(worktree: Path) -> list[Path]:
     _refuse_redirected_parents(target, entries)
     try:
         validate_seed_sources(main, entries, protected_patterns=protected_patterns)
+        _refuse_uncommitted_protected_links(main, entries, protected_patterns)
         return seed_worktree(
             main,
             target,

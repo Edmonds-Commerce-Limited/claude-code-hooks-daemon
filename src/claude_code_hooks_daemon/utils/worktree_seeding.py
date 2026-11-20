@@ -168,6 +168,17 @@ def _protecting_pattern_for_source(
     return None
 
 
+def protecting_pattern_for_source(
+    root: Path, relative: str, patterns: tuple[str, ...]
+) -> str | _Unwalkable | None:
+    """The verdict of :func:`_protecting_pattern_for_source` for a caller outside this module.
+
+    ``None`` only when the source provably protects nothing; anything else (a
+    glob, or the could-not-be-walked marker) is to be treated as protected.
+    """
+    return _protecting_pattern_for_source(root, relative, patterns)
+
+
 def _describe_copy_refusal(
     root: Path, entry: SeedEntry, number: int, patterns: tuple[str, ...]
 ) -> str | None:

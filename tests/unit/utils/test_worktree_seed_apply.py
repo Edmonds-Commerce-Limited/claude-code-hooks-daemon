@@ -76,6 +76,9 @@ def repo(tmp_path: Path) -> Path:
     (root / "local.env").write_text("ordinary\n", encoding="utf-8")
     (root / ".claude").mkdir()
     (root / _CONFIG).write_text(_config(_LINK_VAULT + _LINK_PLAIN), encoding="utf-8")
+    # The committed config is the baseline a protected link must already be listed in.
+    _git(root, "add", _CONFIG)
+    _git(root, "commit", "-q", "-m", "config")
     return root
 
 
@@ -104,9 +107,7 @@ class TestSeedsARegisteredWorktree:
         placed = seed_existing_worktree(Path(str(worktree) + "/"))
         assert len(placed) == 2
 
-    def test_audits_the_protected_link_under_its_own_verb(
-        self, repo: Path, worktree: Path
-    ) -> None:
+    def test_audits_the_protected_link_under_its_own_verb(self, repo: Path, worktree: Path) -> None:
         seed_existing_worktree(worktree)
         lines = seed_link_audit_path(repo).read_text(encoding="utf-8").splitlines()
         records = [json.loads(line) for line in lines]
@@ -193,15 +194,11 @@ class TestReadsTheConfigStrictly:
             seed_existing_worktree(worktree)
         assert not (worktree / VAULT).exists()
 
-    def test_a_yml_config_is_read_as_the_daemon_reads_it(
-        self, repo: Path, worktree: Path
-    ) -> None:
+    def test_a_yml_config_is_read_as_the_daemon_reads_it(self, repo: Path, worktree: Path) -> None:
         (repo / _CONFIG).rename(repo / ".claude" / "hooks-daemon.yml")
         assert len(seed_existing_worktree(worktree)) == 2
 
-    def test_a_disabled_worktree_create_handler_refuses(
-        self, repo: Path, worktree: Path
-    ) -> None:
+    def test_a_disabled_worktree_create_handler_refuses(self, repo: Path, worktree: Path) -> None:
         text = (repo / _CONFIG).read_text(encoding="utf-8")
         (repo / _CONFIG).write_text(
             text.replace("enabled: true", "enabled: false"), encoding="utf-8"
@@ -250,3 +247,67 @@ class TestTheSameExecutorAsCreation:
         (repo / "local.env").unlink()
         with pytest.raises(SeedApplyRefused, match="no such file"):
             seed_existing_worktree(worktree)
+
+
+class TestAProtectedLinkMustBeInTheCommittedConfig:
+    """Residual (1) of the 261120 handoff: an agent edits the seed list, then runs the verb.
+
+    The verb reads the config fresh from disk, so an uncommitted edit would place a
+    link to any protected path at once. A link-mode entry whose source is, holds or
+    links to a protected path is placed only when the config committed at HEAD of
+    the main checkout lists the same entry; an unprotected entry is not gated.
+    """
+
+    def test_an_uncommitted_protected_entry_refuses_before_anything_is_placed(
+        self, repo: Path, worktree: Path
+    ) -> None:
+        (repo / "conf").mkdir()
+        (repo / "conf" / VAULT).write_text("not-a-real-secret\n", encoding="utf-8")
+        added = "            - path: conf\n              mode: symlink\n"
+        (repo / _CONFIG).write_text(_config(_LINK_PLAIN + added), encoding="utf-8")
+        with pytest.raises(SeedApplyRefused, match="committed"):
+            seed_existing_worktree(worktree)
+        assert not (worktree / "conf").exists()
+        assert not (worktree / "local.env").exists()
+
+    def test_an_uncommitted_unprotected_entry_is_placed(self, repo: Path, worktree: Path) -> None:
+        (repo / "notes.txt").write_text("ordinary\n", encoding="utf-8")
+        added = "            - path: notes.txt\n              mode: symlink\n"
+        (repo / _CONFIG).write_text(_config(_LINK_VAULT + added), encoding="utf-8")
+        placed = seed_existing_worktree(worktree)
+        assert sorted(p.name for p in placed) == sorted([VAULT, "notes.txt"])
+
+    def test_a_committed_protected_entry_is_placed(self, repo: Path, worktree: Path) -> None:
+        assert (worktree.resolve() / VAULT) in seed_existing_worktree(worktree)
+
+    def test_no_committed_config_refuses_a_protected_entry(
+        self, repo: Path, worktree: Path
+    ) -> None:
+        _git(repo, "rm", "-q", "--cached", _CONFIG)
+        _git(repo, "commit", "-q", "-m", "untrack config")
+        with pytest.raises(SeedApplyRefused, match="committed"):
+            seed_existing_worktree(worktree)
+        assert not (worktree / VAULT).exists()
+
+    def test_unprotecting_the_path_in_the_working_config_does_not_ungate_it(
+        self, repo: Path, worktree: Path
+    ) -> None:
+        guarded = (
+            "  pre_tool_use:\n"
+            "    secret_file_guard:\n"
+            "      enabled: true\n"
+            "      options:\n"
+            "        protected_paths:\n"
+            "          - conf/app.txt\n"
+        )
+        (repo / "conf").mkdir()
+        (repo / "conf" / "app.txt").write_text("not-a-real-secret\n", encoding="utf-8")
+        committed = _config(_LINK_PLAIN).replace("handlers:\n", "handlers:\n" + guarded)
+        (repo / _CONFIG).write_text(committed, encoding="utf-8")
+        _git(repo, "add", _CONFIG)
+        _git(repo, "commit", "-q", "-m", "protect conf")
+        added = "            - path: conf\n              mode: symlink\n"
+        (repo / _CONFIG).write_text(_config(_LINK_PLAIN + added), encoding="utf-8")
+        with pytest.raises(SeedApplyRefused, match="committed"):
+            seed_existing_worktree(worktree)
+        assert not (worktree / "conf").exists()

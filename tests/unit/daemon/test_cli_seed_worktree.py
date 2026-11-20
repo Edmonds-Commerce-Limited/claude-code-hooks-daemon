@@ -37,6 +37,9 @@ def worktree(tmp_path: Path) -> Path:
         f"            - path: {VAULT}\n              mode: symlink\n",
         encoding="utf-8",
     )
+    # A protected link is placed only when the committed config lists it.
+    _git(root, "add", ".claude/hooks-daemon.yaml")
+    _git(root, "commit", "-q", "-m", "config", "--no-gpg-sign")
     path = tmp_path / "hand-made"
     _git(root, "worktree", "add", "-q", "-b", "hand", str(path))
     return path
