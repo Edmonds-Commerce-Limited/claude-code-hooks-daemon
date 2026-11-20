@@ -1,0 +1,159 @@
+# positive controls: main must deny these
+cat flink
+grep -r DUMMY olink
+cat sub/dl/m
+# (B) shapes the fix still trusts
+cd - && git commit -m acceptance -- no-such-acceptance-path
+cd - && git commit -am 'a message'
+cd - && git commit -a -q --message=done
+cd - && git commit -a -m x --dry-run
+cd - && git commit --amend -m x
+cd - && git commit --amend --no-edit
+cd - && git commit -a -m x -- m
+cd - && git status --porcelain=v2 -z -b
+cd - && git status -uno -s
+cd - && git status --untracked-files=all --ignored
+# playbook probe #350 verbatim (#351 is the -m row above)
+git commit --dry-run && cd - && git commit --dry-run
+# a hook already in the landing repository, run directly
+cd - && .git/hooks/pre-commit
+sh sub/dl/.git/hooks/pre-commit
+./sub/dl/.git/hooks/pre-commit
+cd sub/dl && .git/hooks/pre-commit
+cd sub/dl && git commit -m x --allow-empty
+# (A) /proc/self plain-file carve-out
+cat /proc/self/status
+cat /proc/thread-self/status
+grep -r foo /proc/self/status
+cat /proc/self/cwd/flink
+cat /dev/fd/../cwd/flink
+grep -r DUMMY /proc/self/cwd/olink
+cat /proc/self/status/../cwd/flink
+cat /proc/self/./cwd/flink
+cat /proc/self//cwd/flink
+cat /proc/self/task/../cwd/flink
+cat /proc/thread-self/cwd/flink
+cat /proc/thread-self/../self/cwd/flink
+cat /proc/self/status /proc/self/cwd/flink
+cat /proc/self/mountinfo/../cwd/flink
+cat /proc/self/stat*
+cat /proc/self/{status,cwd/flink}
+cat /proc/$$/cwd/flink
+cat /proc/$BASHPID/cwd/flink
+cat /proc/[0-9]*/cwd/flink
+cd /proc/self && cat cwd/flink
+cd /proc/self/status/.. && cat cwd/flink
+cd /proc && cat self/cwd/flink
+cd /proc && cat self/status
+cd /proc/self/ && cat ./status && cat ./cwd/flink
+cat /proc/sys/../self/cwd/flink
+cat /proc/1/../self/cwd/flink
+cat /proc/./self/cwd/flink
+cat /proc/self/fdinfo/../cwd/flink
+grep -r DUMMY /proc/self/cwd/sub
+cat /proc/self/root/proc/self/cwd/flink
+cat /proc/self/status<NL>cat /proc/self/cwd/flink
+# (B) git commit/status after a computed cd: literal diff options
+cd - && git status
+cd - && git status -v
+cd - && git status -vv
+cd - && git status --verbose
+cd - && git status --verb
+cd - && git status --porcelain=v2
+cd - && git status -z
+cd - && git commit -a -v
+cd - && git commit --dry-run -v
+cd - && git commit --dry-run -a
+cd - && git commit -p
+cd - && git commit --patc
+cd - && git -P commit -v
+cd - && git --no-pager status -vv
+# (B) diff option hidden from the literal check
+V=-vv; cd - && git status $V
+cd - && git status $V
+cd - && git status ${V:--vv}
+cd - && git status $'-vv'
+cd - && git status $'\x2dvv'
+cd - && git status "-vv"
+cd - && git status '-vv'
+cd - && git status -\v\v
+cd - && git status -\<NL>vv
+cd - && git sta\<NL>tus -vv
+cd - && git status $(echo -vv)
+cd - && git status `echo -vv`
+cd - && git status $(printf %s -vv)
+cd - && git status -"v"v
+cd - && git status ""-vv
+cd - && git status -u -v
+cd - && git status -uv
+cd - && git status -- -vv
+cd - && git status -vv --
+cd - && git commit --dry-run -a $'-v'
+cd - && git status {-v,-v}
+cd - && git status -{v,v}
+cd - && git status -[v]v
+cd - && git status -?v
+cd - && git status @(-vv)
+cd - && git status -ｖ
+cd - && git commit --dry-run --verbose=1
+cd - && git commit -a --dry-run --no-verbose --verbose
+# (B) editor / config / env channels
+cd - && GIT_EDITOR=cat git commit -a
+cd - && GIT_EDITOR=cat git commit -a -m x -e
+cd - && GIT_EDITOR='cat m' git commit --allow-empty
+cd - && EDITOR=cat git commit -a
+cd - && GIT_EDITOR=cat GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.verbose GIT_CONFIG_VALUE_0=true git commit -a
+cd - && GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.verbose GIT_CONFIG_VALUE_0=true git commit --dry-run -a
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.verbose GIT_CONFIG_VALUE_0=true; cd - && git commit --dry-run -a
+export GIT_EDITOR=cat; cd - && git commit -a
+cd - && GIT_CONFIG_PARAMETERS="'commit.verbose'='true'" GIT_EDITOR=cat git commit -a
+cd - && git config commit.verbose true && GIT_EDITOR=cat git commit -a
+cd - && git config core.editor cat && git commit -a
+cd - && git config core.editor 'cat m' && git commit -a
+cd - && git -c core.editor=cat commit -a
+cd - && git -c commit.verbose=true commit --dry-run -a
+cd - && GIT_DIR=.git git status -vv
+cd - && GIT_EXTERNAL_DIFF=cat git status -vv
+# (B) file operands through the foreign cwd
+cd - && git commit -F m
+cd - && git commit -F m --allow-empty
+cd - && git commit --file=m --allow-empty
+cd - && git commit --fil=m --allow-empty
+cd - && git commit -Fm --allow-empty
+cd - && git commit -t m --allow-empty -e
+cd - && GIT_EDITOR=cat git commit -t m --allow-empty
+cd - && GIT_EDITOR=cat git commit --template=m --allow-empty
+cd - && GIT_EDITOR=cat git commit --templ=m --allow-empty
+cd - && git commit --pathspec-from-file=m
+cd - && git commit -a --pathspec-from-file=m
+cd - && git status --pathspec-from-file=m
+cd - && git commit -F flink --allow-empty
+cd - && git commit -F sub/dl/m --allow-empty
+cd - && git commit -m "$(cat m)" --allow-empty
+cd - && git status m
+cd - && git commit m -m x
+# (B) the chain continues after a treeless git
+cd - && git status && cat m
+cd - && git status; cat m
+cd - && git status && grep -r DUMMY .
+cd - && git commit -am x && git show
+cd - && git commit -am x && git log -p
+cd - && git status && git diff
+cd - && git status | cat m
+cd - && git status && head m
+cd - && git status && cat < m
+# (B) wrappers and spellings of git
+cd - && command git status -vv
+cd - && env git status -vv
+cd - && \git status -vv
+cd - && "git" status -vv
+cd - && /usr/bin/git status -vv
+cd - && exec git status -vv
+cd - && nice git status -vv
+cd - && git "status" -vv
+cd - && git st\atus -vv
+cd ~ && git status -vv
+cd "$X" && git status -vv
+cd ~- && git status -vv
+cd ~- && git log -p
+pushd - && git status -vv

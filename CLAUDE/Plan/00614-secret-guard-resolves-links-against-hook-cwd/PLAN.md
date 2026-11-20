@@ -1,6 +1,6 @@
 # Plan 00614: secret guard resolves links against hook cwd
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-16
 **Owner**: joseph
 **Priority**: High
@@ -43,25 +43,42 @@ project whose worktrees carry seeded links to protected files.
 
 ### Phase 1: Defence
 
-- [ ] ⬜ **Task 1.1**: Failing tests for gaps 1, 2 and 3 on synthetic fixtures
+- [x] ✅ **Task 1.1**: Failing tests for gaps 1, 2 and 3 on synthetic fixtures
   (dummy protected file, relative and directory links, hook `cwd` set to the
   worktree while the process cwd is `/`).
 
 ### Phase 2: Fix
 
-- [ ] ⬜ **Task 2.1**: Join a relative token to the hook `cwd` before the
+- [x] ✅ **Task 2.1**: Join a relative token to the hook `cwd` before the
   `is_symlink` check and `realpath`, and resolve when any path component is a link.
-- [ ] ⬜ **Task 2.2**: Add the realpath of a directory link's target to the
+- [x] ✅ **Task 2.2**: Add the realpath of a directory link's target to the
   index bases, or deny by default when it lies outside the indexed project.
-- [ ] ⬜ **Task 2.3**: Expand glob tokens and realpath each match.
-- [ ] ⬜ **Task 2.4**: Release note.
+- [x] ✅ **Task 2.3**: Expand glob tokens and realpath each match.
+- [x] ✅ **Task 2.4**: Release note.
+
+### Phase 3: Review fix rounds
+
+- [x] ✅ **Task 3.1**: Review 614 (F1-F5) and 614b (R1-R5, P1) findings fixed test first.
+- [x] ✅ **Task 3.2**: Review 614c: X1/X1b (wide globbed `cd` bounded), P2 (every scan that
+  gave up beside a search or glob denies, Grep tool included), N1 (a computed `cd` is judged
+  from inside each directory link), N3 partial (CDPATH, extended-glob operand, `eval cd`), a
+  cap on the search walk's directory set. Main merged in (Plan 00618, which carries Plan 00615).
+- [ ] **Task 3.3**: Residuals recorded in `subagent-reports/261118-finish-opus.md`, not fixed
+  here: N2 (physical `..` through a directory link), a glob matching a file link
+  (`cat lin[k]1.txt`), an absolute glob outside the project, `CDPATH` from the environment
+  (niggle N661 in Plan 00474), and `*/*` through a link (allowed by decision).
+- [x] ✅ **Task 3.4**: Independent review (`subagent-reports/261118-independent-review.md`, 6 defects)
+  fixed test first: the link scan reports whether it finished and every caller denies when it did
+  not (D1, D2), chdir option clusters and abbreviations (D3), `exec` (D4), scan reuse limited to one
+  call (D5), a pathless Grep judged at the hook cwd (D6). Report `subagent-reports/261118-fix-round-6.md`;
+  the remaining "stopped early, so allowed" routes are niggle N662.
 
 ## Success Criteria
 
-- [ ] Each gap has a test that failed before its fix.
-- [ ] Every pre-existing deny still holds (the existing secret-guard suite is green).
-- [ ] Release-bound consequences recorded in the pending release notes.
+- [x] Each gap has a test that failed before its fix.
+- [x] Every pre-existing deny still holds (the existing secret-guard suite is green).
+- [x] Release-bound consequences recorded in the pending release notes.
 
 ## Delivery & Milestones
 
-- Found by the 00613 Task 1.1 probe; no delivery yet.
+- Found by the 00613 Task 1.1 probe. Fixed on branch `agent-a13d7c8504105d4c9-aeae03b4`, not yet merged; release note `007-secret-guard-judges-links-from-the-hook-cwd.md` (renumbered after the v3.75.0 release emptied the holding area, and again past main's 003 and 006). Reports: `subagent-reports/261116-link-gaps.md`, `subagent-reports/261116-review-b-fixes.md`, `subagent-reports/261118-finish-opus.md`.

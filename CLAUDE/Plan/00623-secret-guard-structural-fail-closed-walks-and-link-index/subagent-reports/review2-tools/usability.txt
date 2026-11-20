@@ -1,0 +1,11 @@
+BUILD_DIRECTORY_CAP 200000
+build 1.9s
+complete True reason 
+holding 426 dirlinks 2461 links 3072
+scan complete False named False
+deny   0.85s | cd ~/x && cat f
+deny   0.86s | cd "$(git rev-parse --show-toplevel)" && cat f
+deny   0.83s | cd "$(mktemp -d)" && ls
+allow  0.00s | cat README.md
+allow  0.00s | cd src && ls
+deny   0.93s | cd "$D" && cat CLAUDE.md

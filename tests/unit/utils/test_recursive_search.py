@@ -6,9 +6,11 @@ roots are looked up in the protected-file index. Nothing here walks a tree.
 
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.utils import path_exclusion
 from claude_code_hooks_daemon.utils import recursive_search as rs
 from claude_code_hooks_daemon.utils.protected_file_index import (
     ProtectedFileIndex,
@@ -232,15 +234,42 @@ class TestWorkingDirectoryFollowsCd:
         assert _reach("cd clean && cd .. && grep -r x sub", tree) == PROTECTED_GLOB
         assert _reach("cd sub && cd .. && cd clean && grep -r x .", tree) is None
 
-    def test_a_cd_with_a_computed_target_leaves_relative_roots_unplaced(self, tree: Path) -> None:
-        assert rs.search_reads('cd "$D" && grep -r x .', str(tree)) == []
-        assert rs.search_reads("cd $(pwd)/x && grep -r x .", str(tree)) == []
+    @staticmethod
+    def _roots_from_project(command: str, tree: Path) -> list[str]:
+        """Roots placed for ``command`` run from ``tree/sub``, the project being ``tree``."""
+        with patch.object(path_exclusion, "resolve_project_root", return_value=str(tree)):
+            return [read.root for read in rs.search_reads(command, str(tree / "sub"))]
+
+    def test_a_cd_with_a_computed_target_reads_from_the_project_root(self, tree: Path) -> None:
+        """Plan 00614 review F1: an unplaceable cd fails closed: root, targets and hook cwd."""
+        expected = [str(tree), str(tree / "sub")]
+        assert self._roots_from_project('cd "$D" && grep -r x .', tree) == expected
+        assert self._roots_from_project("cd $(pwd)/x && grep -r x .", tree) == expected
 
     def test_a_bare_cd_goes_home_which_is_unknown(self, tree: Path) -> None:
-        assert rs.search_reads("cd && grep -r x .", str(tree)) == []
+        expected = [str(tree), str(tree / "sub")]
+        assert self._roots_from_project("cd && grep -r x .", tree) == expected
+
+    @pytest.mark.parametrize(
+        ("command", "root"),
+        [
+            ("FOO=$(true) grep -r x .", "."),
+            ("D=`pwd` grep -r x .", "."),
+            ("grep -r foo\\(\\)", "."),
+            ("grep -r x dir\\ \\(1\\)", "dir (1)"),
+        ],
+    )
+    def test_unwrapping_a_segment_never_loses_its_read(
+        self, tree: Path, command: str, root: str
+    ) -> None:
+        """Plan 00614: the segment as written is still judged beside its unwrapped form."""
+        roots = [read.root for read in rs.search_reads(command, str(tree))]
+        expected = str(tree) if root == "." else str(tree / root)
+        assert expected in roots
 
     def test_cd_dash_is_unknown(self, tree: Path) -> None:
-        assert rs.search_reads("cd - && grep -r x .", str(tree)) == []
+        expected = [str(tree), str(tree / "sub")]
+        assert self._roots_from_project("cd - && grep -r x .", tree) == expected
 
     def test_an_absolute_root_is_still_judged_after_an_unplaceable_cd(self, tree: Path) -> None:
         reads = rs.search_reads(f'cd "$D" && grep -r x {tree / "sub"}', str(tree))

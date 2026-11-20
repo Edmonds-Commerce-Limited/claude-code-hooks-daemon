@@ -1049,12 +1049,15 @@ class TestTheAcceptanceTestsCanFail:
             if test.tool_payload is not None and test.harness_cannot_produce is None
         ]
 
-    def test_there_is_a_dry_run_and_a_cd_dash_test(
+    def test_there_is_a_chained_commit_and_a_cd_dash_test(
         self, handler: ConflictMarkerCommitGateHandler
     ) -> None:
         commands = [test.command for test in self._dispatched(handler)]
-        assert any("--dry-run" in command for command in commands)
+        assert any(
+            command.count("git commit") == 2 and " && cd - && " in command for command in commands
+        )
         assert any(command.startswith("cd - ") for command in commands)
+        assert not any("--dry-run" in command for command in commands)
 
     def test_each_verdict_holds_even_with_a_marker_staged(
         self, handler: ConflictMarkerCommitGateHandler, repo: Path
@@ -1062,6 +1065,8 @@ class TestTheAcceptanceTestsCanFail:
         """A staged marker makes an ALLOW mean the gate truly skipped the command."""
         _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
         for test in self._dispatched(handler):
+            if not test.command.startswith("cd - "):
+                continue
             hook_input = _bash(test.command, repo)
             if not handler.matches(hook_input):
                 assert test.expected_decision == Decision.ALLOW, test.title
@@ -1072,16 +1077,20 @@ class TestTheAcceptanceTestsCanFail:
                 text = "\n".join([result.reason or "", *result.context])
                 assert re.search(pattern, text), (test.title, pattern)
 
-    def test_the_dry_run_command_would_deny_were_dry_run_misjudged(
+
+class TestTheChainedCommitProbeOnACleanIndex:
+    def test_the_chained_commit_probe_is_allowed_and_denied_with_a_marker_staged(
         self, handler: ConflictMarkerCommitGateHandler, repo: Path
     ) -> None:
-        """Strip `--dry-run` and the same command must deny: the ALLOW can fail."""
+        """The first commit is judged, so a clean index allows and a marker denies."""
+        (probe,) = [
+            t
+            for t in TestTheAcceptanceTestsCanFail._dispatched(handler)
+            if t.command.count("git commit") == 2
+        ]
+        assert _verdict(handler, probe.command, repo).decision == probe.expected_decision
         _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
-        (dry_run,) = [t for t in self._dispatched(handler) if "--dry-run" in t.command]
-        judged = dry_run.command.replace(" --dry-run", "")
-        result = _verdict(handler, judged, repo)
-        assert result.decision == Decision.DENY
-        assert result.rule == RuleID.CONFLICT_MARKER_COMMIT
+        assert _verdict(handler, probe.command, repo).decision == Decision.DENY
 
 
 class TestTheGrepIsScopedToTheRecordedPaths:
