@@ -226,6 +226,7 @@ from .init_config import generate_config
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from claude_code_hooks_daemon.core.branch_reject import RejectRoute
     from claude_code_hooks_daemon.core.release_slate import (
         CiRunState,
         PlanSummary,
@@ -6933,6 +6934,33 @@ def _branch_sweep_clean(args: argparse.Namespace, repo: Path, branches: Branches
     return 0
 
 
+def _delete_reject_route(
+    repo: Path, branches: BranchesConfig, default_ref: str
+) -> "tuple[RejectRoute | None, str]":
+    """The no-value route for ``delete-branch``, or None and why it cannot be built.
+
+    The state store lives under the MAIN checkout, so building the route fails on a
+    bare repository or one with no main checkout. That failure is not a crash: the
+    delete runs without the route, which refuses every ``unproven`` branch exactly as
+    it did before the route existed (Plan 00620).
+    """
+    from claude_code_hooks_daemon.core import branch_reject
+
+    config = branches.reject
+    try:
+        store_root = branch_reject.main_checkout(repo) / config.state_dir
+    except branch_reject.RejectError as exc:
+        return None, str(exc)
+    route = branch_reject.RejectRoute(
+        store=branch_reject.RejectStore(store_root),
+        ledger_path=repo / config.ledger_path,
+        config=config,
+        now=time.time(),
+        default_ref=default_ref,
+    )
+    return route, ""
+
+
 def cmd_delete_branch(args: argparse.Namespace) -> int:
     """Delete local branches only when their safety can be proven (Plan 00206).
 
@@ -6983,6 +7011,9 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     # above), so there is always something to prove a line against.
     protected_names = (*branches.protected_names, *branches.exempt, protected_ref, resolved_default)
     line_targets = branch_cleanup.default_targets(repo, branches, resolved_default)
+    # The no-value route (Plan 00620) judges rejected work against the DEFAULT only,
+    # never the integration line `--protected-ref` may name.
+    reject_route, route_unavailable = _delete_reject_route(repo, branches, resolved_default)
 
     try:
         report = delete_branches(
@@ -6994,6 +7025,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
             line_names=branches.integration_lines,
             line_targets=line_targets,
             remote=branches.remote,
+            reject_route=reject_route,
         )
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -7032,9 +7064,11 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
                             "content_unique_paths": list(c.content_unique_paths),
                             "detail": c.detail,
                             "held_by": c.held_by or None,
+                            "recovery_bundle": c.recovery_bundle or None,
                         }
                         for c in report.classifications
                     ],
+                    "reject_route_unavailable": route_unavailable or None,
                 },
                 indent=2,
             )
@@ -7044,6 +7078,8 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     for c in report.classifications:
         verdict = c.refusal or c.tier
         print(f"  {c.name}: {verdict} — {c.detail}")
+        if c.recovery_bundle:
+            print(f"      recovery bundle: {c.recovery_bundle}")
         if c.tier == TIER_UNPROVEN and c.content_unique_paths:
             # Show the CONTENT-unique files: these are the only ones whose
             # bytes disappear. A merely path-unique file is already safe.
@@ -7073,11 +7109,18 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
         _print_restore_lines(report.restore_commands, file=sys.stderr)
         if any(c.tier == TIER_UNPROVEN for c in report.classifications):
             print(
-                "\nA branch whose content cannot be proven recoverable is never "
-                "deleted by this command. Finish the work (merge it) or ask the "
-                "human who owns the branch to decide.",
+                "\nA branch whose content cannot be proven recoverable is deleted by "
+                "this command only through the no-value route: an independent "
+                "reviewer's verdict (`hooks-daemon branch-reject request <name>`) and "
+                "a recovery bundle the guard writes and verifies. Otherwise finish "
+                "the work (merge it) or ask the human who owns the branch to decide.",
                 file=sys.stderr,
             )
+            if route_unavailable:
+                print(
+                    f"The no-value route is unavailable here: {route_unavailable}",
+                    file=sys.stderr,
+                )
         return 1
 
     if args.dry_run:
