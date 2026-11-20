@@ -150,6 +150,21 @@ class TestOutput:
         assert Path(document["root"]) == tree.root
         assert [row["name"] for row in document["entries"]] == ["a.log"]
 
+    def test_the_configured_plan_directory_reaches_the_filing_proposal(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        config = tree.base / "project" / ".claude" / "hooks-daemon.yaml"
+        config.write_text('version: "2.0"\nplan_workflow:\n  directory: plans\n')
+        plan = tree.base / "project" / "plans" / "00627-x"
+        plan.mkdir(parents=True)
+        (plan / "PLAN.md").write_text("# Plan: x\n")
+        tree.file("00627-r.md", b"prose\n", mtime=time.time() - 2 * _DAY)
+        assert _run(tree, _args(tree, as_json=True)) == 0
+        row = json.loads(capsys.readouterr().out)["entries"][0]
+        assert row["filing_destination"] == "plans/00627-x/subagent-reports/"
+        assert row["filing_command"].startswith("mv -n -- untracked/scratch/00627-r.md ")
+        assert (tree.root / "00627-r.md").exists()
+
     def test_an_explicit_root_outside_untracked_is_refused(
         self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
     ) -> None:

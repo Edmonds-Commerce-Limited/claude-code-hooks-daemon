@@ -421,6 +421,72 @@ class TestP3IdenticalCopy:
         assert any("P3" in note for note in report.notes)
 
 
+class TestFilingProposals:
+    """DESIGN.md section 6 at sweep level (Plan 00627 Task 2.5)."""
+
+    def _plan(self, gp: GitProject) -> str:
+        folder = gp.project / "CLAUDE" / "Plan" / "00627-x"
+        (folder / "subagent-reports").mkdir(parents=True)
+        (folder / "PLAN.md").write_text("# Plan: x\n")
+        return "CLAUDE/Plan/00627-x/subagent-reports/"
+
+    def test_a_plan_numbered_file_is_proposed_and_nothing_moves(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        destination = self._plan(gp)
+        gp.tree.file("00627-report.md", b"findings\n")
+        now = _now()
+        _old(gp.tree, now)
+        report = _git_sweep(gp, now, plan_dir="CLAUDE/Plan")
+        row = report.rows[0]
+        assert row.verdict.value == "UNCERTAIN"
+        assert row.filing_destination == destination
+        assert row.filing_command == (f"mv -n -- untracked/scratch/00627-report.md {destination}")
+        text = "\n".join(render_table(report, max_listed=50))
+        assert "Filing proposals" in text
+        assert row.filing_command in text
+        assert report_json(report)["entries"][0]["filing_command"] == row.filing_command
+        assert (gp.tree.root / "00627-report.md").exists()
+        assert not (gp.project / destination / "00627-report.md").exists()
+
+    def test_no_plan_directory_proposes_no_plan(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        self._plan(gp)
+        gp.tree.file("00627-report.md", b"findings\n")
+        now = _now()
+        _old(gp.tree, now)
+        row = _git_sweep(gp, now).rows[0]
+        assert (row.filing_command, row.filing_destination.startswith("No tracked home")) == (
+            "",
+            True,
+        )
+
+    def test_a_p3_disposable_entry_gets_no_proposal(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        now = _now()
+        gp.tree.file("copy/app.py", b"print('app')\n")
+        _old(gp.tree, now)
+        row = _git_sweep(gp, now, plan_dir="CLAUDE/Plan").rows[0]
+        assert (row.verdict.value, row.filing_destination) == ("DISPOSABLE", "")
+
+    def test_a_worktree_is_protected_by_a_repository(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        gp.worktree("wt", "wt-branch")
+        now = _now()
+        _old(gp.tree, now)
+        row = _git_sweep(gp, now, plan_dir="CLAUDE/Plan").rows[0]
+        assert row.verdict.value == "PROTECTED"
+        assert row.filing_destination.startswith("commit and push to a branch on the remote")
+
+    def test_the_proposals_section_is_bounded(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        for name in ("a.md", "b.md", "c.md"):
+            gp.tree.file(name, b"prose\n")
+        now = _now()
+        _old(gp.tree, now)
+        text = "\n".join(render_table(_git_sweep(gp, now), max_listed=1))
+        assert "2 more proposal(s)" in text
+
+
 class TestReferenced:
     """DESIGN.md section 3.4 at sweep level (Plan 00627 Task 2.4)."""
 

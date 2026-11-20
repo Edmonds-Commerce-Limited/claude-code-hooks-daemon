@@ -6784,6 +6784,7 @@ def cmd_scratch_sweep(
             runner=git_runner or run_git,
         ),
         scandir=scandir,
+        plan_dir=config.plan_workflow.directory,
     )
     if args.json:
         print(json.dumps(scratch_sweep.report_json(report), indent=2))

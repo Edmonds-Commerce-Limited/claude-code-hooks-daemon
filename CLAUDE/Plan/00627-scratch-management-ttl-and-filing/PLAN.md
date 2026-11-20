@@ -74,7 +74,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [x] ✅ **Task 2.2**: Add the related-repository tests: dirty tracked content, stash, ref tips proved against the main repository's objects and remote-held refs. A git failure or timeout is STUCK.
 - [x] ✅ **Task 2.3**: Add proof P3 (identical copy by blob hash, hashed in-process with `O_NOFOLLOW`, bounded per sweep by files and bytes) and P4 (clean pushed clone).
 - [x] ✅ **Task 2.4**: Add the reference set (exact path, HEAD and unmerged branch tips) and the REFERENCED verdict.
-- [ ] ⬜ **Task 2.5**: Add the filing proposal table (DESIGN.md section 6) to the dry-run output.
+- [x] ✅ **Task 2.5**: Add the filing proposal table (DESIGN.md section 6) to the dry-run output.
 
 ### Phase 3: The archive store and `--apply`
 

@@ -2,7 +2,7 @@
 
 The sweep is a report and nothing else. It lists, ``lstat``s and judges; it
 never creates, moves, packs or removes anything, and prints no file content
-and no removal command. Git is run once per sweep in the project (tracked files
+and no delete command; a filing proposal is printed, never acted on. Git is run once per sweep in the project (tracked files
 under the root, worktrees, live remote tips, and the tracked lines that name
 a scratch path) and, for a due entry holding a
 repository, inside that repository under the rules of
@@ -28,6 +28,12 @@ from typing import Any
 
 from claude_code_hooks_daemon.config.models import ScratchConfig
 from claude_code_hooks_daemon.core.scratch_clock import NO_BIRTH_NOTE, EntryAge, entry_age
+from claude_code_hooks_daemon.core.scratch_filing import (
+    PlanIndex,
+    Protection,
+    build_plan_index,
+    propose,
+)
 from claude_code_hooks_daemon.core.scratch_liveness import LivenessInputs, entry_liveness
 from claude_code_hooks_daemon.core.scratch_references import (
     References,
@@ -135,6 +141,9 @@ class EntryRow:
     due: bool
     uncovered: tuple[str, ...]
     uncovered_count: int
+    #: Where the entry could be filed, and the ``mv -n`` that would do it (empty: none).
+    filing_destination: str = ""
+    filing_command: str = ""
 
 
 @dataclass(frozen=True)
@@ -182,6 +191,7 @@ def run_sweep(
     project_git: ProjectGit | None,
     scandir: ScandirFn = os.scandir,
     hash_budget: HashBudget | None = None,
+    plan_dir: str | None = None,
 ) -> SweepReport:
     """Judge every entry of a resolved sweep root; read only.
 
@@ -190,6 +200,8 @@ def run_sweep(
     reported and never listed, and an entry holding a never-swept path is skipped.
     ``project_git`` is the project's repository read once (None: git unavailable,
     so every due entry is STUCK: nothing can be proved about tracked files).
+    ``plan_dir`` is the project's plan directory, indexed once for filing
+    proposals (None: no plan folder is proposed).
     """
     root = sweep_root.path
     notes: list[str] = [] if inputs.cwds else [NO_CWDS_NOTE]
@@ -210,6 +222,12 @@ def run_sweep(
     tracked = _tracked_by_entry(project_git, project_root, relative_root)
     references = build_references(project_git, relative_root)
     hashing = hash_budget or HashBudget()
+    filing = _Filing(
+        build_plan_index(project_root, plan_dir),
+        project_root,
+        relative_root,
+        config.filing.max_bytes,
+    )
     if project_git is not None and project_git.verified_note:
         notes.append(f"remote proof: {project_git.verified_note}")
     rows = [
@@ -228,6 +246,7 @@ def run_sweep(
                 hashing,
                 references.for_entry(name),
             ),
+            filing,
         )
         for name in listing.value
         if name not in sweep_root.skip
@@ -281,6 +300,16 @@ class _EntryGit:
 
 
 @dataclass(frozen=True)
+class _Filing:
+    """What a filing proposal needs, built once per sweep."""
+
+    plans: PlanIndex
+    project_root: Path
+    relative_root: str | None
+    max_bytes: int
+
+
+@dataclass(frozen=True)
 class _EntryClock:
     """The root's TTL, the lifetime backstop (never shorter than the TTL), and now."""
 
@@ -299,6 +328,7 @@ def _judge_entry(
     inputs: LivenessInputs,
     scandir: ScandirFn,
     git: _EntryGit,
+    filing: _Filing,
 ) -> EntryRow:
     now = clock.now
     walk = walk_entry(root, name, now=now, budget=budget, scandir=scandir)
@@ -333,6 +363,17 @@ def _judge_entry(
     )
     if judgement.verdict is Verdict.UNCERTAIN:
         judgement = _with_p3(root, walk, age, repos, git, judgement)
+    proposal = propose(
+        name,
+        kind=stats.kind,
+        size=stats.bytes,
+        verdict=judgement.verdict,
+        protection=_protection(judgement.verdict, repos, git.tracked),
+        plans=filing.plans,
+        project_root=filing.project_root,
+        relative_root=filing.relative_root,
+        max_bytes=filing.max_bytes,
+    )
     return EntryRow(
         name=name,
         kind=stats.kind,
@@ -349,7 +390,20 @@ def _judge_entry(
         due=age.due,
         uncovered=judgement.uncovered,
         uncovered_count=judgement.uncovered_count,
+        filing_destination=proposal.destination if proposal else "",
+        filing_command=proposal.command if proposal else "",
     )
+
+
+def _protection(
+    verdict: Verdict, repos: RepoFindings | None, tracked: tuple[str, ...] | None
+) -> Protection:
+    """Why a PROTECTED entry is protected, in the order ``judge`` decides it."""
+    if verdict is not Verdict.PROTECTED:
+        return Protection.NONE
+    if repos is not None and repos.protected:
+        return Protection.REPOSITORY
+    return Protection.TRACKED if tracked else Protection.NONE
 
 
 def _with_p3(
@@ -431,6 +485,23 @@ def render_table(report: SweepReport, *, max_listed: int) -> list[str]:
     hidden = len(ordered) - max_listed
     if hidden > 0:
         lines.append(f"... and {hidden} more (--json lists every entry)")
+    lines.extend(_render_filing(ordered, max_listed=max_listed))
+    return lines
+
+
+def _render_filing(ordered: list[EntryRow], *, max_listed: int) -> list[str]:
+    """The "Filing proposals" section: a suggestion per row, nothing acted on."""
+    proposed = [row for row in ordered if row.filing_destination]
+    if not proposed:
+        return []
+    lines = ["", "Filing proposals (suggestions only: nothing is moved by the sweep)"]
+    for row in proposed[:max_listed]:
+        lines.append(f"{_printable(row.name)}: {_printable(row.filing_destination)}")
+        if row.filing_command:
+            lines.append(f"    {row.filing_command}")
+    hidden = len(proposed) - max_listed
+    if hidden > 0:
+        lines.append(f"... and {hidden} more proposal(s) (--json lists every entry)")
     return lines
 
 

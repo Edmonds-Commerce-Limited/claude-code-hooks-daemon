@@ -232,18 +232,21 @@ A failure at steps 2 to 5 renames the entry back and marks it STUCK. A failure a
 
 ## 6. Filing: who does it and where
 
-**The sweep proposes; an agent or a human files (R4).** For each UNCERTAIN, REFERENCED or PROTECTED entry the report prints a destination and the command that would move it. Nothing is moved by the sweep, because a filed file needs a name, a commit and the content guards (`sensitive_content`, `qa_suppression`, `markdown_organization`), which do not see a `mv`.
+**The sweep proposes; an agent or a human files (R4).** For each UNCERTAIN, REFERENCED or PROTECTED entry the report prints a destination in a "Filing proposals" section bounded by `scratch.sweep.max_listed` (`core/scratch_filing.py`). A command is printed only for a single regular file going to a plan folder: `mv -n -- <src> <plan>/subagent-reports/`, both sides shell-quoted, and never when the name is unprintable, starts with `-`, the plan number is ambiguous, or the destination already exists. No delete command is ever printed. Nothing is moved by the sweep, because a filed file needs a name, a commit and the content guards (`sensitive_content`, `qa_suppression`, `markdown_organization`), which do not see a `mv`.
 
-The destination is chosen by rule, and the rule is only a suggestion (as in 00560 D4, content picks the hint and never the verdict):
+The destination is chosen by rule, and the rule is only a suggestion that never feeds the verdict. The hint comes from the entry's name, kind and size only; no file is opened. Signals are tried in the order below, first match wins:
 
-| Signal                                                                 | Proposed home                                                                               |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| The manifest names a plan, or the entry name starts with a plan number | `CLAUDE/Plan/<plan>/subagent-reports/` for prose; a journal entry for a decision            |
-| A script                                                               | `scripts/` or `tests/`, test first (`tdd_enforcement` applies)                              |
-| Release wording                                                        | `CLAUDE/UPGRADES/UNRELEASED/`                                                               |
-| Commits or dirty tracked files in a related repository                 | Commit, then push to a branch on the remote; the entry then passes P4                       |
-| Prose with no plan                                                     | "No tracked home: ask the coordinator for a plan folder" (00560 Q1), and it stays UNCERTAIN |
-| A file above `scratch.filing.max_bytes` (default 262,144)              | "Too large to track: file a summary and let the rest expire"                                |
+| Signal                                                                    | Proposed home                                                                               |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| PROTECTED by a repository in the entry                                    | Commit, then push to a branch on the remote; the entry then passes P4 (text only)           |
+| PROTECTED because it holds a file the project tracks                      | A human decides                                                                             |
+| Above `scratch.filing.max_bytes` (default 262,144)                        | "Too large to track: file a summary and let the rest expire"                                |
+| The name starts with a plan number (`^\d{3,5}` then `-`, `_`, `.` or end) | `<plan>/subagent-reports/`; an active plan beats one under `Completed/`                     |
+| A `.py`, `.sh` or `.bash` name                                            | `scripts/` or `tests/`, test first (`tdd_enforcement` applies)                              |
+| `release` or `upgrade` in the name                                        | `CLAUDE/UPGRADES/UNRELEASED/`                                                               |
+| Anything else                                                             | "No tracked home: ask the coordinator for a plan folder" (00560 Q1), and it stays UNCERTAIN |
+
+**Deviations from the first draft of this section (Task 2.5).** There is no manifest signal: no manifest exists yet (section 7), so a plan is found only from the name. The hint is chosen from the name, never from content, unlike 00560 D4: reading content to pick a hint would open every uncertain file on every sweep. A command is printed only for a single file going to a plan folder; every other destination needs a judgement (a summary, a test, a release note) that a `mv` cannot make.
 
 An entry that is filed is then deleted by its filer, or simply expires. An entry nobody files expires through its verdict. That is the owner's rule: filed, or deleted.
 
