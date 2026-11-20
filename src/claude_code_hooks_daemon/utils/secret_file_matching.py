@@ -83,7 +83,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     shell_word_spans,
     split_unquoted_spans,
     strip_inert_spans,
-    strip_unrun_heredoc_bodies,
+    strip_never_run_heredoc_bodies,
     substitution_inner_spans,
 )
 from claude_code_hooks_daemon.utils.shell_snapshot import default_glob_semantics
@@ -4762,12 +4762,15 @@ def effective_cwds(command: str, cwd: str | None) -> CwdSet:
     (ledger 00474 N465).
 
     Release 3.76.0 review 2 F4: a quoted heredoc body that nothing runs, now
-    or later (:func:`strip_unrun_heredoc_bodies`), is not walked. It is data,
-    so a ``cd`` in it moves nothing. A body that is executed, or written to a
-    file that could be run later, is still walked.
+    or later (:func:`strip_never_run_heredoc_bodies`), is not walked. It is
+    data, so a ``cd`` in it moves nothing. A body that is executed, written to
+    a file that could be run later, or written to a ``.md`` file the command
+    names again (``bash n.md``) is still walked.
     """
     walk = _DirectoryWalk(cwd, cdpath=CDPATH_VARIABLE in command, command=command)
-    run_text = strip_unrun_heredoc_bodies(command) if _HEREDOC_OPERATOR in command else command
+    run_text = (
+        strip_never_run_heredoc_bodies(command) if _HEREDOC_OPERATOR in command else command
+    )
     # One scan for the command's many computed moves, even outside a guard's scope.
     with link_scan_scope():
         _walk_directory_changes(run_text, walk, 0)

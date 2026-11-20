@@ -349,9 +349,7 @@ class TestResolveEventsDirUnderASocketOverride:
         override = tmp_path / "run" / "d.sock"
         monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", str(override))
 
-        assert resolve_events_dir(tmp_path) == get_event_socket_dir_from_untracked(
-            override.parent
-        )
+        assert resolve_events_dir(tmp_path) == get_event_socket_dir_from_untracked(override.parent)
 
     def test_an_over_limit_override_follows_the_fitted_fallback(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -362,12 +360,8 @@ class TestResolveEventsDirUnderASocketOverride:
         fitted = fit_socket_path(tmp_path, override)
         assert fitted != override
 
-        assert resolve_events_dir(tmp_path) == get_event_socket_dir_from_untracked(
-            fitted.parent
-        )
-        assert resolve_events_dir(tmp_path) != get_event_socket_dir_from_untracked(
-            override.parent
-        )
+        assert resolve_events_dir(tmp_path) == get_event_socket_dir_from_untracked(fitted.parent)
+        assert resolve_events_dir(tmp_path) != get_event_socket_dir_from_untracked(override.parent)
 
 
 class TestGuardStateProbe:

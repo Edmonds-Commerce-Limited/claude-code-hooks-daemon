@@ -270,10 +270,12 @@ RUN_BODIES = [
     "ssh h <<'EOF'\ncd \"$D\" && cat late\nEOF",
     "cat <<'EOF' | bash\ncd \"$D\" && cat late\nEOF",
     "cat <<'EOF' > >(bash)\ncd \"$D\" && cat late\nEOF",
-    "cat <<EOF\n$(cd \"$D\" && cat late)\nEOF",
+    'cat <<EOF\n$(cd "$D" && cat late)\nEOF',
     "$(cat <<'EOF'\ncd \"$D\" && cat late\nEOF\n)",
     f"bash <<'EOF'\necho {_APOSTROPHE}\ncd \"$D\" && cat late\nEOF",
     "cat > run.sh <<'EOF'\ncd \"$D\" && cat late\nEOF",
+    "cat > n.md <<'EOF'\ncd \"$D\" && cat late\nEOF\nbash n.md",
+    "cat > n.md <<'EOF'\ncd \"$D\"\nEOF\n. n.md && cat late",
     "cat > notes.md <<'EOF'\nhello\nEOF\ncd \"$D\" && cat late",
     f"cat > notes.md <<'EOF'\n{_APOSTROPHE}\nEOF\ncat {_LAST}/zz/late",
 ]
@@ -281,9 +283,9 @@ RUN_BODIES = [
 #: Loose (unbalanced) segments whose move IS in command position after a quote opens.
 LOOSE_MOVES = [
     "bash -c 'cd \"$D\" && cat late'",
-    "sh -c \"cd $D && cat late\"",
+    'sh -c "cd $D && cat late"',
     "sudo bash -c 'cd \"$D\" && cat late'",
-    "eval \"cd $D && cat late\"",
+    'eval "cd $D && cat late"',
     "ssh h 'cd \"$D\" && cat late'",
     "bash -c 'sudo -D \"$D\" cat late && true'",
     "bash -c 'true && env -C \"$D\" cat late'",
@@ -317,9 +319,7 @@ class TestQuotedHeredocPastTheCap:
         assert _decision(reaching, command) is Decision.DENY
 
     @pytest.mark.parametrize("command", LOOSE_MOVES)
-    def test_a_loose_move_after_a_quote_still_denies(
-        self, reaching: Project, command: str
-    ) -> None:
+    def test_a_loose_move_after_a_quote_still_denies(self, reaching: Project, command: str) -> None:
         _built(reaching)
         assert _decision(reaching, command) is Decision.DENY
 

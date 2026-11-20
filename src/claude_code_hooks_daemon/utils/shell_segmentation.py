@@ -1525,6 +1525,22 @@ def strip_unrun_heredoc_bodies(command: str) -> str:
     return strip_quoted_heredoc_bodies(command, text_readers_only=True, prose_sinks=True)
 
 
+def strip_never_run_heredoc_bodies(command: str) -> str:
+    """:func:`strip_unrun_heredoc_bodies`, keeping a ``.md`` body the command names again.
+
+    Release 3.76.0 review 2 F4: ``cat > n.md <<'EOF' … EOF; bash n.md`` runs
+    the body it wrote. A prose body is blanked only when ``.md`` appears no
+    more often than the bodies that blanking removes (once per target),
+    so any later word naming a markdown file again keeps every body.
+    """
+    readers = strip_quoted_heredoc_bodies(command, text_readers_only=True)
+    prose = strip_unrun_heredoc_bodies(readers)
+    blanked = prose.count(_INERT_BODY_PLACEHOLDER) - readers.count(_INERT_BODY_PLACEHOLDER)
+    if prose.count(_MARKDOWN_SUFFIX) > blanked:
+        return readers
+    return prose
+
+
 def strip_quoted_heredoc_bodies(
     command: str, *, text_readers_only: bool = False, prose_sinks: bool = False
 ) -> str:
