@@ -1,0 +1,3 @@
+## 05:05 · handoff · —
+
+Tasks 1.2 to 1.4 built test-first on the Phase 1 branch, after merging origin/main (the carried bounded-walk files now match main; the README 00627 row conflict was resolved to one row). Task 1.2: the `scratch:` config block with forbidden extra keys and ordered bounds. Task 1.3: the entry walker on `Bounded`, lstat only, one device, one budget shared across the sweep, any stop reported with its reason. Task 1.4: the TTL clock; with no birth time the lifetime backstop is reported as not evaluated. Tasks 1.5 to 1.7 remain; handoff in subagent-reports/phase1-handoff-2.md. Nothing in scratch was moved or deleted.

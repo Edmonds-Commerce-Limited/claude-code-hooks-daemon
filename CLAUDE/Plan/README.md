@@ -8,7 +8,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - In Progress (owner request: a full scratch management system; every scratch entry has a 24-hour TTL and past it is filed, archived or kept only on a machine proof of unpushed or human work; design written, rulings by a delegated sub-agent, no code yet; takes over Plan 00560's sweep)
+- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - In Progress (owner request: every scratch entry has a 24-hour TTL and past it is filed, archived or kept only on a machine proof of unpushed or human work; a `scratch-sweep` command, caps, a per-session directory; Phase 1 read-only core under way; takes over Plan 00560's sweep)
 
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - In Progress (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
 

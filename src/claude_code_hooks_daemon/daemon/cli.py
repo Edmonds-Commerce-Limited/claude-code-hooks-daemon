@@ -40,7 +40,7 @@ import socket
 import subprocess  # nosec B404 - subprocess used for daemon management (systemctl) only
 import sys
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal, TextIO, cast
@@ -224,8 +224,6 @@ from claude_code_hooks_daemon.utils.settings_repair import repair_settings_regis
 from .init_config import generate_config
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from claude_code_hooks_daemon.core.branch_reject import Digest, IssuedRequest, RejectRoute
     from claude_code_hooks_daemon.core.release_slate import (
         CiRunState,
@@ -6741,6 +6739,92 @@ def cmd_branch_sweep(args: argparse.Namespace) -> int:
     notice = branch_sweep.deprecation_line(branches, legacy)
     if notice is not None:
         print(notice)
+    return 0
+
+
+#: ``scratch-sweep``'s default budget: the whole run, not one entry (Plan 00627 Task 1.7).
+SCRATCH_SWEEP_DEFAULT_SECONDS: Final[float] = 300.0
+SCRATCH_SWEEP_DEFAULT_MAX_INODES: Final[int] = 5_000_000
+
+
+def cmd_scratch_sweep(
+    args: argparse.Namespace,
+    *,
+    scandir: Callable[[str], Any] = os.scandir,
+    wall_clock: Callable[[], float] = time.time,
+    budget_clock: Callable[[], float] = time.monotonic,
+    process_cwds: Callable[[], Mapping[int, Path]] | None = None,
+    git_runner: Callable[..., Any] | None = None,
+) -> int:
+    """``scratch-sweep [--json] [--root PATH]``: judge every scratch entry; change nothing.
+
+    A Phase 1 dry run (Plan 00627 Task 1.7). It never creates the scratch root,
+    writes no cache or state, prints no file content and prints no delete command.
+    The keyword parameters exist for tests.
+
+    Returns:
+        0 for a report, complete or not.
+    """
+    from claude_code_hooks_daemon.core import scratch_sweep
+    from claude_code_hooks_daemon.core.scratch_liveness import (
+        LivenessInputs,
+        ProcessCwdReading,
+        read_background_records,
+        read_process_cwds,
+    )
+    from claude_code_hooks_daemon.core.scratch_repos import build_project_git
+    from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
+    from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
+    from claude_code_hooks_daemon.utils.git_repo import run_git
+    from claude_code_hooks_daemon.utils.git_sync import resolve_remote_default_branch
+
+    repo = get_project_path(getattr(args, "project_root", None))
+    config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
+    scratch = config.scratch
+    root = Path(args.root) if args.root is not None else repo / "untracked" / "scratch"
+    if not root.is_absolute():
+        root = repo / root
+    now = wall_clock()
+    cwd_reading = (
+        ProcessCwdReading(process_cwds(), ()) if process_cwds is not None else read_process_cwds()
+    )
+    inputs = LivenessInputs(
+        cwds=cwd_reading.cwds,
+        background=read_background_records(
+            _daemon_untracked_dir(repo) / "background-processes.jsonl"
+        ),
+        min_age_minutes=scratch.min_age_minutes,
+        now=now,
+        unreadable_pids=cwd_reading.unreadable,
+    )
+    report = scratch_sweep.run_sweep(
+        resolve_sweep_root(
+            root,
+            project_root=repo,
+            config=scratch,
+            reference_roots=tuple(config.reference_repos.roots),
+        ),
+        config=scratch,
+        now=now,
+        budget=WalkBudget(
+            seconds=args.budget_seconds, max_inodes=args.max_inodes, clock=budget_clock
+        ),
+        inputs=inputs,
+        project_root=repo,
+        project_git=build_project_git(
+            repo,
+            remote=config.branches.remote,
+            default_branch=resolve_remote_default_branch(config.branches, repo),
+            runner=git_runner or run_git,
+        ),
+        scandir=scandir,
+        plan_dir=config.plan_workflow.directory,
+    )
+    if args.json:
+        print(json.dumps(scratch_sweep.report_json(report), indent=2))
+        return 0
+    for line in scratch_sweep.render_table(report, max_listed=scratch.sweep.max_listed):
+        print(line)
     return 0
 
 
@@ -13900,6 +13984,52 @@ def build_parser() -> argparse.ArgumentParser:
         "(a positive integer); branches not measured in time stay unclassified",
     )
     parser_branch_sweep.set_defaults(func=cmd_branch_sweep)
+
+    # scratch-sweep command (Plan 00627 Task 1.7): a dry run only.
+    parser_scratch_sweep = subparsers.add_parser(
+        "scratch-sweep",
+        help="Judge every scratch entry (LIVE, STUCK, PROTECTED, REFERENCED, DISPOSABLE, "
+        "UNCERTAIN); "
+        "a read-only report that changes nothing",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Exit 0 for a report, complete or not. The report says when the walk "
+            "budget ran out or a directory could not be read.\n\n"
+            "KEPT is not evaluated yet. An entry a tracked file names is REFERENCED. "
+            "A repository in an entry is "
+            "classified (a registered worktree, a related clone with unpushed or dirty "
+            "work: PROTECTED; a standalone repository: ordinary content). The remote's "
+            "live tips are read with git ls-remote."
+        ),
+    )
+    parser_scratch_sweep.add_argument(
+        "--json", action="store_true", help="Print every entry's record as JSON"
+    )
+    parser_scratch_sweep.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="The root to judge: a directory inside this project's untracked/ "
+        "(default: untracked/scratch/); any other path is refused",
+    )
+    parser_scratch_sweep.add_argument(
+        "--budget-seconds",
+        type=_positive_seconds,
+        default=SCRATCH_SWEEP_DEFAULT_SECONDS,
+        metavar="N",
+        help="Time budget for the whole walk "
+        f"(default {SCRATCH_SWEEP_DEFAULT_SECONDS:g}); entries past it are reported STUCK",
+    )
+    parser_scratch_sweep.add_argument(
+        "--max-inodes",
+        type=_positive_int,
+        default=SCRATCH_SWEEP_DEFAULT_MAX_INODES,
+        metavar="N",
+        help="Inode cap for the whole walk "
+        f"(default {SCRATCH_SWEEP_DEFAULT_MAX_INODES}); entries past it are reported STUCK",
+    )
+    parser_scratch_sweep.set_defaults(func=cmd_scratch_sweep)
 
     # branch-preflight command (Plan 00594 Task 4.1)
     parser_branch_preflight = subparsers.add_parser(

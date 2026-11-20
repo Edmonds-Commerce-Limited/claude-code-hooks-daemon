@@ -29,7 +29,8 @@ This plan is design only until the owner or coordinator starts Phase 1. No exist
 ## Goals
 
 - Every scratch entry past its TTL (24 hours by default, configurable) is filed, archived or removed, unless a machine test shows it is live or holds work that exists nowhere else.
-- Removal is only ever by machine proof or after a verified archive has been held and announced. A repository or worktree that has somewhere to push (a remote, or shared history with the project) and holds unpushed commits or dirty tracked content is never packed or removed. A standalone repository with no remote and unrelated history is the stated exception: it is packed whole and removed after the long hold (DESIGN.md R6, R7), and the owner should confirm that.
+- Removal is only ever by machine proof or after a verified archive has been held and announced. A repository or worktree that has somewhere to push (a remote, or shared history with the project) and holds unpushed commits or dirty tracked content is never packed or removed (DESIGN.md R6). A standalone repository has no special rule: the owner, 2026-11-20, "no special rules for repos ... scratch repo - i dont know what this is for but its presumably for testing stuff etc - no value". It is DISPOSABLE by proof P7, the coordinator's application of those words (DESIGN.md R7a); files beside it are judged on their own.
+- Each directory directly under `untracked/` has a configurable TTL, as the owner asked on 2026-11-20: "default/configurable TTL for untracked paths: untracked-ttl: repos: * (means unlimited, never clear); scratch: 7d; other-dir: 36h". `untracked/repos` and the reference-repository roots are never swept (DESIGN.md section 4.1, R16).
 - `hooks-daemon scratch-sweep` reports by default and acts with `--apply`. It runs from the housekeeping pass, a must-do item and a routine.
 - A SessionStart report, and caps on directories, bytes and entries that warn and then block before the link index is affected. The link index excludes nothing.
 - Scratch is written inside a per-session directory the daemon creates and marks, so each entry has an owner and a birth time.
@@ -57,24 +58,27 @@ Every build task is test-first: the failing test is written and seen to fail bef
 
 ### Phase 1: Read-only core (no mutation anywhere)
 
-- [ ] ⬜ **Task 1.1**: Add the fake-tree builder `tests/helpers/scratch_tree.py` with its own tests (entries, set mtimes, links to dummy files outside the root, hard links, FIFOs, unreadable directories).
-- [ ] ⬜ **Task 1.2**: Add the `scratch:` keys of DESIGN.md section 10 to the config model, with validation tests (bounds, `extra="forbid"`).
-- [ ] ⬜ **Task 1.3**: Add the entry walker: per entry, directories, files, bytes, newest mtime, special files, link counts, nested `.git` markers. `lstat` only, one device, a `ScanDeadline` budget, and an explicit incomplete result.
-- [ ] ⬜ **Task 1.4**: Add the TTL clock (DESIGN.md section 4): newest mtime, root ctime, birth time, future mtimes, maximum lifetime.
-- [ ] ⬜ **Task 1.5**: Add liveness: process working directories (reusing `default_process_cwds`), background-process records, minimum age.
-- [ ] ⬜ **Task 1.6**: Add the verdict type and the ordering, with proofs P1, P2 and P5 (the ones that need no git).
-- [ ] ⬜ **Task 1.7**: Add `hooks-daemon scratch-sweep` as a dry run only: the table and `--json`. Test that a run changes no inode (snapshot before and after).
+- [x] ✅ **Task 1.1**: Add the fake-tree builder `tests/support/scratch_tree.py` (the project's helper directory) with its own tests (entries, set mtimes, links to dummy files outside the root, hard links, FIFOs, unreadable directories).
+- [x] ✅ **Task 1.2**: Add the `scratch:` keys of DESIGN.md section 10 to the config model, with validation tests (bounds, `extra="forbid"`).
+- [x] ✅ **Task 1.3**: Add the entry walker: per entry, directories, files, bytes, newest mtime, special files, link counts, nested `.git` markers. `lstat` only, one device, a `ScanDeadline` budget, and an explicit incomplete result.
+- [x] ✅ **Task 1.4**: Add the TTL clock (DESIGN.md section 4): newest mtime, root ctime, birth time, future mtimes, maximum lifetime.
+- [x] ✅ **Task 1.5**: Add liveness: process working directories (reusing `default_process_cwds`), background-process records, minimum age.
+- [x] ✅ **Task 1.6**: Add the verdict type and the ordering, with proofs P1, P2 and P5 (the ones that need no git).
+- [x] ✅ **Task 1.7**: Add `hooks-daemon scratch-sweep` as a dry run only: the table and `--json`. Test that a run changes no inode (snapshot before and after).
+- [x] ✅ **Task 1.8**: Drop the R7 wording from the verdict code (owner, 2026-11-20). A `.git` marker stays "repository, not judged" until Task 2.1 classifies it.
+- [x] ✅ **Task 1.9**: Add `scratch.untracked_ttl` and `untracked_default_ttl` (DESIGN.md section 4.1) in place of `ttl_hours` and `sweep.extra_roots`, and one root resolver (`core/untracked_roots.py`) that refuses `untracked/repos`, the reference roots and the archive store. Release note `017-scratch-sweep-dry-run-and-untracked-ttls.md` and `config-changes/v3.77.0.yaml` are in `CLAUDE/UPGRADES/UNRELEASED/`.
 
 ### Phase 2: Git proofs and references
 
-- [ ] ⬜ **Task 2.1**: Classify each nested repository: registered worktree, outside-pointing `.git` file, related, standalone, linked inside (DESIGN.md section 3.3).
-- [ ] ⬜ **Task 2.2**: Add the related-repository tests: dirty tracked content, stash, ref tips proved against the main repository's objects and remote-held refs. A git failure or timeout is STUCK.
-- [ ] ⬜ **Task 2.3**: Add proof P3 (identical copy by blob hash) and P4 (clean pushed clone).
-- [ ] ⬜ **Task 2.4**: Add the reference set (exact path, HEAD and unmerged branch tips) and the REFERENCED verdict.
-- [ ] ⬜ **Task 2.5**: Add the filing proposal table (DESIGN.md section 6) to the dry-run output.
+- [x] ✅ **Task 2.1**: Classify each nested repository: registered worktree, outside-pointing `.git` file, related, standalone, linked inside (DESIGN.md section 3.3). A standalone repository is DISPOSABLE by P7 (R7a); git runs in a nested repository take no locks and run no hooks or fsmonitor.
+- [x] ✅ **Task 2.2**: Add the related-repository tests: dirty tracked content, stash, ref tips proved against the main repository's objects and remote-held refs. A git failure or timeout is STUCK.
+- [x] ✅ **Task 2.3**: Add proof P3 (identical copy by blob hash, hashed in-process with `O_NOFOLLOW`, bounded per sweep by files and bytes) and P4 (clean pushed clone).
+- [x] ✅ **Task 2.4**: Add the reference set (exact path, HEAD and unmerged branch tips) and the REFERENCED verdict.
+- [x] ✅ **Task 2.5**: Add the filing proposal table (DESIGN.md section 6) to the dry-run output.
 
 ### Phase 3: The archive store and `--apply`
 
+- [x] ✅ **Task 3.0**: Prerequisite for Tasks 3.8 and 3.9. Close DESIGN.md section 13 rows N1 (alternates lender PROTECTED), N2 (`--separate-git-dir`), N3 (venv layout and `_is_venv`), N4 (`./` and `//` sub-root spelling) and the reflog/`ORIG_HEAD` row, test-first (a failing test per row, then the fix). From the 261120 re-review: Phases 1-2 are safe to merge as a dry run only; DISPOSABLE is not yet safe to act on.
 - [ ] ⬜ **Task 3.1**: Add the store: flat layout, mode 0700, `index.jsonl`, `flock`.
 - [ ] ⬜ **Task 3.2**: Add claim-by-rename through a directory descriptor, with the fingerprint re-check and rename-back.
 - [ ] ⬜ **Task 3.3**: Add pack and bidirectional verify (GNU tar by argv, `tar --compare`, member count, SHA-256, `fsync`), including the special-file skip list and the link-count refusal.
@@ -82,8 +86,8 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [ ] ⬜ **Task 3.5**: Add batch packing of loose files by run and verdict.
 - [ ] ⬜ **Task 3.6**: Add expiry by verdict retention, `restore <id>` and `keep` (bounded, reasoned, no repeated reason).
 - [ ] ⬜ **Task 3.7**: Add proof P6 (adopt a tarball beside its original).
-- [ ] ⬜ **Task 3.8**: Wire `--apply`. Add the crash-safety tests (a failure after each step), the escape tests and the property test of DESIGN.md section 14.
-- [ ] ⬜ **Task 3.9**: Independent adversarial review of Phases 1 to 3 (data loss, link escapes, TOCTOU) before any later phase runs `--apply` outside tests.
+- [ ] ⬜ **Task 3.8** (depends on Task 3.0): Wire `--apply`, rebuilding every per-sweep git fact for the run (DESIGN.md section 5.2 step 1: tracked files, worktrees, verified tips and blobs, references). Add the crash-safety tests (a failure after each step), the escape tests and the property test of DESIGN.md section 14.
+- [ ] ⬜ **Task 3.9** (depends on Task 3.0): Independent adversarial review of Phases 1 to 3 (data loss, link escapes, TOCTOU) before any later phase runs `--apply` outside tests. It must review the Task 3.0 fixes for the N1-N4 and reflog/`ORIG_HEAD` rows of DESIGN.md section 13.
 
 ### Phase 4: The session directory convention
 
@@ -130,7 +134,8 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [ ] A failure injected after each step of the removal order leaves the original or a verified archive, and a second run converges.
 - [ ] No link is followed: the escape tests leave every outside dummy file untouched.
 - [ ] A dry run changes no inode.
-- [ ] A related repository (a remote, or shared history) with unpushed commits or dirty tracked content is never packed or removed, including when its own remote refs claim otherwise and when the remote cannot be reached. A standalone repository is only ever packed whole and held (DESIGN.md R7).
+- [ ] A related repository (a remote, or shared history) with unpushed commits or dirty tracked content is never packed or removed, including when its own remote refs claim otherwise and when the remote cannot be reached. A standalone repository is DISPOSABLE by P7 (R7a) and covers nothing beside its own root, and one marker of another kind in the same entry decides the entry.
+- [ ] No sweep root is, or lies inside, `untracked/repos`, a reference-repository root or the archive store, whatever `scratch.untracked_ttl` says; a malformed TTL falls back to the key's default with a warning and is never read as `"*"`.
 - [ ] The cap guard denies a directory-creating command at the block cap and never denies a commit or journal body file.
 - [ ] No code path and no printed suggestion deletes on age alone.
 - [ ] After the dogfood run this repository's scratch is under the warn caps, or the report names each protected entry that keeps it above.
@@ -139,4 +144,4 @@ Every build task is test-first: the failing test is written and seen to fail bef
 
 ## Delivery & Milestones
 
-- Design written: [DESIGN.md](DESIGN.md), rulings R1 to R15.
+- Design written: [DESIGN.md](DESIGN.md), rulings R1 to R16 (R7 overturned by the owner).
