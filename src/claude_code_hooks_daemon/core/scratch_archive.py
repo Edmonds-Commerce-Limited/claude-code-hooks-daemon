@@ -29,12 +29,17 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Any
 
 #: The append-only record of every archive the store holds.
 INDEX_NAME = "index.jsonl"
+
+#: The append-only record of keeps and expiries. It is a separate file because
+#: the index reader refuses the whole store on any line that is not a record.
+EVENTS_NAME = "events.jsonl"
 
 #: The file whose ``flock`` serialises every sweep that uses the store.
 LOCK_NAME = "lock"
@@ -162,6 +167,112 @@ class ArchiveRecord:
             skipped=lists["skipped"],
             restore_command=data["restore_command"],
         )
+
+
+def parse_instant(value: str) -> datetime:
+    """Parse an ISO 8601 instant that carries a zone; raise ``ValueError`` otherwise."""
+    if not value:
+        raise ValueError("an instant must be a non-empty string")
+    parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"instant {value!r} has no zone")
+    return parsed
+
+
+def _event_strings(data: dict[str, Any], keys: tuple[str, ...]) -> dict[str, str]:
+    expected = {"kind", *keys}
+    if set(data) != expected:
+        raise ValueError(f"event keys differ: {sorted(set(data) ^ expected)}")
+    for key in keys:
+        if not isinstance(data[key], str):
+            raise ValueError(f"{key} is not a string")
+    check_archive_id(data["archive_id"])
+    return {key: data[key] for key in keys}
+
+
+_KEEP_KEYS = ("archive_id", "original_path", "reason", "kept_at", "until")
+_EXPIRED_KEYS = ("archive_id", "at")
+_ADOPT_KEYS = ("archive_id", "original_path", "tarball", "at")
+
+
+@dataclass(frozen=True)
+class KeepEvent:
+    """An agent's bounded pause of one record's expiry, with its reason."""
+
+    archive_id: str
+    original_path: str
+    reason: str
+    kept_at: str
+    until: str
+
+    def to_json(self) -> dict[str, Any]:
+        """Return the event as a JSON-ready mapping."""
+        return {"kind": "keep", **{key: getattr(self, key) for key in _KEEP_KEYS}}
+
+
+@dataclass(frozen=True)
+class ExpiredEvent:
+    """An archive the expiry pass decided to delete; written before the unlink."""
+
+    archive_id: str
+    at: str
+
+    def to_json(self) -> dict[str, Any]:
+        """Return the event as a JSON-ready mapping."""
+        return {"kind": "expired", "archive_id": self.archive_id, "at": self.at}
+
+
+@dataclass(frozen=True)
+class AdoptEvent:
+    """A tarball about to be moved into the store as ``archive_id`` (proof P6).
+
+    Written before the move, so a crash between the move and the index append
+    leaves a named, user-owned archive rather than an anonymous unrecorded one.
+    """
+
+    archive_id: str
+    original_path: str
+    tarball: str
+    at: str
+
+    def to_json(self) -> dict[str, Any]:
+        """Return the event as a JSON-ready mapping."""
+        return {"kind": "adopt", **{key: getattr(self, key) for key in _ADOPT_KEYS}}
+
+
+ArchiveEvent = KeepEvent | ExpiredEvent | AdoptEvent
+
+
+def parse_event(data: object) -> ArchiveEvent:
+    """Parse one events line's object strictly; raise ``ValueError`` on any wrong shape.
+
+    Every instant must parse with a zone, so a bad keep can never read as no keep.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("event is not an object")
+    kind = data.get("kind")
+    if kind == "keep":
+        fields = _event_strings(data, _KEEP_KEYS)
+        parse_instant(fields["kept_at"])
+        parse_instant(fields["until"])
+        return KeepEvent(**fields)
+    if kind == "expired":
+        fields = _event_strings(data, _EXPIRED_KEYS)
+        parse_instant(fields["at"])
+        return ExpiredEvent(**fields)
+    if kind == "adopt":
+        fields = _event_strings(data, _ADOPT_KEYS)
+        parse_instant(fields["at"])
+        return AdoptEvent(**fields)
+    raise ValueError(f"unknown event kind {kind!r}")
+
+
+@dataclass(frozen=True)
+class EventsRead:
+    """The events file as read: its complete events, and whether a torn final line was dropped."""
+
+    events: tuple[ArchiveEvent, ...]
+    torn_tail: bool
 
 
 @dataclass(frozen=True)
@@ -315,25 +426,41 @@ class ArchiveStore:
             raise StoreRefused(f"store file {name} is not a regular file")
         return fd
 
-    def read_index(self) -> IndexRead:
-        """Read every complete record; raise :class:`StoreRefused` on an interior bad line."""
+    def _read_lines(self, name: str) -> tuple[list[bytes], bool]:
+        """Return a JSON-lines file's complete lines and whether a torn tail was dropped."""
         try:
-            fd = self._open_file(INDEX_NAME, os.O_RDONLY)
+            fd = self._open_file(name, os.O_RDONLY)
         except StoreRefused:
-            if not self._exists(INDEX_NAME):
-                return IndexRead(records=(), torn_tail=False)
+            if not self._exists(name):
+                return [], False
             raise
         with os.fdopen(fd, "rb") as handle:
             data = handle.read()
         lines = data.split(b"\n")
         tail = lines.pop()
+        return lines, bool(tail)
+
+    def read_index(self) -> IndexRead:
+        """Read every complete record; raise :class:`StoreRefused` on an interior bad line."""
+        lines, torn = self._read_lines(INDEX_NAME)
         records = []
         for number, line in enumerate(lines, start=1):
             try:
                 records.append(ArchiveRecord.from_json(json.loads(line)))
             except ValueError as exc:
                 raise StoreRefused(f"{INDEX_NAME} line {number} is malformed: {exc}") from exc
-        return IndexRead(records=tuple(records), torn_tail=bool(tail))
+        return IndexRead(records=tuple(records), torn_tail=torn)
+
+    def read_events(self) -> EventsRead:
+        """Read every complete event; raise :class:`StoreRefused` on an interior bad line."""
+        lines, torn = self._read_lines(EVENTS_NAME)
+        events = []
+        for number, line in enumerate(lines, start=1):
+            try:
+                events.append(parse_event(json.loads(line)))
+            except ValueError as exc:
+                raise StoreRefused(f"{EVENTS_NAME} line {number} is malformed: {exc}") from exc
+        return EventsRead(events=tuple(events), torn_tail=torn)
 
     def _exists(self, name: str) -> bool:
         try:
@@ -346,8 +473,17 @@ class ArchiveStore:
         """Append ``record`` and fsync it with the directory; a torn tail is cut first."""
         self.require_lock("append")
         check_archive_id(record.archive_id)
-        line = json.dumps(record.to_json(), sort_keys=True).encode() + b"\n"
-        fd = self._open_file(INDEX_NAME, os.O_RDWR | os.O_CREAT)
+        self._append_line(INDEX_NAME, record.to_json())
+
+    def append_event(self, event: ArchiveEvent) -> None:
+        """Append ``event`` to the events file and fsync it; a torn tail is cut first."""
+        self.require_lock("append_event")
+        check_archive_id(event.archive_id)
+        self._append_line(EVENTS_NAME, event.to_json())
+
+    def _append_line(self, name: str, payload: dict[str, Any]) -> None:
+        line = json.dumps(payload, sort_keys=True).encode() + b"\n"
+        fd = self._open_file(name, os.O_RDWR | os.O_CREAT)
         try:
             size = os.fstat(fd).st_size
             if size:

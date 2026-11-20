@@ -946,10 +946,48 @@ def test_the_surface_scan_sees_a_module_level_alias() -> None:
     assert found == {("m.py", "<module>", "rmtree")}
 
 
+_CTYPES_MOVERS = frozenset({"rename_noreplace", "rename_noreplace_between", "_RENAMEAT2"})
+
+
+def _ctypes_moves() -> set[tuple[str, str, str]]:
+    """Every reference to the ctypes ``renameat2`` movers, which the deleter scan cannot see."""
+    core = Path(claude_code_hooks_daemon.__file__).parent / "core"
+    found: set[tuple[str, str, str]] = set()
+
+    def scan(node: ast.AST, scope: str, module: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = (
+                child.name if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef) else scope
+            )
+            name = None
+            if isinstance(child, ast.Name) and child.id in _CTYPES_MOVERS:
+                name = child.id
+            elif isinstance(child, ast.Attribute) and child.attr in _CTYPES_MOVERS:
+                name = child.attr
+            if name is not None:
+                found.add((module, inner, name))
+            scan(child, inner, module)
+
+    for path in sorted(core.glob("scratch_archive*.py")):
+        scan(ast.parse(path.read_text(encoding="utf-8")), "<module>", path.name)
+    return found
+
+
+def test_ctypes_moves_are_only_the_listed_ones() -> None:
+    """The Task 3.9 review list of no-replace renames: a move out of scratch is a removal."""
+    assert _ctypes_moves() == {
+        ("scratch_archive_claim.py", "<module>", "_RENAMEAT2"),
+        ("scratch_archive_claim.py", "rename_noreplace", "_RENAMEAT2"),
+        ("scratch_archive_claim.py", "claim", "rename_noreplace"),
+        ("scratch_archive_claim.py", "release", "rename_noreplace"),
+        ("scratch_archive_remove.py", "resume_claimed", "rename_noreplace"),
+    }
+
+
 def test_deletion_surfaces_are_only_the_listed_ones() -> None:
     """The Task 3.9 review list: every place the archive modules can delete or truncate."""
     assert _deletion_surfaces() == {
-        ("scratch_archive.py", "append", "ftruncate"),
+        ("scratch_archive.py", "_append_line", "ftruncate"),
         ("scratch_archive.py", "discard_unrecorded", "unlink"),
         ("scratch_archive_remove.py", "_delete", "unlink"),
         ("scratch_archive_remove.py", "_delete", "rmdir"),
