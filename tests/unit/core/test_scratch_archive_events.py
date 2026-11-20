@@ -14,6 +14,7 @@ from claude_code_hooks_daemon.core.scratch_archive import (
     INDEX_NAME,
     ArchiveRecord,
     ArchiveStore,
+    ClaimEvent,
     ExpiredEvent,
     KeepEvent,
     StoreRefused,
@@ -68,6 +69,29 @@ def test_events_round_trip_and_coexist_with_the_index(store: ArchiveStore) -> No
     read = store.read_events()
     assert read.events == (keep, expired)
     assert not read.torn_tail
+
+
+def _claim_event(archive_id: str, root_ino: str = "42") -> ClaimEvent:
+    return ClaimEvent(
+        archive_id=archive_id,
+        original_path="untracked/scratch/e",
+        checkout="main",
+        root_dev="7",
+        root_ino=root_ino,
+        at="2026-11-20T00:00:00+00:00",
+    )
+
+
+def test_a_claim_event_round_trips(store: ArchiveStore) -> None:
+    claim = _claim_event(new_archive_id())
+    store.append_event(claim)
+    assert store.read_events().events == (claim,)
+
+
+def test_a_claim_event_with_a_non_numeric_inode_refuses_the_store(store: ArchiveStore) -> None:
+    store.append_event(_claim_event(new_archive_id(), root_ino="x"))
+    with pytest.raises(StoreRefused):
+        store.read_events()
 
 
 def test_no_events_file_reads_as_no_events(store: ArchiveStore) -> None:

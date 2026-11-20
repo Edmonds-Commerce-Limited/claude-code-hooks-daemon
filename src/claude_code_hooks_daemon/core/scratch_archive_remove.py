@@ -19,7 +19,9 @@ which stops the removal. Any refusal leaves the rest under its claimed name.
 
 A leftover claim is resumed by :func:`resume_claimed`: removed when an archive
 recorded for it verifies against what is left (whole, or a partly removed
-tree), and renamed back otherwise.
+tree), and renamed back otherwise. Only a claim a sweep recorded with
+:func:`record_claim` before its rename is resumed; any other ``.sweeping-*``
+name is reported foreign and left alone.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from pathlib import PurePosixPath
 from claude_code_hooks_daemon.core.scratch_archive import (
     ArchiveRecord,
     ArchiveStore,
+    ClaimEvent,
     StoreRefused,
 )
 from claude_code_hooks_daemon.core.scratch_archive_adopt import PROOF_ID as ADOPT_PROOF
@@ -95,7 +98,10 @@ class Removed:
 
 @dataclass(frozen=True)
 class Resumed:
-    """What became of a leftover claim: removed, renamed-back, stuck or absent."""
+    """What became of a leftover claim: removed, renamed-back, stuck, absent or foreign.
+
+    ``foreign``: no claim event covers the name, so a sweep did not make it; untouched.
+    """
 
     name: str
     outcome: str
@@ -152,6 +158,46 @@ def _removable(
         require_not_due(store.read_index(), store.read_events(), archive_id, now, retention_hours)
     except (Incomplete, Due, StoreRefused, ValueError) as exc:
         raise RemoveRefused(f"archive {archive_id} may not authorise a removal: {exc}") from exc
+
+
+def record_claim(
+    store: ArchiveStore,
+    expected: Fingerprint,
+    *,
+    archive_id: str,
+    original_path: str,
+    checkout: str,
+    at: datetime,
+) -> None:
+    """Record, durably, that a sweep is about to claim the entry ``expected`` describes.
+
+    Call it under the store lock BEFORE the rename: a crash between the two
+    leaves a record and no claim, never a claim with no record.
+    """
+    store.append_event(
+        ClaimEvent(
+            archive_id=archive_id,
+            original_path=original_path,
+            checkout=checkout,
+            root_dev=str(expected.root_dev),
+            root_ino=str(expected.root_ino),
+            at=at.isoformat(),
+        )
+    )
+
+
+def _claim_recorded(store: ArchiveStore, checkout: str, name: str, info: os.stat_result) -> bool:
+    try:
+        events = store.read_events().events
+    except StoreRefused as exc:
+        raise RemoveRefused(str(exc)) from exc
+    return any(
+        isinstance(event, ClaimEvent)
+        and event.checkout == checkout
+        and PurePosixPath(event.original_path).name == name
+        and (event.root_dev, event.root_ino) == (str(info.st_dev), str(info.st_ino))
+        for event in events
+    )
 
 
 def _names_entry(record: ArchiveRecord, name: str) -> bool:
@@ -432,15 +478,23 @@ def resume_claimed(
     it stays claimed and is reported stuck. A record that could not be checked at
     all (tar did not run) also leaves it stuck: a partly removed tree is never
     renamed back for want of a check. Nothing is removed without a record.
+
+    A claim name no claim event of this checkout covers (same entry name, same
+    device and inode) was not made by a sweep: it is reported ``foreign`` and
+    neither removed nor renamed (D-PATH F1).
     """
     name = entry_name_of(claimed_name)
     records = _index(store)
     try:
-        os.lstat(claimed_name, dir_fd=parent_fd)
+        info = os.lstat(claimed_name, dir_fd=parent_fd)
     except FileNotFoundError:
         return Resumed(name, "absent", "no leftover claim")
     except OSError as exc:
         raise RemoveRefused(f"cannot lstat {claimed_name!r}: {exc}") from exc
+    if not _claim_recorded(store, checkout, name, info):
+        return Resumed(
+            name, "foreign", f"no claim record covers {claimed_name!r}: not a sweep's; left alone"
+        )
     candidates = [r for r in reversed(records) if r.checkout == checkout and _names_entry(r, name)]
     unchecked = False
     for record in candidates:

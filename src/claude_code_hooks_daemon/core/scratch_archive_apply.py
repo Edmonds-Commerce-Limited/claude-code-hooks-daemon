@@ -69,6 +69,7 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import (
 from claude_code_hooks_daemon.core.scratch_archive_remove import (
     RemoveRefused,
     Resumed,
+    record_claim,
     remove_claimed,
     resume_claimed,
 )
@@ -270,6 +271,19 @@ def _apply_row(
     expected = fingerprints.get(name)
     if expected is None:
         return EntryOutcome(name, "not-fingerprinted", "no fingerprint taken before classification")
+    archive_id = new_archive_id()
+    try:
+        # Recorded before the rename, so a leftover claim with no record is not ours.
+        record_claim(
+            store,
+            expected,
+            archive_id=archive_id,
+            original_path=str(PurePosixPath(settings.original_prefix) / name),
+            checkout=settings.checkout,
+            at=settings.clock(),
+        )
+    except (StoreRefused, OSError, ValueError) as exc:
+        return EntryOutcome(name, "refused", f"claim not recorded: {exc}")
     try:
         result = claim(
             root_fd,
@@ -287,13 +301,14 @@ def _apply_row(
         return EntryOutcome(name, "renamed-back", result.reason)
     try:
         after_step(STEP_CLAIM, name)
-        return _archive_claimed(result, row, store, settings, after_step)
+        return _archive_claimed(result, archive_id, row, store, settings, after_step)
     finally:
         result.close()
 
 
 def _archive_claimed(
     handle: Claimed,
+    archive_id: str,
     row: EntryRow,
     store: ArchiveStore,
     settings: ApplySettings,
@@ -304,7 +319,7 @@ def _archive_claimed(
         packed = pack(
             handle,
             store,
-            new_archive_id(),
+            archive_id,
             tar=settings.tar,
             max_inodes=settings.max_inodes,
             max_depth=settings.max_depth,

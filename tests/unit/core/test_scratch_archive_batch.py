@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.core.scratch_archive_claim import (
 from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu_tar
 from claude_code_hooks_daemon.core.scratch_archive_remove import (
     RemoveRefused,
+    record_claim,
     remove_claimed,
     resume_claimed,
 )
@@ -78,8 +79,19 @@ def tar() -> TarTool:
     return find_gnu_tar()
 
 
-def _claim(parent_fd: int, name: str) -> Claimed:
-    result = claim(parent_fd, name, fingerprint_at(parent_fd, name, max_inodes=MAX), max_inodes=MAX)
+def _claim(parent_fd: int, name: str, store: ArchiveStore | None = None) -> Claimed:
+    """Claim ``name``; with a store, record the claim first as a sweep does."""
+    expected = fingerprint_at(parent_fd, name, max_inodes=MAX)
+    if store is not None:
+        record_claim(
+            store,
+            expected,
+            archive_id=new_archive_id(),
+            original_path=f"untracked/scratch/{name}",
+            checkout=CHECKOUT,
+            at=_clock(),
+        )
+    result = claim(parent_fd, name, expected, max_inodes=MAX)
     assert isinstance(result, Claimed)
     return result
 
@@ -284,7 +296,7 @@ def test_a_crash_after_each_step_converges(
     """Hard stop after each step, then resume every leftover claim; nothing is lost."""
     names = ("f", "g", "h")
     content = _loose(root, names)
-    claims = [_claim(root_fd, n) for n in names]
+    claims = [_claim(root_fd, n, store) for n in names]
     result = pack_batch(claims, store, new_archive_id(), tar=tar)
     records = batch_records(
         result,

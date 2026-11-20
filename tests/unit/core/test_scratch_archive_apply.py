@@ -345,15 +345,57 @@ def archive_e1(root: Path, store: ArchiveStore, tar: TarTool) -> str:
     return outcome.archive_id
 
 
+class _Killed(Exception):
+    """A simulated kill between two apply steps."""
+
+
 class TestResumeReclaimExpireOrder:
     def test_a_leftover_claim_is_resumed_then_judged_in_the_same_run(
         self, root: Path, store: ArchiveStore, tar: TarTool
     ) -> None:
-        entry(root, CLAIM_PREFIX + "e1")
+        entry(root, "e1")
+
+        def crash(step: str, name: str) -> None:
+            if step == apply_mod.STEP_CLAIM:
+                raise _Killed(step)
+
+        with pytest.raises(_Killed):
+            apply_sweep(
+                store, FakeFacts([row("e1")]).facts(), settings(root, tar), after_step=crash
+            )
+        assert (root / (CLAIM_PREFIX + "e1")).exists()
         result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
         assert [r.outcome for r in result.resumed] == ["renamed-back"]
         assert outcome_of(result, "e1").outcome == "archived"
         assert not (root / "e1").exists()
+
+    def test_a_claim_name_no_sweep_recorded_is_foreign_and_untouched(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """D-PATH F1: an agent's own ``.sweeping-notes`` is never resumed or re-claimed."""
+        entry(root, CLAIM_PREFIX + "notes")
+        before = snapshot(root / (CLAIM_PREFIX + "notes"))
+        rows = [row("notes"), row(CLAIM_PREFIX + "notes")]
+        result = apply_sweep(store, FakeFacts(rows).facts(), settings(root, tar))
+        assert [(r.name, r.outcome) for r in result.resumed] == [("notes", "foreign")]
+        assert snapshot(root / (CLAIM_PREFIX + "notes")) == before
+        assert sorted(p.name for p in root.iterdir()) == [CLAIM_PREFIX + "notes"]
+        assert store.read_index().records == ()
+
+    def test_a_claim_that_cannot_be_recorded_is_never_made(
+        self, root: Path, store: ArchiveStore, tar: TarTool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The claim event is written BEFORE the rename: no record, no claim."""
+        entry(root, "e1")
+
+        def refuse(*args: object, **kwargs: object) -> None:
+            raise StoreRefused("events file unwritable")
+
+        monkeypatch.setattr(store, "append_event", refuse)
+        result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
+        assert outcome_of(result, "e1").outcome == "refused"
+        assert (root / "e1" / "a.txt").exists()
+        assert not (root / (CLAIM_PREFIX + "e1")).exists()
 
     def test_a_resume_that_raises_is_reported_stuck_and_the_run_goes_on(
         self, root: Path, store: ArchiveStore, tar: TarTool, monkeypatch: pytest.MonkeyPatch
@@ -381,12 +423,12 @@ class TestResumeReclaimExpireOrder:
         self, root: Path, store: ArchiveStore, tar: TarTool
     ) -> None:
         archive_id = archive_e1(root, store, tar)
-        # A stuck, partly removed claim (its name taken, so it cannot be renamed back).
+        # A claim name present (no sweep recorded this one, so it is foreign) still holds.
         (root / (CLAIM_PREFIX + "e1")).mkdir()
         (root / (CLAIM_PREFIX + "e1") / "a.txt").write_text("alpha e1")
         (root / "e1").mkdir()
         result = apply_sweep(store, FakeFacts([]).facts(), settings(root, tar, later(13)))
-        assert [r.outcome for r in result.resumed] == ["stuck"]
+        assert [r.outcome for r in result.resumed] == ["foreign"]
         assert [(o.archive_id, o.outcome) for o in result.expired] == [(archive_id, "held")]
         assert archive_id in {r.archive_id for r in store.read_index().records}
 

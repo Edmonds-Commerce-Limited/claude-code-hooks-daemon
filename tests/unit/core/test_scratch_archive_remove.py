@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.core.scratch_archive_remove import (
     Removed,
     RemoveRefused,
     Resumed,
+    record_claim,
     remove_claimed,
     resume_claimed,
 )
@@ -105,8 +106,21 @@ def _entry(root: Path, name: str = "e1") -> Path:
     return entry
 
 
-def _claim(root_fd: int, name: str) -> Claimed:
-    result = claim(root_fd, name, fingerprint_at(root_fd, name, max_inodes=MAX), max_inodes=MAX)
+def _claim(
+    root_fd: int, name: str, store: ArchiveStore | None = None, checkout: str = CHECKOUT
+) -> Claimed:
+    """Claim ``name``; with a store, record the claim first as a sweep does."""
+    expected = fingerprint_at(root_fd, name, max_inodes=MAX)
+    if store is not None:
+        record_claim(
+            store,
+            expected,
+            archive_id=new_archive_id(),
+            original_path=f"untracked/scratch/{name}",
+            checkout=checkout,
+            at=NOW,
+        )
+    result = claim(root_fd, name, expected, max_inodes=MAX)
     assert isinstance(result, Claimed)
     return result
 
@@ -132,7 +146,7 @@ def _record(name: str, store: ArchiveStore, handle: Claimed, tar: TarTool) -> Ar
 def _archived(
     root_fd: int, store: ArchiveStore, tar: TarTool, name: str = "e1"
 ) -> tuple[Claimed, ArchiveRecord]:
-    handle = _claim(root_fd, name)
+    handle = _claim(root_fd, name, store)
     record = _record(name, store, handle, tar)
     store.append(record)
     return handle, record
@@ -733,16 +747,49 @@ class TestResume:
     ) -> None:
         entry = _entry(root)
         before = _snapshot(entry)
-        _claim(root_fd, "e1")
+        _claim(root_fd, "e1", store)
         resumed = _resume(root_fd, store, tar)
         assert resumed.outcome == "renamed-back"
         assert _snapshot(entry) == before
+
+    def test_a_claim_name_no_sweep_recorded_is_foreign_and_left_alone(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """D-PATH F1: an agent's own ``.sweeping-notes`` is not a sweep's claim."""
+        entry = _entry(root)
+        before = _snapshot(entry)
+        _claim(root_fd, "e1")
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "foreign"
+        assert _snapshot(root / (CLAIM_PREFIX + "e1")) == before
+        assert not (root / "e1").exists()
+
+    def test_a_claim_record_for_another_inode_does_not_cover_the_name(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _archived(root_fd, store, tar)
+        claimed = root / (CLAIM_PREFIX + "e1")
+        shutil.rmtree(claimed)
+        claimed.mkdir()
+        (claimed / "mine.txt").write_text("an agent's own")
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "foreign"
+        assert (claimed / "mine.txt").read_text() == "an agent's own"
+
+    def test_another_checkouts_claim_record_does_not_cover_the_name(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _claim(root_fd, "e1", store, checkout="other")
+        assert _resume(root_fd, store, tar).outcome == "foreign"
+        assert _claimed_exists(root)
 
     def test_no_record_and_the_name_retaken_is_stuck(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
     ) -> None:
         _entry(root)
-        _claim(root_fd, "e1")
+        _claim(root_fd, "e1", store)
         (root / "e1").mkdir()
         resumed = _resume(root_fd, store, tar)
         assert resumed.outcome == "stuck"
@@ -772,7 +819,15 @@ class TestResume:
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
     ) -> None:
         _entry(root)
-        _archived(root_fd, store, tar)
+        handle, _ = _archived(root_fd, store, tar)
+        record_claim(
+            store,
+            handle.fingerprint,
+            archive_id=new_archive_id(),
+            original_path="untracked/scratch/e1",
+            checkout="other",
+            at=NOW,
+        )
         resumed = resume_claimed(
             root_fd,
             CLAIM_PREFIX + "e1",
@@ -794,7 +849,7 @@ class TestResume:
         entry = root / "e1"
         entry.mkdir()
         (entry / "new.txt").write_text("new content")
-        _claim(root_fd, "e1")
+        _claim(root_fd, "e1", store)
         resumed = _resume(root_fd, store, tar)
         assert resumed.outcome == "renamed-back"
         assert (entry / "new.txt").read_text() == "new content"
@@ -888,7 +943,7 @@ def _adopted(
     )
     record = store.read_index().by_id(adopted.archive_id)
     assert record is not None and ADOPT_PROOF_ID in record.proof_ids
-    _claim(root_fd, "e1")
+    _claim(root_fd, "e1", store)
     return record
 
 
@@ -1072,7 +1127,7 @@ FUTURE = "2026-12-01T00:00:00Z"
 def _archived_with(
     root_fd: int, store: ArchiveStore, tar: TarTool, **changes: Any
 ) -> tuple[Claimed, ArchiveRecord]:
-    handle = _claim(root_fd, "e1")
+    handle = _claim(root_fd, "e1", store)
     record = dataclasses.replace(_record("e1", store, handle, tar), **changes)
     store.append(record)
     return handle, record
@@ -1232,7 +1287,7 @@ def _sequence(
         if not hard:
             raise _Crash(stop_at)
 
-    handle = _claim(root_fd, "e1")
+    handle = _claim(root_fd, "e1", store)
     if stop_at == "claim":
         return fault()
     record = _record("e1", store, handle, tar)

@@ -193,6 +193,7 @@ def _event_strings(data: dict[str, Any], keys: tuple[str, ...]) -> dict[str, str
 _KEEP_KEYS = ("archive_id", "original_path", "reason", "kept_at", "until")
 _EXPIRED_KEYS = ("archive_id", "at")
 _ADOPT_KEYS = ("archive_id", "original_path", "tarball", "at")
+_CLAIM_KEYS = ("archive_id", "original_path", "checkout", "root_dev", "root_ino", "at")
 
 
 @dataclass(frozen=True)
@@ -240,7 +241,28 @@ class AdoptEvent:
         return {"kind": "adopt", **{key: getattr(self, key) for key in _ADOPT_KEYS}}
 
 
-ArchiveEvent = KeepEvent | ExpiredEvent | AdoptEvent
+@dataclass(frozen=True)
+class ClaimEvent:
+    """An entry about to be renamed to its claim name; written BEFORE the rename.
+
+    ``root_dev``/``root_ino`` are the entry's own (a rename keeps both). A
+    leftover claim name no such event covers was not made by a sweep, so a
+    resume leaves it alone (D-PATH F1). ``archive_id`` is the id the pack uses.
+    """
+
+    archive_id: str
+    original_path: str
+    checkout: str
+    root_dev: str
+    root_ino: str
+    at: str
+
+    def to_json(self) -> dict[str, Any]:
+        """Return the event as a JSON-ready mapping."""
+        return {"kind": "claim", **{key: getattr(self, key) for key in _CLAIM_KEYS}}
+
+
+ArchiveEvent = KeepEvent | ExpiredEvent | AdoptEvent | ClaimEvent
 
 
 def parse_event(data: object) -> ArchiveEvent:
@@ -264,6 +286,12 @@ def parse_event(data: object) -> ArchiveEvent:
         fields = _event_strings(data, _ADOPT_KEYS)
         parse_instant(fields["at"])
         return AdoptEvent(**fields)
+    if kind == "claim":
+        fields = _event_strings(data, _CLAIM_KEYS)
+        parse_instant(fields["at"])
+        if not (fields["root_dev"].isdigit() and fields["root_ino"].isdigit()):
+            raise ValueError("claim root_dev/root_ino are not decimal numbers")
+        return ClaimEvent(**fields)
     raise ValueError(f"unknown event kind {kind!r}")
 
 
