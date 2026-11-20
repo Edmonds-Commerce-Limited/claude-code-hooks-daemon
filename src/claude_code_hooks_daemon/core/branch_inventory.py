@@ -64,7 +64,7 @@ from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
-from claude_code_hooks_daemon.utils.load_scaling import branch_metadata_timeout
+from claude_code_hooks_daemon.utils.load_scaling import branch_metadata_timeout, scaled_timeout
 from claude_code_hooks_daemon.utils.remote_refs import (
     RemoteRefs,
     RemoteSource,
@@ -151,6 +151,10 @@ class BranchState(StrEnum):
     #: A park marker (an empty ``Parked-*`` commit) over work the default already holds:
     #: nothing is unique but the marker, so it is in no pool and its delete is proven.
     PARK_CARRIED = "park-carried"
+    #: The remote-tracking default holds the branch's whole net change (a squash, or
+    #: the same bytes reaching it another way). Proved only by an inventory built with
+    #: ``prove_content`` (``branch-sweep --clean``); every other pass calls it LIVE.
+    CONTENT_PRESERVED = "content-preserved"
     PARKED = "parked"
     DORMANT = "dormant"
     LIVE = "live"
@@ -163,6 +167,7 @@ _DONE_RANK = {
     BranchState.MERGED_LINE: 1,
     BranchState.PATCH_EQUIVALENT: 2,
     BranchState.PARK_CARRIED: 3,
+    BranchState.CONTENT_PRESERVED: 4,
 }
 
 
@@ -178,6 +183,7 @@ _POOL_OF_STATE = {
     BranchState.MERGED_DEFAULT: Pool.MERGED,
     BranchState.MERGED_LINE: Pool.MERGED,
     BranchState.PATCH_EQUIVALENT: Pool.MERGED,
+    BranchState.CONTENT_PRESERVED: Pool.MERGED,
     BranchState.PARKED: Pool.PARKED,
     BranchState.LIVE: Pool.OPEN,
     BranchState.DORMANT: Pool.OPEN,
@@ -276,9 +282,10 @@ class BranchRecord:
     #: Author of a FOREIGN branch's tip.
     author: str | None = None
     author_email: str | None = None
-    #: The done state a FOREIGN branch was proven in (merged, merged-into-line or
-    #: patch-equivalent), so ``--clean --remote`` can still delete it: proof
-    #: matters more than ownership.
+    #: The done state a FOREIGN branch was proven in (any ``_DONE_RANK`` state:
+    #: merged, merged-into-line, patch-equivalent, park-carried, or content-preserved
+    #: when built with ``prove_content``), so ``--clean --remote`` can still delete
+    #: it, gated by the live remote-delete proof: proof matters more than ownership.
     proof_state: BranchState | None = None
 
     @property
@@ -883,11 +890,13 @@ class _Pass:
         config: BranchesConfig,
         cache: _Cache,
         remote_refs: RemoteSource | None = None,
+        prove_content: bool = False,
     ) -> None:
         self.repo = repo
         self.config = config
         self.cache = cache
         self.remote_refs = remote_refs
+        self.prove_content = prove_content
         self.deadline = time.monotonic() + config.sweep.budget_ms / 1000
         #: Why a (tip, target sha) pair went unmeasured this pass: the budget, or a git failure.
         self.unmeasured: dict[tuple[str, str], str] = {}
@@ -1061,8 +1070,15 @@ def build_inventory(
     *,
     now: float | None = None,
     remote_refs: RemoteSource | None = None,
+    prove_content: bool = False,
 ) -> BranchInventory:
     """Classify every local and remote branch of ``repo`` (DESIGN.md section 2).
+
+    ``prove_content`` lets a branch that is neither merged nor patch-equivalent be
+    ``CONTENT_PRESERVED`` when the remote-tracking default holds its net change
+    (:func:`_content_preserved`). Only ``branch-sweep --clean`` asks: the proof costs
+    tree reads per branch, and a hook's inventory must keep counting such a branch
+    as open work.
 
     ``remote_refs`` is the one ``ls-remote`` an explicit command (``branch-sweep``)
     made; a branch otherwise CONTAINED NOWHERE whose tip a listed ref holds is
@@ -1109,7 +1125,7 @@ def build_inventory(
         owners=OwnerRule(repo),
     )
     cache_path = repo / CACHE_RELATIVE_PATH
-    run = _Pass(repo, config, _load_cache(cache_path), remote_refs)
+    run = _Pass(repo, config, _load_cache(cache_path), remote_refs, prove_content)
 
     records = {name: _record(run, context, name, *by_name[name]) for name in sorted(by_name)}
     records = _with_pools(run, _with_same_tips(records), moment)
@@ -1293,7 +1309,49 @@ def _tip_verdict(run: _Pass, context: _Context, row: _RefRow) -> _Verdict:
     equivalent = next((t for t, f in facts if f.unique == 0 and f.merges == 0), None)
     if equivalent is not None:
         return _Verdict(BranchState.PATCH_EQUIVALENT, equivalent.name, equivalent.ref, ahead, lines)
+    held_by = _content_preserved(run, context, row)
+    if held_by is not None:
+        return _Verdict(BranchState.CONTENT_PRESERVED, context.default, held_by, ahead, lines)
     return _Verdict(BranchState.LIVE, ahead=ahead, lines=lines)
+
+
+def _content_preserved(run: _Pass, context: _Context, row: _RefRow) -> str | None:
+    """The remote-tracking default ref when it holds ``row``'s whole net change, else None.
+
+    The proof is ``remote_branch_proof.holds_net_change`` (bounded by its path and
+    candidate caps), against the REMOTE-tracking default only, never a local ref whose
+    commits may be unpushed. Asked only when the pass was built with
+    ``prove_content``. A spent budget or a git failure is None (the branch stays
+    LIVE), and nothing is cached: a deleting caller re-proves every branch itself.
+    """
+    tracking = f"{_REMOTES}{run.config.remote}/{context.default}"
+    if (
+        not run.prove_content
+        or context.default is None
+        or all(ref != tracking for ref, _merged in context.merged_default)
+        or not run.within_budget()
+    ):
+        return None
+    # Imported here: remote_branch_proof imports this module.
+    from claude_code_hooks_daemon.core import remote_branch_proof
+
+    # The proof reads ROOT-relative paths: from a project below the top level a
+    # lookup would miss, and a deleted path would read as absent, i.e. held.
+    top = run_git(run.repo, "rev-parse", "--show-toplevel", timeout=_GIT_TIMEOUT)
+    top_level = top.stdout.strip() if top.returncode == 0 else ""
+    if not top_level:
+        return None
+    try:
+        held = remote_branch_proof.holds_net_change(
+            Path(top_level),
+            tracking,
+            row.sha,
+            timeout=scaled_timeout(Timeout.GIT_BRANCH_SAFETY, Timeout.GIT_BRANCH_SAFETY_MAX),
+        )
+    except remote_branch_proof.ProofUnavailableError as exc:
+        log_and_continue(logger, exc, reason="an unanswered proof leaves the branch LIVE")
+        return None
+    return tracking if held else None
 
 
 def _weakest(verdicts: list[_Verdict]) -> _Verdict:

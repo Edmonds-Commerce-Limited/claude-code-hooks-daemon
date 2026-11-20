@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shlex
 import time
 from dataclasses import dataclass
 from enum import StrEnum
@@ -129,12 +130,14 @@ def _judgeable(record: BranchRecord | None, config: BranchesConfig) -> bool:
 
 
 def _merged_commands(record: BranchRecord, remote: str) -> tuple[str, ...]:
+    """Pasteable commands: every path and name is shell-quoted."""
+    name = shlex.quote(record.name)
     commands: list[str] = []
     if record.worktree is not None:
-        commands.append(f"git worktree remove {record.worktree}")
-    commands.append(f"git branch -d {record.name}")
+        commands.append(f"git worktree remove {shlex.quote(str(record.worktree))}")
+    commands.append(f"git branch -d {name}")
     if record.remote_tip is not None:
-        commands.append(f"git push {remote} --delete {record.name}")
+        commands.append(f"git push {shlex.quote(remote)} --delete {name}")
     return tuple(commands)
 
 
@@ -204,7 +207,7 @@ def _park_commands(record: BranchRecord) -> tuple[str, ...]:
     """Finish it, or park it with a reason; never a rename or someone else's branch."""
     return (
         f"merge {record.name} when its work is done",
-        f"{daemon_cli_command_for_docs('branch-park')} {record.name} --reason ...",
+        f"{daemon_cli_command_for_docs('branch-park', shlex.quote(record.name))} --reason ...",
     )
 
 
@@ -346,12 +349,13 @@ def _judge_branch(
         dirty = _is_dirty(record, budget)
         finished = finished and dirty is not None
         if dirty:
+            tree = shlex.quote(str(record.worktree))
             findings.append(
                 StopFinding(
                     record.name,
                     StopCheck.DIRTY,
                     tip,
-                    (f"git -C {record.worktree} add -A", f"git -C {record.worktree} commit"),
+                    (f"git -C {tree} add -A", f"git -C {tree} commit"),
                 )
             )
     if merged:
@@ -377,7 +381,7 @@ def _judge_branch(
                 record.name,
                 StopCheck.UNPUSHED,
                 tip,
-                (f"git push -u {config.remote} {record.name}",),
+                (f"git push -u {shlex.quote(config.remote)} {shlex.quote(record.name)}",),
                 advisory=mode == "advise",
             )
         )
