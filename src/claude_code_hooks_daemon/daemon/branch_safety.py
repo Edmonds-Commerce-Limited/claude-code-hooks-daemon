@@ -1022,10 +1022,17 @@ def _remove_branch_config(repo: Path, name: str) -> None:
 
 def _read_state_file(path: Path) -> str | None:
     """A git state file's text; None when absent. Any other read failure raises."""
+    text: str | None = None
     try:
-        return path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return None
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"{path.name} is absent, so it records no operation",
+            level=logging.DEBUG,
+        )
+    return text
 
 
 def _operation_holding_branch(repo: Path, name: str) -> str | None:
