@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.core.scratch_repos import (
+    NESTED_GIT_ENV,
     GitRunner,
     LiveTips,
     ProjectGit,
@@ -186,6 +187,25 @@ class TestUntrustedConfig:
             before.st_mtime_ns,
             before.st_ctime_ns,
         )
+
+    def test_control_the_same_fixture_with_optional_locks_on_does_rewrite_the_index(
+        self, gp: GitProject
+    ) -> None:
+        """Mutation check: without the no-optional-locks guard the index IS rewritten,
+        so the test above can fail and is not vacuous."""
+        repo = gp.clone("e")
+        os.utime(repo / "src" / "app.py", (1_000_000, 1_000_000))
+        index = repo / ".git" / "index"
+        before = os.lstat(index)
+        env = {**NESTED_GIT_ENV, "GIT_OPTIONAL_LOCKS": "1"}
+        subprocess.run(  # nosec B603 B607 - fixed argv, test fixture only
+            ["git", f"--git-dir={repo / '.git'}", f"--work-tree={repo}", "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            env={**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")}, **env},
+        )
+        after = os.lstat(index)
+        assert (after.st_ino, after.st_mtime_ns) != (before.st_ino, before.st_mtime_ns)
 
 
 class TestRelated:
