@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import (
     find_gnu_tar,
     pack,
     verify,
+    verify_remaining,
 )
 
 
@@ -439,4 +440,53 @@ class TestVerify:
             verify(
                 claimed.parent_fd, claimed.claimed_name, store, archive_id, tar=tar, max_inodes=1000
             )
+        claimed.close()
+
+
+class TestVerifyRemaining:
+    """A partly removed tree verifies when all that is left is in the archive, unchanged."""
+
+    def _check(self, claimed: Claimed, store: ArchiveStore, archive_id: str, sha: str) -> None:
+        verify_remaining(
+            claimed.parent_fd,
+            claimed.claimed_name,
+            store,
+            archive_id,
+            tar=find_gnu_tar(),
+            max_inodes=1000,
+            expected_sha256=sha,
+        )
+
+    def test_a_whole_tree_verifies(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        claimed, archive_id, sha = _packed(root, root_fd, store, tar)
+        self._check(claimed, store, archive_id, sha)
+        claimed.close()
+
+    def test_a_partly_removed_tree_verifies(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        claimed, archive_id, sha = _packed(root, root_fd, store, tar)
+        tree = root / claimed.claimed_name
+        (tree / "sub" / "b.bin").unlink()
+        (tree / "rel-link").unlink()
+        self._check(claimed, store, archive_id, sha)
+        claimed.close()
+
+    @pytest.mark.parametrize("change", ["new-file", "changed-content", "wrong-sha"])
+    def test_anything_the_archive_lacks_fails(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool, change: str
+    ) -> None:
+        claimed, archive_id, sha = _packed(root, root_fd, store, tar)
+        tree = root / claimed.claimed_name
+        (tree / "sub" / "b.bin").unlink()
+        if change == "new-file":
+            (tree / "sub" / "late.txt").write_text("late")
+        elif change == "changed-content":
+            (tree / "a.txt").write_text("ALPHA")
+        else:
+            sha = "0" * 64
+        with pytest.raises(VerifyFailed):
+            self._check(claimed, store, archive_id, sha)
         claimed.close()

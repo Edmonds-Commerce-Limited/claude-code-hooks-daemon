@@ -1,0 +1,883 @@
+"""Remove a claimed, archived tree, and resume a leftover claim (Plan 00627 Task 3.4).
+
+DESIGN.md section 5.2 step 6 and section 5.3: removal is descriptor-based and
+driven by a listing taken after the archive verified, never by a fresh scan; it
+follows no link, stays on one mount, and refuses on any difference. It runs
+only for an entry whose archive is in the index and verifies against the tree
+with the recorded SHA-256. A leftover ``.sweeping-`` tree is finished when an
+archive verifies against what is left, and renamed back otherwise.
+"""
+
+from __future__ import annotations
+
+import ast
+import dataclasses
+import errno
+import os
+import stat
+import subprocess
+import tarfile
+from collections.abc import Callable, Iterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+import claude_code_hooks_daemon
+from claude_code_hooks_daemon.core import scratch_archive_remove as remove_mod
+from claude_code_hooks_daemon.core.scratch_archive import (
+    ArchiveRecord,
+    ArchiveStore,
+    new_archive_id,
+)
+from claude_code_hooks_daemon.core.scratch_archive_claim import (
+    CLAIM_PREFIX,
+    Claimed,
+    claim,
+    fingerprint_at,
+    open_dir,
+)
+from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu_tar, pack
+from claude_code_hooks_daemon.core.scratch_archive_remove import (
+    Removed,
+    RemoveRefused,
+    Resumed,
+    remove_claimed,
+    resume_claimed,
+)
+
+MAX = 1000
+CHECKOUT = "main"
+Snapshot = dict[str, tuple[str, bytes]]
+
+
+@pytest.fixture
+def root(tmp_path: Path) -> Path:
+    path = tmp_path / "project" / "untracked" / "scratch"
+    path.mkdir(parents=True)
+    return path
+
+
+@pytest.fixture
+def root_fd(root: Path) -> Iterator[int]:
+    fd = open_dir(root)
+    yield fd
+    os.close(fd)
+
+
+@pytest.fixture
+def store(tmp_path: Path) -> Iterator[ArchiveStore]:
+    with ArchiveStore.open(tmp_path / "project" / "untracked" / "scratch-archive") as opened:
+        with opened.lock():
+            yield opened
+
+
+@pytest.fixture
+def tar() -> TarTool:
+    return find_gnu_tar()
+
+
+@pytest.fixture
+def outside(tmp_path: Path) -> Path:
+    """A directory outside the scratch root that nothing may touch."""
+    path = tmp_path / "outside"
+    path.mkdir()
+    (path / "keep.txt").write_text("outside content")
+    return path
+
+
+def _entry(root: Path, name: str = "e1") -> Path:
+    entry = root / name
+    (entry / "sub" / "deep").mkdir(parents=True)
+    (entry / "a.txt").write_text("alpha")
+    (entry / "sub" / "b.bin").write_bytes(bytes(range(256)))
+    (entry / "sub" / "deep" / "c.txt").write_text("gamma")
+    (entry / "rel-link").symlink_to("a.txt")
+    return entry
+
+
+def _claim(root_fd: int, name: str) -> Claimed:
+    result = claim(root_fd, name, fingerprint_at(root_fd, name, max_inodes=MAX), max_inodes=MAX)
+    assert isinstance(result, Claimed)
+    return result
+
+
+def _record(name: str, store: ArchiveStore, handle: Claimed, tar: TarTool) -> ArchiveRecord:
+    result = pack(handle, store, new_archive_id(), tar=tar, max_inodes=MAX)
+    return ArchiveRecord(
+        archive_id=result.archive_id,
+        original_path=f"untracked/scratch/{name}",
+        checkout=CHECKOUT,
+        verdict="DISPOSABLE",
+        proof_ids=("P1",),
+        packed_at="2026-11-20T00:00:00Z",
+        expires_at=None,
+        counts=result.counts,
+        archive_size=result.size,
+        sha256=result.sha256,
+        skipped=result.skipped,
+        restore_command=f"hooks-daemon scratch restore {result.archive_id}",
+    )
+
+
+def _archived(
+    root_fd: int, store: ArchiveStore, tar: TarTool, name: str = "e1"
+) -> tuple[Claimed, ArchiveRecord]:
+    handle = _claim(root_fd, name)
+    record = _record(name, store, handle, tar)
+    store.append(record)
+    return handle, record
+
+
+def _remove(
+    root_fd: int, store: ArchiveStore, tar: TarTool, record: ArchiveRecord, name: str = "e1"
+) -> Removed:
+    return remove_claimed(root_fd, CLAIM_PREFIX + name, store, record, tar=tar, max_inodes=MAX)
+
+
+def _resume(root_fd: int, store: ArchiveStore, tar: TarTool, name: str = "e1") -> Resumed:
+    return resume_claimed(
+        root_fd, CLAIM_PREFIX + name, store, checkout=CHECKOUT, tar=tar, max_inodes=MAX
+    )
+
+
+def _snapshot(path: Path) -> Snapshot:
+    """Every name under ``path`` with its type and content, read without following links."""
+    found: Snapshot = {}
+
+    def one(rel: str, item: Path) -> None:
+        info = item.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            found[rel] = ("link", str(item.readlink()).encode())
+        elif stat.S_ISDIR(info.st_mode):
+            found[rel] = ("dir", b"")
+            for child in sorted(item.iterdir()):
+                one(f"{rel}/{child.name}" if rel else child.name, child)
+        elif stat.S_ISREG(info.st_mode):
+            found[rel] = ("file", item.read_bytes())
+        else:
+            found[rel] = ("special", b"")
+
+    one("", path)
+    return found
+
+
+def _archive_snapshot(store: ArchiveStore, record: ArchiveRecord) -> Snapshot:
+    found: Snapshot = {}
+    with tarfile.open(store.path / f"{record.archive_id}.tar") as archive:
+        for member in archive.getmembers():
+            rel = "" if member.name in (".", "./") else member.name.removeprefix("./").rstrip("/")
+            if member.isdir():
+                found[rel] = ("dir", b"")
+            elif member.issym():
+                found[rel] = ("link", member.linkname.encode())
+            else:
+                extracted = archive.extractfile(member)
+                assert extracted is not None
+                found[rel] = ("file", extracted.read())
+    return found
+
+
+def _outside_state(outside: Path) -> tuple[str, int]:
+    keep = outside / "keep.txt"
+    return keep.read_text(), keep.stat().st_mtime_ns
+
+
+def _claimed_exists(root: Path, name: str = "e1") -> bool:
+    return os.path.lexists(root / (CLAIM_PREFIX + name))
+
+
+class TestRemoveClaimed:
+    def test_removes_a_recorded_verified_tree(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        result = _remove(root_fd, store, tar, record)
+        assert result.removed == 7
+        assert result.archive_id == record.archive_id
+        assert result.partial is False
+        assert list(root.iterdir()) == []
+
+    def test_removes_a_file_root(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        (root / "f1").write_text("file root")
+        _handle, record = _archived(root_fd, store, tar, "f1")
+        result = _remove(root_fd, store, tar, record, "f1")
+        assert result.removed == 1
+        assert list(root.iterdir()) == []
+
+    def test_a_symlink_root_loses_only_the_link(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool, outside: Path
+    ) -> None:
+        (root / "l1").symlink_to(outside)
+        before = _outside_state(outside)
+        _handle, record = _archived(root_fd, store, tar, "l1")
+        result = _remove(root_fd, store, tar, record, "l1")
+        assert result.link_target == str(outside)
+        assert list(root.iterdir()) == []
+        assert _outside_state(outside) == before
+
+    @pytest.mark.parametrize(
+        "bad",
+        ["e1", "..", ".", CLAIM_PREFIX, CLAIM_PREFIX + "../e1", CLAIM_PREFIX + CLAIM_PREFIX + "e1"],
+    )
+    def test_refuses_a_name_that_is_not_one_claim(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool, bad: str
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        before = _snapshot(root)
+        with pytest.raises(RemoveRefused):
+            remove_claimed(root_fd, bad, store, record, tar=tar, max_inodes=MAX)
+        assert _snapshot(root) == before
+
+    def test_refuses_without_the_store_lock(
+        self, tmp_path: Path, root: Path, root_fd: int, tar: TarTool
+    ) -> None:
+        _entry(root)
+        path = tmp_path / "project" / "untracked" / "scratch-archive"
+        with ArchiveStore.open(path) as opened:
+            with opened.lock():
+                _handle, record = _archived(root_fd, opened, tar)
+            with pytest.raises(RemoveRefused, match="lock"):
+                _remove(root_fd, opened, tar, record)
+        assert _claimed_exists(root)
+
+    def test_refuses_a_record_not_in_the_index(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        handle = _claim(root_fd, "e1")
+        record = _record("e1", store, handle, tar)
+        before = _snapshot(root)
+        with pytest.raises(RemoveRefused, match="index"):
+            _remove(root_fd, store, tar, record)
+        assert _snapshot(root) == before
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            lambda r: dataclasses.replace(r, sha256="0" * 64),
+            lambda r: dataclasses.replace(r, original_path="untracked/scratch/xe1"),
+            lambda r: dataclasses.replace(r, checkout="other"),
+        ],
+        ids=["sha256", "original_path", "checkout"],
+    )
+    def test_refuses_a_record_that_differs_from_the_index(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        change: Callable[[ArchiveRecord], ArchiveRecord],
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        before = _snapshot(root)
+        with pytest.raises(RemoveRefused):
+            _remove(root_fd, store, tar, change(record))
+        assert _snapshot(root) == before
+
+    def test_refuses_a_record_for_another_entry_name(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root, "e1")
+        _entry(root, "xe1")
+        _h1, record = _archived(root_fd, store, tar, "e1")
+        _archived(root_fd, store, tar, "xe1")
+        before = _snapshot(root)
+        with pytest.raises(RemoveRefused, match="names"):
+            _remove(root_fd, store, tar, record, "xe1")
+        assert _snapshot(root) == before
+
+    def test_refuses_when_the_archive_differs_from_its_record(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        with open(store.path / f"{record.archive_id}.tar", "ab") as handle:
+            handle.write(b"\0" * 512)
+        before = _snapshot(root)
+        with pytest.raises(RemoveRefused, match="SHA-256"):
+            _remove(root_fd, store, tar, record)
+        assert _snapshot(root) == before
+
+    def test_refuses_when_the_archive_is_missing(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        (store.path / f"{record.archive_id}.tar").rename(store.path / "moved")
+        before = _snapshot(root)
+        with pytest.raises(RemoveRefused):
+            _remove(root_fd, store, tar, record)
+        assert _snapshot(root) == before
+
+    @pytest.mark.parametrize("change", ["new-file", "changed-content", "fifo", "hard-link"])
+    def test_refuses_content_the_archive_does_not_hold(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        outside: Path,
+        change: str,
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        claimed = root / (CLAIM_PREFIX + "e1")
+        if change == "new-file":
+            (claimed / "late.txt").write_text("late")
+        elif change == "changed-content":
+            (claimed / "a.txt").write_text("ALPHA")
+        elif change == "fifo":
+            os.mkfifo(claimed / "pipe")
+        else:
+            os.link(outside / "keep.txt", claimed / "sub" / "linked")
+        before = _snapshot(root)
+        with pytest.raises(RemoveRefused):
+            _remove(root_fd, store, tar, record)
+        assert _snapshot(root) == before
+        assert (outside / "keep.txt").read_text() == "outside content"
+
+    def test_removes_a_fifo_the_record_lists_as_skipped(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry = _entry(root)
+        os.mkfifo(entry / "pipe")
+        _handle, record = _archived(root_fd, store, tar)
+        assert record.skipped == ("pipe",)
+        _remove(root_fd, store, tar, record)
+        assert list(root.iterdir()) == []
+
+    def test_refuses_a_changed_fingerprint(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        handle, record = _archived(root_fd, store, tar)
+        stale = dataclasses.replace(handle.fingerprint, count=handle.fingerprint.count + 1)
+        before = _snapshot(root)
+        with pytest.raises(RemoveRefused, match="fingerprint"):
+            remove_claimed(
+                root_fd, handle.claimed_name, store, record, tar=tar, max_inodes=MAX, expected=stale
+            )
+        assert _snapshot(root) == before
+
+    def test_accepts_the_claim_fingerprint(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        handle, record = _archived(root_fd, store, tar)
+        remove_claimed(
+            root_fd,
+            handle.claimed_name,
+            store,
+            record,
+            tar=tar,
+            max_inodes=MAX,
+            expected=handle.fingerprint,
+        )
+        assert list(root.iterdir()) == []
+
+    def test_refuses_a_tree_deeper_than_the_cap(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        before = _snapshot(root)
+        with pytest.raises(RemoveRefused):
+            remove_claimed(
+                root_fd, CLAIM_PREFIX + "e1", store, record, tar=tar, max_inodes=MAX, max_depth=1
+            )
+        assert _snapshot(root) == before
+
+
+class TestEscapes:
+    def test_symlink_swapped_in_after_verify_is_never_crossed(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        outside: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        claimed = root / (CLAIM_PREFIX + "e1")
+        real_verify = remove_mod.verify
+
+        def verify_then_swap(*args: Any, **kwargs: Any) -> Any:
+            result = real_verify(*args, **kwargs)
+            (claimed / "sub").rename(root.parent / "sub-moved")
+            (claimed / "sub").symlink_to(outside)
+            return result
+
+        monkeypatch.setattr(remove_mod, "verify", verify_then_swap)
+        before = _outside_state(outside)
+        with pytest.raises(RemoveRefused):
+            _remove(root_fd, store, tar, record)
+        assert _outside_state(outside) == before
+        assert (claimed / "a.txt").read_text() == "alpha"
+
+    def test_symlink_swapped_in_mid_removal_is_never_crossed(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        outside: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The swap lands between the lstat and the open: O_NOFOLLOW still refuses it."""
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        claimed = root / (CLAIM_PREFIX + "e1")
+        real_lstat = remove_mod._lstat_at
+
+        def lstat_then_swap(dir_fd: int, name: str) -> os.stat_result:
+            info = real_lstat(dir_fd, name)
+            if name == "sub":
+                (claimed / "sub").rename(root.parent / "sub-moved")
+                (claimed / "sub").symlink_to(outside)
+            return info
+
+        monkeypatch.setattr(remove_mod, "_lstat_at", lstat_then_swap)
+        before = _outside_state(outside)
+        with pytest.raises(RemoveRefused):
+            _remove(root_fd, store, tar, record)
+        assert _outside_state(outside) == before
+        assert (root.parent / "sub-moved" / "deep" / "c.txt").read_text() == "gamma"
+
+    def test_file_swapped_for_a_link_mid_removal_is_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        outside: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        claimed = root / (CLAIM_PREFIX + "e1")
+        real_lstat = remove_mod._lstat_at
+
+        def swap_then_lstat(dir_fd: int, name: str) -> os.stat_result:
+            if name == "a.txt":
+                (claimed / "a.txt").unlink()
+                (claimed / "a.txt").symlink_to(outside / "keep.txt")
+            return real_lstat(dir_fd, name)
+
+        monkeypatch.setattr(remove_mod, "_lstat_at", swap_then_lstat)
+        before = _outside_state(outside)
+        with pytest.raises(RemoveRefused, match="changed"):
+            _remove(root_fd, store, tar, record)
+        assert _outside_state(outside) == before
+        assert (claimed / "a.txt").is_symlink()
+
+    def test_a_name_added_mid_removal_stops_the_removal(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        claimed = root / (CLAIM_PREFIX + "e1")
+        real_lstat = remove_mod._lstat_at
+
+        def add_then_lstat(dir_fd: int, name: str) -> os.stat_result:
+            if name == "a.txt":
+                (claimed / "late.txt").write_text("late writer")
+            return real_lstat(dir_fd, name)
+
+        monkeypatch.setattr(remove_mod, "_lstat_at", add_then_lstat)
+        with pytest.raises(RemoveRefused):
+            _remove(root_fd, store, tar, record)
+        assert (claimed / "late.txt").read_text() == "late writer"
+
+    def test_a_directory_on_another_mount_is_never_entered(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A same-filesystem bind mount keeps ``st_dev``; the mount id tells it apart."""
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        claimed = root / (CLAIM_PREFIX + "e1")
+        sub_ino = (claimed / "sub").stat().st_ino
+        real_mount_id = remove_mod._mount_id
+
+        def mount_id(fd: int) -> int:
+            value = real_mount_id(fd)
+            return value + 1 if os.fstat(fd).st_ino == sub_ino else value
+
+        monkeypatch.setattr(remove_mod, "_mount_id", mount_id)
+        with pytest.raises(RemoveRefused, match="mount"):
+            _remove(root_fd, store, tar, record)
+        assert _snapshot(claimed / "sub")["deep/c.txt"] == ("file", b"gamma")
+
+    def test_mount_id_is_read_for_a_real_descriptor(self, root_fd: int) -> None:
+        assert remove_mod._mount_id(root_fd) >= 0
+
+    def test_a_real_bind_mount_is_never_entered(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool, outside: Path
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        target = root / (CLAIM_PREFIX + "e1") / "sub" / "deep"
+        try:
+            subprocess.run(
+                ["mount", "--bind", str(outside), str(target)],
+                check=True,
+                capture_output=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            pytest.skip(f"bind mount unavailable here: {exc}")
+        try:
+            before = _outside_state(outside)
+            with pytest.raises(RemoveRefused):
+                _remove(root_fd, store, tar, record)
+            assert _outside_state(outside) == before
+        finally:
+            subprocess.run(["umount", str(target)], check=True, timeout=10)
+
+    def test_a_read_only_directory_is_made_writable_through_its_descriptor(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Root ignores directory modes, so the EACCES is injected once."""
+        entry = _entry(root)
+        (entry / "sub" / "deep").chmod(0o555)
+        _handle, record = _archived(root_fd, store, tar)
+        real_unlink = os.unlink
+        real_fchmod = os.fchmod
+        fchmods: list[int] = []
+        failed: list[str] = []
+
+        def unlink(name: str, *, dir_fd: int) -> None:
+            if name == "c.txt" and not failed:
+                failed.append(name)
+                raise PermissionError(errno.EACCES, "Permission denied", name)
+            real_unlink(name, dir_fd=dir_fd)
+
+        def fchmod(fd: int, mode: int) -> None:
+            fchmods.append(mode)
+            real_fchmod(fd, mode)
+
+        monkeypatch.setattr(os, "unlink", unlink)
+        monkeypatch.setattr(os, "fchmod", fchmod)
+        _remove(root_fd, store, tar, record)
+        assert failed == ["c.txt"]
+        assert fchmods and all(mode & stat.S_IWUSR for mode in fchmods)
+        assert list(root.iterdir()) == []
+
+    def test_an_unreadable_directory_is_refused_before_anything_goes(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        if os.geteuid() == 0:
+            pytest.skip("root reads every directory")
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        claimed = root / (CLAIM_PREFIX + "e1")
+        (claimed / "sub").chmod(0)
+        try:
+            with pytest.raises(RemoveRefused):
+                _remove(root_fd, store, tar, record)
+        finally:
+            (claimed / "sub").chmod(0o755)
+        assert (claimed / "a.txt").exists()
+
+    def test_an_immutable_file_stops_the_removal_and_a_resume_finishes_it(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """EPERM (immutable) is never chmod-retried; what is left stays claimed."""
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        real_unlink = os.unlink
+
+        def unlink(name: str, *, dir_fd: int) -> None:
+            if name == "c.txt":
+                raise PermissionError(errno.EPERM, "Operation not permitted", name)
+            real_unlink(name, dir_fd=dir_fd)
+
+        monkeypatch.setattr(os, "unlink", unlink)
+        with pytest.raises(RemoveRefused):
+            _remove(root_fd, store, tar, record)
+        assert (root / (CLAIM_PREFIX + "e1") / "sub" / "deep" / "c.txt").exists()
+        monkeypatch.setattr(os, "unlink", real_unlink)
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "removed"
+        assert resumed.removed is not None and resumed.removed.partial is True
+        assert list(root.iterdir()) == []
+
+    def test_a_real_immutable_file_is_never_removed(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        target = root / (CLAIM_PREFIX + "e1") / "sub" / "deep" / "c.txt"
+        try:
+            subprocess.run(
+                ["chattr", "+i", str(target)], check=True, capture_output=True, timeout=10
+            )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            pytest.skip(f"chattr unavailable here: {exc}")
+        try:
+            with pytest.raises(RemoveRefused):
+                _remove(root_fd, store, tar, record)
+            assert target.read_text() == "gamma"
+        finally:
+            subprocess.run(["chattr", "-i", str(target)], check=True, timeout=10)
+
+
+class TestResume:
+    def test_an_absent_claim_is_converged(
+        self, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        assert _resume(root_fd, store, tar).outcome == "absent"
+
+    def test_no_record_renames_back(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry = _entry(root)
+        before = _snapshot(entry)
+        _claim(root_fd, "e1")
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "renamed-back"
+        assert _snapshot(entry) == before
+
+    def test_no_record_and_the_name_retaken_is_stuck(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _claim(root_fd, "e1")
+        (root / "e1").mkdir()
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "stuck"
+        assert (root / (CLAIM_PREFIX + "e1") / "a.txt").read_text() == "alpha"
+
+    def test_a_verified_record_finishes_the_removal(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _archived(root_fd, store, tar)
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "removed"
+        assert list(root.iterdir()) == []
+
+    def test_content_the_archive_lacks_is_renamed_back(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _archived(root_fd, store, tar)
+        (root / (CLAIM_PREFIX + "e1") / "late.txt").write_text("late")
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "late.txt").read_text() == "late"
+        assert (root / "e1" / "a.txt").read_text() == "alpha"
+
+    def test_another_checkouts_record_is_not_used(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _archived(root_fd, store, tar)
+        resumed = resume_claimed(
+            root_fd, CLAIM_PREFIX + "e1", store, checkout="other", tar=tar, max_inodes=MAX
+        )
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "a.txt").exists()
+
+    def test_an_older_record_of_the_same_name_does_not_authorise(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        handle, old = _archived(root_fd, store, tar)
+        remove_claimed(root_fd, handle.claimed_name, store, old, tar=tar, max_inodes=MAX)
+        entry = root / "e1"
+        entry.mkdir()
+        (entry / "new.txt").write_text("new content")
+        _claim(root_fd, "e1")
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "renamed-back"
+        assert (entry / "new.txt").read_text() == "new content"
+
+    def test_the_matching_record_among_several_authorises(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        (root / "e1").mkdir()
+        (root / "e1" / "old.txt").write_text("old")
+        handle, old = _archived(root_fd, store, tar)
+        remove_claimed(root_fd, handle.claimed_name, store, old, tar=tar, max_inodes=MAX)
+        _entry(root)
+        _archived(root_fd, store, tar)
+        assert _resume(root_fd, store, tar).outcome == "removed"
+        assert list(root.iterdir()) == []
+
+    def test_refuses_an_unclaimed_name(
+        self, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        with pytest.raises(RemoveRefused):
+            resume_claimed(root_fd, "e1", store, checkout=CHECKOUT, tar=tar, max_inodes=MAX)
+
+    def test_refuses_without_the_store_lock(
+        self, tmp_path: Path, root: Path, root_fd: int, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _claim(root_fd, "e1")
+        with ArchiveStore.open(tmp_path / "project" / "untracked" / "scratch-archive") as opened:
+            with pytest.raises(RemoveRefused, match="lock"):
+                _resume(root_fd, opened, tar)
+        assert _claimed_exists(root)
+
+
+class _Crash(Exception):
+    """A fault injected between two steps."""
+
+
+STEPS = ("claim", "pack", "append", "unlink-1", "unlink-3", "rmdir-1", "rmdir-3", "remove")
+
+
+def _sequence(
+    root_fd: int,
+    store: ArchiveStore,
+    tar: TarTool,
+    stop_at: str,
+    hard: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run claim -> pack -> record -> remove, faulting after ``stop_at`` with no cleanup.
+
+    ``hard`` returns mid-sequence as a killed process would; otherwise an
+    exception is raised. A fault inside the removal fails the ``n``-th
+    ``unlink`` or ``rmdir`` and is always raised.
+    """
+
+    def fault() -> None:
+        if not hard:
+            raise _Crash(stop_at)
+
+    handle = _claim(root_fd, "e1")
+    if stop_at == "claim":
+        return fault()
+    record = _record("e1", store, handle, tar)
+    if stop_at == "pack":
+        return fault()
+    store.append(record)
+    if stop_at == "append":
+        return fault()
+    if stop_at.startswith(("unlink-", "rmdir-")):
+        op, count = stop_at.split("-")
+        real: Callable[..., None] = getattr(os, op)
+        calls: list[str] = []
+
+        def failing(name: str, *, dir_fd: int) -> None:
+            calls.append(name)
+            if len(calls) == int(count):
+                raise _Crash(stop_at)
+            real(name, dir_fd=dir_fd)
+
+        monkeypatch.setattr(os, op, failing)
+        try:
+            _remove(root_fd, store, tar, record)
+        finally:
+            monkeypatch.setattr(os, op, real)
+        return None
+    _remove(root_fd, store, tar, record)
+    return fault()
+
+
+def _preserved(root: Path, store: ArchiveStore, original: Snapshot) -> bool:
+    """The original is back under its name, or a recorded archive holds all of it."""
+    if os.path.lexists(root / "e1"):
+        return _snapshot(root / "e1") == original
+    return any(
+        record.original_path.endswith("/e1") and _archive_snapshot(store, record) == original
+        for record in store.read_index().records
+    )
+
+
+class TestCrashSafety:
+    @pytest.mark.parametrize("hard", [False, True], ids=["raised", "hard-stop"])
+    @pytest.mark.parametrize("stop_at", STEPS)
+    def test_every_fault_point_resumes_or_refuses_and_converges(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+        stop_at: str,
+        hard: bool,
+    ) -> None:
+        original = _snapshot(_entry(root))
+        try:
+            _sequence(root_fd, store, tar, stop_at, hard, monkeypatch)
+        except (_Crash, RemoveRefused):
+            assert _claimed_exists(root) or stop_at == "remove"
+        assert _claimed_exists(root) or _preserved(root, store, original)
+        first = _resume(root_fd, store, tar)
+        assert _preserved(root, store, original)
+        assert not _claimed_exists(root)
+        second = _resume(root_fd, store, tar)
+        assert second.outcome == "absent"
+        assert _preserved(root, store, original)
+        if stop_at in {"claim", "pack"}:
+            assert first.outcome == "renamed-back"
+        elif stop_at == "remove":
+            assert first.outcome == "absent"
+        else:
+            assert first.outcome == "removed"
+
+
+_DELETERS = frozenset(
+    {"unlink", "rmdir", "rmtree", "remove", "removedirs", "replace", "truncate", "ftruncate"}
+)
+
+
+def _deletion_surfaces() -> set[tuple[str, str, str]]:
+    """Every reference to a deleting call in the archive modules: (module, function, call)."""
+    core = Path(claude_code_hooks_daemon.__file__).parent / "core"
+    found: set[tuple[str, str, str]] = set()
+    for path in sorted(core.glob("scratch_archive*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for func in ast.walk(tree):
+            if not isinstance(func, ast.FunctionDef):
+                continue
+            for node in ast.walk(func):
+                name = None
+                if isinstance(node, ast.Attribute) and node.attr in _DELETERS:
+                    name = node.attr
+                elif isinstance(node, ast.Name) and node.id in _DELETERS:
+                    name = node.id
+                if name is not None:
+                    found.add((path.name, func.name, name))
+    return found
+
+
+def test_deletion_surfaces_are_only_the_listed_ones() -> None:
+    """The Task 3.9 review list: every place the archive modules can delete or truncate."""
+    assert _deletion_surfaces() == {
+        ("scratch_archive.py", "append", "ftruncate"),
+        ("scratch_archive.py", "discard_unrecorded", "unlink"),
+        ("scratch_archive_remove.py", "_delete", "unlink"),
+        ("scratch_archive_remove.py", "_delete", "rmdir"),
+    }

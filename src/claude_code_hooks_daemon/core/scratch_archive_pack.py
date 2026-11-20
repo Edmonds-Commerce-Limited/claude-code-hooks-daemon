@@ -292,15 +292,18 @@ def _compare(
     *,
     tar: TarTool,
     timeout: float,
+    only: tuple[str, ...] = (),
 ) -> None:
+    """Run ``tar --compare``; with ``only``, compare just those members."""
     try:
         cwd_fd = _cwd_fd(parent_fd, claimed_name, listing)
     except WalkRefused as exc:
         raise VerifyFailed(str(exc)) from exc
+    operands = ("--", *only) if only else ()
     try:
         proc = _run_tar(
             tar,
-            ["--compare", "--file=-", *_COMMON],
+            ["--compare", "--file=-", *_COMMON, *operands],
             cwd_fd=cwd_fd,
             stdin=archive_fd,
             stdout=None,
@@ -315,6 +318,59 @@ def _compare(
         raise VerifyFailed(
             f"tar --compare found differences (exit {proc.returncode}, {lines} lines)"
         )
+
+
+def verify_remaining(
+    parent_fd: int,
+    claimed_name: str,
+    store: ArchiveStore,
+    archive_id: str,
+    *,
+    tar: TarTool,
+    max_inodes: int,
+    expected_sha256: str,
+    max_depth: int = DEFAULT_MAX_DEPTH,
+    timeout: float = DEFAULT_TAR_TIMEOUT_SECONDS,
+) -> Verified:
+    """Verify a partly removed claimed tree: all that is left is in the archive, unchanged.
+
+    The archive must match its recorded SHA-256, every remaining name must be a
+    member, and ``tar --compare`` restricted to the remaining non-directories
+    must be clean. Directories carry no content, and their times change as they
+    are emptied, so they are checked by membership only. Raises
+    :class:`VerifyFailed`.
+    """
+    check_name(claimed_name)
+    try:
+        listing = walk_tree(parent_fd, claimed_name, max_inodes=max_inodes, max_depth=max_depth)
+        remaining = members_of(listing, claimed_name)
+    except (WalkRefused, PackRefused) as exc:
+        raise VerifyFailed(f"the claimed tree cannot be listed: {exc}") from exc
+    try:
+        archive_fd = store.open_archive(archive_id)
+    except StoreRefused as exc:
+        raise VerifyFailed(str(exc)) from exc
+    try:
+        size, sha = _digest(archive_fd)
+        if sha != expected_sha256:
+            raise VerifyFailed("archive SHA-256 differs from its record")
+        os.lseek(archive_fd, 0, os.SEEK_SET)
+        with os.fdopen(os.dup(archive_fd), "rb") as handle:
+            names = read_member_names(handle)
+        if len(names) != len(set(names)):
+            raise VerifyFailed("archive holds a member twice")
+        absent = {_canonical(n) for n in remaining.names} - set(names)
+        if absent:
+            raise VerifyFailed(f"{len(absent)} remaining names are not in the archive")
+        files = tuple(n for n in remaining.names if not n.endswith("/"))
+        if files:
+            os.lseek(archive_fd, 0, os.SEEK_SET)
+            _compare(
+                parent_fd, claimed_name, listing, archive_fd, tar=tar, timeout=timeout, only=files
+            )
+    finally:
+        os.close(archive_fd)
+    return Verified(size=size, sha256=sha, members=remaining.names)
 
 
 def pack(
