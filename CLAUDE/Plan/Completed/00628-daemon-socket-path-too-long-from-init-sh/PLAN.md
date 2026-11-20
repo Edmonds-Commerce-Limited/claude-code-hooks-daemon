@@ -1,6 +1,6 @@
 # Plan 00628: daemon socket path too long from init sh
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-19
 **Owner**: joseph
 **Priority**: High
@@ -71,9 +71,10 @@ says RUNNING on `/run/user/...`, the next hook's `SOCKET_PATH` is the long one.
 
 - [x] All new tests fail before the fix and pass after; the touched existing suites pass
 - [x] The reproduction scripts show one hook start reaching the daemon
-- [x] The release-bound consequence is recorded in the pending-release holding area (`CLAUDE/UPGRADES/UNRELEASED/release-notes/006-long-project-path-socket.md`)
-- [ ] Merged by the coordinator after the full QA gate
+- [x] The release-bound consequence is recorded in the pending-release holding area: the 00628 callout `CLAUDE/UPGRADES/v3/v3.75.0-to-v3.76.0/release-notes/006-long-project-path-socket.md` (moved there from `UNRELEASED/release-notes/` at the v3.76.0 release)
+- [x] Merged by the coordinator after the full QA gate (merge `2628d4965`, released as v3.76.0, release merge `de8833b5b`)
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hashes -->
+- Merge `2628d4965` (Plan 00628 branch); code commits `55460bf4a`, `4005eee3a`, `bd05c243b`; shipped in tag v3.76.0
+- Follow-up rough edges ledgered as N681 in `CLAUDE/Plan/00474-niggles-ledger-seventeen/NIGGLES.md` (already present, not duplicated)
