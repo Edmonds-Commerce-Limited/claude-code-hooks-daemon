@@ -51,7 +51,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.config.models import BranchesConfig
+from claude_code_hooks_daemon.config.models import DEFAULT_STACK_MAX_DEPTH, BranchesConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.branch_keep import read_keeps
 from claude_code_hooks_daemon.core.branch_park import (
@@ -60,6 +60,7 @@ from claude_code_hooks_daemon.core.branch_park import (
     walk_park_range,
 )
 from claude_code_hooks_daemon.core.branch_records import CREATOR_KEY
+from claude_code_hooks_daemon.core.branch_stacks import read_tip_ancestry
 from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -301,6 +302,11 @@ class BranchInventory:
     worktrees_known: bool = True
     #: The one ``ls-remote`` the caller asked for, or None when the pass stayed offline.
     remote_refs: RemoteRefs | None = None
+    #: Strict ancestors among the open-work tips (:func:`branch_stacks.read_tip_ancestry`);
+    #: None when unknown, which groups no stack (fail closed: over-count).
+    tip_ancestry: Mapping[str, frozenset[str]] | None = None
+    #: ``branches.wip.stack_max_depth`` the pass was built with.
+    stack_max_depth: int = DEFAULT_STACK_MAX_DEPTH
 
 
 @dataclass(frozen=True)
@@ -1113,12 +1119,21 @@ def build_inventory(
     records = {name: _record(run, context, name, *by_name[name]) for name in sorted(by_name)}
     records = _with_pools(run, _with_same_tips(records), moment)
     _save_cache(cache_path, run.cache, set(sha_of.values()))
+    open_tips = frozenset(
+        tip
+        for record in records.values()
+        if pool_of(record.state) == Pool.OPEN
+        for tip in (record.local_tip, record.remote_tip)
+        if tip is not None
+    )
     return BranchInventory(
         default_branch=default,
         default_ref=default_ref,
         records=records,
         worktrees_known=context.worktrees is not None,
         remote_refs=made_listing(remote_refs),
+        tip_ancestry=read_tip_ancestry(repo, open_tips, [ref for ref, _ in merged_default]),
+        stack_max_depth=config.wip.stack_max_depth,
     )
 
 

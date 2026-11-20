@@ -173,7 +173,9 @@ def _single(repo: Path, name: str) -> None:
 def _config(cap: int, *, max_depth: int = 5) -> BranchesConfig:
     return BranchesConfig(
         default="main",
-        wip=BranchWipConfig(cap=cap, count_remote=True, creation_grace=0, stack_max_depth=max_depth),
+        wip=BranchWipConfig(
+            cap=cap, count_remote=True, creation_grace=0, stack_max_depth=max_depth
+        ),
     )
 
 
@@ -262,7 +264,7 @@ class TestCreationGuard:
         _single(repo, "solo")
         report = branch_creation.creation_report(repo, _config(cap=2), "brand-new")
         lines = branch_creation.render_creation_report(report)
-        assert any(line.startswith("Open work branches: 2 (cap 2)") for line in lines)
+        assert any(line.startswith("Open work branches: 2 (cap 2;") for line in lines)
         stack_lines = [line for line in lines if "stack-" in line]
         assert len(stack_lines) == 1
         assert "stack of 5" in stack_lines[0]
@@ -272,9 +274,7 @@ class TestCreationGuard:
 
 
 class TestSweepReport:
-    def test_the_sweep_prints_a_stack_as_one_line_naming_depth_and_bottom(
-        self, repo: Path
-    ) -> None:
+    def test_the_sweep_prints_a_stack_as_one_line_naming_depth_and_bottom(self, repo: Path) -> None:
         _stack(repo, "stack", 3)
         _single(repo, "solo")
         config = _config(cap=10)

@@ -19,6 +19,19 @@ config_changes:
         branches:
           wip:
             ladder: {warn: 60, strong: 80, very_strong: 90}
+    - key: branches.wip.stack_max_depth
+      recommended: false
+      dormant: false
+      description: >-
+        Plan 00594 Task 4.6. A stack of dependent branches (each tip a strict
+        ancestor of the next, local or remote-tracking) counts 1 against
+        branches.wip.cap up to this many links; each link past it counts 1
+        more. Default 5, minimum 1. A fork ends the chain; parked, merged,
+        park-carried and foreign branches never join a stack.
+      example_yaml: |
+        branches:
+          wip:
+            stack_max_depth: 5
     - key: branches.parked.ladder
       recommended: false
       dormant: false
