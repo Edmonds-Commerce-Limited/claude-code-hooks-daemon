@@ -6726,8 +6726,13 @@ def cmd_scratch_sweep(
     budget_clock: Callable[[], float] = time.monotonic,
     process_cwds: Callable[[], Mapping[int, Path]] | None = None,
     git_runner: Callable[..., Any] | None = None,
+    confirm_apply: Callable[[str], bool] | None = None,
 ) -> int:
     """``scratch-sweep [--apply] [--json] [--root PATH] [restore ID | keep ID --reason R]``.
+
+    ``--apply`` also needs a human to type the go-ahead at a terminal
+    (:func:`confirm_apply_interactively`); no flag, variable or file stands in
+    for it. ``confirm_apply`` is the test seam for that question.
 
     Without ``--apply`` or a sub-command it is a dry run: it never creates the
     scratch root or the archive store, writes no cache or state, prints no file
@@ -6782,7 +6787,45 @@ def cmd_scratch_sweep(
         return _scratch_restore(args, sources, sweep_root)
     if action == "keep":
         return _scratch_keep(args, sources)
+    relative = _scratch_relative_root(sources, sweep_root)[1]
+    if not (confirm_apply or confirm_apply_interactively)(relative):
+        print(
+            "scratch-sweep: refused: --apply needs a human's typed confirmation at a "
+            "terminal (stdin and stdout both a TTY); nothing was changed",
+            file=sys.stderr,
+        )
+        return 1
     return _scratch_apply(args, sources, sweep_root)
+
+
+def confirm_apply_interactively(
+    relative_root: str,
+    *,
+    stdin: Any = None,
+    stdout: Any = None,
+    prompt_stream: Any = None,
+) -> bool:
+    """True only when a human at a terminal types ``apply <relative_root>``.
+
+    The interim gate of Plan 00627 F-BYPS F2: until an archive can be kept in
+    advance (Task 4.4) and the coming expiries are announced (Task 5.2), an
+    apply run's hold window is one nobody is told about, so a person decides
+    each run. Both stdin and stdout must be terminals; end of input, any other
+    text, or a non-terminal stream is a refusal. Nothing else is consulted.
+    """
+    stdin = stdin if stdin is not None else sys.stdin
+    stdout = stdout if stdout is not None else sys.stdout
+    prompt_stream = prompt_stream if prompt_stream is not None else sys.stderr
+    if not (stdin.isatty() and stdout.isatty()):
+        return False
+    phrase = f"apply {relative_root}"
+    prompt_stream.write(
+        "scratch-sweep --apply archives and then removes every due DISPOSABLE or "
+        f"UNCERTAIN entry under {relative_root}, and expires archives past retention.\n"
+        f"Type '{phrase}' to go ahead: "
+    )
+    prompt_stream.flush()
+    return bool(stdin.readline().strip() == phrase)
 
 
 @dataclass(frozen=True)
@@ -13942,7 +13985,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--apply",
         action="store_true",
         help="Archive, verify, record, then remove every due DISPOSABLE or UNCERTAIN entry "
-        "(main checkout only; the default is a dry run that changes nothing)",
+        "(main checkout only; a human must type the confirmation at a terminal; the "
+        "default is a dry run that changes nothing)",
     )
     scratch_actions = parser_scratch_sweep.add_subparsers(dest="scratch_action")
     parser_scratch_restore = scratch_actions.add_parser(

@@ -10,6 +10,7 @@ real git project, the real store and GNU tar.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import time
@@ -19,7 +20,11 @@ from pathlib import Path
 import pytest
 from tests.support.scratch_tree import ScratchTree, build_git_project, git
 
-from claude_code_hooks_daemon.daemon.cli import build_parser, cmd_scratch_sweep
+from claude_code_hooks_daemon.daemon.cli import (
+    build_parser,
+    cmd_scratch_sweep,
+    confirm_apply_interactively,
+)
 
 _DAY = 86400.0
 
@@ -46,13 +51,18 @@ def _parse(project: Path, *argv: str) -> argparse.Namespace:
 
 
 def _run(
-    args: argparse.Namespace, *, now: float, cwds: Callable[[], dict[int, Path]] | None = None
+    args: argparse.Namespace,
+    *,
+    now: float,
+    cwds: Callable[[], dict[int, Path]] | None = None,
+    confirm: Callable[[str], bool] | None = None,
 ) -> int:
     return int(
         args.func(
             args,
             wall_clock=lambda: now,
             process_cwds=cwds or (lambda: {1: Path("/elsewhere")}),
+            confirm_apply=confirm or (lambda _root: True),
         )
     )
 
@@ -189,6 +199,77 @@ class TestRefusals:
         project = _project(tree)
         assert _run(_parse(project, *action), now=time.time()) == 1
         assert not _store(project).exists()
+
+
+class _Stream(io.StringIO):
+    def __init__(self, text: str = "", *, tty: bool) -> None:
+        super().__init__(text)
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+class TestHumanConfirmationGate:
+    """F-BYPS F2: until KEPT and the expiry notice exist, a human types the go-ahead."""
+
+    def test_a_declined_confirmation_refuses_before_the_store_exists(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        _old_entry(tree, now)
+        project = _project(tree)
+        assert _run(_parse(project, "--apply"), now=now, confirm=lambda _root: False) == 1
+        assert not _store(project).exists()
+        assert (tree.root / "old" / "a.txt").read_bytes() == b"alpha"
+        assert "confirmation" in capsys.readouterr().err
+
+    def test_the_default_gate_refuses_without_a_terminal(
+        self, tree: ScratchTree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        _old_entry(tree, now)
+        project = _project(tree)
+        monkeypatch.setattr("sys.stdin", _Stream("apply untracked/scratch\n", tty=False))
+        args = _parse(project, "--apply")
+        code = cmd_scratch_sweep(
+            args, wall_clock=lambda: now, process_cwds=lambda: {1: Path("/elsewhere")}
+        )
+        assert code == 1
+        assert not _store(project).exists()
+        assert (tree.root / "old").is_dir()
+
+    @pytest.mark.parametrize(
+        ("stdin_tty", "stdout_tty", "typed"),
+        [
+            (False, True, "apply untracked/scratch\n"),
+            (True, False, "apply untracked/scratch\n"),
+            (True, True, ""),
+            (True, True, "yes\n"),
+            (True, True, "apply untracked/other\n"),
+        ],
+    )
+    def test_the_real_gate_refuses(self, stdin_tty: bool, stdout_tty: bool, typed: str) -> None:
+        assert not confirm_apply_interactively(
+            "untracked/scratch",
+            stdin=_Stream(typed, tty=stdin_tty),
+            stdout=_Stream(tty=stdout_tty),
+            prompt_stream=_Stream(tty=True),
+        )
+
+    def test_the_real_gate_accepts_the_exact_phrase_on_a_terminal(self) -> None:
+        prompt = _Stream(tty=True)
+        assert confirm_apply_interactively(
+            "untracked/scratch",
+            stdin=_Stream("apply untracked/scratch\n", tty=True),
+            stdout=_Stream(tty=True),
+            prompt_stream=prompt,
+        )
+        assert "apply untracked/scratch" in prompt.getvalue()
+
+    def test_no_flag_reaches_the_gate(self) -> None:
+        args = build_parser().parse_args(["scratch-sweep", "--apply"])
+        assert not any("confirm" in key or "yes" in key for key in vars(args))
 
 
 class TestEndToEnd:
