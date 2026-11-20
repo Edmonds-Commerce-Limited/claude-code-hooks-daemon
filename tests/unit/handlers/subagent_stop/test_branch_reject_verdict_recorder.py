@@ -471,7 +471,7 @@ class TestRegistration:
         import yaml
 
         manifest = yaml.safe_load(
-            (_REPO / "CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.76.0.yaml").read_text(
+            (_REPO / "CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.77.0.yaml").read_text(
                 encoding="utf-8"
             )
         )
