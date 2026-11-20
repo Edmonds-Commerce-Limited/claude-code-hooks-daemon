@@ -480,6 +480,22 @@ class TestGuidance:
         assert guidance is not None
         assert "staged" in guidance.lower()
 
+    def test_guidance_says_staged_workflows_run_the_workflow_linter(
+        self, handler: StagedLintGateHandler
+    ) -> None:
+        """Plan 00621 (DESIGN 4.1): the gate is not only a cheap syntax check."""
+        guidance = handler.get_claude_md() or ""
+
+        assert "actions-qa check --file" in guidance
+        assert ".github/workflows/" in guidance
+        assert "only exit 1" in guidance.lower()
+
+    def test_rule_does_not_claim_a_syntax_check_only(self, handler: StagedLintGateHandler) -> None:
+        rule = handler._rule
+
+        assert "cheap syntax check at commit time" not in rule.blocked
+        assert "actions-qa" in rule.verbose
+
     def test_publishes_acceptance_tests(self, handler: StagedLintGateHandler) -> None:
         tests = handler.get_acceptance_tests()
 

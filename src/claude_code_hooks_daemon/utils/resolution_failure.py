@@ -41,6 +41,16 @@ class IncompleteScanError(ResolutionFailedError):
     """
 
 
+class ProcessViewRefusedError(ResolutionFailedError):
+    """A word leads through the calling process's own view (see :data:`_PROCESS_VIEWS`).
+
+    A subclass so the Bash mention scan can tell this refusal from every other
+    placement failure and judge it as a mention, in the positions a protected
+    name is judged (release review F2). Everywhere else it is a plain
+    :class:`ResolutionFailedError`.
+    """
+
+
 #: Raised on purpose by the scan, and judged by their own routes.
 _PASSED_THROUGH: tuple[type[BaseException], ...] = (
     TimeoutError,
@@ -98,7 +108,7 @@ def _is_plain_process_file(parts: list[str], view_end: int) -> bool:
 
 
 def refuse_process_view(path: str) -> None:
-    """Raise :class:`ResolutionFailedError` when ``path`` passes through ``/proc/self`` and kin.
+    """Raise :class:`ProcessViewRefusedError` when ``path`` passes through ``/proc/self`` and kin.
 
     ``//`` and ``.`` are collapsed; ``..`` is not, because after a link it
     climbs from where the link leads. ``path`` is the word as placed: a
@@ -110,7 +120,7 @@ def refuse_process_view(path: str) -> None:
     parts = [part for part in path.split("/") if part not in ("", ".")]
     for index, pair in enumerate(itertools.pairwise(parts), start=1):
         if pair in _PROCESS_VIEWS and not _is_plain_process_file(parts, index):
-            raise ResolutionFailedError(
+            raise ProcessViewRefusedError(
                 "a path through the calling process's own /proc view cannot be placed"
             )
 

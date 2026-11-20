@@ -38,9 +38,22 @@ Further facts the peer notes did not carry, from the same sources:
   `PATH`. It does not do so itself.
 - In a workflow the tool is adopted as `uses: LongTermSupport/actions-qa-ci@<commit>`.
 
-**Still unverified:** everything about how the tool behaves when run. The README on the
-default branch may also describe more than v0.2.0 ships. Task 1.1 (run it once) stays open,
-and the builder can now do it without help.
+**Behaviour, measured 2026-11-20 (Task 1.1).** The v0.2.0 `linux_amd64` bundle was
+downloaded again, its sha256 matched `checksums.txt`, and `bin/actions-qa` was run from the
+unpacked bundle (nothing installed; `actions-qa version` prints `method 1.1.0, toolchain 0.2.0`). The command lines, output and exit codes are in the journal. What it showed:
+
+- Exit codes and output match what the strategy assumes. A clean workflow gives `0 findings`
+  and exit 0. A job with no `runs-on` gives exit 1, one `path:line:col rule message` line per
+  finding, a `rule-doc <id>` line per rule, and a count. Plain output, no `--format`.
+- **The tool analyses only the `.github/workflows/` of the nearest repository root.** A
+  workflow-shaped file anywhere below that root (a nested `sub/.github/workflows/x.yml`, or
+  the acceptance fixtures under `untracked/acceptance/`) gives exit 2, `no lane analyses <path>`. A file in no repository also gives exit 2. Whether the file is gitignored makes no
+  difference.
+- Two consequences, both fixed: the acceptance probes ran in a subdirectory of the project, so
+  the DENY probe was ALLOWED unchecked; each probe's fixture root is now `git init`ed in its
+  setup. And the Ansible probe "a GitHub workflow is not claimed" carried content with three
+  findings (`on: push`, `jobs: {}`), so wherever the linter did analyse it, it would DENY for a
+  reason unrelated to Ansible; it now carries the workflow sample the linter reports clean.
 
 ## 2. The design is confirmed, with five changes
 
@@ -145,6 +158,45 @@ If the behaviour differs from section 1, change the strategy before the plan com
 
 ## 4. What is still open
 
-- **Task 1.1**: the real tool has not been run. It gates the plan's completion, not slice 1.
 - **For the owner's glance**: the advisory is on by default (2.4). Nothing in this plan is
   blocked on it.
+
+### 4.1 Flagged for the owner: decisions the build made that this design did not name
+
+These were made by builder sub-agents. The coordinator has since ruled on each; every item
+below records the decision and why.
+
+- **The commit gate also runs the linter.** `staged_lint_gate` reads the same strategy
+  registry, so a staged `.github/workflows/*.yml` is run through `actions-qa check --file` at
+  `git commit`, on the working-tree copy, with the gate's fixed `Timeout.LINT_CHECK` (15s).
+  This design named only `lint_on_edit`. The builder of Task 2.1 kept it and applied the same
+  exit-code contract there: exit 1 is a failure, which in the gate's shipped `mode: warn` is
+  an advisory naming the file and in `mode: block` denies the commit; any other exit, a
+  missing tool or a timeout never affects the commit and is only logged (the agent is not
+  told the file went unchecked). The alternative is to exclude the workflow strategy from the
+  commit gate, which would leave a workflow that reaches the index without an edit (a merge,
+  a `git add` of an earlier write) unchecked.
+  **Decided: keep as built.** The commit gate is the only check for a workflow that never
+  passed through an edit. The fail-open is made visible: the gate's WARNING log line now
+  names the tool's own error text (first 300 chars of stderr and stdout) after "was NOT
+  checked", so a faulted linter is diagnosable from the log.
+- **A nested workflow directory is accepted, then refused by the tool.** `handles_file` is
+  path-only (parent `workflows`, grandparent `.github`), so a `sub/.github/workflows/x.yml`
+  that is not at a repository root is handed to the linter, which exits 2. The edit is
+  allowed with a "NOT checked" advisory quoting `no lane analyses`. Narrowing to repository
+  roots would need a `.git` probe in `handles_file`; it was not done because such files are
+  rare (GitHub runs none of them) and the advisory states the truth. Revisit if it is noisy.
+  **Decided: keep.** Simplest, and it fails open with an honest message; no `.git` probe to maintain.
+- **The advisory speaks in one case outside 2.4's trigger.** When `.github/workflows/` exists
+  but cannot be listed, `workflow_linter_advisor` says so, since whether a workflow uses the
+  linter is unknown. An unreadable workflow file is named and never counts as using it.
+  **Decided: keep.** Silence would hide an unknown, and the message is a one-off advisory.
+- **"Once per session" is the sibling convention.** It is `not is_resume_session(...)`, which
+  is based on transcript size. A resume is silent. Behaviour after `/compact` or `/clear`
+  was not measured. The advisory also tells the reader how to silence it.
+  **Decided: keep the sibling convention.** One mechanism across advisors beats a bespoke
+  per-session store; the worst case is a repeat of a silenceable advisory.
+- **It fires in this repository.** None of the four workflows here uses `actions-qa-ci`, so
+  the dogfood session sees the suggestion until one does or the handler is disabled.
+  **Decided: keep default-on, no config change.** Section 4 records default-on; the dogfood
+  noise is the advisory working as designed.

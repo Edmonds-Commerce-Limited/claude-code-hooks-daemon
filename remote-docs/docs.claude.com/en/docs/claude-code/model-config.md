@@ -1,10 +1,10 @@
 ---
 source_url: https://docs.claude.com/en/docs/claude-code/model-config
-fetched_at: '2026-11-16T21:15:53.569168+00:00'
+fetched_at: '2026-11-20T09:14:01.884414+00:00'
 fidelity: converted
-source_sha256: c985073ef2d3e222b49aaa612c2f3f02850728a55372bcf647fc32fcb4e87320
+source_sha256: 0eb85bfd05da194833d741b15172de8430cee5920a4ecd11ec07787db8d2c0cf
 licence: unreviewed
-stale_after: '2027-02-14'
+stale_after: '2027-02-18'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 ---
 
@@ -153,21 +153,13 @@ On an Enterprise plan, when you're logged in with your claude.ai account and sav
 
 If you switch models with `/model`, the switch also reaches [subagents that inherit the main conversation's model](https://code.claude.com/docs/en/sub-agents.md#choose-a-model), because Claude Code resolves their model from the one your session is using when Claude starts them. Switch to Opus before Claude delegates research or test runs to one of them, and that work runs on Opus too. To keep a custom subagent on a smaller model, set `model` in its definition.
 
-If you set a model with `/model` in [non-interactive mode](https://code.claude.com/docs/en/headless.md), with the `-p` flag, your choice applies to the current session only and isn't saved as your default; `/model` in that mode requires Claude Code v2.1.205 or later. Project and managed settings still take precedence and reapply on the next launch. An [organization default model](#organization-default-model) that your admin has configured to override user selection also reapplies on the next launch.
+If you set a model with `/model` in [non-interactive mode](https://code.claude.com/docs/en/headless.md), with the `-p` flag, your choice applies to the current session only and isn't saved as your default. `/model` in that mode requires Claude Code v2.1.205 or later.
 
 In v2.1.144 through v2.1.152, `/model` applied to the current session only and `d` in the picker saved a default.
 
 The `--model` flag and `ANTHROPIC_MODEL` environment variable apply only to the session you launch with them. To run different models in different terminals at the same time, launch each one with its own `--model` flag rather than switching with `/model`.
 
 Prices in the `/model` picker appear when Claude Code talks to the Anthropic API, directly or through an [LLM gateway](https://code.claude.com/docs/en/llm-gateway) that proxies it, and the price on a row is the price of the model that row selects. On [third-party providers](https://code.claude.com/docs/en/third-party-integrations.md) such as Amazon Bedrock and on the [Claude apps gateway](https://code.claude.com/docs/en/claude-apps-gateway), your provider or gateway determines what you pay, so picker rows show no price. The price is a display label only; it doesn't affect which model a row selects or what your provider bills. Before v2.1.206, [Claude Platform on AWS](https://code.claude.com/docs/en/claude-platform-on-aws.md) and gateway sessions showed Anthropic list prices, and a row could show the price of a different model than the one it selected.
-
-Resumed sessions started with `claude --resume`, `--continue`, or the `/resume` picker keep the model they were using when the transcript was saved. If the restored model has been retired or is excluded by [`availableModels`](#restrict-model-selection), the session falls through to the normal precedence order. On providers that use provider-specific deployment IDs rather than Anthropic model IDs, such as Amazon Bedrock, Google Cloud's Agent Platform, and Microsoft Foundry, the transcript model isn't restored at all and the session resolves its model through the normal precedence order.
-
-If your `model` setting is `haiku`, a session saved on a Haiku model resumes on the model that `haiku` resolves to now. For example, once `haiku` resolves to Haiku 5.5, a session saved on Haiku 4.5 resumes on Haiku 5.5.
-
-A model you pick for the new launch with `--model` or `ANTHROPIC_MODEL` still takes precedence over the restored model. As of v2.1.195, so does an [`ANTHROPIC_DEFAULT_OPUS_MODEL`](#environment-variables) family variable. [`ANTHROPIC_DEFAULT_MODEL`](#set-a-default-model-for-new-sessions) can too, under the conditions listed in its section.
-
-When the active model at startup comes from project or managed settings rather than your own selection, the startup header shows which settings file set it. Run `/model` to override; the project or managed setting reapplies on the next launch. On platforms that embed Claude Code and set [`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`](https://code.claude.com/docs/en/env-vars), the host's model configuration takes precedence over managed model settings, while a managed `availableModels` allowlist stays in force unless the host supplies its own; [Exceptions to managed settings precedence](https://code.claude.com/docs/en/settings.md#exceptions-to-managed-settings-precedence) says which keys and variables the host overrides.
 
 If you or your organization configure [PreModelSwitch hooks](https://code.claude.com/docs/en/hooks.md#premodelswitch), they run before a requested switch applies and can block it or ask you to confirm. To find out why a hook blocked a switch and what to do, see [Model switch was blocked by a PreModelSwitch hook](https://code.claude.com/docs/en/errors.md#model-switch-was-blocked-by-a-premodelswitch-hook).
 
@@ -213,6 +205,22 @@ Example settings file:
 }
 ```
 
+When the active model at startup comes from project or managed settings rather than your own selection, the startup header shows which settings file set it. Run `/model` to override; the project or managed setting reapplies in new sessions.
+
+On platforms that embed Claude Code and set [`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`](https://code.claude.com/docs/en/env-vars), the host's model configuration takes precedence over managed model settings. A managed `availableModels` allowlist stays in force unless the host supplies its own. [Exceptions to managed settings precedence](https://code.claude.com/docs/en/settings.md#exceptions-to-managed-settings-precedence) says which keys and variables the host overrides.
+
+#### Which model a resumed session uses
+
+A session you resume with `claude --resume` or `--continue` keeps the model it was saved on, except in cases such as these, where it follows the [priority order](#setting-your-model) instead:
+
+* You set an alias variable such as [`ANTHROPIC_DEFAULT_OPUS_MODEL`](#environment-variables), or [`ANTHROPIC_DEFAULT_MODEL`](#set-a-default-model-for-new-sessions) under the conditions listed in its section
+* The saved model has been retired or is excluded by [`availableModels`](#restrict-model-selection)
+* Your provider uses provider-specific deployment IDs rather than Anthropic model IDs, as Amazon Bedrock, Google Cloud's Agent Platform, and Microsoft Foundry do
+* Your `model` setting is `haiku` and the session was saved on a Haiku or Sonnet model. For example, once `haiku` resolves to Haiku 5.5, a session saved on Haiku 4.5 resumes on Haiku 5.5.
+* Your `model` setting is `opusplan` and the session was saved on an Opus or Sonnet model
+
+To resume on a model you choose, pass `--model` or set `ANTHROPIC_MODEL`.
+
 #### Fix a mistyped model name
 
 Either of these warnings means Claude Code doesn't recognize the model ID you set, and the ID nearly spells a model name or alias it does recognize:
@@ -247,16 +255,16 @@ Claude Code ignores the variable in these cases, and the Default option resolves
 * Your organization's [model restrictions](#restrict-model-selection) exclude the model
 * The model isn't available to your account
 
-When a new session would start on the variable's model, a session you resume with `claude --resume`, `--continue`, or the `/resume` picker starts on it too. Claude Code doesn't restore the model saved in that session's transcript. Otherwise Claude Code doesn't use the variable when you [resume a session](#setting-your-model).
+When a new session would start on the variable's model, a session you resume with `claude --resume`, `--continue`, or the `/resume` picker starts on it too. Claude Code doesn't restore the model saved in that session's transcript. Otherwise Claude Code doesn't use the variable when you [resume a session](#which-model-a-resumed-session-uses).
 
 #### A new session starts on a different model than you picked
 
 When you pick a model with `/model` and your next session starts on something else, these are the usual causes:
 
 * **You chose it for one session.** Pressing `s` in the picker, launching with `--model`, and running `/model` in non-interactive mode all apply to the current session and leave your saved default alone.
-* **Something with higher priority sets the model.** A `model` value in project or managed settings, `ANTHROPIC_MODEL` in your shell, or an [organization default](#organization-default-model) your admin set to override user choices applies again at every launch. Your `/model` choice is still saved; it's outranked. When project or managed settings set the model, the startup header names the file.
+* **Something with higher priority sets the model.** A `model` value in project or managed settings, `ANTHROPIC_MODEL` in your shell, or an [organization default](#organization-default-model) your admin set to override user choices applies again at every new-session launch. Your `/model` choice is still saved; it's outranked. When project or managed settings set the model, the startup header names the file.
 * **Claude Code couldn't save your choice.** `/model` writes `model` to `~/.claude/settings.json`. If you can't write to that file, for example because another tool generates it or links it to a read-only copy, the model you chose lasts for the session and the next launch reads the old value. Set `model` in the tool that generates the file, or make the file writable. See [A change you made in Claude Code is lost in new sessions](https://code.claude.com/docs/en/settings.md#a-change-you-made-in-claude-code-is-lost-in-new-sessions).
-* **You resumed a session.** A session you resume with `claude --resume` or `--continue` usually [keeps the model it was using](#setting-your-model) rather than your current default.
+* **You resumed a session.** A session you resume with `claude --resume` or `--continue` usually [keeps the model it was using](#which-model-a-resumed-session-uses) rather than your current default.
 
 ## Restrict model selection
 
@@ -331,8 +339,8 @@ Every surface enforces the allowlist it receives. Which delivery mechanism reach
 * [Cloud sessions](https://code.claude.com/docs/en/claude-code-on-the-web.md), including those you start from the Desktop app, run on Anthropic-managed VMs by default: settings deployed to your device do not reach them, so deliver the allowlist through server-managed settings. Sessions your organization routes to a [self-hosted environment](https://code.claude.com/docs/en/self-hosted-environments) run on your own compute and also read the managed settings file in the runner image. [How Claude Code combines managed sources](https://code.claude.com/docs/en/managed-settings.md#how-claude-code-combines-managed-sources) says when that file applies. A mid-session model switch in a cloud session is rejected when the requested model is excluded by the allowlist. When the `availableModels` list in your server-managed settings is non-empty, the server rejects a request to start a cloud session at claude.ai/code or from the Desktop app on a model the list excludes.
 * [Claude Tag](https://claude.com/docs/claude-tag/overview) sessions run in cloud environments but don't receive server-managed settings; in a [self-hosted environment](https://code.claude.com/docs/en/self-hosted-environments), they still read the managed settings file in the runner image. To set the model for those sessions, see [Choose the model for a scope](https://claude.com/docs/claude-tag/admins/customize#choose-the-model-for-a-scope) in the Claude Tag admin guide.
 * Cowork, the agentic-work tab in the Claude Desktop app, runs its sessions on Claude Code but, by design, does not receive server-managed settings from the claude.ai admin console. When the `availableModels` list in your server-managed settings is non-empty and a user picks a model outside it, the server rejects that model for a remote Cowork session. A managed settings file applies to Cowork sessions when it is present where the session runs; remote Cowork sessions run on Anthropic-managed VMs, where a device-deployed file is not present.
-* Sessions on [third-party providers](https://code.claude.com/docs/en/server-managed-settings.md#platform-availability) such as Amazon Bedrock, Google Cloud's Agent Platform, Microsoft Foundry, and [Claude Platform on AWS](https://code.claude.com/docs/en/claude-platform-on-aws.md) do not receive server-managed settings, so deliver the allowlist through MDM or managed settings files there.
-* Delivery from the admin console also requires the session to fetch with an [eligible login](https://code.claude.com/docs/en/server-managed-settings.md#platform-availability) to your organization or an OAuth token issued for it. For fleets that authenticate with API keys, whether configured directly or generated by an [`apiKeyHelper`](https://code.claude.com/docs/en/settings-reference#apikeyhelper) script, deliver the allowlist through MDM or managed settings files.
+* For sessions on [third-party providers](https://code.claude.com/docs/en/server-managed-settings.md#platform-availability) such as Amazon Bedrock, Google Cloud's Agent Platform, Microsoft Foundry, and [Claude Platform on AWS](https://code.claude.com/docs/en/claude-platform-on-aws.md), deliver the allowlist through MDM or managed settings files.
+* Delivery from the admin console requires the session to fetch with an [eligible login](https://code.claude.com/docs/en/server-managed-settings.md#platform-availability) to your organization or an OAuth token issued for it. For fleets that authenticate with API keys, whether configured directly or generated by an [`apiKeyHelper`](https://code.claude.com/docs/en/settings-reference#apikeyhelper) script, deliver the allowlist through MDM or managed settings files.
 * The Desktop Code tab also hosts [SSH sessions](https://code.claude.com/docs/en/desktop.md#ssh-sessions), which read the managed settings file from the remote host they run on. See [Desktop managed settings](https://code.claude.com/docs/en/desktop.md#managed-settings).
 * The model pickers on claude.ai and in the Desktop app hide or grey out models excluded by your organization's allowlist. The picker state is a convenience for users; it doesn't enforce the allowlist.
 
@@ -445,7 +453,7 @@ Restrictions apply org-wide or per role:
 * Haiku models are always available and can't be disabled, so every member keeps at least one usable model.
 * An access change takes effect on new requests within about a minute; the `/model` picker reflects it the next time a session starts.
 
-Both restrictions apply together: a model is selectable only when it is permitted by `availableModels` and not restricted by the organization. Organization restrictions reach sessions on the Anthropic API and [LLM gateway](https://code.claude.com/docs/en/llm-gateway) deployments only; on any other provider, use `availableModels` instead.
+Both restrictions apply together: a model is selectable only when it is permitted by `availableModels` and not restricted by the organization. Organization restrictions reach sessions on the Anthropic API and [LLM gateway](https://code.claude.com/docs/en/llm-gateway) deployments only; with a [gateway credential](https://code.claude.com/docs/en/llm-gateway#subscriptions-and-gateways) or on any other provider, use `availableModels` instead.
 
 ## Organization default model
 
@@ -459,9 +467,9 @@ The organization default is a starting point, not a restriction. These selection
 * a `model` value in [managed settings](https://code.claude.com/docs/en/managed-settings.md) or supplied through `--settings`
 * a `model` value in your user, project, or local settings, including a model you save with `/model`
 
-Admins can also configure the organization default to override user selection. With override on, it takes precedence over the `model` value in user, project, and local settings, so a model you save with `/model` applies for the current session and the organization default returns on the next launch. When your selection differs, `/model` shows `Your organization's default (<model>) applies on restart`. The `--model` flag, `ANTHROPIC_MODEL`, managed settings, and `--settings` still take precedence even with override on.
+Admins can also configure the organization default to override user selection. With override on, it takes precedence over the `model` value in user, project, and local settings. A model you save with `/model` then applies for the current session, and the organization default returns in new sessions. When your selection differs, `/model` shows `Your organization's default (<model>) applies on restart`.
 
-To limit which models members can select, use [organization model restrictions](#organization-model-restrictions) or [`availableModels`](#restrict-model-selection) instead.
+The `--model` flag, `ANTHROPIC_MODEL`, managed settings, and `--settings` still take precedence even with override on. To limit which models members can select, use [organization model restrictions](#organization-model-restrictions) or [`availableModels`](#restrict-model-selection) instead.
 
 Claude Code reads the organization default once at startup, so a default the admin changes mid-session takes effect on the next launch.
 
@@ -469,7 +477,7 @@ When the organization default doesn't override user selection, the first interac
 
 The organization default passes through these restriction checks before it is adopted:
 
-* With the default prefix matching, [`availableModels`](#restrict-model-selection) on its own doesn't apply to the organization default, so an organization default outside the allowlist still applies. When [`enforceAvailableModels`](#enforce-the-allowlist-for-the-default-model) is also set, an organization default outside the allowlist is remapped to the first allowlist entry as well
+* with the default prefix matching and [`enforceAvailableModels`](#enforce-the-allowlist-for-the-default-model) set, an organization default outside the [`availableModels`](#restrict-model-selection) allowlist is remapped to a model on that list
 * an organization default that [organization model restrictions](#organization-model-restrictions) deny for your account is replaced by the newest allowed model in its family, or a lower-cost family when every version of it is restricted
 * for an organization default that `deniedModels` or an `"exact"` list blocks, see [Block specific models or versions](#block-specific-models-or-versions)
 * an organization default that isn't available to your account at all is skipped, and the Default option resolves as it would [without an organization default](#default-model-setting)
@@ -487,6 +495,8 @@ Organization admins on Claude Enterprise plans can set a maximum [effort level](
 * Levels above the cap aren't offered in the `/effort` picker, and naming a higher level with `--effort` or `/effort` runs at the cap instead. If you start a plain-text `--print` run with `--effort` above the cap, a warning on stderr names the requested and applied levels. In interactive sessions, with `json` or `stream-json` output, or in background agents, that warning goes to the [debug log](https://code.claude.com/docs/en/errors.md#configuration-warnings) instead.
 * Caps are per model, so switching models can change which levels are available.
 * When several of your roles grant the same model, the least restrictive cap applies.
+* If you see `Your organization limits effort for <model>` and need the higher level, ask an organization admin to raise the limit, then restart Claude Code.
+* If a request fails with `API Error: 400 Invalid effort level`, update to v2.1.314 or later and restart. If it still fails, remove any `output_config.effort` key from [`CLAUDE_CODE_EXTRA_BODY`](https://code.claude.com/docs/en/env-vars#variables).
 
 Effort limits are delivered together with [organization model restrictions](#organization-model-restrictions) and reach the same sessions.
 
@@ -519,7 +529,7 @@ The `opusplan` model alias provides an automated hybrid approach:
 
 This pairs Opus's reasoning for planning with Sonnet's efficiency for execution.
 
-The plan-mode Opus phase uses the same context window as the `opus` model setting, and the execution phase uses the same window as `sonnet`. When `opus` and `sonnet` resolve to models that run with the [1M context window](#extended-context) by default, as the current models do on the Anthropic API, both phases run with it. To request 1M context for both phases where they don't, [set the model](#setting-your-model) to `opusplan[1m]`, for example with `/model opusplan[1m]`. Setting it with `/model` requires Claude Code v2.1.265 or later; on earlier versions, use the `--model` flag or the `model` setting instead.
+To request the [1M context window](#extended-context) where `opus` and `sonnet` don't have it by default, [set the model](#setting-your-model) to `opusplan[1m]`, for example with `/model opusplan[1m]`. Setting it with `/model` requires Claude Code v2.1.265 or later; on earlier versions, use the `--model` flag or the `model` setting instead.
 
 When [`availableModels`](#restrict-model-selection) excludes the newest Opus but permits an older version, for example `["sonnet", "claude-opus-4-6"]`, `opusplan` uses the newest permitted Opus for planning and stays on Sonnet only when every Opus is excluded. A Haiku session that would normally upgrade to Sonnet in plan mode likewise uses the newest permitted Sonnet, and stays on Haiku only when every Sonnet is excluded. Before v2.1.205, plan mode stayed on the session's model whenever the newest version of the upgrade family was excluded, even when the allowlist permitted an older one.
 
@@ -765,7 +775,7 @@ A [`maxEffortLevel`](https://code.claude.com/docs/en/settings-reference#maxeffor
 
 #### Effort level of subagents and teammates
 
-On the main conversation's model, a [subagent](https://code.claude.com/docs/en/sub-agents.md#choose-an-effort-level) or [teammate](https://code.claude.com/docs/en/agent-teams.md#specify-teammates-and-models) with no `effort` of its own runs at the level you pick in the session or set with `--effort`. On another model, that level doesn't apply. To pick a subagent's level, set `effort` in its definition.
+On the main conversation's model, a [subagent](https://code.claude.com/docs/en/sub-agents.md#choose-an-effort-level) or [teammate](https://code.claude.com/docs/en/agent-teams.md#specify-teammates-and-models) with [no other level set](https://code.claude.com/docs/en/sub-agents.md#when-a-subagent-has-no-effort-field-or-parameter) runs at the level you pick in the session or set with `--effort`. On another model, that level doesn't apply. To pick a subagent's level, set `effort` in its definition.
 
 #### Check the effort level you set
 
@@ -896,7 +906,7 @@ You can set the auto-compact window in these places:
 * **In scripts and cloud environments**: set [`CLAUDE_CODE_AUTO_COMPACT_WINDOW`](https://code.claude.com/docs/en/env-vars) to a token count such as `200000`. Unless Claude Code [ignores the value](#claude_code_auto_compact_window-values), the variable takes precedence over the command, the flag, and the `autoCompactWindow` setting. `/autocompact` then reports the override without saving. The status line's `used_percentage` measures against the model's full context window, so while the variable is set, that percentage doesn't indicate when compaction will run.
 * **For one subagent**: see [Set the auto-compact window for one subagent](https://code.claude.com/docs/en/sub-agents.md#subagent-auto-compact-window).
 
-The command and the flag accept a window size from 100K to 1M tokens, in any of these forms:
+The command and the flag accept a window size of 100K tokens or more, in any of these forms:
 
 * A plain token count, such as `200000`
 * A `k` or `M` suffix, such as `500k` or `1M`
@@ -906,7 +916,7 @@ Whichever way you set the window, Claude Code caps it at the model's context win
 
 #### Values and warnings for `CLAUDE_CODE_AUTO_COMPACT_WINDOW`
 
-A warning that quotes your `CLAUDE_CODE_AUTO_COMPACT_WINDOW` value means the value falls outside 100,000 to 1,000,000 or isn't a token count. To stop the warning, set a number in that range, such as `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000`. On Claude Code v2.1.304 or later, you can also write the number with `k` for thousands or `M` for millions, as in `200k` or `1M`.
+A warning that quotes your `CLAUDE_CODE_AUTO_COMPACT_WINDOW` value means your session isn't using the value as you set it. To stop the warning, set a number such as `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000`. On Claude Code v2.1.304 or later, you can also write the number with `k` for thousands or `M` for millions, as in `200k` or `1M`.
 
 Find your warning's wording in the first column, then read across for the window your session uses and what to change:
 
@@ -1051,7 +1061,7 @@ For a model that reaches 1M through its `[1m]` variant, such as Opus 4.6 or Sonn
 export ANTHROPIC_DEFAULT_OPUS_MODEL='claude-opus-4-6[1m]'
 ```
 
-With the `[1m]` suffix, the 1M context window applies to all usage of the pinned alias, including the plan-mode Opus phase of [`opusplan`](#opusplan-model-setting) and [subagents](https://code.claude.com/docs/en/sub-agents.md#choose-a-model) whose `model` frontmatter names the alias.
+With the `[1m]` suffix, the pinned alias runs with the 1M context window.
 
 * Claude Code strips the suffix before sending the model ID to your provider.
 * Only append `[1m]` when the underlying model [supports 1M context](https://platform.claude.com/docs/en/build-with-claude/context-windows#context-window-sizes-by-model).
@@ -1061,9 +1071,7 @@ When you set an `ANTHROPIC_DEFAULT_*_MODEL` variable, the `/model` picker shows 
 
 > [!NOTE]
 >
-> An `availableModels` allowlist delivered through [MDM or a managed settings file](https://code.claude.com/docs/en/managed-settings.md#delivery-mechanisms) still applies when using third-party providers; [server-managed settings are not delivered there](https://code.claude.com/docs/en/server-managed-settings.md#platform-availability).
->
-> Filtering matches on a model alias such as `opus`, a version prefix such as `claude-opus-4-8`, or the full provider-form model ID. Provider-specific prefixes such as `us.anthropic.` are not stripped, so to allow a specific model, map it through [`modelOverrides`](#override-model-ids-per-version) or list its full provider-form ID:
+> [`availableModels`](#restrict-model-selection) filtering matches on a model alias such as `opus`, a version prefix such as `claude-opus-4-8`, or the full provider-form model ID. Provider-specific prefixes such as `us.anthropic.` are not stripped, so to allow a specific model, map it through [`modelOverrides`](#override-model-ids-per-version) or list its full provider-form ID:
 >
 > * **Google Cloud's Agent Platform**: when the ID Claude Code requests carries an `@` date, such as `claude-sonnet-4-5@20250929`, include the date in your allowlist entry. On its own, `claude-sonnet-4-5` doesn't match that ID under either [`availableModelsMatch`](https://code.claude.com/docs/en/settings-reference#availablemodelsmatch) setting.
 > * **Pinned models**: list the value you set in the model's `ANTHROPIC_DEFAULT_*_MODEL` variable

@@ -1,10 +1,10 @@
 ---
 source_url: https://code.claude.com/docs/en/statusline
-fetched_at: '2026-11-16T21:15:49.290885+00:00'
+fetched_at: '2026-11-20T09:13:57.624694+00:00'
 fidelity: converted
-source_sha256: 604a14fea0f6c834d0bf6d472efcee7630f9b0cba1a34c5da90364c3c6d93904
+source_sha256: 6ed6ebdc024cf470219ffb455831185b524fd76d01e9d4cafba4a069c3a33cb4
 licence: unreviewed
-stale_after: '2027-02-14'
+stale_after: '2027-02-18'
 fetch_method: agent-browser-lite-headless (accept-markdown)
 value_swaps:
 - kind: session-uuid
@@ -30,7 +30,7 @@ Status lines are useful when you:
 * Work across multiple sessions and need to distinguish them
 * Want git branch and status always visible
 
-The status line renders in its own row above the built-in footer badges and does not replace them. With a custom status line configured, Claude Code stops showing most of the footer's keyboard hints, including `esc to interrupt`, the `? for shortcuts` fallback, and the `hold space to speak` [voice dictation](https://code.claude.com/docs/en/voice-dictation.md) hint. To add clickable link badges to the footer when an ID appears in the conversation, without writing a script, configure [`footerLinksRegexes`](https://code.claude.com/docs/en/settings-reference#footerlinksregexes) instead.
+The status line renders in its own row above the built-in footer badges and doesn't replace them. With a custom status line configured, Claude Code stops showing some footer hints, such as `? for shortcuts` and the `hold space to speak` [voice dictation](https://code.claude.com/docs/en/voice-dictation.md) hint. To add clickable link badges to the footer when an ID appears in the conversation, without writing a script, configure [`footerLinksRegexes`](https://code.claude.com/docs/en/settings-reference#footerlinksregexes) instead.
 
 Here's an example of a [multi-line status line](#display-multiple-lines) that displays git info on the first line and a color-coded context bar on the second.
 

@@ -462,8 +462,9 @@ class Priority:
     BRANCH_CREATION_GUARD = 40
 
     # Plan 00619: the branch pool warning ladder, said on every tool call. Context
-    # only and never terminal; it sits early so a later terminal allow cannot end
-    # the chain before the warning is gathered.
+    # only and never terminal; it sits early because a terminal DENY ends the
+    # chain, so a later slot would lose the warning on every denied call (an
+    # ALLOW never ends the chain).
     BRANCH_POOL_PRESSURE_ADVISOR = 20
 
     # Plan 00602: judges a foreground Bash call's length by shape. Same band
@@ -628,6 +629,9 @@ class Priority:
     # Plan 00474 N523: enabled relay with an unusable binary. Shares slot 72 for
     # the same reason: cheap, silent when clean, and the band is full.
     RELAY_BINARY_CHECKER = 72
+    # Plan 00621 Task 2.2: suggest the workflow linter. Shares slot 72 for the
+    # same reason: cheap, silent when not applicable, and the band is full.
+    WORKFLOW_LINTER_ADVISOR = 72
     # Plan 00416 Task 2.3: the supervisor directive sensor -- so ADVISORY_MAX
     # widens by one again. Last is REQUIRED here, not merely tidy: it counts
     # what is still ACTION_REQUIRED after every other handler has run, and
