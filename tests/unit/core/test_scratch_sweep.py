@@ -12,6 +12,8 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from claude_code_hooks_daemon.config.models import ScratchConfig
 from claude_code_hooks_daemon.core.scratch_filing import HINT_TRACKED
 from claude_code_hooks_daemon.core.scratch_liveness import BackgroundRecords, LivenessInputs
@@ -668,6 +670,81 @@ class TestCrossEntryDependencies:
         assert _verdicts(report)["a"] == "STUCK"
         assert not report.complete
         assert any("b/.git" in reason for reason in report.incomplete_reasons)
+
+    def test_n1_an_entry_lending_its_objects_is_protected(self, tmp_path: Path) -> None:
+        """N1: ``git clone --shared`` leaves the borrower needing the lender's objects."""
+        gp = build_git_project(tmp_path)
+        lender = gp.standalone("lender")
+        borrower = gp.tree.root / "borrower"
+        git(gp.tree.root, "clone", "-q", "--shared", str(lender), str(borrower))
+        (borrower / "new.txt").write_text("work\n")
+        git(borrower, "add", "new.txt")
+        git(borrower, "commit", "-q", "-m", "work")
+        now = _now()
+        _old(gp.tree, now)
+        report = _git_sweep(gp, now)
+        assert _verdicts(report)["lender"] == "PROTECTED"
+        row = next(row for row in report.rows if row.name == "lender")
+        assert "borrower/.git/objects/info/alternates" in " ".join(row.reasons)
+
+    @pytest.mark.parametrize("relative", [True, False])
+    def test_n1_an_alternates_line_relative_or_absolute_is_mapped(
+        self, tmp_path: Path, relative: bool
+    ) -> None:
+        gp = build_git_project(tmp_path)
+        gp.standalone("a")
+        gp.standalone("b")
+        target = "../../../a/.git/objects" if relative else str(gp.tree.root / "a/.git/objects")
+        alternates = gp.tree.root / "b/.git/objects/info/alternates"
+        alternates.parent.mkdir(parents=True, exist_ok=True)
+        alternates.write_text(f"# a comment\n\n{target}\n")
+        now = _now()
+        _old(gp.tree, now)
+        verdicts = _verdicts(_git_sweep(gp, now))
+        assert verdicts["a"] == "PROTECTED"
+
+    def test_n1_an_alternates_line_into_its_own_entry_changes_nothing(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        gp.standalone("e/one")
+        gp.standalone("e/two")
+        alternates = gp.tree.root / "e/two/.git/objects/info/alternates"
+        alternates.parent.mkdir(parents=True, exist_ok=True)
+        alternates.write_text("../../../one/.git/objects\n")
+        now = _now()
+        _old(gp.tree, now)
+        report = _git_sweep(gp, now)
+        # The borrower is related (it borrows objects), so ``e`` is PROTECTED on its
+        # own account; the cross-entry pass must add no dependency of its own.
+        assert report.complete
+        assert not any("depends on this one" in r for row in report.rows for r in row.reasons)
+
+    @pytest.mark.parametrize("shape", ["fifo", "oversize", "link", "quoted"])
+    def test_n1_an_unreadable_alternates_file_makes_disposable_rows_stuck(
+        self, tmp_path: Path, shape: str
+    ) -> None:
+        gp = build_git_project(tmp_path)
+        gp.standalone("a")
+        gp.standalone("b")
+        alternates = gp.tree.root / "b/.git/objects/info/alternates"
+        alternates.parent.mkdir(parents=True, exist_ok=True)
+        if shape == "fifo":
+            os.mkfifo(alternates)
+        elif shape == "oversize":
+            alternates.write_text(f"{gp.tree.root / 'a/.git/objects'}\n" * 10_000)
+        elif shape == "quoted":
+            quoted = str(gp.tree.root / "a/.git/obj") + "\\145cts"
+            alternates.write_text(f'"{quoted}"\n')
+        else:
+            (gp.tree.root / "b/alt.txt").write_text(f"{gp.tree.root / 'a/.git/objects'}\n")
+            alternates.symlink_to(gp.tree.root / "b/alt.txt")
+        now = _now()
+        _old(gp.tree, now)
+        report = _git_sweep(gp, now)
+        verdicts = _verdicts(report)
+        assert verdicts["a"] != "DISPOSABLE"
+        assert verdicts["b"] != "DISPOSABLE"
+        assert not report.complete
+        assert any("alternates" in reason for reason in report.incomplete_reasons)
 
     def test_an_entry_not_walked_to_the_end_makes_disposable_rows_stuck(
         self, tmp_path: Path

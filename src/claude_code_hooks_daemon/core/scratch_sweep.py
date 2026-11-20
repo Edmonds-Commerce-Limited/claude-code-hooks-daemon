@@ -338,9 +338,10 @@ def _entry_of(path: Path, root: Path) -> str | None:
 def _entry_pointers(
     root: Path, resolved_root: Path, name: str, walk: Bounded[EntryStats]
 ) -> _Pointers:
-    """Where entry ``name``'s ``.git`` files and ``commondir`` files point, outside itself.
+    """Where entry ``name``'s ``.git``, ``commondir`` and ``alternates`` files point, outside itself.
 
-    Both the lexical and the resolved target are mapped to an entry; the pointer
+    Every ``objects/info/alternates`` file in the entry is read, whatever
+    repository holds it, and each line maps its lender to an entry (N1). Both the lexical and the resolved target are mapped to an entry; the pointer
     text itself is never reported, only the path of the file holding it.
     """
     if not walk.complete:
@@ -366,13 +367,54 @@ def _entry_pointers(
         if pointer is None:
             unknown.append(pointer_file)
             continue
-        lexical = Path(os.path.normpath(base / pointer))
-        targets = {
-            _entry_of(lexical, root),
-            _entry_of(Path(os.path.realpath(lexical)), resolved_root),
-        }
-        into.update((target, pointer_file) for target in targets if target and target != name)
+        into.update(_into(root, resolved_root, name, base, pointer, pointer_file))
+    for node in walk.value.nodes:
+        if node.path == _ALTERNATES or node.path.endswith(f"/{_ALTERNATES}"):
+            lines = _alternates_lines(root / node.path)
+            if lines is None:
+                unknown.append(node.path)
+                continue
+            objects = (root / node.path).parent.parent
+            for line in lines:
+                into.update(_into(root, resolved_root, name, objects, line, node.path))
     return _Pointers(tuple(sorted(into)), tuple(unknown))
+
+
+#: A repository's list of other object stores it borrows from (N1).
+_ALTERNATES = "objects/info/alternates"
+
+
+def _alternates_lines(path: Path) -> list[str] | None:
+    """Every object-store path an ``alternates`` file names; None when it cannot be read whole.
+
+    Read as a small regular file, never through a link. Blank and ``#`` lines are
+    skipped as git skips them; a C-quoted line (``"..."``) is not decoded, so the
+    file is unknown rather than guessed at.
+    """
+    raw = read_small_regular_file(path)
+    if raw is None:
+        return None
+    lines: list[str] = []
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        text = line.strip()
+        if not text or text.startswith("#"):
+            continue
+        if text.startswith('"'):
+            return None
+        lines.append(text)
+    return lines
+
+
+def _into(
+    root: Path, resolved_root: Path, name: str, base: Path, pointer: str, source: str
+) -> set[tuple[str, str]]:
+    """The other entries ``pointer`` (relative to ``base``) leads into, lexically or resolved."""
+    lexical = Path(os.path.normpath(base / pointer))
+    targets = {
+        _entry_of(lexical, root),
+        _entry_of(Path(os.path.realpath(lexical)), resolved_root),
+    }
+    return {(target, source) for target in targets if target and target != name}
 
 
 def _with_dependencies(
