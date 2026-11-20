@@ -1,6 +1,6 @@
 # Plan 00627: handoff after Tasks 2.1 and 2.2
 
-Branch `agent-acff915e4bf3b86e6-0a26f829`, pushed, not merged. `origin/main` (`bff40f26e`) was already contained, so no merge was needed and `config-changes/v3.77.0.yaml` is untouched. The work is commit `2a66d96ea`; this handoff is the commit after it. The earlier handoff is [261120-r7-overturn-and-untracked-ttl-handoff.md](261120-r7-overturn-and-untracked-ttl-handoff.md). Journal: `JOURNAL/2026-11-20/155251Z-action-b79bc6.md`.
+Branch `agent-acff915e4bf3b86e6-0a26f829`, pushed, not merged. The work is in commits `2a66d96ea` and `0ab0a037f`. `origin/main` was merged in afterwards (`6290ac524`) with no conflict, and `config-changes/v3.77.0.yaml` is untouched. The earlier handoff is [261120-r7-overturn-and-untracked-ttl-handoff.md](261120-r7-overturn-and-untracked-ttl-handoff.md). Journal: `JOURNAL/2026-11-20/155251Z-action-b79bc6.md`.
 
 ## Done (2a66d96ea)
 
@@ -19,7 +19,15 @@ Branch `agent-acff915e4bf3b86e6-0a26f829`, pushed, not merged. `origin/main` (`b
 - **CLI.** `scratch-sweep` builds the `ProjectGit` from `branches.remote` and `resolve_remote_default_branch`. Its help text is updated.
 - **`tests/support/scratch_tree.py`** gains `build_git_project` (real repositories, a local bare `origin`), `git`, `commit_file` and `quiet_project_git`.
 
-Targeted QA: 200 tests pass across the scratch, roots, CLI and support tests. ruff, black and `mypy --strict` are clean on every touched file.
+## Done (0ab0a037f, after an advisor review)
+
+- `resolve_sweep_root` refuses a root at or inside a repository below `untracked/`: a `.git` of any type, or the bare shape, at the root or any directory between it and `untracked/`. Without this, `--root untracked/scratch/<clone>` judged the clone's files as loose entries.
+- P4 covers a tracked file only by exact path. Only a git directory (`RepoFindings.p4_git_dirs`) covers its subtree.
+- `ls-files -v`: an `assume-unchanged` or `skip-worktree` entry protects a related clone, because `status` cannot see its edits.
+- A failed project `ls-files` makes the report incomplete, not just a note.
+- Release note 017 says PROTECTED, not REPOSITORY, and states the `--root` limit.
+
+Targeted QA after the merge: 272 tests pass (the sets below, plus `tests/unit/config/test_scratch_config.py`). Before that: 200 tests pass across the scratch, roots, CLI and support tests. ruff, black and `mypy --strict` are clean on every touched file.
 
 ## Remaining
 
@@ -49,4 +57,5 @@ Targeted QA: 200 tests pass across the scratch, roots, CLI and support tests. ru
    - A worktree deletion is accepted, because the content is in a pushed commit.
 4. **Root reach** is lexical plus `realpath`; see `untracked_roots.py`. The tracked-file check runs per sweep, not per entry. Between that check and a later `--apply`, a file could become tracked. Phase 3's re-classification must repeat it.
 5. **The index-rewrite test** (`test_a_stat_dirty_tracked_file_does_not_rewrite_the_nested_index` and the CLI inode test over a real stat-dirty clone) passes. It was not shown failing with a plain runner, because `run_git` forces `GIT_OPTIONAL_LOCKS=0` for every caller.
-6. **`hash-object` follows a link.** It runs on regular files checked with `lstat` first. A link swapped in between would hash, never print, the target. Dry run only.
+6. **Reflog-only commits are not checked.** A clone with a local commit that was then reset away (reachable only from the reflog or `ORIG_HEAD`) reads as clean and pushed, and is P4. The design covers "every ref tip and HEAD" only. Not built: it is listed for the review.
+7. **`hash-object` follows a link.** It runs on regular files checked with `lstat` first. A link swapped in between would hash, never print, the target. Dry run only.
