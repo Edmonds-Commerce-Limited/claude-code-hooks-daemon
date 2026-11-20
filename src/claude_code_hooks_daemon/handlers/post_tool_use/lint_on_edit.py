@@ -636,18 +636,30 @@ class LintOnEditHandler(LazyLanguageFilterMixin[LintStrategyRegistry], PostToolU
 Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
 Dart file is linted immediately. A lint failure DENIES the tool call.
 
-**Ansible YAML is covered too, and only Ansible YAML.** A `.yml`/`.yaml` file is
-linted when it is plausibly a playbook or a role task file — by Ansible's own
-conventions (`playbooks/`, `roles/`, `tasks/`, `handlers/`, `site.yml`,
-`play-*`, `playbook-*`) or by carrying a top-level `- hosts:` / `- import_playbook:`
-line wherever it sits. Everything else sharing the extension is left alone:
-`.github/workflows/`, `hooks-daemon.yaml`, `docker-compose*`, `group_vars/`,
-`host_vars/`, inventories, and any vault file (never read — it is encrypted).
-The cheap tier is `ansible-playbook --syntax-check`, which is what catches a
+**YAML is linted in two cases only: Ansible plays and GitHub workflows.** A
+`.yml`/`.yaml` file is linted as Ansible when it is plausibly a playbook or a
+role task file — by Ansible's own conventions (`playbooks/`, `roles/`, `tasks/`,
+`handlers/`, `site.yml`, `play-*`, `playbook-*`) or by carrying a top-level
+`- hosts:` / `- import_playbook:` line wherever it sits. A file directly inside a
+`.github/workflows/` directory is linted as a GitHub workflow (below). Everything
+else sharing the extension is not linted: `hooks-daemon.yaml`, `docker-compose*`,
+`.github/dependabot.yml`, `group_vars/`, `host_vars/`, inventories, and any vault
+file (never read — it is encrypted). The Ansible cheap tier is `ansible-playbook --syntax-check`, which is what catches a
 play that will not LOAD: an unbalanced quote inside a `shell:` block aborts the
 whole play at parse time, before `#` means comment. Full `ansible-lint` runs at
 the `extended` tier. The linter runs from the nearest directory containing
 `ansible.cfg`, because roles and collections resolve relative to it.
+
+**GitHub workflows go to the optional `actions-qa` linter.** A file directly
+inside `.github/workflows/` is run through `actions-qa check --file <path>` (the
+`actions-qa-ci` project), which owns the rule set. Only exit 1 (findings)
+DENIES, with the linter's output. Any other non-zero exit (a wrong command line,
+a failed toolchain, no verdict, a file outside a repository root's workflows) is
+not a finding: the write is ALLOWED with an advisory that the file was
+NOT checked, quoting the linter's first line. When `actions-qa` is not installed the
+edit is allowed and lint_on_edit prints nothing; suggesting the linter is
+`workflow_linter_advisor`'s job, at session start. Its budget is
+`options.timeouts."GitHub Workflow"` (15s by default).
 
 **Rust is checked as a module of its crate, without building the crate.** `rustc`
 runs from the directory of the nearest `Cargo.toml`, with that crate's edition
@@ -690,7 +702,10 @@ daemon's venv before `PATH`.
 
 **A linter that is not installed never blocks.** You get an advisory saying it
 was not found and the write stands — so that message means the check was
-SKIPPED, not that it passed. That leniency is specific to THIS handler:
+SKIPPED, not that it passed. The one exception is the optional workflow linter
+above, which is silent when missing. Likewise an advisory saying a file was NOT
+checked (the tool could not analyse it, or exited with a code that is not a
+finding) means skipped, not passed. That leniency is specific to THIS handler:
 `.ts`/`.tsx` files are handled by `validate_eslint_on_write`, which denies on
 a timeout and on any failure to run ESLint.
 

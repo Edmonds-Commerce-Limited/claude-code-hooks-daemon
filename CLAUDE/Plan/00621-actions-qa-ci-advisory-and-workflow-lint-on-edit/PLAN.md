@@ -57,17 +57,22 @@ three. The tool was run on 2026-11-20 (Task 1.1); the design fails open on any b
   against a stub linter, with the tests DESIGN.md section 3 lists, including that Ansible files still resolve to the
   Ansible strategy. `staged_lint_gate` applies the same exit-code contract (a gap the design did not name; journal
   2026-11-20).
-- [ ] ⬜ **Task 2.2**: Slice 2. The `workflow_linter_advisor` session-start handler, with tests for each trigger and
-  silence case.
-- [ ] ⬜ **Task 2.3**: Slice 3. Handler guidance, config documentation and a release note.
+- [x] ✅ **Task 2.2**: Slice 2. The `workflow_linter_advisor` session-start handler, with tests for each trigger and
+  silence case. New sessions only (the sibling `is_resume_session` convention); an unreadable workflow is named and
+  never counts as using the linter.
+- [x] ✅ **Task 2.3**: Slice 3. Handler guidance (`lint_on_edit`, `staged_lint_gate` and its rule, the handler
+  reference), config documentation (`v3.76.0.yaml`) and a release note. The generated `<hooksdaemon>` block follows
+  the corrected `get_claude_md()` sources when it is regenerated on main.
 
 ## Success Criteria
 
 - [ ] The strategy and the handler are covered by tests and pass targeted QA.
-- [ ] The design was settled before the build (done under the owner's delegation, DESIGN.md).
+- [x] The design was settled before the build (done under the owner's delegation, DESIGN.md).
 - [x] The real linter was run once and its behaviour matches what the strategy assumes, or the strategy was changed to
   match (Task 1.1).
-- [ ] The release-bound consequences are recorded in the pending-release holding area (the release note).
+- [x] The release-bound consequences are recorded in the pending-release holding area:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/013-github-workflows-linted-on-edit-by-actions-qa.md` and two entries in
+  `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.76.0.yaml`.
 
 ## Delivery & Milestones
 

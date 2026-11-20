@@ -3989,13 +3989,21 @@ handlers:
 plausibly a playbook or role task file — by Ansible's own path conventions
 (`playbooks/`, `roles/`, `tasks/`, `handlers/`, `site.yml`, `play-*`,
 `playbook-*`) or by carrying a top-level `- hosts:` / `- import_playbook:`
-line wherever it sits. Everything else sharing the extension is left alone
-(`.github/workflows/`, `docker-compose*`, `group_vars/`, `host_vars/`,
-inventories, vault files — never read). The cheap tier is
+line wherever it sits. A file directly in `.github/workflows/` goes to the
+workflow linter below; everything else sharing the extension is not linted
+(`docker-compose*`, `group_vars/`, `host_vars/`, inventories, vault files —
+never read). The cheap tier is
 `ansible-playbook --syntax-check`, which catches a play that will not LOAD
 (e.g. an unbalanced quote inside a `shell:` block); full `ansible-lint` runs
 at the `extended` tier. The linter runs from the nearest directory containing
 `ansible.cfg`, because roles and collections resolve relative to it.
+
+**GitHub workflows** (Plan 00621): a file directly in `.github/workflows/` is
+run through the optional `actions-qa check --file` linter (the
+[actions-qa-ci](https://github.com/LongTermSupport/actions-qa-ci/releases)
+project). Only its findings exit (1) DENIES; any other exit ALLOWs with a "NOT
+checked" advisory, and a missing linter is silent (`workflow_linter_advisor`
+suggests it at session start). Budget: `options.timeouts."GitHub Workflow"`.
 
 **Rust** (GitHub #76): `rustc` runs from the nearest `Cargo.toml` with that
 crate's edition (`package.edition`, or `[workspace.package].edition` when the
@@ -4006,12 +4014,13 @@ means it cannot be resolved outside its crate (`E0432`, `E0433`, `E0463`,
 checked. Syntax errors and other compiler errors still DENY. A `command_overrides`
 template may use `{edition}` as a whole argument; one without it is run as written.
 
-| Option              | Values         | Default | Effect                                                                                          |
-| ------------------- | -------------- | ------- | ----------------------------------------------------------------------------------------------- |
-| `lint_bash_writes`  | `true`/`false` | `true`  | Lint files authored by a Bash command. `false` restricts the handler to `Write`/`Edit` only.    |
-| `languages`         | list           | all     | Restrict which languages are checked.                                                           |
-| `command_overrides` | map            | none    | Replace a language's `default`/`extended` command; `extended: null` runs only the syntax check. |
-| `exclude_paths`     | glob list      | none    | Exempt paths entirely; unions with `daemon.exclude_paths`.                                      |
+| Option              | Values         | Default | Effect                                                                                            |
+| ------------------- | -------------- | ------- | ------------------------------------------------------------------------------------------------- |
+| `lint_bash_writes`  | `true`/`false` | `true`  | Lint files authored by a Bash command. `false` restricts the handler to `Write`/`Edit` only.      |
+| `languages`         | list           | all     | Restrict which languages are checked.                                                             |
+| `command_overrides` | map            | none    | Replace a language's `default`/`extended` command; `extended: null` runs only the syntax check.   |
+| `exclude_paths`     | glob list      | none    | Exempt paths entirely; unions with `daemon.exclude_paths`.                                        |
+| `timeouts`          | map            | 15s     | Per-language budget in seconds (e.g. `"GitHub Workflow": 30`); a timeout ALLOWs with an advisory. |
 
 **Config example:**
 
