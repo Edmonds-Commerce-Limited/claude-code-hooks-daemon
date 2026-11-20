@@ -81,7 +81,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [x] ✅ **Task 3.0**: Prerequisite for Tasks 3.8 and 3.9. Close DESIGN.md section 13 rows N1 (alternates lender PROTECTED), N2 (`--separate-git-dir`), N3 (venv layout and `_is_venv`), N4 (`./` and `//` sub-root spelling) and the reflog/`ORIG_HEAD` row, test-first (a failing test per row, then the fix). From the 261120 re-review: Phases 1-2 are safe to merge as a dry run only; DISPOSABLE is not yet safe to act on.
 - [x] ✅ **Task 3.1**: Add the store: flat layout, mode 0700, `index.jsonl`, `flock`.
 - [x] ✅ **Task 3.2**: Add claim-by-rename through a directory descriptor, with the fingerprint re-check and rename-back.
-- [ ] ⬜ **Task 3.3**: Add pack and bidirectional verify (GNU tar by argv, `tar --compare`, member count, SHA-256, `fsync`), including the special-file skip list and the link-count refusal.
+- [x] ✅ **Task 3.3**: Add pack and bidirectional verify (GNU tar by argv, `tar --compare`, member count, SHA-256, `fsync`), including the special-file skip list and the link-count refusal.
 - [ ] ⬜ **Task 3.4**: Add descriptor-based removal of a claimed tree, and resumption of a leftover `.sweeping-` tree.
 - [ ] ⬜ **Task 3.5**: Add batch packing of loose files by run and verdict.
 - [ ] ⬜ **Task 3.6**: Add expiry by verdict retention, `restore <id>` and `keep` (bounded, reasoned, no repeated reason).
