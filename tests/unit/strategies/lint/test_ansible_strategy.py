@@ -207,6 +207,29 @@ class TestRegistryIntegration:
 
         assert strategy is None or strategy.language_name != "Ansible"
 
+    def test_workflow_probe_content_is_the_clean_workflow_sample(self) -> None:
+        """Plan 00621 Task 1.1: the "not claimed" probe also reaches the workflow
+        strategy, and actions-qa v0.2.0 found three findings in its old content
+        (`on: push` with `jobs: {}`), so on a host with the linter it would have
+        DENIED for a reason unrelated to Ansible. It now carries the one sample
+        measured clean, so its ALLOW holds whether or not the linter is installed.
+        """
+        from claude_code_hooks_daemon.strategies.lint.github_workflow_strategy import (
+            CLEAN_WORKFLOW_SAMPLE,
+        )
+
+        workflow_probes = [
+            test
+            for test in AnsibleLintStrategy().get_acceptance_tests()
+            if test.tool_payload is not None
+            and "/.github/workflows/" in test.tool_payload.tool_input["file_path"]
+        ]
+
+        assert workflow_probes
+        for test in workflow_probes:
+            assert test.tool_payload is not None
+            assert test.tool_payload.tool_input["content"] == CLEAN_WORKFLOW_SAMPLE
+
     def test_a_non_narrowing_strategy_is_unaffected(self) -> None:
         """Eight strategies do not implement the capability and must keep
         matching on extension alone."""

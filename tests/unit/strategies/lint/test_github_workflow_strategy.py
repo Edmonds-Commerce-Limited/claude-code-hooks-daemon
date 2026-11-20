@@ -10,6 +10,8 @@ is a failure, and its absence prints nothing.
 from __future__ import annotations
 
 import shlex
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -140,3 +142,50 @@ class TestAcceptanceTests:
             assert test.tool_payload is not None
             file_path = test.tool_payload.tool_input["file_path"]
             assert strategy.handles_file(file_path), file_path
+
+    def test_each_probe_fixture_root_is_its_own_repository(
+        self, strategy: GitHubWorkflowLintStrategy
+    ) -> None:
+        """Task 1.1, measured against actions-qa v0.2.0: the linter analyses only the
+        `.github/workflows/` of the nearest repository root, and exits 2 ("no lane
+        analyses") for one anywhere below it. Inside a project the acceptance root is
+        a subdirectory, so without its own `.git` the DENY probe is ALLOWED unchecked.
+        """
+        for test in strategy.get_acceptance_tests():
+            assert test.tool_payload is not None
+            fixture_root = Path(test.tool_payload.tool_input["file_path"]).parent.parent.parent
+            assert f"git init -q {fixture_root}" in test.setup_commands, test.title
+
+
+_REAL_LINTER = shutil.which("actions-qa")
+
+
+@pytest.mark.skipif(_REAL_LINTER is None, reason="actions-qa is not installed (optional linter)")
+class TestProbesAgainstTheRealLinter:
+    """Each probe's content gives the exit code its expected decision assumes."""
+
+    def test_probe_content_gives_the_expected_exit_code(
+        self, strategy: GitHubWorkflowLintStrategy, tmp_path: Path
+    ) -> None:
+        assert _REAL_LINTER is not None
+        expected_exit = {Decision.ALLOW: 0, Decision.DENY: 1}
+        for test in strategy.get_acceptance_tests():
+            assert test.tool_payload is not None
+            name = Path(test.tool_payload.tool_input["file_path"]).name
+            repo = tmp_path / name
+            target = repo / ".github" / "workflows" / name
+            target.parent.mkdir(parents=True)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            target.write_text(test.tool_payload.tool_input["content"], encoding="utf-8")
+            result = subprocess.run(
+                [_REAL_LINTER, "check", "--file", str(target)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+            assert result.returncode == expected_exit[test.expected_decision], (
+                test.title,
+                result.stdout,
+                result.stderr,
+            )

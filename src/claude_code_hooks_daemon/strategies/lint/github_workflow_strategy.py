@@ -44,7 +44,10 @@ _GITHUB_DIR: Final = ".github"
 #: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR: Final = "acceptance-test-lint-github-workflow"
 
-_VALID_WORKFLOW: Final = (
+#: A workflow actions-qa v0.2.0 reports 0 findings for (Task 1.1). Shared with
+#: the Ansible "a workflow is not claimed" probe, which this strategy also sees:
+#: its ALLOW must not depend on whether the linter is installed.
+CLEAN_WORKFLOW_SAMPLE: Final = (
     "name: ci\n"
     "on:\n"
     "  pull_request:\n"
@@ -123,11 +126,15 @@ class GitHubWorkflowLintStrategy:
 
         fixture_root = acceptance_path(_FIXTURE_DIR)
         workflows = acceptance_path(_FIXTURE_DIR, _GITHUB_DIR, _WORKFLOWS_DIR)
+        # actions-qa analyses only the `.github/workflows/` of the nearest
+        # repository root and exits 2 for one below it (measured, Task 1.1),
+        # so the fixture root must be a repository of its own.
+        setup = [f"mkdir -p {workflows}", f"git init -q {fixture_root}"]
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
                 "file_path": acceptance_path(_FIXTURE_DIR, _GITHUB_DIR, _WORKFLOWS_DIR, "ok.yml"),
-                "content": _VALID_WORKFLOW,
+                "content": CLEAN_WORKFLOW_SAMPLE,
             },
         )
         probe_faulty = ToolPayload(
@@ -156,7 +163,7 @@ class GitHubWorkflowLintStrategy:
                     "Creates a temporary workflow file."
                 ),
                 test_type=TestType.ADVISORY,
-                setup_commands=[f"mkdir -p {workflows}"],
+                setup_commands=setup,
                 cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
@@ -180,7 +187,7 @@ class GitHubWorkflowLintStrategy:
                     "Creates a temporary faulty workflow file."
                 ),
                 test_type=TestType.BLOCKING,
-                setup_commands=[f"mkdir -p {workflows}"],
+                setup_commands=setup,
                 cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
