@@ -91,13 +91,15 @@ class TestAProtectedCopyIsReported:
         text = format_report_for_llm(report)
         assert _SECRET_CONTENT.strip() not in text
 
-    def test_the_text_names_the_section_and_does_not_advise_a_link(self, repo: Path) -> None:
+    def test_the_text_names_the_section_and_points_at_symlink_mode(self, repo: Path) -> None:
+        # The owner approved link mode for a protected file (Plan 00613 DESIGN,
+        # Owner decision), so the refusal now names the mode to use instead.
         text = format_report_for_llm(
             build_seed_report(repo, _config(_covering((VAULT, SEED_MODE_COPY))))
         )
         assert "REFUSED" in text
         assert "seed entry #2" in text
-        assert "mode: symlink" not in text
+        assert "mode: symlink" in text
 
     def test_the_configs_own_protected_paths_are_honoured(self, repo: Path) -> None:
         clean = build_seed_report(repo, _config(_covering(("deploy.key", SEED_MODE_COPY))))
