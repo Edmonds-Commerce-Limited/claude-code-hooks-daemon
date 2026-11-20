@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.core.scratch_walk import (
     list_entries,
     walk_entry,
 )
+from claude_code_hooks_daemon.core.untracked_roots import SweepRoot
 from claude_code_hooks_daemon.utils.path_containment import (
     path_is_relative_to,
     path_relative_to,
@@ -124,7 +125,7 @@ def _root_problem(root: Path) -> tuple[str, bool]:
 
 
 def run_sweep(
-    root: Path,
+    sweep_root: SweepRoot,
     *,
     config: ScratchConfig,
     now: float,
@@ -133,8 +134,18 @@ def run_sweep(
     project_root: Path,
     scandir: ScandirFn = os.scandir,
 ) -> SweepReport:
-    """Judge every entry of scratch root ``root``; read only."""
+    """Judge every entry of a resolved sweep root; read only.
+
+    The root comes from :func:`~claude_code_hooks_daemon.core.untracked_roots.resolve_sweep_root`,
+    so a refused root (``untracked/repos``, a reference root, a ``"*"`` TTL) is
+    reported and never listed, and an entry holding a never-swept path is skipped.
+    """
+    root = sweep_root.path
     notes: list[str] = [] if inputs.cwds else [NO_CWDS_NOTE]
+    if sweep_root.refusal or sweep_root.ttl_hours is None:
+        return SweepReport(str(root), (), False, (sweep_root.refusal,), tuple(notes))
+    ttl_hours = sweep_root.ttl_hours
+    notes.extend(sweep_root.notes)
     problem, absent = _root_problem(root)
     if absent:
         return SweepReport(str(root), (), True, (), (*notes, problem))
@@ -146,8 +157,18 @@ def run_sweep(
     resolved_root = root.resolve()
     relative_root = _relative(resolved_root, project_root.resolve())
     rows = [
-        _judge_entry(root, resolved_root, relative_root, name, config, now, budget, inputs, scandir)
+        _judge_entry(
+            root,
+            resolved_root,
+            relative_root,
+            name,
+            _EntryClock(ttl_hours, max(config.max_lifetime_hours, ttl_hours), now),
+            budget,
+            inputs,
+            scandir,
+        )
         for name in listing.value
+        if name not in sweep_root.skip
     ]
     if rows:
         # Phase 1 records no birth for any entry, so the note holds for every row: said once.
@@ -162,21 +183,30 @@ def run_sweep(
     return SweepReport(str(root), tuple(rows), not reasons, tuple(reasons), tuple(notes))
 
 
+@dataclass(frozen=True)
+class _EntryClock:
+    """The root's TTL, the lifetime backstop (never shorter than the TTL), and now."""
+
+    ttl_hours: int
+    max_lifetime_hours: int
+    now: float
+
+
 def _judge_entry(
     root: Path,
     resolved_root: Path,
     relative_root: str | None,
     name: str,
-    config: ScratchConfig,
-    now: float,
+    clock: _EntryClock,
     budget: WalkBudget,
     inputs: LivenessInputs,
     scandir: ScandirFn,
 ) -> EntryRow:
+    now = clock.now
     walk = walk_entry(root, name, now=now, budget=budget, scandir=scandir)
     stats = walk.value
     age = entry_age(
-        stats, now=now, ttl_hours=config.ttl_hours, max_lifetime_hours=config.max_lifetime_hours
+        stats, now=now, ttl_hours=clock.ttl_hours, max_lifetime_hours=clock.max_lifetime_hours
     )
     liveness = entry_liveness(
         resolved_root / name,

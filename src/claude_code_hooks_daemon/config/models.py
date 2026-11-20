@@ -5,6 +5,7 @@ validation, serialisation, and sensible defaults.
 """
 
 import logging
+import re
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Final, Literal, Self
@@ -2691,25 +2692,8 @@ class ScratchSweepConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    extra_roots: list[str] = Field(
-        default_factory=list,
-        description="Other agent-written ignored directories, relative to the project root",
-    )
     max_listed: Annotated[int, Field(ge=1)] = Field(default=50)
     unowned_entry: Literal["advise", "block", "off"] = Field(default="advise")
-
-    @field_validator("extra_roots")
-    @classmethod
-    def validate_extra_roots(cls, value: list[str]) -> list[str]:
-        """Each root must be a relative path inside the project, and not the project itself."""
-        for root in value:
-            parts = [part for part in root.split("/") if part not in ("", ".")]
-            if root.startswith("/") or not parts or ".." in parts:
-                raise ValueError(
-                    f"extra_roots: {root!r} must be a relative path inside the project, "
-                    "not the project root itself"
-                )
-        return value
 
 
 class ScratchArchiveConfig(BaseModel):
@@ -2737,15 +2721,58 @@ class ScratchFilingConfig(BaseModel):
     max_bytes: Annotated[int, Field(ge=1)] = Field(default=262_144)
 
 
+#: ``scratch.untracked_ttl`` value meaning "never cleared" (Plan 00627 DESIGN.md section 4.1).
+UNTRACKED_TTL_NEVER: Final[str] = "*"
+
+#: The built-in per-directory TTLs; a config map is merged over these.
+UNTRACKED_TTL_DEFAULTS: Final[dict[str, str]] = {"repos": UNTRACKED_TTL_NEVER, "scratch": "24h"}
+
+_TTL_PATTERN: Final[re.Pattern[str]] = re.compile(r"([1-9][0-9]*)([hd])")
+_HOURS_PER_UNIT: Final[dict[str, int]] = {"h": 1, "d": 24}
+
+
+def untracked_ttl_hours(value: str) -> int | None:
+    """Hours for a valid TTL value, None for ``"*"``; raises ValueError for anything else."""
+    if value == UNTRACKED_TTL_NEVER:
+        return None
+    match = _TTL_PATTERN.fullmatch(value)
+    if match is None:
+        raise ValueError(f'{value!r} is not <N>h, <N>d or "*"')
+    return int(match.group(1)) * _HOURS_PER_UNIT[match.group(2)]
+
+
+def _is_ttl(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        untracked_ttl_hours(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_directory_name(key: object) -> bool:
+    return isinstance(key, str) and key not in ("", ".", "..") and "/" not in key
+
+
 class ScratchConfig(BaseModel):
     """``scratch``: the TTL, sweep, archive and caps of agent scratch (Plan 00627).
 
-    The full design is Plan 00627 DESIGN.md section 10.
+    The full design is Plan 00627 DESIGN.md section 10. A malformed TTL never
+    stops the config loading and is never read as ``"*"``: it falls back to
+    that key's built-in default, with a warning (section 4.1).
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    ttl_hours: Annotated[int, Field(ge=1)] = Field(default=24)
+    untracked_ttl: dict[str, str] = Field(
+        default_factory=lambda: dict(UNTRACKED_TTL_DEFAULTS),
+        description='TTL per directory directly under untracked/: <N>h, <N>d or "*" (never)',
+    )
+    untracked_default_ttl: str = Field(
+        default=UNTRACKED_TTL_NEVER,
+        description="TTL of an untracked/ directory the map does not name",
+    )
     max_ttl_hours: Annotated[int, Field(ge=1)] = Field(default=72)
     max_lifetime_hours: Annotated[int, Field(ge=1)] = Field(default=168)
     min_age_minutes: Annotated[int, Field(ge=0)] = Field(default=30)
@@ -2755,14 +2782,57 @@ class ScratchConfig(BaseModel):
     filing: ScratchFilingConfig = Field(default_factory=ScratchFilingConfig)
     caps: ScratchCapsConfig = Field(default_factory=ScratchCapsConfig)
 
+    @field_validator("untracked_default_ttl", mode="before")
+    @classmethod
+    def _fallthrough_or_never(cls, value: object) -> str:
+        if _is_ttl(value):
+            return str(value)
+        logger.warning(
+            'scratch.untracked_default_ttl: %r is not <N>h, <N>d or "*"; using %r',
+            value,
+            UNTRACKED_TTL_NEVER,
+        )
+        return UNTRACKED_TTL_NEVER
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sanitise_untracked_ttl(cls, data: object) -> object:
+        """Merge the map over the built-ins; a bad value takes that key's default, logged."""
+        if not isinstance(data, dict) or "untracked_ttl" not in data:
+            return data
+        raw = data["untracked_ttl"]
+        configured = data.get("untracked_default_ttl", UNTRACKED_TTL_NEVER)
+        fallthrough = str(configured) if _is_ttl(configured) else UNTRACKED_TTL_NEVER
+        merged = dict(UNTRACKED_TTL_DEFAULTS)
+        if not isinstance(raw, dict):
+            logger.warning("scratch.untracked_ttl: not a mapping; using the built-in map")
+            return {**data, "untracked_ttl": merged}
+        for key, value in raw.items():
+            if not _is_directory_name(key):
+                logger.warning(
+                    "scratch.untracked_ttl: key %r is not one directory name; dropped", key
+                )
+                continue
+            if _is_ttl(value):
+                merged[key] = value
+                continue
+            default = UNTRACKED_TTL_DEFAULTS.get(key, fallthrough)
+            logger.warning(
+                'scratch.untracked_ttl: %s: %r is not <N>h, <N>d or "*"; using %r',
+                key,
+                value,
+                default,
+            )
+            merged[key] = default
+        return {**data, "untracked_ttl": merged}
+
+    def ttl_hours_for(self, directory: str) -> int | None:
+        """The TTL in hours of ``untracked/<directory>``, or None when it is never cleared."""
+        return untracked_ttl_hours(self.untracked_ttl.get(directory, self.untracked_default_ttl))
+
     @model_validator(mode="after")
     def validate_lifetimes(self) -> Self:
-        """Require ``ttl_hours <= max_ttl_hours <= max_lifetime_hours``."""
-        if self.max_ttl_hours < self.ttl_hours:
-            raise ValueError(
-                f"max_ttl_hours ({self.max_ttl_hours}) must be at least ttl_hours "
-                f"({self.ttl_hours})"
-            )
+        """Require ``max_ttl_hours <= max_lifetime_hours``."""
         if self.max_lifetime_hours < self.max_ttl_hours:
             raise ValueError(
                 f"max_lifetime_hours ({self.max_lifetime_hours}) must be at least "

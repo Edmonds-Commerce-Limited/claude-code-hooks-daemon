@@ -17,14 +17,14 @@ from claude_code_hooks_daemon.config.models import Config, ScratchConfig
 class TestDefaults:
     def test_ttl_defaults(self) -> None:
         config = ScratchConfig()
-        assert config.ttl_hours == 24
+        assert config.untracked_ttl == {"repos": "*", "scratch": "24h"}
+        assert config.untracked_default_ttl == "*"
         assert config.max_ttl_hours == 72
         assert config.max_lifetime_hours == 168
         assert config.min_age_minutes == 30
 
     def test_sweep_defaults(self) -> None:
         sweep = ScratchConfig().sweep
-        assert sweep.extra_roots == []
         assert sweep.max_listed == 50
         assert sweep.unowned_entry == "advise"
 
@@ -49,8 +49,8 @@ class TestDefaults:
         assert Config().scratch == ScratchConfig()
 
     def test_root_config_reads_the_block(self) -> None:
-        config = Config.model_validate({"scratch": {"ttl_hours": 48, "max_ttl_hours": 96}})
-        assert config.scratch.ttl_hours == 48
+        config = Config.model_validate({"scratch": {"untracked_ttl": {"scratch": "48h"}}})
+        assert config.scratch.ttl_hours_for("scratch") == 48
 
 
 class TestUnknownKeysFail:
@@ -58,7 +58,9 @@ class TestUnknownKeysFail:
         "document",
         [
             {"ttl_hour": 24},
+            {"ttl_hours": 24},
             {"sweep": {"max_list": 5}},
+            {"sweep": {"extra_roots": ["untracked/briefs"]}},
             {"archive": {"disposable": 1}},
             {"keep": {"hours": 1}},
             {"filing": {"bytes": 1}},
@@ -76,7 +78,6 @@ class TestBounds:
     @pytest.mark.parametrize(
         "document",
         [
-            {"ttl_hours": 0},
             {"min_age_minutes": -1},
             {"sweep": {"max_listed": 0}},
             {"archive": {"disposable_hours": 0}},
@@ -107,13 +108,10 @@ class TestBounds:
 
 
 class TestOrdering:
-    def test_max_ttl_below_ttl_is_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="max_ttl_hours"):
-            ScratchConfig.model_validate({"ttl_hours": 48, "max_ttl_hours": 24})
-
-    def test_max_ttl_equal_to_ttl_is_accepted(self) -> None:
-        config = ScratchConfig.model_validate({"ttl_hours": 72, "max_ttl_hours": 72})
-        assert config.max_ttl_hours == 72
+    def test_a_root_ttl_above_the_manifest_bound_still_loads(self) -> None:
+        """The owner's own example, ``scratch: 7d``, is longer than ``max_ttl_hours``."""
+        config = ScratchConfig.model_validate({"untracked_ttl": {"scratch": "7d"}})
+        assert config.ttl_hours_for("scratch") == 168
 
     def test_lifetime_below_max_ttl_is_rejected(self) -> None:
         with pytest.raises(ValidationError, match="max_lifetime_hours"):
@@ -131,12 +129,67 @@ class TestOrdering:
             )
 
 
-class TestExtraRoots:
-    def test_a_relative_root_is_kept(self) -> None:
-        config = ScratchConfig.model_validate({"sweep": {"extra_roots": ["untracked/briefs"]}})
-        assert config.sweep.extra_roots == ["untracked/briefs"]
+class TestUntrackedTtl:
+    """DESIGN.md section 4.1: the owner's per-directory TTL map."""
 
-    @pytest.mark.parametrize("root", ["", "/abs/path", "../outside", "untracked/../..", "."])
-    def test_a_root_outside_the_project_or_the_project_itself_is_rejected(self, root: str) -> None:
-        with pytest.raises(ValidationError, match="extra_roots"):
-            ScratchConfig.model_validate({"sweep": {"extra_roots": [root]}})
+    def test_the_owners_example_loads(self) -> None:
+        config = ScratchConfig.model_validate(
+            {"untracked_ttl": {"repos": "*", "scratch": "7d", "other-dir": "36h"}}
+        )
+        assert config.ttl_hours_for("repos") is None
+        assert config.ttl_hours_for("scratch") == 168
+        assert config.ttl_hours_for("other-dir") == 36
+
+    def test_a_partial_map_keeps_the_built_in_entries(self) -> None:
+        config = ScratchConfig.model_validate({"untracked_ttl": {"briefs": "36h"}})
+        assert config.untracked_ttl == {"repos": "*", "scratch": "24h", "briefs": "36h"}
+
+    def test_an_unlisted_directory_falls_through_to_never(self) -> None:
+        assert ScratchConfig().ttl_hours_for("logs") is None
+
+    def test_the_fallthrough_is_configurable(self) -> None:
+        config = ScratchConfig.model_validate({"untracked_default_ttl": "2d"})
+        assert config.ttl_hours_for("anything") == 48
+
+    @pytest.mark.parametrize("value", ["7 days", "36", "0h", "-1d", "", "1w", "1.5h", 36, None])
+    def test_a_malformed_scratch_value_falls_back_to_24h_never_to_star(
+        self, value: object, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        config = ScratchConfig.model_validate({"untracked_ttl": {"scratch": value}})
+        assert config.ttl_hours_for("scratch") == 24
+        assert "untracked_ttl" in caplog.text
+
+    def test_a_malformed_value_for_another_key_falls_back_to_the_fallthrough(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        config = ScratchConfig.model_validate(
+            {"untracked_default_ttl": "36h", "untracked_ttl": {"briefs": "soon"}}
+        )
+        assert config.ttl_hours_for("briefs") == 36
+        assert "briefs" in caplog.text
+
+    def test_a_malformed_fallthrough_falls_back_to_never(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        config = ScratchConfig.model_validate({"untracked_default_ttl": "36 hours"})
+        assert config.untracked_default_ttl == "*"
+        assert "untracked_default_ttl" in caplog.text
+
+    @pytest.mark.parametrize("key", ["a/b", ".", "..", "", "/abs"])
+    def test_a_key_that_is_not_one_directory_name_is_dropped(
+        self, key: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        config = ScratchConfig.model_validate({"untracked_ttl": {key: "36h"}})
+        assert key not in config.untracked_ttl
+        assert "untracked_ttl" in caplog.text
+
+    def test_a_map_that_is_not_a_mapping_keeps_the_defaults(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        config = ScratchConfig.model_validate({"untracked_ttl": ["scratch"]})
+        assert config.untracked_ttl == {"repos": "*", "scratch": "24h"}
+        assert "untracked_ttl" in caplog.text
+
+    def test_hours_and_days_are_parsed(self) -> None:
+        config = ScratchConfig.model_validate({"untracked_ttl": {"a": "1h", "b": "1d"}})
+        assert (config.ttl_hours_for("a"), config.ttl_hours_for("b")) == (1, 24)

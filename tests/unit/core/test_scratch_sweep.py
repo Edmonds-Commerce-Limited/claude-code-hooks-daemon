@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import time
+from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from pathlib import Path
 
 from claude_code_hooks_daemon.config.models import ScratchConfig
@@ -15,6 +18,7 @@ from claude_code_hooks_daemon.core.scratch_sweep import (
     run_sweep,
 )
 from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
+from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
 from tests.support.scratch_tree import ScratchTree, build_scratch_tree
 
 _DAY = 86400.0
@@ -35,6 +39,7 @@ def _sweep(
     refused: tuple[str, ...] = (),
     config: ScratchConfig | None = None,
     root: Path | None = None,
+    reference_roots: tuple[str, ...] = ("untracked/repos",),
 ) -> SweepReport:
     inputs = LivenessInputs(
         cwds={1: Path("/elsewhere")} if cwds is None else cwds,
@@ -42,9 +47,15 @@ def _sweep(
         min_age_minutes=30,
         now=now,
     )
+    config = config or ScratchConfig()
     return run_sweep(
-        root or tree.root,
-        config=config or ScratchConfig(),
+        resolve_sweep_root(
+            root or tree.root,
+            project_root=tree.base / "project",
+            config=config,
+            reference_roots=reference_roots,
+        ),
+        config=config,
         now=now,
         budget=budget or WalkBudget(seconds=60, max_inodes=10_000),
         inputs=inputs,
@@ -60,6 +71,63 @@ def _verdicts(report: SweepReport) -> dict[str, str]:
 def _old(tree: ScratchTree, now: float) -> None:
     for path in tree.root.iterdir():
         tree.set_tree_mtime(path.name, now - 2 * _DAY)
+
+
+class TestSweepRoot:
+    """DESIGN.md section 4.1: the root's TTL, and roots that are never swept."""
+
+    def test_a_refused_root_is_never_listed(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        repos = tree.base / "project" / "untracked" / "repos"
+        (repos / "alpha").mkdir(parents=True)
+        listed: list[str] = []
+        real = tree.refusing_scandir()
+
+        def spy(path: str) -> AbstractContextManager[Iterator[os.DirEntry[str]]]:
+            listed.append(path)
+            return real(path)
+
+        config = ScratchConfig.model_validate({"untracked_ttl": {"repos": "1h"}})
+        report = run_sweep(
+            resolve_sweep_root(
+                repos, project_root=tree.base / "project", config=config, reference_roots=()
+            ),
+            config=config,
+            now=_now(),
+            budget=WalkBudget(seconds=60, max_inodes=10_000),
+            inputs=LivenessInputs(
+                cwds={1: Path("/elsewhere")},
+                background=BackgroundRecords((), ""),
+                min_age_minutes=30,
+                now=_now(),
+            ),
+            project_root=tree.base / "project",
+            scandir=spy,
+        )
+        assert listed == []
+        assert report.rows == ()
+        assert not report.complete
+        assert any("never swept" in reason for reason in report.incomplete_reasons)
+
+    def test_an_entry_holding_a_reference_root_is_not_judged(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("kept/inner/a.txt")
+        tree.file("notes.txt")
+        _old(tree, now)
+        report = _sweep(
+            tree, now=now, reference_roots=("untracked/repos", "untracked/scratch/kept/inner")
+        )
+        assert _verdicts(report) == {"notes.txt": "UNCERTAIN"}
+        assert any("kept" in note for note in report.notes)
+
+    def test_the_root_ttl_decides_due(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("notes.txt")
+        _old(tree, now)
+        config = ScratchConfig.model_validate({"untracked_ttl": {"scratch": "7d"}})
+        assert _verdicts(_sweep(tree, now=now, config=config)) == {"notes.txt": "LIVE"}
 
 
 class TestRunSweep:

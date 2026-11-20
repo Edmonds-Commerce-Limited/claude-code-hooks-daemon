@@ -149,6 +149,18 @@ class TestOutput:
         document = json.loads(capsys.readouterr().out)
         assert [row["name"] for row in document["entries"]] == ["f.out"]
 
+    def test_the_reference_repositories_root_is_refused(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        repos = tree.base / "project" / "untracked" / "repos" / "alpha"
+        repos.mkdir(parents=True)
+        (repos / "notes.log").write_text("x")
+        assert _run(tree, _args(tree, as_json=True, root=Path("untracked/repos"))) == 0
+        document = json.loads(capsys.readouterr().out)
+        assert document["entries"] == []
+        assert document["complete"] is False
+        assert any("never swept" in reason for reason in document["incomplete_reasons"])
+
     def test_a_relative_root_is_taken_from_the_project(
         self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
     ) -> None:

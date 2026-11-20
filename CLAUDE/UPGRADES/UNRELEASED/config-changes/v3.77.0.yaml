@@ -1,0 +1,55 @@
+# Drafted by Plan 00627.
+version: "3.77.0"
+date: "UNRELEASED"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: scratch
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00627). The scratch management block: TTLs, the sweep's
+        listing bound, archive retention, the keep bound, the filing size
+        limit and the caps. Only the TTLs and sweep.max_listed are read in
+        this release, by the read-only `hooks-daemon scratch-sweep` report;
+        the other keys are validated and reserved for the phases that act.
+      example_yaml: |
+        scratch:
+          untracked_ttl:
+            repos: "*"
+            scratch: 24h
+          untracked_default_ttl: "*"
+          max_ttl_hours: 72
+          max_lifetime_hours: 168
+          min_age_minutes: 30
+          sweep: {max_listed: 50, unowned_entry: advise}
+    - key: scratch.untracked_ttl
+      recommended: false
+      dormant: false
+      description: >-
+        TTL per directory directly under untracked/: "<N>h", "<N>d" or "*"
+        (never cleared; quote it, unquoted * is YAML alias syntax). Merged over
+        the built-ins repos: "*" and scratch: 24h. A malformed value never
+        stops the config loading and is never read as "*": it falls back to
+        that key's built-in default with a logged warning. untracked/repos,
+        every reference_repos root and the archive store are never swept,
+        whatever this map says.
+      example_yaml: |
+        scratch:
+          untracked_ttl:
+            scratch: 7d
+            briefs: 36h
+    - key: scratch.untracked_default_ttl
+      recommended: false
+      dormant: false
+      description: >-
+        TTL of an untracked/ directory the map does not name. Default "*"
+        (never swept): in self-install mode the daemon's own runtime stores
+        (venvs, logs, worktrees) live directly under untracked/, so a finite
+        default would make each of them a sweep root. Set it only when every
+        unnamed untracked/ directory is agent-written and disposable.
+      example_yaml: |
+        scratch:
+          untracked_default_ttl: 36h

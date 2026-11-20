@@ -65,8 +65,8 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [x] ✅ **Task 1.5**: Add liveness: process working directories (reusing `default_process_cwds`), background-process records, minimum age.
 - [x] ✅ **Task 1.6**: Add the verdict type and the ordering, with proofs P1, P2 and P5 (the ones that need no git).
 - [x] ✅ **Task 1.7**: Add `hooks-daemon scratch-sweep` as a dry run only: the table and `--json`. Test that a run changes no inode (snapshot before and after).
-- [ ] 🔄 **Task 1.8**: Drop the R7 wording from the verdict code (owner, 2026-11-20). A `.git` marker stays "repository, not judged" until Task 2.1 classifies it.
-- [ ] 🔄 **Task 1.9**: Add `scratch.untracked_ttl` and `untracked_default_ttl` (DESIGN.md section 4.1) in place of `ttl_hours` and `sweep.extra_roots`, and one root resolver that refuses `untracked/repos`, the reference roots and the archive store.
+- [x] ✅ **Task 1.8**: Drop the R7 wording from the verdict code (owner, 2026-11-20). A `.git` marker stays "repository, not judged" until Task 2.1 classifies it.
+- [x] ✅ **Task 1.9**: Add `scratch.untracked_ttl` and `untracked_default_ttl` (DESIGN.md section 4.1) in place of `ttl_hours` and `sweep.extra_roots`, and one root resolver (`core/untracked_roots.py`) that refuses `untracked/repos`, the reference roots and the archive store. Release note `017-scratch-sweep-dry-run-and-untracked-ttls.md` and `config-changes/v3.77.0.yaml` are in `CLAUDE/UPGRADES/UNRELEASED/`.
 
 ### Phase 2: Git proofs and references
 

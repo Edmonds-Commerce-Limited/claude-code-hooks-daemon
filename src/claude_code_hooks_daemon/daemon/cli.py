@@ -6741,10 +6741,12 @@ def cmd_scratch_sweep(
         read_background_records,
     )
     from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
+    from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
     from claude_code_hooks_daemon.core.worktree_reaping import default_process_cwds
 
     repo = get_project_path(getattr(args, "project_root", None))
-    scratch = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml").scratch
+    config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
+    scratch = config.scratch
     root = Path(args.root) if args.root is not None else repo / "untracked" / "scratch"
     if not root.is_absolute():
         root = repo / root
@@ -6758,7 +6760,12 @@ def cmd_scratch_sweep(
         now=now,
     )
     report = scratch_sweep.run_sweep(
-        root,
+        resolve_sweep_root(
+            root,
+            project_root=repo,
+            config=scratch,
+            reference_roots=tuple(config.reference_repos.roots),
+        ),
         config=scratch,
         now=now,
         budget=WalkBudget(
