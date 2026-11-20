@@ -193,11 +193,46 @@ class TestReadsTheConfigStrictly:
             seed_existing_worktree(worktree)
         assert not (worktree / VAULT).exists()
 
+    def test_a_yml_config_is_read_as_the_daemon_reads_it(
+        self, repo: Path, worktree: Path
+    ) -> None:
+        (repo / _CONFIG).rename(repo / ".claude" / "hooks-daemon.yml")
+        assert len(seed_existing_worktree(worktree)) == 2
+
+    def test_a_disabled_worktree_create_handler_refuses(
+        self, repo: Path, worktree: Path
+    ) -> None:
+        text = (repo / _CONFIG).read_text(encoding="utf-8")
+        (repo / _CONFIG).write_text(
+            text.replace("enabled: true", "enabled: false"), encoding="utf-8"
+        )
+        with pytest.raises(SeedApplyRefused, match="disabled"):
+            seed_existing_worktree(worktree)
+        assert not (worktree / VAULT).exists()
+
     def test_malformed_config_refuses(self, repo: Path, worktree: Path) -> None:
         (repo / _CONFIG).write_text("handlers: [unclosed\n", encoding="utf-8")
         with pytest.raises(SeedApplyRefused, match="config"):
             seed_existing_worktree(worktree)
         assert not (worktree / VAULT).exists()
+
+
+class TestAnExistingWorktreeCannotRedirectAPlacement:
+    """A hand-made worktree is not fresh: a parent of a destination may be a link."""
+
+    def test_a_symlinked_parent_inside_the_worktree_refuses(
+        self, repo: Path, worktree: Path, tmp_path: Path
+    ) -> None:
+        nested = f"            - path: conf/{VAULT}\n              mode: symlink\n"
+        (repo / "conf").mkdir()
+        (repo / "conf" / VAULT).write_text("not-a-real-secret\n", encoding="utf-8")
+        (repo / _CONFIG).write_text(_config(nested), encoding="utf-8")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (worktree / "conf").symlink_to(outside)
+        with pytest.raises(SeedApplyRefused, match="symlink"):
+            seed_existing_worktree(worktree)
+        assert list(outside.iterdir()) == []
 
 
 class TestTheSameExecutorAsCreation:
