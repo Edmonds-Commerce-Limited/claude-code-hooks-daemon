@@ -11,6 +11,7 @@ branch survives. Only the last class shows the route working at all.
 
 from __future__ import annotations
 
+import json
 import shlex
 from dataclasses import replace
 from pathlib import Path
@@ -30,6 +31,7 @@ from claude_code_hooks_daemon.core.branch_reject import (
     Verdict,
     append_ledger,
     bundle_path_for,
+    new_id,
     read_ledger,
     read_ledger_entries,
     write_bundle,
@@ -42,6 +44,7 @@ from tests.unit.core.test_branch_reject import (
     _issue,
     _ledger_line,
     _main_sha,
+    _problems,
     _reviewer,
     _tip,
     config,
@@ -430,3 +433,84 @@ class TestRecordRemoval:
         with pytest.raises(RejectError, match="concurrent"):
             branch_reject.record_removal(repo, approval, route)
         assert len(read_ledger_entries(route.ledger_path)) == 1
+
+
+def _copy_under_new_id(store: RejectStore, verdict: Verdict) -> Verdict:
+    """What an agent with write access to the store could do: re-file a verdict."""
+    copy = replace(verdict, verdict_id=new_id())
+    (store.root / "verdicts" / f"{copy.verdict_id}.json").write_text(
+        json.dumps(copy.to_dict(), sort_keys=True), encoding="utf-8"
+    )
+    return copy
+
+
+class TestVerdictIdentity:
+    """Single use is keyed on the verdict id, so the id must be bound to the nonce.
+
+    The recorder writes ``verdict_id = nonce`` and one nonce binds one reviewer stop;
+    a verdict filed under any other id, or a file whose name is not its id, is a copy
+    nobody's stop produced, and it must never count.
+    """
+
+    def test_a_used_verdict_copied_under_a_new_id_refuses(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        tip = _tip(repo)
+        verdict = _issue(repo, store)
+        route = _route(repo, store, config)
+        assert _delete(repo, route).deleted == ("feat",)
+        _git(repo, "branch", "feat", tip)
+        _copy_under_new_id(store, verdict)
+        again = _delete(repo, route)
+        assert again.refused is True
+        assert _branch_exists(repo)
+        assert len(read_ledger(route.ledger_path)) == 1
+
+    def test_a_git_refused_verdict_copied_under_a_new_id_refuses(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        verdict = _issue(repo, store)
+        route = _route(repo, store, config)
+        lock = repo / ".git" / "refs" / "heads" / "feat.lock"
+        lock.write_text("held\n", encoding="utf-8")
+        _delete(repo, route)
+        lock.unlink()
+        _copy_under_new_id(store, verdict)
+        again = _delete(repo, route)
+        assert again.refused is True
+        assert _branch_exists(repo)
+        assert read_ledger(route.ledger_path) == []
+
+    def test_a_verdict_whose_id_is_not_its_nonce_refuses(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        verdict = _issue(repo, store)
+        store.withdraw_verdict(verdict.verdict_id)
+        _copy_under_new_id(store, verdict)
+        route = _route(repo, store, config)
+        _assert_refused(repo, _delete(repo, route), route)
+
+    def test_a_verdict_problem_names_the_id_nonce_mismatch(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        verdict = replace(_issue(repo, store), verdict_id=new_id())
+        found = _problems(repo, store, verdict, config)
+        assert any("is not its nonce" in p for p in found)
+
+    def test_a_verdict_filed_under_another_name_refuses(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        """The content is untouched (id == nonce), only the file name differs."""
+        verdict = _issue(repo, store)
+        original = store.root / "verdicts" / f"{verdict.verdict_id}.json"
+        original.rename(original.with_name(f"{new_id()}.json"))
+        route = _route(repo, store, config)
+        _assert_refused(repo, _delete(repo, route), route)
+
+    def test_a_used_nonce_refuses_whatever_id_it_is_filed_under(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        """Defence in depth: the ledger's consumed set is checked against the nonce too."""
+        verdict = _issue(repo, store)
+        found = _problems(repo, store, verdict, config, consumed=frozenset({verdict.nonce}))
+        assert any("already used" in p for p in found)
