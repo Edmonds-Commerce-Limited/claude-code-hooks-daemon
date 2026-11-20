@@ -14,8 +14,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - In Progress (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; open questions ruled under the owner's delegation in RULINGS.md: the verdict never unlocks alone, the guard must also verify a recovery bundle; local delete only; slice 1 ready to build)
 
-- [00621: actions qa ci advisory and workflow lint on edit](00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - In Progress (peer request, owner direction relayed: advise adopting an external workflow linter and run it on workflow edits; design ruled under the owner's delegation in DESIGN.md; the linter's documentation and release were read but it has not been run, so the route fails open; slice 1 built, slices 2-3 and Task 1.1 remain)
-
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
 
 - [00614: secret guard resolves links against hook cwd](00614-secret-guard-resolves-links-against-hook-cwd/PLAN.md) - In Progress (found by the 00613 probe: a relative Bash token such as `cat link` is resolved against the daemon's cwd `/`, so a link to a protected file passes; also a directory-link grep and a glob under a directory link; fix test-first and fail closed)
@@ -206,6 +204,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00621: actions qa ci advisory and workflow lint on edit](Completed/00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - Complete at merge `4f97728de` + the archiving commit, shipping in v3.76.0 (a `.github/workflows/` file is run through the optional `actions-qa` linter on edit and at commit, and a session-start advisory suggests the linter; release note 013 and a truth-change entry recorded)
+
 - [00628: daemon socket path too long from init sh](Completed/00628-daemon-socket-path-too-long-from-init-sh/PLAN.md) - Complete at merge `2628d4965`, shipped in v3.76.0 (live defect: a long project path denied every tool call because init.sh forced an over-limit socket path; one path-fitting function now decides every socket and PID path, the discovery file is written after bind, the short fallback root is private; release note 006; follow-up N681)
 
 - [00626: remote delete proof cherry route and remote default ref](Completed/00626-remote-delete-proof-cherry-route-and-remote-default-ref/PLAN.md) - Complete at merge `201a17fae` + the archiving commit (client report: interleaved cherry-picks now prove a branch merged, and a remote delete is proven against the remote default's live tip only, never the local default or a cached positive; security review passed; release note 003; follow-up N674)
@@ -264,8 +264,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00581: provision repairs a stale venv](Completed/00581-provision-repairs-a-stale-venv/PLAN.md) - Complete at `cfa601263` (CI run 42650039659 success) + the archiving commit (GitHub #168, closed: at the expected version `provision.sh` checks the venv's lock hash; a foreground run repairs a stale venv through the bootstrap repair, a background run names `hooks-daemon repair`, an unreadable hash counts as stale; release note 017)
 
-- [00580: optional seed entries are not missing](Completed/00580-optional-seed-entries-are-not-missing/PLAN.md) - Complete at `1b1cbb079` (CI run 42636878356 success) + the archiving commit (GitHub #167, closed: `check-worktree-seed` no longer lists an absent `optional: true` seed entry as MISSING or tells the reader to remove it; an absent required entry still is; release note 016)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -321,9 +319,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 628 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 522 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 523 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 82 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 81 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
