@@ -317,6 +317,9 @@ class Priority:
     # Plan 00472 T1: a silent sensor of the same kind beside it, joining the
     # model an Agent dispatch resolved to onto its PreToolUse tier row.
     DISPATCH_MODEL_RECORDER = 33
+    # Plan 00620: another silent sensor on the same Agent result, filling a
+    # branch-reject dispatch record's agent id. It never denies.
+    BRANCH_REJECT_AGENT_BINDER = 33
 
     # Merge QA report (Priority: 34 - PostToolUse advisory; Plan 00373 Phase
     # 3, next free slot in the PostToolUse advisory band after

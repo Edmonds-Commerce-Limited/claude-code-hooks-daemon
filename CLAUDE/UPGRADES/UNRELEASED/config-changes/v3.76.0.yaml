@@ -26,6 +26,21 @@ config_changes:
       migration_note: >-
         Keep it at priority 59, after every handler that can deny an Agent call:
         its allow records the dispatch, so a later deny would burn the nonce.
+    - key: handlers.post_tool_use.branch_reject_agent_binder
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00620). Silent PostToolUse sensor: fills the agent id of a
+        branch-reject reviewer dispatch record from the Agent call's agentId,
+        only when the record is unbound and the session and tool_use_id match.
+        Never blocks. Disabling it fails closed (an unbound dispatch chains no
+        verdict, so no removal can be unlocked).
+      example_yaml: |
+        handlers:
+          post_tool_use:
+            branch_reject_agent_binder:
+              enabled: true
+              priority: 33
     - key: branches.wip.ladder
       recommended: false
       dormant: false

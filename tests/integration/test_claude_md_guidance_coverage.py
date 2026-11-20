@@ -524,6 +524,7 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "limit and the sub-agent scope; a second section would bill the same fact twice"
     ),
     "DispatchModelRecorderHandler": "observe-only sensor, no agent-facing action",
+    "BranchRejectAgentBinderHandler": "observe-only sensor, no agent-facing action",
     "SubagentTierAdvisorHandler": (
         "T2: the advice arrives with the dispatch it is about and governs the NEXT one; "
         "it never denies, and the tier: token it names is in the message itself"

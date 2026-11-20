@@ -423,6 +423,7 @@ class ConfigTemplate:
             "    budget_exhaustion_detector: {enabled: true, priority: 32}  # Advisory on a WebSearch budget-refusal or a sub-agent usage-limit termination (channel-scoped, opt-out)\n"
             "    model_downgrade_recorder: {enabled: true, priority: 33}  # Publish <session>.model-downgrade so the ccy supervisor can tell a machine downgrade from your own /model (opt-out)\n"
             "    dispatch_model_recorder: {enabled: true, priority: 33}  # Record the model an Agent dispatch resolved to, for hooks-daemon tiers (silent)\n"
+            "    branch_reject_agent_binder: {enabled: true, priority: 33}  # Bind a branch-reject reviewer dispatch to its agentId (silent)\n"
             "    merge_qa_report: {enabled: true, priority: 34}  # Post-hoc plan/docs QA report on what a git merge/pull/rebase introduced (fires only when plan/docs QA sweeps are active)\n"
             "    daemon_sync_after_merge: {enabled: true, priority: 35}  # A merge/pull/rebase that changed daemon config or handler code leaves the running daemon stale -- advises a restart, naming the paths\n"
             "    cleanup_after_merge: {enabled: true, priority: 39}  # After a merge into the default branch, delete or advise deleting the merged branch per branches.cleanup_after_merge.mode (Plan 00558)\n"

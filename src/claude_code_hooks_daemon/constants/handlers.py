@@ -513,6 +513,12 @@ class HandlerID:
         config_key="dispatch_model_recorder",
         display_name="dispatch-model-recorder",
     )
+    # Plan 00620: fills a branch-reject dispatch record's agent id from agentId.
+    BRANCH_REJECT_AGENT_BINDER = HandlerIDMeta(
+        class_name="BranchRejectAgentBinderHandler",
+        config_key="branch_reject_agent_binder",
+        display_name="branch-reject-agent-binder",
+    )
     # Plan 00472 T3/T4: names a cheaper tier, or a floor, at dispatch time.
     SUBAGENT_TIER_ADVISOR = HandlerIDMeta(
         class_name="SubagentTierAdvisorHandler",

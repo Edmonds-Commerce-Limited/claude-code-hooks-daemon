@@ -653,6 +653,10 @@ handlers:
       enabled: true
       priority: 33
 
+    branch_reject_agent_binder:  # Binds a branch-reject reviewer dispatch to the agent it started; silent, never blocks
+      enabled: true
+      priority: 33
+
     merge_qa_report:  # Post-hoc plan/docs QA report on what a git merge/pull/rebase introduced (Plan 00373)
       enabled: true   # On by default; silent unless plan/docs QA sweeps are active AND the operation introduced attributable drift.
       priority: 34
