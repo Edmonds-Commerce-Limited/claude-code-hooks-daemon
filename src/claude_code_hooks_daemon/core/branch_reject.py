@@ -72,6 +72,8 @@ _SECONDS_PER_HOUR = 3600.0
 _SECONDS_PER_DAY = 86_400.0
 _HASH_CHUNK = 1 << 20
 _HEADER_LIMIT = 1 << 20
+_FILTER_CAPABILITY = b"@filter"
+_SIDECAR_SUFFIX = ".sha256"
 _LEDGER_MODE = 0o644
 _GIT_DIR_NAME = ".git"
 _HEADS = "refs/"
@@ -898,6 +900,8 @@ def bundle_prerequisites(path: Path) -> tuple[str, ...]:
         raise RejectError(f"{path} holds no complete bundle header")
     prerequisites: list[str] = []
     for raw in head[:end].split(b"\n")[1:]:
+        if raw.startswith(_FILTER_CAPABILITY):
+            raise RejectError(f"{path} is a filtered bundle, which omits objects")
         if not raw.startswith(b"-"):
             continue
         oid = raw[1:].split(b" ", 1)[0].decode("ascii", errors="replace")
@@ -911,7 +915,7 @@ def _prerequisite_problems(repo: Path, record: BundleRecord) -> list[str]:
     try:
         prerequisites = bundle_prerequisites(record.path)
     except RejectError as exc:
-        return [f"the bundle header could not be read: {exc}"]
+        return [f"the bundle header is not acceptable: {exc}"]
     return [
         f"the bundle prerequisite {oid[:12]} is not on the default branch at "
         f"{record.base[:12]}, so the bundle restores nothing once the branch is gone"
@@ -956,15 +960,38 @@ def write_bundle(
     problems = bundle_problems(repo, record, branch)
     if problems:
         raise RejectError(f"the bundle at {path} is not sound: {'; '.join(problems)}")
+    if _written_sha256(path) != record.sha256:
+        # `git bundle verify` reads the header, not the pack, so a planted or altered
+        # file can pass every check above. Only bytes the guard wrote are trusted.
+        raise RejectError(
+            f"the bundle at {path} was not written by the guard, or changed since; "
+            "move it aside to let the guard write its own"
+        )
     return record
 
 
+def _sha256_sidecar(path: Path) -> Path:
+    return path.with_name(f"{path.name}{_SIDECAR_SUFFIX}")
+
+
+def _written_sha256(path: Path) -> str | None:
+    sidecar = _sha256_sidecar(path)
+    if not sidecar.is_file():
+        return None
+    try:
+        return sidecar.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RejectError(f"could not read {sidecar}: {exc}") from exc
+
+
 def _create_bundle(repo: Path, branch: str, default_sha: str, path: Path) -> None:
+    """Create the bundle, never overwriting, and record its sha256 beside it."""
     tmp = path.with_name(f".{path.name}.{new_id()}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         _git_out(repo, "bundle", "create", str(tmp), branch_ref(branch), f"^{default_sha}")
         path.hardlink_to(tmp)
+        _sha256_sidecar(path).write_text(sha256_of(path) + "\n", encoding="utf-8")
     except OSError as exc:
         raise RejectError(f"could not write the bundle {path}: {exc}") from exc
     finally:
@@ -1192,7 +1219,14 @@ def _verdict_refusal(verdicts: Sequence[Verdict], problems: Mapping[str, list[st
 
 
 def approve_removal(
-    repo: Path, branch: str, tip: str, route: RejectRoute, *, default_ref: str, write: bool
+    repo: Path,
+    branch: str,
+    tip: str,
+    route: RejectRoute,
+    *,
+    default_ref: str,
+    write: bool,
+    pending: int = 0,
 ) -> RemovalApproval:
     """Recompute every fact the route rests on; raise RejectRefusedError or RejectError.
 
@@ -1202,11 +1236,16 @@ def approve_removal(
     the remaining verdicts each validate in full; the valid set meets the number from
     distinct agents; and, unless ``write`` is False, the bundle is written and
     verified against the default as it stands now.
+
+    ``pending`` is the number of removals this same batch has already approved: none
+    of them is in the ledger yet, and the rate must count them all the same.
     """
     entries = read_ledger_entries(route.ledger_path)
     default_sha = _resolve(repo, _full_ref(default_ref))
     inventory = compute_inventory(repo, branch, default_ref)
-    removals = removals_in_window(effective_removals(entries), now=route.now, config=route.config)
+    removals = pending + removals_in_window(
+        effective_removals(entries), now=route.now, config=route.config
+    )
     required = admit_request(branch, tip, inventory, route.store.keeps(), removals, route.config)
     verdicts = route.store.verdicts_for(branch, tip)
     if not verdicts:

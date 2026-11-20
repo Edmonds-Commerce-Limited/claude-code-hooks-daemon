@@ -18,12 +18,15 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import BranchRejectConfig
+from claude_code_hooks_daemon.core import branch_reject
 from claude_code_hooks_daemon.core.branch_reject import (
     TIER_REJECTED_BUNDLED,
     LedgerLine,
     LedgerRefusal,
+    RejectError,
     RejectRoute,
     RejectStore,
+    RemovalApproval,
     Verdict,
     append_ledger,
     bundle_path_for,
@@ -324,3 +327,106 @@ class TestRouteStrictness:
         assert report.deleted == ("feat",)
         (line,) = read_ledger(route.ledger_path)
         assert line.default_sha == _main_sha(repo)
+
+
+def _second_branch(repo: Path, name: str = "other") -> None:
+    _git(repo, "branch", name, "main")
+    _git(repo, "switch", "-q", name)
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / f"{name}.py").write_text("o\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", name)
+    _git(repo, "switch", "-q", "main")
+
+
+class TestBatchAndFailures:
+    def test_a_batch_counts_its_own_approvals_against_the_rate(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        """Nothing is appended until phase two, so the batch itself must be counted."""
+        _second_branch(repo)
+        route = _route(repo, store, config)
+        for _ in range(config.two_reviewer_after - 1):
+            append_ledger(route.ledger_path, _ledger_line(branch="old", removed_at=NOW - HOUR))
+        before = len(read_ledger_entries(route.ledger_path))
+        _issue(repo, store)
+        _issue(repo, store, branch="other")
+        report = delete_branches(repo, ["feat", "other"], protected_ref="main", reject_route=route)
+        assert report.refused is True
+        assert report.deleted == ()
+        assert _branch_exists(repo)
+        assert len(read_ledger_entries(route.ledger_path)) == before
+
+    def test_a_failed_refusal_append_says_the_ledger_is_wrong(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _issue(repo, store)
+        route = _route(repo, store, config)
+
+        def _fail(*_args: object) -> None:
+            raise RejectError("disk full")
+
+        monkeypatch.setattr(branch_reject, "append_refusal", _fail)
+        lock = repo / ".git" / "refs" / "heads" / "feat.lock"
+        lock.write_text("held\n", encoding="utf-8")
+        report = _delete(repo, route)
+        lock.unlink()
+        assert report.refused is True
+        assert _branch_exists(repo)
+        assert any("wrongly records" in b for b in report.blockers)
+
+    def test_a_bundle_changed_after_approval_refuses_before_the_append(
+        self,
+        repo: Path,
+        store: RejectStore,
+        config: BranchRejectConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        real = branch_reject.record_removal
+
+        def _tamper(repo_: Path, approval: RemovalApproval, route_: RejectRoute) -> LedgerLine:
+            assert approval.bundle is not None
+            approval.bundle.path.write_bytes(b"replaced")
+            return real(repo_, approval, route_)
+
+        monkeypatch.setattr(branch_reject, "record_removal", _tamper)
+        report = _delete(repo, route)
+        assert report.refused is True
+        assert _branch_exists(repo)
+        assert read_ledger_entries(route.ledger_path) == []
+        assert any("no longer verifies" in b for b in report.blockers)
+
+
+class TestRecordRemoval:
+    def _approval(
+        self, repo: Path, store: RejectStore, route: RejectRoute, *, write: bool = True
+    ) -> RemovalApproval:
+        return branch_reject.approve_removal(
+            repo, "feat", _tip(repo), route, default_ref="main", write=write
+        )
+
+    def test_a_dry_run_approval_records_nothing(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        approval = self._approval(repo, store, route, write=False)
+        with pytest.raises(RejectError, match="dry-run"):
+            branch_reject.record_removal(repo, approval, route)
+
+    def test_a_concurrent_consume_refuses(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        _issue(repo, store)
+        route = _route(repo, store, config)
+        approval = self._approval(repo, store, route)
+        branch_reject.record_removal(repo, approval, route)
+        with pytest.raises(RejectError, match="concurrent"):
+            branch_reject.record_removal(repo, approval, route)
+        assert len(read_ledger_entries(route.ledger_path)) == 1

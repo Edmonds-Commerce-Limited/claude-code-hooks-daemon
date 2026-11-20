@@ -239,6 +239,19 @@ Decided in slice 2 (`approve_removal`, `record_removal`, `record_git_refusal`):
   every prerequisite to be an ancestor of the base it was cut against
   (`BundleRecord.base`). Without it a planted thin bundle (`feat ^feat~1`) verifies and
   lists the tip, yet restores nothing once the branch is gone; a test pins the refusal.
+  A `@filter` capability (a filtered bundle omits objects) refuses too.
+- **Only bytes the guard wrote are trusted.** `git bundle verify` reads the header, not the
+  pack: a probe (git 2.47) showed a planted bundle with a truncated pack, and a planted
+  `--filter=blob:none` bundle, both passing it. `_create_bundle` therefore writes a
+  `<bundle>.sha256` sidecar beside the file, and an existing bundle is reused only when its
+  sha256 equals that record. A planted file, or one altered after the guard wrote it,
+  refuses. A same-user forger who writes both files is the residue RULINGS Q1 accepts.
+- **The batch counts itself.** Phase one appends nothing, so each approval passes the
+  number already approved in the batch as `pending`, added to the window count; one
+  batch cannot carry several removals past the two-reviewer or refuse threshold.
+- **A crash between the append and git's answer** leaves an uncancelled removal line for
+  a branch that may still exist. This is the cost of the ruling's append-first order; the
+  digest (slice 3) should flag a ledger line whose branch still resolves at its tip.
 - **A git refusal after the append** appends a second line,
   `{"outcome": "git-refused", branch, tip, verdict_ids, detail, refused_at}`.
   `read_ledger` returns only removals no refusal cancels (same tip and verdict ids), so

@@ -846,6 +846,44 @@ class TestBundle:
         record = write_bundle(repo, "feat", _tip(repo), _main_sha(repo), config)
         assert record.base == _main_sha(repo)
 
+    def test_a_planted_truncated_bundle_is_refused(
+        self, repo: Path, config: BranchRejectConfig
+    ) -> None:
+        """``git bundle verify`` reads the header only, so a cut pack passes it."""
+        tip = _tip(repo)
+        path = bundle_path_for(repo, config, "feat", tip)
+        path.parent.mkdir(parents=True)
+        _git(repo, "bundle", "create", str(path), "refs/heads/feat", "^refs/heads/main")
+        path.write_bytes(path.read_bytes()[:-40])
+        with pytest.raises(RejectError, match="not written by the guard"):
+            write_bundle(repo, "feat", tip, _main_sha(repo), config)
+
+    def test_a_planted_filtered_bundle_is_refused(
+        self, repo: Path, config: BranchRejectConfig
+    ) -> None:
+        tip = _tip(repo)
+        path = bundle_path_for(repo, config, "feat", tip)
+        path.parent.mkdir(parents=True)
+        _git(
+            repo,
+            "bundle",
+            "create",
+            str(path),
+            "--filter=blob:none",
+            "refs/heads/feat",
+            "^refs/heads/main",
+        )
+        with pytest.raises(RejectError, match="filter"):
+            write_bundle(repo, "feat", tip, _main_sha(repo), config)
+
+    def test_a_guard_written_bundle_altered_later_is_refused(
+        self, repo: Path, config: BranchRejectConfig
+    ) -> None:
+        record = write_bundle(repo, "feat", _tip(repo), _main_sha(repo), config)
+        record.path.write_bytes(record.path.read_bytes()[:-40])
+        with pytest.raises(RejectError, match="not written by the guard"):
+            write_bundle(repo, "feat", _tip(repo), _main_sha(repo), config)
+
     def test_a_planted_thin_bundle_is_refused(self, repo: Path, config: BranchRejectConfig) -> None:
         """A bundle needing a branch-only commit loses that commit once the ref is gone."""
         _git(repo, "switch", "-q", "feat")
@@ -893,6 +931,13 @@ class TestBundleProblems:
         assert bundle_problems(repo, record, "feat") == []
         unrelated = replace(record, base=lone)
         assert any("prerequisite" in p for p in bundle_problems(repo, unrelated, "feat"))
+
+    def test_a_prerequisite_that_is_not_an_object_id(
+        self, repo: Path, record: BundleRecord
+    ) -> None:
+        record.path.write_bytes(b"# v2 git bundle\n-not-a-sha comment\n\n")
+        rehashed = replace(record, sha256=sha256_of(record.path))
+        assert any("header" in p for p in bundle_problems(repo, rehashed, "feat"))
 
     def test_a_bundle_with_no_header_end(self, repo: Path, record: BundleRecord) -> None:
         record.path.write_bytes(b"# v2 git bundle\n-" + b"a" * 40)

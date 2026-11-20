@@ -1053,6 +1053,7 @@ def delete_branches(
                     reject_route,
                     default_ref=reject_route.default_ref or protected_ref,
                     write=not dry_run,
+                    pending=len(approvals),
                 )
             except (branch_reject.RejectError, branch_reject.RejectRefusedError) as exc:
                 blocker_list.append(f"{c.name}: {c.detail}; the no-value route refused: {exc}")
