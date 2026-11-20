@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import enum
 import fnmatch
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -139,26 +140,45 @@ class Judgement:
 #: Top-level files a venv tool writes beside ``pyvenv.cfg`` (``python -m venv``, uv).
 VENV_FILES: tuple[str, ...] = (VENV_MARKER, ".gitignore", "CACHEDIR.TAG")
 
-#: Top-level names whose whole subtree is the venv's own layout.
-VENV_LAYOUT_DIRECTORIES: tuple[str, ...] = (
-    "bin",
-    "Scripts",
-    "lib",
-    "lib64",
-    "lib32",
-    "Lib",
-    "include",
-    "Include",
-    "share",
+#: Top-level names whose whole subtree is the venv's own layout (headers pip installs).
+VENV_INCLUDE_DIRECTORIES: tuple[str, ...] = ("include", "Include")
+
+#: Top-level names that may be the venv's link to ``lib`` (``python -m venv`` writes lib64).
+VENV_LIB_LINKS: tuple[str, ...] = ("lib64", "lib32")
+
+#: The scripts folders; only the files named by :data:`_VENV_SCRIPT` are the venv's (N3).
+VENV_SCRIPT_DIRECTORIES: tuple[str, ...] = ("bin", "Scripts")
+
+#: An interpreter a venv tool writes in its scripts folder: ``python``, ``python3.13``, ``pythonw.exe``.
+_VENV_INTERPRETER = re.compile(r"pythonw?(\d+(\.\d+)?)?(\.exe)?")
+
+#: Every file a venv tool or ensurepip writes in the scripts folder, matched whole (N3).
+#: A console script pip installs later is NOT here: its name is arbitrary, so it is
+#: uncovered and the entry is UNCERTAIN, which over-protects only.
+_VENV_SCRIPT = re.compile(
+    r"pythonw?(\d+(\.\d+)?)?(\.exe)?"
+    r"|pip(\d+(\.\d+)?)?(\.exe)?"
+    r"|activate(\.(sh|bash|csh|fish|nu|ps1|bat|xsh))?|Activate\.ps1|activate_this\.py"
+    r"|deactivate(\.(bat|nu))?|pydoc(\.bat)?"
+)
+
+#: The installed-package tree of a lib folder: ``lib/python3.13/site-packages/`` (N3).
+_SITE_PACKAGES = re.compile(
+    r"(lib|lib64|lib32)/python\d+\.\d+/site-packages(/.*)?|Lib/site-packages(/.*)?"
 )
 
 
+def _is_interpreter(relative: str) -> bool:
+    folder, _, name = relative.partition("/")
+    return folder in VENV_SCRIPT_DIRECTORIES and bool(_VENV_INTERPRETER.fullmatch(name))
+
+
 def _is_venv(venv: str, paths: Sequence[str]) -> bool:
-    """The real venv shape: an interpreter under bin/ (or a Scripts/ tree) and a lib tree."""
-    has_interpreter = any(
-        path.startswith((f"{venv}/bin/python", f"{venv}/Scripts/")) for path in paths
-    )
-    has_lib = any(path.startswith((f"{venv}/lib/", f"{venv}/Lib/")) for path in paths)
+    """The real venv shape: an exact interpreter in the scripts folder and a site-packages tree."""
+    prefix = f"{venv}/"
+    below = [path[len(prefix) :] for path in paths if path.startswith(prefix)]
+    has_interpreter = any(_is_interpreter(relative) for relative in below)
+    has_lib = any(_SITE_PACKAGES.fullmatch(relative) for relative in below)
     return has_interpreter and has_lib
 
 
@@ -175,18 +195,31 @@ def _venv_directories(nodes: Sequence[Node]) -> tuple[str, ...]:
 
 
 def _in_venv_layout(node: Node, venv: str) -> bool:
-    """True only for the venv's own files and layout trees, never a sibling beside them.
+    """True only for the files a venv tool writes, never a user file in or beside them (N3).
 
-    A top-level regular FILE named like a layout directory (``share``) is a sibling.
+    Covered: the top-level :data:`VENV_FILES`, a ``lib64``/``lib32`` link, the
+    ``include`` tree, the named scripts directly in ``bin``/``Scripts``, and the
+    ``site-packages`` tree of a lib folder. Anything else (``bin/probe.py``,
+    ``lib/helpers.py``, ``share/notes.md``, a top-level FILE named ``share``) is
+    uncovered.
     """
     if not node.path.startswith(f"{venv}/"):
         return False
-    top, _, below = node.path[len(venv) + 1 :].partition("/")
-    if below:
-        return top in VENV_LAYOUT_DIRECTORIES
-    if node.kind is NodeKind.FILE:
-        return top in VENV_FILES
-    return top in VENV_LAYOUT_DIRECTORIES
+    relative = node.path[len(venv) + 1 :]
+    top, _, below = relative.partition("/")
+    if not below:
+        if node.kind is NodeKind.FILE:
+            return top in VENV_FILES
+        return node.kind is NodeKind.SYMLINK and top in VENV_LIB_LINKS
+    if top in VENV_INCLUDE_DIRECTORIES:
+        return True
+    if top in VENV_SCRIPT_DIRECTORIES:
+        return (
+            "/" not in below
+            and node.kind is not NodeKind.DIRECTORY
+            and bool(_VENV_SCRIPT.fullmatch(below))
+        )
+    return bool(_SITE_PACKAGES.fullmatch(relative))
 
 
 def _proof_for(node: Node, venvs: Sequence[str]) -> Proof | None:
@@ -358,8 +391,10 @@ __all__ = [
     "REGENERABLE_DIRECTORIES",
     "TRACKED_UNKNOWN",
     "VENV_FILES",
-    "VENV_LAYOUT_DIRECTORIES",
+    "VENV_INCLUDE_DIRECTORIES",
+    "VENV_LIB_LINKS",
     "VENV_MARKER",
+    "VENV_SCRIPT_DIRECTORIES",
     "Judgement",
     "Proof",
     "RepositoryMarker",

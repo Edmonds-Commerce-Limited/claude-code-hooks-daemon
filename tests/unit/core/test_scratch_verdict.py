@@ -387,7 +387,7 @@ class TestP2:
                 Node("e/venv/pyvenv.cfg", F, 50),
                 Node("e/venv/bin", D, 0),
                 Node("e/venv/bin/python", L, 7),
-                Node("e/venv/lib/site.py", F, 500),
+                Node("e/venv/lib/python3.13/site-packages/site.py", F, 500),
             )
         )
         judgement = judge(walk, age=_DUE, liveness=())
@@ -482,7 +482,7 @@ class TestP2:
                 Node("e/bin", D, 0),
                 Node("e/bin/python", L, 7),
                 Node("e/lib", D, 0),
-                Node("e/lib/python3.13/site.py", F, 9),
+                Node("e/lib/python3.13/site-packages/site.py", F, 9),
                 Node("e/findings.md", F, 500),
                 Node("e/notes", D, 0),
                 Node("e/notes/a.txt", F, 5),
@@ -500,12 +500,102 @@ class TestP2:
                 Node("e/bin", D, 0),
                 Node("e/bin/python", L, 7),
                 Node("e/lib", D, 0),
-                Node("e/lib/python3.13/site.py", F, 9),
+                Node("e/lib/python3.13/site-packages/site.py", F, 9),
                 Node("e/share", F, 500),
             )
         )
         judgement = judge(walk, age=_DUE, liveness=())
         assert judgement.uncovered == ("e/share",)
+
+    @staticmethod
+    def _venv_with(*extra: Node) -> Bounded[EntryStats]:
+        return finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/pyvenv.cfg", F, 50),
+                Node("e/bin", D, 0),
+                Node("e/bin/python", L, 7),
+                Node("e/bin/python3.13", L, 6),
+                Node("e/bin/pip3", F, 200),
+                Node("e/bin/activate.fish", F, 200),
+                Node("e/lib", D, 0),
+                Node("e/lib/python3.13/site-packages/x.py", F, 9),
+                *extra,
+            )
+        )
+
+    def test_n3_the_venv_alone_is_covered(self) -> None:
+        assert _judge(self._venv_with()) is Verdict.DISPOSABLE
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "e/bin/probe.py",
+            "e/bin/tool/run.sh",
+            "e/bin/python-notes.txt",
+            "e/lib/helpers.py",
+            "e/lib/python3.13/notes.md",
+            "e/lib64/helpers.py",
+            "e/share/findings.md",
+            "e/Lib/notes.md",
+        ],
+    )
+    def test_n3_a_user_file_in_a_layout_folder_is_uncovered(self, path: str) -> None:
+        """N3: P2 covers only the files a venv tool writes, never a user file beside them."""
+        judgement = judge(self._venv_with(Node(path, F, 500)), age=_DUE, liveness=())
+        assert judgement.verdict is Verdict.UNCERTAIN
+        assert judgement.uncovered == (path,)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "e/bin/activate",
+            "e/bin/Activate.ps1",
+            "e/bin/activate_this.py",
+            "e/bin/pip",
+            "e/bin/pip3.13",
+            "e/bin/python3",
+            "e/include/site/python3.13/x.h",
+            "e/lib64/python3.13/site-packages/y.py",
+            "e/.gitignore",
+            "e/CACHEDIR.TAG",
+        ],
+    )
+    def test_n3_files_a_venv_tool_writes_are_covered(self, path: str) -> None:
+        assert _judge(self._venv_with(Node(path, F, 500))) is Verdict.DISPOSABLE
+
+    def test_n3_a_lib64_link_is_covered(self) -> None:
+        assert _judge(self._venv_with(Node("e/lib64", L, 3))) is Verdict.DISPOSABLE
+
+    @pytest.mark.parametrize(
+        "interpreter", ["e/bin/python-notes.txt", "e/bin/pythonista", "e/bin/python/x"]
+    )
+    def test_n3_is_venv_needs_an_exact_interpreter(self, interpreter: str) -> None:
+        """N3: ``_is_venv`` must not accept a file merely starting ``bin/python``."""
+        walk = finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/pyvenv.cfg", F, 50),
+                Node(interpreter, F, 7),
+                Node("e/lib/python3.13/site-packages/x.py", F, 9),
+            )
+        )
+        judgement = judge(walk, age=_DUE, liveness=())
+        assert judgement.verdict is Verdict.UNCERTAIN
+        assert "e/lib/python3.13/site-packages/x.py" in judgement.uncovered
+
+    def test_n3_is_venv_needs_a_site_packages_tree(self) -> None:
+        walk = finished(
+            _stats(
+                Node("e", D, 0),
+                Node("e/pyvenv.cfg", F, 50),
+                Node("e/bin/python", L, 7),
+                Node("e/lib/notes.md", F, 9),
+            )
+        )
+        judgement = judge(walk, age=_DUE, liveness=())
+        assert judgement.verdict is Verdict.UNCERTAIN
+        assert "e/bin/python" in judgement.uncovered
 
     def test_pyvenv_cfg_covers_only_its_own_directory(self) -> None:
         walk = finished(
