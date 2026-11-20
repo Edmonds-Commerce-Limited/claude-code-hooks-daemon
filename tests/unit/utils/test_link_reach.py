@@ -52,7 +52,7 @@ def _index(root: Path) -> ProtectedFileIndex:
 def _with_link_index(root: Path) -> None:
     """Build and settle the link index, so the index path (not the walk) is taken."""
     assert link_index.link_scan_for(str(root)) is None
-    link_index.wait_for_link_index(timeout=30)
+    link_index.wait_for_link_index(timeout=link_index.BUILD_DEADLINE_SECONDS)
     held = link_index._indexes[os.path.normpath(str(root))]
     held.age_for_tests(seconds=3600)
 
