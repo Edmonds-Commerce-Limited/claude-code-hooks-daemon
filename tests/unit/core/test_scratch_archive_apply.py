@@ -455,6 +455,20 @@ class TestResumeReclaimExpireOrder:
         result = apply_sweep(store, FakeFacts([]).facts(), other)
         assert [(o.archive_id, o.outcome) for o in result.expired] == [(archive_id, "held")]
 
+    def test_an_archive_from_a_sub_root_is_held_by_the_parent_root(
+        self, root: Path, project: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        # Its record's directory is untracked/scratch/sub, never the swept prefix, so
+        # the parent root cannot see whether anything still holds it: kept, not expired.
+        entry(root, "e1")
+        sub = dataclasses.replace(settings(root, tar), original_prefix="untracked/scratch/sub")
+        packed = apply_sweep(store, FakeFacts([row("e1")]).facts(), sub)
+        archive_id = outcome_of(packed, "e1").archive_id
+        (record,) = store.read_index().records
+        assert record.original_path == "untracked/scratch/sub/e1"
+        result = apply_sweep(store, FakeFacts([]).facts(), settings(root, tar, later(13)))
+        assert [(o.archive_id, o.outcome) for o in result.expired] == [(archive_id, "held")]
+
     def test_unfinished_adoptions_are_reported_not_finished(
         self, root: Path, store: ArchiveStore, tar: TarTool
     ) -> None:
