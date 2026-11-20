@@ -218,6 +218,31 @@ written and `bundle_problems` is empty; the tip re-check passes; the ledger line
 appended (RULINGS section 1 item 5: before git is asked); git deletes. The classification
 then reports tier `rejected-bundled` and the report's restore commands carry both lines of
 section 7. Any failure before the ledger append leaves the branch in place and names the
-problem. A git refusal after the append leaves a ledger line for a removal that did not
-happen; slice 2 must decide how that line is marked (an appended `"outcome": "git-refused"`
-line is the first candidate, since the ledger is append-only).
+problem.
+
+Decided in slice 2 (`approve_removal`, `record_removal`, `record_git_refusal`):
+
+- **Nothing is trusted from a record that git can answer.** The default sha the bundle is
+  cut against and the ledger records is `rev-parse` of the default now. The reviewer count
+  is recomputed at delete time from `admit_request` over the keeps and the ledger, and the
+  larger of that and each request's own count wins, so a request admitted at an empty
+  window cannot carry one reviewer past the two-reviewer or refuse threshold.
+- **Any stored `keep` for this tip refuses**, even beside enough valid `no-value`
+  verdicts; only then are the rest validated, and invalid ones are named in the refusal.
+- **Eligibility:** only `unproven` with no refusal. A protected, current, worktree or
+  unmerged-line branch stays refused whatever verdict exists.
+- **Phases:** validation and the bundle write happen with every other blocker, so one
+  unapproved branch removes none of the batch. A dry run validates and writes nothing.
+  The route measures against `RejectRoute.default_ref` (the CLI sets the resolved default,
+  since `--protected-ref` may name an integration line), falling back to `protected_ref`.
+- **Bundle prerequisites.** `bundle_problems` also reads the bundle header and requires
+  every prerequisite to be an ancestor of the base it was cut against
+  (`BundleRecord.base`). Without it a planted thin bundle (`feat ^feat~1`) verifies and
+  lists the tip, yet restores nothing once the branch is gone; a test pins the refusal.
+- **A git refusal after the append** appends a second line,
+  `{"outcome": "git-refused", branch, tip, verdict_ids, detail, refused_at}`.
+  `read_ledger` returns only removals no refusal cancels (same tip and verdict ids), so
+  the rate count does not see it; `read_ledger_entries` returns every line for the
+  digest. The refused attempt's verdicts stay consumed (fail closed: a retry needs a fresh
+  review). If even the refusal line cannot be appended, the blocker says the ledger
+  wrongly records the removal. A line with an unknown `outcome` raises.

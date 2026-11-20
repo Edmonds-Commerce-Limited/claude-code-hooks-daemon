@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.core.branch_reject import (
     Item,
     KeepRecord,
     LedgerLine,
+    LedgerRefusal,
     RejectError,
     RejectRefusedError,
     RejectRequest,
@@ -39,6 +40,7 @@ from claude_code_hooks_daemon.core.branch_reject import (
     Verdict,
     admit_request,
     append_ledger,
+    append_refusal,
     bundle_path_for,
     bundle_problems,
     compute_inventory,
@@ -47,6 +49,7 @@ from claude_code_hooks_daemon.core.branch_reject import (
     main_checkout,
     new_id,
     read_ledger,
+    read_ledger_entries,
     removals_in_window,
     restore_commands,
     reviewers_for_rate,
@@ -837,6 +840,24 @@ class TestBundle:
         with pytest.raises(RejectError):
             write_bundle(repo, "feat", _main_sha(repo), _main_sha(repo), config)
 
+    def test_the_record_carries_the_base_it_was_cut_against(
+        self, repo: Path, config: BranchRejectConfig
+    ) -> None:
+        record = write_bundle(repo, "feat", _tip(repo), _main_sha(repo), config)
+        assert record.base == _main_sha(repo)
+
+    def test_a_planted_thin_bundle_is_refused(self, repo: Path, config: BranchRejectConfig) -> None:
+        """A bundle needing a branch-only commit loses that commit once the ref is gone."""
+        _git(repo, "switch", "-q", "feat")
+        _commit(repo, "src/second.py", "y = 2\n", "second")
+        _git(repo, "switch", "-q", "main")
+        tip = _tip(repo)
+        path = bundle_path_for(repo, config, "feat", tip)
+        path.parent.mkdir(parents=True)
+        _git(repo, "bundle", "create", str(path), "refs/heads/feat", "^refs/heads/feat~1")
+        with pytest.raises(RejectError, match="prerequisite"):
+            write_bundle(repo, "feat", tip, _main_sha(repo), config)
+
 
 class TestBundleProblems:
     @pytest.fixture
@@ -862,6 +883,21 @@ class TestBundleProblems:
 
     def test_the_tip_under_another_branch_name(self, repo: Path, record: BundleRecord) -> None:
         assert any("does not list" in p for p in bundle_problems(repo, record, "other"))
+
+    def test_a_prerequisite_off_the_base(self, repo: Path, record: BundleRecord) -> None:
+        """Against a base that does not hold the prerequisite, the bundle is not sound."""
+        _git(repo, "switch", "-q", "--orphan", "lone")
+        _commit(repo, "lone.txt", "z\n", "lone")
+        lone = _tip(repo, "lone")
+        _git(repo, "switch", "-q", "main")
+        assert bundle_problems(repo, record, "feat") == []
+        unrelated = replace(record, base=lone)
+        assert any("prerequisite" in p for p in bundle_problems(repo, unrelated, "feat"))
+
+    def test_a_bundle_with_no_header_end(self, repo: Path, record: BundleRecord) -> None:
+        record.path.write_bytes(b"# v2 git bundle\n-" + b"a" * 40)
+        rehashed = replace(record, sha256=sha256_of(record.path))
+        assert any("header" in p for p in bundle_problems(repo, rehashed, "feat"))
 
 
 class TestRestoreCommands:
@@ -907,6 +943,81 @@ class TestLedger:
         with path.open("a", encoding="utf-8") as handle:
             handle.write("\n")
         assert len(read_ledger(path)) == 1
+
+
+def _refusal_of(line: LedgerLine, at: float = NOW) -> LedgerRefusal:
+    return LedgerRefusal(
+        branch=line.branch,
+        tip=line.tip,
+        verdict_ids=line.verdict_ids,
+        detail="git refused: cannot lock ref",
+        refused_at=at,
+    )
+
+
+class TestLedgerRefusal:
+    """DESIGN.md section 10: the line is appended before git; a refusal is a second line."""
+
+    def test_a_refused_removal_is_not_a_removal(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.jsonl"
+        refused, kept = _ledger_line(), _ledger_line(branch="other")
+        append_ledger(path, refused)
+        append_ledger(path, kept)
+        append_refusal(path, _refusal_of(refused))
+        assert read_ledger(path) == [kept]
+
+    def test_every_entry_reads_in_order(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.jsonl"
+        line = _ledger_line()
+        refusal = _refusal_of(line)
+        append_ledger(path, line)
+        append_refusal(path, refusal)
+        assert read_ledger_entries(path) == [line, refusal]
+
+    def test_a_refused_attempt_still_consumes_its_verdict(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.jsonl"
+        line = _ledger_line()
+        append_ledger(path, line)
+        append_refusal(path, _refusal_of(line))
+        assert consumed_verdict_ids(read_ledger_entries(path)) == frozenset(line.verdict_ids)
+
+    def test_a_refused_removal_is_not_in_the_rate(
+        self, tmp_path: Path, config: BranchRejectConfig
+    ) -> None:
+        path = tmp_path / "ledger.jsonl"
+        line = _ledger_line(removed_at=NOW - 1)
+        append_ledger(path, line)
+        append_refusal(path, _refusal_of(line))
+        assert removals_in_window(read_ledger(path), now=NOW, config=config) == 0
+
+    def test_a_refusal_cancels_only_its_own_attempt(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.jsonl"
+        line = _ledger_line()
+        append_ledger(path, line)
+        append_refusal(path, replace(_refusal_of(line), tip="9" * 40))
+        assert read_ledger(path) == [line]
+
+    def test_an_unknown_outcome_raises(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.jsonl"
+        data = _refusal_of(_ledger_line()).to_dict()
+        data["outcome"] = "maybe"
+        path.write_text(json.dumps(data) + "\n", encoding="utf-8")
+        with pytest.raises(RejectError, match="outcome"):
+            read_ledger_entries(path)
+
+    def test_a_refusal_missing_a_field_raises(self, tmp_path: Path) -> None:
+        path = tmp_path / "ledger.jsonl"
+        data = _refusal_of(_ledger_line()).to_dict()
+        del data["detail"]
+        path.write_text(json.dumps(data) + "\n", encoding="utf-8")
+        with pytest.raises(RejectError):
+            read_ledger(path)
+
+    def test_an_unwritable_ledger_raises(self, tmp_path: Path) -> None:
+        blocker = tmp_path / "ledger.jsonl"
+        blocker.mkdir()
+        with pytest.raises(RejectError):
+            append_refusal(blocker, _refusal_of(_ledger_line()))
 
 
 class TestLedgerMerge:

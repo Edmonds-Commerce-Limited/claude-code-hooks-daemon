@@ -59,6 +59,9 @@ CITE_PATH = "path:"
 
 SCHEMA_VERSION = 1
 
+#: The ``outcome`` of a ledger line recording that git refused an appended removal.
+OUTCOME_GIT_REFUSED = "git-refused"
+
 _ID = re.compile(r"[0-9a-f]{32}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _OBJECT = re.compile(r"[0-9a-f]{7,64}")
@@ -68,6 +71,7 @@ _TIP_IN_NAME = 12
 _SECONDS_PER_HOUR = 3600.0
 _SECONDS_PER_DAY = 86_400.0
 _HASH_CHUNK = 1 << 20
+_HEADER_LIMIT = 1 << 20
 _LEDGER_MODE = 0o644
 _GIT_DIR_NAME = ".git"
 _HEADS = "refs/"
@@ -526,6 +530,10 @@ class RejectRoute:
     ledger_path: Path
     config: BranchRejectConfig
     now: float
+    #: The DEFAULT branch the route judges against; None means the delete's own
+    #: ``protected_ref``. A caller whose ``protected_ref`` may be an integration line
+    #: must set it, since rejected work is never judged against a line.
+    default_ref: str | None = None
 
 
 # --- the inventory -------------------------------------------------------------------
@@ -861,11 +869,55 @@ def sha256_of(path: Path) -> str:
 
 @dataclass(frozen=True)
 class BundleRecord:
-    """A bundle the guard wrote, and what it recorded about it at write time."""
+    """A bundle the guard wrote, and what it recorded about it at write time.
+
+    ``base`` is the default-branch commit the bundle was cut against: every
+    prerequisite the bundle names must be an ancestor of it, or the bundle leans on
+    a commit only the branch holds and restores nothing once the branch is gone.
+    """
 
     path: Path
     sha256: str
     tip: str
+    base: str
+
+
+def bundle_prerequisites(path: Path) -> tuple[str, ...]:
+    """The commits a bundle requires the receiving repository to hold already.
+
+    Read from the bundle header (``-<oid>`` lines before the blank line). Raises
+    RejectError when the file cannot be read or holds no complete header.
+    """
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(_HEADER_LIMIT)
+    except OSError as exc:
+        raise RejectError(f"could not read {path}: {exc}") from exc
+    end = head.find(b"\n\n")
+    if end < 0:
+        raise RejectError(f"{path} holds no complete bundle header")
+    prerequisites: list[str] = []
+    for raw in head[:end].split(b"\n")[1:]:
+        if not raw.startswith(b"-"):
+            continue
+        oid = raw[1:].split(b" ", 1)[0].decode("ascii", errors="replace")
+        if not _OBJECT.fullmatch(oid):
+            raise RejectError(f"{path} names a prerequisite that is not an object id")
+        prerequisites.append(oid)
+    return tuple(prerequisites)
+
+
+def _prerequisite_problems(repo: Path, record: BundleRecord) -> list[str]:
+    try:
+        prerequisites = bundle_prerequisites(record.path)
+    except RejectError as exc:
+        return [f"the bundle header could not be read: {exc}"]
+    return [
+        f"the bundle prerequisite {oid[:12]} is not on the default branch at "
+        f"{record.base[:12]}, so the bundle restores nothing once the branch is gone"
+        for oid in prerequisites
+        if not _git_ok(repo, "merge-base", "--is-ancestor", oid, record.base)
+    ]
 
 
 def bundle_problems(repo: Path, record: BundleRecord, branch: str) -> list[str]:
@@ -882,6 +934,7 @@ def bundle_problems(repo: Path, record: BundleRecord, branch: str) -> list[str]:
     wanted = f"{record.tip} {branch_ref(branch)}"
     if heads.returncode != 0 or wanted not in heads.stdout.splitlines():
         problems.append(f"the bundle does not list {record.tip[:12]} as {branch_ref(branch)}")
+    problems += _prerequisite_problems(repo, record)
     return problems
 
 
@@ -899,7 +952,7 @@ def write_bundle(
     path = bundle_path_for(repo, config, branch, tip)
     if not path.exists():
         _create_bundle(repo, branch, default_sha, path)
-    record = BundleRecord(path=path, sha256=sha256_of(path), tip=tip)
+    record = BundleRecord(path=path, sha256=sha256_of(path), tip=tip, base=default_sha)
     problems = bundle_problems(repo, record, branch)
     if problems:
         raise RejectError(f"the bundle at {path} is not sound: {'; '.join(problems)}")
@@ -983,7 +1036,54 @@ class LedgerLine:
 
 def append_ledger(path: Path, line: LedgerLine) -> None:
     """Append one line with a single ``O_APPEND`` write, then fsync."""
-    payload = (json.dumps(line.to_dict(), sort_keys=True) + "\n").encode("utf-8")
+    _append_payload(path, line.to_dict())
+
+
+@dataclass(frozen=True)
+class LedgerRefusal:
+    """Git refused a removal whose line was already appended (DESIGN.md section 10).
+
+    The ledger line goes in BEFORE git is asked (RULINGS.md section 1 item 5), so a
+    refusal is recorded as a second, append-only line naming the same tip and
+    verdicts. That attempt then counts as no removal, but its verdicts stay consumed.
+    """
+
+    branch: str
+    tip: str
+    verdict_ids: tuple[str, ...]
+    detail: str
+    refused_at: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": SCHEMA_VERSION,
+            "outcome": OUTCOME_GIT_REFUSED,
+            "branch": self.branch,
+            "tip": self.tip,
+            "verdict_ids": list(self.verdict_ids),
+            "detail": self.detail,
+            "refused_at": self.refused_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> LedgerRefusal:
+        _schema(data)
+        if _str(data, "outcome") != OUTCOME_GIT_REFUSED:
+            raise RejectError(f"unknown ledger outcome {data.get('outcome')!r}")
+        return cls(
+            branch=_str(data, "branch"),
+            tip=_str(data, "tip"),
+            verdict_ids=_strs(data, "verdict_ids"),
+            detail=_str(data, "detail"),
+            refused_at=_float(data, "refused_at"),
+        )
+
+
+LedgerEntry = LedgerLine | LedgerRefusal
+
+
+def _append_payload(path: Path, data: Mapping[str, Any]) -> None:
+    payload = (json.dumps(data, sort_keys=True) + "\n").encode("utf-8")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, _LEDGER_MODE)
@@ -996,15 +1096,24 @@ def append_ledger(path: Path, line: LedgerLine) -> None:
         raise RejectError(f"could not append to the ledger {path}: {exc}") from exc
 
 
-def read_ledger(path: Path) -> list[LedgerLine]:
-    """Every ledger line; a missing ledger is empty, a damaged one raises RejectError."""
+def append_refusal(path: Path, refusal: LedgerRefusal) -> None:
+    """Append a ``git-refused`` line with a single ``O_APPEND`` write, then fsync."""
+    _append_payload(path, refusal.to_dict())
+
+
+def read_ledger_entries(path: Path) -> list[LedgerEntry]:
+    """Every ledger entry in file order; a missing ledger is empty.
+
+    Strict: a line that is not JSON, not an object, missing a field or naming an
+    unknown outcome raises RejectError, so a damaged ledger refuses the route.
+    """
     if not path.exists():
         return []
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise RejectError(f"could not read the ledger {path}: {exc}") from exc
-    lines: list[LedgerLine] = []
+    entries: list[LedgerEntry] = []
     for number, raw in enumerate(text.splitlines(), start=1):
         if not raw.strip():
             continue
@@ -1015,15 +1124,38 @@ def read_ledger(path: Path) -> list[LedgerLine]:
         if not isinstance(data, dict):
             raise RejectError(f"{path} line {number} is not a JSON object")
         try:
-            lines.append(LedgerLine.from_dict(data))
+            entry: LedgerEntry = (
+                LedgerRefusal.from_dict(data) if "outcome" in data else LedgerLine.from_dict(data)
+            )
         except RejectError as exc:
             raise RejectError(f"{path} line {number}: {exc}") from exc
-    return lines
+        entries.append(entry)
+    return entries
 
 
-def consumed_verdict_ids(lines: Iterable[LedgerLine]) -> frozenset[str]:
-    """Every verdict id a recorded removal has already used."""
-    return frozenset(verdict_id for line in lines for verdict_id in line.verdict_ids)
+def effective_removals(entries: Iterable[LedgerEntry]) -> list[LedgerLine]:
+    """The removal lines no ``git-refused`` line cancels (same tip and verdicts)."""
+    materialised = list(entries)
+    refused = {
+        (entry.tip, entry.verdict_ids)
+        for entry in materialised
+        if isinstance(entry, LedgerRefusal)
+    }
+    return [
+        entry
+        for entry in materialised
+        if isinstance(entry, LedgerLine) and (entry.tip, entry.verdict_ids) not in refused
+    ]
+
+
+def read_ledger(path: Path) -> list[LedgerLine]:
+    """Every removal that happened; a missing ledger is empty, a damaged one raises."""
+    return effective_removals(read_ledger_entries(path))
+
+
+def consumed_verdict_ids(entries: Iterable[LedgerEntry]) -> frozenset[str]:
+    """Every verdict id a removal, or a refused removal attempt, has already used."""
+    return frozenset(verdict_id for entry in entries for verdict_id in entry.verdict_ids)
 
 
 def removals_in_window(
@@ -1032,3 +1164,136 @@ def removals_in_window(
     """Removals within the last ``window_days`` up to ``now``."""
     start = now - config.window_days * _SECONDS_PER_DAY
     return sum(1 for line in lines if start <= line.removed_at <= now)
+
+
+# --- the delete route (slice 2, DESIGN.md section 10) ----------------------------------
+
+
+@dataclass(frozen=True)
+class RemovalApproval:
+    """Everything the guard recomputed that lets one ``unproven`` branch go.
+
+    ``bundle`` is None only on a dry run, which validates and writes nothing.
+    """
+
+    branch: str
+    tip: str
+    default_sha: str
+    verdicts: tuple[Verdict, ...]
+    bundle: BundleRecord | None
+
+
+def _verdict_refusal(verdicts: Sequence[Verdict], problems: Mapping[str, list[str]]) -> str:
+    detail = "; ".join(
+        f"verdict {verdict_id[:12]}: {', '.join(found)}" for verdict_id, found in problems.items()
+    )
+    count = len(verdicts)
+    return f"{count} verdict(s) on file for this tip, none usable" + (
+        f" ({detail})" if detail else ""
+    )
+
+
+def approve_removal(
+    repo: Path, branch: str, tip: str, route: RejectRoute, *, default_ref: str, write: bool
+) -> RemovalApproval:
+    """Recompute every fact the route rests on; raise RejectRefusedError or RejectError.
+
+    In order: the ledger reads cleanly; the admission rules (keep history and the
+    removal rate, both re-read NOW, never trusted from the request) give the number
+    of reviewers; any stored verdict for this tip judging ``keep`` refuses outright;
+    the remaining verdicts each validate in full; the valid set meets the number from
+    distinct agents; and, unless ``write`` is False, the bundle is written and
+    verified against the default as it stands now.
+    """
+    entries = read_ledger_entries(route.ledger_path)
+    default_sha = _resolve(repo, _full_ref(default_ref))
+    inventory = compute_inventory(repo, branch, default_ref)
+    removals = removals_in_window(effective_removals(entries), now=route.now, config=route.config)
+    required = admit_request(
+        branch, tip, inventory, route.store.keeps(), removals, route.config
+    )
+    verdicts = route.store.verdicts_for(branch, tip)
+    if not verdicts:
+        raise RejectRefusedError("no reviewer verdict is on file for this tip")
+    if any(
+        v.overall != DECISION_NO_VALUE or any(i.decision != DECISION_NO_VALUE for i in v.items)
+        for v in verdicts
+    ):
+        raise RejectRefusedError("a reviewer judged keep for this tip; disagreement is keep")
+    consumed = consumed_verdict_ids(entries)
+    valid: list[Verdict] = []
+    problems: dict[str, list[str]] = {}
+    for verdict in verdicts:
+        found = verdict_problems(
+            verdict,
+            repo=repo,
+            store=route.store,
+            default_ref=default_ref,
+            now=route.now,
+            consumed=consumed,
+            config=route.config,
+        )
+        if found:
+            problems[verdict.verdict_id] = found
+            continue
+        request = route.store.read_request(verdict.nonce)
+        if request is None:
+            raise RejectError(f"the request {verdict.nonce[:12]} vanished during the check")
+        required = max(required, request.reviewers_required)
+        valid.append(verdict)
+    if not valid:
+        raise RejectRefusedError(_verdict_refusal(verdicts, problems))
+    set_problems = verdict_set_problems(valid, required=required)
+    if set_problems:
+        raise RejectRefusedError("; ".join(set_problems))
+    bundle = write_bundle(repo, branch, tip, default_sha, route.config) if write else None
+    return RemovalApproval(
+        branch=branch, tip=tip, default_sha=default_sha, verdicts=tuple(valid), bundle=bundle
+    )
+
+
+def record_removal(repo: Path, approval: RemovalApproval, route: RejectRoute) -> LedgerLine:
+    """Re-verify the bundle and the verdicts' single use, then append the ledger line.
+
+    Called after the tip re-check and BEFORE git is asked to delete (RULINGS.md
+    section 1 item 5). Raises RejectError when anything no longer holds; the branch
+    is then left in place.
+    """
+    if approval.bundle is None:
+        raise RejectError("a dry-run approval cannot record a removal")
+    problems = bundle_problems(repo, approval.bundle, approval.branch)
+    if problems:
+        raise RejectError(f"the bundle no longer verifies: {'; '.join(problems)}")
+    ids = tuple(v.verdict_id for v in approval.verdicts)
+    reused = consumed_verdict_ids(read_ledger_entries(route.ledger_path)) & set(ids)
+    if reused:
+        raise RejectError(f"verdict(s) already used by a concurrent removal: {sorted(reused)}")
+    line = LedgerLine(
+        branch=approval.branch,
+        tip=approval.tip,
+        default_sha=approval.default_sha,
+        verdict_ids=ids,
+        reviewer_agent_ids=tuple(v.reviewer.agent_id for v in approval.verdicts),
+        reviewer_models=tuple(m for v in approval.verdicts for m in v.reviewer.models),
+        reply_sha256s=tuple(v.reviewer.reply_sha256 for v in approval.verdicts),
+        bundle_path=str(approval.bundle.path),
+        bundle_sha256=approval.bundle.sha256,
+        restore_commands=restore_commands(approval.branch, approval.tip, approval.bundle.path),
+        removed_at=route.now,
+    )
+    append_ledger(route.ledger_path, line)
+    return line
+
+
+def record_git_refusal(line: LedgerLine, detail: str, route: RejectRoute) -> None:
+    """Append the ``git-refused`` line cancelling ``line``; raises RejectError on failure."""
+    append_refusal(
+        route.ledger_path,
+        LedgerRefusal(
+            branch=line.branch,
+            tip=line.tip,
+            verdict_ids=line.verdict_ids,
+            detail=detail,
+            refused_at=route.now,
+        ),
+    )
