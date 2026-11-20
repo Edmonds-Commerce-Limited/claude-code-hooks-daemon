@@ -1,8 +1,8 @@
 # Plan 00613 DESIGN: a sanctioned verb that links a protected file into a worktree
 
-Task 1.2 of [PLAN.md](PLAN.md). Design only: nothing here is built, and nothing
-here may be built before the owner answers [Owner decision needed](#owner-decision-needed)
-and that answer is recorded in the plan journal (Task 1.3).
+Task 1.2 of [PLAN.md](PLAN.md). The owner has answered; see
+[Owner decision](#owner-decision). Sections 3 to 8 describe the verb, which is
+NOT built; they stay as the record of how it would be.
 
 All examples are synthetic. `<P>` stands for a repository-relative path that the
 secret guard protects (for example a file matching a shipped default glob such
@@ -332,7 +332,40 @@ a cron stand-in ruling is not sufficient for Q1.
   merged and its three routes are verified denied against a live daemon. yes /
   no.
 
+## Owner decision
+
+The owner answered Q0 and Q1 in their own words, typed in the coordinating
+session on 2026-11-20 and relayed verbatim in the coordinator's brief to the
+building sub-agent (so the citation is that session's human line, through the
+brief; the sub-agent did not see the line itself):
+
+> "A linking vault files is essential if worktrees are to be able to work.
+> there's no security issue here - the file already exists on the file system
+> we're just making worktrees actually work"
+
+- **Q0: yes.** The owner typed it. This supersedes the delegated ruling below.
+- **Q1: yes.** Linking a protected file into an agent's worktree is allowed and
+  needed. Decided with it: **link mode only**; copy mode for a protected file
+  stays forbidden (a copy makes a second file, a link does not).
+- **Q2: B + D, as recommended**: the config seed list owns WHAT is linked. The
+  human-run step for a hand-made worktree is `hooks-daemon seed-worktree <worktree>`, which re-applies that list and takes no path of its own, so no
+  agent can use it to link an arbitrary protected path. The verb (A) is not
+  built.
+- **Q3: forbid**, as the owner's constraint says.
+- **Q4: moot.** **Q5:** the read contract is unchanged and pinned (a seeded
+  link is refused for Read, Edit, Grep and relative Bash reads from inside the
+  worktree), so text describing the link route ships with this plan.
+
+Small points settled on best practice, each journalled: the audit line records
+the route (`verb`); the command checks the worktree against git's own list by
+realpath and refuses the main checkout, a subdirectory and a prunable entry;
+the config is read strictly; and the config-edit route (an agent editing the
+seed list) is answered by visibility (the session-start drift report counts
+it), not by a circular deny.
+
 ## Rulings
+
+Superseded for Q0 to Q2 by the owner decision above; kept as the record.
 
 Settled by a fable sub-agent under the owner's delegation, 2026-11-19. These
 are NOT the owner's own words; a later owner message overturns any of them.

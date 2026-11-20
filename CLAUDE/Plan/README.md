@@ -18,7 +18,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00614: secret guard resolves links against hook cwd](00614-secret-guard-resolves-links-against-hook-cwd/PLAN.md) - In Progress (found by the 00613 probe: a relative Bash token such as `cat link` is resolved against the daemon's cwd `/`, so a link to a protected file passes; also a directory-link grep and a glob under a directory link; fix test-first and fail closed)
 
-- [00613: worktree link secret verb](00613-worktree-link-secret-verb/PLAN.md) - In Progress (peer report: the secret guard denies a relative symlink to a protected file made inside a worktree, which a peer workflow needs; design questions settled by delegated ruling: no agent-invocable verb, config seeding in link mode plus a human-run step, copy mode refused for a protected source; Phase 2 tightening ready to build, advising the link gated on Plans 00614 and 00623)
+- [00613: worktree link secret verb](00613-worktree-link-secret-verb/PLAN.md) - In Progress (peer report: the secret guard denies a relative symlink to a protected file made inside a worktree, which a peer workflow needs; the owner approved linking, link mode only: config seeding plus `hooks-daemon seed-worktree <worktree>` for a hand-made worktree, no agent-invocable verb, copy mode refused for a protected source, reads through a link still denied; built on its branch, security review pending)
 
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
