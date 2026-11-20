@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core import scratch_archive_pack as pack_mod
 from claude_code_hooks_daemon.core.scratch_archive import ArchiveStore, new_archive_id
 from claude_code_hooks_daemon.core.scratch_archive_claim import (
@@ -118,7 +119,7 @@ class TestFindTar:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         def hung(*args: object, **kwargs: object) -> object:
-            raise subprocess.TimeoutExpired(cmd="tar", timeout=30)
+            raise subprocess.TimeoutExpired(cmd="tar", timeout=Timeout.TAR_VERSION_PROBE)
 
         monkeypatch.setattr(subprocess, "run", hung)
         with pytest.raises(PackRefused, match="did not answer"):

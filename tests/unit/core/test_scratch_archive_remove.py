@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 
 import claude_code_hooks_daemon
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core import scratch_archive_pack as pack_mod
 from claude_code_hooks_daemon.core import scratch_archive_remove as remove_mod
 from claude_code_hooks_daemon.core.scratch_archive import (
@@ -605,7 +606,7 @@ class TestEscapes:
                 ["mount", "--bind", str(outside), str(target)],
                 check=True,
                 capture_output=True,
-                timeout=10,
+                timeout=Timeout.TEST_PRIVILEGED_SETUP,
             )
         except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             pytest.skip(f"bind mount unavailable here: {exc}")
@@ -615,7 +616,9 @@ class TestEscapes:
                 _remove(root_fd, store, tar, record)
             assert _outside_state(outside) == before
         finally:
-            subprocess.run(["umount", str(target)], check=True, timeout=10)
+            subprocess.run(
+                ["umount", str(target)], check=True, timeout=Timeout.TEST_PRIVILEGED_SETUP
+            )
 
     def test_a_read_only_directory_is_made_writable_through_its_descriptor(
         self,
@@ -724,7 +727,10 @@ class TestEscapes:
         target = root / (CLAIM_PREFIX + "e1") / "sub" / "deep" / "c.txt"
         try:
             subprocess.run(
-                ["chattr", "+i", str(target)], check=True, capture_output=True, timeout=10
+                ["chattr", "+i", str(target)],
+                check=True,
+                capture_output=True,
+                timeout=Timeout.TEST_PRIVILEGED_SETUP,
             )
         except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             pytest.skip(f"chattr unavailable here: {exc}")
@@ -733,7 +739,9 @@ class TestEscapes:
                 _remove(root_fd, store, tar, record)
             assert target.read_text() == "gamma"
         finally:
-            subprocess.run(["chattr", "-i", str(target)], check=True, timeout=10)
+            subprocess.run(
+                ["chattr", "-i", str(target)], check=True, timeout=Timeout.TEST_PRIVILEGED_SETUP
+            )
 
 
 class TestResume:
@@ -1004,7 +1012,7 @@ class TestAdoptedArchives:
                 tar=tar,
                 max_inodes=MAX,
                 max_depth=64,
-                timeout=60.0,
+                timeout=float(Timeout.REQUEST_LONG),
                 partial=False,
             )
         assert (root / (CLAIM_PREFIX + "e1") / "a.txt").read_text() == "alpha"

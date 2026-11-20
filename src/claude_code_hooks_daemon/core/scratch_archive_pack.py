@@ -43,6 +43,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import IO, Literal
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.scratch_archive import ArchiveStore, StoreRefused
 from claude_code_hooks_daemon.core.scratch_archive_claim import (
     DEFAULT_MAX_DEPTH,
@@ -106,7 +107,7 @@ def find_gnu_tar(path: str | None = None) -> TarTool:
             [resolved, "--version"],
             capture_output=True,
             env=_TAR_ENV,
-            timeout=30,
+            timeout=Timeout.TAR_VERSION_PROBE,
             check=False,
         )
     except OSError as exc:
