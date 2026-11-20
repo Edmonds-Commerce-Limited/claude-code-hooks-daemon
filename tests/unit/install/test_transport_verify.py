@@ -22,6 +22,10 @@ import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
 from claude_code_hooks_daemon.constants.events import wired_event_metas
+from claude_code_hooks_daemon.daemon.paths import (
+    fit_socket_path,
+    get_event_socket_dir_from_untracked,
+)
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PROBE_AS_FIELD,
     PROBE_CLASS_SOURCES,
@@ -41,6 +45,7 @@ from claude_code_hooks_daemon.install.transport_verify import (
     probe_relay_rung_active,
     probe_status_line,
     probe_stop_hard_block,
+    resolve_events_dir,
     run_probes,
 )
 
@@ -332,6 +337,37 @@ class TestListenerProbes:
 
         assert not result.passed
         assert "pre-tool-use" in result.detail
+
+
+class TestResolveEventsDirUnderASocketOverride:
+    """Release 3.76.0 review 2 F3: the events dir follows the FITTED socket override."""
+
+    def test_a_short_override_puts_the_events_dir_beside_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_EVENTS_DIR", raising=False)
+        override = tmp_path / "run" / "d.sock"
+        monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", str(override))
+
+        assert resolve_events_dir(tmp_path) == get_event_socket_dir_from_untracked(
+            override.parent
+        )
+
+    def test_an_over_limit_override_follows_the_fitted_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_EVENTS_DIR", raising=False)
+        override = tmp_path / ("x" * 120) / "d.sock"
+        monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", str(override))
+        fitted = fit_socket_path(tmp_path, override)
+        assert fitted != override
+
+        assert resolve_events_dir(tmp_path) == get_event_socket_dir_from_untracked(
+            fitted.parent
+        )
+        assert resolve_events_dir(tmp_path) != get_event_socket_dir_from_untracked(
+            override.parent
+        )
 
 
 class TestGuardStateProbe:
