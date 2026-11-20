@@ -1066,8 +1066,12 @@ _INPUT_REDIRECT: Final[str] = "<"
 _INTERPRETER: Final[re.Pattern[str]] = re.compile(
     r"(?:python|pypy)[0-9.]*|node(?:js)?|deno|bun|perl|ruby|php|lua"
 )
+#: A call of a link-making function (``os.symlink(``, ``fs.symlinkSync(``,
+#: ``Path.symlink_to(``, ``os.link(``, perl ``symlink "a", "b"``) or an ``ln``
+#: run as a quoted program; ``unlink``/``readlink``/``islink``/``is_symlink``
+#: are not link-makers, hence the lookbehind.
 _INTERPRETER_LINK_CALL: Final[re.Pattern[str]] = re.compile(
-    r"symlink|link_to|link(?:Sync)?\(|\bln\b"
+    r"(?<![A-Za-z_])(?:symlink(?:Sync|_to)?|(?:hard)?link(?:Sync|_to)?)(?=\s*[(\"'$])" r"|[\"']ln\b"
 )
 
 

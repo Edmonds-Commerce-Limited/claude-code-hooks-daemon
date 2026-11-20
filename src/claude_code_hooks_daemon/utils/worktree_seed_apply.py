@@ -236,6 +236,12 @@ _UNCOMMITTED_REFUSAL = (
     "the config change to the default branch first; nothing was placed"
 )
 
+_UNJUDGEABLE_REFUSAL = (
+    "seed entry #{number}: the config committed on the default branch does not list it, "
+    "and the main checkout's config could not be read to tell whether it links a protected "
+    "path ({why}); nothing was placed"
+)
+
 
 def _working_protected_patterns(main: Path, number: int) -> tuple[str, ...]:
     """The protected set the main checkout's config on disk declares, read STRICTLY.
@@ -247,16 +253,16 @@ def _working_protected_patterns(main: Path, number: int) -> tuple[str, ...]:
     try:
         config = _load_config(main)
     except SeedApplyRefused as exc:
-        raise WorktreeSeedError(
-            _UNCOMMITTED_REFUSAL.format(number=number, why="") + f" ({exc})"
-        ) from exc
+        raise WorktreeSeedError(_UNJUDGEABLE_REFUSAL.format(number=number, why=exc)) from exc
     options = handler_options(config.handlers.pre_tool_use.get(_SECRET_GUARD_KEY))
     try:
         return sfm.protected_patterns_from_options(options)
     except sfm.ProtectedSetUnreadable as exc:
         raise WorktreeSeedError(
-            _UNCOMMITTED_REFUSAL.format(number=number, why="")
-            + " (the secret_file_guard options in the main checkout's config could not be read)"
+            _UNJUDGEABLE_REFUSAL.format(
+                number=number,
+                why="its secret_file_guard options could not be read",
+            )
         ) from exc
 
 

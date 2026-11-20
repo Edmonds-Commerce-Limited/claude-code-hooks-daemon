@@ -234,6 +234,8 @@ _READERS = [
     "curl -s file://@WT/{P}",
     'echo "$(<{P})"',
     "base64 {P}",
+    "< {P}* cat",
+    'echo "$(<{P}*)"',
 ]
 
 
@@ -278,6 +280,10 @@ class TestEveryWayOfMakingOrMovingALink:
             "mv conf y && cat y/vault.txt",
             "mv -f conf y && grep -R fixture y",
             "mv -t docs conf && cat docs/conf/vault.txt",
+            "mv conf docs/ && grep -R fixture docs",
+            "mv conf docs && grep -R fixture docs",
+            "ln -s @ROOT/conf y && mv y z && cat z/vault.txt",
+            "ln -s @ROOT/conf y && mv y docs && grep -R fixture docs",
             "cp -a conf y && cat y/vault.txt",
             "cp -P conf y && cat y/vault.txt",
             "install -l s @ROOT/conf y && cat y/vault.txt",
@@ -296,6 +302,8 @@ class TestEveryWayOfMakingOrMovingALink:
             "busybox ln -s docs d2 && cat d2/notes.txt",
             "ln --sym docs d2 && cat d2/notes.txt",
             "python3 -c \"print('hello')\" && cat plain.txt",
+            "python3 -c \"import os; os.unlink('t.tmp')\" && cat plain.txt",
+            "python3 -c \"import os; print(os.path.islink('docs'))\" && cat plain.txt",
         ],
     )
     def test_controls_are_allowed(self, layout: _Layout, command: str) -> None:
