@@ -1333,9 +1333,15 @@ def _content_preserved(run: _Pass, context: _Context, row: _RefRow) -> str | Non
     # Imported here: remote_branch_proof imports this module.
     from claude_code_hooks_daemon.core import remote_branch_proof
 
+    # The proof reads ROOT-relative paths: from a project below the top level a
+    # lookup would miss, and a deleted path would read as absent, i.e. held.
+    top = run_git(run.repo, "rev-parse", "--show-toplevel", timeout=_GIT_TIMEOUT)
+    top_level = top.stdout.strip() if top.returncode == 0 else ""
+    if not top_level:
+        return None
     try:
         held = remote_branch_proof.holds_net_change(
-            run.repo,
+            Path(top_level),
             tracking,
             row.sha,
             timeout=scaled_timeout(Timeout.GIT_BRANCH_SAFETY, Timeout.GIT_BRANCH_SAFETY_MAX),

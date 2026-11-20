@@ -22,6 +22,7 @@ from __future__ import annotations
 import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -33,6 +34,7 @@ from claude_code_hooks_daemon.core.branch_keep import keep_branch
 from claude_code_hooks_daemon.daemon.branch_safety import (
     REFUSAL_WORKTREE,
     TIER_UNPROVEN,
+    BranchClassification,
     classify_branch,
     delete_branches,
 )
@@ -185,6 +187,71 @@ class TestInventory:
         assert inventory.records[_RC].state == BranchState.LIVE
         verdict = classify_branch(seed, _RC, protected_ref="main", ignore_worktree=True)
         assert verdict.tier == TIER_UNPROVEN
+
+    def test_a_project_below_the_git_top_level_reads_root_relative_paths(
+        self, held_no_worktree: Path
+    ) -> None:
+        # A branch that only DELETES a file main keeps holds nothing main has. The
+        # proof reads root-relative paths; run from a subdirectory, a lookup would
+        # miss and the deleted path would read as "absent", i.e. held.
+        seed = held_no_worktree
+        _git(seed, "switch", "-q", "-c", "deletes-a", "main")
+        _git(seed, "rm", "-q", "a.txt")
+        _git(seed, "commit", "-q", "-m", "delete a.txt")
+        _git(seed, "push", "-q", "origin", "deletes-a")
+        _git(seed, "switch", "-q", "main")
+        project = seed / "proj"
+        project.mkdir()
+        inventory = branch_inventory.build_inventory(project, _CONFIG, prove_content=True)
+        assert inventory.records["deletes-a"].state == BranchState.LIVE
+
+    def test_an_unanswered_proof_leaves_the_branch_live(
+        self, held_no_worktree: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.core import remote_branch_proof
+
+        def unavailable(*_args: object, **_kwargs: object) -> bool:
+            raise remote_branch_proof.ProofUnavailableError("git failed")
+
+        monkeypatch.setattr(remote_branch_proof, "holds_net_change", unavailable)
+        inventory = branch_inventory.build_inventory(held_no_worktree, _CONFIG, prove_content=True)
+        assert inventory.records[_RC].state == BranchState.LIVE
+
+
+class TestDeleteBranchEdgeCases:
+    def test_a_branch_in_the_main_checkout_gets_no_removal_step(
+        self, held_no_worktree: Path, tmp_path: Path
+    ) -> None:
+        seed = held_no_worktree
+        _git(seed, "switch", "-q", _RC)
+        linked = tmp_path / "linked-main"
+        _git(seed, "worktree", "add", "-q", str(linked), "main")
+        report = delete_branches(linked, [_RC], protected_ref="main", dry_run=True)
+        (verdict,) = report.classifications
+        assert verdict.refusal == REFUSAL_WORKTREE
+        assert "git worktree remove" not in verdict.detail
+        assert "switch the main checkout" in verdict.detail
+
+    def test_a_failed_reproof_keeps_the_plain_refusal(
+        self, held: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.daemon import branch_safety
+
+        real = branch_safety.classify_branch
+
+        def failing(repo: Path, name: str, **kwargs: Any) -> BranchClassification:
+            if kwargs.get("ignore_worktree"):
+                raise subprocess.CalledProcessError(127, ["git"], "", "timed out")
+            return real(repo, name, **kwargs)
+
+        monkeypatch.setattr(branch_safety, "classify_branch", failing)
+        seed, _tree = held
+        report = delete_branches(seed, [_RC], protected_ref="main", dry_run=True)
+        (verdict,) = report.classifications
+        assert report.refused
+        assert verdict.refusal == REFUSAL_WORKTREE
+        assert "git worktree remove" not in verdict.detail
+        assert "failed" in verdict.detail
 
 
 class TestCleanSweep:
