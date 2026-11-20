@@ -37,8 +37,16 @@ each unresolved attempt adds a reviewer, the second closes the route). It is not
 - GREEN: 672 pass in `untracked/scratch/run-br.sh` (the branch_reject files, branch_safety and
   branch_sweep). A further 599 pass in the other files that reference branch_reject. ruff,
   black and mypy are clean on the changed files.
-- The fixture sweep found nothing to loosen: no other fixture dispatches without a verdict
-  and then requests or deletes again.
+- Fixture sweep: no existing fixture needed a change, and the rule was not loosened. Some
+  fixtures do withdraw a verdict or dispatch without one: `withdraw_verdict`,
+  `write_dispatch(` and `_admit(` hit in the delete, forge, recorder and dispatch test files.
+  Those are refusal or recorder tests, so the extra refusal reason leaves them passing for
+  their original reason.
+  - Example: `test_a_verdict_whose_id_is_not_its_nonce_refuses` still refuses.
+  - This was not audited per test beyond the green run.
+- Follow-up commit: `unresolved_attempts` raises when a request file's content names a
+  different nonce than its file name, with a test for it. It also documents in DESIGN.md
+  section 6 that a dispatch which is admitted but never run counts as an attempt.
 
 ## Docs
 

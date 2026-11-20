@@ -1120,6 +1120,8 @@ def unresolved_attempts(store: RejectStore, branch: str, tip: str, inventory: In
         request = store.read_request(nonce)
         if request is None:
             raise RejectError(f"review {nonce[:12]} was dispatched or failed with no request")
+        if request.nonce != nonce:
+            raise RejectError(f"the request file for {nonce[:12]} is not named by its nonce")
         related = same_work(
             branch, tip, inventory.commits, request.branch, request.tip, request.inventory.commits
         )

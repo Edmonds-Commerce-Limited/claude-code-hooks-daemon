@@ -197,6 +197,10 @@ until it stops with a verdict. The `dispatches/` and `failures/` listings fail c
 failure whose request is missing raises. Both `issue_requests` and `approve_removal`
 recompute the count, and the latter is what stops an older `no-value` verdict meeting the
 raised count. An unresolved attempt never expires; like a keep, it is keyed on the work.
+The dispatch record is written when the PreToolUse gate admits the dispatch
+(`admit_dispatch`), so a dispatch admitted but never run (a later hook deny, a spawn
+failure) also counts as an attempt, and two such close the route. That is fail closed by
+choice: the daemon cannot tell a reviewer that never ran from one killed early.
 
 ## 7. The recovery bundle
 

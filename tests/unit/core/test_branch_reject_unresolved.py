@@ -241,6 +241,15 @@ class TestUnresolvedAttempts:
         with pytest.raises(RejectError, match="no request"):
             _count(repo, store)
 
+    def test_a_request_not_named_by_its_nonce_raises(self, repo: Path, store: RejectStore) -> None:
+        request = _dispatched(repo, store)
+        other = replace(request, nonce=new_id())
+        (store.root / "requests" / f"{request.nonce}.json").write_text(
+            json.dumps(other.to_dict(), sort_keys=True), encoding="utf-8"
+        )
+        with pytest.raises(RejectError, match="not named by its nonce"):
+            _count(repo, store)
+
     def test_a_failure_whose_request_is_missing_raises(
         self, repo: Path, store: RejectStore
     ) -> None:
