@@ -7956,7 +7956,31 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open, low priority; needs the reporting seat to name the handler. If it is a shipped handler, it must judge only command words, never the contents of a quoted argument to another program. If it is a project handler, the shared command-word parsing helpers already exist for the same purpose and it should use them.
 
-### N677 — playbook probe #125 (rsync from a worktree) fails whenever the acceptance harness runs inside a worktree
+### N673 — existing code and plans contradict the scratch TTL design (fourteen places)
+
+**Source**: Plan 00627 design pass, by a sub-agent under the owner's delegation.
+
+**Evidence**: the full table, with file and line for each, is `CLAUDE/Plan/00627-scratch-management-ttl-and-filing/DESIGN.md` section 15 (X1 to X14). The ones that can lose work or keep the sprawl going: `utils/stale_litter.py:193` prints `find ... -type f -mmin +N -delete`, removal on age alone that leaves every directory behind; that report rides `idle_housekeeping_advisory`, which is off by default; `project_containment` still calls scratch the place for durable work; `NEVER_REGENERABLE` makes a worktree with scratch content refuse removal with no sanctioned way to empty it; `DEFAULT_HANDOFF_GLOBS` accepts scratch as a handoff home; each agent worktree's own `untracked/scratch/` is read by nothing; the link index on the Plan 00623 branch fails whole at its cap with no warning below it. The Plan 00623 branch also uses the number N673 (for the playbook probe #125 niggle); that branch renumbers its own entries when it merges.
+
+**Status**: ⬜ Open; each row is closed by the Plan 00627 task named beside it (Task 8.4 closes this entry).
+
+### N674 — a stale `refs/remotes/<remote>/HEAD` after a remote default rename misleads the remote-delete proof's default detection
+
+**Source**: Plan 00626 close-out (follow-up of its `auto` default detection, which reads only `refs/remotes/<remote>/HEAD`).
+
+**Evidence**: after the remote renames its default branch, the local `refs/remotes/<remote>/HEAD` keeps pointing at the old name until someone runs `git remote set-head`. The proof then names the old branch as the default; the live-tip confirmation fails closed, so no unsafe delete results, but the refusal is the wrong reason and the owner cannot tell why.
+
+**Status**: ⬜ Open, low priority. Confirm the default with a live `git ls-remote --symref <remote> HEAD` and report a stale tracking HEAD by name, still failing closed.
+
+### N676 — the skill wrappers self-update from unsigned release assets in every session
+
+**Source**: Plan 00625's threat-model review (a Fable sub-agent, 2026-11-19), recorded in its DESIGN ruling 3. The numbering skips N675, which the Plan 00623 branch takes when it merges.
+
+**Evidence**: the skill wrappers refresh themselves from release assets fetched at the start of a session, and nothing verifies a signature on what they fetch. That is a trust gap on every install, whether or not automatic upgrades are on, and it sits outside Plan 00625's scope.
+
+**Status**: ⬜ Open, security-relevant, medium priority. Apply the Plan 00625 trust model (a human-added signers file, a verified tag, the script byte-identical to the verified copy) to the wrapper self-update path, or stop the self-update.
+
+### N675 — playbook probe #125 (rsync from a worktree) fails whenever the acceptance harness runs inside a worktree
 
 **Source**: Plan 00623 acceptance-harness diagnosis (`tests/acceptance/test_playbook_harness.py`).
 
@@ -7964,7 +7988,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open, low priority. The fix belongs to the harness or the probe, not to either handler: give the probe a cwd that is the daemon's project root, or have the harness skip or report this probe when it runs in a worktree.
 
-### N678 — secret_file_guard: a `/proc` path that reaches the shell's own view without spelling `/proc/self` is placed as the daemon's
+### N677 — secret_file_guard: a `/proc` path that reaches the shell's own view without spelling `/proc/self` is placed as the daemon's
 
 **Source**: Plan 00623 review 3 (`CLAUDE/Plan/00623-secret-guard-structural-fail-closed-walks-and-link-index/subagent-reports/261119-review3-loosenings.md`).
 

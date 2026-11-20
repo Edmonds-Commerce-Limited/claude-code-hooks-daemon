@@ -2206,12 +2206,13 @@ class DaemonConfig(BaseModel):
         Returns:
             Path to socket file
         """
-        if self.socket_path:
-            return Path(self.socket_path)
-        # Use paths.py for consistent path generation with init.sh
-        from claude_code_hooks_daemon.daemon.paths import get_socket_path as gen_socket_path
+        # Use paths.py for consistent path generation with init.sh; a configured
+        # path is fitted to the AF_UNIX limit by the same function (Plan 00628).
+        from claude_code_hooks_daemon.daemon import paths
 
-        return gen_socket_path(workspace_root)
+        if self.socket_path:
+            return paths.fit_socket_path(workspace_root, self.socket_path)
+        return paths.get_socket_path(workspace_root)
 
     def get_pid_file_path(self, workspace_root: Path) -> Path:
         """Get the PID file path, using default if not specified.
@@ -2222,12 +2223,11 @@ class DaemonConfig(BaseModel):
         Returns:
             Path to PID file
         """
-        if self.pid_file_path:
-            return Path(self.pid_file_path)
-        # Use paths.py for consistent path generation with init.sh
-        from claude_code_hooks_daemon.daemon.paths import get_pid_path
+        from claude_code_hooks_daemon.daemon import paths
 
-        return get_pid_path(workspace_root)
+        if self.pid_file_path:
+            return paths.fit_pid_path(workspace_root, self.pid_file_path)
+        return paths.get_pid_path(workspace_root)
 
 
 class WorktreeConfig(BaseModel):

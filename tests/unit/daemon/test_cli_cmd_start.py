@@ -17,6 +17,7 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import DaemonConfig
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.cli import cmd_start
 from claude_code_hooks_daemon.daemon.paths import PID_MAX_LIMIT
@@ -912,9 +913,11 @@ class TestCmdStartChildProcess:
         mock_config = MagicMock()
         # Startup hashes the loaded config (Plan 00415); a mock has no model.
         mock_config.model_dump.return_value = {}
-        # Paths already set - should NOT call getters
-        mock_config.daemon.socket_path = "/existing/socket"
-        mock_config.daemon.pid_file_path = "/existing/pid"
+        # Paths already set and within the AF_UNIX limit: kept verbatim (the
+        # getters fit a configured path, Plan 00628, and a fitting one is unchanged).
+        mock_config.daemon = DaemonConfig(
+            socket_path="/existing/socket", pid_file_path="/existing/pid"
+        )
         for attr in [
             "pre_tool_use",
             "post_tool_use",
@@ -977,9 +980,8 @@ class TestCmdStartChildProcess:
             with pytest.raises(SystemExit) as exc_info:
                 cmd_start(args)
             assert exc_info.value.code == 0
-            # Verify getters were NOT called since paths were already set
-            mock_config.daemon.get_socket_path.assert_not_called()
-            mock_config.daemon.get_pid_file_path.assert_not_called()
+            assert mock_config.daemon.socket_path == "/existing/socket"
+            assert mock_config.daemon.pid_file_path == "/existing/pid"
 
 
 class TestAStartUnderWayIsWaitedOnNotRepeated:

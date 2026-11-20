@@ -146,8 +146,10 @@ names, people or hashes appear here.
   questions in its §4) Write `DESIGN.md`: the lifecycle state machine, and the
   answers to every decision above, each with its reason and the failure class
   it closes.
-- [ ] ⬜ **Task 1.3**: Review the design with the client test seat before any
-  code is written.
+- [x] ✅ **Task 1.3**: (Closed by delegated ruling, [DESIGN.md §7.1](DESIGN.md):
+  review round 1 is DESIGN §6, and the design was then reviewed by use on
+  client seats through release candidates.) Review the design with the client test seat
+  before any code is written.
 
 ### Phase 2: Stop the daemon making branches (class 1)
 
@@ -190,6 +192,14 @@ names, people or hashes appear here.
   stop guard, `BRANCH_LIMIT_PRINCIPLE`) says: finish (merge), or delete only on
   machine proof or human confirmation; parking is a short bounded pause. A test
   pins that `branches.wip.creation_grace` never lifts a full parked pool.
+- [ ] ⬜ **Task 3.8**: (owner request typed in session, journal 15 November;
+  route set by delegated ruling, [DESIGN.md §7.2](DESIGN.md)) Land the
+  surviving-content remote-delete tier and `delete-branch --remote-only` from
+  branch `agent-a20c91c23eca4e56e-43e33957`. Bring it up to `main`, reconcile
+  it with Plan 00626's proof code, move its release note into the pending
+  holding area under a free number, run targeted QA and an adversarial
+  security review, then merge with `--no-ff`. Never while a release state
+  file exists.
 - [x] ✅ **Task 3.5**: (RC feedback; done, release note 038) When the
   worktree-removal guard names ignored blocking paths, its deny says to keep
   what matters and delete what is disposable in a separate command first. A
@@ -229,11 +239,14 @@ names, people or hashes appear here.
   before the stale mark was cleared. In the lifecycle model, a keep, a park
   and a proof are all facts about a COMMIT. Every per-name cache of them
   must be keyed or invalidated by tip, never by the name typed.
-- [ ] ⬜ **Task 4.6**: (second client seat) A stack of dependent pull-request
-  branches counts once per link against the open cap, so a five-deep stack
-  alone uses half of a cap of 10. Decide (design review): count a stack as
-  one stream, cap stack depth, or keep counting each link and document the
-  practice of landing the bottom first.
+- [ ] ⬜ **Task 4.6**: (second client seat; decided by delegated ruling,
+  build rules in [DESIGN.md §7.1](DESIGN.md)) A stack of dependent
+  pull-request branches counts once per link against the open cap, so a
+  five-deep stack alone uses half of a cap of 10. Build, test-first: a stack
+  counts as one stream up to `branches.wip.stack_max_depth` (default 5), each
+  link past it counts one more; grouping reads tips only; the sweep, the
+  preflight and the creation guard share one count. Release note and config
+  change entry.
 - [x] ✅ **Task 4.7**: (second client seat; on main, release note 042,
   report `task-4-7-report.md`) `branch-sweep` prints a
   `git push --delete` for a patch-equivalent remote branch that the
@@ -270,8 +283,13 @@ names, people or hashes appear here.
   has moved, and can return to the last tag in one step. Proven on the client
   test seat. On main (release note 041): the install records `tracked_ref`,
   `tracked_sha` and `last_release_tag`, `version_check` reports a moved ref, and
-  `upgrade.sh --release` returns to the last release. Still open: proof on the
-  client test seat, and the stop/build/start handover (Plan 00535).
+  `upgrade.sh --release` returns to the last release. Still open, by
+  delegated ruling ([DESIGN.md §7.1](DESIGN.md)): an end-to-end proof in the
+  client-mode fixture (`scripts/dummy-client-repo.sh`) against a local bare
+  remote: track, move, moved-ref report, re-track, one-step return; a sha pin
+  and a failed listing covered. A seat's report is added when one comes and
+  is not a gate. The stop/build/start handover is Plan 00535's, not this
+  task's.
 - [x] ✅ **Task 5.2**: (RC feedback; done on the release branch, release note
   034\) A guarded unreleased install no longer exits 141 when the ref's
   `pyproject.toml` is larger than one pipe write. Layer 1 reads the blob
@@ -301,11 +319,15 @@ names, people or hashes appear here.
 - [ ] `DESIGN.md` maps each of failure classes 1–9 to the lifecycle gap that
   caused it and to the change that closes it.
 - [ ] Each class has a regression test that failed before its fix.
-- [ ] The client test seat runs a branch tip, observes a move, and returns to
-  the last tag in one step.
+- [ ] A client-mode install runs a branch tip, observes a move, and returns to
+  the last tag in one step: to be proven end to end in the client-mode
+  fixture, not yet run (delegated ruling, DESIGN §7.1); a client seat's report is recorded when
+  one comes.
 - [ ] Release-bound consequences (config keys, truth changes, release notes)
   are recorded in `CLAUDE/UPGRADES/UNRELEASED/`.
 
 ## Delivery & Milestones
 
 - Plan opened.
+- Seat and release questions settled by delegated ruling (DESIGN §7); the
+  plan is no longer blocked. Open: Tasks 3.8, 4.6, 5.1.

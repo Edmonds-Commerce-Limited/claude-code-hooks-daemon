@@ -44,6 +44,7 @@ from claude_code_hooks_daemon.constants.events import wired_event_metas
 from claude_code_hooks_daemon.daemon.paths import (
     get_event_socket_dir,
     get_event_socket_dir_from_untracked,
+    get_socket_path,
 )
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PROBE_AS_FIELD,
@@ -357,9 +358,9 @@ def resolve_events_dir(project_root: Path) -> Path:
     env_dir = os.environ.get("HOOKS_DAEMON_EVENTS_DIR")
     if env_dir:
         return Path(env_dir)
-    socket_env = os.environ.get("CLAUDE_HOOKS_SOCKET_PATH")
-    if socket_env:
-        return get_event_socket_dir_from_untracked(Path(socket_env).parent)
+    if os.environ.get("CLAUDE_HOOKS_SOCKET_PATH"):
+        # The daemon's own socket (the override, fitted to the AF_UNIX limit).
+        return get_event_socket_dir_from_untracked(get_socket_path(project_root).parent)
     return get_event_socket_dir(project_root)
 
 

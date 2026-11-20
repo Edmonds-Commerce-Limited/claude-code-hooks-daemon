@@ -1,0 +1,11 @@
+## 21:52 · decision · — — Design ruled under delegation; linter facts still unverified
+
+Settled by a fable sub-agent under the owner's delegation, 2026-11-19. Not the owner's own words; a later owner message overturns any of it. Full text: DESIGN.md.
+
+Verification attempt: no `actions-qa-ci` executable here; a public web search for the name with its four rule names found no page mentioning them; GitHub repository searches (by name, the authenticated account, this repository's organisation) found no such repository. So no documentation or release was reachable and EVERY linter fact in the earlier entries stays unverified: that v0.2.0 exists, `check --file`, `--format json`, the finding fields (the two peer notes disagree on col, severity and exceptionKey), the exit codes, and where it is installed from.
+
+Design confirmed with five changes. (1) The route is a new lint strategy narrowed to files directly in `.github/workflows/`; the lint registry stores one strategy per extension and would overwrite Ansible, so it must first hold several per extension. (2) Command `actions-qa-ci check --file {file}`, plain output passed through, no JSON parsing, overridable by the existing per-language command override. (3) Exit 1 is a lint failure report like any other linter; every other non-zero exit, a missing tool and a timeout allow with an advisory, so a wrong assumption about the tool fails open; this needs an exit-code capability in the lint protocol. (4) The session-start advisory fires only when workflows exist, none mentions the linter and it is not installed; it ships `enabled: false` until an install source is verified, because advice to install a tool nobody can find cannot be acted on. (5) Bash-authored and relocated files: nothing new.
+
+PLAN.md: Task 1.2 done. Task 1.1 reworded: run the real tool once and record where it is published; it gates completion and the advisory default, not the build. First slice (Task 2.1): registry multi-strategy, exit-code capability, the strategy, against a stub linter, tests first. Status left at Not Started on purpose: In Progress would put the plan on the goal ledger with no builder assigned.
+
+Still needs the owner or the peer project: where the linter is published.

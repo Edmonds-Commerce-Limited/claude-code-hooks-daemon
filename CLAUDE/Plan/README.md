@@ -8,19 +8,21 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00626: remote delete proof cherry route and remote default ref](00626-remote-delete-proof-cherry-route-and-remote-default-ref/PLAN.md) - In Progress (client report: the remote-delete proof refuses a branch whose every patch is in the default when cherry-picks interleave, and proves remote deletes against the LOCAL default; restore the cherry route with exact per-path content, prove against the remote default's live tip only, never on a cached positive)
+- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - Not Started (owner request: a full scratch management system; every scratch entry has a 24-hour TTL and past it is filed, packed into a verified archive and removed after a hold, or kept only on a machine proof of unpushed or human work; a `scratch-sweep` command, a SessionStart report, caps that act before the link index overflows, a per-session scratch directory; design written, rulings by a delegated sub-agent, no code yet; takes over Plan 00560's sweep)
+
+- [00628: daemon socket path too long from init sh](00628-daemon-socket-path-too-long-from-init-sh/PLAN.md) - In Progress (live defect for 3.76.0: init.sh forced an over-limit socket path on the daemon, so a long project path denied every tool call; one path-fitting function for every caller, discovery file only after bind, safe short-path root)
 
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - Not Started (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
 
-- [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - Not Started (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; draft, no code until the owner approves the design)
+- [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - Not Started (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; open questions ruled under the owner's delegation in RULINGS.md: the verdict never unlocks alone, the guard must also verify a recovery bundle; local delete only; slice 1 ready to build)
 
-- [00621: actions qa ci advisory and workflow lint on edit](00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - Not Started (peer request, owner direction relayed: advise adopting an external workflow linter and run it on workflow edits; the design needs the owner's confirmation first)
+- [00621: actions qa ci advisory and workflow lint on edit](00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - Not Started (peer request, owner direction relayed: advise adopting an external workflow linter and run it on workflow edits; design ruled under the owner's delegation in DESIGN.md; the linter's documentation and release were read but it has not been run, so the route fails open; slice 1 ready to build)
 
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
 
 - [00614: secret guard resolves links against hook cwd](00614-secret-guard-resolves-links-against-hook-cwd/PLAN.md) - In Progress (found by the 00613 probe: a relative Bash token such as `cat link` is resolved against the daemon's cwd `/`, so a link to a protected file passes; also a directory-link grep and a glob under a directory link; fix test-first and fail closed)
 
-- [00613: worktree link secret verb](00613-worktree-link-secret-verb/PLAN.md) - Not Started (peer report: the secret guard denies a relative symlink to a protected file made inside a worktree, which a peer workflow needs; design first, because a link is itself a route to the content and the owner instruction is unverified)
+- [00613: worktree link secret verb](00613-worktree-link-secret-verb/PLAN.md) - In Progress (peer report: the secret guard denies a relative symlink to a protected file made inside a worktree, which a peer workflow needs; design questions settled by delegated ruling: no agent-invocable verb, config seeding in link mode plus a human-run step, copy mode refused for a protected source; Phase 2 tightening ready to build, advising the link gated on Plans 00614 and 00623)
 
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
@@ -32,7 +34,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
-- [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - In Progress (DESIGN.md draft written, awaiting client-seat review; owner request via a client team: redesign the whole branch lifecycle (birth, finish, proof of merge, delete, park, owner) from nine failure classes seen in multi-agent client use, plus letting a client follow a daemon branch tip with a one-step return to the last tag; design first, no guard change ships before review)
+- [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - In Progress (unblocked by delegated ruling in DESIGN §7; open: Task 3.8 surviving-content remote delete, Task 4.6 stacks count as one stream, Task 5.1 fixture proof of the branch tip channel; owner request via a client team: redesign the whole branch lifecycle (birth, finish, proof of merge, delete, park, owner) from nine failure classes seen in multi-agent client use, plus letting a client follow a daemon branch tip with a one-step return to the last tag; design first, no guard change ships before review)
 
 ### Next (ordered; work top to bottom)
 
@@ -206,6 +208,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00626: remote delete proof cherry route and remote default ref](Completed/00626-remote-delete-proof-cherry-route-and-remote-default-ref/PLAN.md) - Complete at merge `201a17fae` + the archiving commit (client report: interleaved cherry-picks now prove a branch merged, and a remote delete is proven against the remote default's live tip only, never the local default or a cached positive; security review passed; release note 003; follow-up N674)
+
 - [00624: branch park marker unsigned and reads unmerged](Completed/00624-branch-park-marker-unsigned-and-reads-unmerged/PLAN.md) - Complete at the archiving commit (GitHub #210 and #211, closed: both already fixed in v3.75.0, #210 by `d2e73d0e9` and #211 by Plans 00594 and 00622, confirmed by Phase 1 repro; the ref-based park design is not adopted and not built, kept as a record; docs only, no release note)
 
 - [00622: remote delete proof ignores empty and park marker commits](Completed/00622-remote-delete-proof-ignores-empty-and-park-marker-commits/PLAN.md) - Complete at merge `eba1de61f` + the archiving commit (empty commits over merged work no longer block a branch delete; reviews rounds 1 and 2 fixed, round 3 ledgered N665, N666; release note 002)
@@ -264,8 +268,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00579: copy seeded files and worktree removal](Completed/00579-copy-seeded-files-and-worktree-removal/PLAN.md) - Complete at merge `a26be56b0` (main CI run 42762876632 green) + the archiving commit (#164, closed: a copy-mode seed byte-identical to its source in the main checkout no longer blocks a worktree removal; a diverged, missing or worktree-resolving source still blocks and is named; bounded comparison; release note 030)
 
-- [00577: forwarder stubs shellcheck clean](Completed/00577-forwarder-stubs-shellcheck-clean/PLAN.md) - Complete at `43250b5fb` (CI run 42627973690 success) + the archiving commit (GitHub #163, closed: generated hook stubs export the relay-unused marker the sourced init.sh reads, so `shellcheck --severity=warning` is clean with no suppression; a test shellchecks the stub generated for every event; release note 015)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -319,11 +321,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 624 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 627 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 520 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 521 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 80 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 81 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
