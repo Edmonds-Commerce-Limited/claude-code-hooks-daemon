@@ -436,7 +436,8 @@ class _ContentFinding:
 
     ``gaps`` are the paths whose content no holder's tip has; empty is the proof.
     ``holders`` are the holder refs whose tips the proof relied on (each path's first
-    holder), so the live check confirms each of them is still the tip the proof read.
+    holder). The caller anchors these and the default (the merge base's source), so
+    the live check confirms each is still the tip the proof read.
     """
 
     gaps: list[str]
@@ -734,8 +735,9 @@ def _merged_tracking_tips(
         # Not merged by any history evidence: is anything in it unique? Judged afresh
         # every time (a cached answer would not see a line or default moving), and
         # against surviving refs only, so a ref deleted with it cannot vouch for it.
-        # Every holder is a remote-tracking ref (Plan 00626) and each one relied on is
-        # confirmed live by `_live_tip_problems` through the anchors.
+        # Every holder is a remote-tracking ref (Plan 00626); each one relied on, and the
+        # default that sets the merge base, is confirmed live by `_live_tip_problems`
+        # through the anchors.
         doomed = {f"{REMOTES_PREFIX}{remote}/{n}" for n in (*names, *also_deleting)}
         holders = [
             target
@@ -758,7 +760,10 @@ def _merged_tracking_tips(
             if finding is not None and not finding.gaps and finding.holders:
                 proven.add(tracking[name])
                 evidence[name] = TIER_SURVIVING_CONTENT
-                content_anchors[name] = finding.holders
+                # The default is a proof input even when no path is credited to it: it
+                # sets the merge base, so a remote default rewound past a commit the
+                # branch carries would drop that commit out of the diff unseen.
+                content_anchors[name] = list(dict.fromkeys([tracking_default, *finding.holders]))
             else:
                 content_gaps[name] = None if finding is None else finding.gaps
     lines = " or any integration line" if branches.integration_lines else ""

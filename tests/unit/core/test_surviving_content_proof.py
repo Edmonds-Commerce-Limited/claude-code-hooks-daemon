@@ -362,6 +362,40 @@ class TestRemoteDefaultOnly:
         assert proof.tips == {}
         assert "main" in proof.problems["feat"]
 
+    def test_a_default_rewound_on_the_remote_refuses_when_a_line_holds_all_content(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        # The default sets the merge base, so it is a proof input even when only an
+        # integration line is credited: a remote default rewound past a commit the
+        # branch carries (x.txt) would drop that commit out of the diff unseen.
+        base = _git(repo, "rev-parse", "main").strip()
+        _git(repo, "checkout", "-q", "-b", "release/1", "main")
+        _write(repo, "a.txt", "a\n")
+        _commit(repo, "line has a")
+        _git(repo, "push", "--quiet", "origin", "release/1")
+        _git(repo, "checkout", "-q", "main")
+        _land(repo, "x.txt", "only on the old main\n")
+        _branch_from_main(repo, "feat")
+        _write(repo, "a.txt", "a\n")
+        _commit(repo, "feat has a")
+        _publish_and_leave(repo, "feat")
+        _git(tmp_path / "remote.git", "update-ref", "refs/heads/main", base)
+        proof = _prove(repo, "feat")
+        assert proof.tips == {}
+        assert "main" in proof.problems["feat"]
+
+    def test_a_line_holding_all_content_still_anchors_the_default(self, repo: Path) -> None:
+        _git(repo, "checkout", "-q", "-b", "release/1", "main")
+        _write(repo, "a.txt", "a\n")
+        _commit(repo, "line has a")
+        _git(repo, "push", "--quiet", "origin", "release/1")
+        _git(repo, "checkout", "-q", "-b", "feat", "main")
+        _write(repo, "a.txt", "a\n")
+        _commit(repo, "feat has a")
+        _publish_and_leave(repo, "feat")
+        proof = _prove(repo, "feat")
+        assert proof.evidence == {"feat": TIER_SURVIVING_CONTENT}
+
 
 class TestNeverCached:
     def test_the_tier_is_not_written_to_the_merge_proof_cache(self, repo: Path) -> None:
