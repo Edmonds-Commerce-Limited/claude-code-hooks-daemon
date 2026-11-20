@@ -125,7 +125,12 @@ class TestReadOnly:
             assert verdicts["locked"] == "STUCK"
             assert verdicts["clone"] == "STUCK"
             reasons = {row["name"]: row["reasons"] for row in document["entries"]}
-            assert verdicts["realclone"] in {"PROTECTED", "DISPOSABLE", "UNCERTAIN"}, reasons
+            # The unwalked ``locked`` entry leaves cross-entry dependencies unknown,
+            # which turns a DISPOSABLE row STUCK (F-BYPS 2); the clone itself was judged.
+            realclone = (verdicts["realclone"], reasons["realclone"][:1])
+            assert realclone[0] in {"PROTECTED", "UNCERTAIN"} or (
+                realclone[0] == "STUCK" and "other entries depend on" in realclone[1][0]
+            ), reasons
         else:
             assert "INCOMPLETE" in out
         assert "dummy" not in out.replace("dummy.txt", "")

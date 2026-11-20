@@ -14,10 +14,18 @@ dropped before the next walk, so memory grows with the number of entries, not
 the number of inodes. An entry reached after the budget is spent still gets a
 row (STUCK, or LIVE when its root's ctime proves it), and the report says it is
 incomplete and why.
+
+Entries are judged one at a time, but one entry's ``.git`` pointer can depend
+on another entry's git directory (F-BYPS 2). A post-pass reads every entry's
+``.git`` file and ``commondir`` pointers: an entry another entry points into
+is PROTECTED unless it is already LIVE, STUCK or PROTECTED. A pointer that
+cannot be read, or an entry not walked to the end, leaves the dependencies
+unknown: every DISPOSABLE row becomes STUCK and the report is incomplete.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 import os
 import stat
@@ -45,6 +53,7 @@ from claude_code_hooks_daemon.core.scratch_repos import (
     blob_id,
     blob_length,
     classify_entry,
+    read_small_regular_file,
 )
 from claude_code_hooks_daemon.core.scratch_verdict import (
     NOT_EVALUATED,
@@ -249,7 +258,7 @@ def run_sweep(
     )
     if project_git is not None and project_git.verified_note:
         notes.append(f"remote proof: {project_git.verified_note}")
-    rows = [
+    judged = [
         _judge_entry(
             root,
             resolved_root,
@@ -270,6 +279,7 @@ def run_sweep(
         for name in listing.value
         if name not in sweep_root.skip
     ]
+    rows, dependency_unknown = _with_dependencies(judged)
     if hashing.spent:
         notes.append(P3_BUDGET_NOTE)
     if rows:
@@ -288,7 +298,128 @@ def run_sweep(
         reasons.append("the project's tracked files under the root could not be listed")
     if references.unknown:
         reasons.append(references.unknown)
+    if dependency_unknown:
+        reasons.append(dependency_unknown)
     return SweepReport(str(root), tuple(rows), not reasons, tuple(reasons), tuple(notes))
+
+
+@dataclass(frozen=True)
+class _Pointers:
+    """Which other entries one entry's git pointers lead into, and what was unreadable."""
+
+    #: ``(target entry name, pointing path from the scratch root)``.
+    into: tuple[tuple[str, str], ...] = ()
+    unknown: tuple[str, ...] = ()
+
+
+_GITDIR_PREFIX = "gitdir:"
+_DEPENDABLE = frozenset({Verdict.DISPOSABLE, Verdict.UNCERTAIN, Verdict.REFERENCED})
+
+
+def _pointer_text(path: Path, prefix: str) -> str | None:
+    """The single path a pointer file names, or None when it is not a readable pointer."""
+    raw = read_small_regular_file(path)
+    if raw is None:
+        return None
+    text = raw.decode("utf-8", errors="replace").strip()
+    if prefix:
+        if not text.startswith(prefix):
+            return None
+        text = text[len(prefix) :].strip()
+    return text if text and "\n" not in text else None
+
+
+def _entry_of(path: Path, root: Path) -> str | None:
+    if path == root or not path_is_relative_to(path, root):
+        return None
+    return path_relative_to(path, root).parts[0]
+
+
+def _entry_pointers(
+    root: Path, resolved_root: Path, name: str, walk: Bounded[EntryStats]
+) -> _Pointers:
+    """Where entry ``name``'s ``.git`` files and ``commondir`` files point, outside itself.
+
+    Both the lexical and the resolved target are mapped to an entry; the pointer
+    text itself is never reported, only the path of the file holding it.
+    """
+    if not walk.complete:
+        return _Pointers((), (f"{name} was not walked to the end",))
+    nodes = {node.path for node in walk.value.nodes}
+    into: set[tuple[str, str]] = set()
+    unknown: list[str] = []
+    for marker in walk.value.git_markers:
+        path = root / marker
+        try:
+            info = os.lstat(path)
+        except OSError:
+            unknown.append(marker)
+            continue
+        if stat.S_ISDIR(info.st_mode):
+            pointer_file, prefix = f"{marker}/commondir", ""
+            if pointer_file not in nodes:
+                continue
+            base = path
+        else:
+            pointer_file, prefix, base = marker, _GITDIR_PREFIX, path.parent
+        pointer = _pointer_text(root / pointer_file, prefix)
+        if pointer is None:
+            unknown.append(pointer_file)
+            continue
+        lexical = Path(os.path.normpath(base / pointer))
+        targets = {
+            _entry_of(lexical, root),
+            _entry_of(Path(os.path.realpath(lexical)), resolved_root),
+        }
+        into.update((target, pointer_file) for target in targets if target and target != name)
+    return _Pointers(tuple(sorted(into)), tuple(unknown))
+
+
+def _with_dependencies(
+    judged: list[tuple[EntryRow, _Pointers]],
+) -> tuple[list[EntryRow], str]:
+    """F-BYPS 2: protect an entry another entry's repository depends on.
+
+    Returns the rows and, when some pointer could not be read, the incomplete reason.
+    """
+    dependents: dict[str, list[str]] = {}
+    unknown: list[str] = []
+    for _row, pointers in judged:
+        unknown.extend(pointers.unknown)
+        for target, source in pointers.into:
+            dependents.setdefault(target, []).append(source)
+    reason = ""
+    if unknown:
+        reason = (
+            f"{len(unknown)} git pointer(s) unknown (first: {unknown[0]}), so which "
+            "entries other entries depend on is unknown"
+        )
+    rows: list[EntryRow] = []
+    for row, _pointers in judged:
+        pointing = sorted(dependents.get(row.name, ()))
+        if pointing and row.verdict in _DEPENDABLE:
+            more = f" (and {len(pointing) - 1} more)" if len(pointing) > 1 else ""
+            row = _overruled(
+                row,
+                Verdict.PROTECTED,
+                f"another entry's repository depends on this one: {pointing[0]}{more}",
+            )
+        elif reason and row.verdict is Verdict.DISPOSABLE:
+            row = _overruled(row, Verdict.STUCK, f"not judged: {reason}")
+        rows.append(row)
+    return rows, reason
+
+
+def _overruled(row: EntryRow, verdict: Verdict, reason: str) -> EntryRow:
+    """``row`` with a new verdict; its proofs and any filing proposal no longer hold."""
+    return dataclasses.replace(
+        row,
+        verdict=verdict,
+        reasons=(reason, *row.reasons),
+        proofs=(),
+        filing_destination="",
+        filing_command="",
+    )
 
 
 def _tracked_by_entry(
@@ -350,7 +481,7 @@ def _judge_entry(
     scandir: ScandirFn,
     git: _EntryGit,
     filing: _Filing,
-) -> EntryRow:
+) -> tuple[EntryRow, _Pointers]:
     now = clock.now
     walk = walk_entry(root, name, now=now, budget=budget, scandir=scandir)
     stats = walk.value
@@ -396,7 +527,7 @@ def _judge_entry(
         relative_root=filing.relative_root,
         max_bytes=filing.max_bytes,
     )
-    return EntryRow(
+    row = EntryRow(
         name=name,
         kind=stats.kind,
         verdict=judgement.verdict,
@@ -415,6 +546,7 @@ def _judge_entry(
         filing_destination=proposal.destination if proposal else "",
         filing_command=proposal.command if proposal else "",
     )
+    return row, _entry_pointers(root, resolved_root, name, walk)
 
 
 def _protection(

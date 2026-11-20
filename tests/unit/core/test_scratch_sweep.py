@@ -620,3 +620,63 @@ class TestReferenced:
         assert _verdicts(report) == {"a.log": "STUCK"}
         assert not report.complete
         assert any("git grep failed" in reason for reason in report.incomplete_reasons)
+
+
+class TestCrossEntryDependencies:
+    """F-BYPS 2: an entry another entry's ``.git`` pointer depends on is never disposable."""
+
+    def test_a_standalone_repository_another_entry_points_into_is_protected(
+        self, tmp_path: Path
+    ) -> None:
+        gp = build_git_project(tmp_path)
+        repo = gp.standalone("a/repo")
+        gp.tree.git_marker("b", gitdir=str(repo / ".git"))
+        now = _now()
+        _old(gp.tree, now)
+        report = _git_sweep(gp, now)
+        assert _verdicts(report) == {"a": "PROTECTED", "b": "PROTECTED"}
+        row = next(row for row in report.rows if row.name == "a")
+        assert "b/.git" in " ".join(row.reasons)
+        assert (row.filing_destination, row.filing_command) == ("", "")
+
+    def test_a_relative_pointer_into_another_entry_is_followed_lexically(
+        self, tmp_path: Path
+    ) -> None:
+        gp = build_git_project(tmp_path)
+        gp.standalone("a")
+        gp.tree.git_marker("b/x", gitdir="../../a/.git")
+        now = _now()
+        _old(gp.tree, now)
+        assert _verdicts(_git_sweep(gp, now))["a"] == "PROTECTED"
+
+    def test_a_pointer_into_its_own_entry_changes_nothing(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        parent = gp.standalone("e/main")
+        git(parent, "worktree", "add", "-q", "-b", "side", str(gp.tree.root / "e" / "side"))
+        now = _now()
+        _old(gp.tree, now)
+        assert _verdicts(_git_sweep(gp, now)) == {"e": "DISPOSABLE"}
+
+    def test_an_unreadable_pointer_makes_disposable_rows_stuck(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        gp.standalone("a")
+        gp.tree.directory("b")
+        os.mkfifo(gp.tree.root / "b" / ".git")
+        now = _now()
+        _old(gp.tree, now)
+        report = _git_sweep(gp, now)
+        assert _verdicts(report)["a"] == "STUCK"
+        assert not report.complete
+        assert any("b/.git" in reason for reason in report.incomplete_reasons)
+
+    def test_an_entry_not_walked_to_the_end_makes_disposable_rows_stuck(
+        self, tmp_path: Path
+    ) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("box/inner/a.txt")
+        tree.file("cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now, refused=("box/inner",))
+        assert _verdicts(report) == {"box": "STUCK", "cache": "STUCK"}
+        assert any("box was not walked" in reason for reason in report.incomplete_reasons)
