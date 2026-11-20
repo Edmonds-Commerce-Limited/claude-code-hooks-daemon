@@ -7833,13 +7833,42 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open, medium priority. Make `patch-equivalent` stand only with the net-change proof (as the remote path does), or refuse it when there is no merge base. Write the tests first, using the three corpus shapes.
 
+### N661 — secret-guard link residuals left by Plan 00614
+
+**Source**: the Plan 00614 review 614c fix round (`../00614-secret-guard-resolves-links-against-hook-cwd/subagent-reports/261118-finish-opus.md`), measured with the review probe over synthetic fixtures. Each shape below is allowed on main, on the round-start tip and on the Plan 00614 tip alike: none is a regression. (Filed on the branch as N650; renumbered on merging main, whose close-out of Plan 00618 took N650 to N659; N660 is taken by Plan 00622.)
+
+**Evidence**:
+
+- A physical `..` through a directory link (`cat dlink/../*`, `head -n1 dlink/../i*`, `cd -P dlink/.. && cat *`, `grep -r x deep/idlink/..`). Paths are normalised lexically, and main's `_physical_root` resolves the search form to a target outside the project, where the index does not reach.
+- A glob matching a file link (`cat lin[k]1.txt`): the "wildcard names the link" rule covers directory links only.
+- An absolute glob outside the project (`cat /other/checkout/sub/*`).
+- `CDPATH` inherited from the environment rather than named in the command.
+
+**Status**: ⬜ Open. Apply the link-out rule to a physical root and honour `cd -P` in the text walker; judge a glob's matches that are file links; decide whether an absolute glob outside the project is in scope.
+
+### N662 — "stopped early, so allowed" routes left in and beside the secret guard after Plan 00614 round 6
+
+**Source**: the Plan 00614 round-6 fix of the independent review (`../00614-secret-guard-resolves-links-against-hook-cwd/subagent-reports/261118-fix-round-6.md`, class sweep). Every allow below is allowed on main and on the round-start tip too: none is a regression. (The quarantine guard's advisory route for a `ResolutionFailedError` was one, and was fixed in the same round.)
+
+**Evidence**:
+
+- A `..`-led relative word after a computed `cd` (`cd $(printf q/sub/a/x); cat ../late`, `cat ../../a/late`) is not resolved from the directories above the scanned link, unlike a deeper word without `..`.
+- A chdir hidden more than `_MAX_DIRECTORY_CHANGE_DEPTH` (4) nested `bash -c` bodies deep (`env -C inner cat rel` wrapped 5 or 7 times) is not followed; the walk stops silently.
+- A pathless Grep tool call whose hook `cwd` passes through no link is judged as on main (not at all), so from a directory holding a protected file it is allowed where `path=<that dir>` is denied.
+- The secret guard's Plan 00483 A1 route still allows with an advisory when the full scan gives up on a command holding no search or glob (a cap, the deadline, an unreadable word or an internal error).
+- A hook payload with no `cwd` or a relative one: relative words, globs, searches and a pathless Grep tool call are not placed and are allowed.
+- In a project past the link-scan cap, `cd "$D" && make test` and any other computed `cd` before a relative word is denied (accepted over-deny, release note 002); only the `git rev-parse --show-toplevel` idiom is placed without a scan. The unquoted `$( )` form before a recursive search is still denied. The text walker's segment split is not quote-aware, so a quoted body holding an operator (`bash -c 'cd sub && cat f'`) is read loosely as a computed move, and is denied in such a project too.
+- Suspected, not probed: `_DirectoryWalk.change` and `_expand` follow a relative or globbed `cd` from the first `LINK_DIRECTORY_CAP + 1` existing directories only (a `[:CAP]` slice with no incomplete signal).
+
+**Status**: ⬜ Open. Resolve a `..`-led word from above the scanned links; make the nested-body depth limit an incomplete signal that denies. Decide (owner) whether the A1 no-search advisory and a missing `cwd` should deny. Consider an off-hot-path link index, built like the protected-file index and denying until built, so a large project's computed `cd` is judged instead of denied; make the text walker's segment split quote-aware.
+
 ### N663 — a relative word that fits PATH_MAX only relative to the hook cwd is never resolved, and is allowed
 
 **Source**: Plan 00614 second independent review, defect D-A (`subagent-reports/261118-independent-review-2.md`).
 
 **Evidence**: `_link_targets` places a relative word as `Path(cwd) / token`, and `_realpath_if_resolvable` calls `os.path.lexists` on it, which returns False on ENAMETOOLONG. Bash opens the word relative to its own cwd, so there is a window of `len(project_root) + 1` characters where the kernel resolves the path, the guard cannot place it, and the guard allows. `cat $(plain/../ x 449)flink` allows on the branch and on main; at 448 repeats it denies. No test uses a word near `PATH_MAX`.
 
-**Status**: ⬜ Open, low priority. Treat an `OSError` other than ENOENT from the placement stat as unresolvable so it denies, or resolve the word with `dir_fd` / `openat` semantics. Covered by Plan 00623.
+**Status**: ✅ Fixed on the Plan 00623 branch (merges with Plan 00614). The placement stat is an `lstat`; ENOENT, ENOTDIR and ELOOP are "no such path", and any other `OSError` raises `ResolutionFailedError` (deny) when the raw word fits PATH_MAX and every component of the placed path fits NAME_MAX. Pinned by `TestPlacementStat` in `test_secret_file_guard_bounded_walks.py`.
 
 ### N664 — a recursive search nested 5 or more `bash -c` levels deep is not seen
 
@@ -7847,7 +7876,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Evidence**: the branch denies `grep -r x olink` at nesting depths 3 and 4 and allows it at depths 5 and 6; main allows it at every depth. `cat flink` and `cat olink/i*` deny at every depth from 3 to 6. N662 records the depth limit only for a hidden chdir (`_MAX_DIRECTORY_CHANGE_DEPTH`); the same silent stop on the search side is not recorded.
 
-**Status**: ⬜ Open, low priority. Make the depth limit an incomplete signal that denies, in the same change as the N662 item. Covered by Plan 00623.
+**Status**: ✅ Fixed on the Plan 00623 branch. Past either depth limit a body that could read (`recursive_search`) or move (`secret_file_matching`) raises `IncompleteScanError`; a harmless body still allows at any depth. Pinned by `TestNestingDepth`.
 
 ### N665 — a hand-forged loose commit object makes a branch with content look empty to the delete proofs
 
@@ -7871,7 +7900,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Evidence**: the round-6 branch excuses the top-level idiom from the incomplete-scan deny and places it at the ancestors of the command's directory. It demotes the idiom only when the same command sets `core.worktree`, names a `GIT_` variable, defines a function or alias, or changes `PATH`. Repository config persisted by an EARLIER call (`core.worktree`) makes `git rev-parse --show-toplevel` print a non-ancestor, and `cd "$(git rev-parse --show-toplevel)" && cat late` (also `grep -r` and a glob form) is then allowed past the cap; under the cap the same commands deny. Main allows them too.
 
-**Status**: ⬜ Open, belongs to Plan 00623 (it must land before the Plan 00614 branch merges). Read `core.worktree` and `GIT_WORK_TREE` at decision time, or keep the exemption only when the computed top level equals the project root or a checkout nested in it.
+**Status**: ✅ Fixed on the Plan 00623 branch. `toplevel_relocated` reads the repository, user and system git config (and their includes) at decision time and demotes the idiom to a plain computed move when any sets a `worktree` key, holds more than 16 included files, cannot be read, or a `GIT_` relocating variable is set for the daemon. With the link index complete the computed judgement finds every link anyway. Pinned by `TestPersistedWorktreeConfig` (cold index). Residual: the SHELL's environment is not visible (N669).
 
 ### N668 — a path through `/proc/self/cwd` or `/dev/fd/..` is judged from the daemon's working directory
 
@@ -7879,7 +7908,37 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Evidence**: `cat /proc/self/cwd/flink`, `cat /proc/self/cwd/olink/i*`, `grep -r x /proc/self/cwd/olink` and `cat /dev/fd/../cwd/flink` are allowed on main and on the branch: the daemon's `/proc/self/cwd` is `/`, while the shell's is the project. `cd /proc/self/cwd && cat flink` denies on the branch.
 
-**Status**: ⬜ Open, low priority; belongs to Plan 00623. Treat a `/proc/self/`, `/proc/thread-self/` or `/dev/fd/` prefix as unplaceable (fail closed).
+**Status**: ✅ Fixed on the Plan 00623 branch. `refuse_process_view` raises for adjacent `proc/self`, `proc/thread-self` or `dev/fd` components (`//` and `.` collapsed, `..` not) in Bash words, glob and search roots, and the Read/Grep tool path. Accepted cost: ordinary `cat /proc/self/status`, `ls /dev/fd` and `2>/dev/fd/N` words now deny. Residual: a project link whose TARGET is `/proc/self/cwd` (N669).
+
+### N669 — Plan 00623 residuals: placement trusts the daemon's environment, and the index has its own bounds
+
+**Source**: Plan 00623 build (`CLAUDE/Plan/00623-secret-guard-structural-fail-closed-walks-and-link-index/subagent-reports/261118-build-opus.md`).
+
+**Evidence**:
+
+- A move to `~`, `$HOME` or `$TMPDIR`, and the N667 check, use the DAEMON's values; a shell whose profile sets them differently lands elsewhere. Same class as D-C.
+- The link index is verified per call but bounded (200,000 directories, 4,096 re-lists, 2 s): past a bound the computed move denies, so very large or very busy trees still over-deny. Before the first background build finishes, the 512-directory per-call scan is used.
+- More than 512 link-holding directories in the index (a pnpm-style tree) still denies a computed move. **Addressed on the branch** (`subagent-reports/261119-many-link-directories.md`): past 512, words are judged by link name (`LinkNames`). Still denied: more than 512 directory links (pnpm's `node_modules/<pkg>` links are directory links, so a pnpm tree usually still denies) or more than 65,536 links.
+- A project link whose target is `/proc/self/cwd` is classified by the daemon (its own cwd), not refused as N668 is.
+- The quarantine guard's Read-tool route does not call `refuse_process_view`.
+- The `~`/`$HOME`/`$TMPDIR` placement trusts the command text: it refuses a quoted or escaped spelling, a second mention of the variable, and any `source`, `.`, `eval`, `declare`, `typeset`, `export`, `local`, `readonly`, `read`, `mapfile`, `readarray`, `unset` or `printf -v` in command position, but an alias or function named `cd` defined in an earlier call is not seen.
+- A wildcard word whose placed parent is longer than PATH_MAX (each component short) is now denied as unresolvable rather than read as matching nothing: over-deny for words over 4,096 bytes only.
+- `_could_read` (the depth-limit check) follows the same nesting forms as the search walk (`-c` as its own word, `eval`, substitutions); `bash -ec '...'` is not looked into at any depth by either, a gap that predates this plan.
+
+**Status**: ⬜ Open, low priority; recorded for the merge review. The >512 link-holding-directory bullet is addressed on the branch (pending independent review); the rest stay open.
+
+### N670 — Plan 00623 adversarial review leftovers: this repository's link index always overflows, and the flaggable guard lets an expansion limit escape
+
+**Source**: Plan 00623 adversarial review (`CLAUDE/Plan/00623-secret-guard-structural-fail-closed-walks-and-link-index/subagent-reports/261119-adversarial-review.md`).
+
+**Evidence**:
+
+- `build_link_index('/workspace')` overflows the 200,000-directory cap in about 5 s, because the tree holds `.claude/worktrees/*` (about 69,000 directories each) and `untracked/scratch` fixtures. In this repository every computed move followed by a reader is therefore denied. Since the review's F1 and F3 fixes (a placed `~`/`$TMPDIR` move and the top-level idiom now fail closed on a stopped scan), that includes `cd ~/x && cat f` and `cd "$(git rev-parse --show-toplevel)" && cat f`. A candidate fix is to exclude other checkouts and scratch from the index; that needs its own fail-closed argument.
+- More than 512 link-holding directories (for example `node_modules/.bin`) still stop `_scan_from_index`. This one repeats N669. **Addressed on the branch**, see N669.
+- `flaggable_content_channel_guard` lets `TooManyToEnumerateError` escape `handle` for commands nested 5 or more `bash -c` deep. It does so on main and on the branch alike.
+- An unlistable directory anywhere in the project now stops the link scan (fix F2), so it denies every computed move followed by a reader.
+
+**Status**: ⬜ Open; recorded for the Plan 00623 merge. The >512 bullet is addressed on the branch (pending independent review); the 200,000-directory overflow needs an owner decision (scratch size or the cap), and the flaggable escape and the F2 cost are open.
 
 ### N671 — `issue-report`'s version-currency check reads only the locally installed release notes, so it calls an old install the newest release
 
@@ -7913,6 +7972,14 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open, low priority. Confirm the default with a live `git ls-remote --symref <remote> HEAD` and report a stale tracking HEAD by name, still failing closed.
 
+### N675 — playbook probe #125 (rsync from a worktree) fails whenever the acceptance harness runs inside a worktree
+
+**Source**: Plan 00623 acceptance-harness diagnosis (`tests/acceptance/test_playbook_harness.py`).
+
+**Evidence**: the probe's event `cwd` is `$MAIN_CHECKOUT_DIR` (the main checkout), but a worktree's daemon has the WORKTREE as its project root. The rsync target `src/` then resolves to the main checkout's `src`, outside that root, so `project_containment` (priority 14) denies with R-WRITE-OUTSIDE-PROJECT-ROOT before `worktree_file_copy` (priority 15) gives the expected reason. Main's own code makes the same call: run in-process with the worktree as project root, main's `project_containment` matches the #125 event exactly as the branch's does. It passes only from the main checkout, where the cwd and the root are the same directory. #124 (`cp` to a file under `src/`) is not matched by containment in either tree.
+
+**Status**: ⬜ Open, low priority. The fix belongs to the harness or the probe, not to either handler: give the probe a cwd that is the daemon's project root, or have the harness skip or report this probe when it runs in a worktree.
+
 ### N676 — the skill wrappers self-update from unsigned release assets in every session
 
 **Source**: Plan 00625's threat-model review (a Fable sub-agent, 2026-11-19), recorded in its DESIGN ruling 3. The numbering skips N675, which the Plan 00623 branch takes when it merges.
@@ -7920,3 +7987,29 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: the skill wrappers refresh themselves from release assets fetched at the start of a session, and nothing verifies a signature on what they fetch. That is a trust gap on every install, whether or not automatic upgrades are on, and it sits outside Plan 00625's scope.
 
 **Status**: ⬜ Open, security-relevant, medium priority. Apply the Plan 00625 trust model (a human-added signers file, a verified tag, the script byte-identical to the verified copy) to the wrapper self-update path, or stop the self-update.
+
+### N677 — secret_file_guard: a `/proc` path that reaches the shell's own view without spelling `/proc/self` is placed as the daemon's
+
+**Source**: Plan 00623 review 3 (`CLAUDE/Plan/00623-secret-guard-structural-fail-closed-walks-and-link-index/subagent-reports/261119-review3-loosenings.md`).
+
+**Evidence**: with a project link `flink` to a protected dummy, these print the dummy in real bash and are allowed on main, on Plan 00623's earlier tip and after it: `cat /proc/$$/cwd/flink`, `cat /proc/$BASHPID/cwd/flink`, `cat /proc/[0-9]*/cwd/flink` (an expansion or glob as the pid), and, when the daemon's cwd is not the project root, `cat /proc/sys/../self/cwd/flink` and `cat /proc/1/../self/cwd/flink` (a `..` between `proc` and `self`, so `refuse_process_view`'s adjacent-pair test never sees `proc`,`self`). Not introduced by the plain-file carve-out (6c16ce510): the same rows are allowed before it.
+
+**Status**: ⬜ Open. Candidate fix in `refuse_process_view`: refuse any absolute `/proc/<x>/...` whose `<x>` is not a literal number, and any `/proc` path holding a `..`.
+
+### N678 — secret_file_guard: a scan of a Python heredoc holding braces that runs past its deadline is denied on the Plan 00623 branch, and allowed on main
+
+**Source**: Plan 00623 final full gate, py3.13 leg (`test_a_utf8_declaration_keeps_the_exemption` denied with R-SECRET-BASH-MENTION).
+
+**Evidence**: with `SCAN_DEADLINE_SECONDS` forced to 0 or 0.3, `python3 - <<'EOF'` followed by a 600-line program of set displays (`{0,1}`) is denied on the branch and allowed on main. On the branch, a given-up scan is denied when the command holds a glob character (review 614c P2, `_holds_search_or_glob`). The body of a quoted heredoc fed to python is not stripped there, so its code braces count as glob characters. The scan is also slower: profiled in one process it takes 2.8s against 2.3s on main, and `_search_reach` takes 0.44s against 0.15s. On a loaded host the 5s wall-clock deadline is crossed, so a command that names no protected path is denied. The tests now judge on the CPU clock with a generous deadline. Production is unchanged.
+
+**Correction to the evidence**: braces are not the trigger. `_MAY_GLOB` is `*`, `?` and `[`; with the deadline forced, a program of set displays alone stays an advisory. The failing test's program opens with `# -*- coding: utf-8 -*-`, whose `*` is the glob character. Any `x[0]`, `a * b` or `*args` in an inline or heredoc program does the same.
+
+**Status**: ⬜ Open for the speed half only. The deny is ruled KEPT (Plan 00623 JOURNAL, decision "N678 ruling"): a program can read its own text back (`/proc/self/cmdline` for a `-c` program, `/proc/$PPID/cmdline` for the whole Bash command) and hand it to a shell, the completed scan does judge a glob spelled in code (`print(own/id_rs[a])` is denied), and no test on the word tells a subscript from a glob, so an exemption would let a padded program carry a glob past the guard. The deny message now names the remedy (write the program to a file and run it); `TestAGivenUpScanOfAPythonProgram` pins the ruling. Still to do: make the scan fast enough that an ordinary program does not reach the deadline, starting with whether `_search_reach` should walk a body that the shell never expands (0.44s against 0.15s on main).
+
+### N679 — `test_every_checkout_of_the_repository_is_protected` fails when another agent removes a worktree during a long run
+
+**Source**: Plan 00623 final full gate, py3.13 leg (`tests/unit/test_doc_write_jail.py::TestSessionWiring`).
+
+**Evidence**: the protected-path set is put into the environment once, at session start. The test compares it with a fresh `checkout_roots()` read. The py3.13 leg ran for about 80 minutes. During that run, `untracked/worktrees/plan-00613-00594-rulings` was merged and removed (main reflog, 2026-11-19 21:54). The snapshot still held its two paths, so the comparison failed. It passes on a rerun in the same worktree. The branch does not touch the jail code.
+
+**Status**: ⬜ Open, low priority. Compare the snapshot against the roots that existed when the session started, or assert only that every root still present is protected.

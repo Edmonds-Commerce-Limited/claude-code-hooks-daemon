@@ -36,8 +36,12 @@ The owner asked for two things. First, make sure Claude Code's own idle compacti
 ### Phase 2: Trigger
 
 - [x] ✅ **Task 2.1**: Tests first for the decision function: true idle at and above 30%, not idle with a background task, not idle with a sub-agent running, below 30%, inside the cooldown, inside the settle period, dry-run.
+
 - [x] ✅ **Task 2.2**: Implement the trigger in `.claude/ccy/claude-supervise.py` and its deployed template; confirm the worker reloads (verify the new pid; never restart the session).
+
 - [x] ✅ **Task 2.3**: Configuration (env variables and `ccy.env` comments), `CLAUDE/development/CcySupervisor.md`, release note.
+
+- [x] ✅ **Task 2.4**: Owner decision (answered "fine" to "orange and 600 s as defaults?"): the gate is the sidecar's context tier, default orange or higher (`CCY_IDLE_COMPACT_TIER`), with `CCY_IDLE_COMPACT_PCT` now an optional override; the settle default is 600 s; a pending standing-auth reminder, session-actions directive or cron-reconcile prompt goes first. Tests first; docs, `ccy.env` and release note 004 updated.
 
 ### Phase 3: Proof
 
@@ -45,10 +49,10 @@ The owner asked for two things. First, make sure Claude Code's own idle compacti
 
 ## Success Criteria
 
-- [ ] The supervisor compacts once, at a true idle at or above 30%, and never while a background task or sub-agent is running.
-- [ ] A session sitting at 30% after a compaction is not compacted again within the cooldown.
+- [ ] The supervisor compacts once, at a true idle of 600 s in the orange tier or higher (30% of a 1M window), and never while a background task or sub-agent is running.
+- [ ] A session sitting in orange after a compaction is not compacted again within the cooldown.
 - [ ] `idleCompaction` is verified on, with a test that fails if the optimal-config check stops reporting a disabler.
-- [ ] The pending-release holding area has a release note for the new trigger.
+- [ ] The pending-release holding area has a release note for the new trigger (058, released in v3.75.0) and for the orange-tier and 600 s defaults (`CLAUDE/UPGRADES/UNRELEASED/release-notes/004-supervisor-idle-compaction-at-the-orange-tier.md`).
 
 ## Delivery & Milestones
 

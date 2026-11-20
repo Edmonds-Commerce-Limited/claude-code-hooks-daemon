@@ -1,6 +1,6 @@
 # Plan 00627: scratch management ttl and filing
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-11-19
 **Owner**: joseph
 **Priority**: High
