@@ -511,6 +511,33 @@ class TestVerdictIdentity:
         self, repo: Path, store: RejectStore, config: BranchRejectConfig
     ) -> None:
         """Defence in depth: the ledger's consumed set is checked against the nonce too."""
-        verdict = _issue(repo, store)
+        verdict = replace(_issue(repo, store), verdict_id=new_id())
         found = _problems(repo, store, verdict, config, consumed=frozenset({verdict.nonce}))
         assert any("already used" in p for p in found)
+
+    def test_a_used_chain_replayed_under_a_fresh_nonce_refuses(
+        self, repo: Path, store: RejectStore, config: BranchRejectConfig
+    ) -> None:
+        """Request, dispatch and verdict all copied under a new nonce, nothing else edited.
+
+        Each id check passes (id == nonce == file name), so single use must also be
+        keyed on the reviewer agent: one agent reviews one nonce, and the ledger names it.
+        Writing a NEW agent id into the copies is forging, the residue RULINGS Q1 accepts.
+        """
+        tip = _tip(repo)
+        verdict = _issue(repo, store)
+        route = _route(repo, store, config)
+        assert _delete(repo, route).deleted == ("feat",)
+        _git(repo, "branch", "feat", tip)
+        fresh = new_id()
+        request = store.read_request(verdict.nonce)
+        dispatch = store.read_dispatch(verdict.nonce)
+        assert request is not None and dispatch is not None
+        store.write_request(replace(request, nonce=fresh))
+        store.write_dispatch(replace(dispatch, nonce=fresh))
+        store.write_verdict(replace(verdict, verdict_id=fresh, nonce=fresh))
+        again = _delete(repo, route)
+        assert again.refused is True
+        assert _branch_exists(repo)
+        assert len(read_ledger(route.ledger_path)) == 1
+        assert any("reviewer agent" in b and "already" in b for b in again.blockers)
