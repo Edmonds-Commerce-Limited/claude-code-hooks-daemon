@@ -171,3 +171,51 @@ class TestProveRemoteMerged:
         _git(repo, "checkout", "-q", "main")
         proof = prove_remote_merged(repo, "origin", ["release/1"], "main", _CONFIG)
         assert "integration line not yet merged" in proof.problems["release/1"]
+
+
+class TestPushUrlIsConfirmedToo:
+    """The delete goes to the push URL; the proof must hold where the delete lands."""
+
+    def _fork_with_other_feat(self, repo: Path, tmp_path: Path) -> Path:
+        fork = tmp_path / "fork.git"
+        _git(tmp_path, "init", "--quiet", "--bare", "-b", "main", str(fork))
+        _git(repo, "push", "--quiet", str(fork), "main")
+        _git(repo, "checkout", "-q", "-b", "fork-only", "feat")
+        _commit(repo, "fork-only")
+        _git(repo, "push", "--quiet", str(fork), "fork-only:refs/heads/feat")
+        _git(repo, "checkout", "-q", "main")
+        return fork
+
+    def test_a_push_url_whose_branch_differs_refuses(self, repo: Path, tmp_path: Path) -> None:
+        _pushed_branch(repo, "feat", merge=True)
+        fork = self._fork_with_other_feat(repo, tmp_path)
+        _git(repo, "config", "remote.origin.pushurl", str(fork))
+        proof = prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
+        assert proof.tips == {}
+        assert "push URL" in proof.problems["feat"]
+        assert str(fork) not in proof.problems["feat"]
+
+    def test_a_push_url_naming_the_same_repository_is_proven(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        tip = _pushed_branch(repo, "feat", merge=True)
+        _git(repo, "config", "remote.origin.pushurl", (tmp_path / "remote.git").as_uri())
+        proof = prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
+        assert proof.tips == {"feat": tip}
+
+    def test_every_push_url_is_confirmed(self, repo: Path, tmp_path: Path) -> None:
+        _pushed_branch(repo, "feat", merge=True)
+        fork = self._fork_with_other_feat(repo, tmp_path)
+        _git(repo, "config", "--add", "remote.origin.pushurl", str(tmp_path / "remote.git"))
+        _git(repo, "config", "--add", "remote.origin.pushurl", str(fork))
+        proof = prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
+        assert proof.tips == {}
+        assert "push URL" in proof.problems["feat"]
+
+    def test_an_unreadable_push_url_refuses(self, repo: Path) -> None:
+        _pushed_branch(repo, "feat", merge=True)
+        _git(repo, "config", "remote.origin.pushurl", "--upload-pack=touch pwned")
+        proof = prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
+        assert proof.tips == {}
+        assert "push URL" in proof.problems["feat"]
+        assert not (repo / "pwned").exists()

@@ -853,6 +853,66 @@ def _live_tip_problems(directory: Path, remote: str, proof: _LocalProof) -> dict
                 f"which differs from what {remote} holds now (or `git ls-remote {remote}` "
                 f"failed){cause}; run `git fetch {remote}` and retry"
             )
+    return {**problems, **_push_url_problems(directory, remote, proof, live, set(problems))}
+
+
+def _other_push_urls(directory: Path, remote: str) -> list[str] | None:
+    """Each push URL of ``remote`` that is not its fetch URL, or None when unreadable.
+
+    ``git ls-remote <remote>`` reads the fetch URL while ``git push <remote> --delete``
+    goes to every push URL (``pushurl`` / ``pushInsteadOf``), which may be another
+    repository. ``git remote get-url`` applies both rewrites. A URL that would parse
+    as an option is unreadable, never passed on.
+    """
+    fetch = run_git(directory, "remote", "get-url", remote, timeout=Timeout.GIT_CONTEXT)
+    push = run_git(
+        directory, "remote", "get-url", "--push", "--all", remote, timeout=Timeout.GIT_CONTEXT
+    )
+    if fetch.returncode != 0 or push.returncode != 0:
+        return None
+    urls = [url for url in push.stdout.splitlines() if url]
+    if not urls or any(url.startswith("-") for url in urls):
+        return None
+    return [url for url in dict.fromkeys(urls) if url != fetch.stdout.strip()]
+
+
+def _push_url_problems(
+    directory: Path, remote: str, proof: _LocalProof, live: dict[str, str], settled: set[str]
+) -> dict[str, str]:
+    """Why a push URL that differs from the fetch URL does not hold what the proof read.
+
+    Every push URL must report each deleted branch at its proven tip and each anchor
+    at its proven sha, exactly as the fetch URL did; a push URL naming the same
+    repository by another spelling therefore passes. The URL is never quoted, as it
+    can carry a credential.
+    """
+    pending = [name for name in proof.tips if name not in settled]
+    if not pending:
+        return {}
+    urls = _other_push_urls(directory, remote)
+    if urls is None:
+        return {
+            name: (
+                f"a push URL of {remote} could not be read, so the delete's destination is "
+                f"unconfirmed and `{name}` is unchecked"
+            )
+            for name in pending
+        }
+    problems: dict[str, str] = {}
+    for url in urls:
+        names = sorted({*pending, *(line for n in pending for line in proof.anchors[n])})
+        pushed, _ = live_remote_listing(directory, url, names)
+        for name in pending:
+            expected = {name: proof.tips[name], **proof.anchors[name]}
+            if any(
+                pushed.get(ref) != live.get(ref) or live.get(ref) != sha
+                for ref, sha in expected.items()
+            ):
+                problems[name] = (
+                    f"a push URL of {remote} (where the delete goes) does not hold `{name}` "
+                    f"and what proved it at the tips its fetch URL reported, so `{name}` is "
+                    "unconfirmed there"
+                )
     return problems
 
 

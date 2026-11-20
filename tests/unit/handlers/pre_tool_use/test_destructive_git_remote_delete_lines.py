@@ -187,6 +187,9 @@ class _FakeGit:
             return _done(0, "".join(f"{ref}\n" for ref in named))
         if args[0] == "for-each-ref":
             return _done(0, self._listing())
+        if args[:2] == ("remote", "get-url"):
+            # One URL for fetch and push: the push side needs no listing of its own.
+            return _done(0, "git@example.invalid:o/r.git\n")
         raise AssertionError(f"unexpected git call {args}")
 
     def count(self, verb: str) -> int:
