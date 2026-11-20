@@ -191,9 +191,11 @@ class TestClaim:
         assert (root / "e1").is_dir()
 
     @pytest.mark.parametrize("name", ["", ".", "..", "a/b", "../x", f"{CLAIM_PREFIX}e1"])
-    def test_refuses_bad_names(self, root_fd: int, name: str) -> None:
+    def test_refuses_bad_names(self, root: Path, root_fd: int, name: str) -> None:
+        (root / "e1").mkdir()
+        expected = fingerprint_at(root_fd, "e1", max_inodes=10)
         with pytest.raises(ValueError):
-            claim(root_fd, name, None, max_inodes=10)
+            claim(root_fd, name, expected, max_inodes=10)
 
     def test_dir_swapped_for_a_symlink_renames_back(
         self, root: Path, root_fd: int, tmp_path: Path
