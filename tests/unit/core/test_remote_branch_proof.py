@@ -203,6 +203,14 @@ class TestPushUrlIsConfirmedToo:
         proof = prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
         assert proof.tips == {"feat": tip}
 
+    def test_a_push_instead_of_rewrite_is_followed(self, repo: Path, tmp_path: Path) -> None:
+        _pushed_branch(repo, "feat", merge=True)
+        fork = self._fork_with_other_feat(repo, tmp_path)
+        _git(repo, "config", f"url.{fork}.pushInsteadOf", str(tmp_path / "remote.git"))
+        proof = prove_remote_merged(repo, "origin", ["feat"], "main", _CONFIG)
+        assert proof.tips == {}
+        assert "push URL" in proof.problems["feat"]
+
     def test_every_push_url_is_confirmed(self, repo: Path, tmp_path: Path) -> None:
         _pushed_branch(repo, "feat", merge=True)
         fork = self._fork_with_other_feat(repo, tmp_path)
