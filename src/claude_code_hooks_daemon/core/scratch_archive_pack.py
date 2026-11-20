@@ -63,6 +63,8 @@ _CHUNK = 1 << 20
 _PROC_FD_PARTS = ("", "proc", "self", "fd")
 #: A member operand is a literal name: no glob, no backslash unquoting.
 _LITERAL_OPERANDS = ("--no-wildcards", "--no-unquote")
+#: A P6 archive's members are ``<entry>/...``; compared inside the entry, the root is stripped.
+_STRIP_ROOT = "--strip-components=1"
 
 
 #: The most argv bytes of member names one restricted ``tar --compare`` is given.
@@ -237,11 +239,11 @@ def _member_ok(name: str) -> bool:
     return ".." not in name.split("/") and not posixpath.isabs(name)
 
 
-def read_member_names(handle: IO[bytes]) -> list[str]:
+def read_member_names(handle: IO[bytes], compression: Compression = "none") -> list[str]:
     """Read every header of a tar stream; raise :class:`VerifyFailed` on an unsafe member."""
     names: list[str] = []
     try:
-        with tarfile.open(fileobj=handle, mode="r|") as archive:
+        with tarfile.open(fileobj=handle, mode=tarfile_mode(compression)) as archive:
             for member in archive:
                 if member.type not in _MEMBER_TYPES:
                     raise VerifyFailed(f"member {member.name!r} has a refused type")
@@ -251,6 +253,112 @@ def read_member_names(handle: IO[bytes]) -> list[str]:
     except tarfile.TarError as exc:
         raise VerifyFailed(f"archive cannot be read: {exc}") from exc
     return names
+
+
+def _adopted_member_ok(name: str, root: str) -> bool:
+    if name == root:
+        return True
+    if not name.startswith(root + "/"):
+        return False
+    return all(part not in ("", ".", "..") for part in name[len(root) + 1 :].split("/"))
+
+
+def _read_adopted_names(handle: IO[bytes], compression: Compression, root: str) -> list[str]:
+    """Read a P6 archive's headers: ``root`` (a directory) or ``root/<plain parts>`` only."""
+    names: list[str] = []
+    root_is_dir = False
+    try:
+        with tarfile.open(fileobj=handle, mode=tarfile_mode(compression)) as archive:
+            for member in archive:
+                if member.type not in _MEMBER_TYPES:
+                    raise VerifyFailed(f"member {member.name!r} has a refused type")
+                name = member.name
+                if member.isdir() and name.endswith("/"):
+                    name = name[:-1]
+                if not _adopted_member_ok(name, root):
+                    raise VerifyFailed(f"member {member.name!r} is not under {root!r}")
+                if name == root:
+                    root_is_dir = member.isdir()
+                names.append(name)
+    except tarfile.TarError as exc:
+        raise VerifyFailed(f"archive cannot be read: {exc}") from exc
+    if not root_is_dir:
+        raise VerifyFailed(f"the archive has no directory member {root!r}")
+    return names
+
+
+def _sniff(archive_fd: int) -> Compression:
+    """The archive's compression from its first bytes, with its decompressor present."""
+    try:
+        compression = compression_of(archive_fd)
+        require_decompressor(compression)
+    except PackRefused as exc:
+        raise VerifyFailed(str(exc)) from exc
+    return compression
+
+
+def _archive_names(
+    archive_fd: int, compression: Compression, adopted_root: str | None
+) -> list[str]:
+    os.lseek(archive_fd, 0, os.SEEK_SET)
+    with os.fdopen(os.dup(archive_fd), "rb") as handle:
+        if adopted_root is None:
+            return read_member_names(handle, compression)
+        return _read_adopted_names(handle, compression, adopted_root)
+
+
+def _layout_name(walk_name: str, adopted_root: str | None) -> str:
+    """A walk name (``./``, ``./x/``, ``./x``) as the archive's layout names it."""
+    if adopted_root is None:
+        return _canonical(walk_name)
+    rel = walk_name[2:].rstrip("/")
+    return f"{adopted_root}/{rel}" if rel else adopted_root
+
+
+def _require_adoptable(listing: TreeListing, adopted_root: str | None) -> None:
+    if adopted_root is None:
+        return
+    try:
+        check_name(adopted_root)
+    except ValueError as exc:
+        raise VerifyFailed(f"the adopted root is not one name: {exc}") from exc
+    if listing.root.kind != "dir":
+        raise VerifyFailed("an adopted archive is only checked against a directory")
+
+
+def _compare_adopted(
+    parent_fd: int,
+    claimed_name: str,
+    listing: TreeListing,
+    archive_fd: int,
+    operands: list[str],
+    *,
+    compression: Compression,
+    tar: TarTool,
+    timeout: float,
+) -> None:
+    """``tar --compare --strip-components=1`` inside the claimed tree, naming ``operands``.
+
+    The root strips to an empty name tar cannot stat, so it is never an
+    operand; with no other member the member set alone is the proof.
+    """
+    if not operands:
+        return
+    try:
+        cwd_fd = _cwd_fd(parent_fd, claimed_name, listing)
+    except WalkRefused as exc:
+        raise VerifyFailed(str(exc)) from exc
+    try:
+        batched_compare(
+            cwd_fd,
+            archive_fd,
+            operands,
+            tar=tar,
+            timeout=timeout,
+            flags=(*compression_flags(compression), _STRIP_ROOT),
+        )
+    finally:
+        os.close(cwd_fd)
 
 
 def verify(
@@ -264,14 +372,22 @@ def verify(
     max_depth: int = DEFAULT_MAX_DEPTH,
     expected_sha256: str | None = None,
     timeout: float = DEFAULT_TAR_TIMEOUT_SECONDS,
+    adopted_root: str | None = None,
 ) -> Verified:
-    """Verify ``archive_id`` against the claimed tree both ways; raise :class:`VerifyFailed`."""
+    """Verify ``archive_id`` against the claimed tree both ways; raise :class:`VerifyFailed`.
+
+    The compression is read from the archive's first bytes. ``adopted_root``
+    names the layout: ``None`` for a packed ``./`` archive, the entry name for
+    an adopted (P6) ``<entry>/...`` archive. The caller takes it from the
+    record, never from the archive, so a mismatch refuses rather than adapts.
+    """
     check_name(claimed_name)
     try:
         listing = walk_tree(parent_fd, claimed_name, max_inodes=max_inodes, max_depth=max_depth)
         expected = members_of(listing, claimed_name)
     except (WalkRefused, PackRefused) as exc:
         raise VerifyFailed(f"the claimed tree cannot be listed: {exc}") from exc
+    _require_adoptable(listing, adopted_root)
     try:
         archive_fd = store.open_archive(archive_id)
     except StoreRefused as exc:
@@ -280,17 +396,36 @@ def verify(
         size, sha = _digest(archive_fd)
         if expected_sha256 is not None and sha != expected_sha256:
             raise VerifyFailed("archive SHA-256 differs from its record")
-        os.lseek(archive_fd, 0, os.SEEK_SET)
-        with os.fdopen(os.dup(archive_fd), "rb") as handle:
-            names = read_member_names(handle)
-        wanted = [_canonical(n) for n in expected.names]
+        compression = _sniff(archive_fd)
+        names = _archive_names(archive_fd, compression, adopted_root)
+        wanted = [_layout_name(n, adopted_root) for n in expected.names]
         if len(names) != len(set(names)) or sorted(names) != sorted(wanted):
             raise VerifyFailed(
                 f"archive member set differs from the tree ({len(names)} members, "
                 f"{len(wanted)} expected)"
             )
         os.lseek(archive_fd, 0, os.SEEK_SET)
-        _compare(parent_fd, claimed_name, listing, archive_fd, tar=tar, timeout=timeout)
+        if adopted_root is None:
+            _compare(
+                parent_fd,
+                claimed_name,
+                listing,
+                archive_fd,
+                tar=tar,
+                timeout=timeout,
+                flags=compression_flags(compression),
+            )
+        else:
+            _compare_adopted(
+                parent_fd,
+                claimed_name,
+                listing,
+                archive_fd,
+                [n for n in wanted if n != adopted_root],
+                compression=compression,
+                tar=tar,
+                timeout=timeout,
+            )
     finally:
         os.close(archive_fd)
     return Verified(size=size, sha256=sha, members=expected.names)
@@ -305,6 +440,7 @@ def _compare(
     tar: TarTool,
     timeout: float,
     only: tuple[str, ...] = (),
+    flags: tuple[str, ...] = (),
 ) -> None:
     """Run ``tar --compare``; with ``only``, compare just those members."""
     try:
@@ -315,7 +451,7 @@ def _compare(
     try:
         proc = _run_tar(
             tar,
-            ["--compare", "--file=-", *_COMMON, *operands],
+            ["--compare", *flags, "--file=-", *_COMMON, *operands],
             cwd_fd=cwd_fd,
             stdin=archive_fd,
             stdout=None,
@@ -474,14 +610,15 @@ def verify_remaining(
     expected_sha256: str,
     max_depth: int = DEFAULT_MAX_DEPTH,
     timeout: float = DEFAULT_TAR_TIMEOUT_SECONDS,
+    adopted_root: str | None = None,
 ) -> Verified:
     """Verify a partly removed claimed tree: all that is left is in the archive, unchanged.
 
     The archive must match its recorded SHA-256, every remaining name must be a
     member, and ``tar --compare`` restricted to the remaining non-directories
     must be clean. Directories carry no content, and their times change as they
-    are emptied, so they are checked by membership only. Raises
-    :class:`VerifyFailed`.
+    are emptied, so they are checked by membership only. ``adopted_root`` names
+    the layout as in :func:`verify`. Raises :class:`VerifyFailed`.
     """
     check_name(claimed_name)
     try:
@@ -489,6 +626,7 @@ def verify_remaining(
         remaining = members_of(listing, claimed_name)
     except (WalkRefused, PackRefused) as exc:
         raise VerifyFailed(f"the claimed tree cannot be listed: {exc}") from exc
+    _require_adoptable(listing, adopted_root)
     try:
         archive_fd = store.open_archive(archive_id)
     except StoreRefused as exc:
@@ -497,20 +635,38 @@ def verify_remaining(
         size, sha = _digest(archive_fd)
         if sha != expected_sha256:
             raise VerifyFailed("archive SHA-256 differs from its record")
-        os.lseek(archive_fd, 0, os.SEEK_SET)
-        with os.fdopen(os.dup(archive_fd), "rb") as handle:
-            names = read_member_names(handle)
+        compression = _sniff(archive_fd)
+        names = _archive_names(archive_fd, compression, adopted_root)
         if len(names) != len(set(names)):
             raise VerifyFailed("archive holds a member twice")
-        absent = {_canonical(n) for n in remaining.names} - set(names)
+        absent = {_layout_name(n, adopted_root) for n in remaining.names} - set(names)
         if absent:
             raise VerifyFailed(f"{len(absent)} remaining names are not in the archive")
         files = [n for n in remaining.names if not n.endswith("/")]
-        for batch in _batches(files, COMPARE_ARGV_BUDGET):
-            os.lseek(archive_fd, 0, os.SEEK_SET)
-            _compare(
-                parent_fd, claimed_name, listing, archive_fd, tar=tar, timeout=timeout, only=batch
+        if adopted_root is not None:
+            _compare_adopted(
+                parent_fd,
+                claimed_name,
+                listing,
+                archive_fd,
+                [_layout_name(n, adopted_root) for n in files],
+                compression=compression,
+                tar=tar,
+                timeout=timeout,
             )
+        else:
+            for batch in _batches(files, COMPARE_ARGV_BUDGET):
+                os.lseek(archive_fd, 0, os.SEEK_SET)
+                _compare(
+                    parent_fd,
+                    claimed_name,
+                    listing,
+                    archive_fd,
+                    tar=tar,
+                    timeout=timeout,
+                    only=batch,
+                    flags=compression_flags(compression),
+                )
     finally:
         os.close(archive_fd)
     return Verified(size=size, sha256=sha, members=remaining.names)

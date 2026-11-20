@@ -14,6 +14,7 @@ import ast
 import dataclasses
 import errno
 import os
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -35,6 +36,8 @@ from claude_code_hooks_daemon.core.scratch_archive import (
     KeepEvent,
     new_archive_id,
 )
+from claude_code_hooks_daemon.core.scratch_archive_adopt import PROOF_ID as ADOPT_PROOF_ID
+from claude_code_hooks_daemon.core.scratch_archive_adopt import adopt
 from claude_code_hooks_daemon.core.scratch_archive_claim import (
     CLAIM_PREFIX,
     Claimed,
@@ -847,6 +850,219 @@ class TestResume:
             with pytest.raises(RemoveRefused, match="lock"):
                 _resume(root_fd, opened, tar)
         assert _claimed_exists(root)
+
+
+# --- adopted (P6) archives: unit 4 of Task 3.8 ------------------------------------
+
+_TAR_FLAGS = {"gzip": "-czf", "none": "-cf", "xz": "-cJf"}
+
+
+def _adopted(
+    root: Path, root_fd: int, store: ArchiveStore, tar: TarTool, compression: str = "gzip"
+) -> ArchiveRecord:
+    """Adopt a hand-made ``e1/...`` tarball of the entry, then claim the entry."""
+    if compression == "xz" and shutil.which("xz", path="/usr/bin:/bin") is None:
+        pytest.skip("xz is not installed")
+    proc = subprocess.run(
+        [tar.path, "--format=gnu", _TAR_FLAGS[compression], "e1.tar.x", "--", "e1"],
+        cwd=root,
+        env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    adopted = adopt(
+        store,
+        root_fd,
+        "e1",
+        "e1.tar.x",
+        original_path="untracked/scratch/e1",
+        checkout=CHECKOUT,
+        verdict="DISPOSABLE",
+        proof_ids=(ADOPT_PROOF_ID,),
+        expires_at=None,
+        restore_command="hooks-daemon scratch-restore",
+        now=NOW,
+        tar=tar,
+        max_inodes=MAX,
+    )
+    record = store.read_index().by_id(adopted.archive_id)
+    assert record is not None and ADOPT_PROOF_ID in record.proof_ids
+    _claim(root_fd, "e1")
+    return record
+
+
+class TestAdoptedArchives:
+    """Removal's re-verify reads a P6 archive by the layout its record names."""
+
+    @pytest.mark.parametrize("compression", ["gzip", "none", "xz"])
+    def test_an_adopted_original_is_removed(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool, compression: str
+    ) -> None:
+        _entry(root)
+        record = _adopted(root, root_fd, store, tar, compression)
+        result = _remove(root_fd, store, tar, record)
+        assert (result.removed, result.partial) == (7, False)
+        assert list(root.iterdir()) == []
+
+    def test_an_adopted_empty_directory_is_removed(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        (root / "e1").mkdir()
+        record = _adopted(root, root_fd, store, tar)
+        assert _remove(root_fd, store, tar, record).removed == 1
+        assert list(root.iterdir()) == []
+
+    def test_a_changed_file_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        record = _adopted(root, root_fd, store, tar)
+        changed = root / (CLAIM_PREFIX + "e1") / "a.txt"
+        changed.write_text("alphA")
+        with pytest.raises(RemoveRefused, match="does not verify"):
+            _remove(root_fd, store, tar, record)
+        assert changed.read_text() == "alphA"
+
+    def test_an_extra_file_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        record = _adopted(root, root_fd, store, tar)
+        (root / (CLAIM_PREFIX + "e1") / "late.txt").write_text("late")
+        with pytest.raises(RemoveRefused):
+            _remove(root_fd, store, tar, record)
+        assert (root / (CLAIM_PREFIX + "e1") / "a.txt").read_text() == "alpha"
+
+    def test_an_adopted_archive_without_its_p6_record_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        record = _adopted(root, root_fd, store, tar)
+        plain = dataclasses.replace(record, proof_ids=("P1",))
+        with pytest.raises(RemoveRefused, match="does not verify"):
+            remove_mod._prove(
+                root_fd,
+                CLAIM_PREFIX + "e1",
+                store,
+                plain,
+                tar=tar,
+                max_inodes=MAX,
+                max_depth=64,
+                timeout=60.0,
+                partial=False,
+            )
+        assert (root / (CLAIM_PREFIX + "e1") / "a.txt").read_text() == "alpha"
+
+    def test_a_p6_record_against_a_packed_archive_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        handle = _claim(root_fd, "e1")
+        packed = _record("e1", store, handle, tar)
+        record = dataclasses.replace(packed, proof_ids=(ADOPT_PROOF_ID,))
+        store.append(record)
+        with pytest.raises(RemoveRefused, match="does not verify"):
+            _remove(root_fd, store, tar, record)
+        assert (root / (CLAIM_PREFIX + "e1") / "a.txt").read_text() == "alpha"
+
+    def test_resume_after_a_partial_removal_finishes(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _adopted(root, root_fd, store, tar, "none")
+        claimed = root / (CLAIM_PREFIX + "e1")
+        (claimed / "a.txt").unlink()
+        (claimed / "sub" / "deep" / "c.txt").unlink()
+        (claimed / "sub" / "deep").rmdir()
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "removed"
+        assert list(root.iterdir()) == []
+
+    def test_resume_refuses_a_changed_remaining_file(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _adopted(root, root_fd, store, tar)
+        claimed = root / (CLAIM_PREFIX + "e1")
+        (claimed / "a.txt").unlink()
+        (claimed / "sub" / "b.bin").write_bytes(bytes(256))
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "sub" / "b.bin").read_bytes() == bytes(256)
+
+
+class TestVerifyAdoptedLayout:
+    """``verify`` and ``verify_remaining`` take the layout as an argument, never a guess."""
+
+    def test_verify_maps_walk_names_to_the_adopted_root(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        record = _adopted(root, root_fd, store, tar)
+        verified = pack_mod.verify(
+            root_fd,
+            CLAIM_PREFIX + "e1",
+            store,
+            record.archive_id,
+            tar=tar,
+            max_inodes=MAX,
+            expected_sha256=record.sha256,
+            adopted_root="e1",
+        )
+        assert "./" in verified.members and "./a.txt" in verified.members
+
+    def test_a_wrong_adopted_root_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        record = _adopted(root, root_fd, store, tar)
+        for check in (pack_mod.verify, pack_mod.verify_remaining):
+            with pytest.raises(pack_mod.VerifyFailed):
+                check(
+                    root_fd,
+                    CLAIM_PREFIX + "e1",
+                    store,
+                    record.archive_id,
+                    tar=tar,
+                    max_inodes=MAX,
+                    expected_sha256=record.sha256,
+                    adopted_root="other",
+                )
+
+    def test_an_unknown_archive_format_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        record = _adopted(root, root_fd, store, tar)
+        path = store.path / f"{record.archive_id}.tar"
+        path.write_bytes(b"not a tar at all" * 64)
+        with pytest.raises(pack_mod.VerifyFailed, match="format"):
+            pack_mod.verify(
+                root_fd,
+                CLAIM_PREFIX + "e1",
+                store,
+                record.archive_id,
+                tar=tar,
+                max_inodes=MAX,
+                adopted_root="e1",
+            )
+
+    def test_an_adopted_root_on_a_file_claim_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        (root / "f1").write_text("file root")
+        handle, record = _archived(root_fd, store, tar, "f1")
+        with pytest.raises(pack_mod.VerifyFailed):
+            pack_mod.verify(
+                root_fd,
+                handle.claimed_name,
+                store,
+                record.archive_id,
+                tar=tar,
+                max_inodes=MAX,
+                adopted_root="f1",
+            )
 
 
 PAST = "2026-11-19T00:00:00Z"

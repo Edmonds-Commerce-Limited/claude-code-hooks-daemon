@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.core.scratch_archive import (
     ArchiveStore,
     StoreRefused,
 )
+from claude_code_hooks_daemon.core.scratch_archive_adopt import PROOF_ID as ADOPT_PROOF
 from claude_code_hooks_daemon.core.scratch_archive_claim import (
     CLAIM_PREFIX,
     DEFAULT_MAX_DEPTH,
@@ -191,6 +192,10 @@ def _prove(
     if not partial and (skipped != recorded or members.counts != dict(record.counts)):
         raise RemoveRefused("the tree's special files or counts differ from the record")
     check = verify_remaining if partial else verify
+    # The layout comes from the record's proof, never from the archive's content.
+    adopted_root = (
+        PurePosixPath(record.original_path).name if ADOPT_PROOF in record.proof_ids else None
+    )
     try:
         verified = check(
             parent_fd,
@@ -202,6 +207,7 @@ def _prove(
             max_depth=max_depth,
             expected_sha256=record.sha256,
             timeout=timeout,
+            adopted_root=adopted_root,
         )
     except TarDidNotRun as exc:
         raise ProofUnavailable(f"archive {record.archive_id} was not checked: {exc}") from exc
