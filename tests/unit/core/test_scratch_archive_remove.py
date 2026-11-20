@@ -989,6 +989,7 @@ def test_deletion_surfaces_are_only_the_listed_ones() -> None:
     assert _deletion_surfaces() == {
         ("scratch_archive.py", "_append_line", "ftruncate"),
         ("scratch_archive.py", "discard_unrecorded", "unlink"),
+        ("scratch_archive_expire.py", "_unlink_expired", "unlink"),
         ("scratch_archive_remove.py", "_delete", "unlink"),
         ("scratch_archive_remove.py", "_delete", "rmdir"),
     }

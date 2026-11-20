@@ -528,8 +528,12 @@ class ArchiveStore:
         fsync_dir(self._dir_fd)
 
     def audit(self) -> StoreAudit:
-        """Name unrecorded archive files and records whose archive is missing."""
+        """Name unrecorded archive files and records whose archive is missing.
+
+        An id an ``expired`` event names is not missing: its archive was deleted on purpose.
+        """
         index = self.read_index()
+        expired = {e.archive_id for e in self.read_events().events if isinstance(e, ExpiredEvent)}
         recorded = {r.archive_id for r in index.records}
         present: set[str] = set()
         unrecorded: list[str] = []
@@ -541,5 +545,11 @@ class ArchiveStore:
                 present.add(archive_id)
             else:
                 unrecorded.append(name)
-        missing = tuple(r.archive_id for r in index.records if r.archive_id not in present)
+        missing = tuple(
+            dict.fromkeys(
+                r.archive_id
+                for r in index.records
+                if r.archive_id not in present and r.archive_id not in expired
+            )
+        )
         return StoreAudit(unrecorded_archives=tuple(unrecorded), records_without_archive=missing)
