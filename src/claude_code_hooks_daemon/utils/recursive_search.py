@@ -68,6 +68,10 @@ from claude_code_hooks_daemon.utils.secret_file_matching import (
     toplevel_move_length,
     toplevel_relocated,
 )
+from claude_code_hooks_daemon.utils.shell_expansion import (
+    TooManyToEnumerateError,
+    expand_braces,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     split_unquoted_spans,
@@ -128,7 +132,51 @@ _XARGS: Final[str] = "xargs"
 _XARGS_VALUE_FLAGS: Final[frozenset[str]] = frozenset(
     {"-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a", "-J"}
 )
-_FIND: Final[str] = "find"
+#: Walkers with ``find``'s grammar: roots first, then an expression with ``-exec`` actions.
+_FIND_COMMANDS: Final[frozenset[str]] = frozenset({"find", "gfind", "bfs"})
+#: Walkers that run a command on each file they list: ``fd [OPTIONS] [PATTERN] [PATH]...``.
+_FD_COMMANDS: Final[frozenset[str]] = frozenset({"fd", "fdfind"})
+#: ``fd``'s options that run a command per file (``-x``) or once for all files (``-X``).
+_FD_EXEC_LONG: Final[tuple[str, ...]] = ("--exec", "--exec-batch")
+_FD_EXEC_TERMINATOR: Final[str] = ";"
+#: ``fd`` options whose value is the next word (so it is neither the pattern nor a path).
+_FD_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
+    {
+        "-d",
+        "-e",
+        "-E",
+        "-t",
+        "-c",
+        "-j",
+        "-S",
+        "-o",
+        "--max-depth",
+        "--min-depth",
+        "--exact-depth",
+        "--extension",
+        "--exclude",
+        "--type",
+        "--color",
+        "--threads",
+        "--size",
+        "--owner",
+        "--changed-within",
+        "--changed-before",
+        "--newer",
+        "--older",
+        "--path-separator",
+        "--ignore-file",
+        "--batch-size",
+        "--max-results",
+        "--hyperlink",
+        "--and",
+        "--format",
+        "--strip-cwd-prefix",
+    }
+)
+_BRACE_OPEN: Final[str] = "{"
+_FD_SEARCH_PATH: Final[str] = "--search-path"
+_FD_BASE_DIRECTORY: Final[str] = "--base-directory"
 _FIND_LEADING_OPTIONS: Final[frozenset[str]] = frozenset({"-H", "-L", "-P"})
 _FIND_EXPRESSION_STARTS: Final[frozenset[str]] = frozenset({"(", "!", ")"})
 # git grep reads the working tree instead of the index with either of these.
@@ -877,7 +925,7 @@ def _segment_state(
             # Every later read is judged over every indexed file: the move is not followed.
             return fed_by, current
         return fed_by, _directory_change(words, 1, current, tracker)
-    if head == _FIND:
+    if head in _FIND_COMMANDS:
         return _find_roots(words), current
     return fed_by, current
 
@@ -929,11 +977,14 @@ def _segment_reads(
         yield from _reads(inner, here, depth + 1, tracker)
     elif head == _EVAL:
         yield from _reads(" ".join(words[1:]), here, depth + 1, tracker)
-    elif head == _FIND:
+    elif head in _FIND_COMMANDS:
         if _find_execs_a_reader(words):
             # find hands each link it lists to its command, which may follow it
             # (`-exec grep -r {}`, `-exec cat {}/x`): no find proves it follows none.
             yield from _reads_from_each(_find_roots(words), here)
+    elif (fd_roots := _fd_exec_roots(words)) is not None:
+        # fd hands each file it lists to its `-x`/`-X` command, as find does.
+        yield from _reads_from_each(fd_roots, here)
     elif head == _XARGS:
         inner_words = _xargs_command(words)
         if inner_words and _is_search(inner_words):
@@ -990,7 +1041,9 @@ def _could_read(command: str) -> bool:
 def _reads_files(words: list[str], head: str) -> bool:
     """Could the segment ``words`` read a tree, by any of the routes :func:`_reads` judges?"""
     return (
-        head in (_FIND, _XARGS, _EVAL)
+        head in _FIND_COMMANDS
+        or head in (_XARGS, _EVAL)
+        or _fd_exec_roots(words) is not None
         or (head in SHELL_NAMES and _SHELL_COMMAND_FLAG in words[1:-1])
         or _directory_reader_roots(words) is not None
         or (_is_search(words) and not _git_reads_no_tree(words))
@@ -1343,6 +1396,73 @@ def _find_execs_a_reader(words: list[str]) -> bool:
     return False
 
 
+def _fd_exec_roots(words: list[str]) -> tuple[str, ...] | None:
+    """Where ``fd`` walks when it runs a reader on each file, or None when it does not.
+
+    ``fd [OPTIONS] [PATTERN] [PATH]...``: the first operand is the pattern, the
+    rest (and each ``--search-path``) are roots, and with none it walks the
+    current directory. ``-x``/``--exec`` and ``-X``/``--exec-batch`` take a
+    command up to ``;``. An option this does not know is read as an operand,
+    which can only add a root.
+    """
+    if posixpath.basename(words[0]) not in _FD_COMMANDS:
+        return None
+    operands: list[str] = []
+    searched: list[str] = []
+    base = ""
+    runs_reader = False
+    index = 1
+    while index < len(words):
+        word = words[index]
+        index += 1
+        if word == _END_OF_OPTIONS:
+            operands.extend(words[index:])
+            break
+        command_start = _fd_exec_start(word)
+        if command_start is not None:
+            first = [command_start] if command_start else []
+            end = next(
+                (i for i in range(index, len(words)) if words[i] == _FD_EXEC_TERMINATOR),
+                len(words),
+            )
+            runs_reader = runs_reader or _runs_a_reader([*first, *words[index:end]])
+            index = end + 1
+        elif word in (_FD_SEARCH_PATH, _FD_BASE_DIRECTORY) and index < len(words):
+            if word == _FD_SEARCH_PATH:
+                searched.append(words[index])
+            else:
+                base = words[index]
+            index += 1
+        elif word.startswith(_FD_SEARCH_PATH + "="):
+            searched.append(word.partition("=")[2])
+        elif word.startswith(_FD_BASE_DIRECTORY + "="):
+            base = word.partition("=")[2]
+        elif word in _FD_VALUE_OPTIONS:
+            index += 1
+        elif not word.startswith("-") or word == _LONE_DASH:
+            operands.append(word)
+    if not runs_reader:
+        return None
+    roots = (*operands[1:], *searched) or (".",)
+    return tuple(posixpath.join(base, root) for root in roots) if base else roots
+
+
+def _fd_exec_start(word: str) -> str | None:
+    """The first word of the command an ``fd`` option runs, ``""`` when it follows, else None.
+
+    ``-x``, ``-X`` (also clustered, ``-uX``), ``--exec`` and ``--exec-batch`` take
+    the command from the next words; ``--exec=cat`` carries its first word.
+    """
+    if word.startswith("--"):
+        name, equals, value = word.partition("=")
+        if name not in _FD_EXEC_LONG:
+            return None
+        return value if equals else ""
+    if word.startswith("-") and len(word) > 1 and word[1:].isalpha() and word[-1] in "xX":
+        return ""
+    return None
+
+
 def _xargs_command(words: list[str]) -> list[str]:
     """The command ``xargs`` runs: the words after its own options."""
     index = 1
@@ -1635,6 +1755,22 @@ def _view_for(rules: _Rules) -> TreeView:
     return TreeView.UNIGNORED if rules.honour_ignore else TreeView.ALL
 
 
+def _brace_spellings(roots: tuple[str, ...]) -> tuple[str, ...]:
+    """``roots`` with each brace operand replaced by the words bash expands it to.
+
+    The shell expands ``{conf,docs}`` before any search sees it, so the search
+    reads each spelling: a file read judges them the same way. Raises
+    :class:`TooManyToEnumerateError` when one cannot be listed.
+    """
+    spelled: dict[str, None] = {}
+    for root in roots:
+        if _BRACE_OPEN not in root:
+            spelled[root] = None
+            continue
+        spelled.update(dict.fromkeys(expand_braces(root)))
+    return tuple(spelled)
+
+
 def _reads_of_roots(
     roots: tuple[str, ...],
     cwd: str | None,
@@ -1642,6 +1778,13 @@ def _reads_of_roots(
     *,
     follows: LinkFollow = LinkFollow.ALL,
 ) -> Iterator[Read]:
+    try:
+        roots = _brace_spellings(roots)
+    except TooManyToEnumerateError:
+        # Brace operands are judged as each spelling; one that cannot be listed
+        # (past the cap, or quoting that hides a group) fails closed.
+        yield Read(_EVERYTHING, view=TreeView.ALL, follows=follows)
+        return
     if any(unknown_tilde(root) for root in roots):
         # `~-`/`~N` is a real directory this hook cannot see: judge every indexed file.
         yield Read(_EVERYTHING, view=TreeView.ALL, follows=follows)
