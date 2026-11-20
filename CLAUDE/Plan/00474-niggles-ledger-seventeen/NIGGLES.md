@@ -7972,14 +7972,6 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open, low priority. Confirm the default with a live `git ls-remote --symref <remote> HEAD` and report a stale tracking HEAD by name, still failing closed.
 
-### N676 — the skill wrappers self-update from unsigned release assets in every session
-
-**Source**: Plan 00625's threat-model review (a Fable sub-agent, 2026-11-19), recorded in its DESIGN ruling 3. The numbering skips N675, which the Plan 00623 branch takes when it merges.
-
-**Evidence**: the skill wrappers refresh themselves from release assets fetched at the start of a session, and nothing verifies a signature on what they fetch. That is a trust gap on every install, whether or not automatic upgrades are on, and it sits outside Plan 00625's scope.
-
-**Status**: ⬜ Open, security-relevant, medium priority. Apply the Plan 00625 trust model (a human-added signers file, a verified tag, the script byte-identical to the verified copy) to the wrapper self-update path, or stop the self-update.
-
 ### N675 — playbook probe #125 (rsync from a worktree) fails whenever the acceptance harness runs inside a worktree
 
 **Source**: Plan 00623 acceptance-harness diagnosis (`tests/acceptance/test_playbook_harness.py`).
@@ -7988,6 +7980,14 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Status**: ⬜ Open, low priority. The fix belongs to the harness or the probe, not to either handler: give the probe a cwd that is the daemon's project root, or have the harness skip or report this probe when it runs in a worktree.
 
+### N676 — the skill wrappers self-update from unsigned release assets in every session
+
+**Source**: Plan 00625's threat-model review (a Fable sub-agent, 2026-11-19), recorded in its DESIGN ruling 3. The numbering skips N675, which the Plan 00623 branch takes when it merges.
+
+**Evidence**: the skill wrappers refresh themselves from release assets fetched at the start of a session, and nothing verifies a signature on what they fetch. That is a trust gap on every install, whether or not automatic upgrades are on, and it sits outside Plan 00625's scope.
+
+**Status**: ⬜ Open, security-relevant, medium priority. Apply the Plan 00625 trust model (a human-added signers file, a verified tag, the script byte-identical to the verified copy) to the wrapper self-update path, or stop the self-update.
+
 ### N677 — secret_file_guard: a `/proc` path that reaches the shell's own view without spelling `/proc/self` is placed as the daemon's
 
 **Source**: Plan 00623 review 3 (`CLAUDE/Plan/00623-secret-guard-structural-fail-closed-walks-and-link-index/subagent-reports/261119-review3-loosenings.md`).
@@ -7995,3 +7995,19 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: with a project link `flink` to a protected dummy, these print the dummy in real bash and are allowed on main, on Plan 00623's earlier tip and after it: `cat /proc/$$/cwd/flink`, `cat /proc/$BASHPID/cwd/flink`, `cat /proc/[0-9]*/cwd/flink` (an expansion or glob as the pid), and, when the daemon's cwd is not the project root, `cat /proc/sys/../self/cwd/flink` and `cat /proc/1/../self/cwd/flink` (a `..` between `proc` and `self`, so `refuse_process_view`'s adjacent-pair test never sees `proc`,`self`). Not introduced by the plain-file carve-out (6c16ce510): the same rows are allowed before it.
 
 **Status**: ⬜ Open. Candidate fix in `refuse_process_view`: refuse any absolute `/proc/<x>/...` whose `<x>` is not a literal number, and any `/proc` path holding a `..`.
+
+### N678 — secret_file_guard: a scan of a Python heredoc holding braces that runs past its deadline is denied on the Plan 00623 branch, and allowed on main
+
+**Source**: Plan 00623 final full gate, py3.13 leg (`test_a_utf8_declaration_keeps_the_exemption` denied with R-SECRET-BASH-MENTION).
+
+**Evidence**: with `SCAN_DEADLINE_SECONDS` forced to 0 or 0.3, `python3 - <<'EOF'` followed by a 600-line program of set displays (`{0,1}`) is denied on the branch and allowed on main. On the branch, a given-up scan is denied when the command holds a glob character (review 614c P2, `_holds_search_or_glob`). The body of a quoted heredoc fed to python is not stripped there, so its code braces count as glob characters. The scan is also slower: profiled in one process it takes 2.8s against 2.3s on main, and `_search_reach` takes 0.44s against 0.15s. On a loaded host the 5s wall-clock deadline is crossed, so a command that names no protected path is denied. The tests now judge on the CPU clock with a generous deadline. Production is unchanged.
+
+**Status**: ⬜ Open; needs a ruling. Either a python-fed quoted heredoc's braces stop counting as glob characters after a give-up, or the deny stays as the intended fail-closed cost. Separately, see whether `_search_reach` should walk a body that the shell never expands.
+
+### N679 — `test_every_checkout_of_the_repository_is_protected` fails when another agent removes a worktree during a long run
+
+**Source**: Plan 00623 final full gate, py3.13 leg (`tests/unit/test_doc_write_jail.py::TestSessionWiring`).
+
+**Evidence**: the protected-path set is put into the environment once, at session start. The test compares it with a fresh `checkout_roots()` read. The py3.13 leg ran for about 80 minutes. During that run, `untracked/worktrees/plan-00613-00594-rulings` was merged and removed (main reflog, 2026-11-19 21:54). The snapshot still held its two paths, so the comparison failed. It passes on a rerun in the same worktree. The branch does not touch the jail code.
+
+**Status**: ⬜ Open, low priority. Compare the snapshot against the roots that existed when the session started, or assert only that every root still present is protected.
