@@ -87,6 +87,7 @@ from claude_code_hooks_daemon.core.scratch_session import (
 )
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport, pending_verdict
 from claude_code_hooks_daemon.core.scratch_verdict import KEEP_MARKER, Verdict
+from claude_code_hooks_daemon.utils.birth_time import BirthStamp, birth_stamp
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 _LOG = logging.getLogger(__name__)
@@ -132,6 +133,13 @@ class Pressure:
     idle_hours: float
     #: The root's TTL, from which the time an entry had left is computed.
     ttl_hours: float
+    #: Paths (``<report root>/<name>``) the human consented to (:func:`consent_to`);
+    #: a not-due entry outside it is never packed. None: not bound, so no not-due
+    #: entry is packed at all (an unbound Pressure restricts to nothing).
+    consented: frozenset[str] | None = None
+    #: ``(path, birth stamp)`` of each consented entry: the run packs a not-due
+    #: entry only while its name still holds that very inode (device, inode, birth).
+    identities: frozenset[tuple[str, BirthStamp]] = frozenset()
 
 
 def pressure_for(
@@ -147,12 +155,97 @@ def pressure_for(
     return Pressure(idle_hours=caps.pressure_idle_minutes / 60, ttl_hours=ttl_hours)
 
 
-def pressured_count(report: SweepReport, pressure: Pressure | None) -> int:
-    """How many entries, root and session children, ``pressure`` adds beyond the due ones."""
-    reports = (report, *report.sessions)
-    return sum(
-        1 for part in reports for row in part.rows if not row.due and _actionable(row, pressure)
+def _pressured_paths(report: SweepReport, pressure: Pressure | None) -> frozenset[str]:
+    """``<root>/<name>`` of every entry, root and session children, ``pressure`` adds."""
+    return frozenset(
+        _entry_key(part.root, row.name)
+        for part in (report, *report.sessions)
+        for row in part.rows
+        if row.walk_complete and _candidate(row, pressure)
     )
+
+
+def pressured_count(report: SweepReport, pressure: Pressure | None) -> int:
+    """How many entries, root and session children, ``pressure`` adds beyond the due ones.
+
+    Bound (:func:`consent_to`), only the consented ones count, so the question
+    never names an entry the run could not pack.
+    """
+    paths = _pressured_paths(report, pressure)
+    if pressure is not None and pressure.consented is not None:
+        paths &= pressure.consented
+    return len(paths)
+
+
+def consent_to(report: SweepReport, pressure: Pressure | None) -> Pressure | None:
+    """``pressure`` bound to the entries ``report`` counts, so a run never packs more.
+
+    The ``--apply`` question names :func:`pressured_count` of the same report;
+    an entry that turns idle, or appears, while the question waits is not in
+    the set, so the run can only pack fewer than the human agreed to. Each
+    entry is bound by its birth stamp as read now; one whose stamp cannot be
+    read (no birth time, an error, a session directory that is no longer the
+    one listed) is left out, so it is never packed early (fail closed).
+    """
+    if pressure is None:
+        return None
+    candidates = _pressured_paths(report, pressure)
+    identities = frozenset(
+        pair for part in (report, *report.sessions) for pair in _stamps(part, candidates)
+    )
+    return dataclasses.replace(
+        pressure,
+        consented=frozenset(key for key, _ in identities),
+        identities=identities,
+    )
+
+
+def _stamps(part: SweepReport, candidates: frozenset[str]) -> list[tuple[str, BirthStamp]]:
+    """``(key, birth stamp)`` of each of ``part``'s rows in ``candidates`` whose stamp is readable."""
+    wanted = [row.name for row in part.rows if _entry_key(part.root, row.name) in candidates]
+    if not wanted:
+        return []
+    try:
+        fd = open_dir(Path(part.root))
+    except OSError as exc:
+        log_and_continue(_LOG, exc, reason=f"{part.root}: not opened, nothing in it consented")
+        return []
+    try:
+        if part.identity is not None:
+            info = os.fstat(fd)
+            if (info.st_dev, info.st_ino) != part.identity:
+                return []
+        found: list[tuple[str, BirthStamp]] = []
+        for name in wanted:
+            try:
+                stamp = birth_stamp(fd, name)
+            except OSError as exc:
+                log_and_continue(
+                    _LOG, exc, reason=f"{name!r}: birth stamp unreadable, not consented"
+                )
+                continue
+            if stamp is not None:
+                found.append((_entry_key(part.root, name), stamp))
+        return found
+    finally:
+        os.close(fd)
+
+
+def _consent_holds(root_fd: int, settings: ApplySettings, name: str) -> bool:
+    """``name`` still holds the inode the human consented to: device, inode and birth."""
+    pressure = settings.pressure
+    if pressure is None:
+        return False
+    try:
+        stamp = birth_stamp(root_fd, name)
+    except OSError as exc:
+        log_and_continue(_LOG, exc, reason=f"{name!r}: birth stamp unreadable, not packed early")
+        return False
+    return stamp is not None and (_entry_key(settings.root, name), stamp) in pressure.identities
+
+
+def _entry_key(root: str | Path, name: str) -> str:
+    return str(Path(root) / name)
 
 
 @dataclass(frozen=True)
@@ -244,7 +337,9 @@ def apply_sweep(
         entries = [
             (
                 foreign[row.name]
-                if row.name in foreign and report.complete and _actionable(row, settings.pressure)
+                if row.name in foreign
+                and report.complete
+                and _actionable(row, settings.pressure, settings.root)
                 else _apply_row(
                     root_fd, row, report, fingerprints, store, facts, settings, after_step
                 )
@@ -517,10 +612,11 @@ def _fingerprint_all(
     return prints, foreign
 
 
-def _pressured(row: EntryRow, pressure: Pressure | None) -> bool:
-    """Not yet due, held by its TTL alone, actionable underneath, and idle long enough.
+def _candidate(row: EntryRow, pressure: Pressure | None) -> bool:
+    """Not yet due, held by its TTL alone, actionable underneath, idle long enough.
 
-    A row LIVE for a liveness reason carries no ``ttl_hold``, so it never matches.
+    What the ``--apply`` question counts and :func:`consent_to` binds. A row
+    LIVE for a liveness reason carries no ``ttl_hold``, so it never matches.
     """
     return (
         pressure is not None
@@ -530,12 +626,22 @@ def _pressured(row: EntryRow, pressure: Pressure | None) -> bool:
     )
 
 
-def _actionable(row: EntryRow, pressure: Pressure | None = None) -> bool:
+def _pressured(row: EntryRow, pressure: Pressure | None, root: str | Path) -> bool:
+    """A candidate the human consented to; an unbound Pressure consents to nothing."""
+    return (
+        pressure is not None
+        and pressure.consented is not None
+        and _candidate(row, pressure)
+        and _entry_key(root, row.name) in pressure.consented
+    )
+
+
+def _actionable(row: EntryRow, pressure: Pressure | None, root: str | Path) -> bool:
     if not row.walk_complete:
         return False
     if row.due:
         return row.verdict in ACTIONABLE
-    return _pressured(row, pressure)
+    return _pressured(row, pressure, root)
 
 
 def _pressure_order(rows: tuple[EntryRow, ...]) -> list[EntryRow]:
@@ -543,6 +649,13 @@ def _pressure_order(rows: tuple[EntryRow, ...]) -> list[EntryRow]:
     due = [row for row in rows if row.due]
     rest = sorted((row for row in rows if not row.due), key=lambda row: -row.directories)
     return due + rest
+
+
+def _skip_reason(row: EntryRow) -> str:
+    """Why a skipped row was skipped: a TTL-held row names its held verdict, not the bare LIVE."""
+    if row.ttl_hold is None:
+        return row.verdict.value
+    return f"{pending_verdict(row).value} (not yet due: within its TTL)"
 
 
 def _safe(facts: ApplyFacts, name: str) -> bool:
@@ -561,11 +674,14 @@ def _apply_row(
     after_step: Callable[[str, str], None],
 ) -> EntryOutcome:
     name = row.name
-    if not report.complete or not _actionable(row, settings.pressure):
-        return EntryOutcome(name, "not-actionable", row.verdict.value)
+    if not report.complete or not _actionable(row, settings.pressure, settings.root):
+        return EntryOutcome(name, "not-actionable", _skip_reason(row))
     expected = fingerprints.get(name)
     if expected is None:
         return EntryOutcome(name, "not-fingerprinted", "no fingerprint taken before classification")
+    if not row.due and not _consent_holds(root_fd, settings, name):
+        # record_claim then ties this inode to the fingerprint, so the chain holds to the claim.
+        return EntryOutcome(name, "refused", "not the entry consented to (replaced or unproven)")
     archive_id = new_archive_id()
     try:
         # Recorded before the rename, so a leftover claim with no record is not ours.

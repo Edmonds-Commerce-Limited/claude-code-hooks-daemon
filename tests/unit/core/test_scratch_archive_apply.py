@@ -12,6 +12,7 @@ import ast
 import dataclasses
 import errno
 import os
+import shutil
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -36,6 +37,7 @@ from claude_code_hooks_daemon.core.scratch_archive_apply import (
     Pressure,
     apply_sessions,
     apply_sweep,
+    consent_to,
     pressure_for,
     pressured_count,
     session_facts,
@@ -45,7 +47,11 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu
 from claude_code_hooks_daemon.core.scratch_archive_remove import RemoveRefused
 from claude_code_hooks_daemon.core.scratch_archive_restore import restore
 from claude_code_hooks_daemon.core.scratch_caps import CapLevel
-from claude_code_hooks_daemon.core.scratch_session import ensure_session_dir, new_entry
+from claude_code_hooks_daemon.core.scratch_session import (
+    ensure_session_dir,
+    is_session_dir_name,
+    new_entry,
+)
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport
 from claude_code_hooks_daemon.core.scratch_verdict import (
     KEEP_MARKER,
@@ -852,7 +858,28 @@ def not_due(
     )
 
 
+def on_disk(root: Path) -> SweepReport:
+    """A report listing every directory in ``root`` (and each session's children) as idle, not due."""
+
+    def rows(top: Path) -> tuple[EntryRow, ...]:
+        return tuple(not_due(p.name) for p in sorted(top.iterdir()) if p.is_dir())
+
+    sessions = tuple(
+        SweepReport(str(p), rows(p), True, (), ())
+        for p in sorted(root.iterdir())
+        if p.is_dir() and is_session_dir_name(p.name)
+    )
+    return SweepReport(str(root), rows(root), True, (), (), sessions=sessions)
+
+
 def pressed(root: Path, tar: TarTool, pressure: Pressure | None = PRESSURE) -> ApplySettings:
+    """Settings in pressure mode; an unbound ``pressure`` is bound to every entry now on disk.
+
+    Call it after the test's entries exist. Pass an already bound Pressure
+    (``consented`` set) to keep its own consent.
+    """
+    if pressure is not None and pressure.consented is None:
+        pressure = consent_to(on_disk(root), pressure)
     return dataclasses.replace(settings(root, tar), pressure=pressure)
 
 
@@ -876,6 +903,33 @@ class TestPressureMode:
         result = apply_sweep(store, fake.facts(), pressed(root, tar, None))
         assert outcome_of(result, "e1").outcome == "not-actionable"
         assert (root / "e1").is_dir()
+
+    @pytest.mark.parametrize("pressure", [None, PRESSURE])
+    @pytest.mark.parametrize("held", [Verdict.DISPOSABLE, Verdict.KEPT, Verdict.REFERENCED])
+    def test_a_skipped_ttl_held_entry_reports_its_held_verdict(
+        self,
+        root: Path,
+        store: ArchiveStore,
+        tar: TarTool,
+        pressure: Pressure | None,
+        held: Verdict,
+    ) -> None:
+        """The outcome names what holds it back underneath, not the TTL's bare LIVE."""
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1", held, age_hours=0.1)])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar, pressure))
+        outcome = outcome_of(result, "e1")
+        assert outcome.outcome == "not-actionable"
+        assert outcome.reason == f"{held.value} (not yet due: within its TTL)"
+
+    def test_a_liveness_live_entry_still_reports_live(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        result = apply_sweep(
+            store, FakeFacts([row("e1", Verdict.LIVE, due=False)]).facts(), pressed(root, tar)
+        )
+        assert outcome_of(result, "e1").reason == "LIVE"
 
     def test_its_archive_expires_no_sooner_than_ttl_plus_retention(
         self, root: Path, store: ArchiveStore, tar: TarTool
@@ -955,6 +1009,41 @@ class TestPressureMode:
         assert outcome_of(result, "e1").outcome != "archived"
         assert (root / "e1").is_dir()
 
+    def test_a_reference_read_at_the_claim_still_refuses(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1")], referenced={"e1"})
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome == "renamed-back"
+        assert (root / "e1").is_dir()
+        assert store.read_index().records == ()
+
+    def test_a_session_keep_marker_added_after_classification_holds_a_child(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root / SESSION, "old")
+        world = SessionWorld(root, [not_due("old")])
+
+        def keep() -> None:
+            (root / SESSION / KEEP_MARKER).write_text("hold")
+
+        world.after_first = keep
+        results = apply_sessions(store, world.parent(), pressed(root, tar), world.for_session)
+        ((_, result),) = results
+        assert outcome_of(result, "old").outcome == "renamed-back"
+        assert (root / SESSION / "old").is_dir()
+
+    def test_a_session_child_is_packed_without_the_hold(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """The positive control for the two tests above."""
+        entry(root / SESSION, "old")
+        world = SessionWorld(root, [not_due("old")])
+        results = apply_sessions(store, world.parent(), pressed(root, tar), world.for_session)
+        ((_, result),) = results
+        assert outcome_of(result, "old").outcome == "archived"
+
     def test_an_incomplete_classification_packs_nothing(
         self, root: Path, store: ArchiveStore, tar: TarTool
     ) -> None:
@@ -1014,3 +1103,107 @@ class TestPressuredCount:
         report = SweepReport("root", rows, True, (), (), sessions=(session,))
         assert pressured_count(report, PRESSURE) == 2
         assert pressured_count(report, None) == 0
+
+    def test_consent_binds_exactly_the_counted_entries(self, root: Path) -> None:
+        for name in ("due", "idle", "fresh", "s/child"):
+            (root / name).mkdir(parents=True)
+        session = SweepReport(str(root / "s"), (not_due("child", age_hours=10.0),), True, (), ())
+        rows = (row("due"), not_due("idle", age_hours=10.0), not_due("fresh", age_hours=0.1))
+        report = SweepReport(str(root), rows, True, (), (), sessions=(session,))
+        bound = consent_to(report, PRESSURE)
+        assert bound is not None
+        assert bound.consented == frozenset({str(root / "idle"), str(root / "s" / "child")})
+        assert {key for key, _ in bound.identities} == bound.consented
+        assert pressured_count(report, bound) == 2
+        assert consent_to(report, None) is None
+
+    def test_an_entry_whose_identity_cannot_be_read_is_not_consented_or_counted(self) -> None:
+        """No such directory: no birth stamp, so it is left out and the question omits it."""
+        report = SweepReport("/nonexistent-root", (not_due("idle"),), True, (), ())
+        bound = consent_to(report, PRESSURE)
+        assert bound is not None
+        assert bound.consented == frozenset()
+        assert pressured_count(report, bound) == 0
+
+
+class TestPressureIsBoundToConsent:
+    """The run never packs a not-due entry the confirmation did not count."""
+
+    def test_an_entry_outside_the_consented_set_is_left(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "counted")
+        entry(root, "late")
+        counted = SweepReport(str(root), (not_due("counted"),), True, (), ())
+        bound = consent_to(counted, PRESSURE)
+        fake = FakeFacts([not_due("counted"), not_due("late")])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar, bound))
+        assert outcome_of(result, "counted").outcome == "archived"
+        assert outcome_of(result, "late").outcome == "not-actionable"
+        assert (root / "late").is_dir()
+
+    def test_a_due_entry_needs_no_consent(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "due")
+        bound = dataclasses.replace(PRESSURE, consented=frozenset())
+        result = apply_sweep(store, FakeFacts([row("due")]).facts(), pressed(root, tar, bound))
+        assert outcome_of(result, "due").outcome == "archived"
+
+    def test_an_entry_replaced_under_the_same_name_after_consent_is_not_packed(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """Consent is to the entry the prompt counted, not to whatever holds its name later."""
+        entry(root, "e1")
+        bound = pressed(root, tar)
+        entry(root, "replacement")
+        shutil.rmtree(root / "e1")
+        (root / "replacement").rename(root / "e1")
+        result = apply_sweep(store, FakeFacts([not_due("e1")]).facts(), bound)
+        assert outcome_of(result, "e1").outcome != "archived"
+        assert (root / "e1" / "a.txt").read_text() == "alpha replacement"
+        assert store.read_index().records == ()
+
+    def test_the_same_entry_is_still_packed(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """The positive control for the replacement test above."""
+        entry(root, "e1")
+        bound = pressed(root, tar)
+        result = apply_sweep(store, FakeFacts([not_due("e1")]).facts(), bound)
+        assert outcome_of(result, "e1").outcome == "archived"
+
+    @pytest.mark.parametrize("when", ["consent", "apply"])
+    def test_no_birth_time_packs_nothing_not_due(
+        self,
+        root: Path,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+        when: str,
+    ) -> None:
+        """Identity unproven, at the prompt or at the run, consents to nothing (fail closed)."""
+        entry(root, "e1")
+        if when == "consent":
+            monkeypatch.setattr(apply_mod, "birth_stamp", lambda fd, name: None)
+        bound = pressed(root, tar)
+        if when == "apply":
+            monkeypatch.setattr(apply_mod, "birth_stamp", lambda fd, name: None)
+        result = apply_sweep(store, FakeFacts([not_due("e1")]).facts(), bound)
+        assert outcome_of(result, "e1").outcome != "archived"
+        assert (root / "e1").is_dir()
+
+    def test_pressure_passed_straight_through_without_consent_packs_nothing_not_due(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """An unbound Pressure (no :func:`consent_to`) restricts to nothing, never to everything."""
+        entry(root, "idle")
+        entry(root, "due")
+        unbound = pressure_for(CapLevel.BLOCK, ScratchCapsConfig(), TTL)
+        assert unbound is not None
+        fake = FakeFacts([not_due("idle", age_hours=50.0), row("due")])
+        straight = dataclasses.replace(settings(root, tar), pressure=unbound)
+        result = apply_sweep(store, fake.facts(), straight)
+        assert outcome_of(result, "idle").outcome == "not-actionable"
+        assert (root / "idle").is_dir()
+        assert outcome_of(result, "due").outcome == "archived"
