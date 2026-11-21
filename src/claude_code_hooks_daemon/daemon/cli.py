@@ -6829,6 +6829,90 @@ def cmd_scratch_sweep(
     return _scratch_apply(args, sources, sweep_root)
 
 
+def _scratch_checkout(repo: Path, cwd: Path) -> tuple[Path, Path]:
+    """``(checkout, main checkout)``: cwd's worktree of THIS project, else ``repo``."""
+    from claude_code_hooks_daemon.utils.git_repo import GitRepo
+
+    project = GitRepo.resolve_for(repo)
+    main = project.main_worktree_root() if project is not None else repo
+    found = GitRepo.resolve_for(cwd)
+    if found is None or project is None:
+        return repo, main
+    if found.main_worktree_root().resolve() != main.resolve():
+        return repo, main
+    return found.root, main
+
+
+def cmd_scratch_new(
+    args: argparse.Namespace,
+    *,
+    environ: Mapping[str, str] | None = None,
+    cwd: Path | None = None,
+    now: Callable[[], datetime.datetime] | None = None,
+) -> int:
+    """``scratch new <name> [--purpose P] [--plan NNNNN] [--ttl-hours N]`` (Plan 00627 Task 4.2).
+
+    Makes ``<name>`` in this session's scratch directory (found by the
+    ``CLAUDE_CODE_SESSION_ID`` every Bash call carries; a linked worktree reuses
+    the main checkout's directory name), records its birth, purpose, plan and a
+    TTL bounded by ``max(scratch.max_ttl_hours, the root's TTL)``, and prints
+    only the path. A never-cleared root bounds the TTL by ``max_ttl_hours``.
+    The keyword parameters exist for tests.
+
+    Returns:
+        0 when the entry was made; 1 for a refusal, said on stderr.
+    """
+    from claude_code_hooks_daemon.core.scratch_session import (
+        SessionError,
+        bounded_ttl_hours,
+        check_session_id,
+        new_entry,
+        resolve_session_dir,
+    )
+    from claude_code_hooks_daemon.utils.git_sync import current_branch
+    from claude_code_hooks_daemon.utils.scratch_dir import ensure_scratch_dir
+
+    env = os.environ if environ is None else environ
+    session_id = env.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    repo = get_project_path(getattr(args, "project_root", None))
+    config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
+    moment = (now or (lambda: datetime.datetime.now(datetime.UTC)))()
+    try:
+        check_session_id(session_id)
+        root_ttl = config.scratch.ttl_hours_for("scratch")
+        ttl = bounded_ttl_hours(
+            args.ttl_hours,
+            max_ttl_hours=config.scratch.max_ttl_hours,
+            root_ttl_hours=root_ttl if root_ttl is not None else config.scratch.max_ttl_hours,
+        )
+        checkout, main = _scratch_checkout(repo, Path.cwd() if cwd is None else cwd)
+        ensure_scratch_dir(checkout)
+        session_dir = resolve_session_dir(
+            checkout / "untracked" / "scratch",
+            main / "untracked" / "scratch",
+            session_id,
+            now=moment,
+            checkout=str(checkout),
+            branch=current_branch(checkout),
+        )
+        path = new_entry(
+            session_dir,
+            args.name,
+            now=moment,
+            purpose=args.purpose,
+            plan=args.plan,
+            ttl_hours=ttl,
+        )
+    except (SessionError, ValueError) as exc:
+        print(f"scratch new: refused: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"scratch new: refused: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    print(path)
+    return 0
+
+
 def confirm_apply_interactively(
     relative_root: str,
     *,
@@ -14432,6 +14516,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", dest="status_json", action="store_true", help="Print the archives as JSON"
     )
     parser_scratch_sweep.set_defaults(func=cmd_scratch_sweep)
+
+    # scratch command (Plan 00627 Task 4.2): entries in the session directory.
+    parser_scratch = subparsers.add_parser(
+        "scratch", help="Work in this session's scratch directory (scratch new <name>)"
+    )
+    scratch_verbs = parser_scratch.add_subparsers(dest="scratch_verb", required=True)
+    parser_scratch_new = scratch_verbs.add_parser(
+        "new",
+        help="Make a recorded entry in this session's scratch directory and print its path",
+    )
+    parser_scratch_new.add_argument("name", help="One path segment: [A-Za-z0-9._+@~-]")
+    parser_scratch_new.add_argument(
+        "--purpose", default=None, help="What the entry is for (feeds the filing proposal)"
+    )
+    parser_scratch_new.add_argument(
+        "--plan", default=None, metavar="NNNNN", help="The plan the work belongs to"
+    )
+    parser_scratch_new.add_argument(
+        "--ttl-hours",
+        type=_positive_int,
+        default=None,
+        metavar="N",
+        help="A longer TTL, bounded by scratch.max_ttl_hours or the root's TTL",
+    )
+    parser_scratch_new.set_defaults(func=cmd_scratch_new)
 
     # branch-preflight command (Plan 00594 Task 4.1)
     parser_branch_preflight = subparsers.add_parser(
