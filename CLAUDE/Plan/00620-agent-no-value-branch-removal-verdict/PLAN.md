@@ -50,7 +50,7 @@ The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in 
   - [x] ✅ Known gaps recorded (section below).
   - [ ] ⬜ Independent loosening review.
   - [ ] ⬜ CI green.
-  - [ ] ⬜ Merge.
+  - [x] ✅ Merge (to main via integration/gate-261120, merge commit 69e375788).
 
 ### Phase 3: Follow-up
 

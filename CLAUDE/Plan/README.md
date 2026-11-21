@@ -10,6 +10,8 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - In Progress (owner request: every scratch entry has a 24-hour TTL and past it is filed, archived or kept only on a machine proof of unpushed or human work; a `scratch-sweep` command, caps, a per-session directory; Phase 1 read-only core under way; takes over Plan 00560's sweep)
 
+- [00625: automatic upgrade standing approval and upgrade lock](00625-automatic-upgrade-standing-approval-and-upgrade-lock/PLAN.md) - Not Started on main (owner request: a default-on `daemon-auto-upgrade` standing authorisation, `upgrade.sh --unattended`, and one cross-namespace-safe upgrade lock shared by upgrade and provision; the in-progress work is parked unmerged on `origin/agent-a5947fd1e83f03452-ba288018`)
+
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - In Progress (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
 
 - [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - In Progress (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; open questions ruled under the owner's delegation in RULINGS.md: the verdict never unlocks alone, the guard must also verify a recovery bundle; local delete only; slice 1 built: core module green, delete-path tests committed red for slice 2)
