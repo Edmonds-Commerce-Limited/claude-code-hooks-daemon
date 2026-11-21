@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 from tests.support.scratch_tree import ScratchTree, build_git_project, commit_file, git
 
+from claude_code_hooks_daemon.core.scratch_archive import ArchiveRecord, ArchiveStore
 from claude_code_hooks_daemon.core.worktree_scratch_evacuation import EvacuationGate
 from claude_code_hooks_daemon.daemon.cli import build_parser, cmd_scratch_sweep, cmd_worktree_reap
 from claude_code_hooks_daemon.daemon.worktree_evacuate import (
@@ -114,6 +115,8 @@ def _reap(
     reap: bool,
     now: float,
     confirm: Confirm | None = None,
+    after_step: Callable[[str, str], None] | None = None,
+    tar_path: str | None = None,
 ) -> int:
     args = argparse.Namespace(
         project_root=str(_main(tree)),
@@ -130,6 +133,8 @@ def _reap(
             confirm=confirm,
             wall_clock=lambda: now,
             process_cwds=lambda: {1: Path("/elsewhere")},
+            after_step=after_step,
+            tar_path=tar_path,
         ),
     )
 
@@ -305,3 +310,96 @@ class TestTheQuestion:
         args = build_parser().parse_args(["worktree-reap"])
         keys = [key for key in vars(args) if "confirm" in key or "yes" in key]
         assert keys == []
+
+
+class _Killed(Exception):
+    """A kill between two steps; deliberately not an OSError, which ``_pack`` reports."""
+
+
+def _yes(_relative: str, _gate: EvacuationGate) -> bool:
+    return True
+
+
+def _all_due(tree: ScratchTree) -> dict[str, bytes]:
+    """Two due entries; returns each file's content by path relative to the scratch root."""
+    base = time.time()
+    scratch = _scratch(tree)
+    files = {"old/a.txt": b"alpha", "old/sub/b.txt": b"beta", "two.txt": b"second"}
+    for relative, content in files.items():
+        _write(scratch / relative, content, base - 5 * _DAY)
+    _set_mtime(scratch / "old", base - 5 * _DAY)
+    return files
+
+
+def _due_clock() -> float:
+    """Past the TTL measured from every ctime set so far."""
+    return time.time() + _DAY + 60
+
+
+def _restore_all(tree: ScratchTree, ids: list[str], now: float) -> Path:
+    main_scratch = _main(tree) / "untracked" / "scratch"
+    main_scratch.mkdir(parents=True, exist_ok=True)
+    for archive_id in ids:
+        args = build_parser().parse_args(["scratch-sweep", "restore", archive_id])
+        args.project_root = _main(tree)
+        assert cmd_scratch_sweep(args, wall_clock=lambda: now) == 0
+    return main_scratch
+
+
+class TestConvergence:
+    @pytest.mark.parametrize(
+        ("step", "occurrence"),
+        [("claim", 1), ("pack", 1), ("append", 1), ("append", 2)],
+        ids=["claim", "pack", "append", "after-the-last-archive"],
+    )
+    def test_a_kill_after_each_step_keeps_the_worktree_and_a_rerun_converges(
+        self,
+        tree: ScratchTree,
+        capsys: pytest.CaptureFixture[str],
+        step: str,
+        occurrence: int,
+    ) -> None:
+        files = _all_due(tree)
+        seen: list[str] = []
+
+        def kill(at: str, _name: str) -> None:
+            seen.append(at)
+            if at == step and seen.count(step) == occurrence:
+                raise _Killed(at)
+
+        with pytest.raises(_Killed):
+            _reap(tree, reap=True, now=_due_clock(), confirm=_yes, after_step=kill)
+        assert _worktree(tree).is_dir()
+        assert _NAME in git(_main(tree), "branch", "--list", _NAME)
+        recorded = _store_records(tree)
+        for entry in ("old", "two.txt"):
+            on_disk = (_scratch(tree) / entry).exists() or (
+                _scratch(tree) / f".sweeping-{entry}"
+            ).exists()
+            assert on_disk or f"untracked/scratch/{entry}" in recorded, entry
+        capsys.readouterr()
+
+        rc = _reap(tree, reap=True, now=_due_clock(), confirm=_yes)
+
+        out = capsys.readouterr().out
+        assert rc == 0, out
+        assert not _worktree(tree).exists(), out
+        store_ids = _store_ids(tree)
+        printed = set(_restore_ids(out))
+        if occurrence == 1:
+            assert printed == set(store_ids), out
+        else:
+            assert len(printed) == 1 and printed <= set(store_ids), out
+        main_scratch = _restore_all(tree, store_ids, _due_clock())
+        for relative, content in files.items():
+            assert (main_scratch / relative).read_bytes() == content, relative
+
+
+def _store_records(tree: ScratchTree) -> dict[str, ArchiveRecord]:
+    """The main store's latest record for each original path."""
+    with ArchiveStore.open(_store(tree), create=False) as store:
+        return {record.original_path: record for record in store.read_index().records}
+
+
+def _store_ids(tree: ScratchTree) -> list[str]:
+    return sorted(record.archive_id for record in _store_records(tree).values())

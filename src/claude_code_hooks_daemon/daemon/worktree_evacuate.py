@@ -46,6 +46,9 @@ _LOG = logging.getLogger(__name__)
 SCRATCH_PREFIX: Final[str] = "untracked/scratch/"
 _SCRATCH_RELATIVE: Final[str] = "untracked/scratch"
 _KEEP: Final[str] = "KEEP   "
+#: A leftover claim is done when removed after its archive, or renamed back
+#: (then judged again, and required to be archived, as an entry).
+_RESUME_DONE: Final[frozenset[str]] = frozenset({"removed", "renamed-back"})
 
 Confirm = Callable[[str, EvacuationGate], bool]
 
@@ -60,6 +63,8 @@ class EvacuateSeams:
     process_cwds: Callable[[], Mapping[int, Path]] | None = None
     git_runner: Callable[..., Any] | None = None
     tar_path: str | None = None
+    #: ``apply_sweep``'s crash seam: called after each claim, pack and record append.
+    after_step: Callable[[str, str], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -176,7 +181,7 @@ def evacuate_scratch(
             "no typed confirmation at a terminal (stdin and stdout both a TTY); nothing was "
             f"changed; a human runs `{human_command(name)}`"
         )
-    return _pack(sources, sweep_root, gate, tar, name)
+    return _pack(sources, sweep_root, gate, tar, name, seams.after_step)
 
 
 def _precondition_refusal(main: Path, worktree: Path, seams: EvacuateSeams) -> tuple[str, str]:
@@ -235,7 +240,14 @@ def _sources(main: Path, worktree: Path, config: Any, seams: EvacuateSeams) -> A
     )
 
 
-def _pack(sources: Any, sweep_root: Any, gate: EvacuationGate, tar: Any, name: str) -> Evacuation:
+def _pack(
+    sources: Any,
+    sweep_root: Any,
+    gate: EvacuationGate,
+    tar: Any,
+    name: str,
+    after_step: Callable[[str, str], None] | None,
+) -> Evacuation:
     """One ``apply_sweep`` under the main store's lock, bound to ``gate.consent``."""
     from claude_code_hooks_daemon.core.scratch_archive import (
         ArchiveStore,
@@ -282,25 +294,43 @@ def _pack(sources: Any, sweep_root: Any, gate: EvacuationGate, tar: Any, name: s
     )
     try:
         with ArchiveStore.open(sources.store_path) as store, store.lock():
-            result = apply_sweep(store, facts, settings)
+            if after_step is None:
+                result = apply_sweep(store, facts, settings)
+            else:
+                result = apply_sweep(store, facts, settings, after_step=after_step)
     except (StoreRefused, StoreBusy, OSError) as exc:
         _LOG.warning("worktree-reap: evacuation of %s refused: %s", name, exc)
         return Evacuation(False, (f"{_KEEP} {name}: evacuation refused: {exc}",))
     restore = daemon_cli_command_for_docs("scratch-sweep", "restore")
+    # A killed earlier run's claim is listed as a row and finished by resume, not
+    # in ``entries``: once removed it is archived; renamed back, it is an entry again.
+    finished = [
+        (resumed.name, resumed.removed.archive_id)
+        for resumed in result.resumed
+        if resumed.outcome == "removed" and resumed.removed is not None
+    ]
+    archived = finished + [
+        (outcome.name, outcome.archive_id) for outcome in result.entries if outcome.archive_id
+    ]
     lines = [
-        f"ARCHIVED {name}: {outcome.name} archive {outcome.archive_id}; restore it from the "
-        f"main checkout with `{restore} {outcome.archive_id}`"
-        for outcome in result.entries
-        if outcome.archive_id
+        f"ARCHIVED {name}: {entry} archive {archive_id}; restore it from the "
+        f"main checkout with `{restore} {archive_id}`"
+        for entry, archive_id in archived
     ]
     unfinished = [
         f"{outcome.name}: {outcome.outcome}" + (f" ({outcome.reason})" if outcome.reason else "")
         for outcome in result.entries
         if outcome.outcome != "archived"
+    ] + [
+        f"{resumed.name}: leftover claim {resumed.outcome}"
+        + (f" ({resumed.reason})" if resumed.reason else "")
+        for resumed in result.resumed
+        if resumed.outcome not in _RESUME_DONE
     ]
     if not result.complete:
         unfinished.append("run incomplete: " + "; ".join(result.incomplete_reasons))
-    if len(result.entries) < gate.entries:
-        unfinished.append(f"{gate.entries - len(result.entries)} entries were not acted on")
+    acted = len(result.entries) + len(finished)
+    if acted < gate.entries:
+        unfinished.append(f"{gate.entries - acted} entries were not acted on")
     lines.extend(f"{_KEEP} {name}: evacuation refused: {reason}" for reason in unfinished)
     return Evacuation(not unfinished, tuple(lines))
