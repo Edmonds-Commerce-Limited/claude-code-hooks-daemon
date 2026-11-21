@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 
+from claude_code_hooks_daemon.config.models import ScratchCapsConfig
 from claude_code_hooks_daemon.core.scratch_archive import (
     AdoptEvent,
     ArchiveRecord,
@@ -79,6 +80,7 @@ from claude_code_hooks_daemon.core.scratch_archive_remove import (
     resume_claimed,
 )
 from claude_code_hooks_daemon.core.scratch_archive_restore import Reclaimed, reclaim_staging
+from claude_code_hooks_daemon.core.scratch_caps import CapLevel
 from claude_code_hooks_daemon.core.scratch_session import (
     is_session_dir_name,
     remove_empty_session_dir,
@@ -117,6 +119,31 @@ class ApplyFacts:
 
 
 @dataclass(frozen=True)
+class Pressure:
+    """Pressure mode (DESIGN.md section 8): only set while a cap is at block.
+
+    An entry not yet due is also packed when its verdict is actionable and it
+    has been idle ``idle_hours``; its archive expires no sooner than the time
+    its TTL had left plus its verdict's retention. Every other safety rule
+    (complete classification, fresh liveness and references, the claim) is
+    unchanged.
+    """
+
+    idle_hours: float
+    #: The root's TTL, from which the time an entry had left is computed.
+    ttl_hours: float
+
+
+def pressure_for(
+    level: CapLevel, caps: ScratchCapsConfig, ttl_hours: float | None
+) -> Pressure | None:
+    """Pressure mode for a run: only at block, and only for a root with a finite TTL."""
+    if level < CapLevel.BLOCK or ttl_hours is None:
+        return None
+    return Pressure(idle_hours=caps.pressure_idle_minutes / 60, ttl_hours=ttl_hours)
+
+
+@dataclass(frozen=True)
 class ApplySettings:
     """Where and how one run packs."""
 
@@ -134,6 +161,8 @@ class ApplySettings:
     empty_session_hours: float | None = None
     #: ``(st_dev, st_ino)`` the root must have when opened; None: not checked (a top-level root).
     expected_identity: tuple[int, int] | None = None
+    #: Set only while a cap is at block (Task 5.5); None: due entries only.
+    pressure: Pressure | None = None
 
 
 @dataclass(frozen=True)
@@ -203,12 +232,12 @@ def apply_sweep(
         entries = [
             (
                 foreign[row.name]
-                if row.name in foreign and report.complete and _actionable(row)
+                if row.name in foreign and report.complete and _actionable(row, settings.pressure)
                 else _apply_row(
                     root_fd, row, report, fingerprints, store, facts, settings, after_step
                 )
             )
-            for row in report.rows
+            for row in _pressure_order(report.rows)
         ]
         adoptions = unfinished_adoptions(store)
         if adoptions:
@@ -463,8 +492,22 @@ def _fingerprint_all(
     return prints, foreign
 
 
-def _actionable(row: EntryRow) -> bool:
-    return row.due and row.walk_complete and row.verdict in ACTIONABLE
+def _pressured(row: EntryRow, pressure: Pressure | None) -> bool:
+    """Not yet due, but packable under pressure: idle long enough."""
+    return pressure is not None and not row.due and row.age_hours >= pressure.idle_hours
+
+
+def _actionable(row: EntryRow, pressure: Pressure | None = None) -> bool:
+    if not row.walk_complete or row.verdict not in ACTIONABLE:
+        return False
+    return row.due or _pressured(row, pressure)
+
+
+def _pressure_order(rows: tuple[EntryRow, ...]) -> list[EntryRow]:
+    """Due entries in report order, then the rest largest directory count first."""
+    due = [row for row in rows if row.due]
+    rest = sorted((row for row in rows if not row.due), key=lambda row: -row.directories)
+    return due + rest
 
 
 def _safe(facts: ApplyFacts, name: str) -> bool:
@@ -483,7 +526,7 @@ def _apply_row(
     after_step: Callable[[str, str], None],
 ) -> EntryOutcome:
     name = row.name
-    if not report.complete or not _actionable(row):
+    if not report.complete or not _actionable(row, settings.pressure):
         return EntryOutcome(name, "not-actionable", row.verdict.value)
     expected = fingerprints.get(name)
     if expected is None:
@@ -580,7 +623,11 @@ def _archive_claimed(
 def _record(row: EntryRow, packed: PackResult, settings: ApplySettings) -> ArchiveRecord:
     verdict = row.verdict.value
     packed_at = settings.clock()
-    expires_at = packed_at + timedelta(hours=settings.retention_hours[verdict])
+    hold = settings.retention_hours[verdict]
+    if settings.pressure is not None and not row.due:
+        # Packing early is not removing early: the TTL's remainder is added.
+        hold += max(0.0, settings.pressure.ttl_hours - row.age_hours)
+    expires_at = packed_at + timedelta(hours=hold)
     return ArchiveRecord(
         archive_id=packed.archive_id,
         original_path=str(PurePosixPath(settings.original_prefix) / row.name),

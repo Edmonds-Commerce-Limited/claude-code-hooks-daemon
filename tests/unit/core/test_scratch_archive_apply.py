@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 import claude_code_hooks_daemon
+from claude_code_hooks_daemon.config.models import ScratchCapsConfig
 from claude_code_hooks_daemon.core import scratch_archive_apply as apply_mod
 from claude_code_hooks_daemon.core.scratch_archive import (
     AdoptEvent,
@@ -32,14 +33,17 @@ from claude_code_hooks_daemon.core.scratch_archive import (
 from claude_code_hooks_daemon.core.scratch_archive_apply import (
     ApplyFacts,
     ApplySettings,
+    Pressure,
     apply_sessions,
     apply_sweep,
+    pressure_for,
     session_facts,
 )
 from claude_code_hooks_daemon.core.scratch_archive_claim import CLAIM_PREFIX, open_dir
 from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu_tar
 from claude_code_hooks_daemon.core.scratch_archive_remove import RemoveRefused
 from claude_code_hooks_daemon.core.scratch_archive_restore import restore
+from claude_code_hooks_daemon.core.scratch_caps import CapLevel
 from claude_code_hooks_daemon.core.scratch_session import ensure_session_dir, new_entry
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport
 from claude_code_hooks_daemon.core.scratch_verdict import (
@@ -820,3 +824,136 @@ class TestEmptySessionDirectoryRemoval:
         notes = self._sessions(root, store, tar, session)
         assert session.is_dir(), notes
         assert "held" in notes
+
+
+TTL = 72.0
+PRESSURE = Pressure(idle_hours=0.5, ttl_hours=TTL)
+
+
+def not_due(
+    name: str,
+    verdict: Verdict = Verdict.DISPOSABLE,
+    *,
+    age_hours: float = 10.0,
+    directories: int = 1,
+) -> EntryRow:
+    return dataclasses.replace(
+        row(name, verdict, due=False), age_hours=age_hours, directories=directories
+    )
+
+
+def pressed(root: Path, tar: TarTool, pressure: Pressure | None = PRESSURE) -> ApplySettings:
+    return dataclasses.replace(settings(root, tar), pressure=pressure)
+
+
+class TestPressureMode:
+    """Task 5.5: at block, ``--apply`` also packs idle entries that are not yet due."""
+
+    def test_an_idle_entry_not_yet_due_is_packed_under_pressure(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1", age_hours=10.0)])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome == "archived"
+        assert not (root / "e1").exists()
+
+    def test_without_pressure_it_is_left_alone(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1")])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar, None))
+        assert outcome_of(result, "e1").outcome == "not-actionable"
+        assert (root / "e1").is_dir()
+
+    def test_its_archive_expires_no_sooner_than_ttl_plus_retention(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1", age_hours=10.0)])
+        apply_sweep(store, fake.facts(), pressed(root, tar))
+        (record,) = store.read_index().records
+        remaining = TTL - 10.0
+        expected = NOW + timedelta(hours=remaining + RETENTION["DISPOSABLE"])
+        assert datetime.fromisoformat(record.expires_at or "") == expected
+
+    def test_a_due_entry_keeps_its_ordinary_expiry(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([row("e1")])
+        apply_sweep(store, fake.facts(), pressed(root, tar))
+        (record,) = store.read_index().records
+        expected = NOW + timedelta(hours=RETENTION["DISPOSABLE"])
+        assert datetime.fromisoformat(record.expires_at or "") == expected
+
+    @pytest.mark.parametrize(
+        "verdict",
+        [v for v in Verdict if v not in apply_mod.ACTIONABLE],
+    )
+    def test_no_other_verdict_is_ever_packed(
+        self, root: Path, store: ArchiveStore, tar: TarTool, verdict: Verdict
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1", verdict)])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome == "not-actionable"
+        assert (root / "e1").is_dir()
+
+    def test_an_entry_idle_for_less_than_the_minimum_is_left(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1", age_hours=0.2)])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome == "not-actionable"
+        assert (root / "e1").is_dir()
+
+    def test_a_live_entry_is_still_refused(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1")], live={"e1"})
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome != "archived"
+        assert (root / "e1").is_dir()
+
+    def test_an_incomplete_classification_packs_nothing(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1")], complete=False)
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome == "not-actionable"
+        assert (root / "e1").is_dir()
+
+    def test_largest_directory_count_is_packed_first(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        for name in ("small", "big", "mid"):
+            entry(root, name)
+        fake = FakeFacts(
+            [
+                not_due("small", directories=2),
+                not_due("big", directories=50),
+                row("due"),
+                not_due("mid", directories=9),
+            ]
+        )
+        entry(root, "due")
+        apply_sweep(store, fake.facts(), pressed(root, tar))
+        order = [r.original_path.rsplit("/", 1)[1] for r in store.read_index().records]
+        assert order == ["due", "big", "mid", "small"]
+
+
+class TestPressureFor:
+    def test_only_at_block(self) -> None:
+        caps = ScratchCapsConfig()
+        assert pressure_for(CapLevel.WARN, caps, TTL) is None
+        assert pressure_for(CapLevel.OK, caps, TTL) is None
+        found = pressure_for(CapLevel.BLOCK, caps, TTL)
+        assert found == Pressure(idle_hours=caps.pressure_idle_minutes / 60, ttl_hours=TTL)
+
+    def test_a_root_with_no_ttl_gets_no_pressure(self) -> None:
+        assert pressure_for(CapLevel.BLOCK, ScratchCapsConfig(), None) is None

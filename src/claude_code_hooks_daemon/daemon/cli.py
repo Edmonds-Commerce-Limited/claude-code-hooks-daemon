@@ -6867,6 +6867,25 @@ def _record_scratch_inventory(sources: "_ScratchSources", report: Any) -> None:
     logger.debug("scratch inventory written: %d entries", len(refreshed.entries))
 
 
+def _scratch_pressure(sources: "_ScratchSources", ttl_hours: float | None) -> Any:
+    """Pressure mode (Task 5.5) when the cached inventory's caps are at block, else None.
+
+    A missing or unreadable inventory gives no pressure: the mode only ever
+    widens what is packed, so it is never entered on an unknown reading.
+    """
+    from claude_code_hooks_daemon.core import scratch_inventory
+    from claude_code_hooks_daemon.core.scratch_archive_apply import pressure_for
+
+    caps = sources.config.scratch.caps
+    reading = scratch_inventory.read_inventory(
+        sources.repo / "untracked" / scratch_inventory.INVENTORY_FILE
+    )
+    if reading.inventory is None:
+        return None
+    level = scratch_inventory.inventory_caps(reading.inventory, caps).level
+    return pressure_for(level, caps, ttl_hours)
+
+
 def start_scratch_inventory_refresh(repo: Path) -> Any:
     """Refresh ``untracked/scratch-inventory.json`` in a background thread.
 
@@ -7220,7 +7239,14 @@ def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_roo
         retention_hours=sources.retention_hours(),
         clock=sources.now,
         empty_session_hours=sweep_root.ttl_hours,
+        pressure=_scratch_pressure(sources, sweep_root.ttl_hours),
     )
+    if settings.pressure is not None:
+        print(
+            "scratch-sweep: a scratch cap is at block: pressure mode also packs idle entries "
+            "not yet due (largest first); their archives keep the TTL's remainder",
+            file=sys.stderr,
+        )
     try:
         with ArchiveStore.open(sources.store_path) as store, store.lock():
             result = apply_sweep(store, facts, settings)
