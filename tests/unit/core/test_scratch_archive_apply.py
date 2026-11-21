@@ -983,6 +983,37 @@ class TestPressureMode:
         assert outcome_of(result, "e1").outcome != "archived"
         assert (root / "e1").is_dir()
 
+    def test_a_reference_read_at_the_claim_still_refuses(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1")], referenced={"e1"})
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome == "renamed-back"
+        assert (root / "e1").is_dir()
+        assert store.read_index().records == ()
+
+    def test_a_session_keep_marker_added_after_classification_holds_a_child(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root / SESSION, "old")
+        world = SessionWorld(root, [not_due("old")])
+        world.after_first = lambda: (root / SESSION / KEEP_MARKER).write_text("hold")
+        results = apply_sessions(store, world.parent(), pressed(root, tar), world.for_session)
+        ((_, result),) = results
+        assert outcome_of(result, "old").outcome == "renamed-back"
+        assert (root / SESSION / "old").is_dir()
+
+    def test_a_session_child_is_packed_without_the_hold(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """The positive control for the two tests above."""
+        entry(root / SESSION, "old")
+        world = SessionWorld(root, [not_due("old")])
+        results = apply_sessions(store, world.parent(), pressed(root, tar), world.for_session)
+        ((_, result),) = results
+        assert outcome_of(result, "old").outcome == "archived"
+
     def test_an_incomplete_classification_packs_nothing(
         self, root: Path, store: ArchiveStore, tar: TarTool
     ) -> None:

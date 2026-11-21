@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.support.scratch_tree import ScratchTree, build_git_project, git
+from tests.support.scratch_tree import ScratchTree, build_git_project, commit_file, git
 
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.core.scratch_archive_apply import Pressure
@@ -223,6 +223,102 @@ class TestApplyConfirmationNamesPressure:
         tree.file("a/f.txt", b"x")
         (notice,) = self._apply(_project(tree), (100, 200), time.time())
         assert notice == ""
+
+
+_PRESSURE_SESSION = "s-20261101T000000Z-abcdefgh"
+
+
+class TestHoldsStillProtectUnderPressure:
+    """Through the real classifier and ``--apply``: a hold protects a TTL-held entry at block.
+
+    ``none`` is the positive control: the same idle, not-due entry IS packed
+    under pressure, so every other case fails for its hold and not by accident.
+    """
+
+    def _apply(self, tree: ScratchTree, hold: str) -> Path:
+        project = _project(tree)
+        (project / ".claude" / "hooks-daemon.yaml").write_text(
+            "version: '2.0'\nscratch:\n  caps:\n    entries:\n      warn: 1\n      block: 2\n"
+        )
+        tree.file("filler-1/f.txt", b"x")
+        tree.file("filler-2/f.txt", b"x")
+        cwd = Path("/elsewhere")
+        now = time.time() + 2 * 3600
+        if hold.startswith("session"):
+            # An old session with a young child: a young session holds its children whole.
+            target = tree.root / _PRESSURE_SESSION / "work"
+            tree.file(f"{_PRESSURE_SESSION}/work/__pycache__/m.pyc", b"pyc")
+            if hold == "session-keep":
+                tree.file(f"{_PRESSURE_SESSION}/.scratch-keep", b"hold\n")
+            if hold == "session-live":
+                cwd = (tree.root / _PRESSURE_SESSION).resolve()
+            tree.set_tree_mtime(_PRESSURE_SESSION, now - 5 * _DAY)
+            tree.set_tree_mtime(f"{_PRESSURE_SESSION}/work", now - 2 * 3600)
+        else:
+            target = tree.root / "work"
+            tree.file("work/__pycache__/m.pyc", b"pyc")
+            if hold == "keep":
+                tree.file("work/.scratch-keep", b"hold\n")
+            if hold == "reference":
+                commit_file(project, "docs/ref.md", "evidence in untracked/scratch/work\n")
+        args = build_parser().parse_args(["scratch-sweep", "--apply", "--json"])
+        args.project_root = project
+        asked: list[str] = []
+
+        def consent(_root: str, notice: str) -> bool:
+            asked.append(notice)
+            return True
+
+        code = args.func(
+            args, wall_clock=lambda: now, process_cwds=lambda: {1: cwd}, confirm_apply=consent
+        )
+        assert code == 0
+        (notice,) = asked
+        assert "pressure mode" in notice, "the caps must be at block for this test to mean anything"
+        return target
+
+    @pytest.mark.parametrize(
+        ("hold", "held_as"),
+        [
+            ("keep", "KEPT"),
+            ("reference", "REFERENCED"),
+            # The session's keep marker, or a process in the session, is carried down
+            # to the child's ttl_hold by the classification.
+            ("session-keep", "KEPT"),
+            ("session-live", "LIVE"),
+        ],
+    )
+    def test_a_hold_protects_a_ttl_held_entry(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str], hold: str, held_as: str
+    ) -> None:
+        capsys.readouterr()
+        target = self._apply(tree, hold)
+        document = json.loads(capsys.readouterr().out)
+        assert (target / "__pycache__" / "m.pyc").read_bytes() == b"pyc"
+        rows = (
+            document["entries"]
+            if not hold.startswith("session")
+            else [row for sub in document["sessions"] for row in sub["entries"]]
+        )
+        outcomes = {row["name"]: row for row in rows}
+        assert outcomes["work"]["outcome"] == "not-actionable", outcomes
+        assert outcomes["work"]["reason"] == f"{held_as} (not yet due: within its TTL)"
+
+    @pytest.mark.parametrize("where", ["root", "session"])
+    def test_without_a_hold_the_same_entry_is_packed(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str], where: str
+    ) -> None:
+        capsys.readouterr()
+        target = self._apply(tree, "none" if where == "root" else "session-none")
+        document = json.loads(capsys.readouterr().out)
+        rows = (
+            document["entries"]
+            if where == "root"
+            else [row for sub in document["sessions"] for row in sub["entries"]]
+        )
+        outcomes = {row["name"]: row for row in rows}
+        assert outcomes["work"]["outcome"] == "archived", outcomes
+        assert not target.exists()
 
 
 class TestDryRunReportsEveryWorktree:
