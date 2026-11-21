@@ -105,7 +105,7 @@ def test_unresolved_creation_counts_as_under(prelude: str, command: str) -> None
         # before, inside and after the statement that creates the directory.
         "echo $'it\\'s'; mkdir untracked/scratch/x",
         "mkdir untracked/scratch/x 'unbalanced",
-        "echo ok; echo \"open; mkdir untracked/scratch/x",
+        'echo ok; echo "open; mkdir untracked/scratch/x',
     ],
 )
 def test_an_unlexable_command_counts_as_under(command: str) -> None:
