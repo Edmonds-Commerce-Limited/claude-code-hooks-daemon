@@ -8067,3 +8067,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 - `_FD_VALUE_OPTIONS` lists `--hyperlink` and `--strip-cwd-prefix` as taking the next word. In current fd both take an OPTIONAL value with a required `=` (unverified: fd is not installed here), so `fd --strip-cwd-prefix fixture ../conf -x cat` is parsed with `../conf` as the pattern and root `.`, and is allowed from `wt/docs` under both roots.
 
 **Status**: ⬜ Open. Model `parallel` (and `parallel --pipe`/`:::` forms) as a runner of a fed command like `xargs`; check `_FD_VALUE_OPTIONS` against `fd --help` for the pinned fd versions and drop the optional-value options. Corpus rows for `find d | parallel cat` and `fd --strip-cwd-prefix x d -x cat`.
+
+### N686 — owner decision: should a raw `git push --delete` of a surviving-content branch be denied in favour of the leased `delete-branch --remote-only`?
+
+**Source**: Plan 00594 Task 3.8, F-BYPS review Finding 4 (`CLAUDE/Plan/00594-branch-lifecycle-and-branch-tip-channel/subagent-reports/f-byps-remote-delete-surviving-content-review.md`), recorded as an owner decision in `subagent-reports/261120-task-3-8-merge-ready.md`.
+
+**Evidence**: the surviving-content tier (on main since `69e375788`) lets an agent's raw `git push --delete` of a branch whose tip content every holder already has go through. The hook can allow or deny that command but cannot add a lease to it, so a holder or the branch can move between the proof and the push. `delete-branch --remote-only` deletes with a per-ref `--force-with-lease` and closes that race for the deleted ref. Denying the raw form would change the contract of a command allowed today. Holder leases are not possible in git (a lease only constrains a ref the push updates), so that part stays residue whatever is chosen.
+
+**Status**: ⬜ Open, owner decision. Options: keep the raw route allowed (today), or deny it for the surviving-content tier only and point at `delete-branch --remote-only`, with corpus rows for both.

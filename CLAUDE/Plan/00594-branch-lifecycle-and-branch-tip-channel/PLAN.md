@@ -192,10 +192,15 @@ names, people or hashes appear here.
   stop guard, `BRANCH_LIMIT_PRINCIPLE`) says: finish (merge), or delete only on
   machine proof or human confirmation; parking is a short bounded pause. A test
   pins that `branches.wip.creation_grace` never lifts a full parked pool.
-- [ ] 🔄 **Task 3.8**: (in progress: brought up to v3.76.0 and reconciled with
-  Plan 00626 on the branch, release note 010, F-BYPS review acted on, targeted
-  tests green, report `subagent-reports/261120-task-3-8-merge-ready.md`; open:
-  independent security review of the post-F-BYPS fixes, full gate, `--no-ff` merge) (owner request typed in session, journal 15 November;
+- [x] ✅ **Task 3.8**: (on main: `--no-ff` merge `cdb3e25dd` in the
+  integration gate merged as `69e375788`; release note 010; reports
+  `subagent-reports/261120-task-3-8-merge-ready.md` and
+  `subagent-reports/261120-task-3-8-independent-security-review.md`, whose one
+  Low finding was fixed test-first in `e64f11f64`/`8c1ebe38e`
+  (`261120-submodule-ignore-fix.md`); combined full gate green. Not
+  independently re-reviewed: those two fix commits and `a7f2af3b6`, all of
+  which only refuse more. Owner decision still open: F-BYPS Finding 4, ledger
+  N686) (owner request typed in session, journal 15 November;
   route set by delegated ruling, [DESIGN.md §7.2](DESIGN.md)) Land the
   surviving-content remote-delete tier and `delete-branch --remote-only` from
   branch `agent-a20c91c23eca4e56e-43e33957`. Bring it up to `main`, reconcile
@@ -243,9 +248,12 @@ names, people or hashes appear here.
   and a proof are all facts about a COMMIT. Every per-name cache of them
   must be keyed or invalidated by tip, never by the name typed.
 - [ ] 🔄 **Task 4.6**: (second client seat; decided by delegated ruling,
-  build rules in [DESIGN.md §7.1](DESIGN.md); built on branch
-  `agent-ab8590f82ee261d91-c14c8267`, release note 007, awaiting the
-  coordinator's gate and merge) A stack of dependent
+  build rules in [DESIGN.md §7.1](DESIGN.md); built test-first on branch
+  `agent-ab8590f82ee261d91-c14c8267` (RED `bdb18c137`), merged up to main on
+  `plan-00594-finish`, release note 020, config-change entry in
+  `UNRELEASED/config-changes/v3.77.0.yaml`; targeted tests green; awaiting an
+  independent review of the count change, the full gate and the coordinator's
+  `--no-ff` merge) A stack of dependent
   pull-request branches counts once per link against the open cap, so a
   five-deep stack alone uses half of a cap of 10. Build, test-first: a stack
   counts as one stream up to `branches.wip.stack_max_depth` (default 5), each
@@ -294,7 +302,13 @@ names, people or hashes appear here.
   remote: track, move, moved-ref report, re-track, one-step return; a sha pin
   and a failed listing covered. A seat's report is added when one comes and
   is not a gate. The stop/build/start handover is Plan 00535's, not this
-  task's.
+  task's. Not yet built (checked 21 November): the fixture cannot run it as
+  it stands, because its `.claude/hooks-daemon` is a `git worktree` of this
+  repository, so it shares this repository's `.git/config` and `origin`, and
+  `upgrade.sh` fetches the tracked ref from that `origin`. The proof first
+  needs a fixture mode whose daemon dir is a real clone of a local bare
+  remote (seeded from HEAD, with a release tag), so no fetch or push reaches
+  the real origin.
 - [x] ✅ **Task 5.2**: (RC feedback; done on the release branch, release note
   034\) A guarded unreleased install no longer exits 141 when the ref's
   `pyproject.toml` is larger than one pipe write. Layer 1 reads the blob
@@ -335,4 +349,6 @@ names, people or hashes appear here.
 
 - Plan opened.
 - Seat and release questions settled by delegated ruling (DESIGN §7); the
-  plan is no longer blocked. Open: Tasks 3.8, 4.6, 5.1.
+  plan is no longer blocked. Task 3.8 is on main. Open: Task 4.6 (built,
+  on `plan-00594-finish`, awaiting review, gate and merge) and Task 5.1 (the
+  fixture proof, not built).
