@@ -83,7 +83,10 @@ logger = logging.getLogger(__name__)
 _MODE_ADDITIVE: Final[str] = "additive"
 _MODE_REPLACE: Final[str] = "replace"
 
-#: Where a handoff may be written while the hard band is on.
+#: Where a handoff may be written while the hard band is on. Plan work hands
+#: off into ``subagent-reports/``; the scratch glob stays for work with no plan
+#: folder and for ``git commit -F`` message files, both consumed within the
+#: scratch TTL (Plan 00627 DESIGN X5).
 DEFAULT_HANDOFF_GLOBS: Final[tuple[str, ...]] = ("**/subagent-reports/**", "untracked/scratch/**")
 
 #: Bash a handoff needs: look at the worktree, stage it, commit it.
@@ -175,7 +178,8 @@ def handoff_path(project_root: Path, cwd: str, label: str, plan_key: str) -> Pat
 
     ``<plan>/subagent-reports/<yymmdd>-<label>-handoff.md`` in the checkout the
     agent runs in (its ``cwd`` when that holds a plan folder for its plan key),
-    else ``untracked/scratch/`` of that checkout.
+    else ``untracked/scratch/`` of that checkout, where the scratch sweep removes
+    it after the TTL, so the lead must consume it first.
     """
     safe_label = _LABEL_UNSAFE.sub("-", label) or "agent"
     stamp = datetime.now(UTC).strftime("%y%m%d")
@@ -577,7 +581,10 @@ class SubagentContextBudgetHandler(PreToolUseHandlerBase):
             "`untracked/scratch/**`), Bash made only of `git status|diff|add|commit|log` "
             "(no `$(...)`, so write a long commit message to `untracked/scratch/` and "
             "`git commit -F` it), SendMessage and ToolSearch. The handoff is a file at the "
-            "path the message names (`<plan>/subagent-reports/<yymmdd>-<agent>-handoff.md`), "
+            "path the message names (`<plan>/subagent-reports/<yymmdd>-<agent>-handoff.md`; "
+            "plan work hands off there, because scratch is swept after 24 hours by default "
+            "and a handoff left in `untracked/scratch/` for work with no plan must be "
+            "consumed before then), "
             "a WIP commit, and a SendMessage to the lead; an agent that cannot Write sends "
             "the handoff itself by SendMessage. Past `hard_tokens`, `subagent_handoff_gate` "
             "also BLOCKS the agent's stop until that handoff exists (at most three times, "

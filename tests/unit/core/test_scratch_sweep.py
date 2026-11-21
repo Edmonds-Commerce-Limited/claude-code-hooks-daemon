@@ -5,9 +5,10 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import shutil
 import subprocess
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.config.models import ScratchConfig
+from claude_code_hooks_daemon.core import scratch_sweep as sweep_mod
 from claude_code_hooks_daemon.core.scratch_filing import HINT_TRACKED
 from claude_code_hooks_daemon.core.scratch_liveness import BackgroundRecords, LivenessInputs
 from claude_code_hooks_daemon.core.scratch_repos import build_project_git
@@ -25,6 +27,7 @@ from claude_code_hooks_daemon.core.scratch_sweep import (
     report_json,
     run_sweep,
 )
+from claude_code_hooks_daemon.core.scratch_verdict import Verdict
 from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
 from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
 from tests.support.scratch_tree import (
@@ -57,6 +60,7 @@ def _sweep(
     root: Path | None = None,
     reference_roots: tuple[str, ...] = ("untracked/repos",),
     unreadable: tuple[int, ...] = (),
+    scandir: Callable[[str], AbstractContextManager[Iterator[os.DirEntry[str]]]] | None = None,
 ) -> SweepReport:
     inputs = LivenessInputs(
         cwds={1: Path("/elsewhere")} if cwds is None else cwds,
@@ -79,7 +83,7 @@ def _sweep(
         inputs=inputs,
         project_root=tree.base / "project",
         project_git=quiet_project_git(tree.base / "project"),
-        scandir=tree.refusing_scandir(*refused),
+        scandir=scandir or tree.refusing_scandir(*refused),
     )
 
 
@@ -298,8 +302,19 @@ class TestRendering:
         text = "\n".join(render_table(self._report(tmp_path), max_listed=50))
         assert "nothing was changed" in text
         assert "DISPOSABLE 1" in text
-        assert "evaluated in this phase: KEPT" in text
+        assert "evaluated in this phase" not in text
         assert "not a git repository" in text
+
+    def test_a_keep_marker_makes_the_entry_kept_with_its_reason(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("pinned/a.log")
+        tree.file("pinned/.scratch-keep", b"owner's draft\nsecond line\n")
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        (row,) = [row for row in report.rows if row.name == "pinned"]
+        assert row.verdict.value == "KEPT"
+        assert row.reasons == ("pinned by .scratch-keep: owner's draft",)
 
     def test_the_table_suggests_no_removal(self, tmp_path: Path) -> None:
         text = "\n".join(render_table(self._report(tmp_path), max_listed=50)).lower()
@@ -325,7 +340,7 @@ class TestRendering:
         document = report_json(self._report(tmp_path))
         json.dumps(document)
         assert document["dry_run"] is True
-        assert document["not_evaluated"] == ["KEPT"]
+        assert document["not_evaluated"] == []
         rows = {row["name"]: row for row in document["entries"]}
         assert set(rows) == {"a.log", "clone", "notes.txt"}
         assert rows["clone"]["repository"] == "found"
@@ -783,3 +798,325 @@ class TestCrossEntryDependencies:
         report = _sweep(tree, now=now, refused=("box/inner",))
         assert _verdicts(report) == {"box": "STUCK", "cache": "STUCK"}
         assert any("box was not walked" in reason for reason in report.incomplete_reasons)
+
+
+_SESSION = "s-20261101T000000Z-abcdefgh"
+
+
+class TestSessionDirectoryIsNeverActedOnWhole:
+    """Task 4.3 step 1: a session directory is a container, never packed as one entry."""
+
+    def test_a_due_session_directory_is_not_actionable(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file(f"{_SESSION}/.scratch-session.json", b"{}")
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        tree.file("cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        assert _verdicts(report) == {_SESSION: "STUCK", "cache": "DISPOSABLE"}
+        row = next(row for row in report.rows if row.name == _SESSION)
+        assert any("session directory" in reason for reason in row.reasons)
+        assert row.proofs == ()
+
+    def test_a_link_with_a_session_name_is_judged_as_an_ordinary_entry(
+        self, tmp_path: Path
+    ) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        (tree.root / _SESSION).symlink_to(tmp_path / "nowhere")
+        report = _sweep(tree, now=now)
+        row = next(row for row in report.rows if row.name == _SESSION)
+        assert not any("session directory" in reason for reason in row.reasons)
+
+    def test_a_session_directory_gone_non_directory_at_the_second_lstat_is_held(
+        self, tmp_path: Path
+    ) -> None:
+        """Walked as a directory, then a file by the hold's ``lstat``: held STUCK, fail closed."""
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        walked = next(row for row in report.rows if row.name == _SESSION)
+        eligible = dataclasses.replace(walked, verdict=Verdict.DISPOSABLE)
+        shutil.rmtree(tree.root / _SESSION)
+        (tree.root / _SESSION).write_text("swapped")
+        held = sweep_mod._held_if_session(tree.root, eligible)
+        assert held.verdict is Verdict.STUCK
+        assert any("no longer a directory" in reason for reason in held.reasons)
+
+    def test_a_session_child_pointing_at_an_entry_still_protects_it(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        gp.tree.file("lender/.git/objects/pack/x", b"x")
+        alternates = gp.tree.root / f"{_SESSION}/clone/.git/objects/info/alternates"
+        alternates.parent.mkdir(parents=True)
+        alternates.write_text(f"{gp.tree.root / 'lender/.git/objects'}\n")
+        now = _now()
+        _old(gp.tree, now)
+        verdicts = _verdicts(_git_sweep(gp, now))
+        assert verdicts[_SESSION] not in {"DISPOSABLE", "UNCERTAIN"}
+        assert verdicts["lender"] not in {"DISPOSABLE", "UNCERTAIN"}
+
+
+def _children(report: SweepReport, session: str = _SESSION) -> dict[str, str]:
+    """The verdicts of one session directory's children (its sub-report)."""
+    found = [sub for sub in report.sessions if Path(sub.root).name == session]
+    assert len(found) == 1, [sub.root for sub in report.sessions]
+    return _verdicts(found[0])
+
+
+_ACTIONABLE_VALUES = {"DISPOSABLE", "UNCERTAIN"}
+
+
+class TestSessionChildrenAreTheEntries:
+    """Task 4.3 step 2: a session directory's children are judged as entries of their own."""
+
+    def _session(self, tree: ScratchTree) -> None:
+        tree.file(f"{_SESSION}/.scratch-session.json", b"{}")
+        # scratch_session writes the manifest through ``.<name>.tmp-<hex>``.
+        tree.file(f"{_SESSION}/..scratch-session.json.tmp-0123456789ab", b"{}")
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+
+    def test_children_are_judged_and_container_files_are_never_rows(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        assert _verdicts(report) == {_SESSION: "STUCK"}
+        assert _children(report) == {"cache": "DISPOSABLE"}
+        document = report_json(report)
+        assert document["sessions"][0]["entries"][0]["name"] == "cache"
+        assert any("cache" in line for line in render_table(report, max_listed=50))
+
+    def test_a_session_keep_marker_keeps_every_child(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        tree.file(f"{_SESSION}/.scratch-keep", b"hold the session\n")
+        _old(tree, now)
+        assert _children(_sweep(tree, now=now)) == {"cache": "KEPT"}
+
+    def test_a_working_directory_at_the_session_holds_every_child(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        _old(tree, now)
+        report = _sweep(tree, now=now, cwds={7: (tree.root / _SESSION).resolve()})
+        assert _children(report) == {"cache": "LIVE"}
+
+    def test_a_working_directory_in_one_child_does_not_hold_another(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        tree.file(f"{_SESSION}/work/notes.txt", b"n")
+        _old(tree, now)
+        cwd = (tree.root / _SESSION / "work").resolve()
+        children = _children(_sweep(tree, now=now, cwds={7: cwd}))
+        assert children["work"] == "LIVE"
+        assert children["cache"] == "DISPOSABLE"
+
+    def test_a_not_due_session_does_not_block_a_due_child(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        tree.file(f"{_SESSION}/fresh/notes.txt", b"n")
+        _old(tree, now)
+        tree.set_tree_mtime(f"{_SESSION}/fresh", now - 60)
+        report = _sweep(tree, now=now)
+        assert _verdicts(report)[_SESSION] == "LIVE"
+        children = _children(report)
+        assert children["cache"] == "DISPOSABLE"
+        assert children["fresh"] == "LIVE"
+
+    def test_a_dependency_on_the_session_holds_every_child(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        gp.tree.file(f"{_SESSION}/.scratch-session.json", b"{}")
+        gp.tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        gp.tree.file(f"{_SESSION}/lender/.git/objects/pack/x", b"x")
+        alternates = gp.tree.root / "clone/.git/objects/info/alternates"
+        alternates.parent.mkdir(parents=True)
+        alternates.write_text(f"{gp.tree.root / _SESSION / 'lender/.git/objects'}\n")
+        now = _now()
+        _old(gp.tree, now)
+        children = _children(_git_sweep(gp, now))
+        assert children["cache"] not in _ACTIONABLE_VALUES
+        assert children["lender"] not in _ACTIONABLE_VALUES
+
+    def test_a_session_that_is_a_repository_is_judged_whole(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        tree.file(f"{_SESSION}/.git/HEAD", b"ref: refs/heads/main\n")
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        assert report.sessions == ()
+        assert _verdicts(report)[_SESSION] not in _ACTIONABLE_VALUES
+
+    def test_a_session_named_child_is_an_ordinary_entry(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        inner = "s-20261102T000000Z-ijklmnop"
+        tree.file(f"{_SESSION}/{inner}/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        assert _children(report)[inner] == "DISPOSABLE"
+        assert all(Path(sub.root).name != inner for sub in report.sessions)
+
+    def test_a_recorded_longer_ttl_holds_a_child(self, tmp_path: Path) -> None:
+        from datetime import UTC, datetime
+
+        from claude_code_hooks_daemon.core.scratch_session import ensure_session_dir, new_entry
+
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        born = datetime.fromtimestamp(now - 3 * _DAY, UTC)
+        session = ensure_session_dir(
+            tree.root, "abcdefgh-session", now=born, checkout="c", branch=None
+        ).path
+        new_entry(session, "long", now=born, purpose=None, plan=None, ttl_hours=70)
+        new_entry(session, "short", now=born, purpose=None, plan=None, ttl_hours=None)
+        (session / "long" / "a.log").write_bytes(b"x")
+        (session / "short" / "a.log").write_bytes(b"x")
+        _old(tree, now)
+        children = _children(_sweep(tree, now=now), session.name)
+        assert children["long"] == "LIVE"
+        assert children["short"] in _ACTIONABLE_VALUES
+
+
+class TestSessionDirectoryIdentity:
+    """Task 4.3 step 3: a session sub-report names the directory it listed, and a swap fails closed."""
+
+    def test_the_sub_report_records_the_listed_directory(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        info = os.lstat(tree.root / _SESSION)
+        assert report.sessions[0].identity == (info.st_dev, info.st_ino)
+        assert report.identity is None
+
+    def test_a_directory_swapped_after_the_split_check_is_incomplete(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        real = tree.refusing_scandir()
+        session = str(tree.root / _SESSION)
+        seen: list[str] = []
+
+        def swapping(path: str) -> AbstractContextManager[Iterator[os.DirEntry[str]]]:
+            seen.append(path)
+            # The first listing of the session path is the parent's walk; the last, its own.
+            if path == session and seen.count(session) == 2:
+                (tree.root / _SESSION).rename(tree.root / "moved")
+                (tree.root / _SESSION / "cache" / "__pycache__").mkdir(parents=True)
+                (tree.root / _SESSION / "cache" / "__pycache__" / "m.pyc").write_bytes(b"x")
+            return real(path)
+
+        report = _sweep(tree, now=now, scandir=swapping)
+        sub = report.sessions[0]
+        assert not sub.complete
+        assert any("changed" in reason for reason in sub.incomplete_reasons)
+        assert not report.complete
+
+    def test_a_directory_has_an_identity(self, tmp_path: Path) -> None:
+        info = os.lstat(tmp_path)
+        assert sweep_mod._identity(tmp_path) == (info.st_dev, info.st_ino)
+
+    def test_no_identity_says_why(self, tmp_path: Path) -> None:
+        missing = sweep_mod._identity(tmp_path / "gone")
+        assert not isinstance(missing, tuple)
+        assert "FileNotFoundError" in missing.reason
+        (tmp_path / "file").write_bytes(b"x")
+        plain = sweep_mod._identity(tmp_path / "file")
+        assert not isinstance(plain, tuple)
+        assert "not a directory" in plain.reason
+
+
+_WEEK = ScratchConfig.model_validate({"untracked_ttl": {"scratch": "7d"}})
+
+
+def _held(report: SweepReport, name: str) -> Verdict | None:
+    row = next(row for row in report.rows if row.name == name)
+    assert row.verdict is Verdict.LIVE
+    return row.ttl_hold
+
+
+class TestTtlHold:
+    """An entry LIVE only because it is within its TTL carries its underlying verdict.
+
+    Pressure mode (DESIGN.md section 5.5) acts on that ``ttl_hold`` and never on
+    an entry LIVE for a liveness reason.
+    """
+
+    def test_a_young_idle_entry_is_held_by_its_ttl_alone(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.scratch_archive_apply import (
+            Pressure,
+            pressured_count,
+        )
+
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("cache/__pycache__/m.pyc", b"pyc")
+        tree.file("notes.txt", b"n")
+        _old(tree, now)
+        report = _sweep(tree, now=now, config=_WEEK)
+        assert _held(report, "cache") is Verdict.DISPOSABLE
+        assert _held(report, "notes.txt") is Verdict.UNCERTAIN
+        assert report_json(report)["entries"][0]["ttl_hold"] in {"DISPOSABLE", "UNCERTAIN"}
+        assert pressured_count(report, Pressure(idle_hours=0.5, ttl_hours=168.0)) == 2
+
+    def test_an_entry_with_a_process_in_it_has_no_ttl_hold(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("work/notes.txt", b"n")
+        _old(tree, now)
+        report = _sweep(tree, now=now, config=_WEEK, cwds={7: (tree.root / "work").resolve()})
+        assert _held(report, "work") is None
+
+    def test_a_keep_marker_holds_a_young_entry(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("pinned/.scratch-keep", b"mine\n")
+        tree.file("pinned/a.log", b"x")
+        _old(tree, now)
+        assert _held(_sweep(tree, now=now, config=_WEEK), "pinned") is Verdict.KEPT
+
+    def test_a_young_repository_is_never_pressure_eligible(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.git_marker("clone")
+        _old(tree, now)
+        assert _held(_sweep(tree, now=now, config=_WEEK), "clone") is Verdict.STUCK
+
+    def test_unknown_liveness_holds_a_young_entry(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now, config=_WEEK, cwds={})
+        assert _held(report, "cache") is Verdict.STUCK
+
+    def test_a_young_session_directory_is_held_whole(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file(f"{_SESSION}/.scratch-session.json", b"{}")
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now, config=_WEEK)
+        assert _held(report, _SESSION) is Verdict.STUCK
+
+    def test_a_kept_session_holds_its_young_children(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file(f"{_SESSION}/.scratch-session.json", b"{}")
+        tree.file(f"{_SESSION}/.scratch-keep", b"hold\n")
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now, config=_WEEK)
+        (sub,) = report.sessions
+        assert _held(sub, "cache") is Verdict.KEPT

@@ -2271,6 +2271,9 @@ BRANCH_DORMANCY_PRESETS: dict[str, tuple[int, int, int]] = {
 #: ``branches.default`` value meaning "ask git" (``git_sync.default_branch``).
 BRANCH_DEFAULT_AUTO = "auto"
 
+#: ``branches.wip.stack_max_depth`` default (Plan 00594 Task 4.6, DESIGN.md 7.1).
+DEFAULT_STACK_MAX_DEPTH = 5
+
 
 class BranchLadderConfig(BaseModel):
     """The warning ladder of one pool (Plan 00619): percent of its block point in use.
@@ -2316,6 +2319,11 @@ class BranchWipConfig(BaseModel):
         default=2,
         description="Creation is denied only at cap + this many; below that it warns "
         "(pressure lands at stop and session start; 0 restores the deny at the cap)",
+    )
+    stack_max_depth: Annotated[int, Field(ge=1)] = Field(
+        default=DEFAULT_STACK_MAX_DEPTH,
+        description="A stack of dependent branches (each tip a strict ancestor of the next) "
+        "counts 1 against cap up to this many links; each link past it counts 1 more",
     )
 
 

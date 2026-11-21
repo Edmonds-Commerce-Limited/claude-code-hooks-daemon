@@ -1322,6 +1322,94 @@ handlers:
 
 ---
 
+#### scratch_keep_marker_guard
+
+| Property       | Value                       |
+| -------------- | --------------------------- |
+| **Config key** | `scratch_keep_marker_guard` |
+| **Priority**   | 18                          |
+| **Type**       | Blocking                    |
+| **Event**      | PreToolUse                  |
+| **Rule**       | `R-SCRATCH-KEEP-MARKER`     |
+
+**Description:** Denies an agent creating, changing or removing a `.scratch-keep` file. A scratch entry holding that marker is KEPT by `hooks-daemon scratch-sweep` for ever, so the marker is a human's decision. Judged on the file name across every write route: `Write`/`Edit`, and a Bash redirect, `tee`, `cp`/`mv`/`install`/`dd`, `ln`, `touch` or `rm`. A destination built from a variable, or command text the scanner cannot read, is denied when it names the marker. Not covered: a recursive copy of a directory that already holds a marker.
+
+**Example trigger:**
+
+```
+touch untracked/scratch/my-session/probe/.scratch-keep
+```
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    scratch_keep_marker_guard:
+      enabled: true
+      priority: 18
+```
+
+#### scratch_unowned_entry
+
+| Property       | Value                     |
+| -------------- | ------------------------- |
+| **Config key** | `scratch_unowned_entry`   |
+| **Priority**   | 46                        |
+| **Type**       | Advisory (configurable)   |
+| **Event**      | PreToolUse                |
+| **Rule**       | `R-SCRATCH-UNOWNED-ENTRY` |
+
+**Description:** A `Write`/`Edit` or Bash write that would create a new first-level entry directly in `untracked/scratch/` (outside the `s-*` session directory) gets an advisory naming `bin/hooks-daemon scratch new`, because such an entry has no recorded owner, birth or purpose. `scratch.sweep.unowned_entry` sets the answer: `advise` (default; never denies), `block` (denies under `R-SCRATCH-UNOWNED-ENTRY`) or `off`. An entry that already exists, a session directory and `.gitignore` never fire. Not seen: `mkdir` and `touch` (the Bash write scan does not report them), and a destination built from a variable.
+
+**Example trigger:**
+
+```
+echo notes > untracked/scratch/notes.txt
+```
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    scratch_unowned_entry:
+      enabled: true
+      priority: 46
+```
+
+---
+
+#### scratch_cap_guard
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `scratch_cap_guard`     |
+| **Priority**   | 19                      |
+| **Type**       | Blocking (configurable) |
+| **Event**      | PreToolUse              |
+| **Rule**       | `R-SCRATCH-CAP`         |
+
+**Description:** A Bash command that creates a directory under a scratch root (`untracked/scratch/` or the configured sweep root) is denied when the cached scratch inventory (`untracked/scratch-inventory.json`) is at the block cap. The deny names the over-cap measures, the five largest entries and `bin/hooks-daemon scratch-sweep --apply`. A file write never matches, and a missing or unreadable inventory allows. When only LIVE, KEPT or PROTECTED entries keep scratch over the block cap, the command is allowed with an advisory so nothing is stranded. `scratch.caps.mode: advise` turns the deny into an advisory.
+
+**Example trigger:**
+
+```
+mkdir -p untracked/scratch/s-abc/run-42
+```
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    scratch_cap_guard:
+      enabled: true
+      priority: 19
+```
+
+---
+
 #### write_protected_paths
 
 | Property       | Value                   |
@@ -4188,6 +4276,19 @@ handlers:
 
 ---
 
+#### scratch_inventory_refresher
+
+| Property       | Value                         |
+| -------------- | ----------------------------- |
+| **Config key** | `scratch_inventory_refresher` |
+| **Priority**   | 42                            |
+| **Type**       | Sensor (silent)               |
+| **Event**      | PostToolUse                   |
+
+**Description:** After a Bash command that creates a directory tree under a scratch root (`mkdir`, `git clone`, `git init`, `git worktree add`, `cp -r`, `tar -x`, `mktemp -d`), starts a background refresh of the cached scratch inventory (`untracked/scratch-inventory.json`), one at a time. That inventory is what `scratch_cap_guard` reads, so a new tree is counted before the next command. It never blocks and adds no context; the inventory is also refreshed at SessionStart and after `scratch-sweep --apply`.
+
+---
+
 #### dispatch_model_recorder
 
 | Property       | Value                     |
@@ -4517,6 +4618,17 @@ handlers:
 | **Event**      | SessionStart   |
 
 **Description:** Prints a short summary of the branches that need attention at session start: commits contained nowhere, merged but undeleted, dormant (advisory and noisy stages), and open work against `branches.wip.cap`. The full report is `bin/hooks-daemon branch-sweep`. Never blocks. Thresholds come from the top-level `branches:` block; see [CONFIGURATION.md](CONFIGURATION.md).
+
+#### scratch_sweep
+
+| Property       | Value           |
+| -------------- | --------------- |
+| **Config key** | `scratch_sweep` |
+| **Priority**   | 56              |
+| **Type**       | Advisory        |
+| **Event**      | SessionStart    |
+
+**Description:** Creates this session's scratch directory, `untracked/scratch/s-<UTC>-<first 8 of the session id>/`, in the checkout the session starts in, with a daemon-written `.scratch-session.json` manifest (session id, birth, checkout, branch, entries), and announces it as "your scratch directory" with the `bin/hooks-daemon scratch new` command. Idempotent per session id and runs on every source, since compaction drops the earlier announcement. A failure to create it is one advisory line; it never blocks.
 
 #### plan_qa_sweep
 
@@ -5416,6 +5528,9 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `curl_pipe_shell`               | PreToolUse        | 10       | curl/wget piped to bash/sh                                                      |
 | `lock_file_edit_blocker`        | PreToolUse        | 10       | Direct editing of lock files                                                    |
 | `write_protected_paths`         | PreToolUse        | 18       | Agent writes to a configured read-only path                                     |
+| `scratch_keep_marker_guard`     | PreToolUse        | 18       | An agent writing or removing a `.scratch-keep` marker                           |
+| `scratch_unowned_entry`         | PreToolUse        | 46       | A new scratch entry outside the session directory (only when set to `block`)    |
+| `scratch_cap_guard`             | PreToolUse        | 19       | A new directory under scratch while the scratch inventory is at the block cap   |
 | `pip_break_system`              | PreToolUse        | 10       | pip --break-system-packages                                                     |
 | `sudo_pip`                      | PreToolUse        | 10       | sudo pip install                                                                |
 | `host_command_guard`            | PreToolUse        | 10       | docker host-root mount, gh auth token, non-PyPI pip index, crontab -r           |

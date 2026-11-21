@@ -216,6 +216,9 @@ the daemon's `constants/priority.py`, the source of truth):
 .claude/hooks-daemon/bin/hooks-daemon generate-playbook > untracked/scratch/playbook.md
 ```
 
+The playbook is consumed by the acceptance run; scratch is swept after 24 hours
+by default, so record results in a plan folder, not beside it.
+
 ## Examples
 
 See example project handlers:

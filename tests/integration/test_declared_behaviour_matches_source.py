@@ -119,6 +119,12 @@ _EXEMPT_FROM_BLOCKING_TAG: dict[str, str] = {
         "`llm:lint`. Same reasoning as NpmCommandHandler -- capability is real "
         "but dormant in a project that has not opted in."
     ),
+    "ScratchUnownedEntryHandler": (
+        "denies only under `scratch.sweep.unowned_entry: block`, and the shipped "
+        "default (and this project's setting) is `advise` -- the same deliberate "
+        "warn-first shape as PlanQaCommitGateHandler. Its own guidance names the "
+        "block mode; rendering it BLOCKING would overstate a default installation."
+    ),
 }
 
 

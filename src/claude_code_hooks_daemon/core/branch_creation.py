@@ -49,6 +49,14 @@ from claude_code_hooks_daemon.core.branch_park import (
     park_marked_refs,
     read_park_records,
 )
+from claude_code_hooks_daemon.core.branch_stacks import (
+    WorkStack,
+    WorkUnit,
+    group_stacks,
+    read_tip_ancestry,
+    stack_line,
+)
+from claude_code_hooks_daemon.core.branch_stacks import open_work_charge as charge_streams
 from claude_code_hooks_daemon.daemon.branch_safety import TIER_UNPROVEN, matches_any_glob
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
@@ -206,6 +214,8 @@ class _Work:
     stale: bool = False
     #: The display label of the ref named ``name`` (see ``_display_label``).
     label: Mapping[str, str | None] = field(default_factory=dict)
+    #: Every tip of the refs that join this work (stack grouping reads them).
+    tips: frozenset[str] = frozenset()
 
 
 #: The public name of one connected piece of work, for modules that read ``work_pools``.
@@ -443,6 +453,18 @@ def _owned_refs(repo: Path, refs: list[_Ref]) -> list[_Ref]:
     ]
 
 
+def _default_targets(config: BranchesConfig, refs: list[_Ref], default: str | None) -> list[str]:
+    """The default branch's refs that exist (remote-tracking first, then local)."""
+    if default is None:
+        return []
+    listed = {ref.refname for ref in refs}
+    return [
+        ref
+        for ref in (f"{_REMOTES}{config.remote}/{default}", f"{_HEADS}{default}")
+        if ref in listed
+    ]
+
+
 def _merged_refnames(
     repo: Path, config: BranchesConfig, refs: list[_Ref], default: str | None
 ) -> set[str]:
@@ -452,14 +474,7 @@ def _merged_refnames(
     set, which leaves every branch in the pool its other facts decide: the
     guard then over-counts open work rather than under-counting it.
     """
-    if default is None:
-        return set()
-    listed = {ref.refname for ref in refs}
-    targets = [
-        ref
-        for ref in (f"{_REMOTES}{config.remote}/{default}", f"{_HEADS}{default}")
-        if ref in listed
-    ]
+    targets = _default_targets(config, refs, default)
     if not targets:
         return set()
     namespaces = [_HEADS.rstrip("/"), f"{_REMOTES}{config.remote}"]
@@ -493,14 +508,7 @@ def _carried_refnames(
     unpark trailer is read by one batched listing, paid only when some unmerged ref is
     not already known to be parked.
     """
-    if default is None:
-        return set()
-    listed = {ref.refname for ref in refs}
-    targets = [
-        ref
-        for ref in (f"{_REMOTES}{config.remote}/{default}", f"{_HEADS}{default}")
-        if ref in listed
-    ]
+    targets = _default_targets(config, refs, default)
     if not targets:
         return set()
     unmerged = [ref for ref in work_refs if ref.refname not in merged]
@@ -636,6 +644,7 @@ def _work_groups(
                     (_display_label(ref, labels or {}) for ref in group if ref.name == name),
                     {},
                 ),
+                tips=frozenset(ref.tip for ref in group),
             )
         )
     return groups
@@ -659,27 +668,46 @@ def work_rank(work: _Work) -> int:
 
 def _cap_lines(
     groups: list[_Work],
+    stacks: tuple[WorkStack, ...],
+    open_count: int,
     config: BranchesConfig,
     now: float,
     worktrees: Mapping[str, Path] | None,
 ) -> tuple[list[str], list[str]]:
-    """``(lines, fixes)`` for the open-work cap."""
-    ordered = sorted(groups, key=lambda work: (work_rank(work), work.committed, work.name))
+    """``(lines, fixes)`` for the open-work cap: one line per stream, a stack as one line."""
+    by_name = {work.name: work for work in groups}
+    # Each stream is listed by its bottom link, the one to land (or close) first.
+    ordered = sorted(
+        stacks,
+        key=lambda stack: (
+            work_rank(by_name[stack.bottom]),
+            by_name[stack.bottom].committed,
+            stack.bottom,
+        ),
+    )
     lines = [
-        f"Open work branches: {len(groups)} (cap {config.effective_wip_cap()}). "
-        f"Finish (merge) one, {POOL_PARK_CLAUSE}, or delete it ({POOL_DELETE_CONDITION}), "
-        "before starting another:"
+        f"Open work branches: {open_count} (cap {config.effective_wip_cap()}; a stack of "
+        f"dependent branches counts once up to branches.wip.stack_max_depth "
+        f"{config.wip.stack_max_depth}). Finish (merge) one, {POOL_PARK_CLAUSE}, or delete "
+        f"it ({POOL_DELETE_CONDITION}), before starting another:"
     ]
     park = daemon_cli_command_for_docs("branch-park")
     fixes: list[str] = []
-    for work in ordered[:DENY_LIST_LIMIT]:
+    for stack in ordered[:DENY_LIST_LIMIT]:
+        work = by_name[stack.bottom]
         group = work.label.get("group")
         # Merging is the better outcome, so a snapshot action wins; without one the
         # always-valid way out is a park, which keeps the work and frees the slot.
         action = work.label.get("action") or f"{park} {work.name} --reason ..."
         fixes.append(action)
         suffix = f"  [{group}]" if group else ""
-        lines.append(f"  - {_detail(work, now, worktrees)}{suffix}  -> {action}")
+        if stack.depth > 1:
+            what = (
+                f"{stack_line(stack, config.wip.stack_max_depth)}; {_detail(work, now, worktrees)}"
+            )
+        else:
+            what = _detail(work, now, worktrees)
+        lines.append(f"  - {what}{suffix}  -> {action}")
     if len(ordered) > DENY_LIST_LIMIT:
         lines.append(f"  ... and {len(ordered) - DENY_LIST_LIMIT} more")
     lines.append(BRANCH_LIMIT_PRINCIPLE)
@@ -886,6 +914,55 @@ def _pool_groups(
     return _work_groups(work_refs, merged, labels, carried)
 
 
+def _open_stacks(
+    repo: Path,
+    config: BranchesConfig,
+    refs: list[_Ref],
+    default: str | None,
+    open_groups: list[_Work],
+) -> tuple[WorkStack, ...]:
+    """The open groups' streams (Plan 00594 Task 4.6); unknown ancestry groups nothing."""
+    units = [WorkUnit(work.name, work.tips) for work in open_groups]
+    ancestry = None
+    if len(units) > 1:
+        tips = frozenset(tip for unit in units for tip in unit.tips)
+        ancestry = read_tip_ancestry(repo, tips, _default_targets(config, refs, default))
+    return group_stacks(units, ancestry)
+
+
+@dataclass(frozen=True)
+class PoolsReading:
+    """Each pool's work groups and the count it holds against its cap."""
+
+    groups: dict[Pool, list[_Work]]
+    counts: dict[Pool, int]
+    #: The open pool's streams, stacked branches grouped.
+    open_stacks: tuple[WorkStack, ...] = ()
+
+
+def read_pools(repo: Path, config: BranchesConfig, *, labels: Labels | None = None) -> PoolsReading:
+    """The work groups and counts of each pool as the creation guard reads them.
+
+    The open count is :func:`branch_stacks.open_work_charge` over the open streams,
+    the one function the sweep's :func:`branch_sweep.pool_count` reads too.
+
+    Raises:
+        RuntimeError: git could not list the refs.
+    """
+    read = _read_refs(repo, config)
+    if isinstance(read, str):
+        raise RuntimeError(f"git for-each-ref failed: {read}")
+    refs, default = read
+    groups: dict[Pool, list[_Work]] = {pool: [] for pool in Pool}
+    for work in _pool_groups(repo, config, refs, default, labels or {}):
+        if work.pool is not None:
+            groups[work.pool].append(work)
+    stacks = _open_stacks(repo, config, refs, default, groups[Pool.OPEN])
+    counts = {pool: len(works) for pool, works in groups.items()}
+    counts[Pool.OPEN] = charge_streams(stacks, config.wip.stack_max_depth)
+    return PoolsReading(groups, counts, stacks)
+
+
 def work_pools(
     repo: Path, config: BranchesConfig, *, labels: Labels | None = None
 ) -> dict[Pool, list[_Work]]:
@@ -898,15 +975,16 @@ def work_pools(
     Raises:
         RuntimeError: git could not list the refs.
     """
-    read = _read_refs(repo, config)
-    if isinstance(read, str):
-        raise RuntimeError(f"git for-each-ref failed: {read}")
-    refs, default = read
-    found: dict[Pool, list[_Work]] = {pool: [] for pool in Pool}
-    for work in _pool_groups(repo, config, refs, default, labels or {}):
-        if work.pool is not None:
-            found[work.pool].append(work)
-    return found
+    return read_pools(repo, config, labels=labels).groups
+
+
+def open_work_charge(repo: Path, config: BranchesConfig, *, labels: Labels | None = None) -> int:
+    """The open-work count the creation guard and the preflight judge the cap by.
+
+    Raises:
+        RuntimeError: git could not list the refs.
+    """
+    return read_pools(repo, config, labels=labels).counts[Pool.OPEN]
 
 
 def creation_report(
@@ -953,8 +1031,10 @@ def creation_report(
     labels = labels or {}
     all_groups = _pool_groups(repo, config, refs, default, labels)
     groups = [work for work in all_groups if work.pool == Pool.OPEN]
+    stacks = _open_stacks(repo, config, refs, default, groups)
+    open_count = charge_streams(stacks, config.wip.stack_max_depth)
     moment = time.time() if now is None else now
-    over_cap = config.wip.mode != "off" and len(groups) >= config.effective_wip_cap()
+    over_cap = config.wip.mode != "off" and open_count >= config.effective_wip_cap()
     duplicates = (
         _duplicates(new_name, all_groups, config.remote)
         if new_name and config.duplicates.mode == "warn"
@@ -983,13 +1063,13 @@ def creation_report(
         )
         sections.append(ReportSection(None, False, True, duplicate_lines))
     if over_cap:
-        lines, fixes = _cap_lines(groups, config, moment, worktrees)
+        lines, fixes = _cap_lines(groups, stacks, open_count, config, moment, worktrees)
         sections.append(
             ReportSection(
                 RuleID.BRANCH_WIP_CAP,
                 # Creation is a backstop: below cap + grace the cap only warns.
                 config.wip.mode == "block"
-                and len(groups) >= config.effective_wip_cap() + config.wip.creation_grace,
+                and open_count >= config.effective_wip_cap() + config.wip.creation_grace,
                 True,
                 tuple(lines),
                 tuple(fixes),

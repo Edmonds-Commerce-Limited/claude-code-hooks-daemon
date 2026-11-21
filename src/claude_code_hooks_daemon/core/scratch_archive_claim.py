@@ -76,6 +76,8 @@ class Node:
     ctime_ns: int
     mtime_ns: int
     size: int
+    uid: int = -1
+    gid: int = -1
 
 
 @dataclass(frozen=True)
@@ -132,6 +134,8 @@ def _node(rel: str, info: os.stat_result) -> Node:
         ctime_ns=info.st_ctime_ns,
         mtime_ns=info.st_mtime_ns,
         size=info.st_size,
+        uid=info.st_uid,
+        gid=info.st_gid,
     )
 
 
@@ -197,6 +201,9 @@ def walk_tree(
         top = os.lstat(name, dir_fd=parent_fd)
     except OSError as exc:
         raise WalkRefused(f"cannot lstat {name!r}: {exc}") from exc
+    if top.st_dev != os.fstat(parent_fd).st_dev:
+        # The entry is itself a mount point: DESIGN section 5.3 gives it no action.
+        raise WalkRefused(f"{name!r} is on a second device (a mount point)")
     nodes = [_node("", top)]
     if not stat.S_ISDIR(top.st_mode):
         return TreeListing(tuple(nodes))

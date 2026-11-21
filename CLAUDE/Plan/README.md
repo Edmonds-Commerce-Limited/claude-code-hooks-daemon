@@ -14,13 +14,11 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - In Progress (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
 
-- [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - In Progress (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; open questions ruled under the owner's delegation in RULINGS.md: the verdict never unlocks alone, the guard must also verify a recovery bundle; local delete only; slice 1 built: core module green, delete-path tests committed red for slice 2)
+- [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - In Progress (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work; open questions ruled under the owner's delegation in RULINGS.md: the verdict never unlocks alone, the guard must also verify a recovery bundle; local delete only; merged to main (69e375788), success criteria met; open: review sign-off of 8260463ff/09e744603 and CI green on main)
 
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
 
 - [00614: secret guard resolves links against hook cwd](00614-secret-guard-resolves-links-against-hook-cwd/PLAN.md) - In Progress (found by the 00613 probe: a relative Bash token such as `cat link` is resolved against the daemon's cwd `/`, so a link to a protected file passes; also a directory-link grep and a glob under a directory link; fix test-first and fail closed)
-
-- [00613: worktree link secret verb](00613-worktree-link-secret-verb/PLAN.md) - In Progress (peer report: the secret guard denies a relative symlink to a protected file made inside a worktree, which a peer workflow needs; the owner approved linking, link mode only: config seeding plus `hooks-daemon seed-worktree <worktree>` for a hand-made worktree, no agent-invocable verb, copy mode refused for a protected source, reads through a link still denied; built on its branch, security review pending)
 
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
@@ -111,6 +109,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 - [00453: supervisor modal overlay](00453-supervisor-modal-overlay/PLAN.md) - Not Started (the status-line banner from Plan 00173/00318 is a one-line TTL notification and structurally cannot hold history; this adds a hotkey-summoned inspection surface costing no model turn, no transcript entry and no status-line space — gated on the owner choosing a hotkey, F12 and F3 already rejected) **Blocked on: the owner must choose a hotkey (F12 and F3 already rejected).**
 
 ### Later
+
+- [00629: recovery copy advisory reject route](00629-recovery-copy-advisory-reject-route/PLAN.md) - Not Started (follow-up of 00620 Task 3.1, RULINGS Q6: `recovery_copy_advisory` stops advising `refs/archive/<name>` and points at the no-value reject route, whose verified bundle is the recovery copy; advice and docs only, no guard change)
 
 - [00129: Wire llm-friendly-qa-wrappers in as a Major Dependency](00129-llm-qa-wrappers-integration/PLAN.md) - Not Started
 
@@ -206,6 +206,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00613: worktree link secret verb](Completed/00613-worktree-link-secret-verb/PLAN.md) - Complete at merge `69e375788` + `2f1c14e80` (live-daemon check) + the archiving commit (a protected file is seeded into a worktree as a link from the committed seed list, by the creation hook or `seed-worktree`; copy refused; reads through the link denied on a live daemon, N683 to N685 open; release notes 009, 019; peer reply drafted, owner to send)
+
 - [00621: actions qa ci advisory and workflow lint on edit](Completed/00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - Complete at merge `4f97728de` + the archiving commit, shipping in v3.76.0 (a `.github/workflows/` file is run through the optional `actions-qa` linter on edit and at commit, and a session-start advisory suggests the linter; release note 013 and a truth-change entry recorded)
 
 - [00628: daemon socket path too long from init sh](Completed/00628-daemon-socket-path-too-long-from-init-sh/PLAN.md) - Complete at merge `2628d4965`, shipped in v3.76.0 (live defect: a long project path denied every tool call because init.sh forced an over-limit socket path; one path-fitting function now decides every socket and PID path, the discovery file is written after bind, the short fallback root is private; release note 006; follow-up N681)
@@ -264,8 +266,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00583: branch guard notices state intent and action](Completed/00583-branch-guard-notices-state-intent-and-action/PLAN.md) - Complete at `d60da0fda` (merged via `7d954f213`; main CI run 42682133539, full suite, success) + the archiving commit (GitHub #192, closed: the dormancy Stop line, `branch-sweep`'s Dormant section and the `wip.cap` deny each carry `BRANCH_LIMIT_PRINCIPLE` and a next action per branch, and the session is told to take that work on first; release note 018)
 
-- [00581: provision repairs a stale venv](Completed/00581-provision-repairs-a-stale-venv/PLAN.md) - Complete at `cfa601263` (CI run 42650039659 success) + the archiving commit (GitHub #168, closed: at the expected version `provision.sh` checks the venv's lock hash; a foreground run repairs a stale venv through the bootstrap repair, a background run names `hooks-daemon repair`, an unreadable hash counts as stale; release note 017)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -319,9 +319,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 628 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 629 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 523 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 524 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
 - **Active**: 81 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 

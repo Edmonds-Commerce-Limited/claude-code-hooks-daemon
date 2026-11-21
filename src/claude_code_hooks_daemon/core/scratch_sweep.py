@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.core.scratch_filing import (
 from claude_code_hooks_daemon.core.scratch_liveness import LivenessInputs, entry_liveness
 from claude_code_hooks_daemon.core.scratch_references import (
     References,
+    ReferenceSet,
     build_references,
 )
 from claude_code_hooks_daemon.core.scratch_repos import (
@@ -55,12 +56,19 @@ from claude_code_hooks_daemon.core.scratch_repos import (
     classify_entry,
     read_small_regular_file,
 )
+from claude_code_hooks_daemon.core.scratch_session import (
+    MANIFEST_NAME,
+    is_session_dir_name,
+    read_manifest,
+)
 from claude_code_hooks_daemon.core.scratch_verdict import (
+    KEEP_MARKER,
     NOT_EVALUATED,
     Judgement,
     Proof,
     RepositoryMarker,
     Verdict,
+    has_keep_marker,
     judge,
     uncovered_nodes,
 )
@@ -108,6 +116,7 @@ def liveness_unknown_reason(inputs: LivenessInputs) -> str:
 #: Table order: what needs a human first, what is in use last.
 _TABLE_ORDER = (
     Verdict.STUCK,
+    Verdict.KEPT,
     Verdict.PROTECTED,
     Verdict.REFERENCED,
     Verdict.UNCERTAIN,
@@ -171,6 +180,14 @@ class EntryRow:
     #: Where the entry could be filed, and the ``mv -n`` that would do it (empty: none).
     filing_destination: str = ""
     filing_command: str = ""
+    #: :attr:`Judgement.ttl_hold`: set only on a LIVE row held by its TTL alone.
+    ttl_hold: Verdict | None = None
+    ttl_hold_proofs: tuple[Proof, ...] = ()
+
+
+def pending_verdict(row: EntryRow) -> Verdict:
+    """The verdict an action would act on: a TTL-held row's ``ttl_hold``, else its verdict."""
+    return row.ttl_hold if row.ttl_hold is not None else row.verdict
 
 
 @dataclass(frozen=True)
@@ -183,6 +200,24 @@ class SweepReport:
     incomplete_reasons: tuple[str, ...]
     notes: tuple[str, ...]
     not_evaluated: tuple[str, ...] = NOT_EVALUATED
+    #: One report per session directory, whose children are its entries (Task 4.3).
+    sessions: tuple[SweepReport, ...] = ()
+    #: A session sub-report's ``(st_dev, st_ino)``: the directory it listed, checked by apply.
+    identity: tuple[int, int] | None = None
+
+
+@dataclass(frozen=True)
+class _Container:
+    """A session directory judged as a sub-root: what overrules its children, and their TTLs."""
+
+    #: ``(verdict, reason)`` pairs computed from the container itself, never from its row.
+    holds: tuple[tuple[Verdict, str], ...]
+    #: Why a DISPOSABLE child cannot be proved so; "" when nothing says so.
+    unproved: str
+    #: TTL hours ``scratch new --ttl-hours`` recorded per child.
+    recorded_ttl: dict[str, int]
+    #: ``(st_dev, st_ino)`` of the directory the parent judged a session directory.
+    identity: tuple[int, int] | None = None
 
 
 def _relative(root: Path, project_root: Path) -> str | None:
@@ -229,7 +264,42 @@ def run_sweep(
     so every due entry is STUCK: nothing can be proved about tracked files).
     ``plan_dir`` is the project's plan directory, indexed once for filing
     proposals (None: no plan folder is proposed).
+
+    Each real session directory that is not itself a repository is judged again
+    as a sub-root of its own (``SweepReport.sessions``): its children are the
+    entries, one level only (Task 4.3).
     """
+    return _run(
+        sweep_root,
+        _Context(config, now, budget, inputs, project_root, project_git, scandir, plan_dir),
+        hash_budget or HashBudget(),
+        None,
+    )
+
+
+@dataclass(frozen=True)
+class _Context:
+    """What every sub-root of one sweep shares."""
+
+    config: ScratchConfig
+    now: float
+    budget: WalkBudget
+    inputs: LivenessInputs
+    project_root: Path
+    project_git: ProjectGit | None
+    scandir: ScandirFn
+    plan_dir: str | None
+
+
+def _run(
+    sweep_root: SweepRoot,
+    ctx: _Context,
+    hashing: HashBudget,
+    container: _Container | None,
+) -> SweepReport:
+    """One root's report; ``container`` is set when the root is a session directory."""
+    config, now, budget, inputs = ctx.config, ctx.now, ctx.budget, ctx.inputs
+    project_root, project_git, scandir = ctx.project_root, ctx.project_git, ctx.scandir
     root = sweep_root.path
     notes: list[str] = []
     liveness_unknown = liveness_unknown_reason(inputs)
@@ -247,13 +317,16 @@ def run_sweep(
     listing = list_entries(root, scandir=scandir)
     if not listing.complete:
         return SweepReport(str(root), (), False, (listing.reason,), tuple(notes))
+    if container is not None and _identity(root) != container.identity:
+        # Swapped between the parent's check and this listing: what was listed is not it.
+        changed = f"session directory {root.name} changed while it was listed"
+        return SweepReport(str(root), (), False, (changed,), tuple(notes))
     resolved_root = root.resolve()
     relative_root = _relative(resolved_root, project_root.resolve())
     tracked = _tracked_by_entry(project_git, project_root, relative_root)
     references = build_references(project_git, relative_root)
-    hashing = hash_budget or HashBudget()
     filing = _Filing(
-        build_plan_index(project_root, plan_dir),
+        build_plan_index(project_root, ctx.plan_dir),
         project_root,
         relative_root,
         config.filing.max_bytes,
@@ -266,7 +339,7 @@ def run_sweep(
             resolved_root,
             relative_root,
             name,
-            _EntryClock(ttl_hours, max(config.max_lifetime_hours, ttl_hours), now),
+            _clock(name, ttl_hours, config.max_lifetime_hours, now, container),
             budget,
             inputs,
             scandir,
@@ -279,9 +352,27 @@ def run_sweep(
             filing,
         )
         for name in listing.value
-        if name not in sweep_root.skip
+        if name not in sweep_root.skip and not (container and _container_file(name))
     ]
-    rows, dependency_unknown = _with_dependencies(judged)
+    rows, dependency_unknown, depended_on = _with_dependencies(judged)
+    sessions: list[SweepReport] = []
+    if container is None:
+        for row in rows:
+            identity = _splits(root, row)
+            if identity is not None:
+                held = _container_holds(
+                    root,
+                    row.name,
+                    _Parent(resolved_root, relative_root, references, depended_on),
+                    inputs,
+                    dependency_unknown,
+                )
+                held = dataclasses.replace(held, identity=identity)
+                sub_root = dataclasses.replace(sweep_root, path=root / row.name, skip=(), notes=())
+                sessions.append(_run(sub_root, ctx, hashing, held))
+        rows = [_held_if_session(root, row) for row in rows]
+    else:
+        rows = [_carried_down(row, container) for row in rows]
     if hashing.spent:
         notes.append(P3_BUDGET_NOTE)
     if rows:
@@ -302,7 +393,20 @@ def run_sweep(
         reasons.append(references.unknown)
     if dependency_unknown:
         reasons.append(dependency_unknown)
-    return SweepReport(str(root), tuple(rows), not reasons, tuple(reasons), tuple(notes))
+    reasons.extend(
+        f"session directory {Path(sub.root).name} is incomplete"
+        for sub in sessions
+        if not sub.complete
+    )
+    return SweepReport(
+        str(root),
+        tuple(rows),
+        not reasons,
+        tuple(reasons),
+        tuple(notes),
+        sessions=tuple(sessions),
+        identity=None if container is None else container.identity,
+    )
 
 
 @dataclass(frozen=True)
@@ -315,6 +419,7 @@ class _Pointers:
 
 
 _GITDIR_PREFIX = "gitdir:"
+_ACTIONABLE = frozenset({Verdict.DISPOSABLE, Verdict.UNCERTAIN})
 _DEPENDABLE = frozenset({Verdict.DISPOSABLE, Verdict.UNCERTAIN, Verdict.REFERENCED})
 
 
@@ -421,10 +526,11 @@ def _into(
 
 def _with_dependencies(
     judged: list[tuple[EntryRow, _Pointers]],
-) -> tuple[list[EntryRow], str]:
+) -> tuple[list[EntryRow], str, frozenset[str]]:
     """F-BYPS 2: protect an entry another entry's repository depends on.
 
-    Returns the rows and, when some pointer could not be read, the incomplete reason.
+    Returns the rows, the incomplete reason when some pointer could not be read,
+    and every entry name some pointer leads into (whatever that entry's verdict).
     """
     dependents: dict[str, list[str]] = {}
     unknown: list[str] = []
@@ -441,21 +547,183 @@ def _with_dependencies(
     rows: list[EntryRow] = []
     for row, _pointers in judged:
         pointing = sorted(dependents.get(row.name, ()))
-        if pointing and row.verdict in _DEPENDABLE:
+        if pointing and pending_verdict(row) in _DEPENDABLE:
             more = f" (and {len(pointing) - 1} more)" if len(pointing) > 1 else ""
             row = _overruled(
                 row,
                 Verdict.PROTECTED,
                 f"another entry's repository depends on this one: {pointing[0]}{more}",
             )
-        elif reason and row.verdict is Verdict.DISPOSABLE:
+        elif reason and pending_verdict(row) is Verdict.DISPOSABLE:
             row = _overruled(row, Verdict.STUCK, f"not judged: {reason}")
         rows.append(row)
-    return rows, reason
+    return rows, reason, frozenset(dependents)
+
+
+@dataclass(frozen=True)
+class _Parent:
+    """What the root above a session directory knows about it."""
+
+    resolved_root: Path
+    relative_root: str | None
+    references: ReferenceSet
+    #: Names of the root's entries another entry's repository points into.
+    depended_on: frozenset[str]
+
+
+def _splits(root: Path, row: EntryRow) -> tuple[int, int] | None:
+    """The identity of ``row`` when it is a real session directory that is not a repository.
+
+    A repository at the session root keeps being judged whole (and held by
+    :func:`_held_if_session`), so its children are never entries. None: not split.
+    """
+    if not is_session_dir_name(row.name) or row.kind is not NodeKind.DIRECTORY:
+        return None
+    identity = _identity(root / row.name)
+    if isinstance(identity, _NoIdentity) or _is_repository(root / row.name):
+        return None
+    return identity
+
+
+@dataclass(frozen=True)
+class _NoIdentity:
+    """Why a path has no directory identity; never equal to an ``(st_dev, st_ino)`` pair."""
+
+    reason: str
+
+
+def _identity(directory: Path) -> tuple[int, int] | _NoIdentity:
+    """``(st_dev, st_ino)`` of a real directory by ``lstat``; why not, for anything else."""
+    try:
+        info = os.lstat(directory)
+    except OSError as exc:
+        return _NoIdentity(f"{directory} could not be read: {type(exc).__name__}")
+    if not stat.S_ISDIR(info.st_mode):
+        return _NoIdentity(f"{directory} is not a directory")
+    return (info.st_dev, info.st_ino)
+
+
+def _is_repository(directory: Path) -> bool:
+    """A ``.git`` of any type, or the bare shape (``HEAD`` and ``objects``); ``lstat`` only."""
+    return any(os.path.lexists(directory / name) for name in (".git", "HEAD", "objects"))
+
+
+#: The manifest's in-flight replacement (``scratch_session._replace_file``).
+_MANIFEST_TEMP_PREFIX = f".{MANIFEST_NAME}.tmp-"
+
+
+def _container_file(name: str) -> bool:
+    """True for a session directory's own files, which are never its entries."""
+    return name in (MANIFEST_NAME, KEEP_MARKER) or name.startswith(_MANIFEST_TEMP_PREFIX)
+
+
+def _container_holds(
+    root: Path,
+    name: str,
+    parent: _Parent,
+    inputs: LivenessInputs,
+    dependency_unknown: str,
+) -> _Container:
+    """What holds every child of session directory ``name``, computed from the directory itself.
+
+    Never read from the directory's own row: a row that is not due says only
+    LIVE "within its TTL", which hides its keep marker and every protection.
+    """
+    holds: list[tuple[Verdict, str]] = []
+    session = root / name
+    if os.path.lexists(session / KEEP_MARKER):
+        holds.append((Verdict.KEPT, "the session directory holds a keep marker"))
+    resolved = parent.resolved_root / name
+    for pid, cwd in sorted(inputs.cwds.items()):
+        if Path(cwd) == resolved:
+            holds.append(
+                (Verdict.LIVE, f"process {pid} has its working directory at the session directory")
+            )
+            break
+    needles = [str(resolved)]
+    if parent.relative_root:
+        needles.append(f"{parent.relative_root}/{name}")
+    if any(needle in command for command in inputs.background.commands for needle in needles):
+        holds.append((Verdict.LIVE, "a tracked background command names the session directory"))
+    if parent.references.root_sites:
+        holds.append((Verdict.REFERENCED, "a tracked file names the root above the session"))
+    if name in parent.depended_on:
+        holds.append(
+            (Verdict.PROTECTED, "another entry's repository depends on the session directory")
+        )
+    unproved = parent.references.unknown or dependency_unknown
+    manifest = read_manifest(session)
+    recorded = {} if manifest is None else manifest.entries
+    ttls = {key: record.ttl_hours for key, record in recorded.items() if record.ttl_hours}
+    return _Container(tuple(holds), unproved, ttls)
+
+
+def _carried_down(row: EntryRow, container: _Container) -> EntryRow:
+    """A child's row, overruled by the first container hold when it is actionable."""
+    if pending_verdict(row) not in _ACTIONABLE:
+        return row
+    if container.holds:
+        verdict, reason = container.holds[0]
+        return _overruled(row, verdict, reason)
+    if container.unproved and pending_verdict(row) is Verdict.DISPOSABLE:
+        return _overruled(row, Verdict.STUCK, f"not judged: {container.unproved}")
+    return row
+
+
+def _clock(
+    name: str, ttl_hours: int, max_lifetime_hours: int, now: float, container: _Container | None
+) -> _EntryClock:
+    """The entry's clock: a session child's recorded TTL is used when longer, up to the backstop."""
+    lifetime = max(max_lifetime_hours, ttl_hours)
+    recorded = container.recorded_ttl.get(name, 0) if container else 0
+    return _EntryClock(min(max(ttl_hours, recorded), lifetime), lifetime, now)
+
+
+#: Why a session directory is never acted on as one entry (Task 4.3).
+SESSION_HELD_REASON = (
+    "session directory: a container whose children are the entries, never packed as one"
+)
+
+#: Why a session name walked as a directory, then found otherwise, is held.
+SESSION_CHANGED_REASON = (
+    "session directory walked as a directory but no longer a directory: held, it changed"
+)
+
+
+def _held_if_session(root: Path, row: EntryRow) -> EntryRow:
+    """A real session directory's actionable row, made STUCK so ``--apply`` never packs it whole.
+
+    It is still walked and judged as one entry first, so its git pointers keep
+    protecting the entries they lead into. A link or a file the walk saw with
+    the name is an ordinary entry. One walked as a directory that the second
+    ``lstat`` cannot read, or finds no longer a directory, is held too (fail
+    closed): it changed under the sweep.
+    """
+    if (
+        not is_session_dir_name(row.name)
+        or row.kind is not NodeKind.DIRECTORY
+        or pending_verdict(row) not in _ACTIONABLE
+    ):
+        return row
+    try:
+        info = os.lstat(root / row.name)
+    except OSError:
+        return _overruled(row, Verdict.STUCK, SESSION_HELD_REASON)
+    if not stat.S_ISDIR(info.st_mode):
+        return _overruled(row, Verdict.STUCK, SESSION_CHANGED_REASON)
+    return _overruled(row, Verdict.STUCK, SESSION_HELD_REASON)
 
 
 def _overruled(row: EntryRow, verdict: Verdict, reason: str) -> EntryRow:
-    """``row`` with a new verdict; its proofs and any filing proposal no longer hold."""
+    """``row`` with a new verdict; its proofs and any filing proposal no longer hold.
+
+    A row held by its TTL alone keeps showing LIVE; the overrule lands on its
+    ``ttl_hold``, so pressure mode sees it.
+    """
+    if row.ttl_hold is not None:
+        return dataclasses.replace(
+            row, ttl_hold=verdict, ttl_hold_proofs=(), reasons=(*row.reasons, reason)
+        )
     return dataclasses.replace(
         row,
         verdict=verdict,
@@ -557,6 +825,7 @@ def _judge_entry(
         repos=repos,
         tracked=git.tracked,
         liveness_unknown=liveness_unknown_reason(inputs),
+        keep_reason=_keep_reason(root, stats),
     )
     if judgement.verdict is Verdict.UNCERTAIN:
         judgement = _with_p3(root, walk, age, repos, git, judgement)
@@ -589,8 +858,29 @@ def _judge_entry(
         uncovered_count=judgement.uncovered_count,
         filing_destination=proposal.destination if proposal else "",
         filing_command=proposal.command if proposal else "",
+        ttl_hold=judgement.ttl_hold,
+        ttl_hold_proofs=judgement.ttl_hold_proofs,
     )
     return row, _entry_pointers(root, resolved_root, name, walk)
+
+
+#: The most of a ``.scratch-keep`` file read for its reason.
+_KEEP_REASON_BYTES = 512
+
+
+def _keep_reason(root: Path, stats: EntryStats) -> str:
+    """The first line of the entry's keep marker, printable; "" when absent or unreadable.
+
+    The marker's presence is decided from the walk; this only reads its reason,
+    without following a link, so an unreadable marker still keeps the entry.
+    """
+    if not has_keep_marker(stats):
+        return ""
+    raw = read_small_regular_file(root / stats.name / KEEP_MARKER, _KEEP_REASON_BYTES)
+    if raw is None:
+        return ""
+    first = raw.decode("utf-8", errors="replace").split("\n", 1)[0].strip()
+    return _printable(first)
 
 
 def _protection(
@@ -661,8 +951,12 @@ def render_table(report: SweepReport, *, max_listed: int) -> list[str]:
     counts = _counts(report)
     summary = ", ".join(f"{verdict} {count}" for verdict, count in counts.items())
     lines.append(f"Entries: {len(report.rows)}" + (f" ({summary})" if summary else ""))
-    lines.append("Not evaluated in this phase: " + ", ".join(report.not_evaluated))
+    if report.not_evaluated:
+        lines.append("Not evaluated in this phase: " + ", ".join(report.not_evaluated))
     lines.extend(f"Note: {note}" for note in report.notes)
+    for sub in report.sessions:
+        lines.append("")
+        lines.extend(render_table(sub, max_listed=max_listed))
     if not report.rows:
         return lines
     ordered = sorted(report.rows, key=lambda row: (_TABLE_ORDER.index(row.verdict), row.name))
@@ -726,6 +1020,7 @@ def report_json(report: SweepReport) -> dict[str, Any]:
         "not_evaluated": list(report.not_evaluated),
         "counts": _counts(report),
         "entries": [_row_json(row) for row in report.rows],
+        "sessions": [report_json(sub) for sub in report.sessions],
     }
 
 
@@ -737,6 +1032,7 @@ __all__ = [
     "EntryRow",
     "HashBudget",
     "SweepReport",
+    "pending_verdict",
     "render_table",
     "report_json",
     "run_sweep",

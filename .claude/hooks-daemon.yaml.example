@@ -208,6 +208,18 @@ handlers:
       enabled: true
       priority: 19
 
+    scratch_keep_marker_guard: # `.scratch-keep` pins a scratch entry for ever: only a human writes it
+      enabled: true
+      priority: 18
+
+    scratch_cap_guard:         # Deny new directory trees in scratch at the block cap (scratch.caps)
+      enabled: true
+      priority: 19
+
+    scratch_unowned_entry:     # A new entry directly in a scratch root: advise|block|off via scratch.sweep.unowned_entry
+      enabled: true
+      priority: 46
+
     pip_break_system:      # Blocks pip commands that break system packages
       enabled: true
       priority: 20
@@ -574,6 +586,10 @@ handlers:
 
   # PostToolUse handlers (run after tool execution)
   post_tool_use:
+    scratch_inventory_refresher:  # Plan 00627 Task 5.1: background scratch inventory refresh after a directory-creating command into scratch
+      enabled: true
+      priority: 42
+
     branch_touch_recorder:  # Plan 00558: creator and touch records in git config, read by WorktreeRemove and the stop guard
       enabled: true
       priority: 40
@@ -748,6 +764,10 @@ handlers:
 
     branch_sweep:          # Branch inventory summary: contained nowhere, merged, dormant, count vs branches.wip.cap (Plan 00558)
       enabled: true        # Contained-nowhere on every source, the rest on new sessions; silent when clean
+      priority: 56
+
+    scratch_sweep:         # Creates and announces this session's scratch directory (Plan 00627)
+      enabled: true        # Every source; idempotent per session id
       priority: 56
 
     reference_repo_sweep:  # Freshness of reference clones under untracked/repos (Plan 00401)
@@ -930,8 +950,7 @@ handlers:
         stale_worktree_days: 7        # a worktree whose branch has no commit for this many days is stale
         # Plan 00470 Task 4.1 follow-ups: report-only, nothing is ever deleted. Each
         # finding prints the command a human may choose to run.
-        report_stale_scratch: true    # false drops the old untracked/scratch/ files section
-        stale_scratch_days: 14        # a scratch file not modified for this many days is old (integer >= 1)
+        report_stale_scratch: true    # false drops the scratch-sweep due-entries section (read from its inventory)
         report_gone_branch_refs: true # false drops the refs/integration/changed-green/* of deleted branches
 
     focus_mode_trigger:  # `hooks-daemon focus <task>` / `focus off` at the start of a prompt turns the session's focus mode on or off (Plan 00501)

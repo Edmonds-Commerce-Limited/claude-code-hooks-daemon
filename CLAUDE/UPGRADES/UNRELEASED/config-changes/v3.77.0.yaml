@@ -1,4 +1,4 @@
-# Drafted by Plan 00620 (branches.reject, branch_reject_* handlers) and Plan 00627 (scratch).
+# Drafted by Plan 00620 (branches.reject, branch_reject_* handlers), Plan 00627 (scratch) and Plan 00594 (branches.wip.stack_max_depth).
 version: "3.77.0"
 date: "UNRELEASED"
 
@@ -78,15 +78,29 @@ config_changes:
       migration_note: >-
         Keep it below the terminal subagent_report_size_blocker (15); a handler
         after a terminal one never runs.
+    - key: branches.wip.stack_max_depth
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00594 Task 4.6). A stack of dependent branches (each tip a
+        strict ancestor of the next, local or remote-tracking) counts 1 against
+        branches.wip.cap up to this many links; each link past it counts 1
+        more. Default 5, minimum 1. A fork ends the chain; parked, merged,
+        park-carried and foreign branches never join a stack.
+      example_yaml: |
+        branches:
+          wip:
+            stack_max_depth: 5
     - key: scratch
       recommended: false
       dormant: false
       description: >-
         NEW (Plan 00627). The scratch management block: TTLs, the sweep's
         listing bound, archive retention, the keep bound, the filing size
-        limit and the caps. Only the TTLs and sweep.max_listed are read in
-        this release, by the read-only `hooks-daemon scratch-sweep` report;
-        the other keys are validated and reserved for the phases that act.
+        limit and the caps. `hooks-daemon scratch-sweep` reports by default
+        and, with --apply behind a human's typed confirmation at a terminal,
+        archives then removes due entries; the caps guard writes into
+        scratch. Each sub-key has its own entry below.
       example_yaml: |
         scratch:
           untracked_ttl:
@@ -125,3 +139,78 @@ config_changes:
       example_yaml: |
         scratch:
           untracked_default_ttl: 36h
+    - key: scratch.caps
+      recommended: false
+      dormant: false
+      description: >-
+        Size limits on untracked/scratch/ that warn, then block, before the
+        link index overflows: directories (10000/25000), bytes (1 GiB/4 GiB),
+        entries (500/2000), project_directories as a percentage of the link
+        index's directory cap (50/75), pressure_idle_minutes (30) and mode
+        (block, advise or off; default block). warn must be below block.
+        Past a block figure, a command creating a directory tree under
+        scratch is denied as R-SCRATCH-CAP; a file write never is.
+      example_yaml: |
+        scratch:
+          caps:
+            entries:
+              warn: 300
+              block: 1000
+            mode: advise
+    - key: scratch.sweep.unowned_entry
+      recommended: false
+      dormant: false
+      description: >-
+        What happens when a new file or directory is made directly in a
+        scratch root rather than inside a session directory: advise
+        (default), block or off.
+      example_yaml: |
+        scratch:
+          sweep:
+            unowned_entry: block
+    - key: scratch.archive
+      recommended: false
+      dormant: false
+      description: >-
+        How long `scratch-sweep --apply` holds a packed entry in the archive
+        store before it expires, by verdict: disposable_hours (12) and
+        uncertain_hours (168). `scratch-sweep restore ID` brings one back
+        while it is held.
+      example_yaml: |
+        scratch:
+          archive:
+            uncertain_hours: 336
+    - key: scratch.keep
+      recommended: false
+      dormant: false
+      description: >-
+        Bounds on `scratch-sweep keep ID --reason R`: max_hours (168), the
+        longest one keep may last, and max_keeps (4), how many keeps one
+        archive may carry.
+      example_yaml: |
+        scratch:
+          keep:
+            max_hours: 72
+    - key: scratch.filing
+      recommended: false
+      dormant: false
+      description: >-
+        max_bytes (262144): the largest file the sweep proposes filing into
+        tracked history; a larger one is never proposed.
+      example_yaml: |
+        scratch:
+          filing:
+            max_bytes: 65536
+  removed:
+    - key: handlers.user_prompt_submit.idle_housekeeping_advisory.options.stale_scratch_days
+      description: >-
+        RETIRED (Plan 00627). The idle housekeeping advisory no longer walks
+        untracked/scratch/ for files older than N days and no longer prints a
+        `find ... -delete`: removal on age alone is gone. It now reads the
+        scratch sweep's cached inventory and names the entries due by verdict
+        with the `scratch-sweep` dry run. The option is no longer read or
+        validated.
+      migration_note: >-
+        Delete the key. How long scratch may sit is now scratch.untracked_ttl
+        (scratch: 24h by default); report_stale_scratch still turns the
+        section off.

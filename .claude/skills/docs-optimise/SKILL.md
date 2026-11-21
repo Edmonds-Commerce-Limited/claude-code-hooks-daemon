@@ -36,7 +36,8 @@ rules it applies are cited, not restated:
 
 - **Proposal only.** Everything is written under
   `untracked/scratch/docs-optimise/<run-id>/`. It never edits a tracked file
-  and never adds an allowlist entry.
+  and never adds an allowlist entry. Scratch is swept after 24 hours by
+  default: apply or discard the proposal before then.
 - It never proposes edits to the daemon-injected `<hooksdaemon>` block,
   `CLAUDE.local.md` or files under `~/.claude/`; they are counted, not moved.
 - It owns placement and footprint only. Its report ends by naming `/docs-qa`

@@ -65,6 +65,46 @@ def _judge(
     return judge(walk, age=age, liveness=liveness).verdict
 
 
+class TestKept:
+    """Task 4.4: a ``.scratch-keep`` file at the top of an entry is a human's pin (R15)."""
+
+    def _kept(self, *extra: Node) -> Bounded[EntryStats]:
+        return finished(_stats(Node("e", D, 0), Node("e/.scratch-keep", F, 9), *extra))
+
+    def test_a_marker_makes_a_due_entry_kept_with_its_reason(self) -> None:
+        walk = self._kept(Node("e/a.log", F, 3))
+        judgement = judge(walk, age=_DUE, liveness=(), keep_reason="my notes")
+        assert judgement.verdict is Verdict.KEPT
+        assert judgement.reasons == ("pinned by .scratch-keep: my notes",)
+
+    def test_kept_beats_protected_and_disposable(self) -> None:
+        walk = self._kept(Node("e/a.log", F, 3))
+        judged = judge(walk, age=_DUE, liveness=(), tracked=("e/a.log",))
+        assert judged.verdict is Verdict.KEPT
+
+    def test_a_marker_with_no_reason_still_keeps(self) -> None:
+        judgement = judge(self._kept(), age=_DUE, liveness=())
+        assert judgement.verdict is Verdict.KEPT
+        assert judgement.reasons == ("pinned by .scratch-keep: (no reason given)",)
+
+    def test_live_and_stuck_still_come_first(self) -> None:
+        assert _judge(self._kept(), age=_FRESH) is Verdict.LIVE
+        walk = stopped(_stats(Node("e", D, 0), Node("e/.scratch-keep", F, 1)), "deadline")
+        assert _judge(walk) is Verdict.STUCK
+
+    @pytest.mark.parametrize(
+        "node",
+        [
+            Node("e/.scratch-keep", L, 0),
+            Node("e/.scratch-keep", D, 0, empty=True),
+            Node("e/sub/.scratch-keep", F, 1),
+        ],
+    )
+    def test_only_a_regular_file_at_the_top_counts(self, node: Node) -> None:
+        walk = finished(_stats(Node("e", D, 0), Node("e/sub", D, 0), node))
+        assert _judge(walk) is not Verdict.KEPT
+
+
 class TestLivenessUnknown:
     def test_a_due_entry_is_stuck_when_liveness_is_unknown(self) -> None:
         walk = finished(_stats(Node("a.log", F, 5), kind=F))
@@ -644,7 +684,7 @@ class TestP5:
 
 
 def test_not_evaluated_rungs_are_named() -> None:
-    assert NOT_EVALUATED == ("KEPT",)
+    assert NOT_EVALUATED == ()
 
 
 class TestReferenced:
@@ -682,3 +722,41 @@ class TestReferenced:
         walk = finished(_stats(Node("e", D, 0), Node("e/a.log", F, 1)))
         unknown = References((), "references could not be read")
         assert judge(walk, age=_FRESH, liveness=(), references=unknown).verdict is Verdict.LIVE
+
+
+class TestTtlHold:
+    """LIVE "within its TTL" records what the rest of the ladder says (pressure mode, 5.5)."""
+
+    _walk = staticmethod(
+        lambda: finished(_stats(Node("e", D, 0), Node("e/__pycache__/m.pyc", F, 3)))
+    )
+
+    def test_an_idle_young_entry_holds_its_underlying_verdict(self) -> None:
+        judgement = judge(self._walk(), age=_FRESH, liveness=())
+        assert judgement.verdict is Verdict.LIVE
+        assert judgement.reasons == ("within its TTL",)
+        assert judgement.ttl_hold is Verdict.DISPOSABLE
+        assert judgement.ttl_hold_proofs == (Proof.P2,)
+
+    def test_a_liveness_reason_carries_no_hold(self) -> None:
+        judgement = judge(self._walk(), age=_FRESH, liveness=("process 1",))
+        assert judgement.ttl_hold is None
+
+    def test_a_due_entry_carries_no_hold(self) -> None:
+        assert judge(self._walk(), age=_DUE, liveness=()).ttl_hold is None
+
+    def test_a_reference_holds_a_young_entry(self) -> None:
+        judgement = judge(self._walk(), age=_FRESH, liveness=(), references=References(("a.md:1",)))
+        assert judgement.ttl_hold is Verdict.REFERENCED
+
+    def test_a_tracked_file_holds_a_young_entry(self) -> None:
+        judgement = judge(self._walk(), age=_FRESH, liveness=(), tracked=("e/x",))
+        assert judgement.ttl_hold is Verdict.PROTECTED
+
+    def test_unknown_liveness_holds_a_young_entry(self) -> None:
+        judgement = judge(self._walk(), age=_FRESH, liveness=(), liveness_unknown="no cwd")
+        assert judgement.ttl_hold is Verdict.STUCK
+
+    def test_an_unclassified_repository_holds_a_young_entry(self) -> None:
+        walk = finished(_stats(Node("e", D, 0), git_markers=("e/.git",)))
+        assert judge(walk, age=_FRESH, liveness=()).ttl_hold is Verdict.STUCK

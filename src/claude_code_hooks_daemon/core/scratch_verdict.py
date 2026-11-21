@@ -6,13 +6,16 @@ from a walk that did not finish:
 
 1. LIVE: something uses the entry now, or it is within its TTL. A fresh mtime
    found by a partial walk still proves this: the walk can only have missed a
-   NEWER mtime, never an older one.
+   NEWER mtime, never an older one. An entry LIVE only because it is within
+   its TTL also carries ``ttl_hold``: the verdict the remaining rungs give it.
 2. STUCK: liveness could not be read (no process working directory was
    readable, or some pids were not), the walk did not finish, or a file has
    another name outside the entry. Nothing is concluded about an entry that
    was not read whole.
-3. KEPT: not evaluated in Phase 1 (no keep marker or pause store exists yet).
-   Also STUCK: a repository in the entry could not be classified
+3. KEPT: a regular ``.scratch-keep`` file directly in the entry (a human's
+   pin, R15; an agent may not create one, ``R-SCRATCH-KEEP-MARKER``). An
+   agent's bounded pause is a keep on the ARCHIVE, not an entry verdict.
+   Also STUCK, after KEPT: a repository in the entry could not be classified
    (:mod:`~claude_code_hooks_daemon.core.scratch_repos`), or the project's
    tracked files could not be listed, or whether a tracked file names the entry
    is unknown (:mod:`~claude_code_hooks_daemon.core.scratch_references`).
@@ -38,6 +41,7 @@ regular file or an empty directory.
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 import fnmatch
 import re
@@ -86,7 +90,10 @@ REGENERABLE_DIRECTORIES: tuple[str, ...] = (
 VENV_MARKER = "pyvenv.cfg"
 
 #: The rungs of the order not evaluated yet, in order.
-NOT_EVALUATED: tuple[str, ...] = ("KEPT",)
+NOT_EVALUATED: tuple[str, ...] = ()
+
+#: A regular file of this name at the top of an entry pins it for ever (R15).
+KEEP_MARKER = ".scratch-keep"
 
 #: How many uncovered paths a judgement keeps, so a huge entry stays small in memory.
 MAX_UNCOVERED = 5
@@ -97,6 +104,7 @@ class Verdict(enum.Enum):
 
     LIVE = "LIVE"
     STUCK = "STUCK"
+    KEPT = "KEPT"
     PROTECTED = "PROTECTED"
     REFERENCED = "REFERENCED"
     DISPOSABLE = "DISPOSABLE"
@@ -135,6 +143,12 @@ class Judgement:
     #: For UNCERTAIN, the first uncovered paths (at most :data:`MAX_UNCOVERED`).
     uncovered: tuple[str, ...] = ()
     uncovered_count: int = 0
+    #: For LIVE "within its TTL" only: the verdict the full ladder gives the entry
+    #: as if it were due. None for every other judgement, so an entry LIVE for a
+    #: liveness reason (process, cwd, background command) never carries one.
+    #: Pressure mode (DESIGN.md section 5.5) acts on this, never on LIVE itself.
+    ttl_hold: Verdict | None = None
+    ttl_hold_proofs: tuple[Proof, ...] = ()
 
 
 #: Top-level files a venv tool writes beside ``pyvenv.cfg`` (``python -m venv``, uv).
@@ -300,8 +314,19 @@ def uncovered_nodes(nodes: Sequence[Node], repos: RepoFindings | None) -> list[N
 #: Said when an entry holds a repository and no classification was run.
 NOT_CLASSIFIED = "a repository in the entry was not classified (the project's git was not read)"
 
+#: The reason of an entry held by time alone (its ``ttl_hold`` says what it would be when due).
+WITHIN_TTL = "within its TTL"
+
 #: Said when the project's tracked files under the root could not be listed.
 TRACKED_UNKNOWN = "the project's tracked files could not be listed"
+
+
+def has_keep_marker(stats: EntryStats) -> bool:
+    """True when the walk found a regular :data:`KEEP_MARKER` directly in the entry."""
+    wanted = f"{stats.name}/{KEEP_MARKER}"
+    return stats.kind is NodeKind.DIRECTORY and any(
+        node.path == wanted and node.kind is NodeKind.FILE for node in stats.nodes
+    )
 
 
 def judge(
@@ -314,6 +339,7 @@ def judge(
     tracked: tuple[str, ...] | None = (),
     p3: frozenset[str] = frozenset(),
     liveness_unknown: str = "",
+    keep_reason: str = "",
 ) -> Judgement:
     """Judge one walked entry, given its age and any liveness reasons.
 
@@ -324,6 +350,8 @@ def judge(
     ``tracked`` lists the entry's paths the project tracks (None: unknown).
     ``p3`` holds the regular files whose blob the remote's default tip holds.
     ``references`` is required, so no caller can skip the REFERENCED rung.
+    ``keep_reason`` is the first line of the entry's :data:`KEEP_MARKER`, read
+    by the caller; whether the entry is KEPT is decided from the walk alone.
     """
     stats = walk.value
     markers = stats.git_markers
@@ -338,7 +366,24 @@ def judge(
     if liveness:
         return result(Verdict.LIVE, *liveness)
     if not age.due:
-        return result(Verdict.LIVE, "within its TTL")
+        # Held by time alone: judge the rest of the ladder so pressure mode can
+        # tell an idle young entry from one a keep marker, reference or repo holds.
+        underlying = judge(
+            walk,
+            age=dataclasses.replace(age, due=True),
+            liveness=liveness,
+            references=references,
+            repos=repos,
+            tracked=tracked,
+            p3=p3,
+            liveness_unknown=liveness_unknown,
+            keep_reason=keep_reason,
+        )
+        return dataclasses.replace(
+            result(Verdict.LIVE, WITHIN_TTL),
+            ttl_hold=underlying.verdict,
+            ttl_hold_proofs=underlying.proofs,
+        )
     if liveness_unknown:
         return result(Verdict.STUCK, f"liveness unknown: {liveness_unknown}")
     if not walk.complete:
@@ -353,6 +398,10 @@ def judge(
         return result(Verdict.STUCK, TRACKED_UNKNOWN)
     if references.unknown:
         return result(Verdict.STUCK, references.unknown)
+    if has_keep_marker(stats):
+        return result(
+            Verdict.KEPT, f"pinned by {KEEP_MARKER}: {keep_reason or '(no reason given)'}"
+        )
     if markers and repos is None:
         return result(Verdict.STUCK, NOT_CLASSIFIED)
     if repos is not None and repos.stuck:
@@ -385,6 +434,7 @@ def judge(
 
 __all__ = [
     "CONSUMED_SHAPES",
+    "KEEP_MARKER",
     "MAX_UNCOVERED",
     "NOT_CLASSIFIED",
     "NOT_EVALUATED",
@@ -395,10 +445,12 @@ __all__ = [
     "VENV_LIB_LINKS",
     "VENV_MARKER",
     "VENV_SCRIPT_DIRECTORIES",
+    "WITHIN_TTL",
     "Judgement",
     "Proof",
     "RepositoryMarker",
     "Verdict",
+    "has_keep_marker",
     "judge",
     "uncovered_nodes",
 ]

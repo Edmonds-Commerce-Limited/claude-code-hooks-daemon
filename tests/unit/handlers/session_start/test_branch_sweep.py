@@ -310,13 +310,13 @@ class TestPoolPressureReport:
         self._two_open(repo)
         text = "\n".join(_run(self._handler(wip={"cap": 1}), repo, _new()))
         assert "BRANCH POOLS" in text
-        assert "Open work branches: 2 (cap 1)" in text
+        assert "Open work branches: 2 (cap 1;" in text
         assert "branch-park" in text
 
     def test_a_new_session_states_the_open_work_cap_once(self, repo: Path) -> None:
         self._two_open(repo)
         text = "\n".join(_run(self._handler(wip={"cap": 1}), repo, _new()))
-        assert "Open work branches: 2 (cap 1)" in text
+        assert "Open work branches: 2 (cap 1;" in text
         assert "Open work: 2 of 1" not in text
 
     def test_lists_every_blocker_not_only_the_first(self, repo: Path) -> None:
@@ -370,7 +370,7 @@ class TestPoolLadderAtSessionStart:
         _git(repo, "checkout", "-q", "-b", "lost")
         _commit(repo, "lost", days_ago=10)
         _git(repo, "checkout", "-q", "main")
-        monkeypatch.setattr(branch_ladder, "work_pools", boom)
+        monkeypatch.setattr(branch_ladder, "read_pools", boom)
         text = "\n".join(_run(self._handler(wip={"cap": 3}), repo, _new()))
         assert "CONTAINED NOWHERE: lost" in text
         assert "BRANCH POOL" not in text

@@ -40,6 +40,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 DUMMY_ROOT="$REPO_ROOT/untracked/dummy-client-repo"
 DUMMY_DAEMON_DIR="$DUMMY_ROOT/.claude/hooks-daemon"
+# The offline remote of `create --bare-remote`, beside (not inside) the client.
+DUMMY_REMOTE_DIR="$REPO_ROOT/untracked/dummy-client-repo-remote.git"
 INSTALL_VERSION_SH="$REPO_ROOT/scripts/install_version.sh"
 
 # Dedicated hostname suffix — keeps daemon-{suffix}.{sock,pid,log} for the
@@ -167,17 +169,74 @@ verify_dummy_daemon_stopped() {
     info "surviving daemon reaped"
 }
 
-remove_dummy_worktree() {
-    if [ ! -e "$DUMMY_DAEMON_DIR" ]; then
+# release_tag_of SOURCE — the release tag HEAD of SOURCE would carry: "v" plus
+# the [project].version of its committed pyproject.toml. The blob is read whole
+# before parsing, so no reader closes git's pipe early under pipefail.
+release_tag_of() {
+    local pyproject version
+    pyproject="$(git -C "$1" show HEAD:pyproject.toml)" || fail "no pyproject.toml at HEAD of $1"
+    version="$(awk -F'"' '/^version[[:space:]]*=/ {print $2; exit}' <<< "$pyproject")"
+    [ -n "$version" ] || fail "no [project].version at HEAD of $1"
+    printf 'v%s\n' "$version"
+}
+
+# seed_bare_remote SOURCE BARE — create the offline remote of the bare-remote
+# mode: a new bare repository at BARE holding SOURCE's HEAD as main, tagged with
+# its release tag. The bare FETCHES from SOURCE by path, so nothing runs in, is
+# written to, or is configured in SOURCE (no remote, no push, no hook), and the
+# bare names no remote at all, so the real origin is never reachable from it.
+seed_bare_remote() {
+    local source="$1" bare="$2" tag
+    [ ! -e "$bare" ] || fail "refusing to seed: $bare already exists"
+    tag="$(release_tag_of "$source")"
+    git init -q --bare "$bare"
+    git -C "$bare" fetch -q --no-tags "$source" "+HEAD:refs/heads/main"
+    # update-ref, not `git tag`: a lightweight tag that the caller's tag.*
+    # config (a signing or annotation default) cannot turn into a prompt.
+    git -C "$bare" update-ref "refs/tags/$tag" refs/heads/main
+    git -C "$bare" symbolic-ref HEAD refs/heads/main
+    info "bare remote at $bare (main + $tag)"
+}
+
+# clone_daemon_from_bare BARE DAEMON_DIR TAG — make DAEMON_DIR a plain clone of
+# the local bare repository BARE, detached on TAG, as a release install leaves
+# it. BARE must be an absolute path to a bare repository: a URL of any scheme
+# (file:// included) or a relative path is refused before anything is created,
+# so the clone's origin, which upgrade.sh fetches from, can only be that path.
+# No --shared/--reference: the clone owns its objects.
+clone_daemon_from_bare() {
+    local bare="$1" daemon_dir="$2" tag="$3"
+    if [ "${bare#/}" = "$bare" ]; then
+        fail "refusing to clone: remote '$bare' is not an absolute local path"
+    fi
+    [ "$(git -C "$bare" rev-parse --is-bare-repository)" = "true" ] \
+        || fail "refusing to clone: $bare is not a bare repository"
+    git clone -q --no-hardlinks --no-checkout "$bare" "$daemon_dir"
+    git -C "$daemon_dir" checkout -q --detach "$tag"
+    info "daemon dir is a clone of $bare at $tag"
+}
+
+# remove_daemon_dir REPO DAEMON_DIR — remove the fixture's daemon dir by what is
+# ON DISK, not by the mode the last create was asked for: a linked worktree (its
+# git dir is not its common dir) is removed through REPO's git so that its
+# registration goes too; a clone is deleted outright.
+remove_daemon_dir() {
+    local repo="$1" daemon_dir="$2" git_dir common_dir
+    if [ ! -e "$daemon_dir" ]; then
         return 0
     fi
-    if git -C "$REPO_ROOT" worktree remove --force "$DUMMY_DAEMON_DIR"; then
+    if git_dir="$(git -C "$daemon_dir" rev-parse --path-format=absolute --git-dir)" \
+        && common_dir="$(git -C "$daemon_dir" rev-parse --path-format=absolute --git-common-dir)" \
+        && [ "$git_dir" != "$common_dir" ] \
+        && git -C "$repo" worktree remove --force "$daemon_dir"; then
         info "worktree removed"
-    else
-        info "WARNING: git worktree remove failed; pruning and deleting directory"
-        git -C "$REPO_ROOT" worktree prune
-        rm -rf "$DUMMY_DAEMON_DIR"
+        return 0
     fi
+    # A clone, a half-made directory, or a worktree git could not remove: delete
+    # it, then drop any registration a broken worktree left in REPO.
+    rm -rf "$daemon_dir"
+    git -C "$repo" worktree prune
+    info "daemon dir removed"
 }
 
 # --- commands --------------------------------------------------------------
@@ -193,16 +252,26 @@ cmd_destroy() {
     # resolved the wrong project exits 0 while the daemon lives on, and deleting
     # the tree then orphans it — with teardown still reporting success.
     verify_dummy_daemon_stopped
-    remove_dummy_worktree
+    remove_daemon_dir "$REPO_ROOT" "$DUMMY_DAEMON_DIR"
     rm -rf "$DUMMY_ROOT"
     info "removed $DUMMY_ROOT"
 }
 
 cmd_create() {
+    local mode="worktree"
+    case "${1:-}" in
+        "") ;;
+        --bare-remote) mode="bare-remote" ;;
+        *) fail "create: unknown option '$1' (only --bare-remote)" ;;
+    esac
     [ -f "$INSTALL_VERSION_SH" ] || fail "installer missing at $INSTALL_VERSION_SH"
     command -v uv > /dev/null || fail "uv is required to bootstrap the client venv"
 
     cmd_destroy
+    if [ -e "$DUMMY_REMOTE_DIR" ]; then
+        rm -rf "$DUMMY_REMOTE_DIR"
+        info "removed $DUMMY_REMOTE_DIR"
+    fi
 
     step "Creating client-mode project skeleton"
     # install_version.sh Step 1 requires BOTH .claude/ and .git/ to already
@@ -215,11 +284,25 @@ cmd_create() {
     info "git repo + .claude/ created at $DUMMY_ROOT"
 
     step "Cloning daemon into .claude/hooks-daemon (mirrors Layer 1 install)"
-    # A detached worktree at HEAD gives the installer the exact tree under test
-    # — including uncommitted-to-main work once committed — without a network
-    # clone. ClientInstallValidator hard-codes this path.
-    git -C "$REPO_ROOT" worktree add --detach "$DUMMY_DAEMON_DIR" HEAD
-    info "worktree at $DUMMY_DAEMON_DIR"
+    if [ "$mode" = "bare-remote" ]; then
+        # Plan 00594 Task 5.1: the daemon dir is a real clone of a LOCAL bare
+        # remote seeded from HEAD and tagged as a release, so upgrade.sh in this
+        # fixture fetches from that bare and never from this repository's
+        # origin or the network. The tracked branch and its moves are made in
+        # the bare (see prove-branch-channel), never in this repository.
+        local tag
+        tag="$(release_tag_of "$REPO_ROOT")"
+        seed_bare_remote "$REPO_ROOT" "$DUMMY_REMOTE_DIR"
+        clone_daemon_from_bare "$DUMMY_REMOTE_DIR" "$DUMMY_DAEMON_DIR" "$tag"
+    else
+        # A detached worktree at HEAD gives the installer the exact tree under
+        # test without a network clone. It shares this repository's config and
+        # origin, so an upgrade.sh run in it fetches from the real origin: use
+        # --bare-remote for anything that upgrades. ClientInstallValidator
+        # hard-codes this path.
+        git -C "$REPO_ROOT" worktree add --detach "$DUMMY_DAEMON_DIR" HEAD
+        info "worktree at $DUMMY_DAEMON_DIR"
+    fi
 
     step "Running the PRODUCTION installer (scripts/install_version.sh)"
     # CI=true short-circuits ensure_venv into a no-op that yields an empty
@@ -328,7 +411,7 @@ main() {
         shift
     fi
     case "$command" in
-        create) cmd_create ;;
+        create) cmd_create "$@" ;;
         status) cmd_status ;;
         destroy) cmd_destroy ;;
         python) cmd_python ;;

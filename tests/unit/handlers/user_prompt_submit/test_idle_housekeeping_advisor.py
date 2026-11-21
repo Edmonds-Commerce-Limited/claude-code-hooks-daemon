@@ -17,6 +17,13 @@ import pytest
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.scratch_caps import CapLevel
+from claude_code_hooks_daemon.core.scratch_inventory import (
+    INVENTORY_FILE,
+    Inventory,
+    InventoryEntry,
+    write_inventory,
+)
 from claude_code_hooks_daemon.core.transcript_reader import ContentBlock, TranscriptMessage
 from claude_code_hooks_daemon.daemon.housekeeping import report_only_steps
 from claude_code_hooks_daemon.handlers.registry import apply_handler_options
@@ -24,6 +31,7 @@ from claude_code_hooks_daemon.handlers.user_prompt_submit.idle_housekeeping_advi
     _RECOVERY_MARKER,
     IdleHousekeepingAdvisoryHandler,
     count_trailing_noop_recovery_ticks,
+    scratch_sweep_report,
 )
 from claude_code_hooks_daemon.utils.stale_checkouts import SCAN_BUDGET_SECONDS
 
@@ -36,7 +44,7 @@ def _no_real_stale_scan() -> Iterator[None]:
     module = "claude_code_hooks_daemon.handlers.user_prompt_submit.idle_housekeeping_advisor"
     with (
         patch(f"{module}.collect_stale_report", return_value=None),
-        patch(f"{module}.collect_scratch_report", return_value=None),
+        patch(f"{module}.scratch_sweep_report", return_value=None),
         patch(f"{module}.collect_gone_branch_ref_report", return_value=None),
         patch(f"{module}.ProjectContext") as project_context,
     ):
@@ -455,7 +463,7 @@ class TestStaleCheckoutsReport:
 
 
 class TestLitterReports:
-    """Plan 00470 Task 4.1 follow-ups: old scratch files and changed-green refs of gone branches."""
+    """Plan 00470 Task 4.1 follow-ups; the scratch report reads the sweep's inventory (Plan 00627)."""
 
     def _fire(self, handler: IdleHousekeepingAdvisoryHandler) -> str:
         return TestStaleCheckoutsReport()._fire(handler)
@@ -465,7 +473,7 @@ class TestLitterReports:
         with (
             patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
             patch(
-                f"{_HANDLER_MODULE}.collect_scratch_report", return_value="OLD SCRATCH FILES: x"
+                f"{_HANDLER_MODULE}.scratch_sweep_report", return_value="SCRATCH DUE: x"
             ) as scratch,
             patch(
                 f"{_HANDLER_MODULE}.collect_gone_branch_ref_report",
@@ -475,9 +483,9 @@ class TestLitterReports:
             mock_pc.project_root.return_value = tmp_path
             blob = self._fire(handler)
 
-        assert "OLD SCRATCH FILES: x" in blob
+        assert "SCRATCH DUE: x" in blob
         assert "CHANGED-GREEN REFS OF GONE BRANCHES: y" in blob
-        scratch.assert_called_once_with(tmp_path / "untracked" / "scratch", 14, deadline=ANY)
+        scratch.assert_called_once_with(tmp_path)
         refs.assert_called_once_with(tmp_path, deadline=ANY)
 
     def test_each_report_can_be_switched_off(self, tmp_path: Path) -> None:
@@ -487,7 +495,7 @@ class TestLitterReports:
         )
         with (
             patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
-            patch(f"{_HANDLER_MODULE}.collect_scratch_report") as scratch,
+            patch(f"{_HANDLER_MODULE}.scratch_sweep_report") as scratch,
             patch(f"{_HANDLER_MODULE}.collect_gone_branch_ref_report") as refs,
         ):
             mock_pc.project_root.return_value = tmp_path
@@ -496,28 +504,13 @@ class TestLitterReports:
         scratch.assert_not_called()
         refs.assert_not_called()
 
-    def test_the_configured_age_reaches_the_scratch_scan(self, tmp_path: Path) -> None:
-        handler = IdleHousekeepingAdvisoryHandler()
-        apply_handler_options(handler, {"stale_scratch_days": 3})
-        with (
-            patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
-            patch(f"{_HANDLER_MODULE}.collect_scratch_report", return_value=None) as scratch,
-            patch(f"{_HANDLER_MODULE}.collect_gone_branch_ref_report", return_value=None),
-        ):
-            mock_pc.project_root.return_value = tmp_path
-            self._fire(handler)
-
-        scratch.assert_called_once_with(tmp_path / "untracked" / "scratch", 3, deadline=ANY)
-
-    def test_the_three_scans_share_one_budget_under_the_chain_deadline(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_two_scans_share_one_budget_under_the_chain_deadline(self, tmp_path: Path) -> None:
         handler = IdleHousekeepingAdvisoryHandler()
         with (
             patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
             patch(f"{_HANDLER_MODULE}.ScanDeadline") as make_deadline,
             patch(f"{_HANDLER_MODULE}.collect_stale_report", return_value=None) as checkouts,
-            patch(f"{_HANDLER_MODULE}.collect_scratch_report", return_value=None) as scratch,
+            patch(f"{_HANDLER_MODULE}.scratch_sweep_report", return_value=None),
             patch(f"{_HANDLER_MODULE}.collect_gone_branch_ref_report", return_value=None) as refs,
         ):
             mock_pc.project_root.return_value = tmp_path
@@ -526,24 +519,97 @@ class TestLitterReports:
         make_deadline.assert_called_once_with(SCAN_BUDGET_SECONDS)
         shared = make_deadline.return_value
         assert checkouts.call_args.kwargs["deadline"] is shared
-        assert scratch.call_args.kwargs["deadline"] is shared
         assert refs.call_args.kwargs["deadline"] is shared
         assert SCAN_BUDGET_SECONDS < Timeout.CHAIN_DEADLINE_DEFAULT
 
-    @pytest.mark.parametrize("value", [0, -1, "14", 1.5, True, None])
-    def test_stale_scratch_days_must_be_a_positive_int(self, value: object) -> None:
-        handler = IdleHousekeepingAdvisoryHandler()
+    def test_stale_scratch_days_is_retired_and_no_longer_validated(self) -> None:
+        assert IdleHousekeepingAdvisoryHandler.validate_options({"stale_scratch_days": 0}) == {}
+        assert not hasattr(IdleHousekeepingAdvisoryHandler, "_stale_scratch_days")
 
-        with pytest.raises(ValueError, match="stale_scratch_days"):
-            apply_handler_options(handler, {"stale_scratch_days": value})
-
-    def test_a_bad_stale_scratch_days_is_named_at_validation(self) -> None:
-        problems = IdleHousekeepingAdvisoryHandler.validate_options({"stale_scratch_days": 0})
-
-        assert "stale_scratch_days" in problems
-
-    def test_claude_md_mentions_the_new_options(self) -> None:
+    def test_claude_md_names_the_sweep_and_no_age_delete(self) -> None:
         md = IdleHousekeepingAdvisoryHandler().get_claude_md()
         assert md is not None
-        for option in ("report_stale_scratch", "stale_scratch_days", "report_gone_branch_refs"):
+        for option in ("report_stale_scratch", "report_gone_branch_refs", "scratch-sweep"):
             assert option in md
+        assert "stale_scratch_days" not in md
+        assert "find ... -delete" not in md
+
+
+def _entry(name: str, verdict: str, *, due: bool) -> InventoryEntry:
+    return InventoryEntry(
+        name=name,
+        verdict=verdict,
+        directories=1,
+        files=1,
+        bytes=10,
+        newest_mtime=0.0,
+        due=due,
+        filing_command="",
+    )
+
+
+def _inventory(
+    root: Path, *entries: InventoryEntry, incomplete_reasons: tuple[str, ...] = ()
+) -> None:
+    write_inventory(
+        root / "untracked" / INVENTORY_FILE,
+        Inventory(
+            generated_at=0.0,
+            incomplete=bool(incomplete_reasons),
+            incomplete_reasons=incomplete_reasons,
+            entries=entries,
+            archives=(),
+            cap_level=CapLevel.OK,
+        ),
+    )
+
+
+class TestScratchSweepReport:
+    """Plan 00627 Task 7.2: the idle pass reads the sweep's cached inventory, never walks scratch."""
+
+    def test_no_scratch_and_no_inventory_is_quiet(self, tmp_path: Path) -> None:
+        assert scratch_sweep_report(tmp_path) is None
+
+    def test_scratch_without_an_inventory_names_the_dry_run(self, tmp_path: Path) -> None:
+        (tmp_path / "untracked" / "scratch").mkdir(parents=True)
+
+        report = scratch_sweep_report(tmp_path)
+
+        assert report is not None
+        assert "missing" in report
+        assert "scratch-sweep" in report
+
+    def test_nothing_due_is_quiet(self, tmp_path: Path) -> None:
+        _inventory(tmp_path, _entry("a", "LIVE", due=False))
+
+        assert scratch_sweep_report(tmp_path) is None
+
+    def test_due_entries_are_counted_by_verdict_and_the_sweep_is_named(
+        self, tmp_path: Path
+    ) -> None:
+        _inventory(
+            tmp_path,
+            _entry("a", "DISPOSABLE", due=True),
+            _entry("b", "DISPOSABLE", due=True),
+            _entry("c", "UNCERTAIN", due=True),
+            _entry("d", "LIVE", due=False),
+        )
+
+        report = scratch_sweep_report(tmp_path)
+
+        assert report is not None
+        assert "3 entries due" in report
+        assert "DISPOSABLE 2" in report
+        assert "UNCERTAIN 1" in report
+        assert "LIVE" not in report
+        assert "scratch-sweep" in report
+        assert "-delete" not in report
+        assert "find " not in report
+
+    def test_an_incomplete_inventory_is_never_quiet(self, tmp_path: Path) -> None:
+        _inventory(tmp_path, incomplete_reasons=("budget ran out",))
+
+        report = scratch_sweep_report(tmp_path)
+
+        assert report is not None
+        assert "budget ran out" in report

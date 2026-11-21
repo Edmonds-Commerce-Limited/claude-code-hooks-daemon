@@ -68,6 +68,9 @@ class Crash(BaseException):
     """A simulated process death: no ``except Exception`` cleanup runs."""
 
 
+_SESSION = "s-20261101T000000Z-abcdefgh"
+
+
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
     path = tmp_path / "project" / "untracked" / "scratch"
@@ -230,6 +233,46 @@ def _make_entry(root: Path, name: str = "e1") -> dict[str, str]:
 
 
 # --- the between-directories no-replace rename ----------------------------------
+
+
+class TestSessionChild:
+    """Task 4.3 step 3: a child taken from a session directory goes back into it."""
+
+    def test_a_child_is_restored_into_its_session_directory(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        session = root / _SESSION
+        session.mkdir()
+        original = _make_entry(session)
+        session_fd = open_dir(session)
+        try:
+            expected = fingerprint_at(session_fd, "e1", max_inodes=1000)
+            handle = claim(session_fd, "e1", expected, max_inodes=1000)
+            assert isinstance(handle, Claimed)
+            archive_id = new_archive_id()
+            result = pack(handle, store, archive_id, tar=tar, max_inodes=1000)
+            handle.close()
+        finally:
+            os.close(session_fd)
+        store.append(
+            _record(
+                archive_id,
+                path=f"untracked/scratch/{_SESSION}/e1",
+                counts=result.counts,
+                size=result.size,
+                sha=result.sha256,
+                skipped=result.skipped,
+            )
+        )
+        claimed = session / f"{CLAIM_PREFIX}e1"
+        for path in [claimed, *claimed.rglob("*")]:
+            if path.is_dir() and not path.is_symlink():
+                path.chmod(0o755)
+        shutil.rmtree(claimed)
+        restored = _restore(store, root_fd, tar, archive_id)
+        assert restored.name == "e1"
+        assert _tree(session / "e1") == original
+        assert not (root / "e1").exists()
 
 
 class TestRenameBetween:
@@ -572,6 +615,17 @@ class TestRefusals:
             extra_records=("untracked/other/b",),
         )
         _refused_cleanly(store, root, root_fd, tar, archive_id, "another root", "untracked/other/a")
+
+    def test_a_child_of_a_missing_or_linked_session_directory_is_refused(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        path = f"untracked/scratch/{_SESSION}/e1"
+        archive_id = _install(store, [_member("./e1", data=b"x")], path=path, counts={"file": 1})
+        _refused_cleanly(store, root, root_fd, tar, archive_id, "session directory")
+        (root / "elsewhere").mkdir()
+        (root / _SESSION).symlink_to("elsewhere")
+        _refused_cleanly(store, root, root_fd, tar, archive_id, "session directory")
+        assert _names(root / "elsewhere") == []
 
     @pytest.mark.parametrize("path", ["untracked/scratch/..", "untracked/", "x/.", "/"])
     def test_a_hostile_original_path_is_refused(

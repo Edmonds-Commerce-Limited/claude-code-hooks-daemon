@@ -192,10 +192,15 @@ names, people or hashes appear here.
   stop guard, `BRANCH_LIMIT_PRINCIPLE`) says: finish (merge), or delete only on
   machine proof or human confirmation; parking is a short bounded pause. A test
   pins that `branches.wip.creation_grace` never lifts a full parked pool.
-- [ ] 🔄 **Task 3.8**: (in progress: brought up to v3.76.0 and reconciled with
-  Plan 00626 on the branch, release note 010, F-BYPS review acted on, targeted
-  tests green, report `subagent-reports/261120-task-3-8-merge-ready.md`; open:
-  independent security review of the post-F-BYPS fixes, full gate, `--no-ff` merge) (owner request typed in session, journal 15 November;
+- [x] ✅ **Task 3.8**: (on main: `--no-ff` merge `cdb3e25dd` in the
+  integration gate merged as `69e375788`; release note 010; reports
+  `subagent-reports/261120-task-3-8-merge-ready.md` and
+  `subagent-reports/261120-task-3-8-independent-security-review.md`, whose one
+  Low finding was fixed test-first in `e64f11f64`/`8c1ebe38e`
+  (`261120-submodule-ignore-fix.md`); combined full gate green. Not
+  independently re-reviewed: those two fix commits and `a7f2af3b6`, all of
+  which only refuse more. Owner decision still open: F-BYPS Finding 4, ledger
+  N686) (owner request typed in session, journal 15 November;
   route set by delegated ruling, [DESIGN.md §7.2](DESIGN.md)) Land the
   surviving-content remote-delete tier and `delete-branch --remote-only` from
   branch `agent-a20c91c23eca4e56e-43e33957`. Bring it up to `main`, reconcile
@@ -242,8 +247,13 @@ names, people or hashes appear here.
   before the stale mark was cleared. In the lifecycle model, a keep, a park
   and a proof are all facts about a COMMIT. Every per-name cache of them
   must be keyed or invalidated by tip, never by the name typed.
-- [ ] ⬜ **Task 4.6**: (second client seat; decided by delegated ruling,
-  build rules in [DESIGN.md §7.1](DESIGN.md)) A stack of dependent
+- [ ] 🔄 **Task 4.6**: (second client seat; decided by delegated ruling,
+  build rules in [DESIGN.md §7.1](DESIGN.md); built test-first on branch
+  `agent-ab8590f82ee261d91-c14c8267` (RED `bdb18c137`), merged up to main on
+  `plan-00594-finish`, release note 020, config-change entry in
+  `UNRELEASED/config-changes/v3.77.0.yaml`; targeted tests green; awaiting an
+  independent review of the count change, the full gate and the coordinator's
+  `--no-ff` merge) A stack of dependent
   pull-request branches counts once per link against the open cap, so a
   five-deep stack alone uses half of a cap of 10. Build, test-first: a stack
   counts as one stream up to `branches.wip.stack_max_depth` (default 5), each
@@ -292,7 +302,13 @@ names, people or hashes appear here.
   remote: track, move, moved-ref report, re-track, one-step return; a sha pin
   and a failed listing covered. A seat's report is added when one comes and
   is not a gate. The stop/build/start handover is Plan 00535's, not this
-  task's.
+  task's. Built and run on `plan-00594-finish` (awaiting review, gate and
+  merge): `dummy-client-repo.sh create --bare-remote` clones the daemon dir
+  from a local bare remote seeded from HEAD, and
+  `scripts/dummy-client-branch-channel-proof.sh` passed every step offline.
+  Evidence and limits (the move check lists a fixed GitHub URL, rewritten to
+  the bare for the proof; the tip cache was emptied per report):
+  [subagent-reports/261121-task-5-1-fixture-proof.md](subagent-reports/261121-task-5-1-fixture-proof.md).
 - [x] ✅ **Task 5.2**: (RC feedback; done on the release branch, release note
   034\) A guarded unreleased install no longer exits 141 when the ref's
   `pyproject.toml` is larger than one pipe write. Layer 1 reads the blob
@@ -321,11 +337,21 @@ names, people or hashes appear here.
 
 - [ ] `DESIGN.md` maps each of failure classes 1–9 to the lifecycle gap that
   caused it and to the change that closes it.
-- [ ] Each class has a regression test that failed before its fix.
+- [ ] Each class has a regression test that failed before its fix. Audit
+  `subagent-reports/261121-success-criterion-red-evidence.md`: RED evidence
+  for classes 2, 4, 5, 7, 8 and for 3 via Task 3.8 only. The gaps were then
+  closed by revert-and-see runs (each fix's tests as of the fix, run at its
+  parent against that parent's source):
+  [subagent-reports/261121-red-evidence-revert-runs.md](subagent-reports/261121-red-evidence-revert-runs.md).
+  Classes 1, 6 and 9 (Tasks 6.1, 6.2 and 6.3) and Tasks 3.1/3.2 (`fa14065d6`)
+  and 3.7 (`64a74a1f1`, `0949616e2`) went red, then green at the fix.
+  `e1b0b5b73` is red only at import, and `7df818c71` is a test-only pin. Ready
+  to tick at review.
 - [ ] A client-mode install runs a branch tip, observes a move, and returns to
-  the last tag in one step: to be proven end to end in the client-mode
-  fixture, not yet run (delegated ruling, DESIGN §7.1); a client seat's report is recorded when
-  one comes.
+  the last tag in one step: proven end to end in the offline client-mode
+  fixture on 21 November ([report](subagent-reports/261121-task-5-1-fixture-proof.md));
+  ticked when that branch is merged. A client seat's report is recorded when
+  one comes (delegated ruling, DESIGN §7.1).
 - [ ] Release-bound consequences (config keys, truth changes, release notes)
   are recorded in `CLAUDE/UPGRADES/UNRELEASED/`.
 
@@ -333,4 +359,7 @@ names, people or hashes appear here.
 
 - Plan opened.
 - Seat and release questions settled by delegated ruling (DESIGN §7); the
-  plan is no longer blocked. Open: Tasks 3.8, 4.6, 5.1.
+  plan is no longer blocked. Task 3.8 is on main. Open: Task 4.6 (built,
+  on `plan-00594-finish`, awaiting review, gate and merge) and Task 5.1 (the
+  fixture proof, built and passing on the same branch, awaiting review, gate
+  and merge).

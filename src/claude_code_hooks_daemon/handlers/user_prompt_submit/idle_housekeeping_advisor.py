@@ -17,13 +17,16 @@ GitHub issue.
 """
 
 import logging
+from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final, TypeGuard
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.paths import DaemonPath
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
+from claude_code_hooks_daemon.core.scratch_inventory import INVENTORY_FILE, read_inventory
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptMessage, TranscriptReader
 from claude_code_hooks_daemon.daemon.housekeeping import report_only_steps
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
@@ -34,12 +37,7 @@ from claude_code_hooks_daemon.utils.stale_checkouts import (
     ScanDeadline,
     collect_stale_report,
 )
-from claude_code_hooks_daemon.utils.stale_litter import (
-    DEFAULT_SCRATCH_DAYS,
-    SCRATCH_RELATIVE_PATH,
-    collect_gone_branch_ref_report,
-    collect_scratch_report,
-)
+from claude_code_hooks_daemon.utils.stale_litter import collect_gone_branch_ref_report
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +67,7 @@ _USER_ROLES: Final[frozenset[str]] = frozenset({"user", "human"})
 
 
 _STALE_DAYS_OPTION: Final[str] = "stale_worktree_days"
-_SCRATCH_DAYS_OPTION: Final[str] = "stale_scratch_days"
+_SCRATCH_DIR: Final[str] = "scratch"
 
 
 def _is_day_count(value: object) -> TypeGuard[int]:
@@ -108,6 +106,48 @@ class _DayCountOption:
         if problem is not None:
             raise ValueError(problem)
         setattr(instance, self._slot, value)
+
+
+def scratch_sweep_report(project_root: Path) -> str | None:
+    """What the scratch sweep has due, from its cached inventory only, or None.
+
+    Plan 00627 Task 7.2: this replaces a per-file age walk that printed a
+    ``find ... -delete``. It never walks scratch and never suggests a delete:
+    it names the sweep's dry run, which judges each entry before anything is
+    removed. Quiet when nothing is due and the inventory is complete; never
+    quiet when the inventory is unusable while a scratch root exists, or
+    incomplete.
+    """
+    untracked = project_root / DaemonPath.UNTRACKED_DIR
+    reading = read_inventory(untracked / INVENTORY_FILE)
+    sweep = daemon_cli_command_for_docs("scratch-sweep")
+    inventory = reading.inventory
+    if inventory is None:
+        if not (untracked / _SCRATCH_DIR).is_dir():
+            return None
+        return (
+            f"SCRATCH (report only): the scratch inventory is {reading.problem}, so what is "
+            f"due is unknown. Run `{sweep}` (a dry run that changes nothing) to judge "
+            f"`{DaemonPath.UNTRACKED_DIR}/{_SCRATCH_DIR}/`."
+        )
+    due = Counter(entry.verdict for entry in inventory.entries if entry.due)
+    if not due and not inventory.incomplete:
+        return None
+    lines = [
+        "SCRATCH DUE (report only; this advisory removes nothing, and nothing is removed on age alone):"
+    ]
+    if inventory.incomplete:
+        reasons = "; ".join(inventory.incomplete_reasons) or "no reason recorded"
+        lines.append(f"INVENTORY INCOMPLETE: {reasons}, so the count below is a floor.")
+    total = sum(due.values())
+    noun = "entry" if total == 1 else "entries"
+    by_verdict = ", ".join(f"{verdict} {count}" for verdict, count in sorted(due.items()))
+    lines.append(f"  - {total} {noun} due" + (f" ({by_verdict})" if by_verdict else ""))
+    lines.append(
+        f"  Run `{sweep}` for the table and its filing proposals; its `--apply` is the "
+        "housekeeping pass's mutating step, held here."
+    )
+    return "\n".join(lines)
 
 
 def count_trailing_noop_recovery_ticks(messages: list[TranscriptMessage], marker: str) -> int:
@@ -151,7 +191,6 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
     housekeeping pass dispatched to specialist sub-agents (beta, opt-in)."""
 
     _stale_worktree_days = _DayCountOption(_STALE_DAYS_OPTION)
-    _stale_scratch_days = _DayCountOption(_SCRATCH_DAYS_OPTION)
 
     # Opt-in (beta): it changes how idle time is spent, so it waits for field
     # time. Enable with
@@ -181,9 +220,8 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         # Empty means "the repository's own default branch".
         self._base_branch: str = ""
         self._stale_worktree_days = DEFAULT_MAX_IDLE_DAYS
-        # Old scratch files and changed-green refs of gone branches (Plan 00470 Task 4.1).
+        # The scratch sweep's due entries (Plan 00627) and changed-green refs of gone branches.
         self._report_stale_scratch: bool = True
-        self._stale_scratch_days = DEFAULT_SCRATCH_DAYS
         self._report_gone_branch_refs: bool = True
         # Per-session housekeeping-pass counter (in-memory; resets on daemon
         # restart, which is acceptable for a bounded beta safety-net feature).
@@ -200,7 +238,7 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         reported at session start while the handler runs on its default.
         """
         problems: dict[str, str] = {}
-        for option in (_STALE_DAYS_OPTION, _SCRATCH_DAYS_OPTION):
+        for option in (_STALE_DAYS_OPTION,):
             if option in options:
                 problem = _day_count_problem(option, options[option])
                 if problem is not None:
@@ -285,21 +323,21 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
                 f"{default}\n\n---\n\nPROJECT-SPECIFIC HOUSEKEEPING GUIDANCE "
                 f"(from {self._custom_guidance_doc}):\n{custom}"
             )
-        # One budget for all three scans: their sum must stay under the chain deadline.
+        # One budget for the two scans: their sum must stay under the chain deadline. The
+        # scratch report reads one cached file and needs none.
         deadline = ScanDeadline(SCAN_BUDGET_SECONDS)
         reports = (
             self._stale_checkouts_report(deadline),
-            self._stale_scratch_report(deadline),
+            self._stale_scratch_report(),
             self._gone_branch_refs_report(deadline),
         )
         return "\n\n".join([guidance, *(report for report in reports if report is not None)])
 
-    def _stale_scratch_report(self, deadline: ScanDeadline) -> str | None:
-        """Old files under ``untracked/scratch/``, or None. Report-first, never deleted."""
+    def _stale_scratch_report(self) -> str | None:
+        """What the scratch sweep has due, or None. Report-first, never deleted."""
         if not self._report_stale_scratch:
             return None
-        scratch = ProjectContext.project_root() / SCRATCH_RELATIVE_PATH
-        return collect_scratch_report(scratch, self._stale_scratch_days, deadline=deadline)
+        return scratch_sweep_report(ProjectContext.project_root())
 
     def _gone_branch_refs_report(self, deadline: ScanDeadline) -> str | None:
         """Changed-green refs of branches that no longer exist, or None. Never deleted."""
@@ -399,9 +437,10 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
             "and stale daemons (dead pid file, project root gone) with the exact cleanup "
             "command for each; it only names them, never runs them, and stays quiet when "
             "nothing is stale (`report_stale_checkouts: false` turns it off). It also "
-            "reports files under `untracked/scratch/` older than `stale_scratch_days` "
-            "(count, size, oldest age, and a suggested `find ... -delete` it never runs; "
-            "`report_stale_scratch: false` turns it off) and "
+            "reports the scratch entries the sweep's cached inventory marks due, by "
+            "verdict, and names the `scratch-sweep` dry run that judges them; it never "
+            "walks scratch and never suggests a delete (`report_stale_scratch: false` turns "
+            "it off) and "
             "`refs/integration/changed-green/*` refs whose branch no longer exists locally "
             "or on a remote (at most 5 named, with one `git update-ref --stdin` command that "
             "deletes every one of them) "

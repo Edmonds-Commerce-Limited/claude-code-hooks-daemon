@@ -74,7 +74,7 @@ their resolved target in every tool. Three routes are NOT:
 
 Route 1 is exactly what the verb creates: an agent in `<wt>` typing `cat <P>`
 (relative) reaches the content today. These are being fixed under
-[Plan 00614](../00614-secret-guard-resolves-links-against-hook-cwd/PLAN.md).
+[Plan 00614](../../00614-secret-guard-resolves-links-against-hook-cwd/PLAN.md).
 As of this design, Plan 00614 on `main` is **Not Started** with every task
 unticked; the coordinator reports a fix on a separate unmerged branch, which
 was not verified here.

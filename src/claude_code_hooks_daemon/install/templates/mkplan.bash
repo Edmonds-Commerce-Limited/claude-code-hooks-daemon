@@ -446,6 +446,8 @@ Example (write the BODY first, e.g. with the Write tool; the script writes
 the "## HH:MM · category · REF" heading itself):
   mkplan.bash --journal 427 finding untracked/scratch/entry.md --title "short title"
   mkplan.bash --journal 427 correction untracked/scratch/fix.md --ref 09:50
+The body file is scratch: once appended, the journal entry is what git keeps,
+and the scratch sweep removes the body after 24 hours by default.
 USAGE
 }
 

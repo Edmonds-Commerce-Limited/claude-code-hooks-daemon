@@ -55,14 +55,14 @@ def _run(
     *,
     now: float,
     cwds: Callable[[], dict[int, Path]] | None = None,
-    confirm: Callable[[str], bool] | None = None,
+    confirm: Callable[[str, str], bool] | None = None,
 ) -> int:
     return int(
         args.func(
             args,
             wall_clock=lambda: now,
             process_cwds=cwds or (lambda: {1: Path("/elsewhere")}),
-            confirm_apply=confirm or (lambda _root: True),
+            confirm_apply=confirm or (lambda _root, _notice: True),
         )
     )
 
@@ -106,7 +106,7 @@ class TestFlagSurface:
             "--apply",
         }
         (sub,) = [a for a in sweep._actions if isinstance(a, argparse._SubParsersAction)]
-        assert set(sub.choices) == {"restore", "keep"}
+        assert set(sub.choices) == {"restore", "keep", "status"}
 
         def surface(name: str) -> tuple[set[str], list[str]]:
             actions = sub.choices[name]._actions
@@ -154,18 +154,21 @@ class TestRefusals:
         assert not _store(project).exists()
         assert "--apply" in capsys.readouterr().err
 
-    def test_apply_from_a_linked_worktree_is_refused(
+    def test_apply_from_a_linked_worktree_cannot_reach_the_main_root(
         self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        # Task 6.1 lets a linked worktree apply to its OWN root only
+        # (tests/unit/daemon/test_cli_scratch_worktrees.py); the main root stays out of reach.
         project = _project(tree)
         linked = _linked_worktree(tree)
-        (linked / "untracked" / "scratch").mkdir(parents=True)
-        (linked / "untracked" / "scratch" / "f.log").write_text("x")
-        assert _run(_parse(linked, "--apply"), now=time.time() + 3 * _DAY) == 1
+        now = time.time() + 3 * _DAY
+        _old_entry(tree, now)
+        main_root = str(project / "untracked" / "scratch")
+        assert _run(_parse(linked, "--apply", "--root", main_root), now=now) == 1
         assert not _store(linked).exists()
         assert not _store(project).exists()
-        assert (linked / "untracked" / "scratch" / "f.log").exists()
-        assert "main checkout" in capsys.readouterr().err
+        assert (project / "untracked" / "scratch" / "old").exists()
+        assert "never swept" in capsys.readouterr().err
 
     @pytest.mark.parametrize("action", [("restore", "x"), ("keep", "x", "--reason", "r")])
     def test_restore_and_keep_from_a_linked_worktree_are_refused(
@@ -271,7 +274,7 @@ class TestHumanConfirmationGate:
         now = time.time() + 3 * _DAY
         _old_entry(tree, now)
         project = _project(tree)
-        assert _run(_parse(project, "--apply"), now=now, confirm=lambda _root: False) == 1
+        assert _run(_parse(project, "--apply"), now=now, confirm=lambda _root, _notice: False) == 1
         assert not _store(project).exists()
         assert (tree.root / "old" / "a.txt").read_bytes() == b"alpha"
         assert "confirmation" in capsys.readouterr().err
@@ -318,6 +321,18 @@ class TestHumanConfirmationGate:
             prompt_stream=prompt,
         )
         assert "apply untracked/scratch" in prompt.getvalue()
+        assert "pressure" not in prompt.getvalue()
+
+    def test_the_real_gate_names_pressure_in_its_question(self) -> None:
+        prompt = _Stream(tty=True)
+        confirm_apply_interactively(
+            "untracked/scratch",
+            "pressure mode: 4 idle entries that are NOT yet due",
+            stdin=_Stream("", tty=True),
+            stdout=_Stream(tty=True),
+            prompt_stream=prompt,
+        )
+        assert "pressure mode: 4 idle entries" in prompt.getvalue()
 
     def test_no_flag_reaches_the_gate(self) -> None:
         args = build_parser().parse_args(["scratch-sweep", "--apply"])
@@ -398,3 +413,50 @@ class TestEndToEnd:
         assert (tree.root / "old" / "a.txt").read_bytes() == b"alpha"
         document = json.loads(capsys.readouterr().out)
         assert all(row["outcome"] != "archived" for row in document["entries"])
+
+
+_SESSION = "s-20261101T000000Z-abcdefgh"
+
+
+def _session_children(tree: ScratchTree, now: float) -> None:
+    tree.file(f"{_SESSION}/old/a.txt", b"alpha")
+    tree.file(f"{_SESSION}/kept/a.txt", b"kept")
+    tree.file(f"{_SESSION}/kept/.scratch-keep", b"hold\n")
+    tree.set_tree_mtime(_SESSION, now - 5 * _DAY)
+
+
+class TestSessionChildren:
+    """Task 4.3 step 3: each due child of a session directory is its own archive."""
+
+    def test_a_child_is_archived_alone_and_restored_by_its_record(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        _session_children(tree, now)
+        project = _project(tree)
+        assert _run(_parse(project, "--apply", "--json"), now=now) == 0
+        document = json.loads(capsys.readouterr().out)
+        assert all(row["outcome"] != "archived" for row in document["entries"])
+        (session,) = document["sessions"]
+        outcomes = {row["name"]: row for row in session["entries"]}
+        assert outcomes["old"]["outcome"] == "archived", session
+        assert outcomes["kept"]["outcome"] != "archived"
+        assert (tree.root / _SESSION / "kept" / "a.txt").read_bytes() == b"kept"
+        assert not (tree.root / _SESSION / "old").exists()
+
+        assert _run(_parse(project, "restore", outcomes["old"]["archive_id"]), now=now) == 0
+        assert (tree.root / _SESSION / "old" / "a.txt").read_bytes() == b"alpha"
+        assert f"{_SESSION}/old" in capsys.readouterr().out
+
+    def test_a_working_directory_in_the_session_holds_every_child(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        _session_children(tree, now)
+        project = _project(tree)
+        held = tree.root.resolve() / _SESSION
+        assert _run(_parse(project, "--apply", "--json"), now=now, cwds=lambda: {4: held}) == 0
+        document = json.loads(capsys.readouterr().out)
+        for session in document["sessions"]:
+            assert all(row["outcome"] != "archived" for row in session["entries"])
+        assert (tree.root / _SESSION / "old" / "a.txt").read_bytes() == b"alpha"

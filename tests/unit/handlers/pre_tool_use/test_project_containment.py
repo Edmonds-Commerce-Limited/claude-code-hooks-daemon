@@ -1807,3 +1807,14 @@ class TestACompoundBodyRunsWhereTheChainsCdLanded:
         command = "for x in a; do echo hi > ../x; done; cd sub"
         hook_input = _bash(command, cwd=str(repo))
         assert handler.handle(hook_input).decision == Decision.DENY
+
+
+class TestScratchLifecycleGuidance:
+    """Plan 00627 Task 7.1: the deny and the guidance carry the scratch lifecycle."""
+
+    def test_guidance_says_session_dir_ttl_and_filing(self) -> None:
+        from claude_code_hooks_daemon.utils.scratch_dir import SCRATCH_LIFECYCLE_GUIDANCE
+
+        guidance = ProjectContainmentHandler().get_claude_md()
+        assert guidance is not None
+        assert SCRATCH_LIFECYCLE_GUIDANCE in guidance

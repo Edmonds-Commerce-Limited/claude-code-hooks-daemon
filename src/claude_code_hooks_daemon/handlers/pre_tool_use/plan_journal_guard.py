@@ -199,8 +199,10 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             "changed (Edit/Write/Bash into a JOURNAL/ day-file or entry file)",
             why="Only `mkplan.bash --journal` stamps the real UTC time; hand-typed "
             "stamps have landed 40 minutes in the future",
-            fix="Write the entry body to a fresh file under untracked/scratch/, then run "
-            "`mkplan.bash --journal <plan> <category> <body-file>`",
+            fix="Write the entry body to a fresh file in your scratch session directory "
+            "(under untracked/scratch/, swept after 24 hours by default), then run "
+            "`mkplan.bash --journal <plan> <category> <body-file>`; the journal entry, "
+            "not the body file, is what git keeps",
             verbose=(
                 "`mkplan.bash --journal` reads the real UTC clock and writes the "
                 "`## HH:MM · category · REF` heading itself, so a guessed time "

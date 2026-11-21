@@ -85,6 +85,12 @@ _EARNS_GUIDANCE: dict[str, str] = {
     ),
     "LongRunningCommandGuardHandler": "T1 denies a long foreground Bash call in the main thread",
     "GithubIssueAssignmentGuardHandler": "T1 denies issue-tied work on an unclaimed or foreign issue",
+    "ScratchCapGuardHandler": "T1 denies a directory tree into scratch at the block cap",
+    "ScratchKeepMarkerGuardHandler": "T1 denies an agent writing the .scratch-keep marker",
+    "ScratchUnownedEntryHandler": (
+        "T3 standing policy: entries go in the session directory via `scratch new`, "
+        "which governs every scratch write; block mode denies under a rule"
+    ),
     "WriteProtectedPathsHandler": "T1 denies a write, move onto or deletion of a read-only path",
     "ResumeGuardHandler": "T1 denies a cold resume of a large stopped agent under mode: deny",
     "SubagentContextBudgetHandler": (
@@ -266,6 +272,11 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "T3 standing policy: the open-branch cap and the delete-branch route govern "
         "every later decision to start or remove a branch, long after the one "
         "session-start summary"
+    ),
+    "ScratchSweepHandler": (
+        "T3 standing policy: where throwaway work goes (the session directory, "
+        "`scratch new`) governs every later write, long after the one "
+        "session-start announcement"
     ),
     "BudgetExhaustionDetectorHandler": (
         "T3 standing policy: every future detection must lead with the same "
@@ -498,6 +509,7 @@ _DORMANT_IN_THIS_PROJECT: dict[str, _DormancyExemption] = {
 _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     # -- Emit nothing an agent acts on -----------------------------------
     "AccountDisplayHandler": "status-line renderer, no agent-facing action",
+    "ScratchInventoryRefresherHandler": "silent background inventory refresh, never a result",
     "ContextSidecarHandler": "status-line renderer, no agent-facing action",
     "CurrentTimeHandler": "status-line renderer, no agent-facing action",
     "PromptCacheIndicatorHandler": "status-line renderer, no agent-facing action",

@@ -185,3 +185,12 @@ class TestAcceptanceFixturesDoNotShareTheHumanScratchDirectory:
 
         assert ensure_scratch_dir(tmp_path) is True
         assert (tmp_path / "untracked" / ".gitignore").is_file()
+
+
+def test_lifecycle_guidance_says_the_three_things() -> None:
+    from claude_code_hooks_daemon.utils.scratch_dir import SCRATCH_LIFECYCLE_GUIDANCE
+
+    assert "session directory" in SCRATCH_LIFECYCLE_GUIDANCE
+    assert "24 hours" in SCRATCH_LIFECYCLE_GUIDANCE
+    assert "plan folder" in SCRATCH_LIFECYCLE_GUIDANCE
+    assert "hooks-daemon scratch new" in SCRATCH_LIFECYCLE_GUIDANCE

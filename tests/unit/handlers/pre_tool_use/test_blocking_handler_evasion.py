@@ -580,6 +580,16 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
         "name; its Bash rule is an ALLOWLIST (a respelling is denied, never let through), "
         "covered in test_subagent_context_budget.py"
     ),
+    "ScratchKeepMarkerGuardHandler": (
+        "matches on the FILE NAME a file tool or a shell write names, read by the shared "
+        "write scan with mutations (redirects, tee, cp/mv/install, ln, touch, rm), not on "
+        "a command name; its respellings are covered in test_scratch_keep_marker_guard.py"
+    ),
+    "ScratchUnownedEntryHandler": (
+        "matches on the PATH a file tool or a shell write names (a new first-level entry "
+        "in a scratch root), not on a command name, and advises by default; covered in "
+        "test_scratch_unowned_entry.py"
+    ),
     "WriteProtectedPathsHandler": (
         "matches on the PATH a file tool or a shell write names, read by the shared write "
         "scan (redirects, tee, cp/mv/install/ln, sed -i, rm, truncate), not on a command name; "
@@ -730,6 +740,13 @@ _COMMAND_ANCHORED_NOT_UNIT_TESTABLE: dict[str, str] = {
     "DocsQaCommitGateHandler": "inspects the staged git tree; needs a real repository",
     "RemoteDocsCommitGateHandler": "inspects the staged git tree; needs a real repository",
     "NpmCommandHandler": "needs ProjectContext wiring",
+    "ScratchCapGuardHandler": (
+        "matches directory-creating commands (mkdir, git clone/init/worktree add, cp -r, "
+        "tar -x, mktemp -d) under a scratch root, but denies only when the CACHED scratch "
+        "inventory is at the block cap, so it needs ProjectContext and an inventory file; "
+        "respellings such as `git -C` are covered in tests/unit/utils/"
+        "test_scratch_dir_creation.py"
+    ),
     "PlanNumberHelperHandler": "needs ProjectContext wiring",
     "DaemonLocationGuardHandler": "matches a cd target path, evasion is path spelling",
     "PipeBlockerHandler": "matches the pipe target; covered by its own suite",
