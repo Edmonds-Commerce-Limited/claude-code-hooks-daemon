@@ -28,8 +28,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
 
-- [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - In Progress (unblocked by delegated ruling in DESIGN §7; open: Task 3.8 surviving-content remote delete, Task 4.6 stacks count as one stream, Task 5.1 fixture proof of the branch tip channel; owner request via a client team: redesign the whole branch lifecycle from nine failure classes seen in multi-agent client use, plus a branch tip channel for clients)
-
 ### Next (ordered; work top to bottom)
 
 Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in this order:
@@ -250,6 +248,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00595: secret guard search string option value bold colon](Completed/00595-secret-guard-search-string-option-value-bold-colon/PLAN.md) - Complete at `eae5878e9` (main CI run 42912436475 green) + the archiving commit (GitHub #200, closed: a git search string, a grep/rg filter value and a colon-split bold are no longer judged as protected paths; release note 045)
 
+- [00594: branch lifecycle and branch tip channel](Completed/00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - Complete at merge `662750cf4` (gate-261121, full gate green) + the archiving commit (owner request via a client team: the branch lifecycle redesigned from nine failure classes seen in multi-agent client use, each with red-then-green evidence, plus a branch tip channel proven in the client-mode fixture; release notes 031 to 075 shipped, 020 unreleased; niggles N686, N687 open)
+
 - [00593: dependabot security lock bumps](Completed/00593-dependabot-security-lock-bumps/PLAN.md) - Complete at `d1d248e1d` + `cc6ace282` (main CI run 42769393325 green) + the archiving commit (open Dependabot alerts 77 to 18: nltk, anyio, virtualenv, urllib3, cryptography, idna bumped; filelock, mcp, opentelemetry-api held by the latest `safety`/`semgrep` pins; anyio's new `--anyio-mode` added to the full-QA blocker's option table; PR #193 closed)
 
 - [00592: worktree create undo releases initializing lock](Completed/00592-worktree-create-undo-releases-initializing-lock/PLAN.md) - Complete at `fd7e894fa` (merge `c5c9deb82`) + `37d8d31e0` (main CI run 42739985119 success) + the archiving commit (GitHub #173, closed: the failed-add undo releases git's own `initializing` lock and removes the worktree and new branch; another lock is never overridden; leftovers are named in the error; release note 026)
@@ -261,8 +261,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 - [00589: explain rule covers plugin handlers](Completed/00589-explain-rule-covers-plugin-handlers/PLAN.md) - Complete at `bb6dbcb58` (merge `5ba1d98a2`; main CI run 42718913878 success) + the archiving commit (GitHub #171, closed: `explain-rule`/`explain-handler` also load the `plugins:` section through the daemon's own loader; a broken plugin is logged and contributes nothing; release note 023)
 
 - [00588: lsp_enforcement leaves stdin greps and git grep alone](Completed/00588-lsp-enforcement-stdin-and-git-grep/PLAN.md) - Complete at `a0ac71f37` (main CI run 42706023447 success) + the archiving commit (GitHub #169, closed: a grep fed by a pipe, `<` or `<<<` with no file target, and any `git grep`, are not judged as symbol lookups; real lookups stay enforced; release note 021)
-
-- [00587: containment follows a cd into compound command bodies](Completed/00587-containment-cd-into-compound-bodies/PLAN.md) - Complete at `f05530f35` (main CI run 42697064932 success) + the archiving commit (GitHub #195, closed: a `../` redirect in a loop, `if` or `( )` body after a `cd` is resolved from the `cd` target; a `cd` that may have failed still denies; release note 020)
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
@@ -319,9 +317,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 629 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 525 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 526 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 80 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 79 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

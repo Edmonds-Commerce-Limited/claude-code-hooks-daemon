@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00587: containment follows a cd into compound command bodies](00587-containment-cd-into-compound-bodies/PLAN.md) - Complete at `f05530f35` (main CI run 42697064932 success) + the archiving commit (GitHub #195, closed: a `../` redirect in a loop, `if` or `( )` body after a `cd` is resolved from the `cd` target; a `cd` that may have failed still denies; release note 020)
+
 - [00583: branch guard notices state intent and action](00583-branch-guard-notices-state-intent-and-action/PLAN.md) - Complete at `d60da0fda` (merged via `7d954f213`; main CI run 42682133539, full suite, success) + the archiving commit (GitHub #192, closed: the dormancy Stop line, `branch-sweep`'s Dormant section and the `wip.cap` deny each carry `BRANCH_LIMIT_PRINCIPLE` and a next action per branch, and the session is told to take that work on first; release note 018)
 
 - [00581: provision repairs a stale venv](00581-provision-repairs-a-stale-venv/PLAN.md) - Complete at `cfa601263` (CI run 42650039659 success) + the archiving commit (GitHub #168, closed: at the expected version `provision.sh` checks the venv's lock hash; a foreground run repairs a stale venv through the bootstrap repair, a background run names `hooks-daemon repair`, an unreadable hash counts as stale; release note 017)

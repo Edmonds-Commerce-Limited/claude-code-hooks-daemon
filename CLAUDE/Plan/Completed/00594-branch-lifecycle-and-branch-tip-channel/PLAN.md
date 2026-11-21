@@ -1,6 +1,6 @@
 # Plan 00594: branch lifecycle and branch tip channel
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-10
 **Owner**: joseph
 **Priority**: High
@@ -247,13 +247,13 @@ names, people or hashes appear here.
   before the stale mark was cleared. In the lifecycle model, a keep, a park
   and a proof are all facts about a COMMIT. Every per-name cache of them
   must be keyed or invalidated by tip, never by the name typed.
-- [ ] 🔄 **Task 4.6**: (second client seat; decided by delegated ruling,
+- [x] ✅ **Task 4.6**: (second client seat; decided by delegated ruling,
   build rules in [DESIGN.md §7.1](DESIGN.md); built test-first on branch
-  `agent-ab8590f82ee261d91-c14c8267` (RED `bdb18c137`), merged up to main on
-  `plan-00594-finish`, release note 020, config-change entry in
-  `UNRELEASED/config-changes/v3.77.0.yaml`; targeted tests green; awaiting an
-  independent review of the count change, the full gate and the coordinator's
-  `--no-ff` merge) A stack of dependent
+  `agent-ab8590f82ee261d91-c14c8267` (RED `bdb18c137`), release note 020,
+  config-change entry in `UNRELEASED/config-changes/v3.77.0.yaml`; independent
+  F-BYPS review "safe to merge", one low design-limit finding, niggle N687
+  ([report](subagent-reports/261121-task-4-6-f-byps-review.md)); on main
+  through gate-261121, merge `662750cf4`, full gate green) A stack of dependent
   pull-request branches counts once per link against the open cap, so a
   five-deep stack alone uses half of a cap of 10. Build, test-first: a stack
   counts as one stream up to `branches.wip.stack_max_depth` (default 5), each
@@ -292,7 +292,7 @@ names, people or hashes appear here.
   unreleased install. Every push gets autofix and targeted QA first and is
   announced with its sha. Proven live: the first RC, `rc/3.73.3`, unblocked
   a client seat and confirmed the class 6 fix the same day.
-- [ ] ⬜ **Task 5.1**: A client can follow a branch or commit, is told when it
+- [x] ✅ **Task 5.1**: A client can follow a branch or commit, is told when it
   has moved, and can return to the last tag in one step. Proven on the client
   test seat. On main (release note 041): the install records `tracked_ref`,
   `tracked_sha` and `last_release_tag`, `version_check` reports a moved ref, and
@@ -302,8 +302,10 @@ names, people or hashes appear here.
   remote: track, move, moved-ref report, re-track, one-step return; a sha pin
   and a failed listing covered. A seat's report is added when one comes and
   is not a gate. The stop/build/start handover is Plan 00535's, not this
-  task's. Built and run on `plan-00594-finish` (awaiting review, gate and
-  merge): `dummy-client-repo.sh create --bare-remote` clones the daemon dir
+  task's. Built and run on `plan-00594-finish`, on main through gate-261121
+  (merge `662750cf4`, full gate green; §7.1 closes the task on the fixture
+  proof, and no separate review of the fixture scripts ran):
+  `dummy-client-repo.sh create --bare-remote` clones the daemon dir
   from a local bare remote seeded from HEAD, and
   `scripts/dummy-client-branch-channel-proof.sh` passed every step offline.
   Evidence and limits (the move check lists a fixed GitHub URL, rewritten to
@@ -335,9 +337,10 @@ names, people or hashes appear here.
 
 ## Success Criteria
 
-- [ ] `DESIGN.md` maps each of failure classes 1–9 to the lifecycle gap that
-  caused it and to the change that closes it.
-- [ ] Each class has a regression test that failed before its fix. Audit
+- [x] `DESIGN.md` maps each of failure classes 1–9 to the lifecycle gap that
+  caused it and to the change that closes it: §2.1 (classes 3, 8), §2.2 (7),
+  §2.3 (2, 4), §2.4 (5), §2.5 (1), §2.6 (6, 8), §2.7 (9).
+- [x] Each class has a regression test that failed before its fix. Audit
   `subagent-reports/261121-success-criterion-red-evidence.md`: RED evidence
   for classes 2, 4, 5, 7, 8 and for 3 via Task 3.8 only. The gaps were then
   closed by revert-and-see runs (each fix's tests as of the fix, run at its
@@ -345,21 +348,25 @@ names, people or hashes appear here.
   [subagent-reports/261121-red-evidence-revert-runs.md](subagent-reports/261121-red-evidence-revert-runs.md).
   Classes 1, 6 and 9 (Tasks 6.1, 6.2 and 6.3) and Tasks 3.1/3.2 (`fa14065d6`)
   and 3.7 (`64a74a1f1`, `0949616e2`) went red, then green at the fix.
-  `e1b0b5b73` is red only at import, and `7df818c71` is a test-only pin. Ready
-  to tick at review.
-- [ ] A client-mode install runs a branch tip, observes a move, and returns to
+  `e1b0b5b73` is red only at import (the behavioural red for 3.1/3.2 is
+  `fa14065d6`'s), and `7df818c71` is a test-only pin with no fix to revert.
+- [x] A client-mode install runs a branch tip, observes a move, and returns to
   the last tag in one step: proven end to end in the offline client-mode
   fixture on 21 November ([report](subagent-reports/261121-task-5-1-fixture-proof.md));
-  ticked when that branch is merged. A client seat's report is recorded when
-  one comes (delegated ruling, DESIGN §7.1).
-- [ ] Release-bound consequences (config keys, truth changes, release notes)
-  are recorded in `CLAUDE/UPGRADES/UNRELEASED/`.
+  on main at `662750cf4`. A client seat's report is recorded when one comes
+  (delegated ruling, DESIGN §7.1).
+- [x] Release-bound consequences (config keys, truth changes, release notes)
+  are recorded in `CLAUDE/UPGRADES/UNRELEASED/`: the shipped tasks' notes
+  (031 to 075) went out with their releases; the unreleased part is release
+  note `020-stacked-branches-count-once.md` and the
+  `branches.wip.stack_max_depth` entry in `config-changes/v3.77.0.yaml`.
+  Task 5.1's fixture scripts are developer-only and need no note.
 
 ## Delivery & Milestones
 
 - Plan opened.
 - Seat and release questions settled by delegated ruling (DESIGN §7); the
-  plan is no longer blocked. Task 3.8 is on main. Open: Task 4.6 (built,
-  on `plan-00594-finish`, awaiting review, gate and merge) and Task 5.1 (the
-  fixture proof, built and passing on the same branch, awaiting review, gate
-  and merge).
+  plan is no longer blocked. Task 3.8 is on main.
+- Tasks 4.6 and 5.1 and the red-evidence runs merged to main through
+  gate-261121 (`662750cf4`, full gate green); archived. Open follow-ups are
+  niggles N686 (owner decision) and N687.

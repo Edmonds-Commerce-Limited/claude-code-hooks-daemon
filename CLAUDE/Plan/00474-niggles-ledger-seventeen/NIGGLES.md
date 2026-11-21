@@ -8017,7 +8017,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 ### N680 — two remote-branch delete routes carry no proof at all: `gh pr close N --delete-branch` and `gh api -X DELETE .../git/refs/heads/<name>`
 
-**Source**: Plan 00594 F-BYPS review (`CLAUDE/Plan/00594-branch-lifecycle-and-branch-tip-channel/subagent-reports/f-byps-remote-delete-surviving-content-review.md`), on branch `agent-a20c91c23eca4e56e-43e33957`.
+**Source**: Plan 00594 F-BYPS review (`CLAUDE/Plan/Completed/00594-branch-lifecycle-and-branch-tip-channel/subagent-reports/f-byps-remote-delete-surviving-content-review.md`), on branch `agent-a20c91c23eca4e56e-43e33957`.
 
 **Evidence**: both commands delete a remote branch. No handler reads them and the loosening corpus has no row for them, so the remote-delete proof of Plan 00626 (remote default only, cherry route) is never asked. The gap is on main, not introduced by Plan 00594.
 
@@ -8070,7 +8070,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 ### N686 — owner decision: should a raw `git push --delete` of a surviving-content branch be denied in favour of the leased `delete-branch --remote-only`?
 
-**Source**: Plan 00594 Task 3.8, F-BYPS review Finding 4 (`CLAUDE/Plan/00594-branch-lifecycle-and-branch-tip-channel/subagent-reports/f-byps-remote-delete-surviving-content-review.md`), recorded as an owner decision in `subagent-reports/261120-task-3-8-merge-ready.md`.
+**Source**: Plan 00594 Task 3.8, F-BYPS review Finding 4 (`CLAUDE/Plan/Completed/00594-branch-lifecycle-and-branch-tip-channel/subagent-reports/f-byps-remote-delete-surviving-content-review.md`), recorded as an owner decision in `subagent-reports/261120-task-3-8-merge-ready.md`.
 
 **Evidence**: the surviving-content tier (on main since `69e375788`) lets an agent's raw `git push --delete` of a branch whose tip content every holder already has go through. The hook can allow or deny that command but cannot add a lease to it, so a holder or the branch can move between the proof and the push. `delete-branch --remote-only` deletes with a per-ref `--force-with-lease` and closes that race for the deleted ref. Denying the raw form would change the contract of a command allowed today. Holder leases are not possible in git (a lease only constrains a ref the push updates), so that part stays residue whatever is chosen.
 
