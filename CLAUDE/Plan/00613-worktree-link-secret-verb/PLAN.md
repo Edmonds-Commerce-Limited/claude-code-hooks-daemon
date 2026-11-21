@@ -100,5 +100,6 @@ root (`utils/link_reach.py`, closing the gap the 261120 handoff recorded).
 
 ## Delivery & Milestones
 
-- Phases 1 to 3 built on the work branch, not yet merged; an independent
-  security review follows before merge.
+- Phases 1 to 3 built and merged to main via integration/gate-261120
+  (merge commit 69e375788). Open: the live-daemon-socket check of the
+  seeded-link reads and Task 3.4.
