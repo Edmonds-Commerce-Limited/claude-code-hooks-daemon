@@ -230,6 +230,7 @@ if TYPE_CHECKING:
         PlanSummary,
         SlateReport,
     )
+    from claude_code_hooks_daemon.core.scratch_store_view import StoreStatus
     from claude_code_hooks_daemon.core.worktree_reaping import ProcessCwdsFn, RunGit, WorktreeAgeFn
     from claude_code_hooks_daemon.daemon.controller import DaemonController
     from claude_code_hooks_daemon.daemon.docs_generator import CollectedHandler, DocsGenerator
@@ -6849,15 +6850,16 @@ def cmd_scratch_sweep(
     return applied
 
 
-def _scratch_store_status(sources: "_ScratchSources") -> Any:
-    """The archive store's status for the inventory; ``None`` when there is no store."""
+def _scratch_store_status(store_path: Path, retention_hours: Mapping[str, float]) -> "StoreStatus":
+    """The archive store's status for the inventory; no store holds no archives and nothing torn."""
     from claude_code_hooks_daemon.core.scratch_archive import StoreAbsent
     from claude_code_hooks_daemon.core.scratch_archive_status import read_status
+    from claude_code_hooks_daemon.core.scratch_store_view import StoreStatus
 
     try:
-        return read_status(sources.store_path, sources.retention_hours())
+        return read_status(store_path, retention_hours)
     except StoreAbsent:
-        return None
+        return StoreStatus(archives=(), torn=False)
 
 
 def _scratch_worktree_reports(sources: "_ScratchSources") -> list[Any]:
@@ -6915,7 +6917,7 @@ def _record_scratch_inventory(sources: "_ScratchSources", report: Any) -> None:
             lambda: report,
             now=sources.wall_clock(),
             caps=sources.config.scratch.caps,
-            store=lambda: _scratch_store_status(sources),
+            store=lambda: _scratch_store_status(sources.store_path, sources.retention_hours()),
         )
     except (OSError, ValueError) as exc:
         log_and_continue(
@@ -6993,7 +6995,7 @@ def start_scratch_inventory_refresh(repo: Path) -> Any:
         repo / "untracked" / scratch_inventory.INVENTORY_FILE,
         lambda: sources.classify(sweep_root),
         caps=config.scratch.caps,
-        store=lambda: _scratch_store_status(sources),
+        store=lambda: _scratch_store_status(sources.store_path, sources.retention_hours()),
     )
 
 

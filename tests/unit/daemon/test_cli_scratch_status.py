@@ -131,3 +131,13 @@ class TestStatus:
 
 def _epoch(text: str) -> float:
     return datetime.fromisoformat(text).timestamp()
+
+
+class TestStoreStatusForTheInventory:
+    def test_an_absent_store_is_an_empty_status_not_none(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.scratch_store_view import StoreStatus
+        from claude_code_hooks_daemon.daemon.cli import _scratch_store_status
+
+        status = _scratch_store_status(tmp_path / "no-store", {})
+        assert status == StoreStatus(archives=(), torn=False)
+        assert not (tmp_path / "no-store").exists()
