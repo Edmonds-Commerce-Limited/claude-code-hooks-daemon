@@ -1,6 +1,6 @@
 # Plan 00620: agent no value branch removal verdict
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-18
 **Owner**: joseph
 **Priority**: High
@@ -44,17 +44,17 @@ The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in 
 - [x] ✅ **Task 2.1**: Slice 1, no change to delete behaviour. The live dispatch probe (journalled, passed); [DESIGN.md](DESIGN.md) with the verdict record, ledger line, review prompt and state layout; a pure module for inventory, verdict validation, bundle write and verify, ledger append and rate count, tests first; failing tests for forged, reused, stale, wrong-tip and self-written verdicts and for a verdict with no verified bundle, committed red.
 - [x] ✅ **Task 2.2**: Slice 2. The reviewer agent definition, the `branch-reject request` command, the dispatch gate and the SubagentStop record, and the `delete-branch` wiring under the `rejected-bundled` tier. The red tests of Task 2.1 turn green.
 - [x] ✅ **Task 2.3**: Slice 3. The `branch-reject digest` command and the session-start count of undigested removals.
-- [ ] ⬜ **Task 2.4**: Slice 4. Builder's share is done and ticked below; the independent loosening review, CI green and the merge are NOT done and stay unticked (a builder may not do them).
+- [x] ✅ **Task 2.4**: Slice 4. The builder's share, the independent loosening review, CI green and the merge are all done (below).
   - [x] ✅ Adversarial forge tests (`tests/unit/core/test_branch_reject_forge.py`) and the verdict-reuse fixes.
   - [x] ✅ Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/014-agent-no-value-branch-removal-verdict.md`.
   - [x] ✅ Known gaps recorded (section below).
-  - [ ] 🔄 Independent loosening review. Done and signed off for everything up to 09e1512e3: first pass F-BYPS, D-PATH, D-EXEC (security-reviewer) and a correctness review (code-reviewer), all findings fixed; re-checks of `5bbd4ab9a..09e1512e3` were F-BYPS "no bypass found, fit to merge" and D-EXEC "no findings" (reports in `/workspace/untracked/agent-reports/auto/261120-1{41755,41800,42011,42545,45725,45751}-*.md`). NOT yet reviewed: the two delete-path commits merged after that range, 8260463ff (`_operation_holding_branch`, refuse a branch a rebase or bisect holds) and 09e744603 (`_read_state_file` logging). Both only add refusals, but the sign-off must cover the merged head; the reviewer briefs are in `subagent-reports/261121-finish-handoff.md`.
-  - [ ] ⬜ CI green. NOT green: QA run 44854305236 on merge commit 69e375788 failed; CodeQL passed. Every failure is outside Plan 00620: three Plan 00627 scratch-archive unit tests (`test_scratch_archive_apply.py`, `test_scratch_archive_remove.py`, `test_scratch_archive_restore.py`, unit-core shard on py3.11/3.12/3.13) and the acceptance playbook harness (Kotlin linter timeout, #226). No `branch_reject` test failed. Tick once a main QA run containing 69e375788 succeeds.
+  - [x] ✅ Independent loosening review. Signed off up to 09e1512e3: first pass F-BYPS, D-PATH, D-EXEC (security-reviewer) and a correctness review (code-reviewer), all findings fixed; re-checks of `5bbd4ab9a..09e1512e3` were F-BYPS "no bypass found, fit to merge" and D-EXEC "no findings" (reports in `/workspace/untracked/agent-reports/auto/261120-1{41755,41800,42011,42545,45725,45751}-*.md`). The two delete-path commits merged after that range, 8260463ff and 09e744603, were then reviewed on the briefs in `subagent-reports/261121-finish-handoff.md`: D-EXEC "signed off, no findings" ([report](subagent-reports/261121-d-exec-review-8260463ff-09e744603.md)) and F-BYPS "sign-off, no bypass" ([report](subagent-reports/261121-f-byps-review-8260463ff-09e744603.md)); its two low, fail-closed findings are niggle N688. The later `branch_safety.py` commits that F-BYPS report lists as not examined (a7f2af3b6, 8d9036735, 9b3378b82, e64f11f64) touch the proof, cleanup and worktree-refusal code, not `_read_state_file`, `_operation_holding_branch`, `_compare_and_delete` or `_delete_rejected`.
+  - [x] ✅ CI green. QA run 44854305236 on 69e375788 failed outside Plan 00620 (three Plan 00627 scratch-archive tests on the ext4, non-root runner, and the Kotlin linter timeout #226); `ci-main-red-fix` fixed them, and QA run 44858759102 on main `61a916143`, which contains 69e375788, succeeded, as did CodeQL.
   - [x] ✅ Merge (to main via integration/gate-261120, merge commit 69e375788).
 
 ### Phase 3: Follow-up
 
-- [x] ✅ **Task 3.1**: After the merge, file a follow-up plan to point `recovery_copy_advisory` at the reject route instead of `refs/archive/` (RULINGS.md Q6). Plan 00619 is not reopened. Filed as [Plan 00629](../00629-recovery-copy-advisory-reject-route/PLAN.md).
+- [x] ✅ **Task 3.1**: After the merge, file a follow-up plan to point `recovery_copy_advisory` at the reject route instead of `refs/archive/` (RULINGS.md Q6). Plan 00619 is not reopened. Filed as [Plan 00629](../../00629-recovery-copy-advisory-reject-route/PLAN.md).
 
 ## Known gaps
 
@@ -70,6 +70,8 @@ The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in 
 
 - An unreadable second-stop transcript cannot withdraw a verdict, and an agent can mark digest entries read (this hides them only). Not yet pinned by tests.
 
+- Niggle N688 (from the F-BYPS review of 8260463ff): a state file that is not valid UTF-8 raises `UnicodeDecodeError` after `record_removal`, so the delete fails closed but the ledger keeps a removal line with no git-refused line; and on Python 3.14 `Path.is_dir` may answer False on EACCES and skip a linked admin dir (unverified).
+
 ## Success Criteria
 
 - [x] No delete of unproven work succeeds without a valid verdict and a recovery bundle the guard verified at delete time. Tests show the verdict cannot be reused (in any checkout or worktree), self-written, or forged by any route except the accepted RULINGS Q1 gaps above, which the bundle bounds. Evidence: `tests/unit/core/test_branch_reject_delete.py` `TestRefusals` (no, forged, reused, stale, wrong-tip, self-written, keep verdicts), `TestVerdictIdentity`, `TestRecordRemoval`, `TestCompareAndDelete`; `tests/unit/core/test_branch_reject_forge.py` `TestTamperedVerdictFiles`, `TestSymlinks`, `TestBoundToItsRequest`, `TestSingleUseAcrossCheckouts`.
@@ -83,3 +85,4 @@ The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in 
 - Slice 1 built: `core/branch_reject.py` with its tests green, `branches.reject` config, and the delete-path tests committed red for slice 2 (`tests/unit/core/test_branch_reject_delete.py`). Delete behaviour unchanged.
 - Slice 2 built: `delete_branches(reject_route=...)` wired and the red tests green (DESIGN.md section 10); `delete-branch` builds the route from `branches.reject`; `branch-reject request` admits a review and prints the daemon-composed prompt(s); the `hooks-daemon-branch-reject-reviewer` agent ships; `branch_reject_dispatch_gate` (PreToolUse 59), `branch_reject_agent_binder` (PostToolUse 33) and `branch_reject_verdict_recorder` (SubagentStop 13) are registered. Targeted QA is still owed before the Task 2.4 merge ([handoff](subagent-reports/261120-task-2.2-handoff.md)).
 - Slice 3 built: `branch-reject digest [--mark-read] [--format text|json]` and the read-only, fail-open session-start count in `branch_sweep` (DESIGN.md section 11).
+- Slice 4 and close: merged to main in 69e375788 (gate-261120); the finish work in 662750cf4 (gate-261121); reviews signed off, main CI green at 61a916143; follow-up Plan 00629 filed; archived.
