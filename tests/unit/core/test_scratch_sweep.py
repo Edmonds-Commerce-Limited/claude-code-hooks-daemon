@@ -7,7 +7,7 @@ import json
 import os
 import subprocess
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
@@ -57,6 +57,7 @@ def _sweep(
     root: Path | None = None,
     reference_roots: tuple[str, ...] = ("untracked/repos",),
     unreadable: tuple[int, ...] = (),
+    scandir: Callable[[str], AbstractContextManager[Iterator[os.DirEntry[str]]]] | None = None,
 ) -> SweepReport:
     inputs = LivenessInputs(
         cwds={1: Path("/elsewhere")} if cwds is None else cwds,
@@ -79,7 +80,7 @@ def _sweep(
         inputs=inputs,
         project_root=tree.base / "project",
         project_git=quiet_project_git(tree.base / "project"),
-        scandir=tree.refusing_scandir(*refused),
+        scandir=scandir or tree.refusing_scandir(*refused),
     )
 
 
@@ -963,3 +964,41 @@ class TestSessionChildrenAreTheEntries:
         children = _children(_sweep(tree, now=now), session.name)
         assert children["long"] == "LIVE"
         assert children["short"] in _ACTIONABLE_VALUES
+
+
+class TestSessionDirectoryIdentity:
+    """Task 4.3 step 3: a session sub-report names the directory it listed, and a swap fails closed."""
+
+    def test_the_sub_report_records_the_listed_directory(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        info = os.lstat(tree.root / _SESSION)
+        assert report.sessions[0].identity == (info.st_dev, info.st_ino)
+        assert report.identity is None
+
+    def test_a_directory_swapped_after_the_split_check_is_incomplete(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        real = tree.refusing_scandir()
+        session = str(tree.root / _SESSION)
+        seen: list[str] = []
+
+        def swapping(path: str) -> AbstractContextManager[Iterator[os.DirEntry[str]]]:
+            seen.append(path)
+            # The first listing of the session path is the parent's walk; the last, its own.
+            if path == session and seen.count(session) == 2:
+                (tree.root / _SESSION).rename(tree.root / "moved")
+                (tree.root / _SESSION / "cache" / "__pycache__").mkdir(parents=True)
+                (tree.root / _SESSION / "cache" / "__pycache__" / "m.pyc").write_bytes(b"x")
+            return real(path)
+
+        report = _sweep(tree, now=now, scandir=swapping)
+        sub = report.sessions[0]
+        assert not sub.complete
+        assert any("changed" in reason for reason in sub.incomplete_reasons)
+        assert not report.complete

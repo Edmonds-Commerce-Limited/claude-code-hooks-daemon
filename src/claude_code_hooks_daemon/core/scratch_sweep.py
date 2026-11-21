@@ -194,6 +194,8 @@ class SweepReport:
     not_evaluated: tuple[str, ...] = NOT_EVALUATED
     #: One report per session directory, whose children are its entries (Task 4.3).
     sessions: tuple[SweepReport, ...] = ()
+    #: A session sub-report's ``(st_dev, st_ino)``: the directory it listed, checked by apply.
+    identity: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -206,6 +208,8 @@ class _Container:
     unproved: str
     #: TTL hours ``scratch new --ttl-hours`` recorded per child.
     recorded_ttl: dict[str, int]
+    #: ``(st_dev, st_ino)`` of the directory the parent judged a session directory.
+    identity: tuple[int, int] | None = None
 
 
 def _relative(root: Path, project_root: Path) -> str | None:
@@ -305,6 +309,10 @@ def _run(
     listing = list_entries(root, scandir=scandir)
     if not listing.complete:
         return SweepReport(str(root), (), False, (listing.reason,), tuple(notes))
+    if container is not None and _identity(root) != container.identity:
+        # Swapped between the parent's check and this listing: what was listed is not it.
+        changed = f"session directory {root.name} changed while it was listed"
+        return SweepReport(str(root), (), False, (changed,), tuple(notes))
     resolved_root = root.resolve()
     relative_root = _relative(resolved_root, project_root.resolve())
     tracked = _tracked_by_entry(project_git, project_root, relative_root)
@@ -342,7 +350,8 @@ def _run(
     sessions: list[SweepReport] = []
     if container is None:
         for row in rows:
-            if _splits(root, row):
+            identity = _splits(root, row)
+            if identity is not None:
                 held = _container_holds(
                     root,
                     row.name,
@@ -350,6 +359,7 @@ def _run(
                     inputs,
                     dependency_unknown,
                 )
+                held = dataclasses.replace(held, identity=identity)
                 sub_root = dataclasses.replace(sweep_root, path=root / row.name, skip=(), notes=())
                 sessions.append(_run(sub_root, ctx, hashing, held))
         rows = [_held_if_session(root, row) for row in rows]
@@ -387,6 +397,7 @@ def _run(
         tuple(reasons),
         tuple(notes),
         sessions=tuple(sessions),
+        identity=None if container is None else container.identity,
     )
 
 
@@ -552,19 +563,27 @@ class _Parent:
     depended_on: frozenset[str]
 
 
-def _splits(root: Path, row: EntryRow) -> bool:
-    """True when ``row`` is a real session directory that is not itself a repository.
+def _splits(root: Path, row: EntryRow) -> tuple[int, int] | None:
+    """The identity of ``row`` when it is a real session directory that is not a repository.
 
     A repository at the session root keeps being judged whole (and held by
-    :func:`_held_if_session`), so its children are never entries.
+    :func:`_held_if_session`), so its children are never entries. None: not split.
     """
     if not is_session_dir_name(row.name) or row.kind is not NodeKind.DIRECTORY:
-        return False
+        return None
+    identity = _identity(root / row.name)
+    if identity is None or _is_repository(root / row.name):
+        return None
+    return identity
+
+
+def _identity(directory: Path) -> tuple[int, int] | None:
+    """``(st_dev, st_ino)`` of a real directory by ``lstat``; None for anything else."""
     try:
-        info = os.lstat(root / row.name)
+        info = os.lstat(directory)
     except OSError:
-        return False
-    return stat.S_ISDIR(info.st_mode) and not _is_repository(root / row.name)
+        return None
+    return (info.st_dev, info.st_ino) if stat.S_ISDIR(info.st_mode) else None
 
 
 def _is_repository(directory: Path) -> bool:
