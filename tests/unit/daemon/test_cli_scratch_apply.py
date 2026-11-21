@@ -154,18 +154,21 @@ class TestRefusals:
         assert not _store(project).exists()
         assert "--apply" in capsys.readouterr().err
 
-    def test_apply_from_a_linked_worktree_is_refused(
+    def test_apply_from_a_linked_worktree_cannot_reach_the_main_root(
         self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        # Task 6.1 lets a linked worktree apply to its OWN root only
+        # (tests/unit/daemon/test_cli_scratch_worktrees.py); the main root stays out of reach.
         project = _project(tree)
         linked = _linked_worktree(tree)
-        (linked / "untracked" / "scratch").mkdir(parents=True)
-        (linked / "untracked" / "scratch" / "f.log").write_text("x")
-        assert _run(_parse(linked, "--apply"), now=time.time() + 3 * _DAY) == 1
+        now = time.time() + 3 * _DAY
+        _old_entry(tree, now)
+        main_root = str(project / "untracked" / "scratch")
+        assert _run(_parse(linked, "--apply", "--root", main_root), now=now) == 1
         assert not _store(linked).exists()
         assert not _store(project).exists()
-        assert (linked / "untracked" / "scratch" / "f.log").exists()
-        assert "main checkout" in capsys.readouterr().err
+        assert (project / "untracked" / "scratch" / "old").exists()
+        assert "never swept" in capsys.readouterr().err
 
     @pytest.mark.parametrize("action", [("restore", "x"), ("keep", "x", "--reason", "r")])
     def test_restore_and_keep_from_a_linked_worktree_are_refused(

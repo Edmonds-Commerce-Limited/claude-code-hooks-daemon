@@ -6774,6 +6774,8 @@ def cmd_scratch_sweep(
     Returns:
         0 for a report or a completed action; 1 for a refusal.
     """
+    import dataclasses
+
     from claude_code_hooks_daemon.core import scratch_sweep
     from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
 
@@ -6805,16 +6807,25 @@ def cmd_scratch_sweep(
         return _scratch_status(args, sources)
     if action is None and not applying:
         report = sources.classify(sweep_root)
+        others = _scratch_worktree_reports(sources) if args.root is None else []
         if args.json:
-            print(json.dumps(scratch_sweep.report_json(report), indent=2))
+            document = scratch_sweep.report_json(report)
+            document["worktrees"] = [scratch_sweep.report_json(other) for other in others]
+            print(json.dumps(document, indent=2))
             return 0
-        for line in scratch_sweep.render_table(report, max_listed=config.scratch.sweep.max_listed):
+        max_listed = config.scratch.sweep.max_listed
+        for line in scratch_sweep.render_table(report, max_listed=max_listed):
             print(line)
+        for other in others:
+            print(f"\nRegistered worktree scratch root: {other.root}")
+            for line in scratch_sweep.render_table(other, max_listed=max_listed):
+                print(line)
         return 0
     refusal = _scratch_store_refusal(repo, sweep_root, applying=applying, action=action)
     if refusal:
         print(f"scratch-sweep: refused: {refusal}", file=sys.stderr)
         return 1
+    sources = dataclasses.replace(sources, store_checkout=_scratch_checkout(repo, repo)[1])
     if action == "restore":
         return _scratch_restore(args, sources, sweep_root)
     if action == "keep":
@@ -6842,6 +6853,46 @@ def _scratch_store_status(sources: "_ScratchSources") -> Any:
         return read_status(sources.store_path, sources.retention_hours())
     except StoreAbsent:
         return None
+
+
+def _scratch_worktree_reports(sources: "_ScratchSources") -> list[Any]:
+    """Dry-run reports for every OTHER registered worktree's scratch root (Task 6.1).
+
+    Only from the main checkout (a linked worktree sweeps its own root). A
+    worktree git marks prunable, or with no real ``untracked/scratch``
+    directory, is skipped; nothing is created. Each root is resolved and
+    classified against its own checkout, never acted on.
+    """
+    import dataclasses
+
+    from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
+    from claude_code_hooks_daemon.utils.git_repo import parse_worktree_porcelain, run_git
+
+    if not (sources.repo / ".git").is_dir():
+        return []
+    listing = run_git(sources.repo, "worktree", "list", "--porcelain")
+    if listing.returncode != 0:
+        logger.warning("scratch-sweep: git worktree list failed: %s", listing.stderr.strip())
+        return []
+    reports: list[Any] = []
+    for record in parse_worktree_porcelain(listing.stdout):
+        checkout = record.path
+        root = checkout / "untracked" / "scratch"
+        if record.prunable or checkout.resolve() == sources.repo.resolve():
+            continue
+        if root.is_symlink() or not root.is_dir():
+            continue
+        sweep_root = resolve_sweep_root(
+            root,
+            project_root=checkout,
+            config=sources.config.scratch,
+            reference_roots=tuple(sources.config.reference_repos.roots),
+        )
+        if sweep_root.refusal:
+            logger.info("scratch-sweep: %s not swept: %s", root, sweep_root.refusal)
+            continue
+        reports.append(dataclasses.replace(sources, repo=checkout).classify(sweep_root))
+    return reports
 
 
 def _record_scratch_inventory(sources: "_ScratchSources", report: Any) -> None:
@@ -7050,10 +7101,12 @@ class _ScratchSources:
     budget_clock: Callable[[], float]
     process_cwds: Callable[[], Mapping[int, Path]] | None
     git_runner: Callable[..., Any] | None
+    #: The main checkout, which alone holds the archive store; ``None`` means ``repo``.
+    store_checkout: Path | None = None
 
     @property
     def store_path(self) -> Path:
-        return self.repo / "untracked" / "scratch-archive"
+        return (self.store_checkout or self.repo) / "untracked" / "scratch-archive"
 
     @property
     def background_file(self) -> Path:
@@ -7124,6 +7177,23 @@ class _ScratchSources:
         )
 
 
+def _scratch_linked_apply_refusal(repo: Path, main: Path) -> str:
+    """Why ``--apply`` may not run from the linked worktree ``repo``; "" when it may (Task 6.1).
+
+    ``repo`` must be the root of a registered linked worktree of the same
+    repository as ``main``; the sweep root itself is held inside ``repo`` by
+    :func:`resolve_sweep_root`, so the run is limited to its own checkout.
+    """
+    from claude_code_hooks_daemon.utils.git_repo import GitRepo, is_worktree_of_repo
+
+    found = GitRepo.resolve_for(repo)
+    if found is None or found.root.resolve() != repo.resolve():
+        return f"{repo} is not the root of a checkout"
+    if not (main / ".git").is_dir() or not is_worktree_of_repo(repo, main):
+        return f"{repo} is not a linked worktree of {main}"
+    return ""
+
+
 def _scratch_store_refusal(
     repo: Path, sweep_root: Any, *, applying: bool, action: str | None
 ) -> str:
@@ -7131,18 +7201,26 @@ def _scratch_store_refusal(
 
     Fails closed: a checkout whose ``.git`` is not a directory is a linked
     worktree, and git's own answer must also name this checkout as the main one.
+    The one exception is ``--apply`` from a registered linked worktree of this
+    repository (Task 6.1): it acts on that checkout's own root, and its
+    archives go to the main checkout's store.
     """
     from claude_code_hooks_daemon.utils.git_repo import GitRepo
 
     if applying and action is not None:
         return f"--apply cannot be combined with {action}"
     store_rule = "the archive store lives in the main checkout only"
-    if not (repo / ".git").is_dir():
-        return f"{repo} is not the main checkout (its .git is not a directory): {store_rule}"
     found = GitRepo.resolve_for(repo)
     if found is None:
         return f"{repo} is not a git repository: {store_rule}"
-    if found.main_worktree_root().resolve() != repo.resolve():
+    main = found.main_worktree_root()
+    if applying and not (repo / ".git").is_dir():
+        linked = _scratch_linked_apply_refusal(repo, main)
+        if linked:
+            return f"{linked}: {store_rule}"
+    elif not (repo / ".git").is_dir():
+        return f"{repo} is not the main checkout (its .git is not a directory): {store_rule}"
+    elif main.resolve() != repo.resolve():
         return f"{repo} is not the main checkout: {store_rule}"
     if sweep_root.refusal:
         return str(sweep_root.refusal)

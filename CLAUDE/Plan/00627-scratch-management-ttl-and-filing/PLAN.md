@@ -113,9 +113,9 @@ Every build task is test-first: the failing test is written and seen to fail bef
 
 ### Phase 6: Worktrees and the link index
 
-- [ ] ⬜ **Task 6.1**: Sweep every registered worktree's scratch root; limit a sub-agent's `--apply` to its own checkout.
+- [x] ✅ **Task 6.1**: Sweep every registered worktree's scratch root; limit a sub-agent's `--apply` to its own checkout. (Dry run from the main checkout reports every other registered worktree's root; `--apply` from a registered linked worktree acts on that checkout's own root only and packs into the main store; `restore`/`keep` stay main-only; TTY gate unchanged. The CLI cannot tell a sub-agent apart, so the limit is structural: every `--apply` is held to the checkout it runs in.)
 - [ ] ⬜ **Task 6.2**: Add evacuate mode and call it from `worktree-reap --reap` and `cleanup_after_merge` before the removal is judged (DESIGN.md section 11).
-- [ ] ⬜ **Task 6.3**: After Plan 00623 merges, read the link index's listed-directory count and cap for `caps.project_directories`. Blocked on 00623.
+- [ ] ⬜ **Task 6.3**: After Plan 00623 merges, read the link index's listed-directory count and cap for `caps.project_directories`. Blocked on 00623 (still unmerged at Phase 6 handoff 7).
 
 ### Phase 7: Instructions and retirement of the old report
 
