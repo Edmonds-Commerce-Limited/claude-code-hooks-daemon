@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.core.scratch_archive_apply import (
 from claude_code_hooks_daemon.core.scratch_archive_claim import (
     DEFAULT_MAX_DEPTH,
     WalkRefused,
+    bounded_names,
     open_dir,
     walk_tree,
 )
@@ -47,8 +48,11 @@ _LOG = logging.getLogger(__name__)
 
 SESSION_BLOCKER = (
     "{name}: a session directory: evacuation handles root-level entries only, "
-    "and restore cannot recreate it once the worktree is gone (DESIGN.md section 13)"
+    "and restore cannot recreate it once the worktree is gone (DESIGN.md section 13); "
+    "a human files or deletes its children by hand in the worktree (never "
+    "`scratch-sweep --apply` there), then runs worktree-reap again"
 )
+NOT_LISTED = "{name}: not listed by the classification"
 NO_BIRTH_STAMP = "{name}: no birth stamp"
 
 
@@ -102,7 +106,7 @@ def _report_blockers(report: SweepReport) -> list[str]:
     blockers = [SESSION_BLOCKER.format(name=Path(sub.root).name) for sub in report.sessions]
     for row in report.rows:
         reason = _row_blocker(row)
-        if reason:
+        if reason and reason not in blockers:
             blockers.append(reason)
     return blockers
 
@@ -123,16 +127,25 @@ def _row_blocker(row: EntryRow) -> str:
 
 
 def _inode_blockers(report: SweepReport, *, max_inodes: int, max_depth: int) -> list[str]:
-    """Each entry's birth stamp readable and no inode another user owns, checked before any pack."""
-    if not report.rows:
-        return []
+    """Every name on disk listed, each birth stamp readable, no foreign inode: before any pack.
+
+    A name the classification did not list (a skipped protected name, a
+    leftover claim, a keep marker) was never judged, so it refuses the worktree.
+    """
     try:
         root_fd = open_dir(Path(report.root))
     except OSError as exc:
         log_and_continue(_LOG, exc, reason=f"{report.root}: not opened, nothing evacuated")
         return [f"{report.root}: could not be opened"]
     try:
-        return [
+        try:
+            on_disk = bounded_names(root_fd, max_inodes)
+        except WalkRefused as exc:
+            log_and_continue(_LOG, exc, reason=f"{report.root}: not listed, nothing evacuated")
+            return [f"{report.root}: could not be listed"]
+        listed = {row.name for row in report.rows}
+        unlisted = [NOT_LISTED.format(name=name) for name in sorted(set(on_disk) - listed)]
+        return unlisted + [
             reason
             for row in report.rows
             if (reason := _entry_blocker(root_fd, row.name, max_inodes, max_depth))

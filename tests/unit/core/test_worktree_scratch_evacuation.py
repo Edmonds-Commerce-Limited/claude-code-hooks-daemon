@@ -97,6 +97,11 @@ class TestEvacuable:
         assert result.not_due == 1
         assert dict(result.by_verdict) == {"DISPOSABLE": 1, "UNCERTAIN": 2}
 
+    def test_a_plain_file_entry_passes(self, root: Path) -> None:
+        (root / "notes.md").write_text("notes")
+        file_row = dataclasses.replace(row("notes.md"), kind=NodeKind.FILE)
+        assert gate(report(root, file_row)).blockers == ()
+
     def test_an_empty_root_passes_with_nothing_to_pack(self, root: Path) -> None:
         result = gate(report(root))
         assert result.blockers == ()
@@ -193,6 +198,32 @@ class TestBlockers:
         missing = tmp_path / "nope"
         result = gate(report(missing, row("a")))
         assert result.blockers == (f"{missing}: could not be opened",)
+
+    def test_a_name_on_disk_no_row_lists_blocks(self, root: Path) -> None:
+        """A skipped name, a leftover claim or a marker: unjudged, so never packed around."""
+        make(root, "a", ".sweeping-b")
+        (root / ".scratch-keep").write_text("")
+        result = gate(report(root, row("a")))
+        assert result.blockers == (
+            ".scratch-keep: not listed by the classification",
+            ".sweeping-b: not listed by the classification",
+        )
+
+    def test_a_name_on_disk_blocks_an_otherwise_empty_report(self, root: Path) -> None:
+        make(root, "a")
+        assert gate(report(root)).blockers == ("a: not listed by the classification",)
+
+    def test_a_session_directory_listed_twice_is_named_once(self, root: Path) -> None:
+        name = "s-20261121T000000Z-abcdefgh"
+        make(root, name)
+        sub = SweepReport(str(root / name), (), True, (), ())
+        rep = dataclasses.replace(report(root, row(name, Verdict.STUCK)), sessions=(sub,))
+        assert gate(rep).blockers == (SESSION_BLOCKER.format(name=name),)
+
+    def test_the_session_blocker_names_the_human_step(self) -> None:
+        text = SESSION_BLOCKER.format(name="s-x")
+        assert "by hand" in text
+        assert "never" in text
 
     def test_one_blocker_withholds_consent_for_all(self, root: Path) -> None:
         make(root, "a", "b")
