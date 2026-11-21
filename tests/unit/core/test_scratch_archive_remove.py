@@ -57,6 +57,7 @@ from claude_code_hooks_daemon.core.scratch_archive_remove import (
     remove_claimed,
     resume_claimed,
 )
+from tests.unit.core.test_scratch_archive_claim import shift_device_of
 
 MAX = 1000
 CHECKOUT = "main"
@@ -478,6 +479,31 @@ class TestRemoveClaimed:
                 tar=tar,
                 max_inodes=MAX,
                 max_depth=1,
+                **POLICY,
+            )
+        assert _snapshot(root) == before
+
+    def test_refuses_an_entry_that_became_a_mount_point(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Removal re-walks the claimed tree, so a top entry on a second device is kept."""
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        before = _snapshot(root)
+        shift_device_of(root, monkeypatch)
+        with pytest.raises(RemoveRefused, match="second device"):
+            remove_claimed(
+                root_fd,
+                CLAIM_PREFIX + "e1",
+                store,
+                record,
+                tar=tar,
+                max_inodes=MAX,
                 **POLICY,
             )
         assert _snapshot(root) == before

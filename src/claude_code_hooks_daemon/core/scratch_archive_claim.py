@@ -201,6 +201,9 @@ def walk_tree(
         top = os.lstat(name, dir_fd=parent_fd)
     except OSError as exc:
         raise WalkRefused(f"cannot lstat {name!r}: {exc}") from exc
+    if top.st_dev != os.fstat(parent_fd).st_dev:
+        # The entry is itself a mount point: DESIGN section 5.3 gives it no action.
+        raise WalkRefused(f"{name!r} is on a second device (a mount point)")
     nodes = [_node("", top)]
     if not stat.S_ISDIR(top.st_mode):
         return TreeListing(tuple(nodes))
