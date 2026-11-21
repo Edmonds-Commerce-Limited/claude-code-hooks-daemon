@@ -11,10 +11,12 @@ touched, no store is created and the question is never asked.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 from tests.support.scratch_tree import ScratchTree, commit_file, git
@@ -34,6 +36,7 @@ from tests.unit.daemon.test_worktree_evacuate import (
 )
 
 from claude_code_hooks_daemon.core import worktree_scratch_evacuation
+from claude_code_hooks_daemon.core.scratch_archive_claim import TreeListing, walk_tree
 from claude_code_hooks_daemon.daemon import cli
 from claude_code_hooks_daemon.daemon.cli import cmd_worktree_reap
 from claude_code_hooks_daemon.daemon.worktree_evacuate import EvacuateSeams
@@ -61,6 +64,22 @@ def _due_entry(tree: ScratchTree) -> Path:
     _write(entry / "sub" / "b.txt", b"beta", time.time())
     _old(entry)
     return entry
+
+
+def _walk_reporting_owner(monkeypatch: pytest.MonkeyPatch, rel: str, *, uid: int) -> None:
+    """Make the evacuation gate's walk report ``rel`` as owned by ``uid``."""
+
+    def walk(*args: Any, **kwargs: Any) -> TreeListing:
+        listing = walk_tree(*args, **kwargs)
+        nodes = tuple(
+            dataclasses.replace(node, uid=uid) if node.rel == rel else node
+            for node in listing.nodes
+        )
+        if nodes == listing.nodes:
+            return listing
+        return TreeListing(nodes=nodes)
+
+    monkeypatch.setattr(worktree_scratch_evacuation, "walk_tree", walk)
 
 
 def _run(
@@ -144,12 +163,19 @@ class TestEachBlockingVerdictKeepsTheWorktree:
 
         _assert_kept(tree, rc, out, before, "no process working directory could be read")
 
-    @pytest.mark.skipif(os.geteuid() != 0, reason="giving a file to another user needs root")
-    def test_foreign_owner(self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]) -> None:
-        """An inode another user owns is never packed (fix B)."""
-        entry = _due_entry(tree)
-        os.chown(entry / "sub" / "b.txt", 4242, 4242)
-        _old(entry)
+    def test_foreign_owner(
+        self,
+        tree: ScratchTree,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """An inode another user owns is never packed (fix B).
+
+        The foreign owner is injected into the gate's walk rather than made
+        with ``chown``, which needs root: the refusal then runs under every euid.
+        """
+        _due_entry(tree)
+        _walk_reporting_owner(monkeypatch, "sub/b.txt", uid=4242)
         before = _inodes(_scratch(tree))
 
         rc, out = _run(tree, capsys)
