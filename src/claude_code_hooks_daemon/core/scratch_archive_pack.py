@@ -150,6 +150,26 @@ class Verified:
     members: tuple[str, ...]
 
 
+def refuse_foreign_owner(listing: TreeListing, claimed_name: str) -> None:
+    """Raise :class:`PackRefused` if any inode's uid or gid is not the effective user's.
+
+    A restore extracts as the running user and cannot prove another owner back,
+    so an entry holding one is never archived and therefore never removed.
+    """
+    uid, gid = os.geteuid(), os.getegid()
+    for node in listing.nodes:
+        if node.uid != uid:
+            raise PackRefused(
+                f"{node.rel or claimed_name!r} is owned by uid {node.uid}, not {uid}; "
+                "a restore could not give it back"
+            )
+        if node.gid != gid:
+            raise PackRefused(
+                f"{node.rel or claimed_name!r} has gid {node.gid}, not {gid}; "
+                "a restore could not give it back"
+            )
+
+
 def members_of(listing: TreeListing, claimed_name: str) -> Members:
     """Turn a walk into tar's member list; refuse a special root or a multiply-linked file."""
     counts = dict(Counter(n.kind for n in listing.nodes))
@@ -704,6 +724,7 @@ def pack(
         raise PackRefused(f"the claimed entry cannot be walked: {exc}") from exc
     if fingerprint_of(listing) != handle.fingerprint:
         raise PackRefused("fingerprint changed since the claim")
+    refuse_foreign_owner(listing, handle.claimed_name)
     members = members_of(listing, handle.claimed_name)
     try:
         archive_fd = store.create_archive(archive_id)

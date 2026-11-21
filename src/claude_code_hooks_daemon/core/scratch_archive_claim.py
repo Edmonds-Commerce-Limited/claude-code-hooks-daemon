@@ -76,6 +76,8 @@ class Node:
     ctime_ns: int
     mtime_ns: int
     size: int
+    uid: int = -1
+    gid: int = -1
 
 
 @dataclass(frozen=True)
@@ -132,6 +134,8 @@ def _node(rel: str, info: os.stat_result) -> Node:
         ctime_ns=info.st_ctime_ns,
         mtime_ns=info.st_mtime_ns,
         size=info.st_size,
+        uid=info.st_uid,
+        gid=info.st_gid,
     )
 
 

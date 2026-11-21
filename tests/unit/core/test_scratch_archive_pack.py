@@ -230,6 +230,64 @@ class TestPack:
             pack(claimed, store, new_archive_id(), tar=tar, max_inodes=100)
         claimed.close()
 
+    def test_a_file_of_another_owner_is_refused_as_root(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """Fix B: restore cannot prove foreign ownership, so pack never takes it."""
+        if os.geteuid() != 0:
+            pytest.skip("chown to another user needs root")
+        entry = _entry(root)
+        os.chown(entry / "sub" / "b.bin", 65534, os.getegid())
+        claimed = _claim(root_fd, "e1")
+        with pytest.raises(PackRefused, match="owned by uid 65534"):
+            pack(claimed, store, new_archive_id(), tar=tar, max_inodes=100)
+        assert _store_files(store) == []
+        claimed.close()
+
+    def test_a_group_of_another_gid_is_refused_as_root(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        if os.geteuid() != 0:
+            pytest.skip("chgrp to another group needs root")
+        entry = _entry(root)
+        os.chown(entry, os.geteuid(), 65534)
+        claimed = _claim(root_fd, "e1")
+        with pytest.raises(PackRefused, match="gid 65534"):
+            pack(claimed, store, new_archive_id(), tar=tar, max_inodes=100)
+        claimed.close()
+
+    def test_an_entry_owned_by_the_running_user_is_refused_under_another_euid(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Any runner, root included: an owner other than the effective user refuses."""
+        _entry(root)
+        claimed = _claim(root_fd, "e1")
+        monkeypatch.setattr(pack_mod.os, "geteuid", lambda: os.getuid() + 4242)
+        with pytest.raises(PackRefused, match="owned by uid"):
+            pack(claimed, store, new_archive_id(), tar=tar, max_inodes=100)
+        assert _store_files(store) == []
+        claimed.close()
+
+    def test_a_group_other_than_the_effective_gid_is_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _entry(root)
+        claimed = _claim(root_fd, "e1")
+        monkeypatch.setattr(pack_mod.os, "getegid", lambda: os.getgid() + 4242)
+        with pytest.raises(PackRefused, match="gid"):
+            pack(claimed, store, new_archive_id(), tar=tar, max_inodes=100)
+        claimed.close()
+
     def test_hostile_file_names_are_never_options(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool, tmp_path: Path
     ) -> None:

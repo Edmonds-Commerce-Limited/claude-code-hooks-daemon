@@ -460,6 +460,21 @@ class TestAdoptRefusals:
             with pytest.raises(StoreRefused, match="lock"):
                 _adopt(unlocked, root_fd, find_gnu_tar())
 
+    def test_an_original_of_another_owner_is_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        gnu_tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Fix B: adopting would remove a tree a restore cannot give back its owner."""
+        _make(root)
+        _pack_by_hand(root)
+        real_geteuid = os.geteuid
+        monkeypatch.setattr(os, "geteuid", lambda: real_geteuid() + 4242)
+        _refused(store, root, root_fd, gnu_tar, "owned by uid")
+
     @pytest.mark.parametrize(
         "change",
         ["changed-file", "missing-file", "extra-file", "extra-dir"],

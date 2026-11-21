@@ -202,6 +202,25 @@ class TestArchivesWhatIsActionable:
             os.close(fd)
         assert snapshot(root / "e1") == before
 
+    def test_an_entry_of_another_owner_is_refused_and_left_in_place(
+        self, root: Path, store: ArchiveStore, tar: TarTool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fix B: foreign ownership refuses the pack; the entry is renamed back, never removed."""
+        entry(root, "e1")
+        before = snapshot(root / "e1")
+        real_geteuid = os.geteuid
+        fake = FakeFacts([row("e1", Verdict.DISPOSABLE)])
+        settings_ = settings(root, tar)
+        monkeypatch.setattr(os, "geteuid", lambda: real_geteuid() + 4242)
+        result = apply_sweep(store, fake.facts(), settings_)
+        monkeypatch.setattr(os, "geteuid", real_geteuid)
+        outcome = outcome_of(result, "e1")
+        assert outcome.outcome == "renamed-back"
+        assert "owned by uid" in outcome.reason
+        assert snapshot(root / "e1") == before
+        assert not (root / (CLAIM_PREFIX + "e1")).exists()
+        assert store.read_index().records == ()
+
     @pytest.mark.parametrize(
         "verdict",
         [Verdict.LIVE, Verdict.STUCK, Verdict.PROTECTED, Verdict.REFERENCED],
