@@ -446,6 +446,10 @@ handlers:
       enabled: true
       priority: 20
 
+    scratch_keep_marker_guard: # An agent may not create, change or remove `.scratch-keep` (Plan 00627)
+      enabled: true
+      priority: 18
+
     pip_break_system:      # Blocks pip commands that break system packages
       enabled: true
       priority: 21

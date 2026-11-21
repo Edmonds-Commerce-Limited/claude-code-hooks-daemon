@@ -1322,6 +1322,36 @@ handlers:
 
 ---
 
+#### scratch_keep_marker_guard
+
+| Property       | Value                       |
+| -------------- | --------------------------- |
+| **Config key** | `scratch_keep_marker_guard` |
+| **Priority**   | 18                          |
+| **Type**       | Blocking                    |
+| **Event**      | PreToolUse                  |
+| **Rule**       | `R-SCRATCH-KEEP-MARKER`     |
+
+**Description:** Denies an agent creating, changing or removing a `.scratch-keep` file. A scratch entry holding that marker is KEPT by `hooks-daemon scratch-sweep` for ever, so the marker is a human's decision. Judged on the file name across every write route: `Write`/`Edit`, and a Bash redirect, `tee`, `cp`/`mv`/`install`/`dd`, `ln`, `touch` or `rm`. A destination built from a variable, or command text the scanner cannot read, is denied when it names the marker. Not covered: a recursive copy of a directory that already holds a marker.
+
+**Example trigger:**
+
+```
+touch untracked/scratch/<session>/probe/.scratch-keep
+```
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    scratch_keep_marker_guard:
+      enabled: true
+      priority: 18
+```
+
+---
+
 #### write_protected_paths
 
 | Property       | Value                   |
@@ -5416,6 +5446,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `curl_pipe_shell`               | PreToolUse        | 10       | curl/wget piped to bash/sh                                                      |
 | `lock_file_edit_blocker`        | PreToolUse        | 10       | Direct editing of lock files                                                    |
 | `write_protected_paths`         | PreToolUse        | 18       | Agent writes to a configured read-only path                                     |
+| `scratch_keep_marker_guard`     | PreToolUse        | 18       | An agent writing or removing a `.scratch-keep` marker                           |
 | `pip_break_system`              | PreToolUse        | 10       | pip --break-system-packages                                                     |
 | `sudo_pip`                      | PreToolUse        | 10       | sudo pip install                                                                |
 | `host_command_guard`            | PreToolUse        | 10       | docker host-root mount, gh auth token, non-PyPI pip index, crontab -r           |

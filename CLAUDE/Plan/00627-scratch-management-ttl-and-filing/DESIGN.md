@@ -149,7 +149,7 @@ To stop new references, a docs/plan QA check flags a tracked line that cites an 
 
 "Anything the owner or a human wrote" cannot be recognised from file content, and there is no ledger of who wrote what (00560, owner ruling). Two mechanisms stand in:
 
-- **`.scratch-keep`**: a file at the top of an entry, holding one line of reason. An entry with it is KEPT for ever. A guard denies an agent creating it (`Write`, `Edit`, or a Bash-authored path), so it is a human's mark (R15).
+- **`.scratch-keep`**: a file at the top of an entry, holding one line of reason. An entry with it is KEPT for ever. A guard denies an agent creating it (`Write`, `Edit`, or a Bash-authored path), so it is a human's mark (R15). As built (`scratch_keep_marker_guard`, Task 4.4) the guard also denies an agent changing or removing it (`touch`, `ln`, `rm`, the source of `mv`), because an agent's removal would undo a human's keep; it reads the shared write scan with mutations, and fails closed on an unresolved destination or unreadable text that names the marker. A recursive copy of a directory already holding a marker is not seen.
 - **`scratch-sweep keep <entry> --reason "..." [--hours N]`**: an agent's pause, recorded in the store index, bounded by `scratch.keep.max_hours`, refused when the reason repeats the last one for that entry (the `branch-park` rule).
 
 Legacy content has neither mark. For it, the long retention of UNCERTAIN is the protection, and that limit is stated plainly in the first dogfood report (Phase 8).
@@ -263,7 +263,7 @@ An entry that is filed is then deleted by its filer, or simply expires. An entry
 - **Owner and birth** therefore come from the daemon, not from the agent and not from mtime.
 - **A session directory** is itself removed when it is empty apart from its manifest and older than the TTL.
 - **Unowned entries** (a new file or directory made directly in a scratch root) draw an advisory naming the session directory, through the same accessor 00560 uses for Bash-authored writes. It starts as an advisory; the mode key allows a deny later.
-- Whether SessionStart can also export the path to the shell (Claude Code's environment file for hooks) is to be confirmed on a live payload as the first step of Task 4.1; the design does not depend on it.
+- **Exporting the path to the shell is not used (Task 4.1 finding).** Claude Code supports it: `CLAUDE_ENV_FILE` is documented for SessionStart (`remote-docs/code.claude.com/docs/en/hooks.md`, "Persist environment variables"). But it is an environment variable of the hook PROCESS, not a payload field (the SessionStart contract's input carries no such field), and the daemon handler sees only the JSON relayed over the socket; neither the forwarder nor the relay passes it on today. A live SessionStart payload was not captured (the payload-capture directory was empty and a sub-agent cannot trigger one), so this rests on the contract and the docs. The export is also unnecessary: every Bash call already carries `CLAUDE_CODE_SESSION_ID`, equal to the hooks' `session_id` (Claude Code changelog; seen live, matching the session's transcript name). `hooks-daemon scratch new` therefore resolves the session directory by the session id's first 8 characters (validated against a strict charset) in the main checkout's scratch root, and SessionStart only creates and announces it. Creation is idempotent per session id (resume and compact fire SessionStart again) and never rewrites an existing manifest.
 
 ## 8. Caps
 

@@ -56,11 +56,13 @@ from claude_code_hooks_daemon.core.scratch_repos import (
     read_small_regular_file,
 )
 from claude_code_hooks_daemon.core.scratch_verdict import (
+    KEEP_MARKER,
     NOT_EVALUATED,
     Judgement,
     Proof,
     RepositoryMarker,
     Verdict,
+    has_keep_marker,
     judge,
     uncovered_nodes,
 )
@@ -108,6 +110,7 @@ def liveness_unknown_reason(inputs: LivenessInputs) -> str:
 #: Table order: what needs a human first, what is in use last.
 _TABLE_ORDER = (
     Verdict.STUCK,
+    Verdict.KEPT,
     Verdict.PROTECTED,
     Verdict.REFERENCED,
     Verdict.UNCERTAIN,
@@ -557,6 +560,7 @@ def _judge_entry(
         repos=repos,
         tracked=git.tracked,
         liveness_unknown=liveness_unknown_reason(inputs),
+        keep_reason=_keep_reason(root, stats),
     )
     if judgement.verdict is Verdict.UNCERTAIN:
         judgement = _with_p3(root, walk, age, repos, git, judgement)
@@ -591,6 +595,25 @@ def _judge_entry(
         filing_command=proposal.command if proposal else "",
     )
     return row, _entry_pointers(root, resolved_root, name, walk)
+
+
+#: The most of a ``.scratch-keep`` file read for its reason.
+_KEEP_REASON_BYTES = 512
+
+
+def _keep_reason(root: Path, stats: EntryStats) -> str:
+    """The first line of the entry's keep marker, printable; "" when absent or unreadable.
+
+    The marker's presence is decided from the walk; this only reads its reason,
+    without following a link, so an unreadable marker still keeps the entry.
+    """
+    if not has_keep_marker(stats):
+        return ""
+    raw = read_small_regular_file(root / stats.name / KEEP_MARKER, _KEEP_REASON_BYTES)
+    if raw is None:
+        return ""
+    first = raw.decode("utf-8", errors="replace").split("\n", 1)[0].strip()
+    return _printable(first)
 
 
 def _protection(
@@ -661,7 +684,8 @@ def render_table(report: SweepReport, *, max_listed: int) -> list[str]:
     counts = _counts(report)
     summary = ", ".join(f"{verdict} {count}" for verdict, count in counts.items())
     lines.append(f"Entries: {len(report.rows)}" + (f" ({summary})" if summary else ""))
-    lines.append("Not evaluated in this phase: " + ", ".join(report.not_evaluated))
+    if report.not_evaluated:
+        lines.append("Not evaluated in this phase: " + ", ".join(report.not_evaluated))
     lines.extend(f"Note: {note}" for note in report.notes)
     if not report.rows:
         return lines

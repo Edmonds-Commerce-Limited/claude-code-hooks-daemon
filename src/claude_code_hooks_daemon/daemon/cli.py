@@ -6800,6 +6800,8 @@ def cmd_scratch_sweep(
         process_cwds=process_cwds,
         git_runner=git_runner,
     )
+    if action == "status" and not applying:
+        return _scratch_status(args, sources)
     if action is None and not applying:
         report = sources.classify(sweep_root)
         if args.json:
@@ -7104,6 +7106,54 @@ def _scratch_restore(args: argparse.Namespace, sources: _ScratchSources, sweep_r
         for problem in result.problems:
             print(f"scratch-sweep: after the restore: {problem}", file=sys.stderr)
         return 1
+    return 0
+
+
+def _scratch_status(args: argparse.Namespace, sources: _ScratchSources) -> int:
+    """``status [--json]``: the live archives of the main checkout's store, read-only.
+
+    The store lives in the main checkout only, so a linked worktree reads that
+    one. No store is created, no lock is taken and nothing is written.
+    """
+    from claude_code_hooks_daemon.core.scratch_archive import StoreAbsent, StoreRefused
+    from claude_code_hooks_daemon.core.scratch_archive_status import (
+        read_status,
+        render_status,
+    )
+    from claude_code_hooks_daemon.utils.git_repo import GitRepo
+
+    found = GitRepo.resolve_for(sources.repo)
+    main = found.main_worktree_root() if found is not None else sources.repo
+    store = Path(main) / "untracked" / "scratch-archive"
+    try:
+        status = read_status(store, sources.retention_hours())
+    except StoreAbsent:
+        print(f"scratch-sweep status: there is no archive store at {store}")
+        return 0
+    except (StoreRefused, OSError) as exc:
+        print(f"scratch-sweep: status refused: {exc}", file=sys.stderr)
+        return 1
+    if args.status_json:
+        document = {
+            "store": str(store),
+            "torn": status.torn,
+            "archives": [
+                {
+                    "archive_id": row.archive_id,
+                    "original_paths": list(row.original_paths),
+                    "verdict": row.verdict,
+                    "expires": row.expires.isoformat() if row.expires else None,
+                    "note": row.note,
+                    "keeps": row.keeps,
+                    "restore_command": row.restore_command,
+                }
+                for row in status.archives
+            ],
+        }
+        print(json.dumps(document, indent=2))
+        return 0
+    for line in render_status(status, now=sources.now()):
+        print(line)
     return 0
 
 
@@ -14306,7 +14356,8 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Exit 0 for a report, complete or not. The report says when the walk "
             "budget ran out or a directory could not be read.\n\n"
-            "KEPT is not evaluated yet. An entry a tracked file names is REFERENCED. "
+            "An entry holding a regular .scratch-keep file at its top is KEPT (a "
+            "human's pin; never acted on). An entry a tracked file names is REFERENCED. "
             "A repository in an entry is "
             "classified (a registered worktree, a related clone with unpushed or dirty "
             "work: PROTECTED; a standalone repository: ordinary content). The remote's "
@@ -14371,6 +14422,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_scratch_keep.add_argument(
         "--entry", default=None, metavar="PATH", help="The original path, for a batch archive"
+    )
+    parser_scratch_status = scratch_actions.add_parser(
+        "status",
+        help="List the live archives: id, original path, verdict, effective expiry "
+        "with keeps applied (read-only; never creates the store)",
+    )
+    parser_scratch_status.add_argument(
+        "--json", dest="status_json", action="store_true", help="Print the archives as JSON"
     )
     parser_scratch_sweep.set_defaults(func=cmd_scratch_sweep)
 

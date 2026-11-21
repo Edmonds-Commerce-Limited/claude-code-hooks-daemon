@@ -106,7 +106,7 @@ class TestFlagSurface:
             "--apply",
         }
         (sub,) = [a for a in sweep._actions if isinstance(a, argparse._SubParsersAction)]
-        assert set(sub.choices) == {"restore", "keep"}
+        assert set(sub.choices) == {"restore", "keep", "status"}
 
         def surface(name: str) -> tuple[set[str], list[str]]:
             actions = sub.choices[name]._actions

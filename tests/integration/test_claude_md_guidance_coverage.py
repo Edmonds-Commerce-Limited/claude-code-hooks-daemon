@@ -85,6 +85,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     ),
     "LongRunningCommandGuardHandler": "T1 denies a long foreground Bash call in the main thread",
     "GithubIssueAssignmentGuardHandler": "T1 denies issue-tied work on an unclaimed or foreign issue",
+    "ScratchKeepMarkerGuardHandler": "T1 denies an agent writing the .scratch-keep marker",
     "WriteProtectedPathsHandler": "T1 denies a write, move onto or deletion of a read-only path",
     "ResumeGuardHandler": "T1 denies a cold resume of a large stopped agent under mode: deny",
     "SubagentContextBudgetHandler": (

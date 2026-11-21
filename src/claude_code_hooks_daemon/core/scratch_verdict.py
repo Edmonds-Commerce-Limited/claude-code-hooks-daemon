@@ -11,8 +11,10 @@ from a walk that did not finish:
    readable, or some pids were not), the walk did not finish, or a file has
    another name outside the entry. Nothing is concluded about an entry that
    was not read whole.
-3. KEPT: not evaluated in Phase 1 (no keep marker or pause store exists yet).
-   Also STUCK: a repository in the entry could not be classified
+3. KEPT: a regular ``.scratch-keep`` file directly in the entry (a human's
+   pin, R15; an agent may not create one, ``R-SCRATCH-KEEP-MARKER``). An
+   agent's bounded pause is a keep on the ARCHIVE, not an entry verdict.
+   Also STUCK, after KEPT: a repository in the entry could not be classified
    (:mod:`~claude_code_hooks_daemon.core.scratch_repos`), or the project's
    tracked files could not be listed, or whether a tracked file names the entry
    is unknown (:mod:`~claude_code_hooks_daemon.core.scratch_references`).
@@ -86,7 +88,10 @@ REGENERABLE_DIRECTORIES: tuple[str, ...] = (
 VENV_MARKER = "pyvenv.cfg"
 
 #: The rungs of the order not evaluated yet, in order.
-NOT_EVALUATED: tuple[str, ...] = ("KEPT",)
+NOT_EVALUATED: tuple[str, ...] = ()
+
+#: A regular file of this name at the top of an entry pins it for ever (R15).
+KEEP_MARKER = ".scratch-keep"
 
 #: How many uncovered paths a judgement keeps, so a huge entry stays small in memory.
 MAX_UNCOVERED = 5
@@ -97,6 +102,7 @@ class Verdict(enum.Enum):
 
     LIVE = "LIVE"
     STUCK = "STUCK"
+    KEPT = "KEPT"
     PROTECTED = "PROTECTED"
     REFERENCED = "REFERENCED"
     DISPOSABLE = "DISPOSABLE"
@@ -304,6 +310,14 @@ NOT_CLASSIFIED = "a repository in the entry was not classified (the project's gi
 TRACKED_UNKNOWN = "the project's tracked files could not be listed"
 
 
+def has_keep_marker(stats: EntryStats) -> bool:
+    """True when the walk found a regular :data:`KEEP_MARKER` directly in the entry."""
+    wanted = f"{stats.name}/{KEEP_MARKER}"
+    return stats.kind is NodeKind.DIRECTORY and any(
+        node.path == wanted and node.kind is NodeKind.FILE for node in stats.nodes
+    )
+
+
 def judge(
     walk: Bounded[EntryStats],
     *,
@@ -314,6 +328,7 @@ def judge(
     tracked: tuple[str, ...] | None = (),
     p3: frozenset[str] = frozenset(),
     liveness_unknown: str = "",
+    keep_reason: str = "",
 ) -> Judgement:
     """Judge one walked entry, given its age and any liveness reasons.
 
@@ -324,6 +339,8 @@ def judge(
     ``tracked`` lists the entry's paths the project tracks (None: unknown).
     ``p3`` holds the regular files whose blob the remote's default tip holds.
     ``references`` is required, so no caller can skip the REFERENCED rung.
+    ``keep_reason`` is the first line of the entry's :data:`KEEP_MARKER`, read
+    by the caller; whether the entry is KEPT is decided from the walk alone.
     """
     stats = walk.value
     markers = stats.git_markers
@@ -353,6 +370,10 @@ def judge(
         return result(Verdict.STUCK, TRACKED_UNKNOWN)
     if references.unknown:
         return result(Verdict.STUCK, references.unknown)
+    if has_keep_marker(stats):
+        return result(
+            Verdict.KEPT, f"pinned by {KEEP_MARKER}: {keep_reason or '(no reason given)'}"
+        )
     if markers and repos is None:
         return result(Verdict.STUCK, NOT_CLASSIFIED)
     if repos is not None and repos.stuck:
@@ -385,6 +406,7 @@ def judge(
 
 __all__ = [
     "CONSUMED_SHAPES",
+    "KEEP_MARKER",
     "MAX_UNCOVERED",
     "NOT_CLASSIFIED",
     "NOT_EVALUATED",
@@ -399,6 +421,7 @@ __all__ = [
     "Proof",
     "RepositoryMarker",
     "Verdict",
+    "has_keep_marker",
     "judge",
     "uncovered_nodes",
 ]

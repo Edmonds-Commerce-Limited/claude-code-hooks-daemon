@@ -230,6 +230,7 @@ class ConfigTemplate:
             "    host_command_guard: {enabled: true, priority: 10}  # Block docker host-root mounts, gh auth token; human only: non-PyPI pip index, crontab -r\n"
             "    curl_pipe_shell: {enabled: true, priority: 10}   # Block curl | bash patterns\n"
             "    lock_file_edit_blocker: {enabled: true, priority: 10}  # Block direct editing of package manager lock files\n"
+            "    scratch_keep_marker_guard: {enabled: true, priority: 18}  # Only a human writes .scratch-keep (pins a scratch entry for ever)\n"
             # Plan 00499: opt-in; does nothing until `paths` lists repository-relative globs.
             "    write_protected_paths: {enabled: false, priority: 18, options: {paths: []}}  # Paths agents may read but never write, move onto or delete\n"
             # On by default (Plan 00117): prefix-positive gate on AskUserQuestion

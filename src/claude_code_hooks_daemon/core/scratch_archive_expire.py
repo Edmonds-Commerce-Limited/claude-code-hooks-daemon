@@ -146,6 +146,25 @@ def effective_expiry(
     return max(instants)
 
 
+def keeps_of(events: EventsRead, archive_id: str) -> list[KeepEvent]:
+    """Every keep event of ``archive_id``, in file order."""
+    return _keeps(events, archive_id)
+
+
+def expiry_or_hold(
+    records: tuple[ArchiveRecord, ...],
+    keeps: list[KeepEvent],
+    retention_hours: Mapping[str, float],
+) -> tuple[datetime | None, str]:
+    """:func:`effective_expiry` as a value: ``(instant, "")`` or ``(None, why it is held)``."""
+    try:
+        return effective_expiry(records, keeps, retention_hours), ""
+    except _Hold as held:
+        return None, str(held)
+    except ValueError as exc:
+        return None, f"a keep's instant does not parse: {exc}"
+
+
 def require_not_due(
     index: IndexRead,
     events: EventsRead,
