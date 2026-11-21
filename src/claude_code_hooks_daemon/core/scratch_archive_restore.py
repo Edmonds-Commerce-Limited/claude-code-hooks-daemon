@@ -43,7 +43,7 @@ import stat
 import tarfile
 from collections import Counter
 from dataclasses import dataclass
-from typing import IO, Literal
+from typing import IO, Literal, NamedTuple
 
 from claude_code_hooks_daemon.core.scratch_archive import (
     STAGING_PREFIX,
@@ -79,6 +79,7 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import (
     run_tar,
     tarfile_mode,
 )
+from claude_code_hooks_daemon.core.scratch_session import is_session_dir_name
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 _LOG = logging.getLogger(__name__)
@@ -406,11 +407,59 @@ def restore(
     except ValueError as exc:
         raise RestoreRefused(f"the record's name cannot be restored: {exc}") from exc
     recorded_root = posixpath.dirname(record.original_path)
-    if recorded_root != root_path:
+    session = _session_of(recorded_root, root_path)
+    if recorded_root != root_path and session is None:
         raise RestoreRefused(
             f"{record.original_path!r} was taken from another root ({recorded_root!r}),"
             f" not {root_path!r}; restore it with --root naming that root"
         )
+    settings = _RestoreSettings(tar, max_inodes, max_depth, timeout)
+    if session is None:
+        return _restore_into(store, archive_id, record, dest_parent_fd, dest_name, settings)
+    session_fd = _open_session(dest_parent_fd, session)
+    try:
+        return _restore_into(store, archive_id, record, session_fd, dest_name, settings)
+    finally:
+        os.close(session_fd)
+
+
+def _session_of(recorded_root: str, root_path: str) -> str | None:
+    """The session directory a record sits in directly under ``root_path``; None otherwise."""
+    parent, name = posixpath.split(recorded_root)
+    return name if parent == root_path and is_session_dir_name(name) else None
+
+
+def _open_session(dest_parent_fd: int, name: str) -> int:
+    """Open session directory ``name`` in the root, never through a link; never created."""
+    try:
+        return os.open(name, _SESSION_FLAGS, dir_fd=dest_parent_fd)
+    except OSError as exc:
+        raise RestoreRefused(
+            f"the session directory {name!r} the entry was taken from is not a directory "
+            f"here ({type(exc).__name__}); nothing was restored"
+        ) from exc
+
+
+_SESSION_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+class _RestoreSettings(NamedTuple):
+    tar: TarTool
+    max_inodes: int
+    max_depth: int
+    timeout: float
+
+
+def _restore_into(
+    store: ArchiveStore,
+    archive_id: str,
+    record: ArchiveRecord,
+    dest_parent_fd: int,
+    dest_name: str,
+    settings: _RestoreSettings,
+) -> Restored:
+    """Check the destination, stage the archive and move the entry into ``dest_parent_fd``."""
+    tar, max_inodes, max_depth, timeout = settings
     _check_destination(store, dest_parent_fd, dest_name)
     archive_fd, headers, compression = _checked_archive(store, record)
     try:
