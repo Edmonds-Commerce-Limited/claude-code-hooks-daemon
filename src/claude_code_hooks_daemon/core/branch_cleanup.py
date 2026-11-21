@@ -74,7 +74,10 @@ from claude_code_hooks_daemon.utils.git_repo import (
     run_git,
 )
 from claude_code_hooks_daemon.utils.load_scaling import scaled_timeout
-from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
+from claude_code_hooks_daemon.utils.path_containment import (
+    path_is_relative_to,
+    path_relative_to,
+)
 from claude_code_hooks_daemon.utils.regenerable_paths import (
     clone_probe_globs,
     is_regenerable,
@@ -695,7 +698,7 @@ def _reap_name(repo: Path, worktree: Path) -> str | None:
     main = GitRepo(repo).main_worktree_root()
     if not path_is_relative_to(worktree, main):
         return None
-    relative = worktree.relative_to(main).as_posix()
+    relative = path_relative_to(worktree, main).as_posix()
     if any(relative == f"{pattern}{worktree.name}" for pattern in WORKTREE_DIR_PATTERNS):
         return worktree.name
     return None
