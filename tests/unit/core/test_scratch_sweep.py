@@ -1023,6 +1023,19 @@ class TestSessionDirectoryIdentity:
         assert any("changed" in reason for reason in sub.incomplete_reasons)
         assert not report.complete
 
+    def test_a_directory_has_an_identity(self, tmp_path: Path) -> None:
+        info = os.lstat(tmp_path)
+        assert sweep_mod._identity(tmp_path) == (info.st_dev, info.st_ino)
+
+    def test_no_identity_says_why(self, tmp_path: Path) -> None:
+        missing = sweep_mod._identity(tmp_path / "gone")
+        assert not isinstance(missing, tuple)
+        assert "FileNotFoundError" in missing.reason
+        (tmp_path / "file").write_bytes(b"x")
+        plain = sweep_mod._identity(tmp_path / "file")
+        assert not isinstance(plain, tuple)
+        assert "not a directory" in plain.reason
+
 
 _WEEK = ScratchConfig.model_validate({"untracked_ttl": {"scratch": "7d"}})
 

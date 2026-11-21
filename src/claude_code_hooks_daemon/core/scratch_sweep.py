@@ -580,18 +580,27 @@ def _splits(root: Path, row: EntryRow) -> tuple[int, int] | None:
     if not is_session_dir_name(row.name) or row.kind is not NodeKind.DIRECTORY:
         return None
     identity = _identity(root / row.name)
-    if identity is None or _is_repository(root / row.name):
+    if isinstance(identity, _NoIdentity) or _is_repository(root / row.name):
         return None
     return identity
 
 
-def _identity(directory: Path) -> tuple[int, int] | None:
-    """``(st_dev, st_ino)`` of a real directory by ``lstat``; None for anything else."""
+@dataclass(frozen=True)
+class _NoIdentity:
+    """Why a path has no directory identity; never equal to an ``(st_dev, st_ino)`` pair."""
+
+    reason: str
+
+
+def _identity(directory: Path) -> tuple[int, int] | _NoIdentity:
+    """``(st_dev, st_ino)`` of a real directory by ``lstat``; why not, for anything else."""
     try:
         info = os.lstat(directory)
-    except OSError:
-        return None
-    return (info.st_dev, info.st_ino) if stat.S_ISDIR(info.st_mode) else None
+    except OSError as exc:
+        return _NoIdentity(f"{directory} could not be read: {type(exc).__name__}")
+    if not stat.S_ISDIR(info.st_mode):
+        return _NoIdentity(f"{directory} is not a directory")
+    return (info.st_dev, info.st_ino)
 
 
 def _is_repository(directory: Path) -> bool:
