@@ -180,6 +180,14 @@ class EntryRow:
     #: Where the entry could be filed, and the ``mv -n`` that would do it (empty: none).
     filing_destination: str = ""
     filing_command: str = ""
+    #: :attr:`Judgement.ttl_hold`: set only on a LIVE row held by its TTL alone.
+    ttl_hold: Verdict | None = None
+    ttl_hold_proofs: tuple[Proof, ...] = ()
+
+
+def pending_verdict(row: EntryRow) -> Verdict:
+    """The verdict an action would act on: a TTL-held row's ``ttl_hold``, else its verdict."""
+    return row.ttl_hold if row.ttl_hold is not None else row.verdict
 
 
 @dataclass(frozen=True)
@@ -539,14 +547,14 @@ def _with_dependencies(
     rows: list[EntryRow] = []
     for row, _pointers in judged:
         pointing = sorted(dependents.get(row.name, ()))
-        if pointing and row.verdict in _DEPENDABLE:
+        if pointing and pending_verdict(row) in _DEPENDABLE:
             more = f" (and {len(pointing) - 1} more)" if len(pointing) > 1 else ""
             row = _overruled(
                 row,
                 Verdict.PROTECTED,
                 f"another entry's repository depends on this one: {pointing[0]}{more}",
             )
-        elif reason and row.verdict is Verdict.DISPOSABLE:
+        elif reason and pending_verdict(row) is Verdict.DISPOSABLE:
             row = _overruled(row, Verdict.STUCK, f"not judged: {reason}")
         rows.append(row)
     return rows, reason, frozenset(dependents)
@@ -643,12 +651,12 @@ def _container_holds(
 
 def _carried_down(row: EntryRow, container: _Container) -> EntryRow:
     """A child's row, overruled by the first container hold when it is actionable."""
-    if row.verdict not in _ACTIONABLE:
+    if pending_verdict(row) not in _ACTIONABLE:
         return row
     if container.holds:
         verdict, reason = container.holds[0]
         return _overruled(row, verdict, reason)
-    if container.unproved and row.verdict is Verdict.DISPOSABLE:
+    if container.unproved and pending_verdict(row) is Verdict.DISPOSABLE:
         return _overruled(row, Verdict.STUCK, f"not judged: {container.unproved}")
     return row
 
@@ -685,7 +693,7 @@ def _held_if_session(root: Path, row: EntryRow) -> EntryRow:
     if (
         not is_session_dir_name(row.name)
         or row.kind is not NodeKind.DIRECTORY
-        or row.verdict not in _ACTIONABLE
+        or pending_verdict(row) not in _ACTIONABLE
     ):
         return row
     try:
@@ -698,7 +706,15 @@ def _held_if_session(root: Path, row: EntryRow) -> EntryRow:
 
 
 def _overruled(row: EntryRow, verdict: Verdict, reason: str) -> EntryRow:
-    """``row`` with a new verdict; its proofs and any filing proposal no longer hold."""
+    """``row`` with a new verdict; its proofs and any filing proposal no longer hold.
+
+    A row held by its TTL alone keeps showing LIVE; the overrule lands on its
+    ``ttl_hold``, so pressure mode sees it.
+    """
+    if row.ttl_hold is not None:
+        return dataclasses.replace(
+            row, ttl_hold=verdict, ttl_hold_proofs=(), reasons=(*row.reasons, reason)
+        )
     return dataclasses.replace(
         row,
         verdict=verdict,
@@ -833,6 +849,8 @@ def _judge_entry(
         uncovered_count=judgement.uncovered_count,
         filing_destination=proposal.destination if proposal else "",
         filing_command=proposal.command if proposal else "",
+        ttl_hold=judgement.ttl_hold,
+        ttl_hold_proofs=judgement.ttl_hold_proofs,
     )
     return row, _entry_pointers(root, resolved_root, name, walk)
 
@@ -1005,6 +1023,7 @@ __all__ = [
     "EntryRow",
     "HashBudget",
     "SweepReport",
+    "pending_verdict",
     "render_table",
     "report_json",
     "run_sweep",

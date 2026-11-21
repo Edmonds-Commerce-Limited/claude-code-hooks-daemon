@@ -722,3 +722,41 @@ class TestReferenced:
         walk = finished(_stats(Node("e", D, 0), Node("e/a.log", F, 1)))
         unknown = References((), "references could not be read")
         assert judge(walk, age=_FRESH, liveness=(), references=unknown).verdict is Verdict.LIVE
+
+
+class TestTtlHold:
+    """LIVE "within its TTL" records what the rest of the ladder says (pressure mode, 5.5)."""
+
+    _walk = staticmethod(
+        lambda: finished(_stats(Node("e", D, 0), Node("e/__pycache__/m.pyc", F, 3)))
+    )
+
+    def test_an_idle_young_entry_holds_its_underlying_verdict(self) -> None:
+        judgement = judge(self._walk(), age=_FRESH, liveness=())
+        assert judgement.verdict is Verdict.LIVE
+        assert judgement.reasons == ("within its TTL",)
+        assert judgement.ttl_hold is Verdict.DISPOSABLE
+        assert judgement.ttl_hold_proofs == (Proof.P2,)
+
+    def test_a_liveness_reason_carries_no_hold(self) -> None:
+        judgement = judge(self._walk(), age=_FRESH, liveness=("process 1",))
+        assert judgement.ttl_hold is None
+
+    def test_a_due_entry_carries_no_hold(self) -> None:
+        assert judge(self._walk(), age=_DUE, liveness=()).ttl_hold is None
+
+    def test_a_reference_holds_a_young_entry(self) -> None:
+        judgement = judge(self._walk(), age=_FRESH, liveness=(), references=References(("a.md:1",)))
+        assert judgement.ttl_hold is Verdict.REFERENCED
+
+    def test_a_tracked_file_holds_a_young_entry(self) -> None:
+        judgement = judge(self._walk(), age=_FRESH, liveness=(), tracked=("e/x",))
+        assert judgement.ttl_hold is Verdict.PROTECTED
+
+    def test_unknown_liveness_holds_a_young_entry(self) -> None:
+        judgement = judge(self._walk(), age=_FRESH, liveness=(), liveness_unknown="no cwd")
+        assert judgement.ttl_hold is Verdict.STUCK
+
+    def test_an_unclassified_repository_holds_a_young_entry(self) -> None:
+        walk = finished(_stats(Node("e", D, 0), git_markers=("e/.git",)))
+        assert judge(walk, age=_FRESH, liveness=()).ttl_hold is Verdict.STUCK

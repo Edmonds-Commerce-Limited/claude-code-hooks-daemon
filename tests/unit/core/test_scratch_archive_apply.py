@@ -838,8 +838,17 @@ def not_due(
     age_hours: float = 10.0,
     directories: int = 1,
 ) -> EntryRow:
+    """A row real classification gives an entry not yet due: LIVE, held by its TTL alone.
+
+    ``verdict`` is what the rest of the ladder says (its ``ttl_hold``).
+    """
     return dataclasses.replace(
-        row(name, verdict, due=False), age_hours=age_hours, directories=directories
+        row(name, Verdict.LIVE, due=False),
+        reasons=("within its TTL",),
+        age_hours=age_hours,
+        directories=directories,
+        ttl_hold=verdict,
+        ttl_hold_proofs=(Proof.P1,) if verdict is Verdict.DISPOSABLE else (),
     )
 
 
@@ -910,6 +919,32 @@ class TestPressureMode:
         result = apply_sweep(store, fake.facts(), pressed(root, tar))
         assert outcome_of(result, "e1").outcome == "not-actionable"
         assert (root / "e1").is_dir()
+
+    def test_its_archive_records_the_held_verdict_and_proofs(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1")])
+        apply_sweep(store, fake.facts(), pressed(root, tar))
+        (record,) = store.read_index().records
+        assert record.verdict == "DISPOSABLE"
+        assert record.proof_ids == ("P1",)
+
+    def test_an_entry_live_for_a_liveness_reason_is_never_pressured(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        in_use = dataclasses.replace(
+            row("e1", Verdict.LIVE, due=False),
+            reasons=("process 7 has its working directory in the entry",),
+            age_hours=10.0,
+        )
+        fake = FakeFacts([in_use])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome == "not-actionable"
+        assert (root / "e1").is_dir()
+        report = SweepReport("root", (in_use,), True, (), ())
+        assert pressured_count(report, PRESSURE) == 0
 
     def test_a_live_entry_is_still_refused(
         self, root: Path, store: ArchiveStore, tar: TarTool

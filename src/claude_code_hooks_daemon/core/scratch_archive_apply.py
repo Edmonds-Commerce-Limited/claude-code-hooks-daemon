@@ -85,7 +85,7 @@ from claude_code_hooks_daemon.core.scratch_session import (
     is_session_dir_name,
     remove_empty_session_dir,
 )
-from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport
+from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport, pending_verdict
 from claude_code_hooks_daemon.core.scratch_verdict import KEEP_MARKER, Verdict
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
@@ -505,14 +505,24 @@ def _fingerprint_all(
 
 
 def _pressured(row: EntryRow, pressure: Pressure | None) -> bool:
-    """Not yet due, but packable under pressure: idle long enough."""
-    return pressure is not None and not row.due and row.age_hours >= pressure.idle_hours
+    """Not yet due, held by its TTL alone, actionable underneath, and idle long enough.
+
+    A row LIVE for a liveness reason carries no ``ttl_hold``, so it never matches.
+    """
+    return (
+        pressure is not None
+        and not row.due
+        and row.ttl_hold in ACTIONABLE
+        and row.age_hours >= pressure.idle_hours
+    )
 
 
 def _actionable(row: EntryRow, pressure: Pressure | None = None) -> bool:
-    if not row.walk_complete or row.verdict not in ACTIONABLE:
+    if not row.walk_complete:
         return False
-    return row.due or _pressured(row, pressure)
+    if row.due:
+        return row.verdict in ACTIONABLE
+    return _pressured(row, pressure)
 
 
 def _pressure_order(rows: tuple[EntryRow, ...]) -> list[EntryRow]:
@@ -633,7 +643,8 @@ def _archive_claimed(
 
 
 def _record(row: EntryRow, packed: PackResult, settings: ApplySettings) -> ArchiveRecord:
-    verdict = row.verdict.value
+    verdict = pending_verdict(row).value
+    proofs = row.proofs if row.ttl_hold is None else row.ttl_hold_proofs
     packed_at = settings.clock()
     hold = settings.retention_hours[verdict]
     if settings.pressure is not None and not row.due:
@@ -645,7 +656,7 @@ def _record(row: EntryRow, packed: PackResult, settings: ApplySettings) -> Archi
         original_path=str(PurePosixPath(settings.original_prefix) / row.name),
         checkout=settings.checkout,
         verdict=verdict,
-        proof_ids=tuple(proof.value for proof in row.proofs),
+        proof_ids=tuple(proof.value for proof in proofs),
         packed_at=packed_at.isoformat(),
         expires_at=expires_at.isoformat(),
         counts=dict(packed.counts),

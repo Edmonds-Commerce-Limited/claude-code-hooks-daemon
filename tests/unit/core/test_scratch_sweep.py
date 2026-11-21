@@ -1022,3 +1022,88 @@ class TestSessionDirectoryIdentity:
         assert not sub.complete
         assert any("changed" in reason for reason in sub.incomplete_reasons)
         assert not report.complete
+
+
+_WEEK = ScratchConfig.model_validate({"untracked_ttl": {"scratch": "7d"}})
+
+
+def _held(report: SweepReport, name: str) -> Verdict | None:
+    row = next(row for row in report.rows if row.name == name)
+    assert row.verdict is Verdict.LIVE
+    return row.ttl_hold
+
+
+class TestTtlHold:
+    """An entry LIVE only because it is within its TTL carries its underlying verdict.
+
+    Pressure mode (DESIGN.md section 5.5) acts on that ``ttl_hold`` and never on
+    an entry LIVE for a liveness reason.
+    """
+
+    def test_a_young_idle_entry_is_held_by_its_ttl_alone(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.scratch_archive_apply import (
+            Pressure,
+            pressured_count,
+        )
+
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("cache/__pycache__/m.pyc", b"pyc")
+        tree.file("notes.txt", b"n")
+        _old(tree, now)
+        report = _sweep(tree, now=now, config=_WEEK)
+        assert _held(report, "cache") is Verdict.DISPOSABLE
+        assert _held(report, "notes.txt") is Verdict.UNCERTAIN
+        assert report_json(report)["entries"][0]["ttl_hold"] in {"DISPOSABLE", "UNCERTAIN"}
+        assert pressured_count(report, Pressure(idle_hours=0.5, ttl_hours=168.0)) == 2
+
+    def test_an_entry_with_a_process_in_it_has_no_ttl_hold(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("work/notes.txt", b"n")
+        _old(tree, now)
+        report = _sweep(tree, now=now, config=_WEEK, cwds={7: (tree.root / "work").resolve()})
+        assert _held(report, "work") is None
+
+    def test_a_keep_marker_holds_a_young_entry(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("pinned/.scratch-keep", b"mine\n")
+        tree.file("pinned/a.log", b"x")
+        _old(tree, now)
+        assert _held(_sweep(tree, now=now, config=_WEEK), "pinned") is Verdict.KEPT
+
+    def test_a_young_repository_is_never_pressure_eligible(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.git_marker("clone")
+        _old(tree, now)
+        assert _held(_sweep(tree, now=now, config=_WEEK), "clone") is Verdict.STUCK
+
+    def test_unknown_liveness_holds_a_young_entry(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now, config=_WEEK, cwds={})
+        assert _held(report, "cache") is Verdict.STUCK
+
+    def test_a_young_session_directory_is_held_whole(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file(f"{_SESSION}/.scratch-session.json", b"{}")
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now, config=_WEEK)
+        assert _held(report, _SESSION) is Verdict.STUCK
+
+    def test_a_kept_session_holds_its_young_children(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file(f"{_SESSION}/.scratch-session.json", b"{}")
+        tree.file(f"{_SESSION}/.scratch-keep", b"hold\n")
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now, config=_WEEK)
+        (sub,) = report.sessions
+        assert _held(sub, "cache") is Verdict.KEPT
