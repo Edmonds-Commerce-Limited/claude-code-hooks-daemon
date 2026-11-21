@@ -6756,13 +6756,15 @@ def cmd_scratch_sweep(
     budget_clock: Callable[[], float] = time.monotonic,
     process_cwds: Callable[[], Mapping[int, Path]] | None = None,
     git_runner: Callable[..., Any] | None = None,
-    confirm_apply: Callable[[str], bool] | None = None,
+    confirm_apply: Callable[[str, str], bool] | None = None,
 ) -> int:
     """``scratch-sweep [--apply] [--json] [--root PATH] [restore ID | keep ID --reason R]``.
 
     ``--apply`` also needs a human to type the go-ahead at a terminal
     (:func:`confirm_apply_interactively`); no flag, variable or file stands in
-    for it. ``confirm_apply`` is the test seam for that question.
+    for it. ``confirm_apply`` is the test seam for that question; it receives
+    the root and the pressure notice, decided before the question is asked so
+    consent covers the whole run and the run is never widened after it.
 
     Without ``--apply`` or a sub-command it is a dry run: it never creates the
     scratch root or the archive store, writes no cache or state, prints no file
@@ -6831,14 +6833,17 @@ def cmd_scratch_sweep(
     if action == "keep":
         return _scratch_keep(args, sources)
     relative = _scratch_relative_root(sources, sweep_root)[1]
-    if not (confirm_apply or confirm_apply_interactively)(relative):
+    fresh = sources.classify(sweep_root)
+    pressure = _scratch_pressure(sources, fresh, sweep_root.ttl_hours)
+    notice = _scratch_pressure_notice(fresh, pressure)
+    if not (confirm_apply or confirm_apply_interactively)(relative, notice):
         print(
             "scratch-sweep: refused: --apply needs a human's typed confirmation at a "
             "terminal (stdin and stdout both a TTY); nothing was changed",
             file=sys.stderr,
         )
         return 1
-    applied = _scratch_apply(args, sources, sweep_root)
+    applied = _scratch_apply(args, sources, sweep_root, pressure)
     if args.root is None:
         _record_scratch_inventory(sources, sources.classify(sweep_root))
     return applied
@@ -6918,23 +6923,37 @@ def _record_scratch_inventory(sources: "_ScratchSources", report: Any) -> None:
     logger.debug("scratch inventory written: %d entries", len(refreshed.entries))
 
 
-def _scratch_pressure(sources: "_ScratchSources", ttl_hours: float | None) -> Any:
-    """Pressure mode (Task 5.5) when the cached inventory's caps are at block, else None.
+def _scratch_pressure(sources: "_ScratchSources", report: Any, ttl_hours: float | None) -> Any:
+    """Pressure mode (Task 5.5) when ``report``'s own counts are at block, else None.
 
-    A missing or unreadable inventory gives no pressure: the mode only ever
-    widens what is packed, so it is never entered on an unknown reading.
+    ``report`` is the apply run's fresh classification. The cached inventory is
+    never consulted, and no earlier level is carried forward: the mode only
+    ever widens what is packed, so a stale or incomplete reading never enters
+    it (F-BYPS F2).
     """
     from claude_code_hooks_daemon.core import scratch_inventory
     from claude_code_hooks_daemon.core.scratch_archive_apply import pressure_for
 
     caps = sources.config.scratch.caps
-    reading = scratch_inventory.read_inventory(
-        sources.repo / "untracked" / scratch_inventory.INVENTORY_FILE
+    fresh = scratch_inventory.inventory_from_report(
+        report, now=sources.wall_clock(), caps=caps, previous=None
     )
-    if reading.inventory is None:
+    if fresh.incomplete:
         return None
-    level = scratch_inventory.inventory_caps(reading.inventory, caps).level
-    return pressure_for(level, caps, ttl_hours)
+    return pressure_for(fresh.cap_level, caps, ttl_hours)
+
+
+def _scratch_pressure_notice(report: Any, pressure: Any) -> str:
+    """The line the ``--apply`` question adds when pressure is on; "" when it is off."""
+    from claude_code_hooks_daemon.core.scratch_archive_apply import pressured_count
+
+    if pressure is None:
+        return ""
+    return (
+        "A scratch cap is at block, so this run is in pressure mode: it also packs "
+        f"{pressured_count(report, pressure)} idle entries that are NOT yet due "
+        "(largest first); their archives keep the TTL's remainder."
+    )
 
 
 def start_scratch_inventory_refresh(repo: Path) -> Any:
@@ -7060,6 +7079,7 @@ def cmd_scratch_new(
 
 def confirm_apply_interactively(
     relative_root: str,
+    pressure_notice: str = "",
     *,
     stdin: Any = None,
     stdout: Any = None,
@@ -7082,7 +7102,8 @@ def confirm_apply_interactively(
     prompt_stream.write(
         "scratch-sweep --apply archives and then removes every due DISPOSABLE or "
         f"UNCERTAIN entry under {relative_root}, and expires archives past retention.\n"
-        f"Type '{phrase}' to go ahead: "
+        + (f"{pressure_notice}\n" if pressure_notice else "")
+        + f"Type '{phrase}' to go ahead: "
     )
     prompt_stream.flush()
     return bool(stdin.readline().strip() == phrase)
@@ -7241,11 +7262,14 @@ def _scratch_relative_root(sources: _ScratchSources, sweep_root: Any) -> tuple[P
     return resolved, path_relative_to(resolved, sources.repo.resolve()).as_posix()
 
 
-def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_root: Any) -> int:
+def _scratch_apply(
+    args: argparse.Namespace, sources: _ScratchSources, sweep_root: Any, pressure: Any
+) -> int:
     """``--apply``: archive and remove every due DISPOSABLE or UNCERTAIN entry.
 
     The root's own entries first, then each session directory's children (one
     archive per child, never the directory), all under one store lock.
+    ``pressure`` is the mode the human consented to; it is never re-decided here.
     """
     import dataclasses
 
@@ -7317,7 +7341,7 @@ def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_roo
         retention_hours=sources.retention_hours(),
         clock=sources.now,
         empty_session_hours=sweep_root.ttl_hours,
-        pressure=_scratch_pressure(sources, sweep_root.ttl_hours),
+        pressure=pressure,
     )
     if settings.pressure is not None:
         print(

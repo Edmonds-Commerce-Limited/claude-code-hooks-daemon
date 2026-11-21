@@ -10,8 +10,10 @@ is tested directly against an inventory written by the real writer.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -69,7 +71,7 @@ def _run(project: Path, *argv: str, now: float) -> int:
             args,
             wall_clock=lambda: now,
             process_cwds=lambda: {1: Path("/elsewhere")},
-            confirm_apply=lambda _root: True,
+            confirm_apply=lambda _root, _notice: True,
         )
     )
 
@@ -107,25 +109,87 @@ def _config_with_entry_caps(warn: int, block: int) -> Config:
 
 
 class TestScratchPressure:
-    def test_no_inventory_gives_no_pressure(self, tree: ScratchTree) -> None:
-        sources = _sources(_project(tree), _config_with_entry_caps(1, 2), time.time())
-        assert _scratch_pressure(sources, 24.0) is None
+    """F-BYPS F2: pressure comes from the apply run's own fresh, complete classification."""
 
-    def test_an_inventory_at_block_gives_pressure(self, tree: ScratchTree) -> None:
+    def test_a_fresh_reading_at_block_gives_pressure(self, tree: ScratchTree) -> None:
+        for name in ("a", "b", "c"):
+            tree.file(f"{name}/f.txt", b"x")
+        sources = _sources(_project(tree), _config_with_entry_caps(1, 2), time.time())
+        report = _classify(sources)
+        pressure = _scratch_pressure(sources, report, 24.0)
+        assert isinstance(pressure, Pressure)
+        assert pressure.ttl_hours == 24.0
+        assert _scratch_pressure(sources, report, None) is None
+
+    def test_a_fresh_reading_below_block_gives_no_pressure(self, tree: ScratchTree) -> None:
+        tree.file("a/f.txt", b"x")
+        sources = _sources(_project(tree), _config_with_entry_caps(100, 200), time.time())
+        assert _scratch_pressure(sources, _classify(sources), 24.0) is None
+
+    def test_a_stale_cached_block_does_not_outvote_a_fresh_reading(self, tree: ScratchTree) -> None:
         for name in ("a", "b", "c"):
             tree.file(f"{name}/f.txt", b"x")
         sources = _sources(_project(tree), _config_with_entry_caps(1, 2), time.time())
         _record_scratch_inventory(sources, _classify(sources))
-        pressure = _scratch_pressure(sources, 24.0)
-        assert isinstance(pressure, Pressure)
-        assert pressure.ttl_hours == 24.0
-        assert _scratch_pressure(sources, None) is None
+        for name in ("b", "c"):
+            shutil.rmtree(tree.root / name)
+        assert _scratch_pressure(sources, _classify(sources), 24.0) is None
 
-    def test_an_inventory_below_block_gives_no_pressure(self, tree: ScratchTree) -> None:
+    def test_an_incomplete_walk_gives_no_pressure(self, tree: ScratchTree) -> None:
+        for name in ("a", "b", "c"):
+            tree.file(f"{name}/f.txt", b"x")
+        sources = dataclasses.replace(
+            _sources(_project(tree), _config_with_entry_caps(1, 2), time.time()), max_inodes=1
+        )
+        report = _classify(sources)
+        assert not report.complete
+        assert _scratch_pressure(sources, report, 24.0) is None
+
+    def test_advise_mode_gives_no_pressure(self, tree: ScratchTree) -> None:
+        for name in ("a", "b", "c"):
+            tree.file(f"{name}/f.txt", b"x")
+        config = _config_with_entry_caps(1, 2)
+        caps = config.scratch.caps.model_copy(update={"mode": "advise"})
+        config = config.model_copy(
+            update={"scratch": config.scratch.model_copy(update={"caps": caps})}
+        )
+        sources = _sources(_project(tree), config, time.time())
+        assert _scratch_pressure(sources, _classify(sources), 24.0) is None
+
+
+class TestApplyConfirmationNamesPressure:
+    """F-BYPS F1: pressure is decided BEFORE consent, and the question says so."""
+
+    def _apply(self, project: Path, config_caps: tuple[int, int], now: float) -> list[str]:
+        asked: list[str] = []
+        warn, block = config_caps
+        (project / ".claude" / "hooks-daemon.yaml").write_text(
+            "version: '2.0'\nscratch:\n  caps:\n    entries:\n"
+            f"      warn: {warn}\n      block: {block}\n"
+        )
+        args = build_parser().parse_args(["scratch-sweep", "--apply"])
+        args.project_root = project
+        args.func(
+            args,
+            wall_clock=lambda: now,
+            process_cwds=lambda: {1: Path("/elsewhere")},
+            confirm_apply=lambda _root, notice: asked.append(notice) is not None,
+        )
+        return asked
+
+    def test_at_block_the_question_names_pressure_and_the_count(self, tree: ScratchTree) -> None:
+        now = time.time() + 2 * 3600
+        for name in ("a", "b", "c"):
+            tree.file(f"{name}/f.txt", b"x")
+        (notice,) = self._apply(_project(tree), (1, 2), now)
+        assert "pressure mode" in notice
+        assert "idle entries that are NOT yet due" in notice
+        assert (tree.root / "a").is_dir()
+
+    def test_under_the_caps_the_question_carries_no_pressure(self, tree: ScratchTree) -> None:
         tree.file("a/f.txt", b"x")
-        sources = _sources(_project(tree), _config_with_entry_caps(100, 200), time.time())
-        _record_scratch_inventory(sources, _classify(sources))
-        assert _scratch_pressure(sources, 24.0) is None
+        (notice,) = self._apply(_project(tree), (100, 200), time.time())
+        assert notice == ""
 
 
 class TestDryRunReportsEveryWorktree:

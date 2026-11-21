@@ -55,14 +55,14 @@ def _run(
     *,
     now: float,
     cwds: Callable[[], dict[int, Path]] | None = None,
-    confirm: Callable[[str], bool] | None = None,
+    confirm: Callable[[str, str], bool] | None = None,
 ) -> int:
     return int(
         args.func(
             args,
             wall_clock=lambda: now,
             process_cwds=cwds or (lambda: {1: Path("/elsewhere")}),
-            confirm_apply=confirm or (lambda _root: True),
+            confirm_apply=confirm or (lambda _root, _notice: True),
         )
     )
 
@@ -274,7 +274,7 @@ class TestHumanConfirmationGate:
         now = time.time() + 3 * _DAY
         _old_entry(tree, now)
         project = _project(tree)
-        assert _run(_parse(project, "--apply"), now=now, confirm=lambda _root: False) == 1
+        assert _run(_parse(project, "--apply"), now=now, confirm=lambda _root, _notice: False) == 1
         assert not _store(project).exists()
         assert (tree.root / "old" / "a.txt").read_bytes() == b"alpha"
         assert "confirmation" in capsys.readouterr().err
@@ -321,6 +321,18 @@ class TestHumanConfirmationGate:
             prompt_stream=prompt,
         )
         assert "apply untracked/scratch" in prompt.getvalue()
+        assert "pressure" not in prompt.getvalue()
+
+    def test_the_real_gate_names_pressure_in_its_question(self) -> None:
+        prompt = _Stream(tty=True)
+        confirm_apply_interactively(
+            "untracked/scratch",
+            "pressure mode: 4 idle entries that are NOT yet due",
+            stdin=_Stream("", tty=True),
+            stdout=_Stream(tty=True),
+            prompt_stream=prompt,
+        )
+        assert "pressure mode: 4 idle entries" in prompt.getvalue()
 
     def test_no_flag_reaches_the_gate(self) -> None:
         args = build_parser().parse_args(["scratch-sweep", "--apply"])
