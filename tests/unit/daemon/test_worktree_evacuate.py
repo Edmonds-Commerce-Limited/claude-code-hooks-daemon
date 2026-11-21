@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.daemon.cli import (
     cmd_scratch_sweep,
     cmd_worktree_reap,
 )
+from claude_code_hooks_daemon.daemon.housekeeping import mutating_steps
 from claude_code_hooks_daemon.daemon.worktree_evacuate import (
     EvacuateSeams,
     confirm_evacuate_interactively,
@@ -129,12 +130,13 @@ def _reap(
     confirm: Confirm | None = None,
     after_step: Callable[[str, str], None] | None = None,
     tar_path: str | None = None,
+    only: str = _NAME,
 ) -> int:
     args = argparse.Namespace(
         project_root=str(_main(tree)),
         base_branch="main",
         reap=reap,
-        only=_NAME,
+        only=only,
         reap_branches=False,
     )
     return cmd_worktree_reap(
@@ -678,3 +680,86 @@ class TestUnknownIsARefusal:
         assert _inodes(_worktree(tree)) == before
         assert not _store(tree).exists()
         assert "/nonexistent" in _keep_text(out), out
+
+
+_OTHER = "agent-evac-2"
+
+
+def _add_worktree(tree: ScratchTree, name: str) -> Path:
+    path = _main(tree) / ".claude" / "worktrees" / name
+    git(_main(tree), "worktree", "add", "-q", "-b", name, str(path))
+    return path
+
+
+class TestTheHousekeepingStep:
+    def test_with_no_terminal_it_reaps_a_clean_worktree_and_keeps_one_with_scratch(
+        self,
+        tree: ScratchTree,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        files = _all_due(tree)
+        clean = _add_worktree(tree, _OTHER)
+        created = time.time() - 2 * _DAY
+        for worktree in (_worktree(tree), clean):
+            os.utime(worktree / ".git", (created, created))
+        now = _due_clock()
+        step = next(step for step in mutating_steps() if step.name == "worktree-reap-reap")
+        args = build_parser().parse_args(list(step.cli_argv))
+        args.project_root = str(_main(tree))
+        # The phrase is on stdin, but stdin is no terminal: it must not count.
+        monkeypatch.setattr("sys.stdin", _Stream(f"evacuate {_RELATIVE}\n", tty=False))
+
+        cmd_worktree_reap(
+            args,
+            evacuate_seams=EvacuateSeams(
+                wall_clock=lambda: now, process_cwds=lambda: {1: Path("/elsewhere")}
+            ),
+        )
+
+        out = capsys.readouterr().out
+        assert not clean.exists(), out
+        assert any(line.startswith("REAPED") and _OTHER in line for line in out.splitlines()), out
+        assert _worktree(tree).is_dir()
+        for relative, content in files.items():
+            assert (_scratch(tree) / relative).read_bytes() == content
+        assert not _store(tree).exists()
+        assert f"worktree-reap --reap --only {_NAME}" in _keep_text(out), out
+
+
+class TestEvacuationExpiresNothing:
+    def test_a_due_main_store_archive_survives_a_later_evacuation(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _all_due(tree)
+        first = _due_clock()
+        assert _reap(tree, reap=True, now=first, confirm=_yes) == 0, capsys.readouterr().out
+        earlier = _store_records(tree)
+        assert len(earlier) == 2
+        other = _add_worktree(tree, _OTHER)
+        _write(other / "untracked" / "scratch" / "other.txt", b"later", first - 5 * _DAY)
+        config = Config.load_or_default(_main(tree) / ".claude" / "hooks-daemon.yaml")
+        longest = max(
+            config.scratch.archive.disposable_hours, config.scratch.archive.uncertain_hours
+        )
+        later = first + (longest + 1) * _HOUR
+        assert all(
+            datetime.fromisoformat(record.expires_at).timestamp() < later
+            for record in earlier.values()
+        )
+
+        rc = _reap(tree, reap=True, now=later, confirm=_yes, only=_OTHER)
+
+        out = capsys.readouterr().out
+        assert rc == 0, out
+        assert not other.exists(), out
+        records = _store_records(tree)
+        assert "untracked/scratch/other.txt" in records
+        for path, record in earlier.items():
+            assert records[path].archive_id == record.archive_id
+        status = build_parser().parse_args(["scratch-sweep", "status"])
+        status.project_root = _main(tree)
+        assert cmd_scratch_sweep(status, wall_clock=lambda: later) == 0
+        listed = capsys.readouterr().out
+        for record in earlier.values():
+            assert record.archive_id in listed, listed
