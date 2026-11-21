@@ -41,8 +41,26 @@ _REPORT_ONLY_EXPECTED = {
     "harvest-background",
     "worktree-reap",
     "branch-sweep",
+    "scratch-sweep",
+    # Advisory while `scratch-sweep --apply` needs a terminal (Plan 00627 Task 5.7):
+    # R13 makes it an unconfirmed mutating step once the owner removes that gate.
+    "scratch-sweep-apply",
     "skill-scan",
 }
+
+
+class TestScratchSweepSteps:
+    """Plan 00627 Task 5.7: the scratch sweep is in the pass and never applies unattended."""
+
+    def test_both_steps_run_the_dry_run_only(self) -> None:
+        by_name = {s.name: s for s in HOUSEKEEPING_STEPS}
+        assert by_name["scratch-sweep"].cli_argv == ("scratch-sweep",)
+        advisory = by_name["scratch-sweep-apply"]
+        assert "--apply" not in advisory.cli_argv
+        assert not advisory.mutates
+        assert "scratch-sweep --apply" in advisory.purpose
+        assert "scratch-sweep-apply" not in UNCONFIRMED_STEP_NAMES
+
 
 _MUTATING_EXPECTED = {
     "format-markdown",
