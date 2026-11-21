@@ -655,20 +655,35 @@ class TestEscapes:
         assert list(root.iterdir()) == []
 
     def test_an_unreadable_directory_is_refused_before_anything_goes(
-        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        if os.geteuid() == 0:
-            pytest.skip("root reads every directory")
+        """Listing ``sub`` fails with EACCES, injected so it holds for every euid."""
         _entry(root)
         _handle, record = _archived(root_fd, store, tar)
         claimed = root / (CLAIM_PREFIX + "e1")
-        (claimed / "sub").chmod(0)
-        try:
-            with pytest.raises(RemoveRefused):
-                _remove(root_fd, store, tar, record)
-        finally:
-            (claimed / "sub").chmod(0o755)
+        sub_ino = (claimed / "sub").stat().st_ino
+        real_scandir = os.scandir
+        denied: list[int] = []
+
+        def scandir(fd: int) -> Any:
+            if os.fstat(fd).st_ino == sub_ino:
+                denied.append(fd)
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_scandir(fd)
+
+        before = _snapshot(root)
+        monkeypatch.setattr(os, "scandir", scandir)
+        with pytest.raises(RemoveRefused):
+            _remove(root_fd, store, tar, record)
+        monkeypatch.undo()
+        assert denied
         assert (claimed / "a.txt").exists()
+        assert _snapshot(root) == before
 
     def test_an_unreadable_directory_injected_is_refused_before_anything_goes(
         self,

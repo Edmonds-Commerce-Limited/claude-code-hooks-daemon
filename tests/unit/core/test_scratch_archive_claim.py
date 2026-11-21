@@ -8,10 +8,12 @@ renames it back.
 
 from __future__ import annotations
 
+import errno
 import os
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -92,16 +94,25 @@ class TestFingerprint:
         with pytest.raises(WalkRefused, match="depth"):
             walk_tree(root_fd, "deep", max_inodes=100, max_depth=5)
 
-    def test_unreadable_directory_refuses(self, root: Path, root_fd: int) -> None:
-        if os.geteuid() == 0:
-            pytest.skip("root reads any directory")
+    def test_unreadable_directory_refuses(
+        self, root: Path, root_fd: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Listing ``sub`` fails with EACCES, injected so it holds for every euid."""
         entry = _entry(root)
-        (entry / "sub").chmod(0)
-        try:
-            with pytest.raises(WalkRefused):
-                fingerprint_at(root_fd, "e1", max_inodes=100)
-        finally:
-            (entry / "sub").chmod(0o755)
+        sub_ino = (entry / "sub").stat().st_ino
+        real_scandir = os.scandir
+        denied: list[int] = []
+
+        def scandir(fd: int) -> Any:
+            if os.fstat(fd).st_ino == sub_ino:
+                denied.append(fd)
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_scandir(fd)
+
+        monkeypatch.setattr(os, "scandir", scandir)
+        with pytest.raises(WalkRefused, match="cannot list a directory"):
+            fingerprint_at(root_fd, "e1", max_inodes=100)
+        assert len(denied) == 1
 
     def test_links_are_never_followed(self, root: Path, root_fd: int, tmp_path: Path) -> None:
         outside = tmp_path / "outside"
