@@ -17,6 +17,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Final
 
+_PUNCTUATION: Final[str] = ";&|()\n"
 _SEPARATORS: Final[frozenset[str]] = frozenset({";", "&&", "||", "|", "&", "(", ")", "\n"})
 _HEREDOC: Final[re.Pattern[str]] = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
 _CLONE_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
@@ -62,13 +63,20 @@ def _strip_heredocs(command: str) -> str:
 
 
 def _statements(command: str) -> Iterator[list[str]]:
-    lexer = shlex.shlex(_strip_heredocs(command), posix=True, punctuation_chars=";&|()")
+    """Split ``command`` into the words of each simple statement.
+
+    An unquoted newline separates statements exactly as ``;`` does, so it is a
+    punctuation character to the lexer; a newline inside quotes stays in its
+    word, and a backslash-newline continuation is joined first.
+    """
+    text = _strip_heredocs(command).replace("\\\n", " ")
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=_PUNCTUATION)
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     current: list[str] = []
     try:
         for token in lexer:
-            if token in _SEPARATORS or set(token) <= set(";&|()"):
+            if token in _SEPARATORS or set(token) <= set(_PUNCTUATION):
                 if current:
                     yield current
                 current = []
