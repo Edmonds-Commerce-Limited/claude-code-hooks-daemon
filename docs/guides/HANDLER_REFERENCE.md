@@ -4276,6 +4276,19 @@ handlers:
 
 ---
 
+#### scratch_inventory_refresher
+
+| Property       | Value                         |
+| -------------- | ----------------------------- |
+| **Config key** | `scratch_inventory_refresher` |
+| **Priority**   | 42                            |
+| **Type**       | Sensor (silent)               |
+| **Event**      | PostToolUse                   |
+
+**Description:** After a Bash command that creates a directory tree under a scratch root (`mkdir`, `git clone`, `git init`, `git worktree add`, `cp -r`, `tar -x`, `mktemp -d`), starts a background refresh of the cached scratch inventory (`untracked/scratch-inventory.json`), one at a time. That inventory is what `scratch_cap_guard` reads, so a new tree is counted before the next command. It never blocks and adds no context; the inventory is also refreshed at SessionStart and after `scratch-sweep --apply`.
+
+---
+
 #### dispatch_model_recorder
 
 | Property       | Value                     |

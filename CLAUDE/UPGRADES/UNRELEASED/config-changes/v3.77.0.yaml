@@ -135,7 +135,8 @@ config_changes:
         entries (500/2000), project_directories as a percentage of the link
         index's directory cap (50/75), pressure_idle_minutes (30) and mode
         (block, advise or off; default block). warn must be below block.
-        A write past a block figure is denied as R-SCRATCH-CAP.
+        Past a block figure, a command creating a directory tree under
+        scratch is denied as R-SCRATCH-CAP; a file write never is.
       example_yaml: |
         scratch:
           caps:
