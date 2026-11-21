@@ -177,6 +177,30 @@ def _command_words(words: list[str]) -> list[str]:
         words = words[start:]
 
 
+def peeled_statements(command: str) -> Iterator[list[str]]:
+    """Each statement's words from the command that runs: assignments,
+    redirects and wrappers stripped, the first word reduced to its name."""
+    for raw, _separator in _statements(command):
+        words = _command_words(raw)
+        if words:
+            yield [command_word(words[0]), *words[1:]]
+
+
+def copy_operands(args: list[str]) -> tuple[list[str], str | None, bool]:
+    """``(sources, destination, into_directory)`` for ``cp``/``mv``/``install``/``ln``.
+
+    ``into_directory`` is true when the destination is certainly a directory
+    by its spelling: ``-t DIR``, a trailing ``/``, or more than one source.
+    """
+    target_dir = _option_value(args, _TARGET_DIRECTORY)
+    found = _positionals(args, _INSTALL_VALUE_OPTIONS)
+    if target_dir is not None:
+        return found, target_dir, True
+    if len(found) < 2:
+        return found, None, False
+    return found[:-1], found[-1], found[-1].endswith("/") or len(found) > 2
+
+
 def _positionals(args: list[str], value_options: frozenset[str]) -> list[str]:
     out: list[str] = []
     skip = False
