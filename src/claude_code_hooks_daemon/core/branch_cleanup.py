@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import shlex
+import stat
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +48,7 @@ from claude_code_hooks_daemon.core.remote_branch_proof import (
     named_ref_problem,
     prove_remote_merged,
 )
+from claude_code_hooks_daemon.core.worktree_paths import WORKTREE_DIR_PATTERNS
 from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_MERGED,
     TIER_MERGED_NOT_IN_HEAD,
@@ -65,6 +67,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
     GIT_COMMAND_ERRORS,
     HEADS_PREFIX,
     SEE_SUBMODULES,
+    GitRepo,
     WorktreeRecord,
     branch_ref,
     parse_worktree_porcelain,
@@ -654,6 +657,75 @@ def _clear_parks(
     return tuple(cleared)
 
 
+_SCRATCH_ROOT: Final = Path("untracked") / "scratch"
+
+
+def holds_scratch(worktree: Path) -> bool:
+    """True when ``<worktree>/untracked/scratch`` is a real directory with a child.
+
+    One ``lstat`` and one ``scandir`` stopped at its first entry: no walk, no
+    classification, no git. A link or a non-directory is not a scratch root.
+    Any other failure to read it answers True, so the caller points at the
+    human route rather than at a removal that could lose notes.
+    """
+    scratch = worktree / _SCRATCH_ROOT
+    try:
+        mode = os.lstat(scratch).st_mode
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        log_and_continue(logger, exc, reason="an unreadable scratch root is treated as held")
+        return True
+    if not stat.S_ISDIR(mode):
+        return False
+    try:
+        with os.scandir(scratch) as entries:
+            return next(iter(entries), None) is not None
+    except OSError as exc:
+        log_and_continue(logger, exc, reason="an unreadable scratch root is treated as held")
+        return True
+
+
+def _reap_name(repo: Path, worktree: Path) -> str | None:
+    """The ``worktree-reap --only`` name for ``worktree``, or None when it cannot name it.
+
+    ``--only`` matches the directory name of a worktree directly under one of
+    the sanctioned roots of the MAIN checkout, so anything else gets no command.
+    """
+    main = GitRepo(repo).main_worktree_root()
+    if not path_is_relative_to(worktree, main):
+        return None
+    relative = worktree.relative_to(main).as_posix()
+    if any(relative == f"{pattern}{worktree.name}" for pattern in WORKTREE_DIR_PATTERNS):
+        return worktree.name
+    return None
+
+
+def _held_worktree_advice(repo: Path, name: str, held_by: Path) -> tuple[str, list[str]]:
+    """The skip line and commands for a merged branch checked out in ``held_by``.
+
+    With scratch in the worktree the bare ``git worktree remove`` is not
+    printed: it would lose the notes and the guard denies it. Evacuation lives
+    only in ``worktree-reap --reap``, behind a typed phrase at a terminal.
+    """
+    where = f"{name}: checked out in the worktree {held_by}"
+    if not holds_scratch(held_by):
+        return where, [f"git worktree remove {shlex.quote(str(held_by))}"]
+    reap_name = _reap_name(repo, held_by)
+    if reap_name is None:
+        return (
+            f"{where}, which holds scratch (untracked/scratch/) a removal would lose; "
+            "a human files or deletes it by hand, then removes the worktree",
+            [],
+        )
+    return (
+        f"{where}, which holds scratch (untracked/scratch/) a removal would lose; "
+        "a human at a terminal archives it and removes the worktree with the "
+        "worktree-reap command below (it names any entry to file by hand first)",
+        [daemon_cli_command_for_docs("worktree-reap", "--reap", "--only", shlex.quote(reap_name))],
+    )
+
+
 def cleanup_after_merge(
     repo: Path,
     names: Sequence[str],
@@ -718,11 +790,9 @@ def cleanup_after_merge(
             continue
         if held_by is not None:
             park_cleared += _clear_parks(repo, [name])
-            skipped.append(f"{name}: checked out in the worktree {held_by}")
-            commands += [
-                f"git worktree remove {shlex.quote(str(held_by))}",
-                delete_command(name),
-            ]
+            line, removal = _held_worktree_advice(repo, name, held_by)
+            skipped.append(line)
+            commands += [*removal, delete_command(name)]
         elif mode == "advise":
             park_cleared += _clear_parks(repo, [name])
             commands.append(delete_command(name))

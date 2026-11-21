@@ -6,8 +6,9 @@ merged LOCAL branch named on the command line is handed to
 ``branches.cleanup_after_merge.mode``: ``act`` deletes a branch whose every
 commit the target now holds and prints its ``git branch <name> <sha>`` restore
 line; ``advise`` prints the delete command; ``off`` is silent. A worktree is
-never removed here, and a patch-equivalent branch is left to
-``branch-sweep --clean``.
+never removed here (a holding worktree with scratch gets the human
+``worktree-reap --reap --only <name>`` line instead of ``git worktree remove``),
+and a patch-equivalent branch is left to ``branch-sweep --clean``.
 """
 
 from __future__ import annotations
@@ -195,8 +196,13 @@ class CleanupAfterMergeHandler(PostToolUseHandlerBase):
             "`branches.cleanup_after_merge.mode`: `act` deletes it when the target holds "
             "every commit and prints `git branch <name> <sha>` to restore it; `advise` "
             f"prints the `{daemon_cli_command_for_docs('delete-branch')}` command; `off` is silent. A "
-            "branch checked out in a worktree is never removed here (the worktree "
-            "removal is printed for you to run), and a patch-equivalent branch is left "
+            "branch checked out in a worktree is never removed here: the worktree "
+            "removal is printed for you to run, unless the worktree holds scratch "
+            "(`untracked/scratch/`), when the line names "
+            f"`{daemon_cli_command_for_docs('worktree-reap', '--reap', '--only', '<name>')}` "
+            "instead, for a human at a terminal to archive the scratch and remove the "
+            "worktree (this handler packs and removes nothing). A patch-equivalent branch "
+            "is left "
             f"to `{daemon_cli_command_for_docs('branch-sweep', '--clean')}`, which deletes only what "
             "its proof shows loses nothing. The remote delete is never run here: the "
             f"line points at `{daemon_cli_command_for_docs('branch-sweep', '--clean', '--remote')}`, "
@@ -220,12 +226,15 @@ class CleanupAfterMergeHandler(PostToolUseHandlerBase):
                     "fixture allowlist has no `git merge`. Covered by "
                     "tests/unit/handlers/post_tool_use/test_cleanup_after_merge.py, which "
                     "merges in a real repository and asserts the delete, the restore line, "
-                    "the advise mode and the silent cases."
+                    "the advise mode, the silent cases, and the worktree-reap line for a "
+                    "holding worktree with scratch (with nothing in it changed)."
                 ),
                 description=(
                     "The PostToolUse context names the deleted branch and the "
                     "`git branch <name> <sha>` restore line (act), or the delete command "
-                    "(advise). A merge into a work branch produces no context."
+                    "(advise). A branch held by a worktree that holds scratch gets the "
+                    "`worktree-reap --reap --only <name>` line, never `git worktree remove`. "
+                    "A merge into a work branch produces no context."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"BRANCH CLEANUP AFTER MERGE"],

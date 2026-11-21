@@ -3944,7 +3944,7 @@ handlers:
 | **Type**       | Advisory              |
 | **Event**      | PostToolUse           |
 
-**Description:** After a `git merge` concludes, names the merged branch's delete command (`branches.cleanup_after_merge.mode: advise`, the default) or deletes the branch and its worktree when each is proven merged and nothing is lost (`act`). `off` silences it. A branch not provably contained in the default branch is never deleted. Configured by the top-level `branches:` block; see [CONFIGURATION.md](CONFIGURATION.md).
+**Description:** After a `git merge` concludes, names the merged branch's delete command (`branches.cleanup_after_merge.mode: advise`, the default) or deletes the branch when it is proven merged and nothing is lost (`act`). `off` silences it. A branch not provably contained in the default branch is never deleted. A worktree holding the branch is never removed here: the line names `git worktree remove <path>`, or, when the worktree holds scratch (`untracked/scratch/`), `hooks-daemon worktree-reap --reap --only <name>` for a human at a terminal to archive the scratch and remove the worktree. This handler packs and removes no scratch. Configured by the top-level `branches:` block; see [CONFIGURATION.md](CONFIGURATION.md).
 
 **Config example:**
 

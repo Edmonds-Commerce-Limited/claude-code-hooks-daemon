@@ -6,6 +6,7 @@ Real repositories: the subject is a real merge and git's own reachability.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +93,7 @@ class TestIdentity:
         guidance = handler.get_claude_md()
         assert guidance is not None
         assert "cleanup_after_merge" in guidance
+        assert "worktree-reap --reap --only <name>" in guidance
         tests = handler.get_acceptance_tests()
         assert len(tests) == 1
         assert tests[0].harness_cannot_produce
@@ -222,3 +224,80 @@ class TestPoolClearCommandAfterMerge:
         _merge(repo, "feat")
         result = _handler("advise").handle(_input("git merge --no-ff feat", repo))
         assert "branch-sweep" not in "\n".join(result.context)
+
+
+_HELD = "agent-held1"
+
+
+def _tree_snapshot(root: Path) -> dict[str, tuple[int, int, int, bytes]]:
+    """Every path under ``root`` with its inode, size, mtime and (for files) bytes."""
+    snapshot: dict[str, tuple[int, int, int, bytes]] = {}
+    for path in sorted(root.rglob("*")):
+        info = path.lstat()
+        content = path.read_bytes() if path.is_file() and not path.is_symlink() else b""
+        snapshot[str(path.relative_to(root))] = (
+            info.st_ino,
+            info.st_size,
+            info.st_mtime_ns,
+            content,
+        )
+    return snapshot
+
+
+def _held_worktree(repo: Path) -> Path:
+    _merge(repo, _HELD)
+    path = repo / ".claude" / "worktrees" / _HELD
+    _git(repo, "worktree", "add", str(path), _HELD)
+    return path
+
+
+class TestHeldWorktreeWithScratch:
+    """Plan 00627 Task 6.2: the handler prints the human route and touches nothing."""
+
+    @pytest.mark.parametrize("mode", ["act", "advise"])
+    def test_scratch_prints_the_human_command_and_changes_nothing(
+        self, repo: Path, mode: str
+    ) -> None:
+        worktree = _held_worktree(repo)
+        scratch = worktree / "untracked" / "scratch"
+        scratch.mkdir(parents=True)
+        (scratch / "notes.md").write_text("keep me\n", encoding="utf-8")
+        (scratch / "dir").mkdir()
+        (scratch / "dir" / "inner.txt").write_text("inner\n", encoding="utf-8")
+        before = _tree_snapshot(worktree)
+        result = _handler(mode).handle(_input(f"git merge --no-ff {_HELD}", repo))
+        assert result.decision == Decision.ALLOW
+        text = "\n".join(result.context)
+        assert f"worktree-reap --reap --only {_HELD}" in text
+        assert "git worktree remove" not in text
+        assert _tree_snapshot(worktree) == before
+        assert not (repo / "untracked" / "scratch-archive").exists()
+        assert not (worktree / "untracked" / "scratch-archive").exists()
+        assert _HELD in _branches(repo)
+
+    @pytest.mark.parametrize("make_root", [True, False], ids=["empty-root", "absent-root"])
+    def test_without_scratch_the_output_is_unchanged(self, repo: Path, make_root: bool) -> None:
+        worktree = _held_worktree(repo)
+        if make_root:
+            (worktree / "untracked" / "scratch").mkdir(parents=True)
+        result = _handler("act").handle(_input(f"git merge --no-ff {_HELD}", repo))
+        text = "\n".join(result.context)
+        assert f"git worktree remove {worktree}" in text
+        assert "worktree-reap" not in text
+        assert f"Skipped {_HELD}: checked out in the worktree {worktree}" in text
+
+
+def test_the_handler_reaches_no_scratch_archive_module() -> None:
+    """Printing the human route must not pull in anything that can pack or remove scratch."""
+    probe = (
+        "import sys\n"
+        "import claude_code_hooks_daemon.handlers.post_tool_use.cleanup_after_merge\n"
+        "import claude_code_hooks_daemon.core.branch_cleanup\n"
+        "bad = sorted(m for m in sys.modules if 'scratch_archive' in m "
+        "or m.endswith('worktree_scratch_evacuation') or m.endswith('worktree_evacuate'))\n"
+        "print(','.join(bad))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], check=True, capture_output=True, text=True
+    )
+    assert result.stdout.strip() == ""
