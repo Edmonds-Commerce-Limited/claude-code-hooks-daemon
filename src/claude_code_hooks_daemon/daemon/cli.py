@@ -42,7 +42,7 @@ import sys
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Final, Literal, TextIO, cast
 
 logger = logging.getLogger(__name__)
@@ -7071,7 +7071,11 @@ def _scratch_relative_root(sources: _ScratchSources, sweep_root: Any) -> tuple[P
 
 
 def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_root: Any) -> int:
-    """``--apply``: archive and remove every due DISPOSABLE or UNCERTAIN entry."""
+    """``--apply``: archive and remove every due DISPOSABLE or UNCERTAIN entry.
+
+    The root's own entries first, then each session directory's children (one
+    archive per child, never the directory), all under one store lock.
+    """
     import dataclasses
 
     from claude_code_hooks_daemon.core.scratch_archive import (
@@ -7082,7 +7086,9 @@ def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_roo
     from claude_code_hooks_daemon.core.scratch_archive_apply import (
         ApplyFacts,
         ApplySettings,
+        apply_sessions,
         apply_sweep,
+        session_facts,
     )
     from claude_code_hooks_daemon.core.scratch_archive_facts import (
         LazyReferences,
@@ -7099,20 +7105,37 @@ def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_roo
         return 1
     resolved, relative = _scratch_relative_root(sources, sweep_root)
 
-    def entry_live(name: str) -> bool:
-        return entry_in_use(
-            name,
-            root=resolved,
-            relative_root=relative,
-            reading=sources.cwds(),
-            background=read_background_records(sources.background_file),
-        )
+    def live_in(root: Path, relative_root: str) -> Callable[[str], bool]:
+        def entry_live(name: str) -> bool:
+            return entry_in_use(
+                name,
+                root=root,
+                relative_root=relative_root,
+                reading=sources.cwds(),
+                background=read_background_records(sources.background_file),
+            )
 
+        return entry_live
+
+    def references_of(relative_root: str) -> LazyReferences:
+        return LazyReferences(lambda: build_references(sources.project_git(), relative_root))
+
+    parent_references = references_of(relative)
     facts = ApplyFacts(
         classify=lambda: sources.classify(sweep_root),
-        entry_live=entry_live,
-        referenced=LazyReferences(lambda: build_references(sources.project_git(), relative)),
+        entry_live=live_in(resolved, relative),
+        referenced=parent_references,
     )
+
+    def for_session(name: str) -> ApplyFacts:
+        return session_facts(
+            facts,
+            name,
+            child_live=live_in(resolved / name, f"{relative}/{name}"),
+            child_referenced=references_of(f"{relative}/{name}"),
+            container_referenced=parent_references.root_named,
+        )
+
     settings = ApplySettings(
         root=Path(sweep_root.path),
         original_prefix=relative,
@@ -7125,14 +7148,30 @@ def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_roo
     try:
         with ArchiveStore.open(sources.store_path) as store, store.lock():
             result = apply_sweep(store, facts, settings)
+            sessions = apply_sessions(store, facts, settings, for_session)
     except (StoreRefused, StoreBusy, OSError) as exc:
         print(f"scratch-sweep: refused: {exc}", file=sys.stderr)
         return 1
     if args.json:
-        document = {"root": str(sweep_root.path), **dataclasses.asdict(result)}
+        document = {
+            "root": str(sweep_root.path),
+            **dataclasses.asdict(result),
+            "sessions": [
+                {"root": str(Path(sweep_root.path) / name), **dataclasses.asdict(sub)}
+                for name, sub in sessions
+            ],
+        }
         print(json.dumps(document, indent=2, default=str))
         return 0
-    print(f"scratch-sweep --apply: {sweep_root.path}")
+    _print_apply(str(sweep_root.path), result)
+    for name, sub in sessions:
+        _print_apply(str(Path(sweep_root.path) / name), sub)
+    return 0
+
+
+def _print_apply(root: str, result: Any) -> None:
+    """One apply pass's outcome, as ``--apply`` prints it."""
+    print(f"scratch-sweep --apply: {root}")
     if not result.complete:
         print("INCOMPLETE: " + "; ".join(result.incomplete_reasons))
     for outcome in result.entries:
@@ -7145,7 +7184,6 @@ def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_roo
         print(f"  expired: {expired}")
     for note in result.notes:
         print(f"  note: {note}")
-    return 0
 
 
 def _scratch_restore(args: argparse.Namespace, sources: _ScratchSources, sweep_root: Any) -> int:
@@ -7172,6 +7210,11 @@ def _scratch_restore(args: argparse.Namespace, sources: _ScratchSources, sweep_r
         return 1
     try:
         with ArchiveStore.open(sources.store_path) as store, store.lock():
+            recorded = [
+                record.original_path
+                for record in store.read_index().records
+                if record.archive_id == args.archive_id
+            ]
             result = restore(
                 store,
                 args.archive_id,
@@ -7186,12 +7229,23 @@ def _scratch_restore(args: argparse.Namespace, sources: _ScratchSources, sweep_r
         return 1
     finally:
         os.close(root_fd)
-    print(f"restored {result.archive_id} to {Path(sweep_root.path) / result.name}")
+    print(
+        f"restored {result.archive_id} to {_restored_path(sweep_root.path, relative, recorded, result.name)}"
+    )
     if isinstance(result, RestoredWithLeftovers):
         for problem in result.problems:
             print(f"scratch-sweep: after the restore: {problem}", file=sys.stderr)
         return 1
     return 0
+
+
+def _restored_path(root: Path, relative: str, recorded: list[str], name: str) -> Path:
+    """Where ``name`` was restored: under its session directory when its record says so."""
+    for original in recorded:
+        path = PurePosixPath(original)
+        if path.name == name and path.parent.parent == PurePosixPath(relative):
+            return Path(root) / path.parent.name / name
+    return Path(root) / name
 
 
 def _scratch_status(args: argparse.Namespace, sources: _ScratchSources) -> int:

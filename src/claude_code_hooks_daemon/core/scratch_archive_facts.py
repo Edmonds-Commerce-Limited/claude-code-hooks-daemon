@@ -64,6 +64,19 @@ class LazyReferences:
         self._set: ReferenceSet | None = None
 
     def __call__(self, name: str) -> bool:
+        found = self._loaded().for_entry(name)
+        return bool(found.unknown or found.sites)
+
+    def root_named(self) -> bool:
+        """True when a tracked file names the root itself, or the set is unknown.
+
+        A session directory's children are all held by this: from inside the
+        session, a mention of the parent root is a mention of every child.
+        """
+        loaded = self._loaded()
+        return bool(loaded.unknown or loaded.root_sites)
+
+    def _loaded(self) -> ReferenceSet:
         if self._set is None:
             try:
                 self._set = self._build()
@@ -74,8 +87,7 @@ class LazyReferences:
                     reason="a failed reference-set build leaves every entry in use (unknown)",
                 )
                 self._set = ReferenceSet(unknown=f"reference set could not be built: {exc}")
-        found = self._set.for_entry(name)
-        return bool(found.unknown or found.sites)
+        return self._set
 
 
 __all__ = ["LazyReferences", "entry_in_use"]

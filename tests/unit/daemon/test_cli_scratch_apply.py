@@ -398,3 +398,50 @@ class TestEndToEnd:
         assert (tree.root / "old" / "a.txt").read_bytes() == b"alpha"
         document = json.loads(capsys.readouterr().out)
         assert all(row["outcome"] != "archived" for row in document["entries"])
+
+
+_SESSION = "s-20261101T000000Z-abcdefgh"
+
+
+def _session_children(tree: ScratchTree, now: float) -> None:
+    tree.file(f"{_SESSION}/old/a.txt", b"alpha")
+    tree.file(f"{_SESSION}/kept/a.txt", b"kept")
+    tree.file(f"{_SESSION}/kept/.scratch-keep", b"hold\n")
+    tree.set_tree_mtime(_SESSION, now - 5 * _DAY)
+
+
+class TestSessionChildren:
+    """Task 4.3 step 3: each due child of a session directory is its own archive."""
+
+    def test_a_child_is_archived_alone_and_restored_by_its_record(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        _session_children(tree, now)
+        project = _project(tree)
+        assert _run(_parse(project, "--apply", "--json"), now=now) == 0
+        document = json.loads(capsys.readouterr().out)
+        assert all(row["outcome"] != "archived" for row in document["entries"])
+        (session,) = document["sessions"]
+        outcomes = {row["name"]: row for row in session["entries"]}
+        assert outcomes["old"]["outcome"] == "archived", session
+        assert outcomes["kept"]["outcome"] != "archived"
+        assert (tree.root / _SESSION / "kept" / "a.txt").read_bytes() == b"kept"
+        assert not (tree.root / _SESSION / "old").exists()
+
+        assert _run(_parse(project, "restore", outcomes["old"]["archive_id"]), now=now) == 0
+        assert (tree.root / _SESSION / "old" / "a.txt").read_bytes() == b"alpha"
+        assert f"{_SESSION}/old" in capsys.readouterr().out
+
+    def test_a_working_directory_in_the_session_holds_every_child(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = time.time() + 3 * _DAY
+        _session_children(tree, now)
+        project = _project(tree)
+        held = tree.root.resolve() / _SESSION
+        assert _run(_parse(project, "--apply", "--json"), now=now, cwds=lambda: {4: held}) == 0
+        document = json.loads(capsys.readouterr().out)
+        for session in document["sessions"]:
+            assert all(row["outcome"] != "archived" for row in session["entries"])
+        assert (tree.root / _SESSION / "old" / "a.txt").read_bytes() == b"alpha"
