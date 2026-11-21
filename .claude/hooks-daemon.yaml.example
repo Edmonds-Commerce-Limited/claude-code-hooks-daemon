@@ -425,6 +425,10 @@ handlers:
       enabled: true
       priority: 42
 
+    branch_reject_dispatch_gate:  # Admits a branch-reject reviewer only on the daemon's exact prompt
+      enabled: true          # Off fails closed: no reviewer verdict can unlock a removal
+      priority: 59           # After every handler that can deny an Agent call
+
     dispatch_declaration:  # Advises/enforces a file-handoff declaration on Task dispatch
       enabled: true          # On by default (Plan 00307 Task 4.3); set false to opt out
       priority: 48
@@ -646,6 +650,10 @@ handlers:
       #   tail_bytes: 1048576                  # bounded transcript tail scanned per tool call (default shown)
 
     dispatch_model_recorder:  # Joins an Agent dispatch's resolvedModel/modelsUsed onto its tier row for `hooks-daemon tiers`; silent
+      enabled: true
+      priority: 33
+
+    branch_reject_agent_binder:  # Binds a branch-reject reviewer dispatch to the agent it started; silent, never blocks
       enabled: true
       priority: 33
 
@@ -1018,6 +1026,10 @@ handlers:
       enabled: true
       priority: 12
 
+    branch_reject_verdict_recorder:  # Records a branch-reject reviewer's verdict from its final stop; silent, never blocks
+      enabled: true  # Disabling it fails closed: no verdict is recorded, so no removal is unlocked
+      priority: 13   # Below the terminal size blocker (15)
+
     cron_subagent_stop_enforcer:  # SubagentStop twin of cron_stop_enforcer above (Plan 00416)
       enabled: true                 # Silent unless persistent_crons.enabled AND a job is declared
       priority: 7
@@ -1192,17 +1204,23 @@ handlers:
       #     #   symlink — shared with the main checkout. One source of truth,
       #     #             but a write from INSIDE a worktree flows back.
       #     #   copy    — isolated. Safe to overwrite; may drift from the
-      #     #             canonical file after creation.
+      #     #             canonical file after creation. REFUSED for a path
+      #     #             the secret_file_guard protects (creation aborts):
+      #     #             seed such a file with symlink; the guard judges a
+      #     #             read through the link as a read of the file.
       #     default_mode: symlink
       #     entries:
       #       # Repository-root-relative. Files or directories; no globs.
       #       - .env.local
-      #       - path: .secrets       # anything an agent may WRITE to
+      #       - path: .claude/settings.local.json   # anything an agent may WRITE to
       #         mode: copy
       #
       #   # Seeding happens once, at creation. A re-fired event never re-seeds
       #   # over an agent's own edits, and a listed path that does not exist
       #   # ABORTS creation rather than yielding a quietly under-seeded worktree.
+      #   # A worktree made by hand (`git worktree add`) skips this hook; run
+      #   #   bin/hooks-daemon seed-worktree <worktree>
+      #   # to apply this same list to it.
 
   worktree_remove:  # WorktreeRemove event (worktree teardown)
     worktree_remove:  # Prunes stale worktree registrations; removes a named worktree

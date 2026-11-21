@@ -1,4 +1,4 @@
-# Drafted by Plan 00627.
+# Drafted by Plan 00620 (branches.reject, branch_reject_* handlers) and Plan 00627 (scratch).
 version: "3.77.0"
 date: "UNRELEASED"
 
@@ -6,6 +6,78 @@ breaking: false
 
 config_changes:
   added:
+    - key: branches.reject
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00620). The no-value removal route of delete-branch: how long
+        a reviewer verdict stays valid, the rolling window removals are counted
+        over, the counts after which two reviewers are required and after which
+        the route refuses, and where the removal ledger, recovery bundles and
+        review state live. The defaults need no change.
+      example_yaml: |
+        branches:
+          reject:
+            verdict_lifetime_hours: 24
+            window_days: 7
+            two_reviewer_after: 3
+            refuse_after: 10
+            ledger_path: .claude/branch-removals.jsonl
+            bundle_dir: untracked/branch-rejects
+            state_dir: untracked/branch-reject-state
+    - key: handlers.pre_tool_use.branch_reject_dispatch_gate
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00620). Admits a dispatch of the branch-reject reviewer agent
+        only with the exact prompt `hooks-daemon branch-reject request` printed,
+        once per nonce, on Opus or above, as a fresh agent of the shipped
+        definition, and records the dispatch. Denies the reviewer type with any
+        other prompt and a review prompt under any other type. Enabled by
+        default; disabling it fails closed (no reviewer verdict can then unlock
+        a removal).
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            branch_reject_dispatch_gate:
+              enabled: true
+              priority: 59
+      migration_note: >-
+        Keep it at priority 59, after every handler that can deny an Agent call:
+        its allow records the dispatch, so a later deny would burn the nonce.
+    - key: handlers.post_tool_use.branch_reject_agent_binder
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00620). Silent PostToolUse sensor: fills the agent id of a
+        branch-reject reviewer dispatch record from the Agent call's agentId,
+        only when the record is unbound and the session and tool_use_id match.
+        Never blocks. Disabling it fails closed (an unbound dispatch chains no
+        verdict, so no removal can be unlocked).
+      example_yaml: |
+        handlers:
+          post_tool_use:
+            branch_reject_agent_binder:
+              enabled: true
+              priority: 33
+    - key: handlers.subagent_stop.branch_reject_verdict_recorder
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00620). Silent SubagentStop sensor: turns the branch-reject
+        reviewer's final, clean stop into a verdict (and a keep record on keep).
+        A second stop of the same review, or a stop-hook re-entry, withdraws the
+        verdict. Never blocks. Disabling it fails closed (no verdict is recorded,
+        so no removal can be unlocked).
+      example_yaml: |
+        handlers:
+          subagent_stop:
+            branch_reject_verdict_recorder:
+              enabled: true
+              priority: 13
+      migration_note: >-
+        Keep it below the terminal subagent_report_size_blocker (15); a handler
+        after a terminal one never runs.
     - key: scratch
       recommended: false
       dormant: false

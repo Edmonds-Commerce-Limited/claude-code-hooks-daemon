@@ -1,8 +1,8 @@
 # Plan 00613 DESIGN: a sanctioned verb that links a protected file into a worktree
 
-Task 1.2 of [PLAN.md](PLAN.md). Design only: nothing here is built, and nothing
-here may be built before the owner answers [Owner decision needed](#owner-decision-needed)
-and that answer is recorded in the plan journal (Task 1.3).
+Task 1.2 of [PLAN.md](PLAN.md). The owner has answered; see
+[Owner decision](#owner-decision). Sections 3 to 8 describe the verb, which is
+NOT built; they stay as the record of how it would be.
 
 All examples are synthetic. `<P>` stands for a repository-relative path that the
 secret guard protects (for example a file matching a shipped default glob such
@@ -332,7 +332,63 @@ a cron stand-in ruling is not sufficient for Q1.
   merged and its three routes are verified denied against a live daemon. yes /
   no.
 
+## Owner decision
+
+The owner answered Q0 and Q1 in their own words, typed in the coordinating
+session on 2026-11-20 and relayed verbatim in the coordinator's brief to the
+building sub-agent (so the citation is that session's human line, through the
+brief; the sub-agent did not see the line itself):
+
+> "A linking vault files is essential if worktrees are to be able to work.
+> there's no security issue here - the file already exists on the file system
+> we're just making worktrees actually work"
+
+- **Q0: yes.** The owner typed it. This supersedes the delegated ruling below.
+- **Q1: yes.** Linking a protected file into an agent's worktree is allowed and
+  needed. Decided with it: **link mode only**; copy mode for a protected file
+  stays forbidden (a copy makes a second file, a link does not).
+- **Q2: B + D, as recommended.** The route is owned by the project config or
+  a human, never invocable by an agent to link an arbitrary protected path.
+- **Q3: forbid**, as the owner's constraint says.
+- With it, from the coordinator's brief: the secret guard's read protections
+  stay intact; only the creation/link route changes.
+
+The owner's words do NOT address Q4 or Q5. What follows is the BUILDER's
+settlement (the implementing sub-agent, 2026-11-20), not the owner's, and the
+coordinator should treat Q5 as a merge gate.
+
+- **Q2 mechanism (builder).** The human-run step is `hooks-daemon seed-worktree <worktree>`: it re-applies the configured list and takes no
+  path of its own, so what is linked stays the config's decision. It is
+  agent-runnable; the authority is the config, not the invoker.
+- **Q4: moot** (no verb).
+- **Q5 (builder; a merge gate for the coordinator).** Evidence, through the
+  handler and not a live daemon socket: links placed by `seed_worktree`, hook
+  cwd in the worktree, are refused for Read, Edit, Grep and relative Bash
+  reads, including a file covered only by a project glob, with the daemon root
+  at the main checkout or at the worktree. The gap the 261120 handoff pinned
+  (`grep -R` from the worktree descending a directory link to a file only a
+  project glob covers) is closed: `utils/link_reach.py` judges what lies
+  behind each link below the root of every recursive read not proven to
+  follow no link, failing closed on what it cannot resolve. Not done: the
+  live-socket check.
+- **Residual 1 (builder, narrowed).** `seed-worktree` places a link entry
+  whose source is, holds or links to a protected path (by the working or the
+  committed config) only when the config committed at `HEAD` of the main
+  checkout lists the same entry. An agent's uncommitted seed-list edit is
+  refused; an agent that also commits the edit is not stopped, so the route
+  now leaves a commit behind rather than being closed.
+- **Small points (builder), each journalled:** the audit line records the
+  route (`verb`); the command checks the worktree against git's own list by
+  realpath, refuses the main checkout, a subdirectory, a prunable entry, a
+  disabled `worktree_create`, and a destination parent inside the worktree
+  that is a symlink; the config is read strictly and fresh from disk
+  (`.yaml`, else `.yml`); and the config-edit route (an agent editing the seed
+  list) is answered by visibility (the session-start drift report counts it),
+  not by a circular deny.
+
 ## Rulings
+
+Superseded for Q0 to Q2 by the owner decision above; kept as the record.
 
 Settled by a fable sub-agent under the owner's delegation, 2026-11-19. These
 are NOT the owner's own words; a later owner message overturns any of them.

@@ -12,10 +12,16 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.core.branch_reject import (
+    REVIEWER_AGENT_TYPE,
+    VERDICT_BLOCK_END,
+    VERDICT_BLOCK_START,
+)
 from claude_code_hooks_daemon.install import agent_assets
 from claude_code_hooks_daemon.install.agent_assets import (
     AGENT_VERSION_MARKER_PREFIX,
     AGENTS_DIR_PARTS,
+    BRANCH_REJECT_REVIEWER_AGENT_NAME,
     DEDUPE_AGENT_NAME,
     DOCS_QA_AGENT_NAME,
     FACT_CHECKER_AGENT_NAME,
@@ -129,6 +135,50 @@ class TestRegistry:
         )
         sync_agents(on, config)
         assert deployed_agent_path(spec, on).is_file()
+
+
+def _frontmatter(text: str) -> dict[str, str]:
+    """The ``key: value`` lines between the leading ``---`` fences."""
+    lines = text.split("\n")
+    assert lines[0] == "---"
+    end = lines.index("---", 1)
+    fields: dict[str, str] = {}
+    for line in lines[1:end]:
+        key, _, value = line.partition(":")
+        fields[key.strip()] = value.strip()
+    return fields
+
+
+class TestBranchRejectReviewer:
+    """Plan 00620: the reviewer the no-value removal route dispatches."""
+
+    def test_named_as_the_route_dispatches_it(self) -> None:
+        assert BRANCH_REJECT_REVIEWER_AGENT_NAME == REVIEWER_AGENT_TYPE
+        spec = _spec(BRANCH_REJECT_REVIEWER_AGENT_NAME)
+        assert spec.md5 == content_md5(spec_source_path(spec).read_text())
+
+    def test_frontmatter_runs_on_opus_and_cannot_write(self) -> None:
+        spec = _spec(BRANCH_REJECT_REVIEWER_AGENT_NAME)
+        fields = _frontmatter(spec_source_path(spec).read_text())
+        assert fields["name"] == BRANCH_REJECT_REVIEWER_AGENT_NAME
+        assert fields["model"] == "opus"
+        tools = {tool.strip() for tool in fields["tools"].split(",")}
+        assert {"Read", "Bash"} <= tools
+        assert not tools & {"Write", "Edit", "NotebookEdit", "Agent", "Task"}
+
+    def test_reply_format_lives_in_the_prompt_only(self) -> None:
+        # The daemon composes the reply format into each prompt; a second copy in the
+        # definition could drift from the parser and contradict it.
+        text = spec_source_path(_spec(BRANCH_REJECT_REVIEWER_AGENT_NAME)).read_text()
+        assert VERDICT_BLOCK_START not in text
+        assert VERDICT_BLOCK_END not in text
+
+    def test_deployed_whatever_the_config(self, tmp_path: Path) -> None:
+        # The route is unconditional, so its reviewer has no flag of its own.
+        spec = _spec(BRANCH_REJECT_REVIEWER_AGENT_NAME)
+        assert spec.is_enabled(Config())
+        sync_agents(tmp_path, Config())
+        assert classify_agent(spec, tmp_path) is AgentAssetState.CURRENT
 
 
 class TestLedger:
@@ -349,10 +399,12 @@ class TestSync:
 
     def test_sync_skips_disabled_absent_agents(self, tmp_path: Path) -> None:
         report = sync_agents(tmp_path, Config())
-        for spec in SHIPPED_AGENTS:
+        gated = [spec for spec in SHIPPED_AGENTS if not spec.is_enabled(Config())]
+        assert gated, "every shipped agent is unconditional; this test checks nothing"
+        for spec in gated:
             assert not deployed_agent_path(spec, tmp_path).exists()
         actions = {r.name: r.action for r in report.results}
-        assert all(a is AgentAction.SKIPPED_DISABLED for a in actions.values())
+        assert all(actions[spec.name] is AgentAction.SKIPPED_DISABLED for spec in gated)
 
     def test_sync_disabled_present_advises_removal_never_deletes(self, tmp_path: Path) -> None:
         spec = _spec(OPUS_SECURITY_AGENT_NAME)
@@ -386,6 +438,8 @@ class TestSync:
     def test_deploy_agents_if_enabled_missing_config_is_noop_deploy(self, tmp_path: Path) -> None:
         report = deploy_agents_if_enabled(tmp_path, tmp_path / ".claude" / "hooks-daemon.yaml")
         actions = {r.name: r.action for r in report.results}
+        # Only the unconditional reviewer deploys; every gated agent stays off.
+        assert actions.pop(BRANCH_REJECT_REVIEWER_AGENT_NAME) is AgentAction.DEPLOYED
         assert all(a is AgentAction.SKIPPED_DISABLED for a in actions.values())
 
 

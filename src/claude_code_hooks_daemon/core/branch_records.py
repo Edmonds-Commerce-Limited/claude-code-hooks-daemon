@@ -203,6 +203,19 @@ def creator_route(repo: Path, name: str, *, timeout: float = Timeout.GIT_CONTEXT
     return values[-1] if values else None
 
 
+def branch_identities(
+    repo: Path, name: str, *, timeout: float = Timeout.GIT_CONTEXT
+) -> frozenset[str]:
+    """Every identity on ``name``'s creator and touch records (Plan 00620 independence check).
+
+    Raises:
+        RuntimeError: git could not read the config; never read as "no identities".
+    """
+    creators = _get_all(repo, name, CREATOR_KEY, timeout)
+    touched = _get_all(repo, name, TOUCHED_KEY, timeout)
+    return frozenset((*creators, *touched))
+
+
 def worktree_branch_deletable(
     repo: Path, name: str, *, timeout: float = Timeout.GIT_CONTEXT
 ) -> bool:

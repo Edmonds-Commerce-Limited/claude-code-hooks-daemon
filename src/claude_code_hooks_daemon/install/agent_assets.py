@@ -66,6 +66,11 @@ DEDUPE_AGENT_NAME: Final[str] = "hooks-daemon-plan-dedupe-scout"
 OPUS_SECURITY_AGENT_NAME: Final[str] = "hooks-daemon-opus-security"
 DOCS_QA_AGENT_NAME: Final[str] = "hooks-daemon-docs-qa"
 FACT_CHECKER_AGENT_NAME: Final[str] = "hooks-daemon-plan-fact-checker"
+#: Plan 00620's reviewer; equal to ``core.branch_reject.REVIEWER_AGENT_TYPE`` (a test pins it).
+BRANCH_REJECT_REVIEWER_AGENT_NAME: Final[str] = "hooks-daemon-branch-reject-reviewer"
+
+#: Shown where a gating key is expected, for an agent no config key gates.
+_UNGATED: Final[str] = "always (no config key gates it)"
 
 #: Handler whose ``enabled`` flag gates the fact-checker agent: the feed is what
 #: asks the session to dispatch it.
@@ -181,6 +186,12 @@ def _fact_check_feed_enabled(config: Config) -> bool:
     return config.get_handler_config(_FACT_CHECK_FEED_EVENT, _FACT_CHECK_FEED_HANDLER).enabled
 
 
+def _always_enabled(_config: Config) -> bool:
+    # The no-value removal route is unconditional, so the reviewer it dispatches is
+    # deployed everywhere; a flag gating only the agent would just break the route.
+    return True
+
+
 # Historic dedupe-scout revisions, harvested from this repository's git
 # history (every blob the template ever shipped as, including the pre-marker
 # content current at the time this subsystem was introduced). Without these,
@@ -231,6 +242,7 @@ _DEDUPE_MD5: Final[str] = "3b732f40fe276a8d6ac65ebba2d3f615"
 _OPUS_SECURITY_MD5: Final[str] = "63f8d6aac7a46a6bbbf2fab643d9df6e"
 _DOCS_QA_MD5: Final[str] = "30a36b6ce0ce8bbe856dd3f4966a2b5d"
 _FACT_CHECKER_MD5: Final[str] = "c577ce77caa72314df4b6724b673ed46"
+_BRANCH_REJECT_REVIEWER_MD5: Final[str] = "a3705a4bff9b2f5fa00a797e563ac5dd"
 
 #: v1.0.0 told a project to copy the agent to a name of its own, but the feed
 #: never dispatched that copy and nothing recorded which version it came from.
@@ -270,6 +282,13 @@ SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
         gating_config_key="handlers.post_tool_use.plan_fact_check_feed.enabled",
         is_enabled=_fact_check_feed_enabled,
         historic_versions=_FACT_CHECKER_HISTORIC_VERSIONS,
+    ),
+    AgentAssetSpec(
+        name=BRANCH_REJECT_REVIEWER_AGENT_NAME,
+        version="1.0.0",
+        md5=_BRANCH_REJECT_REVIEWER_MD5,
+        gating_config_key=_UNGATED,
+        is_enabled=_always_enabled,
     ),
 )
 

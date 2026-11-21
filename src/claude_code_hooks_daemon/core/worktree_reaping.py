@@ -54,6 +54,7 @@ from claude_code_hooks_daemon.daemon.branch_safety import delete_branches
 from claude_code_hooks_daemon.utils.git_repo import (
     AGENT_BRANCH_PREFIX,
     GIT_TIMED_OUT,
+    SEE_SUBMODULES,
     parse_worktree_porcelain,
     run_git,
     strip_branch_ref,
@@ -420,7 +421,7 @@ def collect_worktree_states(
     states = []
     for entry in _worktree_entries(listing.stdout, repo_root):
         path = entry.path
-        status = run_fn(path, "status", "--porcelain")
+        status = run_fn(path, "status", "--porcelain", SEE_SUBMODULES)
         uncommitted = _work_paths(status, repo_root, run_fn)
         states.append(
             WorktreeState(

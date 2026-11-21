@@ -59,6 +59,9 @@ class _FakeGit:
             names = [a.removeprefix("refs/tags/") for a in args if a.startswith("refs/tags/")]
             rows = [f"{_TIP} commit refs/remotes/{remote}/{n}\n" for n in [*names, "main"]]
             return _done(0, "".join(rows))
+        if args[:2] == ("remote", "get-url"):
+            # One URL for fetch and push: the push side needs no listing of its own.
+            return _done(0, "git@example.invalid:o/r.git\n")
         raise AssertionError(f"unexpected git call {args}")
 
     @property

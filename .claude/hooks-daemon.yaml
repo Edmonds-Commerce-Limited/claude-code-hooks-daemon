@@ -769,6 +769,10 @@ handlers:
       enabled: true
       priority: 42
 
+    branch_reject_dispatch_gate:  # Admits a branch-reject reviewer only on the daemon's exact prompt (Plan 00620)
+      enabled: true
+      priority: 59
+
     dispatch_declaration:  # Advises a file-handoff declaration on Task dispatch (Plan 00307)
       enabled: true
       priority: 48
@@ -1042,6 +1046,10 @@ handlers:
       enabled: true
       priority: 33
 
+    branch_reject_agent_binder:  # Binds a branch-reject reviewer dispatch to its agentId (Plan 00620); silent
+      enabled: true
+      priority: 33
+
     merge_qa_report:  # Dogfood: post-hoc plan/docs QA report on what a git merge/pull/rebase introduced (Plan 00373)
       enabled: true  # On by default; silent unless plan/docs QA sweeps are active AND the operation introduced attributable drift.
       priority: 34
@@ -1273,6 +1281,10 @@ handlers:
     branch_subagent_stop_guard:  # SubagentStop twin of branch_stop_guard (Plan 00558 Task 4.4)
       enabled: true
       priority: 12
+
+    branch_reject_verdict_recorder:  # Records a branch-reject reviewer's verdict from its stop (Plan 00620); silent
+      enabled: true  # Never blocks; disabling it fails closed (no verdict, no removal)
+      priority: 13   # Below the terminal size blocker (15) -- see test_stop_chain_terminal_shadowing.py
 
     subagent_report_size_blocker:  # Blocks an oversized subagent final message
       enabled: true

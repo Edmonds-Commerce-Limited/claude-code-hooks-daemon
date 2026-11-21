@@ -369,6 +369,72 @@ def reset_configured_patterns_cache() -> None:
     _CONFIGURED_PATTERNS = DEFAULT_PROTECTED_PATTERNS
 
 
+class ProtectedSetUnreadable(RuntimeError):
+    """The effective protected set could not be determined from config.
+
+    Raised by :func:`load_protected_patterns_strict`. The message names the
+    failure only, never config content, which may itself spell a protected name.
+    """
+
+
+def load_protected_patterns_strict() -> tuple[str, ...]:
+    """Effective protected globs from the live config, read freshly and STRICTLY.
+
+    :func:`resolve_configured_patterns` falls back to the shipped defaults, which
+    is right for a seam-closer that must still protect. A caller deciding
+    whether to CREATE a copy of a file needs the opposite: a config it cannot
+    read is an answer it cannot act on. Nothing is cached, and no file content
+    other than the config itself is read.
+
+    Raises:
+        ProtectedSetUnreadable: the daemon's project context is not
+            initialised, the config is missing, unreadable, malformed or
+            schema-invalid, or the guard's ``mode`` / ``protected_paths``
+            options have the wrong type.
+    """
+    from claude_code_hooks_daemon.config.models import Config, handler_options
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+    if not ProjectContext.is_initialized():
+        raise ProtectedSetUnreadable("the daemon's project context is not initialised")
+    try:
+        config = Config.load(ProjectContext.config_path())
+        options = handler_options(config.handlers.pre_tool_use.get("secret_file_guard"))
+    except (OSError, RuntimeError, ValueError, yaml.YAMLError) as exc:
+        raise ProtectedSetUnreadable(
+            f"the daemon config could not be loaded ({type(exc).__name__})"
+        ) from exc
+    return protected_patterns_from_options(options)
+
+
+def protected_patterns_from_options(options: object) -> tuple[str, ...]:
+    """Effective protected globs from a ``secret_file_guard`` options mapping, STRICTLY.
+
+    The type checks :func:`load_protected_patterns_strict` applies, for a caller
+    that already holds the options (``check-worktree-seed`` reads them from the
+    config file it was given). ``None`` means no options: the shipped defaults.
+
+    Raises:
+        ProtectedSetUnreadable: ``options`` is not a mapping, or its ``mode`` /
+            ``protected_paths`` have the wrong type.
+    """
+    if options is None:
+        options = {}
+    if not isinstance(options, dict):
+        raise ProtectedSetUnreadable("secret_file_guard options are not a mapping")
+    mode = options.get("mode")
+    project_patterns = options.get("protected_paths")
+    if mode is not None and not isinstance(mode, str):
+        raise ProtectedSetUnreadable("secret_file_guard option 'mode' is not a string")
+    if project_patterns is not None and not (
+        isinstance(project_patterns, list) and all(isinstance(p, str) for p in project_patterns)
+    ):
+        raise ProtectedSetUnreadable(
+            "secret_file_guard option 'protected_paths' is not a list of strings"
+        )
+    return resolve_protected_patterns(mode, project_patterns)
+
+
 def resolve_protected_patterns(
     mode: str | None, project_patterns: list[str] | None
 ) -> tuple[str, ...]:
@@ -426,6 +492,20 @@ def protecting_pattern(file_path: str, patterns: tuple[str, ...]) -> str | None:
     resolves the realpath ONCE for the whole list: asked one pattern at a
     time, each call walked every component of the path again, which for a
     90 KB-deep ``file_path`` cost seconds (Plan 00466 N40 review 2 nit 4).
+    Anchored globs are anchored at the daemon's own project root.
+    """
+    return protecting_pattern_under(file_path, patterns, resolve_project_root())
+
+
+def protecting_pattern_under(
+    file_path: str, patterns: tuple[str, ...], project_root: str | None
+) -> str | None:
+    """:func:`protecting_pattern`, with anchored globs anchored at ``project_root``.
+
+    For a caller judging paths of a checkout that may not be the daemon's own
+    project root (worktree seeding judges the MAIN checkout of whatever
+    repository the session stands in), so a project-anchored glob still
+    matches there. ``None`` matches unanchored globs only.
     """
     if not file_path or not patterns:
         return None
@@ -447,7 +527,7 @@ def protecting_pattern(file_path: str, patterns: tuple[str, ...]) -> str | None:
         # loop as protected by every pattern rather than let a version
         # difference decide whether a secret is guarded.
         return patterns[0]
-    return _pattern_for_spellings(file_path, real, patterns, resolve_project_root())
+    return _pattern_for_spellings(file_path, real, patterns, project_root)
 
 
 def _pattern_for_spellings(
@@ -582,6 +662,19 @@ def _tokenise(command: str) -> list[str]:
     negatives are the enumerated class-(c)/(d) limits.
     """
     return [token for token, _start in _tokenise_with_offsets(command)]
+
+
+def path_mention_words(text: str) -> list[str]:
+    """Every path-shaped word the mention scan reads in ``text``, in each spelling it judges.
+
+    The same crude split the protected-name scan uses: quotes, ``=``, ``<``,
+    ``>``, parentheses and commas end a word, so a redirect operand, ``if=p``,
+    an interpreter one-liner's literal and a ``file://`` URL's path all
+    surface. A caller that PLACES paths (the made-link tracker in
+    ``recursive_search``, re-review R4) uses it so it reads the same words a
+    direct mention is judged on.
+    """
+    return [form for token in _tokenise(text) for form in _normalised_token_forms(token)]
 
 
 def _tokenise_with_offsets(command: str) -> list[tuple[str, int]]:

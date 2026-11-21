@@ -1,2 +1,4 @@
 tests/fixtures/hooks_screen/*.raw binary
 screen/vendor/** linguist-vendored -diff -text
+# Plan 00620: the append-only removal ledger; two branches' appends merge as both lines.
+.claude/branch-removals.jsonl merge=union

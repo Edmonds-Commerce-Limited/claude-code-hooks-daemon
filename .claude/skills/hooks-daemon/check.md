@@ -34,6 +34,11 @@ full picture on demand:
     `autoCompactEnabled: false`, or `DISABLE_AUTO_COMPACT`, `DISABLE_COMPACT`,
     `FORCE_PROMPT_CACHING_5M`; interactive sessions on the one-hour cache,
     Claude Code 2.1.290 or later)
+  - Idle Compaction Threshold (`CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS`) —
+    `[WARN]` when idle compaction is on and the variable is unset (default
+    200000\) or above 100000, the lowest value Claude Code accepts. The fix
+    text adds `"env": {"CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS": "100000"}` to
+    `~/.claude/settings.json`; an explicit value is never overwritten.
 - **Container runtime** — docker / podman / lxc / generic, or desktop/host.
   (Also shown continuously by the status-line environment icon.)
 - **Git `core.fileMode`** — warns when `false` (hooks can lose their exec bit).

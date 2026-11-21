@@ -1,0 +1,3 @@
+## 14:21 · action · — — Submodule-ignore audit completed
+
+The submodule-ignore audit is now complete. `worktree_reaping.collect_worktree_states` also read `git status --porcelain` without `SEE_SUBMODULES`, so a moved submodule under `ignore = all` could let an agent worktree be reaped. It now passes the flag. The test went RED with the flag reverted and GREEN with it restored. The other `git cherry` readers (the `branch_inventory` state and reaping's `unlanded_patches`) decide no delete on their own, as recorded in the report. The wider regression run passed (2290 tests). Correction to the first commit message: `git cherry` is blind only under `.gitmodules ignore = all`. It is not blind under `diff.ignoreSubmodules = all`.

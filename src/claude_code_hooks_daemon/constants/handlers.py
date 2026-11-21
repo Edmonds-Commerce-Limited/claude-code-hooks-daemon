@@ -470,6 +470,13 @@ class HandlerID:
         config_key="agent_dispatch_recorder",
         display_name="agent-dispatch-recorder",
     )
+    # Plan 00620: admits a branch-reject reviewer dispatch only with the exact
+    # daemon-composed prompt, and records the nonce's dispatch.
+    BRANCH_REJECT_DISPATCH_GATE = HandlerIDMeta(
+        class_name="BranchRejectDispatchGateHandler",
+        config_key="branch_reject_dispatch_gate",
+        display_name="branch-reject-dispatch-gate",
+    )
     # Plan 00471 L2: a subagent's context budget (soft advisory, hard handoff-only).
     SUBAGENT_CONTEXT_BUDGET = HandlerIDMeta(
         class_name="SubagentContextBudgetHandler",
@@ -505,6 +512,12 @@ class HandlerID:
         class_name="DispatchModelRecorderHandler",
         config_key="dispatch_model_recorder",
         display_name="dispatch-model-recorder",
+    )
+    # Plan 00620: fills a branch-reject dispatch record's agent id from agentId.
+    BRANCH_REJECT_AGENT_BINDER = HandlerIDMeta(
+        class_name="BranchRejectAgentBinderHandler",
+        config_key="branch_reject_agent_binder",
+        display_name="branch-reject-agent-binder",
     )
     # Plan 00472 T3/T4: names a cheaper tier, or a floor, at dispatch time.
     SUBAGENT_TIER_ADVISOR = HandlerIDMeta(
@@ -808,6 +821,12 @@ class HandlerID:
         class_name="BranchSubagentStopGuardHandler",
         config_key="branch_subagent_stop_guard",
         display_name="branch-subagent-stop-guard",
+    )
+    # Plan 00620: turns a branch-reject reviewer's final stop into a verdict.
+    BRANCH_REJECT_VERDICT_RECORDER = HandlerIDMeta(
+        class_name="BranchRejectVerdictRecorderHandler",
+        config_key="branch_reject_verdict_recorder",
+        display_name="branch-reject-verdict-recorder",
     )
     # Operator signal notice (PostToolUse) -- Plan 00508: the ccy supervisor
     # types a host reboot/shutdown warning only when the session is idle, so a

@@ -11,7 +11,9 @@ Tests run against a real temporary git repo — faithful to the production path.
 
 from __future__ import annotations
 
+import json
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
@@ -21,6 +23,7 @@ import pytest
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.worktree_seed import (
     SEED_MODE_COPY,
     SEED_MODE_SYMLINK,
@@ -29,15 +32,22 @@ from claude_code_hooks_daemon.core.worktree_seed import (
 from claude_code_hooks_daemon.handlers.worktree_create.worktree_create_handler import (
     WorktreeCreateHandler,
 )
-from claude_code_hooks_daemon.utils.worktree_seeding import WorktreeSeedError
+from claude_code_hooks_daemon.utils.worktree_seeding import WorktreeSeedError, seed_link_audit_path
 
 
 def _init_repo(root: Path) -> None:
-    """Create a git repo with one commit so worktrees can branch from HEAD."""
-    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    """Create a git repo with one commit so worktrees can branch from HEAD.
+
+    It is on ``main`` (the default branch the committed seed baseline is read
+    from) and carries a daemon config, as an installed project does: the shared
+    seed check reads the main checkout's config and refuses when it cannot.
+    """
+    subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
     subprocess.run(["git", "-C", str(root), "config", "user.email", "t@t.t"], check=True)
     subprocess.run(["git", "-C", str(root), "config", "user.name", "t"], check=True)
     (root / "README.md").write_text("hi\n", encoding="utf-8")
+    (root / ".claude").mkdir()
+    (root / ".claude" / "hooks-daemon.yaml").write_text("version: '2.0'\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "init"], check=True)
 
@@ -48,6 +58,24 @@ def repo(tmp_path: Path) -> Path:
     root.mkdir()
     _init_repo(root)
     return root
+
+
+@pytest.fixture
+def guard_config(tmp_path: Path) -> Iterator[Path]:
+    """A readable daemon config, so a copy-mode seed can be judged (Plan 00613).
+
+    Without one the protected set cannot be read and every copy entry is
+    refused, which is the behaviour ``TestProtectedCopyOnCreate`` pins.
+    """
+    config_dir = tmp_path / "daemon-config" / ".claude"
+    config_dir.mkdir(parents=True)
+    config_path = config_dir / "hooks-daemon.yaml"
+    config_path.write_text("version: '2.0'\n", encoding="utf-8")
+    with (
+        patch.object(ProjectContext, "is_initialized", return_value=True),
+        patch.object(ProjectContext, "config_path", return_value=config_path),
+    ):
+        yield config_path
 
 
 class TestInitialisation:
@@ -315,7 +343,7 @@ class TestLinkedWorktreeCwd:
         }
 
     def test_worktree_is_created_under_the_main_checkout_and_seeded_from_it(
-        self, repo: Path, linked: Path
+        self, repo: Path, linked: Path, guard_config: Path
     ) -> None:
         (repo / ".env.local").write_text("SECRET=canonical\n", encoding="utf-8")
         assert not (linked / ".env.local").exists()
@@ -326,7 +354,7 @@ class TestLinkedWorktreeCwd:
 
         path = Path(result.worktree_path or "")
         assert str(path).startswith(f"{repo}/.claude/worktrees/")
-        assert not (linked / ".claude").exists()
+        assert not (linked / ".claude" / "worktrees").exists()
         assert (path / ".env.local").read_text(encoding="utf-8") == "SECRET=canonical\n"
 
     def test_subdirectory_of_a_linked_worktree_anchors_to_the_main_checkout(
@@ -533,7 +561,7 @@ class TestSeedingOnCreate:
         assert seeded.is_symlink()
         assert seeded.read_text(encoding="utf-8") == "SECRET=canonical\n"
 
-    def test_copy_mode_is_honoured_end_to_end(self, repo: Path) -> None:
+    def test_copy_mode_is_honoured_end_to_end(self, repo: Path, guard_config: Path) -> None:
         (repo / ".env.local").write_text("SECRET=canonical\n", encoding="utf-8")
 
         handler = WorktreeCreateHandler()
@@ -560,7 +588,9 @@ class TestSeedingOnCreate:
         worktrees = repo / ".claude" / "worktrees"
         assert not worktrees.exists() or not any(worktrees.iterdir())
 
-    def test_refire_does_not_reseed_over_the_agents_own_edits(self, repo: Path) -> None:
+    def test_refire_does_not_reseed_over_the_agents_own_edits(
+        self, repo: Path, guard_config: Path
+    ) -> None:
         (repo / ".env.local").write_text("SECRET=canonical\n", encoding="utf-8")
 
         handler = WorktreeCreateHandler()
@@ -573,6 +603,264 @@ class TestSeedingOnCreate:
         handler.handle(self._input(repo))
 
         assert seeded.read_text(encoding="utf-8") == "SECRET=agent-edited\n"
+
+
+class TestProtectedCopyOnCreate:
+    """Plan 00613 Task 2.1: a copy of a protected source is refused before creation."""
+
+    _VAULT = "." + "vault" + "-pass"
+
+    def _input(self, cwd: Path) -> dict:
+        return {
+            "hook_event_name": EventType.WORKTREE_CREATE.value,
+            "cwd": str(cwd),
+            "name": "Protected Seed",
+            "prompt_id": "pid-123",
+            "session_id": "sid-456",
+        }
+
+    @staticmethod
+    def _assert_nothing_created(repo: Path) -> None:
+        worktrees = repo / ".claude" / "worktrees"
+        assert not worktrees.exists() or not any(worktrees.iterdir())
+        listed = subprocess.run(
+            ["git", "-C", str(repo), "worktree", "list", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert [line for line in listed.splitlines() if line.startswith("worktree ")] == [
+            f"worktree {repo.resolve()}"
+        ]
+
+    def test_a_protected_copy_aborts_before_the_worktree_exists(
+        self, repo: Path, guard_config: Path
+    ) -> None:
+        (repo / self._VAULT).write_text("hush\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [{"path": self._VAULT, "mode": SEED_MODE_COPY}]}
+
+        with pytest.raises(WorktreeSeedError, match="secret_file_guard"):
+            handler.handle(self._input(repo))
+
+        self._assert_nothing_created(repo)
+
+    def test_an_unreadable_config_refuses_a_copy_before_the_worktree_exists(
+        self, repo: Path
+    ) -> None:
+        """No readable protected set (here: no daemon context) refuses every copy."""
+        (repo / ".env.local").write_text("PLAIN=1\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [{"path": ".env.local", "mode": SEED_MODE_COPY}]}
+
+        with (
+            patch.object(ProjectContext, "is_initialized", return_value=False),
+            pytest.raises(WorktreeSeedError, match="could not be read"),
+        ):
+            handler.handle(self._input(repo))
+
+        self._assert_nothing_created(repo)
+
+    @staticmethod
+    def _commit_seed(repo: Path, *paths: str) -> None:
+        """Commit a daemon config whose seed list links ``paths`` (the F6 baseline)."""
+        listed = "".join(f"            - path: {p}\n              mode: symlink\n" for p in paths)
+        (repo / ".claude").mkdir(exist_ok=True)
+        (repo / ".claude" / "hooks-daemon.yaml").write_text(
+            "version: '2.0'\nhandlers:\n  worktree_create:\n    worktree_create:\n"
+            "      options:\n        seed:\n          entries:\n" + listed,
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "-C", str(repo), "add", ".claude/hooks-daemon.yaml"], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
+
+    def test_a_link_only_config_needs_no_readable_protected_set(self, repo: Path) -> None:
+        (repo / self._VAULT).write_text("hush\n", encoding="utf-8")
+        self._commit_seed(repo, self._VAULT)
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [self._VAULT]}
+
+        with patch.object(ProjectContext, "is_initialized", return_value=False):
+            result = handler.handle(self._input(repo))
+
+        assert (Path(result.worktree_path or "") / self._VAULT).is_symlink()
+
+    def test_an_uncommitted_protected_link_aborts_before_the_worktree_exists(
+        self, repo: Path, guard_config: Path
+    ) -> None:
+        """F6: creation applies the same committed-config check as ``seed-worktree``.
+
+        The loaded seed list (a daemon restart after an uncommitted edit) names a
+        protected path the config committed at HEAD does not list: refused, and
+        nothing is created.
+        """
+        (repo / self._VAULT).write_text("hush\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [self._VAULT]}
+
+        with pytest.raises(WorktreeSeedError, match="committed"):
+            handler.handle(self._input(repo))
+
+        self._assert_nothing_created(repo)
+
+    def test_an_uncommitted_protected_link_aborts_whatever_the_daemon_config(
+        self, repo: Path
+    ) -> None:
+        """The check reads the main checkout's config, not the daemon's (re-review R6)."""
+        (repo / self._VAULT).write_text("hush\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [self._VAULT]}
+
+        with (
+            patch.object(ProjectContext, "is_initialized", return_value=False),
+            pytest.raises(WorktreeSeedError, match="committed"),
+        ):
+            handler.handle(self._input(repo))
+
+        self._assert_nothing_created(repo)
+
+    def test_an_unreadable_main_checkout_config_aborts_an_uncommitted_link(
+        self, repo: Path, guard_config: Path
+    ) -> None:
+        """Re-review R6: the creation route fails closed on an unreadable config, too."""
+        (repo / ".env.local").write_text("PLAIN=1\n", encoding="utf-8")
+        (repo / ".claude" / "hooks-daemon.yaml").write_text("handlers: [x\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [".env.local"]}
+
+        with pytest.raises(WorktreeSeedError, match="could not be"):
+            handler.handle(self._input(repo))
+
+        self._assert_nothing_created(repo)
+
+    def test_a_detached_main_checkout_aborts_a_protected_link(
+        self, repo: Path, guard_config: Path
+    ) -> None:
+        """Re-review R5: a commit checked out detached is no baseline at creation either."""
+        (repo / self._VAULT).write_text("hush\n", encoding="utf-8")
+        self._commit_seed(repo, self._VAULT)
+        subprocess.run(["git", "-C", str(repo), "checkout", "-q", "--detach"], check=True)
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [self._VAULT]}
+
+        with pytest.raises(WorktreeSeedError, match="detached"):
+            handler.handle(self._input(repo))
+
+        self._assert_nothing_created(repo)
+
+    def test_both_routes_judge_with_the_main_checkout_config(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """R6 parity: a daemon config that unprotects the path changes neither route.
+
+        The daemon's own config (a worktree-root daemon's) drops nothing from the
+        set the main checkout's config protects, so both routes refuse alike.
+        """
+        from claude_code_hooks_daemon.utils.worktree_seed_apply import (
+            SeedApplyRefused,
+            seed_existing_worktree,
+        )
+
+        (repo / "conf").mkdir()
+        (repo / "conf" / "app.txt").write_text("hush\n", encoding="utf-8")
+        self._commit_seed(repo)
+        working = repo / ".claude" / "hooks-daemon.yaml"
+        working.write_text(
+            "version: '2.0'\nhandlers:\n"
+            "  pre_tool_use:\n    secret_file_guard:\n      options:\n"
+            "        protected_paths:\n          - conf/app.txt\n"
+            "  worktree_create:\n    worktree_create:\n"
+            "      options:\n        seed:\n          entries:\n"
+            "            - path: conf\n              mode: symlink\n",
+            encoding="utf-8",
+        )
+        daemon_config = tmp_path / "daemon-config" / ".claude" / "hooks-daemon.yaml"
+        daemon_config.parent.mkdir(parents=True)
+        daemon_config.write_text("version: '2.0'\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": ["conf"]}
+        with (
+            patch.object(ProjectContext, "is_initialized", return_value=True),
+            patch.object(ProjectContext, "config_path", return_value=daemon_config),
+            pytest.raises(WorktreeSeedError) as by_hook,
+        ):
+            handler.handle(self._input(repo))
+
+        hand_made = tmp_path / "hand-made"
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "hand", str(hand_made)],
+            check=True,
+        )
+        with pytest.raises(SeedApplyRefused) as by_verb:
+            seed_existing_worktree(hand_made, project_root=repo)
+
+        assert str(by_hook.value) == str(by_verb.value)
+        assert "committed" in str(by_hook.value)
+        assert not (hand_made / "conf").exists()
+
+    def test_both_routes_refuse_the_same_uncommitted_protected_entry(
+        self, repo: Path, guard_config: Path, tmp_path: Path
+    ) -> None:
+        """F6 parity: the creation hook and ``seed-worktree`` share one refusal."""
+        from claude_code_hooks_daemon.utils.worktree_seed_apply import (
+            SeedApplyRefused,
+            seed_existing_worktree,
+        )
+
+        (repo / self._VAULT).write_text("hush\n", encoding="utf-8")
+        self._commit_seed(repo)  # a committed seed list that does not name it
+        working = repo / ".claude" / "hooks-daemon.yaml"
+        working.write_text(
+            working.read_text(encoding="utf-8")
+            + f"            - path: {self._VAULT}\n              mode: symlink\n",
+            encoding="utf-8",
+        )
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [self._VAULT]}
+        with pytest.raises(WorktreeSeedError) as by_hook:
+            handler.handle(self._input(repo))
+
+        hand_made = tmp_path / "hand-made"
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "hand", str(hand_made)],
+            check=True,
+        )
+        with pytest.raises(SeedApplyRefused) as by_verb:
+            seed_existing_worktree(hand_made, project_root=repo)
+
+        assert str(by_hook.value) == str(by_verb.value)
+        assert not (hand_made / self._VAULT).exists()
+
+    def test_a_protected_link_is_audited_in_the_main_checkout(
+        self, repo: Path, guard_config: Path
+    ) -> None:
+        """Plan 00613 Task 2.2: the handler wires the audit to the main checkout."""
+        (repo / self._VAULT).write_text("hush\n", encoding="utf-8")
+        self._commit_seed(repo, self._VAULT)
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [self._VAULT]}
+
+        result = handler.handle(self._input(repo))
+
+        lines = seed_link_audit_path(repo).read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 1
+        record = json.loads(lines[0])
+        assert record["outcome"] == "linked"
+        assert record["path"] == self._VAULT
+        assert record["worktree"] == result.worktree_path
+        assert record["session_id"] == "sid-456"
+        assert "hush" not in lines[0]
+
+    def test_an_unreadable_config_audits_the_link_as_unclassified(self, repo: Path) -> None:
+        (repo / ".env.local").write_text("PLAIN=1\n", encoding="utf-8")
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [".env.local"]}
+
+        with patch.object(ProjectContext, "is_initialized", return_value=False):
+            handler.handle(self._input(repo))
+
+        lines = seed_link_audit_path(repo).read_text(encoding="utf-8").splitlines()
+        assert [json.loads(line)["outcome"] for line in lines] == ["linked-unclassified"]
 
 
 class TestSeedingGuidance:
