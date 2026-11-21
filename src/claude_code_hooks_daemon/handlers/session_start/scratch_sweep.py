@@ -10,21 +10,32 @@ command that makes a recorded entry inside it.
 It fires on every source because a compaction drops the earlier announcement.
 It never raises and never blocks: a failure to create the directory is said in
 one line, and an unusable session id is silent. Section 10 names this ONE
-handler for the scratch summary too; Task 5.2 adds that report here.
+handler for the scratch summary too: :func:`render_inventory_report` reads only
+the cached inventory, and each run starts a background refresh of it.
 """
 
 from __future__ import annotations
 
 import logging
+import time
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
+from claude_code_hooks_daemon.config.models import Config, ScratchCapsConfig
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
-from claude_code_hooks_daemon.constants.paths import ProjectPath
+from claude_code_hooks_daemon.constants.paths import DaemonPath, ProjectPath
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.scratch_caps import CapLevel
+from claude_code_hooks_daemon.core.scratch_inventory import (
+    INVENTORY_FILE,
+    InventoryReading,
+    inventory_caps,
+    read_inventory,
+)
 from claude_code_hooks_daemon.core.scratch_session import (
     SessionError,
     check_session_id,
@@ -38,6 +49,94 @@ from claude_code_hooks_daemon.utils.scratch_dir import ensure_scratch_dir
 logger = logging.getLogger(__name__)
 
 _ICON = "🗒️"
+
+#: An inventory older than this is said to be stale.
+STALE_AFTER_SECONDS: Final[float] = 24 * 3600.0
+#: An archive expiring within this window is announced with its restore command.
+EXPIRY_WINDOW_SECONDS: Final[float] = 48 * 3600.0
+_MAX_LISTED: Final[int] = 10
+
+
+def _start_refresh(project_root: Path) -> None:
+    """Refresh the cached inventory in a background thread; never raises."""
+    from claude_code_hooks_daemon.daemon.cli import start_scratch_inventory_refresh
+
+    try:
+        start_scratch_inventory_refresh(project_root)
+    except Exception:
+        logger.exception("scratch inventory refresh not started")
+
+
+def _caps_config(project_root: Path) -> ScratchCapsConfig:
+    """The project's ``scratch.caps``; the defaults when the config cannot be read."""
+    try:
+        config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+    except (OSError, ValueError) as exc:
+        logger.info("scratch caps: config unreadable (%s); using defaults", type(exc).__name__)
+        return ScratchCapsConfig()
+    return config.scratch.caps
+
+
+def _problem_lines(reading: InventoryReading, now: float) -> list[str]:
+    inventory = reading.inventory
+    if inventory is None:
+        return [
+            f"{_ICON} Scratch inventory {reading.problem}: the counts below are unknown; "
+            "a refresh has been started."
+        ]
+    lines: list[str] = []
+    if inventory.incomplete:
+        reasons = "; ".join(inventory.incomplete_reasons) or "no reason recorded"
+        lines.append(f"{_ICON} Scratch inventory is incomplete ({reasons}): counts are a floor.")
+    age = now - inventory.generated_at
+    if age > STALE_AFTER_SECONDS:
+        lines.append(f"{_ICON} Scratch inventory is stale ({age / 3600:.0f}h old); refreshing.")
+    return lines
+
+
+def render_inventory_report(
+    reading: InventoryReading, caps: ScratchCapsConfig, *, now: float
+) -> list[str]:
+    """The SessionStart scratch report, from the cached inventory only.
+
+    Silent when the inventory is complete, fresh, has nothing due to file, no
+    archive about to expire and every cap below warn; never silent when the
+    inventory is missing, unreadable, incomplete or stale.
+    """
+    lines = _problem_lines(reading, now)
+    inventory = reading.inventory
+    if inventory is None:
+        return lines
+    overdue = [entry for entry in inventory.entries if entry.due and entry.filing_command]
+    expiring = [
+        archive
+        for archive in inventory.archives
+        if archive.expires_at - now <= EXPIRY_WINDOW_SECONDS
+    ]
+    cap_report = inventory_caps(inventory, caps)
+    over = cap_report.at_or_above(CapLevel.WARN)
+    if not (lines or overdue or expiring or over):
+        return []
+    verdicts = Counter(entry.verdict for entry in inventory.entries)
+    counts = ", ".join(f"{verdict} {count}" for verdict, count in sorted(verdicts.items()))
+    lines.append(f"{_ICON} Scratch entries by verdict: {counts or 'none'}")
+    if overdue:
+        lines.append(f"   Overdue, to file ({len(overdue)}):")
+        lines.extend(f"     {e.name}: `{e.filing_command}`" for e in overdue[:_MAX_LISTED])
+    if expiring:
+        lines.append(f"   Archives expiring within {EXPIRY_WINDOW_SECONDS / 3600:.0f}h:")
+        lines.extend(
+            f"     {a.archive_id} ({', '.join(a.original_paths)}): `{a.restore_command}`"
+            for a in expiring[:_MAX_LISTED]
+        )
+    for check in over:
+        enforced = "" if cap_report.enforce else " (advise only)"
+        lines.append(
+            f"   Cap {check.key}: {check.count} is at {check.level.name} "
+            f"(warn {check.warn}, block {check.block}){enforced}; run "
+            f"`{daemon_cli_command_for_docs('scratch-sweep')} --apply`."
+        )
+    return lines
 
 
 class ScratchSweepHandler(SessionStartHandlerBase):
@@ -103,6 +202,10 @@ class ScratchSweepHandler(SessionStartHandlerBase):
                 context=[f"{_ICON} Scratch session directory not created: {reason}"],
             )
         command = daemon_cli_command_for_docs("scratch", "new")
+        project_root = self._get_project_root()
+        reading = read_inventory(project_root / DaemonPath.UNTRACKED_DIR / INVENTORY_FILE)
+        report = render_inventory_report(reading, _caps_config(project_root), now=time.time())
+        _start_refresh(project_root)
         return AdvisoryResult(
             decision=Decision.ALLOW,
             context=[
@@ -110,6 +213,7 @@ class ScratchSweepHandler(SessionStartHandlerBase):
                 f"   Make each piece of throwaway work an entry in it: `{command} <name> "
                 "--purpose '...' [--plan NNNNN]` prints the path. Entries expire after "
                 "their TTL; anything worth keeping is filed where git carries it.",
+                *report,
             ],
         )
 
@@ -126,7 +230,13 @@ class ScratchSweepHandler(SessionStartHandlerBase):
             "and TTL and prints its path; a sub-agent in a worktree gets the same directory "
             "name in its own checkout. Scratch expires: anything worth keeping is filed where "
             "git carries it (a plan's `subagent-reports/`, a journal entry, a test). "
-            "Advisory only; never blocks."
+            "The same handler then reports, from the cached "
+            "`untracked/scratch-inventory.json` only (refreshed in the background at each "
+            "SessionStart and by every `scratch-sweep --apply` run), the entries by verdict, the "
+            "overdue entries with their filing command, archives expiring within 48h with "
+            "their restore command, and any cap at warn or block. It is silent when all of "
+            "that is clean, and always speaks when the inventory is missing, incomplete or "
+            "stale. Advisory only; never blocks."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

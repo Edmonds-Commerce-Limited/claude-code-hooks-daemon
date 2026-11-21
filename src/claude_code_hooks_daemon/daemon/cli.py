@@ -6827,7 +6827,81 @@ def cmd_scratch_sweep(
             file=sys.stderr,
         )
         return 1
-    return _scratch_apply(args, sources, sweep_root)
+    applied = _scratch_apply(args, sources, sweep_root)
+    if args.root is None:
+        _record_scratch_inventory(sources, sources.classify(sweep_root))
+    return applied
+
+
+def _scratch_store_status(sources: "_ScratchSources") -> Any:
+    """The archive store's status for the inventory; ``None`` when there is no store."""
+    from claude_code_hooks_daemon.core.scratch_archive import StoreAbsent
+    from claude_code_hooks_daemon.core.scratch_archive_status import read_status
+
+    try:
+        return read_status(sources.store_path, sources.retention_hours())
+    except StoreAbsent:
+        return None
+
+
+def _record_scratch_inventory(sources: "_ScratchSources", report: Any) -> None:
+    """Write the cached inventory from a report this run already made (Plan 00627 Task 5.1).
+
+    Only the project's own scratch root is cached (a ``--root`` run is not), and
+    a failure to write is logged, never fatal: the report itself still prints.
+    """
+    from claude_code_hooks_daemon.core import scratch_inventory
+
+    path = sources.repo / "untracked" / scratch_inventory.INVENTORY_FILE
+    try:
+        refreshed = scratch_inventory.refresh_inventory(
+            path,
+            lambda: report,
+            now=sources.wall_clock(),
+            caps=sources.config.scratch.caps,
+            store=lambda: _scratch_store_status(sources),
+        )
+    except (OSError, ValueError) as exc:
+        logger.warning("scratch inventory not written: %s: %s", type(exc).__name__, exc)
+        return
+    logger.debug("scratch inventory written: %d entries", len(refreshed.entries))
+
+
+def start_scratch_inventory_refresh(repo: Path) -> Any:
+    """Refresh ``untracked/scratch-inventory.json`` in a background thread.
+
+    The SessionStart entry point of Plan 00627 Task 5.1: one fresh
+    classification of the project's scratch root with the default budget,
+    exactly what ``scratch-sweep`` runs. Returns the thread, or ``None`` when a
+    refresh is already running.
+    """
+    from claude_code_hooks_daemon.core import scratch_inventory
+    from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
+
+    config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
+    sweep_root = resolve_sweep_root(
+        repo / "untracked" / "scratch",
+        project_root=repo,
+        config=config.scratch,
+        reference_roots=tuple(config.reference_repos.roots),
+    )
+    sources = _ScratchSources(
+        repo=repo,
+        config=config,
+        budget_seconds=SCRATCH_SWEEP_DEFAULT_SECONDS,
+        max_inodes=SCRATCH_SWEEP_DEFAULT_MAX_INODES,
+        scandir=os.scandir,
+        wall_clock=time.time,
+        budget_clock=time.monotonic,
+        process_cwds=None,
+        git_runner=None,
+    )
+    return scratch_inventory.refresh_in_background(
+        repo / "untracked" / scratch_inventory.INVENTORY_FILE,
+        lambda: sources.classify(sweep_root),
+        caps=config.scratch.caps,
+        store=lambda: _scratch_store_status(sources),
+    )
 
 
 def _scratch_checkout(repo: Path, cwd: Path) -> tuple[Path, Path]:
