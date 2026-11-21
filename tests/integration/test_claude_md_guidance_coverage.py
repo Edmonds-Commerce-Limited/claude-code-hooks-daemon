@@ -85,6 +85,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     ),
     "LongRunningCommandGuardHandler": "T1 denies a long foreground Bash call in the main thread",
     "GithubIssueAssignmentGuardHandler": "T1 denies issue-tied work on an unclaimed or foreign issue",
+    "ScratchCapGuardHandler": "T1 denies a directory tree into scratch at the block cap",
     "ScratchKeepMarkerGuardHandler": "T1 denies an agent writing the .scratch-keep marker",
     "ScratchUnownedEntryHandler": (
         "T3 standing policy: entries go in the session directory via `scratch new`, "
@@ -508,6 +509,7 @@ _DORMANT_IN_THIS_PROJECT: dict[str, _DormancyExemption] = {
 _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     # -- Emit nothing an agent acts on -----------------------------------
     "AccountDisplayHandler": "status-line renderer, no agent-facing action",
+    "ScratchInventoryRefresherHandler": "silent background inventory refresh, never a result",
     "ContextSidecarHandler": "status-line renderer, no agent-facing action",
     "CurrentTimeHandler": "status-line renderer, no agent-facing action",
     "PromptCacheIndicatorHandler": "status-line renderer, no agent-facing action",

@@ -54,6 +54,7 @@ class Priority:
     LOCK_FILE_EDIT_BLOCKER = 10
     WRITE_PROTECTED_PATHS = 18  # Safety band: a PreToolUse write blocker
     SCRATCH_KEEP_MARKER_GUARD = 18  # Plan 00627: a write blocker on one file name
+    SCRATCH_CAP_GUARD = 19  # Plan 00627 Task 5.4: directory creation into scratch at the block cap
     AUTO_APPROVE_READS = 10
     VALIDATE_ESLINT_ON_WRITE = 10
     COMPACTION_SIGNAL = 20  # PreCompact: drop compaction signal for the PTY supervisor

@@ -450,6 +450,10 @@ handlers:
       enabled: true
       priority: 18
 
+    scratch_cap_guard: # Deny new directory trees in scratch at the block cap; this repo runs caps.mode advise (Plan 00627)
+      enabled: true
+      priority: 19
+
     scratch_unowned_entry:     # A new entry directly in a scratch root: advise|block|off via scratch.sweep.unowned_entry
       enabled: true
       priority: 46
@@ -1958,6 +1962,12 @@ project_handlers:
 # so the deploy is a no-op — the flag is set true to dogfood the enabled path.
 ccy:
   deploy_supervisor: true
+
+# Plan 00627 DESIGN.md section 8 rollout: this repository's scratch is over the
+# block cap until Task 8.3 clears the backlog, so R-SCRATCH-CAP only advises.
+scratch:
+  caps:
+    mode: advise
 
 # Pseudo-events: synthetic events triggered by real events with frequency control
 pseudo_events:

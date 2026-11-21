@@ -576,6 +576,13 @@ class RuleID:
     SCRATCH_KEEP_MARKER: str = "R-SCRATCH-KEEP-MARKER"
 
     # ------------------------------------------------------------------
+    # scratch_cap_guard handler (Plan 00627 Task 5.4)
+    # ------------------------------------------------------------------
+
+    #: A directory-creating command into scratch while scratch is at its block cap.
+    SCRATCH_CAP: str = "R-SCRATCH-CAP"
+
+    # ------------------------------------------------------------------
     # scratch_unowned_entry handler (Plan 00627 Task 4.5)
     # ------------------------------------------------------------------
 

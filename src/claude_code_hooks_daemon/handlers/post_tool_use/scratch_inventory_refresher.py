@@ -25,7 +25,10 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.scratch_dir_creation import creates_directory_under
+from claude_code_hooks_daemon.utils.scratch_dir_creation import (
+    creates_directory_under,
+    scratch_roots,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +65,7 @@ class ScratchInventoryRefresherHandler(PostToolUseHandlerBase):
         root = self._project_root()
         cwd = Path(str(hook_input.get(HookInputField.CWD) or root))
         command = get_bash_command(hook_input) or ""
-        return creates_directory_under(command, cwd, (root / "untracked" / "scratch",))
+        return creates_directory_under(command, cwd, scratch_roots(root))
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Start the refresh; always a silent allow."""

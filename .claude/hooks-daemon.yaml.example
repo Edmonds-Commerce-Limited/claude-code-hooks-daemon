@@ -212,6 +212,10 @@ handlers:
       enabled: true
       priority: 18
 
+    scratch_cap_guard:         # Deny new directory trees in scratch at the block cap (scratch.caps)
+      enabled: true
+      priority: 19
+
     scratch_unowned_entry:     # A new entry directly in a scratch root: advise|block|off via scratch.sweep.unowned_entry
       enabled: true
       priority: 46

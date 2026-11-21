@@ -100,6 +100,12 @@ class HandlerID:
         config_key="scratch_keep_marker_guard",
         display_name="scratch-keep-marker-guard",
     )
+    # Plan 00627 Task 5.4: no new directory trees in scratch at the block cap.
+    SCRATCH_CAP_GUARD = HandlerIDMeta(
+        class_name="ScratchCapGuardHandler",
+        config_key="scratch_cap_guard",
+        display_name="scratch-cap-guard",
+    )
     # Plan 00627 Task 4.5: a new entry made directly in a scratch root has no owner.
     SCRATCH_UNOWNED_ENTRY = HandlerIDMeta(
         class_name="ScratchUnownedEntryHandler",

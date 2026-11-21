@@ -199,3 +199,26 @@ def creates_directory_under(command: str, cwd: Path, roots: Iterable[Path]) -> b
         for target in directory_creating_targets(command, cwd)
         for root in normalised
     )
+
+
+def scratch_roots(project_root: Path) -> tuple[Path, ...]:
+    """The default scratch root and the configured sweep root, deduplicated.
+
+    The sweep root is resolved exactly as ``start_scratch_inventory_refresh``
+    resolves it; an unreadable config leaves the default root only.
+    """
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
+
+    default = project_root / "untracked" / "scratch"
+    try:
+        config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+    except (OSError, ValueError):
+        return (default,)
+    resolved = resolve_sweep_root(
+        default,
+        project_root=project_root,
+        config=config.scratch,
+        reference_roots=tuple(config.reference_repos.roots),
+    ).path
+    return (default,) if resolved == default else (default, resolved)
