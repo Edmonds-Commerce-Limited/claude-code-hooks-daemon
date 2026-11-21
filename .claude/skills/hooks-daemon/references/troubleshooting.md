@@ -157,6 +157,8 @@ curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code
 bash untracked/scratch/hooks-daemon-upgrade.sh
 ```
 
+The download is consumed by the run; scratch is swept after 24 hours by default.
+
 ### Upgrade Hangs
 
 **Symptom:** Upgrade command never completes

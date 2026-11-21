@@ -202,6 +202,10 @@ the caller never supplies a time:
 CLAUDE/Plan/mkplan.bash --journal 190 finding untracked/scratch/journal-190-260924-1405.md --title "rate limit is per token"
 ```
 
+The body file is scratch: write it inside your scratch session directory where
+you can, and know that the scratch sweep removes it after 24 hours by default.
+The journal entry is what git keeps.
+
 Add `--ref T2.1` for a task reference. The script writes a new entry file
 `JOURNAL/YYYY-MM-DD/HHMMSSZ-<category>-<hex>.md` and never opens an existing
 one. `mkplan.bash --help`

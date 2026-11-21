@@ -225,6 +225,9 @@ real UTC clock and writes the `## HH:MM · category · REF` heading itself:
 CLAUDE/Plan/mkplan.bash --journal <plan-number> <category> untracked/scratch/journal-<plan-number>-<yymmdd-hhmmss>.md --title "short title"
 ```
 
+The body file is scratch, removed by the scratch sweep after 24 hours by
+default; the journal entry is what git keeps.
+
 `<category>` is one of `action`, `finding`, `decision`, `thought`, `blocker`,
 `handoff`, `correction`; add `--ref T1.2` for a task reference (a `correction`
 requires `--ref` naming the entry it corrects). The script writes one new entry
