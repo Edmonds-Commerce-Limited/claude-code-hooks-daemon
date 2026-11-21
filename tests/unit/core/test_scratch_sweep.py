@@ -298,8 +298,19 @@ class TestRendering:
         text = "\n".join(render_table(self._report(tmp_path), max_listed=50))
         assert "nothing was changed" in text
         assert "DISPOSABLE 1" in text
-        assert "evaluated in this phase: KEPT" in text
+        assert "evaluated in this phase" not in text
         assert "not a git repository" in text
+
+    def test_a_keep_marker_makes_the_entry_kept_with_its_reason(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file("pinned/a.log")
+        tree.file("pinned/.scratch-keep", b"owner's draft\nsecond line\n")
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        (row,) = [row for row in report.rows if row.name == "pinned"]
+        assert row.verdict.value == "KEPT"
+        assert row.reasons == ("pinned by .scratch-keep: owner's draft",)
 
     def test_the_table_suggests_no_removal(self, tmp_path: Path) -> None:
         text = "\n".join(render_table(self._report(tmp_path), max_listed=50)).lower()
@@ -325,7 +336,7 @@ class TestRendering:
         document = report_json(self._report(tmp_path))
         json.dumps(document)
         assert document["dry_run"] is True
-        assert document["not_evaluated"] == ["KEPT"]
+        assert document["not_evaluated"] == []
         rows = {row["name"]: row for row in document["entries"]}
         assert set(rows) == {"a.log", "clone", "notes.txt"}
         assert rows["clone"]["repository"] == "found"

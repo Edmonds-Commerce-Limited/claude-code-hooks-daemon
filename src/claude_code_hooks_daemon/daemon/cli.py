@@ -14356,7 +14356,8 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Exit 0 for a report, complete or not. The report says when the walk "
             "budget ran out or a directory could not be read.\n\n"
-            "KEPT is not evaluated yet. An entry a tracked file names is REFERENCED. "
+            "An entry holding a regular .scratch-keep file at its top is KEPT (a "
+            "human's pin; never acted on). An entry a tracked file names is REFERENCED. "
             "A repository in an entry is "
             "classified (a registered worktree, a related clone with unpushed or dirty "
             "work: PROTECTED; a standalone repository: ordinary content). The remote's "
