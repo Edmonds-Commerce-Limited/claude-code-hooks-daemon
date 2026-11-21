@@ -98,6 +98,19 @@ def test_other_directory_creators_denied(tmp_path: Path, command: str) -> None:
     assert _handler(tmp_path).handle(_bash(command, tmp_path)).decision == Decision.DENY
 
 
+#: Valid bash (an ANSI-C quoted string) that Python's shlex cannot lex: its
+#: posix single quote ends at the escaped quote, so the rest never closes.
+UNLEXABLE_MKDIR = "echo $'it\\'s'; mkdir -p untracked/scratch/new-entry"
+
+
+def test_an_unlexable_command_that_creates_a_directory_is_denied(tmp_path: Path) -> None:
+    """The cap guard fails toward detecting: a command it cannot read may create one."""
+    _write(tmp_path, _entry("a", "EXPIRED", 200, due=True))
+    handler = _handler(tmp_path)
+    assert handler.matches(_bash(UNLEXABLE_MKDIR, tmp_path))
+    assert handler.handle(_bash(UNLEXABLE_MKDIR, tmp_path)).decision == Decision.DENY
+
+
 @pytest.mark.parametrize(
     "command",
     [

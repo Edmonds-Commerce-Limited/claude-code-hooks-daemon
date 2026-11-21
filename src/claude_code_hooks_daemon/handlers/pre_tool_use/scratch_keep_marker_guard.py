@@ -15,6 +15,7 @@ text it cannot read fails CLOSED when it names the marker: where it writes is
 unknown, and the name is the whole rule.
 """
 
+import logging
 import re
 from pathlib import Path, PurePosixPath
 from typing import Any, Final
@@ -33,9 +34,16 @@ from claude_code_hooks_daemon.core.utils import (
     get_file_path,
     scan_bash_write_targets,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
-from claude_code_hooks_daemon.utils.scratch_dir_creation import copy_operands, peeled_statements
+from claude_code_hooks_daemon.utils.scratch_dir_creation import (
+    UnparseableCommand,
+    copy_operands,
+    peeled_statements,
+)
 from claude_code_hooks_daemon.utils.simple_commands import SimpleCommand, nested_command_strings
+
+logger = logging.getLogger(__name__)
 
 #: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR: Final[str] = "acceptance-test-scratch-keep"
@@ -105,6 +113,27 @@ def _bash_writes_marker(hook_input: dict[str, Any], *, depth: int) -> bool:
     if KEEP_MARKER not in command:
         return False
     cwd = hook_input.get(HookInputField.CWD)
+    try:
+        return _statement_routes_write_marker(hook_input, command, cwd, depth=depth)
+    except UnparseableCommand as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                "keep-marker guard: the copy/interpreter/shell-body routes cannot read "
+                "unlexable text, so only the shared write scan above judged this command"
+            ),
+        )
+    return False
+
+
+def _statement_routes_write_marker(
+    hook_input: dict[str, Any], command: str, cwd: Any, *, depth: int
+) -> bool:
+    """The routes the shared write scan does not follow, statement by statement.
+
+    Raises :class:`UnparseableCommand` where the command cannot be lexed.
+    """
     for words in peeled_statements(command):
         if _copies_marker_into_directory(words, cwd) or _interpreter_names_marker(words):
             return True

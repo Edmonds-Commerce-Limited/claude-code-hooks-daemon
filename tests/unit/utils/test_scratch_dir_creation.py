@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.utils.scratch_dir_creation import (
+    UnparseableCommand,
     creates_directory_under,
     directory_creating_targets,
+    peeled_statements,
 )
 
 CWD = Path("/repo")
@@ -94,6 +96,31 @@ def test_under_root_after_prelude(prelude: str) -> None:
 def test_unresolved_creation_counts_as_under(prelude: str, command: str) -> None:
     """A cap guard fails toward detecting a creation it cannot place."""
     assert creates_directory_under(prelude + command, CWD, (SCRATCH,))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Valid bash that shlex cannot lex (an ANSI-C quoted escaped quote),
+        # before, inside and after the statement that creates the directory.
+        "echo $'it\\'s'; mkdir untracked/scratch/x",
+        "mkdir untracked/scratch/x 'unbalanced",
+        "echo ok; echo \"open; mkdir untracked/scratch/x",
+    ],
+)
+def test_an_unlexable_command_counts_as_under(command: str) -> None:
+    """The scan stopping on a lexer error is a creation it cannot place, never a clean scan."""
+    assert creates_directory_under(command, CWD, (SCRATCH,))
+
+
+def test_an_unlexable_command_places_nothing() -> None:
+    """The inventory refresh sees no PLACED target it would have to invent."""
+    assert directory_creating_targets("echo $'it\\'s'; mkdir untracked/scratch/x", CWD) == ()
+
+
+def test_unlexable_text_is_reported_as_such() -> None:
+    with pytest.raises(UnparseableCommand, match="No closing quotation"):
+        list(peeled_statements("echo $'it\\'s'; mkdir x"))
 
 
 @pytest.mark.parametrize(

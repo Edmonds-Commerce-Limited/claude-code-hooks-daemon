@@ -112,6 +112,28 @@ class TestDenied:
         assert handler.handle(_bash(command)).decision == Decision.DENY
 
 
+class TestUnlexableStatementRoutes:
+    """Characterisation: an unlexable command on the copy/interpreter routes.
+
+    The statement scan the copy and interpreter routes share with the cap
+    guard raises on text shlex cannot lex. This guard does not crash on it and
+    keeps its existing verdict (not matched); that open route is reported to
+    the plan owner rather than changed here.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"echo $'it\\'s'; cp /tmp/.scratch-keep {_ENTRY}/",
+            "echo $'it\\'s'; python3 -c 'open(\".scratch-keep\",\"w\")'",
+        ],
+    )
+    def test_does_not_crash_and_keeps_its_verdict(
+        self, handler: ScratchKeepMarkerGuardHandler, command: str
+    ) -> None:
+        assert not handler.matches(_bash(command))
+
+
 class TestAllowed:
     @pytest.mark.parametrize(
         "hook_input",

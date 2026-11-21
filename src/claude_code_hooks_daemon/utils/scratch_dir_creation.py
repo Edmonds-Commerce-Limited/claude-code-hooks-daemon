@@ -85,6 +85,10 @@ _RSYNC_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
 )
 
 
+class UnparseableCommand(ValueError):
+    """The statement scan reached text it cannot lex; what follows is unknown."""
+
+
 class _KeepNewlineAfterComment:
     """shlex consumes a comment with ``readline``; leave its newline in the
     stream so the statement after the comment is not glued onto the one before.
@@ -125,7 +129,9 @@ def _strip_heredocs(command: str) -> str:
 def _statements(command: str) -> Iterator[tuple[list[str], str]]:
     """Yield each simple statement's words with the separator that ends it.
 
-    An unquoted newline separates statements exactly as ``;`` does, so it is a
+    Raises :class:`UnparseableCommand` at the first text the lexer cannot read
+    (an unbalanced quote, or valid bash such as ``$'it\\'s'`` that shlex
+    mis-quotes); the statements already yielded stand. An unquoted newline separates statements exactly as ``;`` does, so it is a
     punctuation character to the lexer; a newline inside quotes stays in its
     word, a backslash-newline continuation is joined first, and a comment ends
     at its newline. The separator is ``""`` at the end of the command, and a
@@ -144,8 +150,8 @@ def _statements(command: str) -> Iterator[tuple[list[str], str]]:
                 current = []
             else:
                 current.append(token)
-    except ValueError:
-        return
+    except ValueError as exc:
+        raise UnparseableCommand(f"the rest of the command could not be lexed: {exc}") from exc
     if current:
         yield current, ""
 
@@ -180,7 +186,9 @@ def _command_words(words: list[str]) -> list[str]:
 
 def peeled_statements(command: str) -> Iterator[list[str]]:
     """Each statement's words from the command that runs: assignments,
-    redirects and wrappers stripped, the first word reduced to its name."""
+    redirects and wrappers stripped, the first word reduced to its name.
+
+    Raises :class:`UnparseableCommand` where the text cannot be lexed."""
     for raw, _separator in _statements(command):
         words = _command_words(raw)
         if words:
@@ -398,28 +406,35 @@ def _resolver(cwd: Target) -> Resolver:
 
 
 def _scan(command: str, cwd: Target, depth: int) -> Iterator[Target]:
-    """Every creation target in ``command``, following ``cd`` and subshells."""
+    """Every creation target in ``command``, following ``cd`` and subshells.
+
+    Text the lexer cannot read yields one UNRESOLVED target: it may create a
+    directory anywhere, and the cap guard fails toward detecting.
+    """
     current = cwd
     saved: list[Target] = []
-    for raw, separator in _statements(command):
-        words = _command_words(raw)
-        if words:
-            name, args = command_word(words[0]), words[1:]
-            if name in ("cd", "pushd"):
-                operands = _positionals(args, frozenset())
-                if not operands:
-                    current = Path.home()
-                elif operands[0] == "-":
-                    current = None
+    try:
+        for raw, separator in _statements(command):
+            words = _command_words(raw)
+            if words:
+                name, args = command_word(words[0]), words[1:]
+                if name in ("cd", "pushd"):
+                    operands = _positionals(args, frozenset())
+                    if not operands:
+                        current = Path.home()
+                    elif operands[0] == "-":
+                        current = None
+                    else:
+                        current = _resolver(current)(operands[0])
                 else:
-                    current = _resolver(current)(operands[0])
-            else:
-                yield from _targets(name, words, current, depth)
-        for char in separator:
-            if char == "(":
-                saved.append(current)
-            elif char == ")" and saved:
-                current = saved.pop()
+                    yield from _targets(name, words, current, depth)
+            for char in separator:
+                if char == "(":
+                    saved.append(current)
+                elif char == ")" and saved:
+                    current = saved.pop()
+    except UnparseableCommand:
+        yield None
 
 
 def _targets(name: str, words: list[str], cwd: Target, depth: int) -> list[Target]:
