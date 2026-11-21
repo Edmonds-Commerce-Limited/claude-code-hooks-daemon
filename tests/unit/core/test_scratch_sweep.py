@@ -794,3 +794,45 @@ class TestCrossEntryDependencies:
         report = _sweep(tree, now=now, refused=("box/inner",))
         assert _verdicts(report) == {"box": "STUCK", "cache": "STUCK"}
         assert any("box was not walked" in reason for reason in report.incomplete_reasons)
+
+
+_SESSION = "s-20261101T000000Z-abcdefgh"
+
+
+class TestSessionDirectoryIsNeverActedOnWhole:
+    """Task 4.3 step 1: a session directory is a container, never packed as one entry."""
+
+    def test_a_due_session_directory_is_not_actionable(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file(f"{_SESSION}/.scratch-session.json", b"{}")
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        tree.file("cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        assert _verdicts(report) == {_SESSION: "STUCK", "cache": "DISPOSABLE"}
+        row = next(row for row in report.rows if row.name == _SESSION)
+        assert any("session directory" in reason for reason in row.reasons)
+        assert row.proofs == ()
+
+    def test_a_link_with_a_session_name_is_judged_as_an_ordinary_entry(
+        self, tmp_path: Path
+    ) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        (tree.root / _SESSION).symlink_to(tmp_path / "nowhere")
+        report = _sweep(tree, now=now)
+        row = next(row for row in report.rows if row.name == _SESSION)
+        assert not any("session directory" in reason for reason in row.reasons)
+
+    def test_a_session_child_pointing_at_an_entry_still_protects_it(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        gp.tree.file("lender/.git/objects/pack/x", b"x")
+        alternates = gp.tree.root / f"{_SESSION}/clone/.git/objects/info/alternates"
+        alternates.parent.mkdir(parents=True)
+        alternates.write_text(f"{gp.tree.root / 'lender/.git/objects'}\n")
+        now = _now()
+        _old(gp.tree, now)
+        verdicts = _verdicts(_git_sweep(gp, now))
+        assert verdicts[_SESSION] not in {"DISPOSABLE", "UNCERTAIN"}
+        assert verdicts["lender"] not in {"DISPOSABLE", "UNCERTAIN"}

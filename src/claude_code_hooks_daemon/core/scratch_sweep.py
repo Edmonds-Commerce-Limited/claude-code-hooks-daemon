@@ -55,6 +55,7 @@ from claude_code_hooks_daemon.core.scratch_repos import (
     classify_entry,
     read_small_regular_file,
 )
+from claude_code_hooks_daemon.core.scratch_session import is_session_dir_name
 from claude_code_hooks_daemon.core.scratch_verdict import (
     KEEP_MARKER,
     NOT_EVALUATED,
@@ -285,6 +286,7 @@ def run_sweep(
         if name not in sweep_root.skip
     ]
     rows, dependency_unknown = _with_dependencies(judged)
+    rows = [_held_if_session(root, row) for row in rows]
     if hashing.spent:
         notes.append(P3_BUDGET_NOTE)
     if rows:
@@ -318,6 +320,7 @@ class _Pointers:
 
 
 _GITDIR_PREFIX = "gitdir:"
+_ACTIONABLE = frozenset({Verdict.DISPOSABLE, Verdict.UNCERTAIN})
 _DEPENDABLE = frozenset({Verdict.DISPOSABLE, Verdict.UNCERTAIN, Verdict.REFERENCED})
 
 
@@ -455,6 +458,34 @@ def _with_dependencies(
             row = _overruled(row, Verdict.STUCK, f"not judged: {reason}")
         rows.append(row)
     return rows, reason
+
+
+#: Why a session directory is never acted on as one entry (Task 4.3).
+SESSION_HELD_REASON = (
+    "session directory: a container whose children are the entries, never packed as one"
+)
+
+
+def _held_if_session(root: Path, row: EntryRow) -> EntryRow:
+    """A real session directory's actionable row, made STUCK so ``--apply`` never packs it whole.
+
+    It is still walked and judged as one entry first, so its git pointers keep
+    protecting the entries they lead into. A link or a file with the name is an
+    ordinary entry.
+    """
+    if (
+        not is_session_dir_name(row.name)
+        or row.kind is not NodeKind.DIRECTORY
+        or row.verdict not in _ACTIONABLE
+    ):
+        return row
+    try:
+        info = os.lstat(root / row.name)
+    except OSError:
+        return _overruled(row, Verdict.STUCK, SESSION_HELD_REASON)
+    if not stat.S_ISDIR(info.st_mode):
+        return row
+    return _overruled(row, Verdict.STUCK, SESSION_HELD_REASON)
 
 
 def _overruled(row: EntryRow, verdict: Verdict, reason: str) -> EntryRow:
