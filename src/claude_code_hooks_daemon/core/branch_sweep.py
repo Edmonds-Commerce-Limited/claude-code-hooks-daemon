@@ -30,6 +30,13 @@ from claude_code_hooks_daemon.core.branch_inventory import (
     Pool,
     pool_of,
 )
+from claude_code_hooks_daemon.core.branch_stacks import (
+    WorkStack,
+    WorkUnit,
+    group_stacks,
+    open_work_charge,
+    stack_line,
+)
 from claude_code_hooks_daemon.core.ownership import HINT_TEXT, OwnershipHint
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 
@@ -169,34 +176,53 @@ def group_records(inventory: BranchInventory) -> SweepGroups:
     )
 
 
-def pool_count(inventory: BranchInventory, pool: Pool) -> int:
-    """Branches in ``pool``, identical tips counted once (Plan 00571 DESIGN.md section 1).
+def _pool_units(inventory: BranchInventory, pool: Pool) -> list[WorkUnit]:
+    """The work units of ``pool``: names linked by ``same_tip_as`` are one unit.
 
-    Membership is the record's state (:func:`pool_of`); an unclassified
-    branch is open work. Names of one pool linked by ``same_tip_as`` count as
-    one.
+    A unit is named by its first name; its tips are every local and remote tip
+    of its names.
     """
     work = {
         name: record for name, record in inventory.records.items() if pool_of(record.state) == pool
     }
     seen: set[str] = set()
-    groups = 0
+    units: list[WorkUnit] = []
     for name in sorted(work):
         if name in seen:
             continue
-        groups += 1
+        tips: set[str] = set()
         pending = [name]
         while pending:
             current = pending.pop()
             if current in seen or current not in work:
                 continue
             seen.add(current)
-            pending.extend(work[current].same_tip_as)
-    return groups
+            record = work[current]
+            tips.update(tip for tip in (record.local_tip, record.remote_tip) if tip is not None)
+            pending.extend(record.same_tip_as)
+        units.append(WorkUnit(name, frozenset(tips)))
+    return units
+
+
+def open_stacks(inventory: BranchInventory) -> tuple[WorkStack, ...]:
+    """The open pool's streams: stacked branches grouped (Plan 00594 Task 4.6)."""
+    return group_stacks(_pool_units(inventory, Pool.OPEN), inventory.tip_ancestry)
+
+
+def pool_count(inventory: BranchInventory, pool: Pool) -> int:
+    """Branches in ``pool``, identical tips counted once (Plan 00571 DESIGN.md section 1).
+
+    Membership is the record's state (:func:`pool_of`); an unclassified
+    branch is open work. Names of one pool linked by ``same_tip_as`` count as
+    one. The open pool counts a stack once (:func:`branch_stacks.open_work_charge`).
+    """
+    if pool == Pool.OPEN:
+        return open_work_charge(open_stacks(inventory), inventory.stack_max_depth)
+    return len(_pool_units(inventory, pool))
 
 
 def open_work_count(inventory: BranchInventory) -> int:
-    """Open work branches (``branches.wip.cap``'s pool), identical tips counted once."""
+    """Open work (``branches.wip.cap``'s pool): identical tips once, a stack once."""
     return pool_count(inventory, Pool.OPEN)
 
 
@@ -518,7 +544,18 @@ def render_report(
         or groups.dormant
     ):
         out += [HINT_TEXT[OwnershipHint.BRANCH_OWNED], ""]
-    out += _section("Live work:", [_work_line(r) for r in groups.live])
+    stacks = [stack for stack in open_stacks(inventory) if stack.depth > 1]
+    stacked = {
+        name
+        for stack in stacks
+        for link in stack.links
+        for name in (link, *inventory.records[link].same_tip_as)
+    }
+    out += _section("Live work:", [_work_line(r) for r in groups.live if r.name not in stacked])
+    out += _section(
+        "Stacks (dependent branches; each counts once against branches.wip.cap):",
+        [f"  {stack_line(stack, inventory.stack_max_depth)}" for stack in stacks],
+    )
     out += _section(
         "Parked:",
         [_parked_line(r, config) for r in groups.parked],

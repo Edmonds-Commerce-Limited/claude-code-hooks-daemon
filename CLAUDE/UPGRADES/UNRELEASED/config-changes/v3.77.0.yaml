@@ -1,4 +1,4 @@
-# Drafted by Plan 00620 (branches.reject, branch_reject_* handlers) and Plan 00627 (scratch).
+# Drafted by Plan 00620 (branches.reject, branch_reject_* handlers), Plan 00627 (scratch) and Plan 00594 (branches.wip.stack_max_depth).
 version: "3.77.0"
 date: "UNRELEASED"
 
@@ -78,6 +78,19 @@ config_changes:
       migration_note: >-
         Keep it below the terminal subagent_report_size_blocker (15); a handler
         after a terminal one never runs.
+    - key: branches.wip.stack_max_depth
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00594 Task 4.6). A stack of dependent branches (each tip a
+        strict ancestor of the next, local or remote-tracking) counts 1 against
+        branches.wip.cap up to this many links; each link past it counts 1
+        more. Default 5, minimum 1. A fork ends the chain; parked, merged,
+        park-carried and foreign branches never join a stack.
+      example_yaml: |
+        branches:
+          wip:
+            stack_max_depth: 5
     - key: scratch
       recommended: false
       dormant: false

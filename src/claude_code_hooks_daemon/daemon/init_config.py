@@ -80,6 +80,7 @@ _BRANCHES_BLOCK = (
     "    mode: block              # block | warn | off\n"
     "    count_remote: true       # remote-only branches count; identical tips count once\n"
     "    creation_grace: 2        # creation is denied only at cap + this; below it warns\n"
+    "    stack_max_depth: 5       # a stack of dependent branches counts 1 up to this depth\n"
     "  parked:                    # branch-park'd branches: their own pool, not wip.cap\n"
     "    cap: null                # null = wip.cap\n"
     "    max_age_days: null       # null = the dormancy preset's block_days\n"

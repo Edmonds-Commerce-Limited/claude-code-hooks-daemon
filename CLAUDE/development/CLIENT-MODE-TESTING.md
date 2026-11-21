@@ -39,6 +39,16 @@ scripts/dummy-client-repo.sh python     # print its resolved interpreter
 scripts/dummy-client-repo.sh destroy    # stop daemon, remove worktree + dir
 ```
 
+By default the daemon dir is a `git worktree` of this repository, so it
+shares this repository's config and `origin`: an `upgrade.sh` run in it
+fetches from the REAL origin. For anything that upgrades, use
+`create --bare-remote`. The daemon dir is then a plain clone of the local bare
+repository `untracked/dummy-client-repo-remote.git`, which is seeded from HEAD
+and tagged `v<pyproject version>`, so every fetch stays on disk. Run it with
+`GIT_ALLOW_PROTOCOL=file UV_OFFLINE=1` to make any network attempt fail.
+`scripts/dummy-client-branch-channel-proof.sh` is the branch-channel proof
+built on this mode (Plan 00594 Task 5.1).
+
 ### Design rules (do not weaken these)
 
 1. **It drives the production installer.** `create` runs
