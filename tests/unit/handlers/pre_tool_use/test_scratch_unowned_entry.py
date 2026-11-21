@@ -69,6 +69,44 @@ class TestMatches:
     def test_owned_existing_or_exempt(self, root: Path, relative: str) -> None:
         assert not _handler().matches(_write(root / relative))
 
+    @pytest.mark.parametrize(
+        "spelling",
+        [f"{_SESSION}/../sneaky.txt", "existing/../sneaky.txt", "./sneaky/a.txt"],
+    )
+    def test_dot_segments_cannot_hide_a_new_entry(self, root: Path, spelling: str) -> None:
+        assert _handler().matches(_write(Path(f"{root}/{spelling}")))
+
+    def test_dot_segment_spelling_of_the_root_is_still_the_root(self, root: Path) -> None:
+        tricky = Path(f"{root.parent}/./scratch/sneaky.txt")
+        assert _handler().matches(_write(tricky))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "mkdir untracked/scratch/made",
+            "mkdir -p untracked/scratch/made/deep",
+            "set -e\nmkdir untracked/scratch/made",
+            "cd untracked/scratch && mkdir made",
+            "env FOO=1 mkdir untracked/scratch/made",
+            "bash -c 'mkdir untracked/scratch/made'",
+        ],
+    )
+    def test_bash_directory_creation_is_seen(self, root: Path, command: str) -> None:
+        assert _handler().matches(_bash(command, root.parent.parent))
+
+    def test_bash_mkdir_inside_the_session_does_not_fire(self, root: Path) -> None:
+        command = f"mkdir untracked/scratch/{_SESSION}/probe"
+        assert not _handler().matches(_bash(command, root.parent.parent))
+
+    @pytest.mark.parametrize("odd", [None, 7, ["a"], {"x": 1}])
+    def test_odd_file_path_is_ignored_not_a_crash(self, odd: object) -> None:
+        hook_input = {"tool_name": "Write", "tool_input": {"file_path": odd, "content": "x"}}
+        assert not _handler().matches(hook_input)
+
+    def test_bash_with_no_cwd_is_not_a_crash(self, root: Path) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "mkdir made"}}
+        assert not _handler().matches(hook_input)
+
     def test_outside_a_scratch_root(self, tmp_path: Path) -> None:
         assert not _handler().matches(_write(tmp_path / "untracked" / "other" / "x.txt"))
         assert not _handler().matches(_write(tmp_path / "scratch" / "x.txt"))

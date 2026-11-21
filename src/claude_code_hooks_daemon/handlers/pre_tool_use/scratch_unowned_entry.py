@@ -12,14 +12,17 @@ denies under R-SCRATCH-UNOWNED-ENTRY, ``off`` does nothing.
 
 Judged on the first path segment under the root, so ``scratch/foo/a.txt``
 creating ``foo`` counts. A segment that already exists (no link followed), a
-session directory name and ``.gitignore`` never fire. The Bash write scan does
-not report ``mkdir`` or ``touch``, so those create an entry unseen; a
-destination the scan cannot resolve is not guessed at, since this is a location
-advisory, not a safety guard.
+session directory name and ``.gitignore`` never fire. Paths are normalised, so
+a ``..`` segment cannot hide the entry. A Bash command is read by the write scan
+and by the shared directory-creation scan (``mkdir``, ``install -d``, ``cp -r``,
+through wrappers, ``cd`` and ``-c`` bodies); ``touch`` is still unseen, and a
+destination neither scan can resolve is not guessed at, since this is a
+location advisory, not a safety guard.
 """
 
 import os
-from pathlib import PurePosixPath
+import posixpath
+from pathlib import Path, PurePosixPath
 from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import ScratchConfig
@@ -32,9 +35,10 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.scratch_session import is_session_dir_name
-from claude_code_hooks_daemon.core.utils import get_file_path, scan_bash_write_targets
+from claude_code_hooks_daemon.core.utils import scan_bash_write_targets
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.scratch_dir import project_dir_path
+from claude_code_hooks_daemon.utils.scratch_dir_creation import directory_creating_targets
 
 _MODE_OFF: Final[str] = "off"
 _MODE_BLOCK: Final[str] = "block"
@@ -60,14 +64,20 @@ _RULE = Rule(
 )
 
 
-def _new_entry(path: str, cwd: object) -> str | None:
-    """The first segment under a scratch root that ``path`` would create, else None."""
+def _new_entry(path: object, cwd: object) -> str | None:
+    """The first segment under a scratch root that ``path`` would create, else None.
+
+    The path is normalised first, so ``scratch/<session>/../x`` is judged as
+    ``scratch/x``; a path that is not a non-empty string is never judged.
+    """
+    if not isinstance(path, str) or not path:
+        return None
     pure = PurePosixPath(path)
     if not pure.is_absolute():
         if not isinstance(cwd, str) or not cwd:
             return None
         pure = PurePosixPath(cwd) / pure
-    parts = pure.parts
+    parts = PurePosixPath(posixpath.normpath(str(pure))).parts
     for index in range(len(parts) - 2):
         if parts[index : index + 2] != _ROOT_PARTS:
             continue
@@ -77,6 +87,21 @@ def _new_entry(path: str, cwd: object) -> str | None:
         entry = PurePosixPath(*parts[: index + 3])
         return None if os.path.lexists(entry) else str(entry)
     return None
+
+
+def _created_directories(tool_input: object, cwd: object) -> list[str]:
+    """Directories a Bash command creates, from the shared creation scan.
+
+    The scan peels wrappers, splits on newlines, follows ``cd`` and reads
+    ``-c`` bodies (DESIGN.md section 8). A creation it cannot place is not
+    guessed at here: this is a location advisory, not a safety guard.
+    """
+    if not isinstance(tool_input, dict) or not isinstance(cwd, str) or not cwd:
+        return []
+    command = tool_input.get("command")
+    if not isinstance(command, str) or not command:
+        return []
+    return [str(target) for target in directory_creating_targets(command, Path(cwd))]
 
 
 class ScratchUnownedEntryHandler(PreToolUseHandlerBase):
@@ -97,15 +122,17 @@ class ScratchUnownedEntryHandler(PreToolUseHandlerBase):
 
     def _entries(self, hook_input: dict[str, Any]) -> list[str]:
         cwd = hook_input.get(HookInputField.CWD)
-        file_path = get_file_path(hook_input)
-        paths = (
-            [file_path]
-            if file_path is not None
-            else list(scan_bash_write_targets(hook_input).paths)
-        )
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+        if hook_input.get(HookInputField.TOOL_NAME) in (ToolName.WRITE, ToolName.EDIT):
+            paths: list[object] = [
+                tool_input.get("file_path") if isinstance(tool_input, dict) else None
+            ]
+        else:
+            paths = list(scan_bash_write_targets(hook_input).paths)
+            paths.extend(_created_directories(tool_input, cwd))
         found: list[str] = []
         for path in paths:
-            entry = _new_entry(path, cwd) if path else None
+            entry = _new_entry(path, cwd)
             if entry is not None and entry not in found:
                 found.append(entry)
         return found
