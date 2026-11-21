@@ -8075,3 +8075,19 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: the surviving-content tier (on main since `69e375788`) lets an agent's raw `git push --delete` of a branch whose tip content every holder already has go through. The hook can allow or deny that command but cannot add a lease to it, so a holder or the branch can move between the proof and the push. `delete-branch --remote-only` deletes with a per-ref `--force-with-lease` and closes that race for the deleted ref. Denying the raw form would change the contract of a command allowed today. Holder leases are not possible in git (a lease only constrains a ref the push updates), so that part stays residue whatever is chosen.
 
 **Status**: ⬜ Open, owner decision. Options: keep the raw route allowed (today), or deny it for the surviving-content tier only and point at `delete-branch --remote-only`, with corpus rows for both.
+
+### N687 — a branch cut from a work branch joins that branch's stack, so the open cap can stretch up to `stack_max_depth` times
+
+**Source**: Plan 00594 Task 4.6, F-BYPS review F1 (`CLAUDE/Plan/Completed/00594-branch-lifecycle-and-branch-tip-channel/subagent-reports/261121-task-4-6-f-byps-review.md`). Low, design limit; the review said safe to merge.
+
+**Evidence**: `branch_stacks.py:113-121` treats "tip is a strict ancestor of" as "depends on". An agent that runs `git checkout -b new` while on a work branch (the default) makes unrelated new work a link of that branch's stack, so up to `branches.wip.stack_max_depth` (default 5) links count as 1 against `branches.wip.cap`. The tests build stacks only from intended dependencies, so they do not show it.
+
+**Status**: ⬜ Open. Candidate remedies: lower the default `stack_max_depth` to 2 or 3; or a detector for a link whose commits touch files the link below did not (expected to be noisy).
+
+### N688 — the no-value delete route: a non-UTF-8 rebase/bisect state file leaves a removal ledger line with no refusal line; `is_dir` on EACCES under Python 3.14 is unverified
+
+**Source**: Plan 00620, F-BYPS review of 8260463ff and 09e744603 (`CLAUDE/Plan/Completed/00620-agent-no-value-branch-removal-verdict/subagent-reports/261121-f-byps-review-8260463ff-09e744603.md`), items 1 and 2; the D-EXEC review noted item 1 too. Both fail closed: no branch is deleted.
+
+**Evidence**: `_read_state_file` in `daemon/branch_safety.py` catches `OSError` only. A state file that is not valid UTF-8 raises `UnicodeDecodeError` (a `ValueError`), which escapes `_operation_holding_branch` after `record_removal` has written the ledger's removal line, so the ledger shows a removal with no matching git-refused line and the refusal surfaces as an exception rather than a reason. Separately, `_operation_holding_branch` relies on `Path.is_dir` raising on EACCES (true on 3.13.5); on 3.14, which `>=3.11` allows, it may return False and skip a linked worktree's admin dir. Only 3.13 is installed here.
+
+**Status**: ⬜ Open. Treat `UnicodeDecodeError` as a refusal reason in `_read_state_file`, with a test that the ledger then records a git-refused line; pin the EACCES behaviour with a test that fails if `is_dir` stops raising.

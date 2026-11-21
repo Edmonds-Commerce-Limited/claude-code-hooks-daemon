@@ -14,8 +14,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - In Progress (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
 
-- [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - In Progress (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work; open questions ruled under the owner's delegation in RULINGS.md: the verdict never unlocks alone, the guard must also verify a recovery bundle; local delete only; merged to main (69e375788), success criteria met; open: review sign-off of 8260463ff/09e744603 and CI green on main)
-
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
 
 - [00614: secret guard resolves links against hook cwd](00614-secret-guard-resolves-links-against-hook-cwd/PLAN.md) - In Progress (found by the 00613 probe: a relative Bash token such as `cat link` is resolved against the daemon's cwd `/`, so a link to a protected file passes; also a directory-link grep and a glob under a directory link; fix test-first and fail closed)
@@ -206,6 +204,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00620: agent no value branch removal verdict](Completed/00620-agent-no-value-branch-removal-verdict/PLAN.md) - Complete at merge `69e375788` + `662750cf4` + the archiving commit (owner proposal: an Opus sub-agent verdict, bound to the tip, plus a recovery bundle the guard verifies, lets an agent remove unproven work; local delete only; reviews of 8260463ff/09e744603 signed off, main CI green at `61a916143`; release note 014; follow-up Plan 00629, niggle N688)
+
 - [00613: worktree link secret verb](Completed/00613-worktree-link-secret-verb/PLAN.md) - Complete at merge `69e375788` + `2f1c14e80` (live-daemon check) + the archiving commit (a protected file is seeded into a worktree as a link from the committed seed list, by the creation hook or `seed-worktree`; copy refused; reads through the link denied on a live daemon, N683 to N685 open; release notes 009, 019; peer reply drafted, owner to send)
 
 - [00621: actions qa ci advisory and workflow lint on edit](Completed/00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - Complete at merge `4f97728de` + the archiving commit, shipping in v3.76.0 (a `.github/workflows/` file is run through the optional `actions-qa` linter on edit and at commit, and a session-start advisory suggests the linter; release note 013 and a truth-change entry recorded)
@@ -264,8 +264,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00587: containment follows a cd into compound command bodies](Completed/00587-containment-cd-into-compound-bodies/PLAN.md) - Complete at `f05530f35` (main CI run 42697064932 success) + the archiving commit (GitHub #195, closed: a `../` redirect in a loop, `if` or `( )` body after a `cd` is resolved from the `cd` target; a `cd` that may have failed still denies; release note 020)
 
-- [00583: branch guard notices state intent and action](Completed/00583-branch-guard-notices-state-intent-and-action/PLAN.md) - Complete at `d60da0fda` (merged via `7d954f213`; main CI run 42682133539, full suite, success) + the archiving commit (GitHub #192, closed: the dormancy Stop line, `branch-sweep`'s Dormant section and the `wip.cap` deny each carry `BRANCH_LIMIT_PRINCIPLE` and a next action per branch, and the session is told to take that work on first; release note 018)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -321,9 +319,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 629 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 524 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 525 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 81 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 80 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

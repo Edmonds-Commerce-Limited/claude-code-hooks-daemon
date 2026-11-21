@@ -10,7 +10,7 @@
 ## Overview
 
 Follow-up filed by Plan 00620 Task 3.1, as ruled in
-[00620 RULINGS.md Q6](../00620-agent-no-value-branch-removal-verdict/RULINGS.md). Plan 00620
+[00620 RULINGS.md Q6](../Completed/00620-agent-no-value-branch-removal-verdict/RULINGS.md). Plan 00620
 shipped the no-value removal route (`branch-reject request` then `delete-branch`, under the
 `rejected-bundled` tier): a branch whose work no proof clears can be removed once an independent
 Opus reviewer judges it worthless, and the guard itself writes and verifies a recovery bundle
