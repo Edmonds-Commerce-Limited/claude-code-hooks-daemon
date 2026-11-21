@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (87 handlers)
+### PreToolUse (88 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -36,6 +36,7 @@
 | 18 | write_protected_paths | BLOCKING | Deny any agent write to a configured path; reading is never denied |
 | 19 | ancestry_preserving_merge | BLOCKING | Block (or, in warn mode, advise against) ancestry-severing merges |
 | 19 | git_stash | BLOCKING | Block or warn about git stash based on mode configuration |
+| 19 | scratch_cap_guard | BLOCKING | Deny a directory-creating command into scratch at the block cap |
 | 20 | branch_pool_pressure_advisor | ADVISORY | Warn on tool calls as a branch pool fills toward the point where creation is refused |
 | 20 | git_message_backtick | BLOCKING | Block a double-quoted git message whose backticks would be executed |
 | 20 | lock_file_edit_blocker | BLOCKING | Block direct editing of package manager lock files |
@@ -96,7 +97,7 @@
 | 60 | subagent_tier_advisor | ADVISORY | Advise a cheaper tier on an unchosen or up-overridden dispatch, and a floor below it |
 | 60 | workflow_fanout_advisor | ADVISORY | Advise on a Workflow script's agent count, inherited sites and per-family ceiling |
 
-### PostToolUse (20 handlers)
+### PostToolUse (21 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -120,6 +121,7 @@
 | 39 | cleanup_after_merge | ADVISORY | Delete or advise deleting the branch a merge into the default just landed |
 | 40 | branch_touch_recorder | ADVISORY | Write the creator and touch records of the branches a call created or changed |
 | 41 | evacuation_recorder | ADVISORY | Keep the evacuations of this turn for destructive_git's same-turn check |
+| 42 | scratch_inventory_refresher | ADVISORY | Start an inventory refresh after a directory-creating command into scratch |
 
 ### SessionStart (37 handlers)
 

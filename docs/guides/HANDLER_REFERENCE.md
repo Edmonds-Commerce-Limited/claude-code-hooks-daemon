@@ -1380,6 +1380,36 @@ handlers:
 
 ---
 
+#### scratch_cap_guard
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `scratch_cap_guard`     |
+| **Priority**   | 19                      |
+| **Type**       | Blocking (configurable) |
+| **Event**      | PreToolUse              |
+| **Rule**       | `R-SCRATCH-CAP`         |
+
+**Description:** A Bash command that creates a directory under a scratch root (`untracked/scratch/` or the configured sweep root) is denied when the cached scratch inventory (`untracked/scratch-inventory.json`) is at the block cap. The deny names the over-cap measures, the five largest entries and `bin/hooks-daemon scratch-sweep --apply`. A file write never matches, and a missing or unreadable inventory allows. When only LIVE, KEPT or PROTECTED entries keep scratch over the block cap, the command is allowed with an advisory so nothing is stranded. `scratch.caps.mode: advise` turns the deny into an advisory.
+
+**Example trigger:**
+
+```
+mkdir -p untracked/scratch/s-abc/run-42
+```
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    scratch_cap_guard:
+      enabled: true
+      priority: 19
+```
+
+---
+
 #### write_protected_paths
 
 | Property       | Value                   |
@@ -5487,6 +5517,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `write_protected_paths`         | PreToolUse        | 18       | Agent writes to a configured read-only path                                     |
 | `scratch_keep_marker_guard`     | PreToolUse        | 18       | An agent writing or removing a `.scratch-keep` marker                           |
 | `scratch_unowned_entry`         | PreToolUse        | 46       | A new scratch entry outside the session directory (only when set to `block`)    |
+| `scratch_cap_guard`             | PreToolUse        | 19       | A new directory under scratch while the scratch inventory is at the block cap   |
 | `pip_break_system`              | PreToolUse        | 10       | pip --break-system-packages                                                     |
 | `sudo_pip`                      | PreToolUse        | 10       | sudo pip install                                                                |
 | `host_command_guard`            | PreToolUse        | 10       | docker host-root mount, gh auth token, non-PyPI pip index, crontab -r           |
