@@ -10,7 +10,7 @@
 ## Overview
 
 Plan 00613 Task 1.1 ran the real `SecretFileGuardHandler` against synthetic
-repos and symlinks (report: `../00613-worktree-link-secret-verb/subagent-reports/261116-symlink-resolution.md`).
+repos and symlinks (report: `../Completed/00613-worktree-link-secret-verb/subagent-reports/261116-symlink-resolution.md`).
 Absolute link paths are judged on their resolved target in every tool. Three
 gaps remain, each a way to reach a protected file's content through a link:
 
