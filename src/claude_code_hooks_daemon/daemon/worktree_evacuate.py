@@ -25,6 +25,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import shlex
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -85,8 +86,12 @@ def only_scratch(blockers: Sequence[str]) -> bool:
 
 
 def human_command(name: str) -> str:
-    """The command a human runs at a terminal to evacuate and reap ``name``."""
-    return daemon_cli_command_for_docs("worktree-reap", "--reap", "--only", name)
+    """The command a human runs at a terminal to evacuate and reap ``name``.
+
+    The builder joins words with spaces and quotes nothing, and the line is
+    pasted into a shell, so the outside name is quoted here.
+    """
+    return daemon_cli_command_for_docs("worktree-reap", "--reap", "--only", shlex.quote(name))
 
 
 def confirm_evacuate_interactively(
@@ -325,7 +330,7 @@ def _pack(
     ]
     lines = [
         f"ARCHIVED {name}: {entry} archive {archive_id}; restore it from the "
-        f"main checkout with `{restore} {archive_id}`"
+        f"main checkout with `{restore} {shlex.quote(archive_id)}`"
         for entry, archive_id in archived
     ]
     unfinished = [
