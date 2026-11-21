@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.core import scratch_archive_apply as apply_mod
 from claude_code_hooks_daemon.core.scratch_archive import (
     AdoptEvent,
     ArchiveStore,
+    ClaimEvent,
     StoreRefused,
     new_archive_id,
 )
@@ -352,6 +353,26 @@ def archive_e1(root: Path, store: ArchiveStore, tar: TarTool) -> str:
     return outcome.archive_id
 
 
+def _mkdir_on_an_unrecorded_inode(root: Path, store: ArchiveStore, name: str) -> Path:
+    """Make ``root/name`` on an inode no claim event records.
+
+    ext4 hands a just-freed inode number straight back, so a directory made where a
+    removed claim stood can carry the recorded number, and is then the sweep's own
+    claim, not a foreign one. A directory that lands on a recorded number is kept
+    aside (holding that number) and the name is made again.
+    """
+    recorded = {
+        int(event.root_ino) for event in store.read_events().events if isinstance(event, ClaimEvent)
+    }
+    target = root / name
+    for attempt in range(len(recorded) + 1):
+        target.mkdir()
+        if target.stat().st_ino not in recorded:
+            return target
+        target.rename(root.parent / f"inode-holder-{attempt}")
+    raise AssertionError("every new directory landed on a recorded inode")
+
+
 class _Killed(Exception):
     """A simulated kill between two apply steps."""
 
@@ -431,8 +452,8 @@ class TestResumeReclaimExpireOrder:
     ) -> None:
         archive_id = archive_e1(root, store, tar)
         # A claim name present (no sweep recorded this one, so it is foreign) still holds.
-        (root / (CLAIM_PREFIX + "e1")).mkdir()
-        (root / (CLAIM_PREFIX + "e1") / "a.txt").write_text("alpha e1")
+        claimed = _mkdir_on_an_unrecorded_inode(root, store, CLAIM_PREFIX + "e1")
+        (claimed / "a.txt").write_text("alpha e1")
         (root / "e1").mkdir()
         result = apply_sweep(store, FakeFacts([]).facts(), settings(root, tar, later(13)))
         assert [r.outcome for r in result.resumed] == ["foreign"]

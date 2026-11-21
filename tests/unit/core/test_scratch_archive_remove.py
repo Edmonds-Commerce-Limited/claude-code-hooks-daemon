@@ -793,8 +793,14 @@ class TestResume:
         _entry(root)
         _archived(root_fd, store, tar)
         claimed = root / (CLAIM_PREFIX + "e1")
-        shutil.rmtree(claimed)
+        recorded_ino = claimed.stat().st_ino
+        # Make the replacement while the claimed inode is still allocated: ext4 hands a
+        # just-freed inode number straight back, and a reused number IS the recorded claim.
+        aside = root / "aside"
+        claimed.rename(aside)
         claimed.mkdir()
+        shutil.rmtree(aside)
+        assert claimed.stat().st_ino != recorded_ino
         (claimed / "mine.txt").write_text("an agent's own")
         resumed = _resume(root_fd, store, tar)
         assert resumed.outcome == "foreign"

@@ -153,6 +153,9 @@ def _member(name: str, kind: bytes = tarfile.REGTYPE, data: bytes = b"", link: s
     info = tarfile.TarInfo(name)
     info.type = kind
     info.mode = 0o755 if kind == tarfile.DIRTYPE else 0o644
+    # A real pack records the packing user's own ids; tar --compare checks them, and an
+    # extract with --no-same-owner gives the restoring user's, so the fixture must match.
+    info.uid, info.gid = os.geteuid(), os.getegid()
     info.linkname = link
     info.size = len(data) if kind in (tarfile.REGTYPE, tarfile.AREGTYPE) else 0
     return info, (io.BytesIO(data) if info.size else None)
