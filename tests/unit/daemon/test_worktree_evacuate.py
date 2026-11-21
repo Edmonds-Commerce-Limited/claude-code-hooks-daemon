@@ -15,13 +15,15 @@ import json
 import os
 import time
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 from tests.support.scratch_tree import ScratchTree, build_git_project, commit_file, git
 
-from claude_code_hooks_daemon.core.scratch_archive import ArchiveRecord, ArchiveStore
+from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.core.scratch_archive import ArchiveRecord, ArchiveStore, StoreBusy
 from claude_code_hooks_daemon.core.worktree_reaping import WorktreeState
 from claude_code_hooks_daemon.core.worktree_scratch_evacuation import EvacuationGate
 from claude_code_hooks_daemon.daemon.cli import (
@@ -544,3 +546,135 @@ class TestChangedWhileAsked:
         assert (_scratch(tree) / "new.txt").read_bytes() == b"appeared"
         assert "untracked/scratch/new.txt" not in _store_records(tree)
         assert "new.txt" in _keep_text(out), out
+
+
+def _hours_held(record: ArchiveRecord) -> float:
+    held = datetime.fromisoformat(record.expires_at) - datetime.fromisoformat(record.packed_at)
+    return held.total_seconds() / _HOUR
+
+
+class TestRetention:
+    def test_a_not_due_entry_keeps_its_ttl_remainder_and_a_due_one_does_not(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        base = time.time()
+        scratch = _scratch(tree)
+        _write(scratch / "old.txt", b"due", base - 5 * _DAY)
+        _write(scratch / "young.txt", b"ten hours left", base + 10 * _HOUR)
+        now = base + _DAY + 1
+        archive = Config.load_or_default(_main(tree) / ".claude" / "hooks-daemon.yaml")
+        retention = {
+            "DISPOSABLE": float(archive.scratch.archive.disposable_hours),
+            "UNCERTAIN": float(archive.scratch.archive.uncertain_hours),
+        }
+
+        assert _reap(tree, reap=True, now=now, confirm=_yes) == 0, capsys.readouterr().out
+
+        records = _store_records(tree)
+        old = records["untracked/scratch/old.txt"]
+        young = records["untracked/scratch/young.txt"]
+        assert _hours_held(old) == pytest.approx(retention[old.verdict], abs=1e-6)
+        remainder = 24.0 - (now - (base + 10 * _HOUR)) / _HOUR
+        assert remainder > 9.0
+        assert _hours_held(young) == pytest.approx(retention[young.verdict] + remainder, abs=1e-3)
+
+
+def _star_root(tree: ScratchTree) -> None:
+    (_main(tree) / ".claude" / "hooks-daemon.yaml").write_text(
+        "version: '2.0'\nscratch:\n  untracked_ttl:\n    scratch: '*'\n", encoding="utf-8"
+    )
+
+
+def _link_root(tree: ScratchTree) -> None:
+    elsewhere = _worktree(tree) / "untracked" / "elsewhere"
+    _scratch(tree).rename(elsewhere)
+    _scratch(tree).symlink_to(elsewhere, target_is_directory=True)
+
+
+def _lock(tree: ScratchTree) -> None:
+    git(_main(tree), "worktree", "lock", str(_worktree(tree)))
+
+
+def _prunable(tree: ScratchTree) -> None:
+    """git calls a linked worktree prunable once its ``.git`` pointer file is gone."""
+    (_worktree(tree) / ".git").unlink()
+
+
+class TestRefusedBeforeTheStore:
+    """Called directly: through the CLI ``ownership_refusal`` keeps a locked worktree first."""
+
+    @pytest.mark.parametrize(
+        ("arrange", "expected"),
+        [
+            (_star_root, 'TTL "*"'),
+            (_link_root, "is not a real directory"),
+            (_lock, "prunable or locked"),
+            (_prunable, "prunable or locked"),
+        ],
+        ids=["star-root", "linked-root", "locked", "prunable"],
+    )
+    def test_each_is_refused_and_creates_no_store(
+        self, tree: ScratchTree, arrange: Callable[[ScratchTree], None], expected: str
+    ) -> None:
+        now = _due_and_young(tree)
+        arrange(tree)
+        before = _inodes(_worktree(tree))
+
+        result = evacuate_scratch(
+            _main(tree), _state(tree), reap=True, seams=_seams(now, confirm=_never_asked)
+        )
+
+        assert not result.evacuated
+        assert any(expected in line for line in result.lines), result.lines
+        assert _inodes(_worktree(tree)) == before
+        assert not _store(tree).exists()
+
+    def test_a_run_from_the_linked_worktree_is_refused(self, tree: ScratchTree) -> None:
+        now = _due_and_young(tree)
+        before = _inodes(_worktree(tree))
+
+        result = evacuate_scratch(
+            _worktree(tree), _state(tree), reap=True, seams=_seams(now, confirm=_never_asked)
+        )
+
+        assert not result.evacuated
+        assert any("not the main checkout" in line for line in result.lines), result.lines
+        assert _inodes(_worktree(tree)) == before
+        assert not _store(tree).exists()
+        assert not (_worktree(tree) / "untracked" / "scratch-archive").exists()
+
+
+class TestUnknownIsARefusal:
+    def test_a_busy_store_keeps_the_worktree(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = _due_and_young(tree)
+        before = _inodes(_worktree(tree))
+        with ArchiveStore.open(_store(tree)) as holder, holder.lock():
+            with ArchiveStore.open(_store(tree)) as other, pytest.raises(StoreBusy):
+                with other.lock():
+                    pass
+
+            rc = _reap(tree, reap=True, now=now, confirm=_yes)
+
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert _worktree(tree).is_dir()
+        assert _inodes(_worktree(tree)) == before
+        assert "locked by another sweep" in _keep_text(out), out
+        assert _store_records(tree) == {}
+
+    def test_no_gnu_tar_keeps_the_worktree_without_asking(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = _due_and_young(tree)
+        before = _inodes(_worktree(tree))
+
+        rc = _reap(tree, reap=True, now=now, confirm=_never_asked, tar_path="/nonexistent")
+
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert _worktree(tree).is_dir()
+        assert _inodes(_worktree(tree)) == before
+        assert not _store(tree).exists()
+        assert "/nonexistent" in _keep_text(out), out
