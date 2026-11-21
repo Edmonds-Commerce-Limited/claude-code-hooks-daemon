@@ -109,7 +109,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [ ] ⬜ **Task 5.5**: Add pressure mode to `--apply`.
 - [x] ✅ **Task 5.6**: Add the must-do item through `session_actions_directive`. `ScratchSweepHandler` is now `SessionStartVerifiable` (declared INFO); its read-only `verify_still_needed` (`sweep_action_required`) is true while an entry is due or a cap is at warn, which puts it on the must-do list. A missing inventory adds no item.
 - [ ] ⬜ **Task 5.7**: Add the housekeeping steps `scratch-sweep` and `scratch-sweep-apply` (unconfirmed, DESIGN.md R13) and update the Decision 6 text.
-- [ ] ⬜ **Task 5.8**: Declare the sweep as a routine in this repository so a sweep that stops running is reported.
+- [x] ✅ **Task 5.8**: Declare the sweep as a routine in this repository so a sweep that stops running is reported. `CLAUDE/Routine/00004-scratch-sweep/` (schedule, 7 days, grace 3 days; cadence chosen by the implementing agent, owner to confirm); `hooks-daemon routine-qa` reports it as never run until the first run is recorded.
 
 ### Phase 6: Worktrees and the link index
 
