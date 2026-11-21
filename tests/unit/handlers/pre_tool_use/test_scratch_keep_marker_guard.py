@@ -158,7 +158,18 @@ class TestContract:
         assert ".scratch-keep" in guidance
         assert "R-SCRATCH-KEEP-MARKER" in guidance
 
-    def test_acceptance_tests_deny(self, handler: ScratchKeepMarkerGuardHandler) -> None:
+    def test_acceptance_tests_declare_the_decision_the_handler_gives(
+        self, handler: ScratchKeepMarkerGuardHandler
+    ) -> None:
         tests = handler.get_acceptance_tests()
-        assert tests
-        assert all(test.expected_decision == Decision.DENY for test in tests)
+        decisions = {test.expected_decision for test in tests}
+        assert decisions == {Decision.DENY, Decision.ALLOW}
+        for test in tests:
+            payload = test.tool_payload
+            assert payload is not None
+            hook_input = {
+                "tool_name": payload.tool_name,
+                "tool_input": payload.tool_input,
+                "cwd": "/",
+            }
+            assert handler.handle(hook_input).decision == test.expected_decision, test.title

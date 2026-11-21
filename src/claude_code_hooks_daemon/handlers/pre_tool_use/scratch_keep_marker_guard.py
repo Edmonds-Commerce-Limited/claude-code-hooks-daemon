@@ -171,7 +171,9 @@ class ScratchKeepMarkerGuardHandler(PreToolUseHandlerBase):
             "redirect, `tee`, `cp`/`mv`/`install`, `ln`, `touch` or `rm` naming it, are "
             "denied (R-SCRATCH-KEEP-MARKER). A destination built from a variable that "
             "names the marker is denied too, as are `cp .scratch-keep DIR/`, a `sh -c` "
-            "body that writes it, and any `python3 -c`/`perl -e`/`node -e` code naming it.\n\n"
+            "body that writes it, and any `python3 -c`/`perl -e`/`node -e` code naming it. "
+            "A script on disk that writes the marker, or a name assembled at run time, "
+            "is not followed.\n\n"
             "**Instead**: file the work where git carries it (a plan folder, a test, "
             "docs), pause the entry for a bounded time with a reason "
             "(`hooks-daemon scratch-sweep keep`), or ask the human to add the marker."
@@ -190,10 +192,6 @@ class ScratchKeepMarkerGuardHandler(PreToolUseHandlerBase):
         write_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={"file_path": marker, "content": "keep: agent says so\n"},
-        )
-        touch_probe = ToolPayload(
-            tool_name=ToolName.BASH,
-            tool_input={"command": f"touch {marker}"},
         )
         setup = [f"mkdir -p untracked/acceptance/{_FIXTURE_DIR}"]
         cleanup = [f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"]
@@ -214,12 +212,26 @@ class ScratchKeepMarkerGuardHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="touch a .scratch-keep marker",
-                command=touch_probe.as_instruction(),
-                tool_payload=touch_probe,
+                command=f"touch {marker}",
+                dispatch_as_bash=True,
                 description="Blocks an agent pinning a scratch entry with a Bash touch",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"R-SCRATCH-KEEP-MARKER", r"human"],
                 safety_notes="Inside the gitignored acceptance directory; denied before it runs.",
+                test_type=TestType.BLOCKING,
+                setup_commands=setup,
+                cleanup_commands=cleanup,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="read a .scratch-keep marker (near miss)",
+                command=f"cat {marker}",
+                dispatch_as_bash=True,
+                description="Reading the marker names it but writes nothing, so it is allowed",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="A read inside the gitignored acceptance directory; a missing file only errors.",
                 test_type=TestType.BLOCKING,
                 setup_commands=setup,
                 cleanup_commands=cleanup,

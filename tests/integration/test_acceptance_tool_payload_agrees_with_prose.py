@@ -128,6 +128,24 @@ _OUTSIDE_ACCEPTANCE_ROOT_BY_CONTRACT = frozenset(
         # MarkdownOrganizationHandler above (Plan 00319 Task 4.6). It carries
         # no code and no credential.
         "PlanDoneRequiresHoldingAreaHandler",
+        # Advises on a new entry made directly in the scratch root, and only
+        # there (Plan 00627), so an acceptance-root path exercises nothing.
+        # It is an ALLOW probe of one ignored text file the cleanup removes.
+        "ScratchUnownedEntryHandler",
+    }
+)
+
+# Handlers whose CONTRACT is the scratch root itself (Plan 00627): they judge
+# only paths under `untracked/scratch/`, which `scratch_roots()` always
+# includes whatever the config says, so a probe relocated under the acceptance
+# root would stop exercising them. Named individually for the same reason as
+# the set above. The N11 hazard -- a notes exclusion silently covering a probe
+# -- cannot switch these off: the scratch root is what they are about.
+_ACTS_ON_HUMAN_SCRATCH_BY_CONTRACT = frozenset(
+    {
+        "ScratchCapGuardHandler",
+        "ScratchInventoryRefresherHandler",
+        "ScratchUnownedEntryHandler",
     }
 )
 
@@ -339,6 +357,8 @@ class TestDeclaredPayloadsAgreeWithTheirProse:
         """
         shared = []
         for block in playbook:
+            if block.get("handler_name", "") in _ACTS_ON_HUMAN_SCRATCH_BY_CONTRACT:
+                continue
             for field in _ACTED_ON_FIELDS:
                 if _HUMAN_SCRATCH_MARKER in json.dumps(block.get(field) or ""):
                     shared.append(
