@@ -171,6 +171,19 @@ class TestEachBlockingVerdictKeepsTheWorktree:
 
         _assert_kept(tree, rc, out, before, "old: no birth stamp")
 
+    def test_a_blocker_outside_the_scratch_root(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Ignored content beside scratch is not evacuation's to pack: no question."""
+        _due_entry(tree)
+        _write(_worktree(tree) / "untracked" / "other.txt", b"beside", time.time())
+        before = _inodes(_scratch(tree))
+
+        rc, out = _run(tree, capsys)
+
+        _assert_kept(tree, rc, out, before, "untracked/other.txt")
+        assert "evacuation refused" not in out, out
+
     def test_incomplete_walk(
         self,
         tree: ScratchTree,
