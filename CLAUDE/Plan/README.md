@@ -20,8 +20,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00614: secret guard resolves links against hook cwd](00614-secret-guard-resolves-links-against-hook-cwd/PLAN.md) - In Progress (found by the 00613 probe: a relative Bash token such as `cat link` is resolved against the daemon's cwd `/`, so a link to a protected file passes; also a directory-link grep and a glob under a directory link; fix test-first and fail closed)
 
-- [00613: worktree link secret verb](00613-worktree-link-secret-verb/PLAN.md) - In Progress (peer report: the secret guard denies a relative symlink to a protected file made inside a worktree, which a peer workflow needs; the owner approved linking, link mode only: config seeding plus `hooks-daemon seed-worktree <worktree>` for a hand-made worktree, no agent-invocable verb, copy mode refused for a protected source, reads through a link still denied; built on its branch, security review pending)
-
 - [00604: claude code internal state research](00604-claude-code-internal-state-research/PLAN.md) - In Progress (research only, RESEARCH.md written: how Claude Code tracks background tasks, monitors, sub-agents and turn state, and what the daemon can hook into)
 
 - [00603: supervisor idle compact at 30 percent](00603-supervisor-idle-compact-at-30-percent/PLAN.md) - In Progress (built, dry-run first: verify Claude Code's idleCompaction, and add a supervisor compaction at true idle once context reaches 30%)
@@ -206,6 +204,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00613: worktree link secret verb](Completed/00613-worktree-link-secret-verb/PLAN.md) - Complete at merge `69e375788` + `2f1c14e80` (live-daemon check) + the archiving commit (a protected file is seeded into a worktree as a link from the committed seed list, by the creation hook or `seed-worktree`; copy refused; reads through the link denied on a live daemon, N683 to N685 open; release notes 009, 019; peer reply drafted, owner to send)
+
 - [00621: actions qa ci advisory and workflow lint on edit](Completed/00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - Complete at merge `4f97728de` + the archiving commit, shipping in v3.76.0 (a `.github/workflows/` file is run through the optional `actions-qa` linter on edit and at commit, and a session-start advisory suggests the linter; release note 013 and a truth-change entry recorded)
 
 - [00628: daemon socket path too long from init sh](Completed/00628-daemon-socket-path-too-long-from-init-sh/PLAN.md) - Complete at merge `2628d4965`, shipped in v3.76.0 (live defect: a long project path denied every tool call because init.sh forced an over-limit socket path; one path-fitting function now decides every socket and PID path, the discovery file is written after bind, the short fallback root is private; release note 006; follow-up N681)
@@ -264,8 +264,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00583: branch guard notices state intent and action](Completed/00583-branch-guard-notices-state-intent-and-action/PLAN.md) - Complete at `d60da0fda` (merged via `7d954f213`; main CI run 42682133539, full suite, success) + the archiving commit (GitHub #192, closed: the dormancy Stop line, `branch-sweep`'s Dormant section and the `wip.cap` deny each carry `BRANCH_LIMIT_PRINCIPLE` and a next action per branch, and the session is told to take that work on first; release note 018)
 
-- [00581: provision repairs a stale venv](Completed/00581-provision-repairs-a-stale-venv/PLAN.md) - Complete at `cfa601263` (CI run 42650039659 success) + the archiving commit (GitHub #168, closed: at the expected version `provision.sh` checks the venv's lock hash; a foreground run repairs a stale venv through the bootstrap repair, a background run names `hooks-daemon repair`, an unreadable hash counts as stale; release note 017)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -321,9 +319,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 628 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 523 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 524 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 81 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 80 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

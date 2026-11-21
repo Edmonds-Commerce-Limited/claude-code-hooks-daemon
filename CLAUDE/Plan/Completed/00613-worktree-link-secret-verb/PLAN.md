@@ -1,6 +1,6 @@
 # Plan 00613: worktree link secret verb
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-11-16
 **Owner**: joseph
 **Priority**: Medium
@@ -80,7 +80,9 @@ root (`utils/link_reach.py`, closing the gap the 261120 handoff recorded).
   release note 019. A protected link entry must also be listed in the config
   committed on the default branch, with the main checkout on it (residual 1
   of the 261120 handoff, narrowed; re-review R5).
-- [ ] ⬜ **Task 3.4**: Reply to the peer project with the route (coordinator).
+- [x] ✅ **Task 3.4**: (Drafted; UNSENT, the owner sends it:
+  `subagent-reports/261121-peer-reply-draft.md`.) Reply to the peer project
+  with the route.
 
 ## Success Criteria
 
@@ -91,9 +93,10 @@ root (`utils/link_reach.py`, closing the gap the 261120 handoff recorded).
   pins of Tasks 2.3 and 3.1, two handler wiring tests for 2.2, and the
   `seed-worktree` CLI wrapper test.)
 - [x] The guard denies every mention it denied before.
-- [ ] Every read through a seeded link is denied, verified through a live daemon
-  socket. (Through the handler: all pinned cases denied, the link-following
-  gap included; the live-socket check is still open.)
+- [x] Every read through a seeded link is denied, verified through a live daemon
+  socket (`tests/integration/test_secret_file_guard_seeded_link_reads_live_daemon.py`,
+  both daemon roots; journal 2026-11-21). Carried exceptions, open in ledger
+  00474: N683, N684, N685.
 - [x] Release-bound consequences recorded in the pending release notes
   (`CLAUDE/UPGRADES/UNRELEASED/release-notes/009-*` and `019-*`) and the
   pre-upgrade tasks (`CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/01-*`).
@@ -101,5 +104,6 @@ root (`utils/link_reach.py`, closing the gap the 261120 handoff recorded).
 ## Delivery & Milestones
 
 - Phases 1 to 3 built and merged to main via integration/gate-261120
-  (merge commit 69e375788). Open: the live-daemon-socket check of the
-  seeded-link reads and Task 3.4.
+  (merge commit 69e375788).
+- Live-daemon check and the Task 3.4 draft on branch `plan-00613-finish`
+  (`2f1c14e80` + the archiving commit). The peer reply is the owner's to send.

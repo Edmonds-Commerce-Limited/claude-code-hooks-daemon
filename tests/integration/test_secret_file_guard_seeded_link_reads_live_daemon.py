@@ -11,8 +11,12 @@ process, over its real socket, with the link placed by the real route:
    only be denied by RESOLVING the link, never by its spelling).
 2. A worktree is made by hand (``git worktree add``), which fires no creation
    hook, and ``hooks-daemon seed-worktree`` places the link.
-3. The project's own daemon is started, and PreToolUse events are sent to its
-   socket with ``cwd`` inside the worktree, where an agent working there stands.
+3. A daemon is started, rooted at the main checkout or at the worktree, and
+   PreToolUse events are sent to its socket with ``cwd`` inside the worktree,
+   where an agent working there stands.
+
+Read routes the guard does not yet judge (ledger 00474 N683 to N685:
+interpreter tree walks, ``fd | xargs``, ``parallel``) are not asserted here.
 
 Each payload carries ``synthetic_source: test-probe`` so the verdict log does
 not count it as an agent's tool call.
@@ -72,28 +76,34 @@ def _git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
-def _cli(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _cli(cwd: Path, env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [*_CLI, *args],
         cwd=cwd,
-        env=os.environ.copy(),
+        env=env,
         capture_output=True,
         text=True,
         timeout=DAEMON_CLI_SUBPROCESS_BOUND,
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="module", params=["main-checkout-root", "worktree-root"])
 def live_seeded_worktree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
 ) -> Iterator[dict[str, Path]]:
-    """A hand-made worktree seeded by ``seed-worktree``, and the project's running daemon."""
-    root = tmp_path / "project"
+    """A hand-made worktree seeded by ``seed-worktree``, and a running daemon.
+
+    The daemon is rooted at the main checkout, or at the worktree itself (the
+    placement Plan 00613 Task 1.1 found its directory-link gap in).
+    """
+    base = tmp_path_factory.mktemp(f"seeded-link-{request.param}")
+    root = base / "project"
     root.mkdir()
-    socket_path, pid_path, log_path = isolated_daemon_paths(tmp_path, "seeded-link")
-    monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", str(socket_path))
-    monkeypatch.setenv("CLAUDE_HOOKS_PID_PATH", str(pid_path))
-    monkeypatch.setenv("CLAUDE_HOOKS_LOG_PATH", str(log_path))
+    socket_path, pid_path, log_path = isolated_daemon_paths(base, "seeded-link")
+    env = os.environ.copy()
+    env["CLAUDE_HOOKS_SOCKET_PATH"] = str(socket_path)
+    env["CLAUDE_HOOKS_PID_PATH"] = str(pid_path)
+    env["CLAUDE_HOOKS_LOG_PATH"] = str(log_path)
 
     _git(root, "init", "-b", "main")
     _git(root, "config", "user.email", "test@test.com")
@@ -112,22 +122,23 @@ def live_seeded_worktree(
     tree = root / _WORKTREE
     _git(root, "worktree", "add", "-b", "live-seeded", str(tree))
 
-    seeded = _cli(root, "seed-worktree", str(tree))
+    seeded = _cli(root, env, "seed-worktree", str(tree))
     assert seeded.returncode == 0, seeded.stderr
     assert (tree / "conf").is_symlink()
     (tree / "plain.txt").write_text("ordinary\n")
 
-    started = _cli(root, "start")
+    daemon_root = root if request.param == "main-checkout-root" else tree
+    started = _cli(daemon_root, env, "start")
     if started.returncode != 0:
         pytest.fail(f"Failed to start daemon (exit {started.returncode}): {started.stderr}")
     time.sleep(1)
-    status = _cli(root, "status")
+    status = _cli(daemon_root, env, "status")
     if "RUNNING" not in status.stdout:
         pytest.fail(f"Daemon not running after start:\n{status.stdout}")
 
     yield {"root": root, "tree": tree, "socket": socket_path}
 
-    _cli(root, "stop")
+    _cli(daemon_root, env, "stop")
 
 
 def _send(sock_path: Path, cwd: Path, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
@@ -196,6 +207,15 @@ def test_the_read_tool_through_the_seeded_link_is_denied(
     decision, reason = _verdict(
         _send(live_seeded_worktree["socket"], tree, "Read", {"file_path": str(tree / _PROTECTED)})
     )
+    assert decision == "deny", reason
+
+
+def test_an_edit_through_the_seeded_link_is_denied(
+    live_seeded_worktree: dict[str, Path],
+) -> None:
+    tree = live_seeded_worktree["tree"]
+    tool_input = {"file_path": str(tree / _PROTECTED), "old_string": "a", "new_string": "b"}
+    decision, reason = _verdict(_send(live_seeded_worktree["socket"], tree, "Edit", tool_input))
     assert decision == "deny", reason
 
 

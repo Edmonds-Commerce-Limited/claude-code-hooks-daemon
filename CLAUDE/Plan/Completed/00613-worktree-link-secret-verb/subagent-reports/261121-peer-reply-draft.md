@@ -12,6 +12,12 @@ version yet (release notes 009 and 019 sit in
 `CLAUDE/UPGRADES/UNRELEASED/`). Either send after the next release, or keep the
 "available from the next release" sentence below.
 
+**Owner's choice, open guard gaps**: three read routes through a seeded link
+are still not judged. They are ledger 00474 entries N683 to N685: an
+interpreter one-liner that walks or copies a tree (`shutil.copytree('.')`,
+`os.walk(followlinks=True)`), `fd ... | xargs cat`, and `find ... | parallel cat`. The reply below says that reads are denied "with known gaps" and does not
+list them. Add or drop the detail as you see fit.
+
 ---
 
 ## Reply text
@@ -56,12 +62,11 @@ What stays the same:
   Move any such entry to symlink mode before upgrading (pre-upgrade task 01).
 - A hand-typed `ln -s`, `ln` or `cp` naming the protected path is still denied
   by `R-SECRET-BASH-MENTION`. Use the seed list.
-- Reading through the link is denied exactly as reading the file itself is.
-  That covers `Read`, `Grep`, `cat`, link-following recursive reads
-  (`grep -R`, `rg -L`, `find -L`, `tar`, `cp -L`) and interpreter one-liners.
-  Your tool that reads the file by path is unaffected: it runs outside the
-  agent's tool calls. If an agent runs it, it needs the usual
-  `allowed_consumers` entry.
+- An agent reading through the link is judged as reading the file itself.
+  `Read`, `Edit`, `Grep`, `cat`, and link-following recursive reads
+  (`grep -R`, `rg -L`, `find -L`, `tar -h`, `cp -L`) are denied. This was
+  verified against a running daemon. A few rarer shapes are known gaps that
+  are being worked on.
 - Every protected link placed is logged before it is made, in
   `worktree-seed-protected-links.jsonl` (verb `worktree-seed` or
   `seed-worktree`).
