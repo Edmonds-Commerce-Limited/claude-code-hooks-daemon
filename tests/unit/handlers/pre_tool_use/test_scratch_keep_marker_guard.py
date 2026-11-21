@@ -61,6 +61,20 @@ class TestDenied:
             _bash(f"mkdir -p {_ENTRY} && printf 'r\\n' > {_ENTRY}/.scratch-keep"),
             _bash(f"rm {_ENTRY}/.scratch-keep"),
             _bash(f"cat > {_ENTRY}/.scratch-keep <<'EOF'\nreason\nEOF"),
+            # D-RULE review finding 3: a directory destination, a shell body,
+            # an interpreter body.
+            _bash(f"cp .scratch-keep {_ENTRY}/"),
+            _bash(f"cp -t {_ENTRY} /tmp/x/.scratch-keep"),
+            _bash(f"mv ../.scratch-keep a.txt {_ENTRY}"),
+            _bash(f"install -m 644 .scratch-keep {_ENTRY}/"),
+            _bash(f"timeout 5 cp .scratch-keep {_ENTRY}/"),
+            _bash(f'sh -c "touch {_ENTRY}/.scratch-keep"'),
+            _bash(f"bash -lc 'cd {_ENTRY} && touch .scratch-keep'"),
+            _bash(f"set -e\nsh -c 'echo r > {_ENTRY}/.scratch-keep'"),
+            _bash(f"python3 -c \"open('{_ENTRY}/.scratch-keep','w')\""),
+            _bash("perl -e 'open(F, \">.scratch-keep\")'"),
+            _bash("node -e \"require('fs').writeFileSync('.scratch-keep','')\""),
+            _bash("sudo python3.12 -c \"import pathlib; pathlib.Path('.scratch-keep').touch()\""),
         ],
     )
     def test_every_write_route_is_denied(
@@ -118,6 +132,11 @@ class TestAllowed:
                 f"cat > {_ENTRY}/notes.md <<'EOF'\nDon't touch .scratch-keep, it's the owner's\nEOF"
             ),
             {"tool_name": "Read", "tool_input": {"file_path": f"{_ENTRY}/.scratch-keep"}},
+            _bash(f"cp {_ENTRY}/.scratch-keep /tmp/marker-copy.txt"),
+            _bash(f"sh -c 'cat {_ENTRY}/.scratch-keep'"),
+            _bash(f"test -e {_ENTRY}/.scratch-keep && echo kept"),
+            _bash("python3 -c 'print(1)'"),
+            _bash("git commit -m 'sh -c touch .scratch-keep is denied'"),
         ],
     )
     def test_reads_and_other_files_pass(
@@ -139,7 +158,18 @@ class TestContract:
         assert ".scratch-keep" in guidance
         assert "R-SCRATCH-KEEP-MARKER" in guidance
 
-    def test_acceptance_tests_deny(self, handler: ScratchKeepMarkerGuardHandler) -> None:
+    def test_acceptance_tests_declare_the_decision_the_handler_gives(
+        self, handler: ScratchKeepMarkerGuardHandler
+    ) -> None:
         tests = handler.get_acceptance_tests()
-        assert tests
-        assert all(test.expected_decision == Decision.DENY for test in tests)
+        decisions = {test.expected_decision for test in tests}
+        assert decisions == {Decision.DENY, Decision.ALLOW}
+        for test in tests:
+            payload = test.tool_payload
+            assert payload is not None
+            hook_input = {
+                "tool_name": payload.tool_name,
+                "tool_input": payload.tool_input,
+                "cwd": "/",
+            }
+            assert handler.handle(hook_input).decision == test.expected_decision, test.title

@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     strip_reserved_word_prefix,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.scratch_dir import SCRATCH_LIFECYCLE_GUIDANCE
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     END_OF_OPTIONS,
     FLAG_PREFIX,
@@ -1567,7 +1568,8 @@ class PipeBlockerHandler(
             f"`pytest tests/ > {ProjectPath.SCRATCH_DIR}/out.txt 2>&1` then read the "
             "file selectively. Keep the capture IN-REPO — `project_containment` "
             "denies a redirect to a path outside the repository, and a capture "
-            "written outside it is gone on the next container restart.\n\n"
+            "written outside it is gone on the next container restart. "
+            f"{SCRATCH_LIFECYCLE_GUIDANCE}\n\n"
         )
         if self._resolve_echd_capture_path() is None:
             return f"**Redirect to a file, then read a bounded slice** (no pipe): {redirect}"

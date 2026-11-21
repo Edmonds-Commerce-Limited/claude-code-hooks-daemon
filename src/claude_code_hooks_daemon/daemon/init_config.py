@@ -231,6 +231,8 @@ class ConfigTemplate:
             "    curl_pipe_shell: {enabled: true, priority: 10}   # Block curl | bash patterns\n"
             "    lock_file_edit_blocker: {enabled: true, priority: 10}  # Block direct editing of package manager lock files\n"
             "    scratch_keep_marker_guard: {enabled: true, priority: 18}  # Only a human writes .scratch-keep (pins a scratch entry for ever)\n"
+            "    scratch_cap_guard: {enabled: true, priority: 19}  # Deny new directory trees in scratch at the block cap (scratch.caps)\n"
+            "    scratch_unowned_entry: {enabled: true, priority: 46}  # Advise on a new entry made directly in a scratch root (scratch.sweep.unowned_entry)\n"
             # Plan 00499: opt-in; does nothing until `paths` lists repository-relative globs.
             "    write_protected_paths: {enabled: false, priority: 18, options: {paths: []}}  # Paths agents may read but never write, move onto or delete\n"
             # On by default (Plan 00117): prefix-positive gate on AskUserQuestion
@@ -431,6 +433,7 @@ class ConfigTemplate:
             "    cleanup_after_merge: {enabled: true, priority: 39}  # After a merge into the default branch, delete or advise deleting the merged branch per branches.cleanup_after_merge.mode (Plan 00558)\n"
             "    evacuation_recorder: {enabled: true, priority: 41}  # Remember this turn's evacuated worktrees and branches so destroying them later in the turn is denied (Plan 00558)\n"
             "    branch_touch_recorder: {enabled: true, priority: 40}  # Record each branch's creator and the sessions/agents that touched it in git config (Plan 00558)\n"
+            "    scratch_inventory_refresher: {enabled: true, priority: 42}  # Refresh untracked/scratch-inventory.json in the background after a Bash command creates a directory under scratch (silent, Plan 00627)\n"
             "    cron_record_keeper: {enabled: true, priority: 36}  # Record each CronCreate/CronDelete so cron_stop_enforcer can refresh a job before the 7-day cron expiry (silent bookkeeping, opt-out)\n"
             "    plan_fact_check_feed: {enabled: false, priority: 37}  # Debounce plan edits; the next tool call asks the session to dispatch hooks-daemon-plan-fact-checker on the diff (opt-in, never blocks, Plan 00480)\n"
             "    operator_signal_notice: {enabled: true, priority: 38}  # Add a pending host reboot/shutdown warning as context at the next tool call, once per signal; never touches the signal file (opt-out, Plan 00508)\n"
@@ -474,6 +477,7 @@ class ConfigTemplate:
             "    gitignore_safety_checker: {enabled: true, priority: 54}  # Warn when required .claude/ paths are not gitignored\n"
             "    git_upstream_checker: {enabled: true, priority: 56, options: {mode: warn, auto_fetch: true}}  # Full fetch + advise pull when behind upstream\n"
             "    branch_sweep: {enabled: true, priority: 56}  # Summarise branches contained nowhere, merged, dormant or over branches.wip.cap (non-blocking)\n"
+            "    scratch_sweep: {enabled: true, priority: 56}  # Create and announce this session's scratch directory (non-blocking)\n"
             "    reference_repo_sweep: {enabled: true, priority: 71}  # Fetch governed reference clones; silent when all are current\n"
             "    routine_qa_sweep: {enabled: false, priority: 72}  # Report recurring work that has stopped recurring; silent when the Routine tree is clean (opt-in)\n"
             "    session_actions_directive: {enabled: false, priority: 73}  # Write <session>.session-actions so the ccy supervisor types one directive when a SessionStart verifier is failing (opt-in)\n"

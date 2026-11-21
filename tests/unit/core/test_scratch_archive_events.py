@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.core.scratch_archive import (
     KeepEvent,
     StoreRefused,
     new_archive_id,
+    parse_event,
     parse_instant,
 )
 
@@ -71,7 +72,9 @@ def test_events_round_trip_and_coexist_with_the_index(store: ArchiveStore) -> No
     assert not read.torn_tail
 
 
-def _claim_event(archive_id: str, root_ino: str = "42") -> ClaimEvent:
+def _claim_event(
+    archive_id: str, root_ino: str = "42", root_birth_ns: str = "1795230745000000001"
+) -> ClaimEvent:
     return ClaimEvent(
         archive_id=archive_id,
         original_path="untracked/scratch/e",
@@ -79,7 +82,27 @@ def _claim_event(archive_id: str, root_ino: str = "42") -> ClaimEvent:
         root_dev="7",
         root_ino=root_ino,
         at="2026-11-20T00:00:00+00:00",
+        root_birth_ns=root_birth_ns,
     )
+
+
+def test_a_claim_event_carries_the_entry_birth() -> None:
+    event = _claim_event(new_archive_id())
+    assert event.to_json()["root_birth_ns"] == "1795230745000000001"
+    assert parse_event(event.to_json()) == event
+
+
+def test_a_claim_event_written_before_birth_was_recorded_reads_with_no_birth() -> None:
+    data = _claim_event(new_archive_id()).to_json()
+    del data["root_birth_ns"]
+    parsed = parse_event(data)
+    assert isinstance(parsed, ClaimEvent)
+    assert parsed.root_birth_ns == ""
+
+
+def test_a_claim_event_with_a_non_numeric_birth_is_refused() -> None:
+    with pytest.raises(ValueError):
+        parse_event(_claim_event(new_archive_id(), root_birth_ns="soon").to_json())
 
 
 def test_a_claim_event_round_trips(store: ArchiveStore) -> None:

@@ -14,7 +14,11 @@ Three owner rulings shape the list:
 - **Decision 6** -- only the idempotent formatters (``format-markdown``,
   ``regenerate-docs``) act without confirmation. Every other mutating step is
   HELD: the pass reports what it would do and acts only when the step is
-  named on ``--apply``.
+  named on ``--apply``. Plan 00627 R13 amends this for one step:
+  ``scratch-sweep-apply`` is to act without confirmation, because every
+  removal trails a hold window. While ``scratch-sweep --apply`` still refuses
+  without a terminal, that step is advisory: it prints the dry run and the
+  apply command for a human, and mutates nothing.
 - **Decision 7** -- each step is delegated to a sub-agent that returns what
   it CHANGED, never what it read, so the coordinator's context does not
   accumulate every step's output.
@@ -120,6 +124,17 @@ HOUSEKEEPING_STEPS: Final[tuple[HousekeepingStep, ...]] = (
         "branch-sweep",
         "Branches by state: contained nowhere, merged, dormant, live, parked (report only)",
         "branch-sweep",
+    ),
+    _report(
+        "scratch-sweep",
+        "Scratch entries by verdict, what is due, and the caps (report only)",
+        "scratch-sweep",
+    ),
+    _report(
+        "scratch-sweep-apply",
+        "Advisory: the dry run of what is due; a human runs `hooks-daemon scratch-sweep --apply` "
+        "at a terminal (it refuses without one, so this step never applies unattended)",
+        "scratch-sweep",
     ),
     _report("skill-scan", "Transcript mining for repeated workloads worth a skill", "skill-scan"),
     _mutating(

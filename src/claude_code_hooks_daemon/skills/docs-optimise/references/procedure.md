@@ -45,7 +45,9 @@ replaces the duplicate with a pointer, it does not copy.
 
 Create `untracked/scratch/docs-optimise/<run-id>/` (`<run-id>` is a UTC
 timestamp). Never write to a tracked file. Never add a `resident_at_imports`
-or `grandfather_allowlist` entry, in either mode. Write:
+or `grandfather_allowlist` entry, in either mode. The scratch sweep removes the
+directory after 24 hours by default, so tell the user to apply or discard the
+proposal before then. Write:
 
 - the proposed new and replacement files, mirroring their intended repository
   paths under `proposed/`

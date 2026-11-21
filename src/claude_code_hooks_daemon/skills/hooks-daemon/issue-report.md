@@ -59,7 +59,8 @@ the user a round trip and the maintainers a triage slot.
 
 ## Step 2 — write the fields file
 
-A JSON object under `untracked/scratch/`. Every key is checked:
+A JSON object under `untracked/scratch/` (swept after 24 hours by default, so
+file the issue before then). Every key is checked:
 
 | Key                 | Required | Note                                                       |
 | ------------------- | -------- | ---------------------------------------------------------- |

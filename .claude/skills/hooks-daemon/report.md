@@ -210,8 +210,8 @@ To share it with the hooks daemon maintainers:
    paths carrying a username, your git remote, branch names, internal service
    or client names, anything from an `.env`.
 2. Reduce the reproduction to the smallest SYNTHETIC case that still shows the
-   behaviour: invented paths under `untracked/scratch/`, never a capture from
-   your own tree. If it cannot be reproduced that way, say so in the issue
+   behaviour: invented paths under `untracked/scratch/` (swept after 24 hours
+   by default; the issue is what keeps it), never a capture from your own tree. If it cannot be reproduced that way, say so in the issue
    rather than pasting the original.
 3. Open an issue at: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
 4. Title: "Bug Report: {problem summary}"

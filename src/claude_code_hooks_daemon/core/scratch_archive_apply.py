@@ -25,6 +25,7 @@ is not archived diverges from DESIGN 5.2 (recorded in DESIGN section 13).
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 from collections.abc import Callable, Mapping
@@ -32,6 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 
+from claude_code_hooks_daemon.config.models import ScratchCapsConfig
 from claude_code_hooks_daemon.core.scratch_archive import (
     AdoptEvent,
     ArchiveRecord,
@@ -52,20 +54,23 @@ from claude_code_hooks_daemon.core.scratch_archive_claim import (
     WalkRefused,
     bounded_names,
     claim,
-    fingerprint_at,
+    fingerprint_of,
     open_dir,
     release,
+    walk_tree,
 )
 from claude_code_hooks_daemon.core.scratch_archive_expire import (
     ExpiryOutcome,
     ExpiryRefused,
     expire_due,
+    expired_ids,
 )
 from claude_code_hooks_daemon.core.scratch_archive_pack import (
     PackRefused,
     PackResult,
     TarTool,
     pack,
+    refuse_foreign_owner,
 )
 from claude_code_hooks_daemon.core.scratch_archive_remove import (
     RemoveRefused,
@@ -75,8 +80,13 @@ from claude_code_hooks_daemon.core.scratch_archive_remove import (
     resume_claimed,
 )
 from claude_code_hooks_daemon.core.scratch_archive_restore import Reclaimed, reclaim_staging
-from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport
-from claude_code_hooks_daemon.core.scratch_verdict import Verdict
+from claude_code_hooks_daemon.core.scratch_caps import CapLevel
+from claude_code_hooks_daemon.core.scratch_session import (
+    is_session_dir_name,
+    remove_empty_session_dir,
+)
+from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport, pending_verdict
+from claude_code_hooks_daemon.core.scratch_verdict import KEEP_MARKER, Verdict
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 _LOG = logging.getLogger(__name__)
@@ -109,6 +119,43 @@ class ApplyFacts:
 
 
 @dataclass(frozen=True)
+class Pressure:
+    """Pressure mode (DESIGN.md section 8): only set while a cap is at block.
+
+    An entry not yet due is also packed when its verdict is actionable and it
+    has been idle ``idle_hours``; its archive expires no sooner than the time
+    its TTL had left plus its verdict's retention. Every other safety rule
+    (complete classification, fresh liveness and references, the claim) is
+    unchanged.
+    """
+
+    idle_hours: float
+    #: The root's TTL, from which the time an entry had left is computed.
+    ttl_hours: float
+
+
+def pressure_for(
+    level: CapLevel, caps: ScratchCapsConfig, ttl_hours: float | None
+) -> Pressure | None:
+    """Pressure mode for a run: only at block, only when the caps enforce, only with a finite TTL.
+
+    ``mode: advise`` reports a level of block but never enforces it, so it never
+    widens what a run packs either.
+    """
+    if caps.mode != "block" or level < CapLevel.BLOCK or ttl_hours is None:
+        return None
+    return Pressure(idle_hours=caps.pressure_idle_minutes / 60, ttl_hours=ttl_hours)
+
+
+def pressured_count(report: SweepReport, pressure: Pressure | None) -> int:
+    """How many entries, root and session children, ``pressure`` adds beyond the due ones."""
+    reports = (report, *report.sessions)
+    return sum(
+        1 for part in reports for row in part.rows if not row.due and _actionable(row, pressure)
+    )
+
+
+@dataclass(frozen=True)
 class ApplySettings:
     """Where and how one run packs."""
 
@@ -122,6 +169,12 @@ class ApplySettings:
     retention_hours: Mapping[str, float]
     clock: Callable[[], datetime]
     max_depth: int = DEFAULT_MAX_DEPTH
+    #: A session directory empty this long after its last recorded birth is removed; None: never.
+    empty_session_hours: float | None = None
+    #: ``(st_dev, st_ino)`` the root must have when opened; None: not checked (a top-level root).
+    expected_identity: tuple[int, int] | None = None
+    #: Set only while a cap is at block (Task 5.5); None: due entries only.
+    pressure: Pressure | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +222,14 @@ def apply_sweep(
     store.require_lock("apply")
     notes: list[str] = []
     root_fd = open_dir(settings.root)
+    if settings.expected_identity is not None:
+        info = os.fstat(root_fd)
+        if (info.st_dev, info.st_ino) != settings.expected_identity:
+            os.close(root_fd)
+            # Checked before any reclaim or resume: nothing in a swapped directory is touched.
+            return acted_on_nothing(
+                store, f"{settings.root.name} is not the directory that was listed"
+            )
     try:
         reclaimed = reclaim_staging(store, max_depth=settings.max_depth)
         resumed = tuple(
@@ -178,11 +239,17 @@ def apply_sweep(
         )
         # Listed again: a claim renamed back above is an entry to judge this run.
         names = bounded_names(root_fd, settings.max_inodes)
-        fingerprints = _fingerprint_all(root_fd, names, settings)
-        report = facts.classify()
+        fingerprints, foreign = _fingerprint_all(root_fd, names, settings)
+        report = _same_directory(root_fd, facts.classify())
         entries = [
-            _apply_row(root_fd, row, report, fingerprints, store, facts, settings, after_step)
-            for row in report.rows
+            (
+                foreign[row.name]
+                if row.name in foreign and report.complete and _actionable(row, settings.pressure)
+                else _apply_row(
+                    root_fd, row, report, fingerprints, store, facts, settings, after_step
+                )
+            )
+            for row in _pressure_order(report.rows)
         ]
         adoptions = unfinished_adoptions(store)
         if adoptions:
@@ -212,6 +279,179 @@ def apply_sweep(
     )
 
 
+def acted_on_nothing(store: ArchiveStore, reason: str) -> ApplyResult:
+    """An incomplete result for a root no step touched."""
+    return ApplyResult(
+        complete=False,
+        incomplete_reasons=(reason,),
+        reclaimed=(),
+        resumed=(),
+        entries=(),
+        expired=(),
+        unfinished_adoptions=(),
+        audit=store.audit(),
+        notes=(),
+    )
+
+
+def _same_directory(root_fd: int, report: SweepReport) -> SweepReport:
+    """``report`` made incomplete when it listed a directory other than the one ``root_fd`` holds.
+
+    A session sub-report records the identity it listed; the root opened here by
+    path may have been swapped since, so nothing acts unless the two agree.
+    """
+    if report.identity is None:
+        return report
+    info = os.fstat(root_fd)
+    if (info.st_dev, info.st_ino) == report.identity:
+        return report
+    reason = f"{Path(report.root).name} is not the directory that was listed: nothing acted on"
+    return dataclasses.replace(
+        report, complete=False, incomplete_reasons=(*report.incomplete_reasons, reason)
+    )
+
+
+def session_facts(
+    parent: ApplyFacts,
+    session: str,
+    *,
+    session_dir: Path,
+    child_live: Callable[[str], bool],
+    child_referenced: Callable[[str], bool],
+    container_referenced: Callable[[], bool],
+) -> ApplyFacts:
+    """Fresh facts for one session directory's children, read through the parent's.
+
+    The classification is the parent's fresh one, narrowed to ``session``'s
+    sub-report; a session no longer listed gives an incomplete empty report, so
+    nothing acts. A child is held as live when it, or the session directory in
+    the parent root, is, or when ``session_dir`` holds a keep marker now
+    (:func:`_session_kept`); referenced when it is, or when anything names the
+    container (``container_referenced``: the parent's root sites or an unknown
+    reference set).
+    """
+
+    def classify() -> SweepReport:
+        report = parent.classify()
+        found = [sub for sub in report.sessions if Path(sub.root).name == session]
+        if len(found) == 1 and report.complete:
+            return found[0]
+        reason = f"session directory {session} is not listed by a complete fresh classification"
+        return SweepReport(session, (), False, (reason,), ())
+
+    return ApplyFacts(
+        classify=classify,
+        entry_live=lambda name: (
+            _session_kept(session_dir) or child_live(name) or parent.entry_live(session)
+        ),
+        referenced=lambda name: container_referenced() or child_referenced(name),
+    )
+
+
+def _session_kept(session_dir: Path) -> bool:
+    """True when the session holds a ``.scratch-keep`` now, or that cannot be read (fail closed).
+
+    Read again at apply time: a marker added after the classification still
+    holds every child. Any ``lstat`` failure but "absent" counts as kept, and a
+    link counts like the file.
+    """
+    try:
+        os.lstat(session_dir / KEEP_MARKER)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        _LOG.warning("%s: keep marker unreadable (%s), read as kept", session_dir, exc)
+    return True
+
+
+def apply_sessions(
+    store: ArchiveStore,
+    facts: ApplyFacts,
+    settings: ApplySettings,
+    for_session: Callable[[str], ApplyFacts],
+    *,
+    after_step: Callable[[str, str], None] = _no_step,
+) -> tuple[tuple[str, ApplyResult], ...]:
+    """One apply pass per session directory a fresh ``facts`` classification lists.
+
+    Run after the root's own pass with the same lock held. Each session
+    directory is a root of its own whose entries are its children; the
+    directory itself is never an entry here. ``for_session(name)`` supplies
+    the facts (normally :func:`session_facts`).
+    """
+    store.require_lock("apply")
+    listed = [(Path(sub.root).name, sub.identity) for sub in facts.classify().sessions]
+    results: list[tuple[str, ApplyResult]] = []
+    for name, identity in listed:
+        if not is_session_dir_name(name):
+            continue
+        if identity is None:
+            results.append((name, acted_on_nothing(store, f"{name}: no identity was recorded")))
+            continue
+        sub_settings = dataclasses.replace(
+            settings,
+            root=settings.root / name,
+            original_prefix=f"{settings.original_prefix}/{name}",
+            expected_identity=identity,
+        )
+        try:
+            result = apply_sweep(store, for_session(name), sub_settings, after_step=after_step)
+        except OSError as exc:
+            # One session that cannot be opened (gone, or a link) never stops the others.
+            reason = f"{name} could not be opened: {type(exc).__name__}"
+            results.append((name, acted_on_nothing(store, reason)))
+            continue
+        removal = _remove_if_empty(store, facts, settings, name) if result.complete else ""
+        if removal:
+            result = dataclasses.replace(result, notes=(*result.notes, removal))
+        results.append((name, result))
+    return tuple(results)
+
+
+def _remove_if_empty(
+    store: ArchiveStore, facts: ApplyFacts, settings: ApplySettings, name: str
+) -> str:
+    """Step 4: remove session directory ``name`` when it is empty and old; a note, or "".
+
+    Held while the directory is live in the root, or while any live (not
+    expired) archive record names a path inside it: its restore needs the
+    directory to exist.
+    """
+    if settings.empty_session_hours is None:
+        return ""
+    inside = f"{settings.original_prefix}/{name}/"
+    born_before = settings.clock().timestamp() - settings.empty_session_hours * 3600
+
+    def held() -> bool:
+        if facts.entry_live(name):
+            return True
+        gone = expired_ids(store.read_events())
+        return any(
+            record.original_path.startswith(inside) and record.archive_id not in gone
+            for record in store.read_index().records
+        )
+
+    try:
+        root_fd = open_dir(settings.root)
+    except OSError as exc:
+        return f"session directory {name} kept: root could not be opened ({type(exc).__name__})"
+    try:
+        reason = remove_empty_session_dir(root_fd, name, born_before=born_before, held=held)
+    except (OSError, StoreRefused) as exc:
+        reason = f"removal failed: {type(exc).__name__}"
+    finally:
+        os.close(root_fd)
+    if not reason:
+        return f"session directory {name} removed: empty and old"
+    if reason in _ROUTINE_KEEPS:
+        return ""
+    return f"session directory {name} kept: {reason}"
+
+
+#: Why a session directory normally stays; not worth a note on every run.
+_ROUTINE_KEEPS = frozenset({"not empty", "a recent session or child birth"})
+
+
 def _resume(
     root_fd: int, claimed_name: str, store: ArchiveStore, settings: ApplySettings
 ) -> Resumed:
@@ -235,27 +475,61 @@ def _resume(
 
 def _fingerprint_all(
     root_fd: int, names: list[str], settings: ApplySettings
-) -> dict[str, Fingerprint]:
-    """Each unclaimed entry's fingerprint; an entry that cannot be walked is left out."""
+) -> tuple[dict[str, Fingerprint], dict[str, EntryOutcome]]:
+    """Each unclaimed entry's fingerprint, and the entries refused before any claim.
+
+    An entry that cannot be walked is left out. One holding an inode another
+    user owns is refused here, so no claim is recorded and no rename is made
+    for it run after run; pack refuses it again in case ownership changes later.
+    """
     prints: dict[str, Fingerprint] = {}
+    foreign: dict[str, EntryOutcome] = {}
     for name in names:
         if name.startswith(CLAIM_PREFIX):
             continue
         try:
-            prints[name] = fingerprint_at(
+            listing = walk_tree(
                 root_fd, name, max_inodes=settings.max_inodes, max_depth=settings.max_depth
             )
+            refuse_foreign_owner(listing, name)
+            prints[name] = fingerprint_of(listing)
+        except PackRefused as exc:
+            foreign[name] = EntryOutcome(name, "refused", str(exc))
         except (WalkRefused, OSError) as exc:
             log_and_continue(
                 _LOG,
                 exc,
                 reason=f"{name!r} cannot be walked, so it is left out and never claimed",
             )
-    return prints
+    return prints, foreign
 
 
-def _actionable(row: EntryRow) -> bool:
-    return row.due and row.walk_complete and row.verdict in ACTIONABLE
+def _pressured(row: EntryRow, pressure: Pressure | None) -> bool:
+    """Not yet due, held by its TTL alone, actionable underneath, and idle long enough.
+
+    A row LIVE for a liveness reason carries no ``ttl_hold``, so it never matches.
+    """
+    return (
+        pressure is not None
+        and not row.due
+        and row.ttl_hold in ACTIONABLE
+        and row.age_hours >= pressure.idle_hours
+    )
+
+
+def _actionable(row: EntryRow, pressure: Pressure | None = None) -> bool:
+    if not row.walk_complete:
+        return False
+    if row.due:
+        return row.verdict in ACTIONABLE
+    return _pressured(row, pressure)
+
+
+def _pressure_order(rows: tuple[EntryRow, ...]) -> list[EntryRow]:
+    """Due entries in report order, then the rest largest directory count first."""
+    due = [row for row in rows if row.due]
+    rest = sorted((row for row in rows if not row.due), key=lambda row: -row.directories)
+    return due + rest
 
 
 def _safe(facts: ApplyFacts, name: str) -> bool:
@@ -274,7 +548,7 @@ def _apply_row(
     after_step: Callable[[str, str], None],
 ) -> EntryOutcome:
     name = row.name
-    if not report.complete or not _actionable(row):
+    if not report.complete or not _actionable(row, settings.pressure):
         return EntryOutcome(name, "not-actionable", row.verdict.value)
     expected = fingerprints.get(name)
     if expected is None:
@@ -285,6 +559,8 @@ def _apply_row(
         record_claim(
             store,
             expected,
+            parent_fd=root_fd,
+            name=name,
             archive_id=archive_id,
             original_path=str(PurePosixPath(settings.original_prefix) / name),
             checkout=settings.checkout,
@@ -367,15 +643,20 @@ def _archive_claimed(
 
 
 def _record(row: EntryRow, packed: PackResult, settings: ApplySettings) -> ArchiveRecord:
-    verdict = row.verdict.value
+    verdict = pending_verdict(row).value
+    proofs = row.proofs if row.ttl_hold is None else row.ttl_hold_proofs
     packed_at = settings.clock()
-    expires_at = packed_at + timedelta(hours=settings.retention_hours[verdict])
+    hold = settings.retention_hours[verdict]
+    if settings.pressure is not None and not row.due:
+        # Packing early is not removing early: the TTL's remainder is added.
+        hold += max(0.0, settings.pressure.ttl_hours - row.age_hours)
+    expires_at = packed_at + timedelta(hours=hold)
     return ArchiveRecord(
         archive_id=packed.archive_id,
         original_path=str(PurePosixPath(settings.original_prefix) / row.name),
         checkout=settings.checkout,
         verdict=verdict,
-        proof_ids=tuple(proof.value for proof in row.proofs),
+        proof_ids=tuple(proof.value for proof in proofs),
         packed_at=packed_at.isoformat(),
         expires_at=expires_at.isoformat(),
         counts=dict(packed.counts),

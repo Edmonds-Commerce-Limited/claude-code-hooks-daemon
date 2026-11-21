@@ -637,6 +637,8 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
             "cat untracked/scratch/script.sh    # inspect\n"
             "bash untracked/scratch/script.sh   # execute if safe\n"
             "```\n\n"
+            "The download is consumed by the run; scratch is swept after 24 hours "
+            "by default, so do not leave anything there you need to keep.\n\n"
             "**Writing ABOUT the pattern is allowed, but only into a "
             "recognised data sink.** A quoted-delimiter heredoc "
             "(`<<'EOF'`) is exempt when the command receiving it consumes "

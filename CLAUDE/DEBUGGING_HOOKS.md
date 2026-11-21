@@ -117,6 +117,11 @@ bin/hooks-daemon probe PreToolUse --file untracked/scratch/payload.json
 bin/hooks-daemon probe PreToolUse --as sub --json '{"tool_name":"CronDelete","tool_input":{"id":"x"}}'
 ```
 
+A fixture tree a probe or review harness generates goes in an entry made by
+`bin/hooks-daemon scratch new <name>` inside your scratch session directory,
+and the harness removes its own tree when it finishes. Scratch is swept after
+24 hours by default; anything worth keeping is filed where git carries it.
+
 It sends the payload through the project's own entry point
 (`.claude/hooks/<event>`) and prints the decision, the reason and the raw
 response. Before sending, it fills in anything the payload leaves out:

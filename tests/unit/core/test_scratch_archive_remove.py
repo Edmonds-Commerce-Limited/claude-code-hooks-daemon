@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.core.scratch_archive import (
     EVENTS_NAME,
     ArchiveRecord,
     ArchiveStore,
+    ClaimEvent,
     ExpiredEvent,
     KeepEvent,
     new_archive_id,
@@ -56,6 +57,7 @@ from claude_code_hooks_daemon.core.scratch_archive_remove import (
     remove_claimed,
     resume_claimed,
 )
+from tests.unit.core.test_scratch_archive_claim import shift_device_of
 
 MAX = 1000
 CHECKOUT = "main"
@@ -116,6 +118,8 @@ def _claim(
         record_claim(
             store,
             expected,
+            parent_fd=root_fd,
+            name=name,
             archive_id=new_archive_id(),
             original_path=f"untracked/scratch/{name}",
             checkout=checkout,
@@ -250,6 +254,25 @@ class TestRemoveClaimed:
         assert result.archive_id == record.archive_id
         assert result.partial is False
         assert list(root.iterdir()) == []
+
+    def test_refuses_a_tree_another_user_owns(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Fix B: ownership changed after the pack; the claimed tree stays whole."""
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        real_geteuid = os.geteuid
+        monkeypatch.setattr(os, "geteuid", lambda: real_geteuid() + 4242)
+        with pytest.raises(RemoveRefused, match="owned by uid"):
+            _remove(root_fd, store, tar, record)
+        monkeypatch.setattr(os, "geteuid", real_geteuid)
+        assert _claimed_exists(root)
+        assert (root / (CLAIM_PREFIX + "e1") / "a.txt").read_text() == "alpha"
 
     def test_removes_a_file_root(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
@@ -456,6 +479,31 @@ class TestRemoveClaimed:
                 tar=tar,
                 max_inodes=MAX,
                 max_depth=1,
+                **POLICY,
+            )
+        assert _snapshot(root) == before
+
+    def test_refuses_an_entry_that_became_a_mount_point(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Removal re-walks the claimed tree, so a top entry on a second device is kept."""
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        before = _snapshot(root)
+        shift_device_of(root, monkeypatch)
+        with pytest.raises(RemoveRefused, match="second device"):
+            remove_claimed(
+                root_fd,
+                CLAIM_PREFIX + "e1",
+                store,
+                record,
+                tar=tar,
+                max_inodes=MAX,
                 **POLICY,
             )
         assert _snapshot(root) == before
@@ -806,6 +854,72 @@ class TestResume:
         assert resumed.outcome == "foreign"
         assert (claimed / "mine.txt").read_text() == "an agent's own"
 
+    def test_a_new_folder_on_the_recorded_inode_is_foreign(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """ext4 reuses a freed inode at once: device and inode alone would match."""
+        _entry(root)
+        _claim(root_fd, "e1", store)
+        claimed = root / (CLAIM_PREFIX + "e1")
+        shutil.rmtree(claimed)
+        claimed.mkdir()
+        (claimed / "mine.txt").write_text("an agent's own")
+        info = claimed.lstat()
+        # Simulate the reuse: a claim event naming this folder's real device and
+        # inode, but the birth of the folder that was claimed and deleted.
+        store.append_event(
+            ClaimEvent(
+                archive_id=new_archive_id(),
+                original_path="untracked/scratch/e1",
+                checkout=CHECKOUT,
+                root_dev=str(info.st_dev),
+                root_ino=str(info.st_ino),
+                at=NOW.isoformat(),
+                root_birth_ns="1",
+            )
+        )
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "foreign"
+        assert (claimed / "mine.txt").read_text() == "an agent's own"
+
+    def test_a_claim_event_with_no_birth_covers_nothing(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _claim(root_fd, "e1")
+        info = (root / (CLAIM_PREFIX + "e1")).lstat()
+        store.append_event(
+            ClaimEvent(
+                archive_id=new_archive_id(),
+                original_path="untracked/scratch/e1",
+                checkout=CHECKOUT,
+                root_dev=str(info.st_dev),
+                root_ino=str(info.st_ino),
+                at=NOW.isoformat(),
+            )
+        )
+        assert _resume(root_fd, store, tar).outcome == "foreign"
+        assert _claimed_exists(root)
+
+    def test_no_birth_time_on_the_filesystem_records_no_claim(
+        self, root: Path, root_fd: int, store: ArchiveStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _entry(root)
+        monkeypatch.setattr(remove_mod, "birth_stamp", lambda fd, name: None)
+        expected = fingerprint_at(root_fd, "e1", max_inodes=MAX)
+        with pytest.raises(ValueError, match="no birth time"):
+            record_claim(
+                store,
+                expected,
+                parent_fd=root_fd,
+                name="e1",
+                archive_id=new_archive_id(),
+                original_path="untracked/scratch/e1",
+                checkout=CHECKOUT,
+                at=NOW,
+            )
+        assert store.read_events().events == ()
+
     def test_another_checkouts_claim_record_does_not_cover_the_name(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
     ) -> None:
@@ -833,6 +947,24 @@ class TestResume:
         assert resumed.outcome == "removed"
         assert list(root.iterdir()) == []
 
+    def test_a_foreign_owner_after_the_pack_is_never_removed_on_resume(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Fix B: the remover's proof refuses a tree another user owns, resume included."""
+        _entry(root)
+        _archived(root_fd, store, tar)
+        real_geteuid = os.geteuid
+        monkeypatch.setattr(os, "geteuid", lambda: real_geteuid() + 4242)
+        resumed = _resume(root_fd, store, tar)
+        monkeypatch.setattr(os, "geteuid", real_geteuid)
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "a.txt").read_text() == "alpha"
+
     def test_content_the_archive_lacks_is_renamed_back(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
     ) -> None:
@@ -852,6 +984,8 @@ class TestResume:
         record_claim(
             store,
             handle.fingerprint,
+            parent_fd=root_fd,
+            name=CLAIM_PREFIX + "e1",
             archive_id=new_archive_id(),
             original_path="untracked/scratch/e1",
             checkout="other",
@@ -1405,11 +1539,27 @@ _DELETERS = frozenset(
 )
 
 
+_DELETING_MODULES = frozenset({"os", "shutil"})
+
+
 def _deleter(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Attribute) and node.attr in _DELETERS:
+    """The deleting call ``node`` names: ``os.<x>`` / ``shutil.<x>`` only.
+
+    Only module-qualified references count, so ``dataclasses.replace`` or
+    ``str.replace`` is not a removal. A bare name is caught at its
+    ``from os import unlink`` instead (see ``_scan``).
+    """
+    if (
+        isinstance(node, ast.Attribute)
+        and node.attr in _DELETERS
+        and isinstance(node.value, ast.Name)
+        and node.value.id in _DELETING_MODULES
+    ):
         return node.attr
-    if isinstance(node, ast.Name) and node.id in _DELETERS:
-        return node.id
+    if isinstance(node, ast.ImportFrom) and node.module in _DELETING_MODULES:
+        for alias in node.names:
+            if alias.name in _DELETERS:
+                return alias.name
     return None
 
 
@@ -1423,16 +1573,39 @@ def _scan(node: ast.AST, scope: str, module: str, found: set[tuple[str, str, str
         _scan(child, inner, module, found)
 
 
-def _deletion_surfaces() -> set[tuple[str, str, str]]:
-    """Every reference to a deleting call in the archive modules: (module, scope, call).
+_SCRATCH_REMOVERS = ("scratch_archive", "scratch_session")
 
+
+def _touches_scratch_removal(tree: ast.Module, name: str) -> bool:
+    """True for a scratch_archive*/scratch_session module or any module importing one."""
+    if name.startswith(_SCRATCH_REMOVERS):
+        return True
+    for node in ast.walk(tree):
+        names: list[str] = []
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names = [node.module or "", *(alias.name for alias in node.names)]
+        if any(part.startswith(_SCRATCH_REMOVERS) for n in names for part in n.split(".")):
+            return True
+    return False
+
+
+def _deletion_surfaces() -> set[tuple[str, str, str]]:
+    """Every deleting reference in the scratch-removal inventory: (module, scope, call).
+
+    The inventory is every package module that is, or imports, a
+    ``scratch_archive*`` or ``scratch_session`` module, so a removal added
+    to a caller is seen too. Modules are named relative to the package.
     The whole module is scanned, so a module- or class-level alias such as
     ``_rm = shutil.rmtree`` is listed under ``<module>``.
     """
-    core = Path(claude_code_hooks_daemon.__file__).parent / "core"
+    package = Path(claude_code_hooks_daemon.__file__).parent
     found: set[tuple[str, str, str]] = set()
-    for path in sorted(core.glob("scratch_archive*.py")):
-        _scan(ast.parse(path.read_text(encoding="utf-8")), "<module>", path.name, found)
+    for path in sorted(package.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if _touches_scratch_removal(tree, path.name):
+            _scan(tree, "<module>", path.relative_to(package).as_posix(), found)
     return found
 
 
@@ -1440,6 +1613,27 @@ def test_the_surface_scan_sees_a_module_level_alias() -> None:
     found: set[tuple[str, str, str]] = set()
     _scan(ast.parse("import shutil\n_rm = shutil.rmtree\n"), "<module>", "m.py", found)
     assert found == {("m.py", "<module>", "rmtree")}
+
+
+def test_the_surface_scan_ignores_a_non_os_replace() -> None:
+    found: set[tuple[str, str, str]] = set()
+    source = (
+        "import dataclasses\ndef f(x):\n    return dataclasses.replace(x), 'a'.replace('a', 'b')\n"
+    )
+    _scan(ast.parse(source), "<module>", "m.py", found)
+    assert found == set()
+
+
+def test_the_surface_scan_sees_an_os_import_from() -> None:
+    found: set[tuple[str, str, str]] = set()
+    _scan(ast.parse("def f():\n    from os import unlink\n"), "<module>", "m.py", found)
+    assert found == {("m.py", "f", "unlink")}
+
+
+def test_the_inventory_includes_an_importer_of_scratch_session() -> None:
+    tree = ast.parse("from claude_code_hooks_daemon.core.scratch_session import x\n")
+    assert _touches_scratch_removal(tree, "other.py")
+    assert not _touches_scratch_removal(ast.parse("import os\n"), "other.py")
 
 
 _CTYPES_MOVERS = frozenset({"rename_noreplace", "rename_noreplace_between", "_RENAMEAT2"})
@@ -1485,14 +1679,29 @@ def test_ctypes_moves_are_only_the_listed_ones() -> None:
 
 
 def test_deletion_surfaces_are_only_the_listed_ones() -> None:
-    """The Task 3.9 review list: every place the archive modules can delete or truncate."""
+    """The Task 3.9 review list: every place the scratch-removal inventory can delete or truncate.
+
+    Each entry was reviewed. The scratch_session ones touch only the module's
+    own files: ``_write_new_file`` drops its temp name after the link,
+    ``_replace_file`` is the atomic manifest rewrite, ``new_entry`` undoes the
+    ``mkdir`` it just made, and ``_remove_locked`` removes an empty, old,
+    unheld session directory whose name still holds the locked one (DESIGN
+    section 13). The cli ones remove proven-stale venvs, not scratch.
+    """
     assert _deletion_surfaces() == {
-        ("scratch_archive.py", "_append_line", "ftruncate"),
-        ("scratch_archive.py", "discard_unrecorded", "unlink"),
-        ("scratch_archive_expire.py", "_unlink_expired", "unlink"),
-        ("scratch_archive_remove.py", "_delete", "unlink"),
-        ("scratch_archive_remove.py", "_delete", "rmdir"),
-        ("scratch_archive_restore.py", "_clean_staging", "rmdir"),
-        ("scratch_archive_restore.py", "_empty_dir", "unlink"),
-        ("scratch_archive_restore.py", "_empty_dir", "rmdir"),
+        ("core/scratch_archive.py", "_append_line", "ftruncate"),
+        ("core/scratch_archive.py", "discard_unrecorded", "unlink"),
+        ("core/scratch_archive_expire.py", "_unlink_expired", "unlink"),
+        ("core/scratch_archive_remove.py", "_delete", "unlink"),
+        ("core/scratch_archive_remove.py", "_delete", "rmdir"),
+        ("core/scratch_archive_restore.py", "_clean_staging", "rmdir"),
+        ("core/scratch_archive_restore.py", "_empty_dir", "unlink"),
+        ("core/scratch_archive_restore.py", "_empty_dir", "rmdir"),
+        ("core/scratch_session.py", "_write_new_file", "unlink"),
+        ("core/scratch_session.py", "_replace_file", "replace"),
+        ("core/scratch_session.py", "new_entry", "rmdir"),
+        ("core/scratch_session.py", "_remove_locked", "unlink"),
+        ("core/scratch_session.py", "_remove_locked", "rmdir"),
+        ("daemon/cli.py", "_cleanup_proven_stale_venvs", "rmtree"),
+        ("daemon/cli.py", "_remove_venv_dirs", "rmtree"),
     }

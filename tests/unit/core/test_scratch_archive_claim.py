@@ -55,6 +55,29 @@ def _entry(root: Path, name: str = "e1") -> Path:
     return entry
 
 
+class _OnAnotherDevice:
+    """A stat result whose ``st_dev`` is shifted, every other field passed through."""
+
+    def __init__(self, info: os.stat_result) -> None:
+        self._info = info
+        self.st_dev = info.st_dev + 1
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._info, name)
+
+
+def shift_device_of(directory: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``os.fstat`` of ``directory`` report another device, as a mount point's parent would."""
+    ino = directory.stat().st_ino
+    real_fstat = os.fstat
+
+    def fstat(fd: int) -> Any:
+        info = real_fstat(fd)
+        return _OnAnotherDevice(info) if info.st_ino == ino else info
+
+    monkeypatch.setattr(os, "fstat", fstat)
+
+
 class TestFingerprint:
     def test_counts_every_inode_and_reads_newest_ctime_below_the_root(
         self, root: Path, root_fd: int
@@ -113,6 +136,18 @@ class TestFingerprint:
         with pytest.raises(WalkRefused, match="cannot list a directory"):
             fingerprint_at(root_fd, "e1", max_inodes=100)
         assert len(denied) == 1
+
+    def test_an_entry_that_is_itself_a_mount_point_refuses(
+        self, root: Path, root_fd: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DESIGN.md: an entry on a second device gets no action, top level included.
+
+        Mounting is not possible here, so the parent's ``st_dev`` is shifted instead.
+        """
+        _entry(root)
+        shift_device_of(root, monkeypatch)
+        with pytest.raises(WalkRefused, match="second device"):
+            walk_tree(root_fd, "e1", max_inodes=100)
 
     def test_links_are_never_followed(self, root: Path, root_fd: int, tmp_path: Path) -> None:
         outside = tmp_path / "outside"

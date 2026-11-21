@@ -6,7 +6,8 @@ from a walk that did not finish:
 
 1. LIVE: something uses the entry now, or it is within its TTL. A fresh mtime
    found by a partial walk still proves this: the walk can only have missed a
-   NEWER mtime, never an older one.
+   NEWER mtime, never an older one. An entry LIVE only because it is within
+   its TTL also carries ``ttl_hold``: the verdict the remaining rungs give it.
 2. STUCK: liveness could not be read (no process working directory was
    readable, or some pids were not), the walk did not finish, or a file has
    another name outside the entry. Nothing is concluded about an entry that
@@ -40,6 +41,7 @@ regular file or an empty directory.
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 import fnmatch
 import re
@@ -141,6 +143,12 @@ class Judgement:
     #: For UNCERTAIN, the first uncovered paths (at most :data:`MAX_UNCOVERED`).
     uncovered: tuple[str, ...] = ()
     uncovered_count: int = 0
+    #: For LIVE "within its TTL" only: the verdict the full ladder gives the entry
+    #: as if it were due. None for every other judgement, so an entry LIVE for a
+    #: liveness reason (process, cwd, background command) never carries one.
+    #: Pressure mode (DESIGN.md section 5.5) acts on this, never on LIVE itself.
+    ttl_hold: Verdict | None = None
+    ttl_hold_proofs: tuple[Proof, ...] = ()
 
 
 #: Top-level files a venv tool writes beside ``pyvenv.cfg`` (``python -m venv``, uv).
@@ -306,6 +314,9 @@ def uncovered_nodes(nodes: Sequence[Node], repos: RepoFindings | None) -> list[N
 #: Said when an entry holds a repository and no classification was run.
 NOT_CLASSIFIED = "a repository in the entry was not classified (the project's git was not read)"
 
+#: The reason of an entry held by time alone (its ``ttl_hold`` says what it would be when due).
+WITHIN_TTL = "within its TTL"
+
 #: Said when the project's tracked files under the root could not be listed.
 TRACKED_UNKNOWN = "the project's tracked files could not be listed"
 
@@ -355,7 +366,24 @@ def judge(
     if liveness:
         return result(Verdict.LIVE, *liveness)
     if not age.due:
-        return result(Verdict.LIVE, "within its TTL")
+        # Held by time alone: judge the rest of the ladder so pressure mode can
+        # tell an idle young entry from one a keep marker, reference or repo holds.
+        underlying = judge(
+            walk,
+            age=dataclasses.replace(age, due=True),
+            liveness=liveness,
+            references=references,
+            repos=repos,
+            tracked=tracked,
+            p3=p3,
+            liveness_unknown=liveness_unknown,
+            keep_reason=keep_reason,
+        )
+        return dataclasses.replace(
+            result(Verdict.LIVE, WITHIN_TTL),
+            ttl_hold=underlying.verdict,
+            ttl_hold_proofs=underlying.proofs,
+        )
     if liveness_unknown:
         return result(Verdict.STUCK, f"liveness unknown: {liveness_unknown}")
     if not walk.complete:
@@ -417,6 +445,7 @@ __all__ = [
     "VENV_LIB_LINKS",
     "VENV_MARKER",
     "VENV_SCRIPT_DIRECTORIES",
+    "WITHIN_TTL",
     "Judgement",
     "Proof",
     "RepositoryMarker",

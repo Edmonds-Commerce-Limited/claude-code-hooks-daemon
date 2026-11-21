@@ -5,17 +5,21 @@ R15), so the marker is a human's decision. An agent that could write it could
 pin its own clutter past every TTL; one that could remove it could unpin a
 human's keep. So every write route is judged on the file NAME: `Write`/`Edit`,
 and a Bash command's redirects, `tee`, `cp`/`mv`/`install`/`dd`, `ln`, `touch`
-and `rm`, read by the shared write scan.
+and `rm`, read by the shared write scan. Past that scan: a copy whose SOURCE
+is the marker into a directory (`cp .scratch-keep DIR/`), a shell `-c` body
+(scanned as a command of its own), and an interpreter (`python3 -c`, `perl -e`
+...) whose code names the marker, which fails closed.
 
 A destination the scan cannot resolve (`> "$DIR/.scratch-keep"`) or command
 text it cannot read fails CLOSED when it names the marker: where it writes is
 unknown, and the name is the whole rule.
 """
 
-from pathlib import PurePosixPath
+import re
+from pathlib import Path, PurePosixPath
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerTag
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -24,11 +28,22 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.scratch_verdict import KEEP_MARKER
-from claude_code_hooks_daemon.core.utils import get_file_path, scan_bash_write_targets
+from claude_code_hooks_daemon.core.utils import (
+    get_bash_command,
+    get_file_path,
+    scan_bash_write_targets,
+)
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
+from claude_code_hooks_daemon.utils.scratch_dir_creation import copy_operands, peeled_statements
+from claude_code_hooks_daemon.utils.simple_commands import SimpleCommand, nested_command_strings
 
 #: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR: Final[str] = "acceptance-test-scratch-keep"
+_COPY_VERBS: Final[frozenset[str]] = frozenset({"cp", "mv", "install", "ln"})
+_INTERPRETER: Final[re.Pattern[str]] = re.compile(
+    r"(?:python|pypy)[0-9.]*|perl|ruby|node|nodejs|deno|bun|php|lua|Rscript|osascript"
+)
+_MAX_NESTING: Final[int] = 3
 
 _RULE = Rule(
     rule_id=RuleID.SCRATCH_KEEP_MARKER,
@@ -58,6 +73,57 @@ def _names_marker(path: str) -> bool:
     return PurePosixPath(path.rstrip("/") or "/").name == KEEP_MARKER
 
 
+def _copies_marker_into_directory(words: list[str], cwd: str | None) -> bool:
+    """``cp .scratch-keep DIR/``: the copy is named after its source."""
+    if words[0] not in _COPY_VERBS:
+        return False
+    sources, destination, into_directory = copy_operands(words[1:])
+    if not any(_names_marker(source) for source in sources) or destination is None:
+        return False
+    if into_directory or "$" in destination or "`" in destination:
+        return True
+    return (Path(cwd or "/") / destination).is_dir()
+
+
+def _interpreter_names_marker(words: list[str]) -> bool:
+    """An interpreter whose code or arguments name the marker fails closed:
+    what its code writes cannot be read."""
+    return bool(_INTERPRETER.fullmatch(words[0])) and any(KEEP_MARKER in w for w in words[1:])
+
+
+def _bash_writes_marker(hook_input: dict[str, Any], *, depth: int) -> bool:
+    """The shared write scan, then the routes it does not follow: a copy into
+    a directory, an interpreter's code, and a shell ``-c`` body (scanned whole)."""
+    scan = scan_bash_write_targets(hook_input, include_mutations=True)
+    if any(_names_marker(path) for path in scan.paths):
+        return True
+    if any(_names_marker(token) for token in scan.unresolved):
+        return True
+    if scan.unreadable is not None and KEEP_MARKER in scan.unreadable:
+        return True
+    command = get_bash_command(hook_input) or ""
+    if KEEP_MARKER not in command:
+        return False
+    cwd = hook_input.get(HookInputField.CWD)
+    for words in peeled_statements(command):
+        if _copies_marker_into_directory(words, cwd) or _interpreter_names_marker(words):
+            return True
+        bodies = nested_command_strings(
+            SimpleCommand(
+                verb=words[0], words=tuple(words), operands=tuple(words[1:]), reread=False
+            )
+        )
+        for body in bodies:
+            if KEEP_MARKER not in body:
+                continue
+            if depth >= _MAX_NESTING:
+                return True
+            nested = {**hook_input, HookInputField.TOOL_INPUT: {"command": body}}
+            if _bash_writes_marker(nested, depth=depth + 1):
+                return True
+    return False
+
+
 class ScratchKeepMarkerGuardHandler(PreToolUseHandlerBase):
     """Block every agent write route onto a file named `.scratch-keep`.
 
@@ -78,12 +144,7 @@ class ScratchKeepMarkerGuardHandler(PreToolUseHandlerBase):
         file_path = get_file_path(hook_input)
         if file_path is not None:
             return bool(file_path) and _names_marker(file_path)
-        scan = scan_bash_write_targets(hook_input, include_mutations=True)
-        if any(_names_marker(path) for path in scan.paths):
-            return True
-        if any(_names_marker(token) for token in scan.unresolved):
-            return True
-        return scan.unreadable is not None and KEEP_MARKER in scan.unreadable
+        return _bash_writes_marker(hook_input, depth=0)
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule this handler denies under."""
@@ -109,7 +170,10 @@ class ScratchKeepMarkerGuardHandler(PreToolUseHandlerBase):
             "may not create, change or remove that file: `Write`/`Edit`, and a Bash "
             "redirect, `tee`, `cp`/`mv`/`install`, `ln`, `touch` or `rm` naming it, are "
             "denied (R-SCRATCH-KEEP-MARKER). A destination built from a variable that "
-            "names the marker is denied too.\n\n"
+            "names the marker is denied too, as are `cp .scratch-keep DIR/`, a `sh -c` "
+            "body that writes it, and any `python3 -c`/`perl -e`/`node -e` code naming it. "
+            "A script on disk that writes the marker, or a name assembled at run time, "
+            "is not followed.\n\n"
             "**Instead**: file the work where git carries it (a plan folder, a test, "
             "docs), pause the entry for a bounded time with a reason "
             "(`hooks-daemon scratch-sweep keep`), or ask the human to add the marker."
@@ -128,10 +192,6 @@ class ScratchKeepMarkerGuardHandler(PreToolUseHandlerBase):
         write_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={"file_path": marker, "content": "keep: agent says so\n"},
-        )
-        touch_probe = ToolPayload(
-            tool_name=ToolName.BASH,
-            tool_input={"command": f"touch {marker}"},
         )
         setup = [f"mkdir -p untracked/acceptance/{_FIXTURE_DIR}"]
         cleanup = [f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"]
@@ -152,12 +212,26 @@ class ScratchKeepMarkerGuardHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="touch a .scratch-keep marker",
-                command=touch_probe.as_instruction(),
-                tool_payload=touch_probe,
+                command=f"touch {marker}",
+                dispatch_as_bash=True,
                 description="Blocks an agent pinning a scratch entry with a Bash touch",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"R-SCRATCH-KEEP-MARKER", r"human"],
                 safety_notes="Inside the gitignored acceptance directory; denied before it runs.",
+                test_type=TestType.BLOCKING,
+                setup_commands=setup,
+                cleanup_commands=cleanup,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="read a .scratch-keep marker (near miss)",
+                command=f"cat {marker}",
+                dispatch_as_bash=True,
+                description="Reading the marker names it but writes nothing, so it is allowed",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="A read inside the gitignored acceptance directory; a missing file only errors.",
                 test_type=TestType.BLOCKING,
                 setup_commands=setup,
                 cleanup_commands=cleanup,

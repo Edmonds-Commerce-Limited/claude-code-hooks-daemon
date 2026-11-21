@@ -25,7 +25,8 @@ assigned task, and one classified it as injected content.
   [Project-Level Handlers Guide](../CLAUDE/PROJECT_HANDLERS.md).
 - **Found a bug** — do NOT fix it here. Use the `hooks-daemon` skill with args
   `issue-report`, or read the [Bug Reporting Guide](../BUG_REPORTING.md);
-  working notes go under `untracked/scratch/` (see
+  working notes go under `untracked/scratch/` (swept after 24 hours by
+  default, so file anything worth keeping in an issue; see
   `explain-handler project_containment` for why not a temp path).
 - **Change handler configuration** — edit your project's
   `.claude/hooks-daemon.yaml` (that IS yours: enable/disable handlers, set

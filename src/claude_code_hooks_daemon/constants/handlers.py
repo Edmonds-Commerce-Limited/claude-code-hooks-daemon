@@ -100,6 +100,18 @@ class HandlerID:
         config_key="scratch_keep_marker_guard",
         display_name="scratch-keep-marker-guard",
     )
+    # Plan 00627 Task 5.4: no new directory trees in scratch at the block cap.
+    SCRATCH_CAP_GUARD = HandlerIDMeta(
+        class_name="ScratchCapGuardHandler",
+        config_key="scratch_cap_guard",
+        display_name="scratch-cap-guard",
+    )
+    # Plan 00627 Task 4.5: a new entry made directly in a scratch root has no owner.
+    SCRATCH_UNOWNED_ENTRY = HandlerIDMeta(
+        class_name="ScratchUnownedEntryHandler",
+        config_key="scratch_unowned_entry",
+        display_name="scratch-unowned-entry",
+    )
     # Plan 00499: paths agents may read but never create, change, move onto or delete.
     WRITE_PROTECTED_PATHS = HandlerIDMeta(
         class_name="WriteProtectedPathsHandler",
@@ -775,6 +787,13 @@ class HandlerID:
         config_key="cleanup_after_merge",
         display_name="cleanup-after-merge",
     )
+    # Scratch inventory refresher (PostToolUse) -- Plan 00627 Task 5.1: refreshes
+    # the cached scratch inventory after a directory-creating command into scratch.
+    SCRATCH_INVENTORY_REFRESHER = HandlerIDMeta(
+        class_name="ScratchInventoryRefresherHandler",
+        config_key="scratch_inventory_refresher",
+        display_name="scratch-inventory-refresher",
+    )
     # Branch touch recorder (PostToolUse) -- Plan 00558 Task 4.2: writes each
     # branch's creator record and the sessions and agents that touched it.
     BRANCH_TOUCH_RECORDER = HandlerIDMeta(
@@ -1017,6 +1036,14 @@ class HandlerID:
         class_name="BranchSweepHandler",
         config_key="branch_sweep",
         display_name="branch-sweep",
+    )
+
+    # Scratch sweep (SessionStart handler) — Plan 00627: creates and announces
+    # the session's scratch directory (DESIGN.md section 7).
+    SCRATCH_SWEEP = HandlerIDMeta(
+        class_name="ScratchSweepHandler",
+        config_key="scratch_sweep",
+        display_name="scratch-sweep",
     )
 
     # Reference-repo freshness sweep (SessionStart handler) — Plan 00401: fetch

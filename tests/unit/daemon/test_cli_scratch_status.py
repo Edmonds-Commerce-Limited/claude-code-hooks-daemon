@@ -48,7 +48,7 @@ def _run(args: argparse.Namespace, *, now: float) -> int:
             args,
             wall_clock=lambda: now,
             process_cwds=lambda: {1: Path("/elsewhere")},
-            confirm_apply=lambda _root: True,
+            confirm_apply=lambda _root, _notice: True,
         )
     )
 

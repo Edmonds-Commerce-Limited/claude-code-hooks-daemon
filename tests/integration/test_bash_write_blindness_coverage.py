@@ -145,6 +145,24 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "run time, a script on disk that writes the file, and deliberately "
         "hostile respellings are not followed; the guidance names them as gaps",
     ),
+    "ScratchKeepMarkerGuardHandler": (
+        _PARTIAL,
+        "Plan 00627: the Bash surface is the point of this handler, since "
+        "`touch .scratch-keep` is the obvious route. It reads the shared write "
+        "scan with mutations (redirect, tee, cp/mv/install/dd, ln, touch, rm), "
+        "a copy whose source is the marker into a directory, shell -c bodies, "
+        "and fails closed on an unresolved destination or an interpreter whose "
+        "code names the marker. PARTIAL because a script on disk that writes "
+        "the marker, or a name assembled at run time, is not followed",
+    ),
+    "ScratchUnownedEntryHandler": (
+        _PARTIAL,
+        "Plan 00627: a Bash command is read by the shared write scan and the "
+        "directory-creation scan (mkdir, install -d, cp -r, through wrappers, "
+        "cd and -c bodies). PARTIAL because touch and a destination neither "
+        "scan can resolve are not guessed at; advisory by default, a location "
+        "nudge rather than a safety guard, and its guidance says so",
+    ),
     "AbsolutePathHandler": (
         _OUT_OF_FRAME,
         "premise is about a TOOL ARGUMENT being absolute, not a file on disk; "

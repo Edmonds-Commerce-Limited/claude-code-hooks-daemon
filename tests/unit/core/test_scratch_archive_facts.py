@@ -107,3 +107,21 @@ class TestLazyReferences:
         refs = LazyReferences(build)
         assert refs("a") is True
         assert refs("b") is True
+
+
+class TestRootNamed:
+    """Task 4.3: a session container is held by what names the parent root, not its siblings."""
+
+    def test_a_site_naming_one_child_does_not_name_the_root(self) -> None:
+        refs = LazyReferences(lambda: ReferenceSet(sites={"s-x": ("README.md",)}))
+        assert refs.root_named() is False
+
+    def test_a_root_site_or_an_unknown_set_names_the_root(self) -> None:
+        assert LazyReferences(lambda: ReferenceSet(root_sites=("README.md",))).root_named()
+        assert LazyReferences(lambda: ReferenceSet(unknown="no git")).root_named()
+
+    def test_a_failed_build_names_the_root(self) -> None:
+        def build() -> ReferenceSet:
+            raise OSError("boom")
+
+        assert LazyReferences(build).root_named() is True

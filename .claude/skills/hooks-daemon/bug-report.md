@@ -17,6 +17,9 @@ handlers, recent logs and a health checklist.
 /hooks-daemon bug-report "plan race condition" -o untracked/scratch/report.md
 ```
 
+A report written to `untracked/scratch/` is swept after 24 hours by default;
+file it (an issue or a plan folder) before then if it is worth keeping.
+
 ## What's Included
 
 The bug report collects:

@@ -54,6 +54,7 @@ class Priority:
     LOCK_FILE_EDIT_BLOCKER = 10
     WRITE_PROTECTED_PATHS = 18  # Safety band: a PreToolUse write blocker
     SCRATCH_KEEP_MARKER_GUARD = 18  # Plan 00627: a write blocker on one file name
+    SCRATCH_CAP_GUARD = 19  # Plan 00627 Task 5.4: directory creation into scratch at the block cap
     AUTO_APPROVE_READS = 10
     VALIDATE_ESLINT_ON_WRITE = 10
     COMPACTION_SIGNAL = 20  # PreCompact: drop compaction signal for the PTY supervisor
@@ -375,6 +376,10 @@ class Priority:
     # depends on its order.)
     EVACUATION_RECORDER = 41
 
+    # Scratch inventory refresher (Priority: 42 - PostToolUse sensor; Plan 00627
+    # Task 5.1. Starts a background inventory refresh; nothing depends on its order.)
+    SCRATCH_INVENTORY_REFRESHER = 42
+
     # Evacuation turn marker (Priority: 43 - UserPromptSubmit bookkeeping; Plan
     # 00558 Task 4.5. Advances the main thread's turn counter; never terminal.)
     EVACUATION_TURN_MARKER = 43
@@ -508,6 +513,8 @@ class Priority:
     PLAN_QA_COMMIT_GATE = 44
     PLAN_WORKFLOW = 45
     AGENT_ISOLATION_ADVISOR = 46
+    # Plan 00627 Task 4.5: workflow band; advises (or, configured, blocks) a write.
+    SCRATCH_UNOWNED_ENTRY = 46
     # Plan 00518: a silent sensor that never decides; its slot only orders it
     # among the workflow handlers that see the same dispatch.
     AGENT_DISPATCH_RECORDER = 46
@@ -583,6 +590,8 @@ class Priority:
     GIT_UPSTREAM_CHECKER = 56
     # Same slot as git_upstream_checker: both read the repository's branches.
     BRANCH_SWEEP = 56
+    # Plan 00627 DESIGN.md section 10: printed directly after the branch sweep.
+    SCRATCH_SWEEP = 56
     PLAN_QA_SWEEP = 57
     CCY_SUPERVISOR_INTEGRITY = 58
     PLAN_WORKFLOW_ASSET_CHECKER = 59

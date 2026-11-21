@@ -42,7 +42,7 @@ import sys
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Final, Literal, TextIO, cast
 
 logger = logging.getLogger(__name__)
@@ -4585,6 +4585,7 @@ def _build_initialised_controller(
         worktree=config.worktree,
         reference_repos=config.reference_repos,
         branches=config.branches,
+        scratch=config.scratch,
         config_fingerprint=config_fingerprint,
         loaded_config=config,
         defer_nonessential_startup=defer_nonessential_startup,
@@ -6755,13 +6756,15 @@ def cmd_scratch_sweep(
     budget_clock: Callable[[], float] = time.monotonic,
     process_cwds: Callable[[], Mapping[int, Path]] | None = None,
     git_runner: Callable[..., Any] | None = None,
-    confirm_apply: Callable[[str], bool] | None = None,
+    confirm_apply: Callable[[str, str], bool] | None = None,
 ) -> int:
     """``scratch-sweep [--apply] [--json] [--root PATH] [restore ID | keep ID --reason R]``.
 
     ``--apply`` also needs a human to type the go-ahead at a terminal
     (:func:`confirm_apply_interactively`); no flag, variable or file stands in
-    for it. ``confirm_apply`` is the test seam for that question.
+    for it. ``confirm_apply`` is the test seam for that question; it receives
+    the root and the pressure notice, decided before the question is asked so
+    consent covers the whole run and the run is never widened after it.
 
     Without ``--apply`` or a sub-command it is a dry run: it never creates the
     scratch root or the archive store, writes no cache or state, prints no file
@@ -6773,6 +6776,8 @@ def cmd_scratch_sweep(
     Returns:
         0 for a report or a completed action; 1 for a refusal.
     """
+    import dataclasses
+
     from claude_code_hooks_daemon.core import scratch_sweep
     from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
 
@@ -6804,33 +6809,277 @@ def cmd_scratch_sweep(
         return _scratch_status(args, sources)
     if action is None and not applying:
         report = sources.classify(sweep_root)
+        others = _scratch_worktree_reports(sources) if args.root is None else []
         if args.json:
-            print(json.dumps(scratch_sweep.report_json(report), indent=2))
+            document = scratch_sweep.report_json(report)
+            document["worktrees"] = [scratch_sweep.report_json(other) for other in others]
+            print(json.dumps(document, indent=2))
             return 0
-        for line in scratch_sweep.render_table(report, max_listed=config.scratch.sweep.max_listed):
+        max_listed = config.scratch.sweep.max_listed
+        for line in scratch_sweep.render_table(report, max_listed=max_listed):
             print(line)
+        for other in others:
+            print(f"\nRegistered worktree scratch root: {other.root}")
+            for line in scratch_sweep.render_table(other, max_listed=max_listed):
+                print(line)
         return 0
     refusal = _scratch_store_refusal(repo, sweep_root, applying=applying, action=action)
     if refusal:
         print(f"scratch-sweep: refused: {refusal}", file=sys.stderr)
         return 1
+    sources = dataclasses.replace(sources, store_checkout=_scratch_checkout(repo, repo)[1])
     if action == "restore":
         return _scratch_restore(args, sources, sweep_root)
     if action == "keep":
         return _scratch_keep(args, sources)
     relative = _scratch_relative_root(sources, sweep_root)[1]
-    if not (confirm_apply or confirm_apply_interactively)(relative):
+    fresh = sources.classify(sweep_root)
+    pressure = _scratch_pressure(sources, fresh, sweep_root.ttl_hours)
+    notice = _scratch_pressure_notice(fresh, pressure)
+    if not (confirm_apply or confirm_apply_interactively)(relative, notice):
         print(
             "scratch-sweep: refused: --apply needs a human's typed confirmation at a "
             "terminal (stdin and stdout both a TTY); nothing was changed",
             file=sys.stderr,
         )
         return 1
-    return _scratch_apply(args, sources, sweep_root)
+    applied = _scratch_apply(args, sources, sweep_root, pressure)
+    if args.root is None:
+        _record_scratch_inventory(sources, sources.classify(sweep_root))
+    return applied
+
+
+def _scratch_store_status(sources: "_ScratchSources") -> Any:
+    """The archive store's status for the inventory; ``None`` when there is no store."""
+    from claude_code_hooks_daemon.core.scratch_archive import StoreAbsent
+    from claude_code_hooks_daemon.core.scratch_archive_status import read_status
+
+    try:
+        return read_status(sources.store_path, sources.retention_hours())
+    except StoreAbsent:
+        return None
+
+
+def _scratch_worktree_reports(sources: "_ScratchSources") -> list[Any]:
+    """Dry-run reports for every OTHER registered worktree's scratch root (Task 6.1).
+
+    Only from the main checkout (a linked worktree sweeps its own root). A
+    worktree git marks prunable, or with no real ``untracked/scratch``
+    directory, is skipped; nothing is created. Each root is resolved and
+    classified against its own checkout, never acted on.
+    """
+    import dataclasses
+
+    from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
+    from claude_code_hooks_daemon.utils.git_repo import parse_worktree_porcelain, run_git
+
+    if not (sources.repo / ".git").is_dir():
+        return []
+    listing = run_git(sources.repo, "worktree", "list", "--porcelain")
+    if listing.returncode != 0:
+        logger.warning("scratch-sweep: git worktree list failed: %s", listing.stderr.strip())
+        return []
+    reports: list[Any] = []
+    for record in parse_worktree_porcelain(listing.stdout):
+        checkout = record.path
+        root = checkout / "untracked" / "scratch"
+        if record.prunable or checkout.resolve() == sources.repo.resolve():
+            continue
+        if root.is_symlink() or not root.is_dir():
+            continue
+        sweep_root = resolve_sweep_root(
+            root,
+            project_root=checkout,
+            config=sources.config.scratch,
+            reference_roots=tuple(sources.config.reference_repos.roots),
+        )
+        if sweep_root.refusal:
+            logger.info("scratch-sweep: %s not swept: %s", root, sweep_root.refusal)
+            continue
+        reports.append(dataclasses.replace(sources, repo=checkout).classify(sweep_root))
+    return reports
+
+
+def _record_scratch_inventory(sources: "_ScratchSources", report: Any) -> None:
+    """Write the cached inventory from a report this run already made (Plan 00627 Task 5.1).
+
+    Only the project's own scratch root is cached (a ``--root`` run is not), and
+    a failure to write is logged, never fatal: the report itself still prints.
+    """
+    from claude_code_hooks_daemon.core import scratch_inventory
+
+    path = sources.repo / "untracked" / scratch_inventory.INVENTORY_FILE
+    try:
+        refreshed = scratch_inventory.refresh_inventory(
+            path,
+            lambda: report,
+            now=sources.wall_clock(),
+            caps=sources.config.scratch.caps,
+            store=lambda: _scratch_store_status(sources),
+        )
+    except (OSError, ValueError) as exc:
+        logger.warning("scratch inventory not written: %s: %s", type(exc).__name__, exc)
+        return
+    logger.debug("scratch inventory written: %d entries", len(refreshed.entries))
+
+
+def _scratch_pressure(sources: "_ScratchSources", report: Any, ttl_hours: float | None) -> Any:
+    """Pressure mode (Task 5.5) when ``report``'s own counts are at block, else None.
+
+    ``report`` is the apply run's fresh classification. The cached inventory is
+    never consulted, and no earlier level is carried forward: the mode only
+    ever widens what is packed, so a stale or incomplete reading never enters
+    it (F-BYPS F2).
+    """
+    from claude_code_hooks_daemon.core import scratch_inventory
+    from claude_code_hooks_daemon.core.scratch_archive_apply import pressure_for
+
+    caps = sources.config.scratch.caps
+    fresh = scratch_inventory.inventory_from_report(
+        report, now=sources.wall_clock(), caps=caps, previous=None
+    )
+    if fresh.incomplete:
+        return None
+    return pressure_for(fresh.cap_level, caps, ttl_hours)
+
+
+def _scratch_pressure_notice(report: Any, pressure: Any) -> str:
+    """The line the ``--apply`` question adds when pressure is on; "" when it is off."""
+    from claude_code_hooks_daemon.core.scratch_archive_apply import pressured_count
+
+    if pressure is None:
+        return ""
+    return (
+        "A scratch cap is at block, so this run is in pressure mode: it also packs "
+        f"{pressured_count(report, pressure)} idle entries that are NOT yet due "
+        "(largest first); their archives keep the TTL's remainder."
+    )
+
+
+def start_scratch_inventory_refresh(repo: Path) -> Any:
+    """Refresh ``untracked/scratch-inventory.json`` in a background thread.
+
+    The SessionStart entry point of Plan 00627 Task 5.1: one fresh
+    classification of the project's scratch root with the default budget,
+    exactly what ``scratch-sweep`` runs. Returns the thread, or ``None`` when a
+    refresh is already running.
+    """
+    from claude_code_hooks_daemon.core import scratch_inventory
+    from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
+
+    config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
+    sweep_root = resolve_sweep_root(
+        repo / "untracked" / "scratch",
+        project_root=repo,
+        config=config.scratch,
+        reference_roots=tuple(config.reference_repos.roots),
+    )
+    sources = _ScratchSources(
+        repo=repo,
+        config=config,
+        budget_seconds=SCRATCH_SWEEP_DEFAULT_SECONDS,
+        max_inodes=SCRATCH_SWEEP_DEFAULT_MAX_INODES,
+        scandir=os.scandir,
+        wall_clock=time.time,
+        budget_clock=time.monotonic,
+        process_cwds=None,
+        git_runner=None,
+    )
+    return scratch_inventory.refresh_in_background(
+        repo / "untracked" / scratch_inventory.INVENTORY_FILE,
+        lambda: sources.classify(sweep_root),
+        caps=config.scratch.caps,
+        store=lambda: _scratch_store_status(sources),
+    )
+
+
+def _scratch_checkout(repo: Path, cwd: Path) -> tuple[Path, Path]:
+    """``(checkout, main checkout)``: cwd's worktree of THIS project, else ``repo``."""
+    from claude_code_hooks_daemon.utils.git_repo import GitRepo
+
+    project = GitRepo.resolve_for(repo)
+    main = project.main_worktree_root() if project is not None else repo
+    found = GitRepo.resolve_for(cwd)
+    if found is None or project is None:
+        return repo, main
+    if found.main_worktree_root().resolve() != main.resolve():
+        return repo, main
+    return found.root, main
+
+
+def cmd_scratch_new(
+    args: argparse.Namespace,
+    *,
+    environ: Mapping[str, str] | None = None,
+    cwd: Path | None = None,
+    now: Callable[[], datetime.datetime] | None = None,
+) -> int:
+    """``scratch new <name> [--purpose P] [--plan NNNNN] [--ttl-hours N]`` (Plan 00627 Task 4.2).
+
+    Makes ``<name>`` in this session's scratch directory (found by the
+    ``CLAUDE_CODE_SESSION_ID`` every Bash call carries; a linked worktree reuses
+    the main checkout's directory name), records its birth, purpose, plan and a
+    TTL bounded by ``max(scratch.max_ttl_hours, the root's TTL)``, and prints
+    only the path. A never-cleared root bounds the TTL by ``max_ttl_hours``.
+    The keyword parameters exist for tests.
+
+    Returns:
+        0 when the entry was made; 1 for a refusal, said on stderr.
+    """
+    from claude_code_hooks_daemon.core.scratch_session import (
+        SessionError,
+        bounded_ttl_hours,
+        check_session_id,
+        new_entry,
+        resolve_session_dir,
+    )
+    from claude_code_hooks_daemon.utils.git_sync import current_branch
+    from claude_code_hooks_daemon.utils.scratch_dir import ensure_scratch_dir
+
+    env = os.environ if environ is None else environ
+    session_id = env.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    repo = get_project_path(getattr(args, "project_root", None))
+    config = Config.load_or_default(repo / ".claude" / "hooks-daemon.yaml")
+    moment = (now or (lambda: datetime.datetime.now(datetime.UTC)))()
+    try:
+        check_session_id(session_id)
+        root_ttl = config.scratch.ttl_hours_for("scratch")
+        ttl = bounded_ttl_hours(
+            args.ttl_hours,
+            max_ttl_hours=config.scratch.max_ttl_hours,
+            root_ttl_hours=root_ttl if root_ttl is not None else config.scratch.max_ttl_hours,
+        )
+        checkout, main = _scratch_checkout(repo, Path.cwd() if cwd is None else cwd)
+        ensure_scratch_dir(checkout)
+        session_dir = resolve_session_dir(
+            checkout / "untracked" / "scratch",
+            main / "untracked" / "scratch",
+            session_id,
+            now=moment,
+            checkout=str(checkout),
+            branch=current_branch(checkout),
+        )
+        path = new_entry(
+            session_dir,
+            args.name,
+            now=moment,
+            purpose=args.purpose,
+            plan=args.plan,
+            ttl_hours=ttl,
+        )
+    except (SessionError, ValueError) as exc:
+        print(f"scratch new: refused: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"scratch new: refused: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    print(path)
+    return 0
 
 
 def confirm_apply_interactively(
     relative_root: str,
+    pressure_notice: str = "",
     *,
     stdin: Any = None,
     stdout: Any = None,
@@ -6853,7 +7102,8 @@ def confirm_apply_interactively(
     prompt_stream.write(
         "scratch-sweep --apply archives and then removes every due DISPOSABLE or "
         f"UNCERTAIN entry under {relative_root}, and expires archives past retention.\n"
-        f"Type '{phrase}' to go ahead: "
+        + (f"{pressure_notice}\n" if pressure_notice else "")
+        + f"Type '{phrase}' to go ahead: "
     )
     prompt_stream.flush()
     return bool(stdin.readline().strip() == phrase)
@@ -6872,10 +7122,12 @@ class _ScratchSources:
     budget_clock: Callable[[], float]
     process_cwds: Callable[[], Mapping[int, Path]] | None
     git_runner: Callable[..., Any] | None
+    #: The main checkout, which alone holds the archive store; ``None`` means ``repo``.
+    store_checkout: Path | None = None
 
     @property
     def store_path(self) -> Path:
-        return self.repo / "untracked" / "scratch-archive"
+        return (self.store_checkout or self.repo) / "untracked" / "scratch-archive"
 
     @property
     def background_file(self) -> Path:
@@ -6946,6 +7198,23 @@ class _ScratchSources:
         )
 
 
+def _scratch_linked_apply_refusal(repo: Path, main: Path) -> str:
+    """Why ``--apply`` may not run from the linked worktree ``repo``; "" when it may (Task 6.1).
+
+    ``repo`` must be the root of a registered linked worktree of the same
+    repository as ``main``; the sweep root itself is held inside ``repo`` by
+    :func:`resolve_sweep_root`, so the run is limited to its own checkout.
+    """
+    from claude_code_hooks_daemon.utils.git_repo import GitRepo, is_worktree_of_repo
+
+    found = GitRepo.resolve_for(repo)
+    if found is None or found.root.resolve() != repo.resolve():
+        return f"{repo} is not the root of a checkout"
+    if not (main / ".git").is_dir() or not is_worktree_of_repo(repo, main):
+        return f"{repo} is not a linked worktree of {main}"
+    return ""
+
+
 def _scratch_store_refusal(
     repo: Path, sweep_root: Any, *, applying: bool, action: str | None
 ) -> str:
@@ -6953,18 +7222,26 @@ def _scratch_store_refusal(
 
     Fails closed: a checkout whose ``.git`` is not a directory is a linked
     worktree, and git's own answer must also name this checkout as the main one.
+    The one exception is ``--apply`` from a registered linked worktree of this
+    repository (Task 6.1): it acts on that checkout's own root, and its
+    archives go to the main checkout's store.
     """
     from claude_code_hooks_daemon.utils.git_repo import GitRepo
 
     if applying and action is not None:
         return f"--apply cannot be combined with {action}"
     store_rule = "the archive store lives in the main checkout only"
-    if not (repo / ".git").is_dir():
-        return f"{repo} is not the main checkout (its .git is not a directory): {store_rule}"
     found = GitRepo.resolve_for(repo)
     if found is None:
         return f"{repo} is not a git repository: {store_rule}"
-    if found.main_worktree_root().resolve() != repo.resolve():
+    main = found.main_worktree_root()
+    if applying and not (repo / ".git").is_dir():
+        linked = _scratch_linked_apply_refusal(repo, main)
+        if linked:
+            return f"{linked}: {store_rule}"
+    elif not (repo / ".git").is_dir():
+        return f"{repo} is not the main checkout (its .git is not a directory): {store_rule}"
+    elif main.resolve() != repo.resolve():
         return f"{repo} is not the main checkout: {store_rule}"
     if sweep_root.refusal:
         return str(sweep_root.refusal)
@@ -6985,8 +7262,15 @@ def _scratch_relative_root(sources: _ScratchSources, sweep_root: Any) -> tuple[P
     return resolved, path_relative_to(resolved, sources.repo.resolve()).as_posix()
 
 
-def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_root: Any) -> int:
-    """``--apply``: archive and remove every due DISPOSABLE or UNCERTAIN entry."""
+def _scratch_apply(
+    args: argparse.Namespace, sources: _ScratchSources, sweep_root: Any, pressure: Any
+) -> int:
+    """``--apply``: archive and remove every due DISPOSABLE or UNCERTAIN entry.
+
+    The root's own entries first, then each session directory's children (one
+    archive per child, never the directory), all under one store lock.
+    ``pressure`` is the mode the human consented to; it is never re-decided here.
+    """
     import dataclasses
 
     from claude_code_hooks_daemon.core.scratch_archive import (
@@ -6997,7 +7281,9 @@ def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_roo
     from claude_code_hooks_daemon.core.scratch_archive_apply import (
         ApplyFacts,
         ApplySettings,
+        apply_sessions,
         apply_sweep,
+        session_facts,
     )
     from claude_code_hooks_daemon.core.scratch_archive_facts import (
         LazyReferences,
@@ -7014,20 +7300,38 @@ def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_roo
         return 1
     resolved, relative = _scratch_relative_root(sources, sweep_root)
 
-    def entry_live(name: str) -> bool:
-        return entry_in_use(
-            name,
-            root=resolved,
-            relative_root=relative,
-            reading=sources.cwds(),
-            background=read_background_records(sources.background_file),
-        )
+    def live_in(root: Path, relative_root: str) -> Callable[[str], bool]:
+        def entry_live(name: str) -> bool:
+            return entry_in_use(
+                name,
+                root=root,
+                relative_root=relative_root,
+                reading=sources.cwds(),
+                background=read_background_records(sources.background_file),
+            )
 
+        return entry_live
+
+    def references_of(relative_root: str) -> LazyReferences:
+        return LazyReferences(lambda: build_references(sources.project_git(), relative_root))
+
+    parent_references = references_of(relative)
     facts = ApplyFacts(
         classify=lambda: sources.classify(sweep_root),
-        entry_live=entry_live,
-        referenced=LazyReferences(lambda: build_references(sources.project_git(), relative)),
+        entry_live=live_in(resolved, relative),
+        referenced=parent_references,
     )
+
+    def for_session(name: str) -> ApplyFacts:
+        return session_facts(
+            facts,
+            name,
+            session_dir=Path(sweep_root.path) / name,
+            child_live=live_in(resolved / name, f"{relative}/{name}"),
+            child_referenced=references_of(f"{relative}/{name}"),
+            container_referenced=parent_references.root_named,
+        )
+
     settings = ApplySettings(
         root=Path(sweep_root.path),
         original_prefix=relative,
@@ -7036,18 +7340,42 @@ def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_roo
         max_inodes=sources.max_inodes,
         retention_hours=sources.retention_hours(),
         clock=sources.now,
+        empty_session_hours=sweep_root.ttl_hours,
+        pressure=pressure,
     )
+    if settings.pressure is not None:
+        print(
+            "scratch-sweep: a scratch cap is at block: pressure mode also packs idle entries "
+            "not yet due (largest first); their archives keep the TTL's remainder",
+            file=sys.stderr,
+        )
     try:
         with ArchiveStore.open(sources.store_path) as store, store.lock():
             result = apply_sweep(store, facts, settings)
+            sessions = apply_sessions(store, facts, settings, for_session)
     except (StoreRefused, StoreBusy, OSError) as exc:
         print(f"scratch-sweep: refused: {exc}", file=sys.stderr)
         return 1
     if args.json:
-        document = {"root": str(sweep_root.path), **dataclasses.asdict(result)}
+        document = {
+            "root": str(sweep_root.path),
+            **dataclasses.asdict(result),
+            "sessions": [
+                {"root": str(Path(sweep_root.path) / name), **dataclasses.asdict(sub)}
+                for name, sub in sessions
+            ],
+        }
         print(json.dumps(document, indent=2, default=str))
         return 0
-    print(f"scratch-sweep --apply: {sweep_root.path}")
+    _print_apply(str(sweep_root.path), result)
+    for name, sub in sessions:
+        _print_apply(str(Path(sweep_root.path) / name), sub)
+    return 0
+
+
+def _print_apply(root: str, result: Any) -> None:
+    """One apply pass's outcome, as ``--apply`` prints it."""
+    print(f"scratch-sweep --apply: {root}")
     if not result.complete:
         print("INCOMPLETE: " + "; ".join(result.incomplete_reasons))
     for outcome in result.entries:
@@ -7060,7 +7388,6 @@ def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_roo
         print(f"  expired: {expired}")
     for note in result.notes:
         print(f"  note: {note}")
-    return 0
 
 
 def _scratch_restore(args: argparse.Namespace, sources: _ScratchSources, sweep_root: Any) -> int:
@@ -7087,6 +7414,11 @@ def _scratch_restore(args: argparse.Namespace, sources: _ScratchSources, sweep_r
         return 1
     try:
         with ArchiveStore.open(sources.store_path) as store, store.lock():
+            recorded = [
+                record.original_path
+                for record in store.read_index().records
+                if record.archive_id == args.archive_id
+            ]
             result = restore(
                 store,
                 args.archive_id,
@@ -7101,12 +7433,23 @@ def _scratch_restore(args: argparse.Namespace, sources: _ScratchSources, sweep_r
         return 1
     finally:
         os.close(root_fd)
-    print(f"restored {result.archive_id} to {Path(sweep_root.path) / result.name}")
+    print(
+        f"restored {result.archive_id} to {_restored_path(sweep_root.path, relative, recorded, result.name)}"
+    )
     if isinstance(result, RestoredWithLeftovers):
         for problem in result.problems:
             print(f"scratch-sweep: after the restore: {problem}", file=sys.stderr)
         return 1
     return 0
+
+
+def _restored_path(root: Path, relative: str, recorded: list[str], name: str) -> Path:
+    """Where ``name`` was restored: under its session directory when its record says so."""
+    for original in recorded:
+        path = PurePosixPath(original)
+        if path.name == name and path.parent.parent == PurePosixPath(relative):
+            return Path(root) / path.parent.name / name
+    return Path(root) / name
 
 
 def _scratch_status(args: argparse.Namespace, sources: _ScratchSources) -> int:
@@ -14432,6 +14775,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", dest="status_json", action="store_true", help="Print the archives as JSON"
     )
     parser_scratch_sweep.set_defaults(func=cmd_scratch_sweep)
+
+    # scratch command (Plan 00627 Task 4.2): entries in the session directory.
+    parser_scratch = subparsers.add_parser(
+        "scratch", help="Work in this session's scratch directory (scratch new <name>)"
+    )
+    scratch_verbs = parser_scratch.add_subparsers(dest="scratch_verb", required=True)
+    parser_scratch_new = scratch_verbs.add_parser(
+        "new",
+        help="Make a recorded entry in this session's scratch directory and print its path",
+    )
+    parser_scratch_new.add_argument("name", help="One path segment: [A-Za-z0-9._+@~-]")
+    parser_scratch_new.add_argument(
+        "--purpose", default=None, help="What the entry is for (feeds the filing proposal)"
+    )
+    parser_scratch_new.add_argument(
+        "--plan", default=None, metavar="NNNNN", help="The plan the work belongs to"
+    )
+    parser_scratch_new.add_argument(
+        "--ttl-hours",
+        type=_positive_int,
+        default=None,
+        metavar="N",
+        help="A longer TTL, bounded by scratch.max_ttl_hours or the root's TTL",
+    )
+    parser_scratch_new.set_defaults(func=cmd_scratch_new)
 
     # branch-preflight command (Plan 00594 Task 4.1)
     parser_branch_preflight = subparsers.add_parser(

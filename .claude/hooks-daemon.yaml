@@ -450,6 +450,14 @@ handlers:
       enabled: true
       priority: 18
 
+    scratch_cap_guard: # Deny new directory trees in scratch at the block cap; this repo runs caps.mode advise (Plan 00627)
+      enabled: true
+      priority: 19
+
+    scratch_unowned_entry:     # A new entry directly in a scratch root: advise|block|off via scratch.sweep.unowned_entry
+      enabled: true
+      priority: 46
+
     pip_break_system:      # Blocks pip commands that break system packages
       enabled: true
       priority: 21
@@ -1062,6 +1070,10 @@ handlers:
       enabled: true  # Silent unless the operation actually changed daemon config or handler code.
       priority: 35
 
+    scratch_inventory_refresher:  # Plan 00627 Task 5.1: background scratch inventory refresh after a directory-creating command into scratch
+      enabled: true
+      priority: 42
+
     branch_touch_recorder:  # Plan 00558: creator and touch records in git config, read by WorktreeRemove and the stop guard
       enabled: true
       priority: 40
@@ -1154,6 +1166,10 @@ handlers:
 
     branch_sweep:          # Branch inventory summary: contained nowhere, merged, dormant, count vs branches.wip.cap (Plan 00558)
       enabled: true        # Contained-nowhere on every source, the rest on new sessions; silent when clean
+      priority: 56
+
+    scratch_sweep:         # Creates and announces this session's scratch directory (Plan 00627)
+      enabled: true        # Every source; idempotent per session id
       priority: 56
 
     reference_repo_sweep:  # Freshness of reference clones under untracked/repos (Plan 00401)
@@ -1946,6 +1962,12 @@ project_handlers:
 # so the deploy is a no-op — the flag is set true to dogfood the enabled path.
 ccy:
   deploy_supervisor: true
+
+# Plan 00627 DESIGN.md section 8 rollout: this repository's scratch is over the
+# block cap until Task 8.3 clears the backlog, so R-SCRATCH-CAP only advises.
+scratch:
+  caps:
+    mode: advise
 
 # Pseudo-events: synthetic events triggered by real events with frequency control
 pseudo_events:

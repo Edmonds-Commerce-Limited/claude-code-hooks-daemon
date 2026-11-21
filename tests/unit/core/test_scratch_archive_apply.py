@@ -10,15 +10,18 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import errno
 import os
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 import claude_code_hooks_daemon
+from claude_code_hooks_daemon.config.models import ScratchCapsConfig
 from claude_code_hooks_daemon.core import scratch_archive_apply as apply_mod
 from claude_code_hooks_daemon.core.scratch_archive import (
     AdoptEvent,
@@ -30,13 +33,26 @@ from claude_code_hooks_daemon.core.scratch_archive import (
 from claude_code_hooks_daemon.core.scratch_archive_apply import (
     ApplyFacts,
     ApplySettings,
+    Pressure,
+    apply_sessions,
     apply_sweep,
+    pressure_for,
+    pressured_count,
+    session_facts,
 )
 from claude_code_hooks_daemon.core.scratch_archive_claim import CLAIM_PREFIX, open_dir
 from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu_tar
+from claude_code_hooks_daemon.core.scratch_archive_remove import RemoveRefused
 from claude_code_hooks_daemon.core.scratch_archive_restore import restore
+from claude_code_hooks_daemon.core.scratch_caps import CapLevel
+from claude_code_hooks_daemon.core.scratch_session import ensure_session_dir, new_entry
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport
-from claude_code_hooks_daemon.core.scratch_verdict import Proof, RepositoryMarker, Verdict
+from claude_code_hooks_daemon.core.scratch_verdict import (
+    KEEP_MARKER,
+    Proof,
+    RepositoryMarker,
+    Verdict,
+)
 from claude_code_hooks_daemon.core.scratch_walk import NodeKind
 
 MAX = 1000
@@ -201,6 +217,40 @@ class TestArchivesWhatIsActionable:
         finally:
             os.close(fd)
         assert snapshot(root / "e1") == before
+
+    def test_an_entry_of_another_owner_is_refused_and_left_in_place(
+        self, root: Path, store: ArchiveStore, tar: TarTool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fix B: foreign ownership refuses the pack; the entry is renamed back, never removed."""
+        entry(root, "e1")
+        before = snapshot(root / "e1")
+        real_geteuid = os.geteuid
+        fake = FakeFacts([row("e1", Verdict.DISPOSABLE)])
+        settings_ = settings(root, tar)
+        monkeypatch.setattr(os, "geteuid", lambda: real_geteuid() + 4242)
+        result = apply_sweep(store, fake.facts(), settings_)
+        monkeypatch.setattr(os, "geteuid", real_geteuid)
+        outcome = outcome_of(result, "e1")
+        assert outcome.outcome == "refused"
+        assert "owned by uid" in outcome.reason
+        assert snapshot(root / "e1") == before
+        assert not (root / (CLAIM_PREFIX + "e1")).exists()
+        assert store.read_index().records == ()
+        # Refused before the claim: no claim event, no rename, so a second run
+        # neither piles up events nor touches the entry's ctime.
+        assert store.read_events().events == ()
+
+    def test_a_foreign_entry_that_is_not_actionable_keeps_its_verdict_outcome(
+        self, root: Path, store: ArchiveStore, tar: TarTool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        entry(root, "e1")
+        real_geteuid = os.geteuid
+        fake = FakeFacts([row("e1", Verdict.LIVE)])
+        settings_ = settings(root, tar)
+        monkeypatch.setattr(os, "geteuid", lambda: real_geteuid() + 4242)
+        result = apply_sweep(store, fake.facts(), settings_)
+        monkeypatch.setattr(os, "geteuid", real_geteuid)
+        assert outcome_of(result, "e1").outcome == "not-actionable"
 
     @pytest.mark.parametrize(
         "verdict",
@@ -432,7 +482,7 @@ class TestResumeReclaimExpireOrder:
         entry(root, "e1")
 
         def refuse(*args: object, **kwargs: object) -> object:
-            raise apply_mod.RemoveRefused("index unreadable")
+            raise RemoveRefused("index unreadable")
 
         monkeypatch.setattr(apply_mod, "resume_claimed", refuse)
         result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
@@ -521,3 +571,446 @@ class TestResumeReclaimExpireOrder:
         assert [r.outcome for r in again.resumed] == ["renamed-back"]
         assert snapshot(root / "e1") == before
         assert again.audit.unrecorded_archives
+
+
+SESSION = "s-20261101T000000Z-abcdefgh"
+
+
+@dataclass
+class SessionWorld:
+    """A parent report holding one session sub-report, with facts a test controls."""
+
+    root: Path
+    children: list[EntryRow]
+    #: How many parent classifications still list the session.
+    present_for: int = 1_000
+    classified: int = 0
+    identity: tuple[int, int] | None = None
+    container_live: bool = False
+    container_referenced: bool = False
+    child_live: set[str] = field(default_factory=set)
+
+    session_name: str = SESSION
+    #: Run once, after the first classification has been read.
+    after_first: Callable[[], None] | None = None
+
+    def classify(self) -> SweepReport:
+        self.classified += 1
+        info = os.lstat(self.root / self.session_name)
+        identity = self.identity or (info.st_dev, info.st_ino)
+        if self.classified == 1 and self.after_first is not None:
+            self.after_first()
+        sub = SweepReport(
+            str(self.root / self.session_name),
+            tuple(self.children),
+            True,
+            (),
+            (),
+            identity=identity,
+        )
+        parent_rows = (row(self.session_name, Verdict.STUCK),)
+        sessions = (sub,) if self.classified <= self.present_for else ()
+        return SweepReport(str(self.root), parent_rows, True, (), (), sessions=sessions)
+
+    def parent(self) -> ApplyFacts:
+        return ApplyFacts(
+            classify=self.classify,
+            entry_live=lambda name: name == self.session_name and self.container_live,
+            referenced=lambda name: False,
+        )
+
+    def for_session(self, name: str) -> ApplyFacts:
+        return session_facts(
+            self.parent(),
+            name,
+            session_dir=self.root / name,
+            child_live=lambda child: child in self.child_live,
+            child_referenced=lambda child: False,
+            container_referenced=lambda: self.container_referenced,
+        )
+
+
+def run_sessions(world: SessionWorld, store: ArchiveStore, tar: TarTool) -> apply_mod.ApplyResult:
+    results = apply_sessions(store, world.parent(), settings(world.root, tar), world.for_session)
+    assert [name for name, _ in results] == [SESSION]
+    return results[0][1]
+
+
+class TestSessionChildrenAreArchivedOneByOne:
+    """Task 4.3 step 3: --apply packs each due child of a session directory, never the directory."""
+
+    def _world(
+        self,
+        root: Path,
+        *,
+        identity: tuple[int, int] | None = None,
+        container_live: bool = False,
+        container_referenced: bool = False,
+    ) -> SessionWorld:
+        entry(root / SESSION, "old")
+        entry(root / SESSION, "kept")
+        entry(root / SESSION, "guarded")
+        children = [
+            row("old"),
+            row("kept", Verdict.KEPT),
+            row("guarded", Verdict.PROTECTED),
+        ]
+        return SessionWorld(
+            root,
+            children,
+            identity=identity,
+            container_live=container_live,
+            container_referenced=container_referenced,
+        )
+
+    def test_a_due_child_is_archived_alone_and_restores_into_its_session(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        world = self._world(root)
+        before = snapshot(root / SESSION / "old")
+        result = run_sessions(world, store, tar)
+        assert outcome_of(result, "old").outcome == "archived"
+        assert outcome_of(result, "kept").outcome == "not-actionable"
+        assert outcome_of(result, "guarded").outcome == "not-actionable"
+        assert (root / SESSION / "kept").is_dir()
+        assert (root / SESSION / "guarded").is_dir()
+        assert not (root / SESSION / "old").exists()
+        (record,) = store.read_index().records
+        assert record.original_path == f"untracked/scratch/{SESSION}/old"
+        fd = open_dir(root)
+        try:
+            restore(
+                store, record.archive_id, fd, root_path="untracked/scratch", tar=tar, max_inodes=MAX
+            )
+        finally:
+            os.close(fd)
+        assert snapshot(root / SESSION / "old") == before
+
+    def test_the_session_directory_itself_is_never_packed(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        world = self._world(root)
+        apply_sweep(store, world.parent(), settings(root, tar))
+        assert (root / SESSION / "old").is_dir()
+        assert store.read_index().records == ()
+
+    def test_a_live_container_holds_every_child(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        result = run_sessions(self._world(root, container_live=True), store, tar)
+        assert outcome_of(result, "old").outcome != "archived"
+        assert (root / SESSION / "old").is_dir()
+
+    def test_a_referenced_container_holds_every_child(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        result = run_sessions(self._world(root, container_referenced=True), store, tar)
+        assert outcome_of(result, "old").outcome != "archived"
+        assert (root / SESSION / "old").is_dir()
+
+    def test_a_live_child_is_not_packed(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        world = self._world(root)
+        world.child_live = {"old"}
+        run_sessions(world, store, tar)
+        assert (root / SESSION / "old").is_dir()
+
+    def test_a_keep_marker_added_after_classification_holds_every_child(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """The apply-time safety re-check reads the session's ``.scratch-keep`` again."""
+        world = self._world(root)
+
+        def keep() -> None:
+            (root / SESSION / KEEP_MARKER).write_text("hold")
+
+        world.after_first = keep
+        result = run_sessions(world, store, tar)
+        assert outcome_of(result, "old").outcome != "archived"
+        assert (root / SESSION / "old").is_dir()
+
+    def test_a_dangling_keep_link_still_holds(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        world = self._world(root)
+        world.after_first = lambda: (root / SESSION / KEEP_MARKER).symlink_to(root / "nowhere")
+        run_sessions(world, store, tar)
+        assert (root / SESSION / "old").is_dir()
+
+    def test_an_unreadable_keep_marker_holds(
+        self, root: Path, store: ArchiveStore, tar: TarTool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An ``lstat`` of the marker that fails other than 'absent' is read as kept."""
+        real_lstat = os.lstat
+
+        def lstat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+            if str(path).endswith(KEEP_MARKER):
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", lstat)
+        run_sessions(self._world(root), store, tar)
+        assert (root / SESSION / "old").is_dir()
+
+    def test_a_directory_not_the_one_listed_is_never_acted_in(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        world = self._world(root, identity=(0, 0))
+        (root / SESSION / (CLAIM_PREFIX + "left")).mkdir()
+        result = run_sessions(world, store, tar)
+        assert not result.complete
+        assert result.entries == () and result.resumed == ()
+        assert (root / SESSION / "old").is_dir()
+        assert (root / SESSION / (CLAIM_PREFIX + "left")).is_dir()
+
+    def test_a_session_swapped_for_a_link_is_skipped_and_the_rest_still_run(
+        self, root: Path, store: ArchiveStore, tar: TarTool, outside: Path
+    ) -> None:
+        world = self._world(root)
+
+        def swap() -> None:
+            (root / SESSION).rename(root / "moved")
+            (root / SESSION).symlink_to(outside)
+
+        world.after_first = swap
+        result = run_sessions(world, store, tar)
+        assert not result.complete
+        assert any("could not be opened" in reason for reason in result.incomplete_reasons)
+        assert (root / "moved" / "old").is_dir()
+        assert (outside / "keep.txt").read_text() == "outside content"
+
+    def test_a_session_gone_from_the_fresh_listing_acts_on_nothing(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        world = self._world(root)
+        # Listed when the loop picks its sessions, gone for the session's own pass.
+        world.present_for = 1
+        result = run_sessions(world, store, tar)
+        assert not result.complete
+        assert result.entries == ()
+        assert (root / SESSION / "old").is_dir()
+
+
+class TestEmptySessionDirectoryRemoval:
+    """Task 4.3 step 4: after its pass, an empty old session directory is removed."""
+
+    def _session(self, root: Path) -> Path:
+        born = NOW - timedelta(days=5)
+        return ensure_session_dir(root, "abcdefgh-run", now=born, checkout="c", branch=None).path
+
+    def _sessions(self, root: Path, store: ArchiveStore, tar: TarTool, session: Path) -> str:
+        world = SessionWorld(root, [], session_name=session.name)
+        hours = dataclasses.replace(settings(root, tar), empty_session_hours=24.0)
+        ((_, result),) = apply_sessions(store, world.parent(), hours, world.for_session)
+        return " ".join(result.notes)
+
+    def test_an_empty_old_session_directory_is_removed(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        session = self._session(root)
+        notes = self._sessions(root, store, tar, session)
+        assert not session.exists(), notes
+
+    def test_a_record_inside_it_keeps_it(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        session = self._session(root)
+        born = datetime.fromtimestamp((NOW - timedelta(days=5)).timestamp(), UTC)
+        new_entry(session, "old", now=born, purpose=None, plan=None, ttl_hours=None)
+        (session / "old" / "a.txt").write_text("alpha")
+        world = SessionWorld(root, [row("old")], session_name=session.name)
+        apply_sessions(store, world.parent(), settings(root, tar), world.for_session)
+        assert not (session / "old").exists()
+        notes = self._sessions(root, store, tar, session)
+        assert session.is_dir(), notes
+        assert "held" in notes
+
+
+TTL = 72.0
+PRESSURE = Pressure(idle_hours=0.5, ttl_hours=TTL)
+
+
+def not_due(
+    name: str,
+    verdict: Verdict = Verdict.DISPOSABLE,
+    *,
+    age_hours: float = 10.0,
+    directories: int = 1,
+) -> EntryRow:
+    """A row real classification gives an entry not yet due: LIVE, held by its TTL alone.
+
+    ``verdict`` is what the rest of the ladder says (its ``ttl_hold``).
+    """
+    return dataclasses.replace(
+        row(name, Verdict.LIVE, due=False),
+        reasons=("within its TTL",),
+        age_hours=age_hours,
+        directories=directories,
+        ttl_hold=verdict,
+        ttl_hold_proofs=(Proof.P1,) if verdict is Verdict.DISPOSABLE else (),
+    )
+
+
+def pressed(root: Path, tar: TarTool, pressure: Pressure | None = PRESSURE) -> ApplySettings:
+    return dataclasses.replace(settings(root, tar), pressure=pressure)
+
+
+class TestPressureMode:
+    """Task 5.5: at block, ``--apply`` also packs idle entries that are not yet due."""
+
+    def test_an_idle_entry_not_yet_due_is_packed_under_pressure(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1", age_hours=10.0)])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome == "archived"
+        assert not (root / "e1").exists()
+
+    def test_without_pressure_it_is_left_alone(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1")])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar, None))
+        assert outcome_of(result, "e1").outcome == "not-actionable"
+        assert (root / "e1").is_dir()
+
+    def test_its_archive_expires_no_sooner_than_ttl_plus_retention(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1", age_hours=10.0)])
+        apply_sweep(store, fake.facts(), pressed(root, tar))
+        (record,) = store.read_index().records
+        remaining = TTL - 10.0
+        expected = NOW + timedelta(hours=remaining + RETENTION["DISPOSABLE"])
+        assert datetime.fromisoformat(record.expires_at or "") == expected
+
+    def test_a_due_entry_keeps_its_ordinary_expiry(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([row("e1")])
+        apply_sweep(store, fake.facts(), pressed(root, tar))
+        (record,) = store.read_index().records
+        expected = NOW + timedelta(hours=RETENTION["DISPOSABLE"])
+        assert datetime.fromisoformat(record.expires_at or "") == expected
+
+    @pytest.mark.parametrize(
+        "verdict",
+        [v for v in Verdict if v not in apply_mod.ACTIONABLE],
+    )
+    def test_no_other_verdict_is_ever_packed(
+        self, root: Path, store: ArchiveStore, tar: TarTool, verdict: Verdict
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1", verdict)])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome == "not-actionable"
+        assert (root / "e1").is_dir()
+
+    def test_an_entry_idle_for_less_than_the_minimum_is_left(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1", age_hours=0.2)])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome == "not-actionable"
+        assert (root / "e1").is_dir()
+
+    def test_its_archive_records_the_held_verdict_and_proofs(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1")])
+        apply_sweep(store, fake.facts(), pressed(root, tar))
+        (record,) = store.read_index().records
+        assert record.verdict == "DISPOSABLE"
+        assert record.proof_ids == ("P1",)
+
+    def test_an_entry_live_for_a_liveness_reason_is_never_pressured(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        in_use = dataclasses.replace(
+            row("e1", Verdict.LIVE, due=False),
+            reasons=("process 7 has its working directory in the entry",),
+            age_hours=10.0,
+        )
+        fake = FakeFacts([in_use])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome == "not-actionable"
+        assert (root / "e1").is_dir()
+        report = SweepReport("root", (in_use,), True, (), ())
+        assert pressured_count(report, PRESSURE) == 0
+
+    def test_a_live_entry_is_still_refused(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1")], live={"e1"})
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome != "archived"
+        assert (root / "e1").is_dir()
+
+    def test_an_incomplete_classification_packs_nothing(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1")], complete=False)
+        result = apply_sweep(store, fake.facts(), pressed(root, tar))
+        assert outcome_of(result, "e1").outcome == "not-actionable"
+        assert (root / "e1").is_dir()
+
+    def test_largest_directory_count_is_packed_first(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        for name in ("small", "big", "mid"):
+            entry(root, name)
+        fake = FakeFacts(
+            [
+                not_due("small", directories=2),
+                not_due("big", directories=50),
+                row("due"),
+                not_due("mid", directories=9),
+            ]
+        )
+        entry(root, "due")
+        apply_sweep(store, fake.facts(), pressed(root, tar))
+        order = [r.original_path.rsplit("/", 1)[1] for r in store.read_index().records]
+        assert order == ["due", "big", "mid", "small"]
+
+
+class TestPressureFor:
+    def test_only_at_block(self) -> None:
+        caps = ScratchCapsConfig()
+        assert pressure_for(CapLevel.WARN, caps, TTL) is None
+        assert pressure_for(CapLevel.OK, caps, TTL) is None
+        found = pressure_for(CapLevel.BLOCK, caps, TTL)
+        assert found == Pressure(idle_hours=caps.pressure_idle_minutes / 60, ttl_hours=TTL)
+
+    def test_a_root_with_no_ttl_gets_no_pressure(self) -> None:
+        assert pressure_for(CapLevel.BLOCK, ScratchCapsConfig(), None) is None
+
+    @pytest.mark.parametrize("mode", ["advise", "off"])
+    def test_a_cap_that_does_not_enforce_gets_no_pressure(self, mode: str) -> None:
+        caps = ScratchCapsConfig.model_validate({"mode": mode})
+        assert pressure_for(CapLevel.BLOCK, caps, TTL) is None
+
+
+class TestPressuredCount:
+    """How many entries pressure would add, for the ``--apply`` confirmation (F-BYPS F1)."""
+
+    def test_counts_only_idle_actionable_entries_not_yet_due(self) -> None:
+        session = SweepReport("root/s", (not_due("child", age_hours=10.0),), True, (), ())
+        rows = (
+            row("due"),
+            not_due("idle", age_hours=10.0),
+            not_due("fresh", age_hours=0.1),
+            not_due("kept", Verdict.KEPT),
+        )
+        report = SweepReport("root", rows, True, (), (), sessions=(session,))
+        assert pressured_count(report, PRESSURE) == 2
+        assert pressured_count(report, None) == 0
