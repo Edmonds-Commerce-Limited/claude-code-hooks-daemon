@@ -46,7 +46,11 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu
 from claude_code_hooks_daemon.core.scratch_archive_remove import RemoveRefused
 from claude_code_hooks_daemon.core.scratch_archive_restore import restore
 from claude_code_hooks_daemon.core.scratch_caps import CapLevel
-from claude_code_hooks_daemon.core.scratch_session import ensure_session_dir, new_entry
+from claude_code_hooks_daemon.core.scratch_session import (
+    ensure_session_dir,
+    is_session_dir_name,
+    new_entry,
+)
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport
 from claude_code_hooks_daemon.core.scratch_verdict import (
     KEEP_MARKER,
@@ -853,7 +857,28 @@ def not_due(
     )
 
 
+def on_disk(root: Path) -> SweepReport:
+    """A report listing every directory in ``root`` (and each session's children) as idle, not due."""
+
+    def rows(top: Path) -> tuple[EntryRow, ...]:
+        return tuple(not_due(p.name) for p in sorted(top.iterdir()) if p.is_dir())
+
+    sessions = tuple(
+        SweepReport(str(p), rows(p), True, (), ())
+        for p in sorted(root.iterdir())
+        if p.is_dir() and is_session_dir_name(p.name)
+    )
+    return SweepReport(str(root), rows(root), True, (), (), sessions=sessions)
+
+
 def pressed(root: Path, tar: TarTool, pressure: Pressure | None = PRESSURE) -> ApplySettings:
+    """Settings in pressure mode; an unbound ``pressure`` is bound to every entry now on disk.
+
+    Call it after the test's entries exist. Pass an already bound Pressure
+    (``consented`` set) to keep its own consent.
+    """
+    if pressure is not None and pressure.consented is None:
+        pressure = consent_to(on_disk(root), pressure)
     return dataclasses.replace(settings(root, tar), pressure=pressure)
 
 
@@ -1110,4 +1135,19 @@ class TestPressureIsBoundToConsent:
         entry(root, "due")
         bound = dataclasses.replace(PRESSURE, consented=frozenset())
         result = apply_sweep(store, FakeFacts([row("due")]).facts(), pressed(root, tar, bound))
+        assert outcome_of(result, "due").outcome == "archived"
+
+    def test_pressure_passed_straight_through_without_consent_packs_nothing_not_due(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """An unbound Pressure (no :func:`consent_to`) restricts to nothing, never to everything."""
+        entry(root, "idle")
+        entry(root, "due")
+        unbound = pressure_for(CapLevel.BLOCK, ScratchCapsConfig(), TTL)
+        assert unbound is not None
+        fake = FakeFacts([not_due("idle", age_hours=50.0), row("due")])
+        straight = dataclasses.replace(settings(root, tar), pressure=unbound)
+        result = apply_sweep(store, fake.facts(), straight)
+        assert outcome_of(result, "idle").outcome == "not-actionable"
+        assert (root / "idle").is_dir()
         assert outcome_of(result, "due").outcome == "archived"

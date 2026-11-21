@@ -133,7 +133,8 @@ class Pressure:
     #: The root's TTL, from which the time an entry had left is computed.
     ttl_hours: float
     #: Paths (``<report root>/<name>``) the human consented to (:func:`consent_to`);
-    #: a not-due entry outside it is never packed. None: not bound, as in core tests.
+    #: a not-due entry outside it is never packed. None: not bound, so no not-due
+    #: entry is packed at all (an unbound Pressure restricts to nothing).
     consented: frozenset[str] | None = None
 
 
@@ -156,13 +157,20 @@ def _pressured_paths(report: SweepReport, pressure: Pressure | None) -> frozense
         _entry_key(part.root, row.name)
         for part in (report, *report.sessions)
         for row in part.rows
-        if not row.due and _actionable(row, pressure, part.root)
+        if row.walk_complete and _candidate(row, pressure)
     )
 
 
 def pressured_count(report: SweepReport, pressure: Pressure | None) -> int:
-    """How many entries, root and session children, ``pressure`` adds beyond the due ones."""
-    return len(_pressured_paths(report, pressure))
+    """How many entries, root and session children, ``pressure`` adds beyond the due ones.
+
+    Bound (:func:`consent_to`), only the consented ones count, so the question
+    never names an entry the run could not pack.
+    """
+    paths = _pressured_paths(report, pressure)
+    if pressure is not None and pressure.consented is not None:
+        paths &= pressure.consented
+    return len(paths)
 
 
 def consent_to(report: SweepReport, pressure: Pressure | None) -> Pressure | None:
@@ -545,17 +553,27 @@ def _fingerprint_all(
     return prints, foreign
 
 
-def _pressured(row: EntryRow, pressure: Pressure | None, root: str | Path) -> bool:
-    """Not yet due, held by its TTL alone, actionable underneath, idle long enough, consented.
+def _candidate(row: EntryRow, pressure: Pressure | None) -> bool:
+    """Not yet due, held by its TTL alone, actionable underneath, idle long enough.
 
-    A row LIVE for a liveness reason carries no ``ttl_hold``, so it never matches.
+    What the ``--apply`` question counts and :func:`consent_to` binds. A row
+    LIVE for a liveness reason carries no ``ttl_hold``, so it never matches.
     """
     return (
         pressure is not None
         and not row.due
         and row.ttl_hold in ACTIONABLE
         and row.age_hours >= pressure.idle_hours
-        and (pressure.consented is None or _entry_key(root, row.name) in pressure.consented)
+    )
+
+
+def _pressured(row: EntryRow, pressure: Pressure | None, root: str | Path) -> bool:
+    """A candidate the human consented to; an unbound Pressure consents to nothing."""
+    return (
+        pressure is not None
+        and pressure.consented is not None
+        and _candidate(row, pressure)
+        and _entry_key(root, row.name) in pressure.consented
     )
 
 
