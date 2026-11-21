@@ -1066,6 +1066,10 @@ handlers:
       enabled: true  # Silent unless the operation actually changed daemon config or handler code.
       priority: 35
 
+    scratch_inventory_refresher:  # Plan 00627 Task 5.1: background scratch inventory refresh after a directory-creating command into scratch
+      enabled: true
+      priority: 42
+
     branch_touch_recorder:  # Plan 00558: creator and touch records in git config, read by WorktreeRemove and the stop guard
       enabled: true
       priority: 40

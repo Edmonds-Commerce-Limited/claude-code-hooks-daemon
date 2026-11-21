@@ -375,6 +375,10 @@ class Priority:
     # depends on its order.)
     EVACUATION_RECORDER = 41
 
+    # Scratch inventory refresher (Priority: 42 - PostToolUse sensor; Plan 00627
+    # Task 5.1. Starts a background inventory refresh; nothing depends on its order.)
+    SCRATCH_INVENTORY_REFRESHER = 42
+
     # Evacuation turn marker (Priority: 43 - UserPromptSubmit bookkeeping; Plan
     # 00558 Task 4.5. Advances the main thread's turn counter; never terminal.)
     EVACUATION_TURN_MARKER = 43

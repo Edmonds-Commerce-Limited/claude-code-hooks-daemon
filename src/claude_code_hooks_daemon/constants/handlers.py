@@ -781,6 +781,13 @@ class HandlerID:
         config_key="cleanup_after_merge",
         display_name="cleanup-after-merge",
     )
+    # Scratch inventory refresher (PostToolUse) -- Plan 00627 Task 5.1: refreshes
+    # the cached scratch inventory after a directory-creating command into scratch.
+    SCRATCH_INVENTORY_REFRESHER = HandlerIDMeta(
+        class_name="ScratchInventoryRefresherHandler",
+        config_key="scratch_inventory_refresher",
+        display_name="scratch-inventory-refresher",
+    )
     # Branch touch recorder (PostToolUse) -- Plan 00558 Task 4.2: writes each
     # branch's creator record and the sessions and agents that touched it.
     BRANCH_TOUCH_RECORDER = HandlerIDMeta(
