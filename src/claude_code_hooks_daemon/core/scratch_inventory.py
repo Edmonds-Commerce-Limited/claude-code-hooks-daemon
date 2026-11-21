@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.config.models import ScratchCapsConfig
-from claude_code_hooks_daemon.core.scratch_archive_status import StoreStatus
 from claude_code_hooks_daemon.core.scratch_caps import CapCounts, CapLevel, CapReport, evaluate_caps
+from claude_code_hooks_daemon.core.scratch_store_view import StoreStatus
 from claude_code_hooks_daemon.core.scratch_sweep import SweepReport
 
 logger = logging.getLogger(__name__)

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -28,30 +27,12 @@ from claude_code_hooks_daemon.core.scratch_archive_expire import (
     keeps_of,
     records_of,
 )
+from claude_code_hooks_daemon.core.scratch_store_view import ArchiveStatus, StoreStatus
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
+__all__ = ["ArchiveStatus", "StoreStatus", "read_status", "render_status"]
+
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class ArchiveStatus:
-    """One live archive: its paths, verdict, effective expiry and why it is held."""
-
-    archive_id: str
-    original_paths: tuple[str, ...]
-    verdict: str
-    expires: datetime | None
-    note: str
-    keeps: int
-    restore_command: str
-
-
-@dataclass(frozen=True)
-class StoreStatus:
-    """Every live archive, and whether the index or events file had a torn tail."""
-
-    archives: tuple[ArchiveStatus, ...]
-    torn: bool
 
 
 def read_status(path: Path, retention_hours: Mapping[str, float]) -> StoreStatus:
