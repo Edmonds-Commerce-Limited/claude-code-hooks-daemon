@@ -8091,3 +8091,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: `_read_state_file` in `daemon/branch_safety.py` catches `OSError` only. A state file that is not valid UTF-8 raises `UnicodeDecodeError` (a `ValueError`), which escapes `_operation_holding_branch` after `record_removal` has written the ledger's removal line, so the ledger shows a removal with no matching git-refused line and the refusal surfaces as an exception rather than a reason. Separately, `_operation_holding_branch` relies on `Path.is_dir` raising on EACCES (true on 3.13.5); on 3.14, which `>=3.11` allows, it may return False and skip a linked worktree's admin dir. Only 3.13 is installed here.
 
 **Status**: ⬜ Open. Treat `UnicodeDecodeError` as a refusal reason in `_read_state_file`, with a test that the ledger then records a git-refused line; pin the EACCES behaviour with a test that fails if `is_dir` stops raising.
+
+### N689 — `docs-qa --lint` crashes with a traceback when `--project-root` is relative
+
+**Source**: post-merge housekeeping of gate-261121, running targeted docs QA from a linked worktree.
+
+**Evidence**: `hooks-daemon docs-qa --project-root . --lint CLAUDE/Plan/README.md` raises `ValueError: '<abs path>' is not in the subpath of '.'` from `path_relative_to` in `cmd_docs_qa` (`daemon/cli.py`, the `lint_rel_path` line): the lint target is resolved to an absolute path but the project root is not. `plan-qa` given the same arguments does not crash but refuses with "Lint target is not a plan document". Both work with an absolute `--project-root`.
+
+**Status**: ⬜ Open. Resolve `--project-root` to an absolute path once at argument parsing for every QA verb, with a test that runs `--lint` under a relative root.
