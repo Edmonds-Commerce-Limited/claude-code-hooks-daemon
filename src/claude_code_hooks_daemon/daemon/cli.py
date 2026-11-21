@@ -11154,6 +11154,14 @@ def cmd_worktree_reap(
             return None, f"{state.name}: no longer listed as an agent worktree"
         return fresh, keep_reason(fresh, *read_holds())
 
+    def recheck_of(asked_state: WorktreeState) -> Callable[[], str | None]:
+        """The keep reason for ``asked_state`` read again, bound to that state."""
+
+        def recheck() -> str | None:
+            return reread(asked_state)[1]
+
+        return recheck
+
     def blockers_of(path: Path) -> Sequence[str]:
         # `is_reapable` reads `git status`, which lists no ignored file, and git
         # deletes ignored files on a plain remove: scratch would go with it.
@@ -11183,7 +11191,7 @@ def cmd_worktree_reap(
                 state,
                 reap=reap,
                 seams=evacuate_seams,
-                recheck=lambda asked_state=state: reread(asked_state)[1],
+                recheck=recheck_of(state),
             )
             asked = asked or reap
             for line in evacuation.lines:
