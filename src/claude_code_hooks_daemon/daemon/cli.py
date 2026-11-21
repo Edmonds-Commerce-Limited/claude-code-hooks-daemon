@@ -11015,12 +11015,12 @@ def cmd_worktree_reap(
     from claude_code_hooks_daemon.core import agent_ownership, branch_cleanup
     from claude_code_hooks_daemon.core.worktree_reaping import (
         PruneOutcome,
+        WorktreeState,
         collect_orphaned_branches,
         collect_skipped_merged_branches,
         collect_worktree_states,
         default_process_cwds,
         default_worktree_age,
-        is_reapable,
         prune_branch,
         reap_refusal_reason,
         reap_worktree,
@@ -11063,13 +11063,20 @@ def cmd_worktree_reap(
     # typed values and still `**`-unpack against three differently typed
     # parameters, and passing either to a branch command would raise a
     # TypeError at runtime regardless.
-    states = collect_worktree_states(
-        repo_root,
-        base_branch,
-        run_fn=run_fn if run_fn is not None else run_git,
-        age_fn=age_fn if age_fn is not None else default_worktree_age,
-        process_cwds_fn=process_cwds_fn if process_cwds_fn is not None else default_process_cwds,
-    )
+    git = run_fn if run_fn is not None else run_git
+
+    def collect() -> tuple[WorktreeState, ...]:
+        return collect_worktree_states(
+            repo_root,
+            base_branch,
+            run_fn=git,
+            age_fn=age_fn if age_fn is not None else default_worktree_age,
+            process_cwds_fn=(
+                process_cwds_fn if process_cwds_fn is not None else default_process_cwds
+            ),
+        )
+
+    states = collect()
     # Plan 00352: a branch whose worktree has already gone is invisible to the
     # worktree collector, so it is reported here — the moment a human needs to
     # know is the moment they finish reaping its siblings. `--only` names a
@@ -11111,16 +11118,24 @@ def cmd_worktree_reap(
 
     # A live agent's worktree and branch are never reaped: a `running` work-queue
     # record or a git lock marks them, whatever the predicate below says.
-    holds = agent_ownership.running_holds(_daemon_untracked_dir(repo_root), repo_root)
-    listing = (run_fn if run_fn is not None else run_git)(
-        repo_root, "worktree", "list", "--porcelain"
-    )
-    locked_paths = {
-        record.path for record in parse_worktree_porcelain(listing.stdout) if record.locked
-    }
+    def read_holds() -> tuple[agent_ownership.RunningHolds, frozenset[Path] | None]:
+        """The running holds and git-locked paths; None for the locks when git cannot list."""
+        read = agent_ownership.running_holds(_daemon_untracked_dir(repo_root), repo_root)
+        listing = git(repo_root, "worktree", "list", "--porcelain")
+        if listing.returncode != 0:
+            return read, None
+        return read, frozenset(
+            record.path for record in parse_worktree_porcelain(listing.stdout) if record.locked
+        )
 
-    refused = 0
-    for state in states:
+    def keep_reason(
+        state: WorktreeState,
+        holds: agent_ownership.RunningHolds,
+        locked_paths: frozenset[Path] | None,
+    ) -> str | None:
+        """Why ``state`` is kept, name first, or None when nothing but blockers can keep it."""
+        if locked_paths is None:
+            return f"{state.name}: git worktree list failed, so a lock cannot be ruled out"
         owned = agent_ownership.ownership_refusal(
             state.branch or "",
             state.path,
@@ -11129,29 +11144,59 @@ def cmd_worktree_reap(
             harness_directory=False,
         )
         if owned is not None:
-            refused += 1
-            print(f"KEEP    {state.name}: {owned}")
-            continue
-        if not is_reapable(state):
-            refused += 1
-            print(f"KEEP    {reap_refusal_reason(state)}")
-            continue
+            return f"{state.name}: {owned}"
+        return reap_refusal_reason(state)
+
+    def reread(state: WorktreeState) -> tuple[WorktreeState | None, str | None]:
+        """``state`` read afresh with every keep predicate; the reason when one keeps it."""
+        fresh = next((found for found in collect() if found.path == state.path), None)
+        if fresh is None:
+            return None, f"{state.name}: no longer listed as an agent worktree"
+        return fresh, keep_reason(fresh, *read_holds())
+
+    def blockers_of(path: Path) -> Sequence[str]:
         # `is_reapable` reads `git status`, which lists no ignored file, and git
         # deletes ignored files on a plain remove: scratch would go with it.
-        blockers = (blockers_fn or branch_cleanup.worktree_blockers)(
-            state.path, reap_config.cleanup_after_merge.regenerable
+        return (blockers_fn or branch_cleanup.worktree_blockers)(
+            path, reap_config.cleanup_after_merge.regenerable
         )
+
+    holds, locked_paths = read_holds()
+    refused = 0
+    # F-BYPS L1: the typed question waits as long as the human takes, so after
+    # one, nothing read before it is trusted: each later worktree is read again.
+    asked = False
+    for state in states:
+        reason = keep_reason(state, holds, locked_paths)
+        if reason is None and asked:
+            fresh, reason = reread(state)
+            state = fresh or state
+        if reason is not None:
+            refused += 1
+            print(f"KEEP    {reason}")
+            continue
+        blockers = blockers_of(state.path)
         if worktree_evacuate.only_scratch(blockers):
             # Plan 00627 Task 6.2: scratch alone may be evacuated, on a typed phrase.
             evacuation = worktree_evacuate.evacuate_scratch(
-                repo_root, state, reap=reap, seams=evacuate_seams
+                repo_root,
+                state,
+                reap=reap,
+                seams=evacuate_seams,
+                recheck=lambda asked_state=state: reread(asked_state)[1],
             )
+            asked = asked or reap
             for line in evacuation.lines:
                 print(line)
             if evacuation.evacuated:
-                blockers = (blockers_fn or branch_cleanup.worktree_blockers)(
-                    state.path, reap_config.cleanup_after_merge.regenerable
-                )
+                # Packing took time too: every predicate again, then the blockers.
+                fresh, reason = reread(state)
+                if reason is not None or fresh is None:
+                    refused += 1
+                    print(f"KEEP    {reason}")
+                    continue
+                state = fresh
+                blockers = blockers_of(state.path)
         if blockers:
             refused += 1
             print(f"KEEP    {state.name}: {branch_cleanup.blockers_line(state.path, blockers)}")

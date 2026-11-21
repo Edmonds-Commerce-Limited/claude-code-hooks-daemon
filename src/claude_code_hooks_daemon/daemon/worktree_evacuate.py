@@ -11,8 +11,10 @@ is the main checkout's store opened (opening creates it, so no refusal path
 reaches it), and one ``apply_sweep`` runs with expiry off, bound to the consent
 decided before the question. Every entry must come back ``archived``;
 otherwise the worktree is kept and each archive made is named with its
-restore command. The caller then re-reads the blockers: only an empty answer
-reaches ``git worktree remove``.
+restore command. The question can wait indefinitely, so every keep predicate
+(live processes, work-queue holds, git locks, reapability) is read again after
+the answer, before packing, and again with the blockers before removal: only a
+worktree nothing keeps reaches ``git worktree remove``.
 
 A TTY does not prove a human (DESIGN.md section 13, F-BYPS F2): this gate has
 the same limit as ``scratch-sweep --apply``'s and does not widen it.
@@ -125,8 +127,14 @@ def evacuate_scratch(
     *,
     reap: bool,
     seams: EvacuateSeams | None = None,
+    recheck: Callable[[], str | None] | None = None,
 ) -> Evacuation:
-    """Evacuate ``state``'s scratch root into ``main``'s store, or say why not."""
+    """Evacuate ``state``'s scratch root into ``main``'s store, or say why not.
+
+    ``recheck`` runs after a yes and before anything is packed: the question
+    waits as long as the human takes, so the caller's keep predicates are read
+    again, and any reason it returns keeps the scratch untouched.
+    """
     seams = seams or EvacuateSeams()
     name = state.name
 
@@ -181,6 +189,9 @@ def evacuate_scratch(
             "no typed confirmation at a terminal (stdin and stdout both a TTY); nothing was "
             f"changed; a human runs `{human_command(name)}`"
         )
+    changed = recheck() if recheck is not None else None
+    if changed:
+        return keep(f"after the answer: {changed}; nothing was changed")
     return _pack(sources, sweep_root, gate, tar, name, seams.after_step)
 
 
