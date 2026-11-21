@@ -126,7 +126,8 @@ upgrade() {
 commit_on_branch() {
     git -C "$WORK/clone" -c user.name=proof -c user.email=proof@example.invalid \
         -c commit.gpgSign=false commit -q --allow-empty -m "$1"
-    git -C "$WORK/clone" push -q origin "HEAD:refs/heads/$BRANCH"
+    # Forced: a re-run starts the branch again from main in the bare remote.
+    git -C "$WORK/clone" push -q origin "+HEAD:refs/heads/$BRANCH"
     git -C "$BARE" rev-parse "refs/heads/$BRANCH"
 }
 
@@ -156,6 +157,10 @@ git clone -q "$BARE" "$WORK/clone"
 git -C "$WORK/clone" checkout -q -b "$BRANCH" origin/main
 
 step "0. start: a release install from the bare remote"
+if [ "$(state stamp)" != "$TAG" ]; then
+    printf 'NOTE a previous run left a non-release install; returning to %s first\n' "$TAG"
+    upgrade --release
+fi
 expect_eq "$(state stamp)" "$TAG" "installed stamp is the release tag"
 expect_eq "$(git -C "$DAEMON_DIR" rev-parse HEAD)" "$(git -C "$BARE" rev-parse "$TAG^{commit}")" \
     "daemon dir is on the tag"
@@ -172,14 +177,14 @@ expect_eq "$(state last_release_tag)" "$TAG" "last_release_tag recorded"
 step "2. report: not moved"
 OUT="$(report "$BARE")"
 printf '%s\n' "$OUT"
-expect_in "$OUT" "Tracked ref $BRANCH has not moved since ${FIRST:0:8}" "unmoved ref reported"
+expect_in "$OUT" "Tracked ref $BRANCH has not moved since ${FIRST:0:7}" "unmoved ref reported"
 expect_in "$OUT" "To return to $TAG in one step" "way back names the release"
 
 step "3. move $BRANCH on the remote"
 SECOND="$(commit_on_branch "proof: the tracked branch moves")"
 OUT="$(report "$BARE")"
 printf '%s\n' "$OUT"
-expect_in "$OUT" "tracked ref $BRANCH moved ${FIRST:0:8}..${SECOND:0:8}" "move reported"
+expect_in "$OUT" "tracked ref $BRANCH moved ${FIRST:0:7}..${SECOND:0:7}" "move reported"
 
 step "4. failed listing"
 OUT="$(report "/nonexistent/branch-channel-remote.git")"
@@ -194,7 +199,7 @@ expect_eq "$(git -C "$DAEMON_DIR" rev-parse HEAD)" "$SECOND" "daemon dir follows
 expect_eq "$(state tracked_sha)" "$SECOND" "tracked_sha follows the move"
 expect_eq "$(state last_release_tag)" "$TAG" "last_release_tag kept across re-track"
 OUT="$(report "$BARE")"
-expect_in "$OUT" "Tracked ref $BRANCH has not moved since ${SECOND:0:8}" "re-tracked ref reported current"
+expect_in "$OUT" "Tracked ref $BRANCH has not moved since ${SECOND:0:7}" "re-tracked ref reported current"
 
 step "6. one-step return: upgrade.sh --release"
 upgrade --release
@@ -211,7 +216,7 @@ expect_eq "$(git -C "$DAEMON_DIR" rev-parse HEAD)" "$FIRST" "daemon dir is on th
 expect_eq "$(state tracked_ref)" "$FIRST" "the pin is recorded as the ref"
 OUT="$(report "/nonexistent/branch-channel-remote.git")"
 printf '%s\n' "$OUT"
-expect_in "$OUT" "Pinned to commit ${FIRST:0:8}; a pin never moves." "a pin is never listed"
+expect_in "$OUT" "Pinned to commit ${FIRST:0:7}; a pin never moves." "a pin is never listed"
 upgrade --release
 expect_eq "$(state stamp)" "$TAG" "back on the release after the pin"
 
