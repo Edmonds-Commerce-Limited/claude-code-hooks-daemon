@@ -186,6 +186,39 @@ class TestApplyConfirmationNamesPressure:
         assert "idle entries that are NOT yet due" in notice
         assert (tree.root / "a").is_dir()
 
+    def test_the_run_packs_no_entry_beyond_the_count_consented_to(self, tree: ScratchTree) -> None:
+        """An entry that turns idle while the question waits is not packed: consent is a set."""
+        project = _project(tree)
+        (project / ".claude" / "hooks-daemon.yaml").write_text(
+            "version: '2.0'\nscratch:\n  caps:\n    pressure_idle_minutes: 120\n"
+            "    entries:\n      warn: 1\n      block: 2\n"
+        )
+        for name in ("a", "b", "c"):
+            tree.file(f"{name}/f.txt", b"x")
+        clock = [time.time() + 3600]
+        asked: list[str] = []
+
+        def answer(_root: str, notice: str) -> bool:
+            asked.append(notice)
+            clock[0] += 2 * 3600
+            return True
+
+        args = build_parser().parse_args(["scratch-sweep", "--apply"])
+        args.project_root = project
+        assert (
+            args.func(
+                args,
+                wall_clock=lambda: clock[0],
+                process_cwds=lambda: {1: Path("/elsewhere")},
+                confirm_apply=answer,
+            )
+            == 0
+        )
+        (notice,) = asked
+        assert "packs 0 idle entries" in notice
+        for name in ("a", "b", "c"):
+            assert (tree.root / name).is_dir(), name
+
     def test_under_the_caps_the_question_carries_no_pressure(self, tree: ScratchTree) -> None:
         tree.file("a/f.txt", b"x")
         (notice,) = self._apply(_project(tree), (100, 200), time.time())

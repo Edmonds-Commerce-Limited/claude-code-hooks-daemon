@@ -6935,10 +6935,12 @@ def _scratch_pressure(sources: "_ScratchSources", report: Any, ttl_hours: float 
     ``report`` is the apply run's fresh classification. The cached inventory is
     never consulted, and no earlier level is carried forward: the mode only
     ever widens what is packed, so a stale or incomplete reading never enters
-    it (F-BYPS F2).
+    it (F-BYPS F2). It is bound to the entries ``report`` counts, the number the
+    question names, so an entry that turns idle while the question waits is
+    never packed.
     """
     from claude_code_hooks_daemon.core import scratch_inventory
-    from claude_code_hooks_daemon.core.scratch_archive_apply import pressure_for
+    from claude_code_hooks_daemon.core.scratch_archive_apply import consent_to, pressure_for
 
     caps = sources.config.scratch.caps
     fresh = scratch_inventory.inventory_from_report(
@@ -6946,7 +6948,7 @@ def _scratch_pressure(sources: "_ScratchSources", report: Any, ttl_hours: float 
     )
     if fresh.incomplete:
         return None
-    return pressure_for(fresh.cap_level, caps, ttl_hours)
+    return consent_to(report, pressure_for(fresh.cap_level, caps, ttl_hours))
 
 
 def _scratch_pressure_notice(report: Any, pressure: Any) -> str:

@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.core.scratch_archive_apply import (
     Pressure,
     apply_sessions,
     apply_sweep,
+    consent_to,
     pressure_for,
     pressured_count,
     session_facts,
@@ -1014,3 +1015,37 @@ class TestPressuredCount:
         report = SweepReport("root", rows, True, (), (), sessions=(session,))
         assert pressured_count(report, PRESSURE) == 2
         assert pressured_count(report, None) == 0
+
+    def test_consent_binds_exactly_the_counted_entries(self) -> None:
+        session = SweepReport("root/s", (not_due("child", age_hours=10.0),), True, (), ())
+        rows = (row("due"), not_due("idle", age_hours=10.0), not_due("fresh", age_hours=0.1))
+        report = SweepReport("root", rows, True, (), (), sessions=(session,))
+        bound = consent_to(report, PRESSURE)
+        assert bound is not None
+        assert bound.consented == frozenset({"root/idle", "root/s/child"})
+        assert pressured_count(report, bound) == len(bound.consented)
+        assert consent_to(report, None) is None
+
+
+class TestPressureIsBoundToConsent:
+    """The run never packs a not-due entry the confirmation did not count."""
+
+    def test_an_entry_outside_the_consented_set_is_left(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "counted")
+        entry(root, "late")
+        bound = dataclasses.replace(PRESSURE, consented=frozenset({str(root / "counted")}))
+        fake = FakeFacts([not_due("counted"), not_due("late")])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar, bound))
+        assert outcome_of(result, "counted").outcome == "archived"
+        assert outcome_of(result, "late").outcome == "not-actionable"
+        assert (root / "late").is_dir()
+
+    def test_a_due_entry_needs_no_consent(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "due")
+        bound = dataclasses.replace(PRESSURE, consented=frozenset())
+        result = apply_sweep(store, FakeFacts([row("due")]).facts(), pressed(root, tar, bound))
+        assert outcome_of(result, "due").outcome == "archived"
