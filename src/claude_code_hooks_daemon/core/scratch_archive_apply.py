@@ -84,7 +84,7 @@ from claude_code_hooks_daemon.core.scratch_session import (
     remove_empty_session_dir,
 )
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport
-from claude_code_hooks_daemon.core.scratch_verdict import Verdict
+from claude_code_hooks_daemon.core.scratch_verdict import KEEP_MARKER, Verdict
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 _LOG = logging.getLogger(__name__)
@@ -274,6 +274,7 @@ def session_facts(
     parent: ApplyFacts,
     session: str,
     *,
+    session_dir: Path,
     child_live: Callable[[str], bool],
     child_referenced: Callable[[str], bool],
     container_referenced: Callable[[], bool],
@@ -282,8 +283,9 @@ def session_facts(
 
     The classification is the parent's fresh one, narrowed to ``session``'s
     sub-report; a session no longer listed gives an incomplete empty report, so
-    nothing acts. A child is live when it, or the session directory in the
-    parent root, is; referenced when it is, or when anything names the
+    nothing acts. A child is held as live when it, or the session directory in
+    the parent root, is, or when ``session_dir`` holds a keep marker now
+    (:func:`_session_kept`); referenced when it is, or when anything names the
     container (``container_referenced``: the parent's root sites or an unknown
     reference set).
     """
@@ -298,9 +300,27 @@ def session_facts(
 
     return ApplyFacts(
         classify=classify,
-        entry_live=lambda name: child_live(name) or parent.entry_live(session),
+        entry_live=lambda name: (
+            _session_kept(session_dir) or child_live(name) or parent.entry_live(session)
+        ),
         referenced=lambda name: container_referenced() or child_referenced(name),
     )
+
+
+def _session_kept(session_dir: Path) -> bool:
+    """True when the session holds a ``.scratch-keep`` now, or that cannot be read (fail closed).
+
+    Read again at apply time: a marker added after the classification still
+    holds every child. Any ``lstat`` failure but "absent" counts as kept, and a
+    link counts like the file.
+    """
+    try:
+        os.lstat(session_dir / KEEP_MARKER)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        _LOG.warning("%s: keep marker unreadable (%s), read as kept", session_dir, exc)
+    return True
 
 
 def apply_sessions(

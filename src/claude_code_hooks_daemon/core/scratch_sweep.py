@@ -667,13 +667,20 @@ SESSION_HELD_REASON = (
     "session directory: a container whose children are the entries, never packed as one"
 )
 
+#: Why a session name walked as a directory, then found otherwise, is held.
+SESSION_CHANGED_REASON = (
+    "session directory walked as a directory but no longer a directory: held, it changed"
+)
+
 
 def _held_if_session(root: Path, row: EntryRow) -> EntryRow:
     """A real session directory's actionable row, made STUCK so ``--apply`` never packs it whole.
 
     It is still walked and judged as one entry first, so its git pointers keep
-    protecting the entries they lead into. A link or a file with the name is an
-    ordinary entry.
+    protecting the entries they lead into. A link or a file the walk saw with
+    the name is an ordinary entry. One walked as a directory that the second
+    ``lstat`` cannot read, or finds no longer a directory, is held too (fail
+    closed): it changed under the sweep.
     """
     if (
         not is_session_dir_name(row.name)
@@ -686,7 +693,7 @@ def _held_if_session(root: Path, row: EntryRow) -> EntryRow:
     except OSError:
         return _overruled(row, Verdict.STUCK, SESSION_HELD_REASON)
     if not stat.S_ISDIR(info.st_mode):
-        return row
+        return _overruled(row, Verdict.STUCK, SESSION_CHANGED_REASON)
     return _overruled(row, Verdict.STUCK, SESSION_HELD_REASON)
 
 

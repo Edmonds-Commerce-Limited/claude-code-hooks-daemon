@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import shutil
 import subprocess
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -15,6 +16,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.config.models import ScratchConfig
+from claude_code_hooks_daemon.core import scratch_sweep as sweep_mod
 from claude_code_hooks_daemon.core.scratch_filing import HINT_TRACKED
 from claude_code_hooks_daemon.core.scratch_liveness import BackgroundRecords, LivenessInputs
 from claude_code_hooks_daemon.core.scratch_repos import build_project_git
@@ -25,6 +27,7 @@ from claude_code_hooks_daemon.core.scratch_sweep import (
     report_json,
     run_sweep,
 )
+from claude_code_hooks_daemon.core.scratch_verdict import Verdict
 from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
 from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
 from tests.support.scratch_tree import (
@@ -825,6 +828,23 @@ class TestSessionDirectoryIsNeverActedOnWhole:
         report = _sweep(tree, now=now)
         row = next(row for row in report.rows if row.name == _SESSION)
         assert not any("session directory" in reason for reason in row.reasons)
+
+    def test_a_session_directory_gone_non_directory_at_the_second_lstat_is_held(
+        self, tmp_path: Path
+    ) -> None:
+        """Walked as a directory, then a file by the hold's ``lstat``: held STUCK, fail closed."""
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        walked = next(row for row in report.rows if row.name == _SESSION)
+        eligible = dataclasses.replace(walked, verdict=Verdict.DISPOSABLE)
+        shutil.rmtree(tree.root / _SESSION)
+        (tree.root / _SESSION).write_text("swapped")
+        held = sweep_mod._held_if_session(tree.root, eligible)
+        assert held.verdict is Verdict.STUCK
+        assert any("no longer a directory" in reason for reason in held.reasons)
 
     def test_a_session_child_pointing_at_an_entry_still_protects_it(self, tmp_path: Path) -> None:
         gp = build_git_project(tmp_path)

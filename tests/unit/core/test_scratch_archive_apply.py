@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import errno
 import os
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -39,7 +41,12 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu
 from claude_code_hooks_daemon.core.scratch_archive_restore import restore
 from claude_code_hooks_daemon.core.scratch_session import ensure_session_dir, new_entry
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport
-from claude_code_hooks_daemon.core.scratch_verdict import Proof, RepositoryMarker, Verdict
+from claude_code_hooks_daemon.core.scratch_verdict import (
+    KEEP_MARKER,
+    Proof,
+    RepositoryMarker,
+    Verdict,
+)
 from claude_code_hooks_daemon.core.scratch_walk import NodeKind
 
 MAX = 1000
@@ -610,6 +617,7 @@ class SessionWorld:
         return session_facts(
             self.parent(),
             name,
+            session_dir=self.root / name,
             child_live=lambda child: child in self.child_live,
             child_referenced=lambda child: False,
             container_referenced=lambda: self.container_referenced,
@@ -700,6 +708,43 @@ class TestSessionChildrenAreArchivedOneByOne:
         world = self._world(root)
         world.child_live = {"old"}
         run_sessions(world, store, tar)
+        assert (root / SESSION / "old").is_dir()
+
+    def test_a_keep_marker_added_after_classification_holds_every_child(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """The apply-time safety re-check reads the session's ``.scratch-keep`` again."""
+        world = self._world(root)
+
+        def keep() -> None:
+            (root / SESSION / KEEP_MARKER).write_text("hold")
+
+        world.after_first = keep
+        result = run_sessions(world, store, tar)
+        assert outcome_of(result, "old").outcome != "archived"
+        assert (root / SESSION / "old").is_dir()
+
+    def test_a_dangling_keep_link_still_holds(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        world = self._world(root)
+        world.after_first = lambda: (root / SESSION / KEEP_MARKER).symlink_to(root / "nowhere")
+        run_sessions(world, store, tar)
+        assert (root / SESSION / "old").is_dir()
+
+    def test_an_unreadable_keep_marker_holds(
+        self, root: Path, store: ArchiveStore, tar: TarTool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An ``lstat`` of the marker that fails other than 'absent' is read as kept."""
+        real_lstat = os.lstat
+
+        def lstat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+            if str(path).endswith(KEEP_MARKER):
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", lstat)
+        run_sessions(self._world(root), store, tar)
         assert (root / SESSION / "old").is_dir()
 
     def test_a_directory_not_the_one_listed_is_never_acted_in(

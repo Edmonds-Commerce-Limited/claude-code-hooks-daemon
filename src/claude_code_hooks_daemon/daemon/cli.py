@@ -7131,6 +7131,7 @@ def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_roo
         return session_facts(
             facts,
             name,
+            session_dir=Path(sweep_root.path) / name,
             child_live=live_in(resolved / name, f"{relative}/{name}"),
             child_referenced=references_of(f"{relative}/{name}"),
             container_referenced=parent_references.root_named,
