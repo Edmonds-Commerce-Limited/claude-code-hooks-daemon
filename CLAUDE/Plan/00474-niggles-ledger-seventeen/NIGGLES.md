@@ -8115,3 +8115,27 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: `core/scratch_archive_restore.py` sends a record whose parent is `untracked/scratch/s-<...>` through `_open_session`, which opens the session directory `O_RDONLY|O_DIRECTORY|O_NOFOLLOW` and never creates it. A record packed from a linked worktree restores into the main checkout's scratch root, where that session directory exists only by coincidence of name. `tests/unit/daemon/test_cli_scratch_restore_after_worktree_gone.py` pins it: a root entry archived by a linked-worktree `scratch-sweep --apply` restores from main byte for byte after the worktree is removed; a session child is refused ("the session directory 's-...' is not a directory here"). Contained for evacuation: `worktree-reap --reap` evacuates root-level entries only and keeps any worktree whose scratch holds an `s-*` directory, naming the by-hand step. **Existing exposure:** a linked-worktree `scratch-sweep --apply` (Task 6.1) already archives session children that become unrestorable once that worktree is removed, so the advice for such a worktree must stay "file or delete by hand", never "run `--apply` in the worktree".
 
 **Status**: ⬜ Open. Have restore create the session directory (with a fresh manifest, under the `new_entry` lock) when the record's session is absent, or restore such a child flat into the root; then flip the pinned refusal test and let evacuation take session children.
+
+### N692 — the worktree-evacuation re-check treats an unreadable work queue as "no holds"
+
+**Source**: Plan 00627 F-BYPS delta review of `4739172a4..82df55ae6` (`untracked/agent-reports/auto/261121-153421-security-reviewer-a699536dcae6abf23.md`), low finding 1.
+
+**Evidence**: `running_holds` in `core/agent_ownership.py` returns empty holds on a `WorkQueueError`, so the post-answer re-check, the later-worktree re-read and the branch-prune check in `worktree-reap` all miss a hold when the queue is corrupt or on a schema mismatch. Inherited, not introduced by the delta; a concurrent write cannot tear the file (atomic write), and the lock, live-pid and age checks still apply. No test corrupts a queue.
+
+**Status**: ⬜ Open. Make the keep predicate fail closed (keep the worktree, name the unreadable queue) with a test that corrupts the queue.
+
+### N693 — the evacuation re-check skips the evacuation's own preconditions
+
+**Source**: same review, low finding 2.
+
+**Evidence**: `worktree_evacuate.py` (around line 197) runs `keep_reason` after the answer but not `_precondition_refusal` or `resolve_sweep_root`, and `_pack` uses the `sweep_root` resolved before the question. A scratch root swapped for a symlink during the question is not re-checked here. Unconfirmed whether `run_sweep`/`apply_sweep` refuse a symlinked root at pack time.
+
+**Status**: ⬜ Open. Read `scratch_sweep.run_sweep`'s root handling; if it does not refuse, re-run the preconditions inside the re-check, with a test that swaps the root during the question.
+
+### N694 — `reap_worktree` prints an unquoted branch name on its timeout-recovery line
+
+**Source**: same review, low finding 3.
+
+**Evidence**: `reap_worktree` prints `git branch -d {state.branch}` without `shlex.quote`. Git allows `;`, `$`, backtick and `|` in branch names, so the pasted line can split. Reachable only after a removal timeout. The `prune_branch` restore commands from `delete_branches` were not checked.
+
+**Status**: ⬜ Open. Quote every git or file name interpolated into a printed command line (both sites), with a test using a branch name containing a space and `;`.

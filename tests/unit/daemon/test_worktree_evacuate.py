@@ -15,7 +15,7 @@ import json
 import os
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -32,13 +32,15 @@ from claude_code_hooks_daemon.core.worktree_scratch_evacuation import Evacuation
 from claude_code_hooks_daemon.daemon.cli import (
     SCRATCH_SWEEP_DEFAULT_MAX_INODES,
     SCRATCH_SWEEP_DEFAULT_SECONDS,
-    _daemon_untracked_dir,
     _ScratchSources,
     build_parser,
     cmd_scratch_sweep,
     cmd_worktree_reap,
 )
 from claude_code_hooks_daemon.daemon.housekeeping import mutating_steps
+from claude_code_hooks_daemon.daemon.install_layout import (
+    get_untracked_dir as _daemon_untracked_dir,
+)
 from claude_code_hooks_daemon.daemon.worktree_evacuate import (
     EvacuateSeams,
     confirm_evacuate_interactively,
@@ -338,6 +340,20 @@ class TestTheQuestion:
 
 class _Killed(Exception):
     """A kill between two steps; deliberately not an OSError, which ``_pack`` reports."""
+
+
+def _clock_at(moment: float) -> Callable[[], float]:
+    def _clock() -> float:
+        return moment
+
+    return _clock
+
+
+def _cwds_of(cwds: Mapping[int, Path]) -> Callable[[], Mapping[int, Path]]:
+    def _read() -> Mapping[int, Path]:
+        return cwds
+
+    return _read
 
 
 def _yes(_relative: str, _gate: EvacuationGate) -> bool:
@@ -864,7 +880,7 @@ class TestProperty:
                 age_fn=lambda _p: 999_999.0,
                 process_cwds_fn=lambda: {},
                 evacuate_seams=EvacuateSeams(
-                    confirm=_yes, wall_clock=lambda now=now: now, process_cwds=lambda c=cwds: c
+                    confirm=_yes, wall_clock=_clock_at(now), process_cwds=_cwds_of(cwds)
                 ),
             )
 
