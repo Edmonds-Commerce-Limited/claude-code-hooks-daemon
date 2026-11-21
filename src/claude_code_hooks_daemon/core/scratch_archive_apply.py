@@ -62,6 +62,7 @@ from claude_code_hooks_daemon.core.scratch_archive_expire import (
     ExpiryOutcome,
     ExpiryRefused,
     expire_due,
+    expired_ids,
 )
 from claude_code_hooks_daemon.core.scratch_archive_pack import (
     PackRefused,
@@ -131,6 +132,8 @@ class ApplySettings:
     max_depth: int = DEFAULT_MAX_DEPTH
     #: A session directory empty this long after its last recorded birth is removed; None: never.
     empty_session_hours: float | None = None
+    #: ``(st_dev, st_ino)`` the root must have when opened; None: not checked (a top-level root).
+    expected_identity: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -178,6 +181,14 @@ def apply_sweep(
     store.require_lock("apply")
     notes: list[str] = []
     root_fd = open_dir(settings.root)
+    if settings.expected_identity is not None:
+        info = os.fstat(root_fd)
+        if (info.st_dev, info.st_ino) != settings.expected_identity:
+            os.close(root_fd)
+            # Checked before any reclaim or resume: nothing in a swapped directory is touched.
+            return acted_on_nothing(
+                store, f"{settings.root.name} is not the directory that was listed"
+            )
     try:
         reclaimed = reclaim_staging(store, max_depth=settings.max_depth)
         resumed = tuple(
@@ -224,6 +235,21 @@ def apply_sweep(
         unfinished_adoptions=adoptions,
         audit=audit,
         notes=tuple(notes),
+    )
+
+
+def acted_on_nothing(store: ArchiveStore, reason: str) -> ApplyResult:
+    """An incomplete result for a root no step touched."""
+    return ApplyResult(
+        complete=False,
+        incomplete_reasons=(reason,),
+        reclaimed=(),
+        resumed=(),
+        entries=(),
+        expired=(),
+        unfinished_adoptions=(),
+        audit=store.audit(),
+        notes=(),
     )
 
 
@@ -293,18 +319,28 @@ def apply_sessions(
     the facts (normally :func:`session_facts`).
     """
     store.require_lock("apply")
-    names = [Path(sub.root).name for sub in facts.classify().sessions]
+    listed = [(Path(sub.root).name, sub.identity) for sub in facts.classify().sessions]
     results: list[tuple[str, ApplyResult]] = []
-    for name in names:
+    for name, identity in listed:
         if not is_session_dir_name(name):
+            continue
+        if identity is None:
+            results.append((name, acted_on_nothing(store, f"{name}: no identity was recorded")))
             continue
         sub_settings = dataclasses.replace(
             settings,
             root=settings.root / name,
             original_prefix=f"{settings.original_prefix}/{name}",
+            expected_identity=identity,
         )
-        result = apply_sweep(store, for_session(name), sub_settings, after_step=after_step)
-        removal = _remove_if_empty(store, facts, settings, name)
+        try:
+            result = apply_sweep(store, for_session(name), sub_settings, after_step=after_step)
+        except OSError as exc:
+            # One session that cannot be opened (gone, or a link) never stops the others.
+            reason = f"{name} could not be opened: {type(exc).__name__}"
+            results.append((name, acted_on_nothing(store, reason)))
+            continue
+        removal = _remove_if_empty(store, facts, settings, name) if result.complete else ""
         if removal:
             result = dataclasses.replace(result, notes=(*result.notes, removal))
         results.append((name, result))
@@ -316,8 +352,9 @@ def _remove_if_empty(
 ) -> str:
     """Step 4: remove session directory ``name`` when it is empty and old; a note, or "".
 
-    Held while the directory is live in the root, or while any archive record
-    names a path inside it (its restore needs the directory to exist).
+    Held while the directory is live in the root, or while any live (not
+    expired) archive record names a path inside it: its restore needs the
+    directory to exist.
     """
     if settings.empty_session_hours is None:
         return ""
@@ -327,8 +364,11 @@ def _remove_if_empty(
     def held() -> bool:
         if facts.entry_live(name):
             return True
-        records = store.read_index().records
-        return any(record.original_path.startswith(inside) for record in records)
+        gone = expired_ids(store.read_events())
+        return any(
+            record.original_path.startswith(inside) and record.archive_id not in gone
+            for record in store.read_index().records
+        )
 
     try:
         root_fd = open_dir(settings.root)

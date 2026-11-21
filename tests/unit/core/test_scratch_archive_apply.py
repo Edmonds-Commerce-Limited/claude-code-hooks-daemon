@@ -578,11 +578,15 @@ class SessionWorld:
     child_live: set[str] = field(default_factory=set)
 
     session_name: str = SESSION
+    #: Run once, after the first classification has been read.
+    after_first: Callable[[], None] | None = None
 
     def classify(self) -> SweepReport:
         self.classified += 1
         info = os.lstat(self.root / self.session_name)
         identity = self.identity or (info.st_dev, info.st_ino)
+        if self.classified == 1 and self.after_first is not None:
+            self.after_first()
         sub = SweepReport(
             str(self.root / self.session_name),
             tuple(self.children),
@@ -701,10 +705,29 @@ class TestSessionChildrenAreArchivedOneByOne:
     def test_a_directory_not_the_one_listed_is_never_acted_in(
         self, root: Path, store: ArchiveStore, tar: TarTool
     ) -> None:
-        result = run_sessions(self._world(root, identity=(0, 0)), store, tar)
+        world = self._world(root, identity=(0, 0))
+        (root / SESSION / (CLAIM_PREFIX + "left")).mkdir()
+        result = run_sessions(world, store, tar)
         assert not result.complete
-        assert outcome_of(result, "old").outcome == "not-actionable"
+        assert result.entries == () and result.resumed == ()
         assert (root / SESSION / "old").is_dir()
+        assert (root / SESSION / (CLAIM_PREFIX + "left")).is_dir()
+
+    def test_a_session_swapped_for_a_link_is_skipped_and_the_rest_still_run(
+        self, root: Path, store: ArchiveStore, tar: TarTool, outside: Path
+    ) -> None:
+        world = self._world(root)
+
+        def swap() -> None:
+            (root / SESSION).rename(root / "moved")
+            (root / SESSION).symlink_to(outside)
+
+        world.after_first = swap
+        result = run_sessions(world, store, tar)
+        assert not result.complete
+        assert any("could not be opened" in reason for reason in result.incomplete_reasons)
+        assert (root / "moved" / "old").is_dir()
+        assert (outside / "keep.txt").read_text() == "outside content"
 
     def test_a_session_gone_from_the_fresh_listing_acts_on_nothing(
         self, root: Path, store: ArchiveStore, tar: TarTool
