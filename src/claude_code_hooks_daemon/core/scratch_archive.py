@@ -73,6 +73,10 @@ class StoreRefused(Exception):
     """The store cannot be used safely; nothing was changed."""
 
 
+class StoreAbsent(StoreRefused):
+    """There is no store, and the caller asked for it not to be created."""
+
+
 class StoreBusy(Exception):
     """Another sweep holds the store's lock."""
 
@@ -365,29 +369,29 @@ class ArchiveStore:
         self._lock_fd: int | None = None
 
     @classmethod
-    def open(cls, path: Path) -> ArchiveStore:
-        """Open (creating if absent) the store at ``path``; raise :class:`StoreRefused`."""
+    def open(cls, path: Path, *, create: bool = True) -> ArchiveStore:
+        """Open the store at ``path``; raise :class:`StoreRefused`.
+
+        With ``create`` (the default) an absent store is created; without it an
+        absent store raises :class:`StoreAbsent` and nothing is made, which is
+        what a read-only caller such as ``scratch-sweep status`` needs.
+        """
         try:
             parent_fd = os.open(path.parent, _DIR_FLAGS)
+        except FileNotFoundError as exc:
+            if not create:
+                raise StoreAbsent(f"there is no archive store at {path}") from exc
+            raise StoreRefused(f"store parent {path.parent} cannot be opened: {exc}") from exc
         except OSError as exc:
             raise StoreRefused(f"store parent {path.parent} cannot be opened: {exc}") from exc
         try:
             created = False
-            try:
-                os.mkdir(path.name, STORE_MODE, dir_fd=parent_fd)
-                created = True
-            except FileExistsError as exc:
-                log_and_continue(
-                    _LOG,
-                    exc,
-                    reason="an existing store directory is the normal reopen case",
-                    level=logging.DEBUG,
-                )
-                created = False
-            except OSError as exc:
-                raise StoreRefused(f"store {path} cannot be created: {exc}") from exc
+            if create:
+                created = cls._make(path, parent_fd)
             try:
                 dir_fd = os.open(path.name, _DIR_FLAGS, dir_fd=parent_fd)
+            except FileNotFoundError as exc:
+                raise StoreAbsent(f"there is no archive store at {path}") from exc
             except OSError as exc:
                 raise StoreRefused(f"store {path} is not a plain directory: {exc}") from exc
         finally:
@@ -408,6 +412,23 @@ class ArchiveStore:
             os.close(dir_fd)
             raise
         return cls(path, dir_fd)
+
+    @staticmethod
+    def _make(path: Path, parent_fd: int) -> bool:
+        """Create the store directory; True when this call created it."""
+        try:
+            os.mkdir(path.name, STORE_MODE, dir_fd=parent_fd)
+        except FileExistsError as exc:
+            log_and_continue(
+                _LOG,
+                exc,
+                reason="an existing store directory is the normal reopen case",
+                level=logging.DEBUG,
+            )
+            return False
+        except OSError as exc:
+            raise StoreRefused(f"store {path} cannot be created: {exc}") from exc
+        return True
 
     @property
     def dir_fd(self) -> int:
