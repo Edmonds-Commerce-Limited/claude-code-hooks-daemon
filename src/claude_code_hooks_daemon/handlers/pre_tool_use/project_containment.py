@@ -79,7 +79,10 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import placed_moves
 from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
-from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
+from claude_code_hooks_daemon.utils.scratch_dir import (
+    SCRATCH_LIFECYCLE_GUIDANCE,
+    acceptance_path,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     body_may_run,
     heredoc_consumers,
@@ -172,7 +175,10 @@ _RULE = Rule(
         "container's temp directory is wiped on restart, and every other path rule "
         "is scoped to the repo so none of them judges it"
     ),
-    fix=f"Write it inside the repository — `{SCRATCH_DIR}/` is the scratch location",
+    fix=(
+        f"Write it inside the repository — your session directory under `{SCRATCH_DIR}/` "
+        "for consumed, short-lived files; file anything worth keeping where git carries it"
+    ),
     verbose=(
         "WHY BLOCKED:\n"
         "The target path is not inside this repository, so it is:\n"
@@ -184,6 +190,7 @@ _RULE = Rule(
         "  - inside the working tree, so it survives container restarts\n"
         "  - gitignored, so it never reaches review\n"
         "  - the same convention the daemon's own runtime files already use\n\n"
+        f"{SCRATCH_LIFECYCLE_GUIDANCE}\n\n"
         "Scratch is not a reason to leave the repository. The only throwaway\n"
         "location this rule opens is the session scratchpad Claude Code names in\n"
         "its system prompt, and that is wiped with the session -- so nothing is\n"
@@ -1038,8 +1045,8 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             "survives a container restart, and gitignored so it never reaches review. "
             "A container's temp directory has neither property — work written there "
             "is gone on the next restart, which is why 'it's only scratch' is not a "
-            "reason to leave the repository. There is no throwaway location, so "
-            "nothing is lost by writing it somewhere durable.\n\n"
+            "reason to leave the repository.\n\n"
+            f"{SCRATCH_LIFECYCLE_GUIDANCE}\n\n"
             "**NOT blocked**: reading any path; a temp file a PROGRAM creates for "
             "itself at runtime (pytest's `tmp_path`, a package manager's build dir) — "
             "this rule judges paths your command NAMES, not what a tool does "

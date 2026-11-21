@@ -47,6 +47,19 @@ _PROJECT_DIR_VAR = "$CLAUDE_PROJECT_DIR"
 #: rather than depending on the daemon having run first.
 SCRATCH_IGNORE_CONTENT = "*\n!.gitignore\n"
 
+#: The three things every place that tells an agent where to write scratch
+#: says (Plan 00627 DESIGN section 12, merged with Plan 00560 Task 2.1): write
+#: inside your session directory; it is consumed, short-lived and swept after
+#: its TTL; anything worth keeping is filed where git carries it. One constant
+#: so the handlers that print it cannot drift apart.
+SCRATCH_LIFECYCLE_GUIDANCE = (
+    f"Write scratch inside your session directory "
+    f"(`{ProjectPath.SCRATCH_DIR}/s-<UTC time>-<session id>/`, announced at SessionStart; "
+    "`hooks-daemon scratch new <name>` makes an entry there). Scratch is for consumed, "
+    "short-lived files: it is swept after 24 hours by default. Anything worth keeping is "
+    "filed where git carries it: a plan folder, a plan journal, a pushed commit or an issue."
+)
+
 
 def acceptance_path(*segments: str) -> str:
     """Return an acceptance-fixture path that resolves ABSOLUTELY on any machine.
