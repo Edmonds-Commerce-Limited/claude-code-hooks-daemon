@@ -20,11 +20,12 @@ from __future__ import annotations
 import io
 import os
 import re
-import shlex
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Final, TextIO, cast
 
+from claude_code_hooks_daemon.utils.linear_shlex import LinearShlex
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     command_word,
     peel_command_wrappers,
@@ -132,7 +133,7 @@ def _statements(command: str) -> Iterator[tuple[list[str], str]]:
     """
     text = _strip_heredocs(command).replace("\\\n", " ")
     stream = cast("TextIO", _KeepNewlineAfterComment(text))
-    lexer = shlex.shlex(stream, posix=True, punctuation_chars=_PUNCTUATION)
+    lexer = LinearShlex(stream, posix=True, punctuation_chars=_PUNCTUATION)
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     current: list[str] = []
@@ -453,7 +454,7 @@ def creates_directory_under(command: str, cwd: Path, roots: Iterable[Path]) -> b
     or is a creation the scan cannot place."""
     normalised = [Path(os.path.normpath(root)) for root in roots]
     return any(
-        target is None or target == root or target.is_relative_to(root)
+        target is None or target == root or path_is_relative_to(target, root)
         for target in _all_targets(command, cwd)
         for root in normalised
     )
