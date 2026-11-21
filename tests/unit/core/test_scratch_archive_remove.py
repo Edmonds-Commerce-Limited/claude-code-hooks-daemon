@@ -1513,11 +1513,27 @@ _DELETERS = frozenset(
 )
 
 
+_DELETING_MODULES = frozenset({"os", "shutil"})
+
+
 def _deleter(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Attribute) and node.attr in _DELETERS:
+    """The deleting call ``node`` names: ``os.<x>`` / ``shutil.<x>`` only.
+
+    Only module-qualified references count, so ``dataclasses.replace`` or
+    ``str.replace`` is not a removal. A bare name is caught at its
+    ``from os import unlink`` instead (see ``_scan``).
+    """
+    if (
+        isinstance(node, ast.Attribute)
+        and node.attr in _DELETERS
+        and isinstance(node.value, ast.Name)
+        and node.value.id in _DELETING_MODULES
+    ):
         return node.attr
-    if isinstance(node, ast.Name) and node.id in _DELETERS:
-        return node.id
+    if isinstance(node, ast.ImportFrom) and node.module in _DELETING_MODULES:
+        for alias in node.names:
+            if alias.name in _DELETERS:
+                return alias.name
     return None
 
 
@@ -1531,16 +1547,39 @@ def _scan(node: ast.AST, scope: str, module: str, found: set[tuple[str, str, str
         _scan(child, inner, module, found)
 
 
-def _deletion_surfaces() -> set[tuple[str, str, str]]:
-    """Every reference to a deleting call in the archive modules: (module, scope, call).
+_SCRATCH_REMOVERS = ("scratch_archive", "scratch_session")
 
+
+def _touches_scratch_removal(tree: ast.Module, name: str) -> bool:
+    """True for a scratch_archive*/scratch_session module or any module importing one."""
+    if name.startswith(_SCRATCH_REMOVERS):
+        return True
+    for node in ast.walk(tree):
+        names: list[str] = []
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names = [node.module or "", *(alias.name for alias in node.names)]
+        if any(part.startswith(_SCRATCH_REMOVERS) for n in names for part in n.split(".")):
+            return True
+    return False
+
+
+def _deletion_surfaces() -> set[tuple[str, str, str]]:
+    """Every deleting reference in the scratch-removal inventory: (module, scope, call).
+
+    The inventory is every package module that is, or imports, a
+    ``scratch_archive*`` or ``scratch_session`` module, so a removal added
+    to a caller is seen too. Modules are named relative to the package.
     The whole module is scanned, so a module- or class-level alias such as
     ``_rm = shutil.rmtree`` is listed under ``<module>``.
     """
-    core = Path(claude_code_hooks_daemon.__file__).parent / "core"
+    package = Path(claude_code_hooks_daemon.__file__).parent
     found: set[tuple[str, str, str]] = set()
-    for path in sorted(core.glob("scratch_archive*.py")):
-        _scan(ast.parse(path.read_text(encoding="utf-8")), "<module>", path.name, found)
+    for path in sorted(package.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if _touches_scratch_removal(tree, path.name):
+            _scan(tree, "<module>", path.relative_to(package).as_posix(), found)
     return found
 
 
@@ -1548,6 +1587,27 @@ def test_the_surface_scan_sees_a_module_level_alias() -> None:
     found: set[tuple[str, str, str]] = set()
     _scan(ast.parse("import shutil\n_rm = shutil.rmtree\n"), "<module>", "m.py", found)
     assert found == {("m.py", "<module>", "rmtree")}
+
+
+def test_the_surface_scan_ignores_a_non_os_replace() -> None:
+    found: set[tuple[str, str, str]] = set()
+    source = (
+        "import dataclasses\ndef f(x):\n    return dataclasses.replace(x), 'a'.replace('a', 'b')\n"
+    )
+    _scan(ast.parse(source), "<module>", "m.py", found)
+    assert found == set()
+
+
+def test_the_surface_scan_sees_an_os_import_from() -> None:
+    found: set[tuple[str, str, str]] = set()
+    _scan(ast.parse("def f():\n    from os import unlink\n"), "<module>", "m.py", found)
+    assert found == {("m.py", "f", "unlink")}
+
+
+def test_the_inventory_includes_an_importer_of_scratch_session() -> None:
+    tree = ast.parse("from claude_code_hooks_daemon.core.scratch_session import x\n")
+    assert _touches_scratch_removal(tree, "other.py")
+    assert not _touches_scratch_removal(ast.parse("import os\n"), "other.py")
 
 
 _CTYPES_MOVERS = frozenset({"rename_noreplace", "rename_noreplace_between", "_RENAMEAT2"})
@@ -1593,14 +1653,29 @@ def test_ctypes_moves_are_only_the_listed_ones() -> None:
 
 
 def test_deletion_surfaces_are_only_the_listed_ones() -> None:
-    """The Task 3.9 review list: every place the archive modules can delete or truncate."""
+    """The Task 3.9 review list: every place the scratch-removal inventory can delete or truncate.
+
+    Each entry was reviewed. The scratch_session ones touch only the module's
+    own files: ``_write_new_file`` drops its temp name after the link,
+    ``_replace_file`` is the atomic manifest rewrite, ``new_entry`` undoes the
+    ``mkdir`` it just made, and ``_remove_locked`` removes an empty, old,
+    unheld session directory whose name still holds the locked one (DESIGN
+    section 13). The cli ones remove proven-stale venvs, not scratch.
+    """
     assert _deletion_surfaces() == {
-        ("scratch_archive.py", "_append_line", "ftruncate"),
-        ("scratch_archive.py", "discard_unrecorded", "unlink"),
-        ("scratch_archive_expire.py", "_unlink_expired", "unlink"),
-        ("scratch_archive_remove.py", "_delete", "unlink"),
-        ("scratch_archive_remove.py", "_delete", "rmdir"),
-        ("scratch_archive_restore.py", "_clean_staging", "rmdir"),
-        ("scratch_archive_restore.py", "_empty_dir", "unlink"),
-        ("scratch_archive_restore.py", "_empty_dir", "rmdir"),
+        ("core/scratch_archive.py", "_append_line", "ftruncate"),
+        ("core/scratch_archive.py", "discard_unrecorded", "unlink"),
+        ("core/scratch_archive_expire.py", "_unlink_expired", "unlink"),
+        ("core/scratch_archive_remove.py", "_delete", "unlink"),
+        ("core/scratch_archive_remove.py", "_delete", "rmdir"),
+        ("core/scratch_archive_restore.py", "_clean_staging", "rmdir"),
+        ("core/scratch_archive_restore.py", "_empty_dir", "unlink"),
+        ("core/scratch_archive_restore.py", "_empty_dir", "rmdir"),
+        ("core/scratch_session.py", "_write_new_file", "unlink"),
+        ("core/scratch_session.py", "_replace_file", "replace"),
+        ("core/scratch_session.py", "new_entry", "rmdir"),
+        ("core/scratch_session.py", "_remove_locked", "unlink"),
+        ("core/scratch_session.py", "_remove_locked", "rmdir"),
+        ("daemon/cli.py", "_cleanup_proven_stale_venvs", "rmtree"),
+        ("daemon/cli.py", "_remove_venv_dirs", "rmtree"),
     }
