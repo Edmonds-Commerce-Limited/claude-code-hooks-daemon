@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (86 handlers)
+### PreToolUse (87 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -76,6 +76,7 @@
 | 46 | agent_dispatch_recorder | NON-TERMINAL | Record ``name -> subagent_type`` for a NAMED dispatch, and every dispatch's tier row |
 | 46 | agent_isolation_advisor | ADVISORY | Advise ``isolation: worktree`` when peers are already active in this checkout |
 | 46 | plan_workflow | ADVISORY | Provide guidance when creating plan files |
+| 46 | scratch_unowned_entry | ADVISORY | Advise (or block) a write creating an entry directly in a scratch root |
 | 47 | docs_qa_commit_gate | ADVISORY | Warn-first STAGED docs QA gate on git commit |
 | 47 | docs_qa_edit | ADVISORY | Blocking/advisory EDIT-time lint for documentation-scoped files |
 | 48 | dispatch_declaration | BLOCKING | Advise or (strict mode) require a file-handoff declaration on Task dispatch |

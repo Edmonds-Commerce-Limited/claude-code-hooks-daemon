@@ -1350,6 +1350,34 @@ handlers:
       priority: 18
 ```
 
+#### scratch_unowned_entry
+
+| Property       | Value                     |
+| -------------- | ------------------------- |
+| **Config key** | `scratch_unowned_entry`   |
+| **Priority**   | 46                        |
+| **Type**       | Advisory (configurable)   |
+| **Event**      | PreToolUse                |
+| **Rule**       | `R-SCRATCH-UNOWNED-ENTRY` |
+
+**Description:** A `Write`/`Edit` or Bash write that would create a new first-level entry directly in `untracked/scratch/` (outside the `s-*` session directory) gets an advisory naming `bin/hooks-daemon scratch new`, because such an entry has no recorded owner, birth or purpose. `scratch.sweep.unowned_entry` sets the answer: `advise` (default; never denies), `block` (denies under `R-SCRATCH-UNOWNED-ENTRY`) or `off`. An entry that already exists, a session directory and `.gitignore` never fire. Not seen: `mkdir` and `touch` (the Bash write scan does not report them), and a destination built from a variable.
+
+**Example trigger:**
+
+```
+echo notes > untracked/scratch/notes.txt
+```
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    scratch_unowned_entry:
+      enabled: true
+      priority: 46
+```
+
 ---
 
 #### write_protected_paths
@@ -5458,6 +5486,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `lock_file_edit_blocker`        | PreToolUse        | 10       | Direct editing of lock files                                                    |
 | `write_protected_paths`         | PreToolUse        | 18       | Agent writes to a configured read-only path                                     |
 | `scratch_keep_marker_guard`     | PreToolUse        | 18       | An agent writing or removing a `.scratch-keep` marker                           |
+| `scratch_unowned_entry`         | PreToolUse        | 46       | A new scratch entry outside the session directory (only when set to `block`)    |
 | `pip_break_system`              | PreToolUse        | 10       | pip --break-system-packages                                                     |
 | `sudo_pip`                      | PreToolUse        | 10       | sudo pip install                                                                |
 | `host_command_guard`            | PreToolUse        | 10       | docker host-root mount, gh auth token, non-PyPI pip index, crontab -r           |

@@ -100,6 +100,12 @@ class HandlerID:
         config_key="scratch_keep_marker_guard",
         display_name="scratch-keep-marker-guard",
     )
+    # Plan 00627 Task 4.5: a new entry made directly in a scratch root has no owner.
+    SCRATCH_UNOWNED_ENTRY = HandlerIDMeta(
+        class_name="ScratchUnownedEntryHandler",
+        config_key="scratch_unowned_entry",
+        display_name="scratch-unowned-entry",
+    )
     # Plan 00499: paths agents may read but never create, change, move onto or delete.
     WRITE_PROTECTED_PATHS = HandlerIDMeta(
         class_name="WriteProtectedPathsHandler",

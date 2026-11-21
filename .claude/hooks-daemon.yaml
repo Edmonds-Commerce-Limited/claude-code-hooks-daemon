@@ -450,6 +450,10 @@ handlers:
       enabled: true
       priority: 18
 
+    scratch_unowned_entry:     # A new entry directly in a scratch root: advise|block|off via scratch.sweep.unowned_entry
+      enabled: true
+      priority: 46
+
     pip_break_system:      # Blocks pip commands that break system packages
       enabled: true
       priority: 21

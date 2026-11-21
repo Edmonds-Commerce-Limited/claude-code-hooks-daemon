@@ -230,6 +230,7 @@ class ConfigTemplate:
             "    curl_pipe_shell: {enabled: true, priority: 10}   # Block curl | bash patterns\n"
             "    lock_file_edit_blocker: {enabled: true, priority: 10}  # Block direct editing of package manager lock files\n"
             "    scratch_keep_marker_guard: {enabled: true, priority: 18}  # Only a human writes .scratch-keep (pins a scratch entry for ever)\n"
+            "    scratch_unowned_entry: {enabled: true, priority: 46}  # Advise on a new entry made directly in a scratch root (scratch.sweep.unowned_entry)\n"
             # Plan 00499: opt-in; does nothing until `paths` lists repository-relative globs.
             "    write_protected_paths: {enabled: false, priority: 18, options: {paths: []}}  # Paths agents may read but never write, move onto or delete\n"
             # On by default (Plan 00117): prefix-positive gate on AskUserQuestion

@@ -29,6 +29,7 @@ if TYPE_CHECKING:
         DocumentationConfig,
         PlanWorkflowConfig,
         ReferenceReposConfig,
+        ScratchConfig,
         WorktreeConfig,
     )
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
@@ -630,6 +631,7 @@ class HandlerRegistry:
         worktree: "WorktreeConfig | None" = None,
         reference_repos: "ReferenceReposConfig | None" = None,
         branches: "BranchesConfig | None" = None,
+        scratch: "ScratchConfig | None" = None,
         config_problems: Sequence[str] = (),
     ) -> int:
         """Register all discovered handlers with the router.
@@ -660,6 +662,8 @@ class HandlerRegistry:
             branches: Optional BranchesConfig (Plan 00558), injected as
                 ``_branches`` onto handlers that DECLARE that attribute,
                 selected the same way as ``reference_repos``
+            scratch: Optional ScratchConfig (Plan 00627), injected as
+                ``_scratch`` onto handlers that DECLARE that attribute
             config_problems: ``DaemonConfig.config_problems`` (Plan 00466
                 round 3), injected as ``_config_problems`` onto handlers that
                 DECLARE that attribute, like ``_option_failures``
@@ -889,6 +893,11 @@ class HandlerRegistry:
                             branches_attr_name = "_branches"
                             if branches is not None and hasattr(instance, branches_attr_name):
                                 setattr(instance, branches_attr_name, branches)
+
+                            # The `scratch:` block (Plan 00627), same selection.
+                            scratch_attr_name = "_scratch"
+                            if scratch is not None and hasattr(instance, scratch_attr_name):
+                                setattr(instance, scratch_attr_name, scratch)
 
                             # Pass-1 option failures (Plan 00466 N19), for the
                             # session-start alert. Same declared-attribute

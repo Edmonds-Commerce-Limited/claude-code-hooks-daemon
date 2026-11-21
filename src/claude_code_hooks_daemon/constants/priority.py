@@ -508,6 +508,8 @@ class Priority:
     PLAN_QA_COMMIT_GATE = 44
     PLAN_WORKFLOW = 45
     AGENT_ISOLATION_ADVISOR = 46
+    # Plan 00627 Task 4.5: workflow band; advises (or, configured, blocks) a write.
+    SCRATCH_UNOWNED_ENTRY = 46
     # Plan 00518: a silent sensor that never decides; its slot only orders it
     # among the workflow handlers that see the same dispatch.
     AGENT_DISPATCH_RECORDER = 46

@@ -67,6 +67,7 @@ if TYPE_CHECKING:
         PluginsConfig,
         ProjectHandlersConfig,
         ReferenceReposConfig,
+        ScratchConfig,
         WorktreeConfig,
     )
     from claude_code_hooks_daemon.core.handler import Handler
@@ -256,6 +257,7 @@ class DaemonController:
         worktree: "WorktreeConfig | None" = None,
         reference_repos: "ReferenceReposConfig | None" = None,
         branches: "BranchesConfig | None" = None,
+        scratch: "ScratchConfig | None" = None,
         chain_deadline_problems: list[str] | None = None,
         config_fingerprint: str | None = None,
         config_problems: list[str] | None = None,
@@ -380,6 +382,7 @@ class DaemonController:
             worktree=worktree,
             reference_repos=reference_repos,
             branches=branches,
+            scratch=scratch,
             config_problems=self._config_problems,
         )
 

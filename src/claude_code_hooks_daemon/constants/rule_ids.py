@@ -576,6 +576,14 @@ class RuleID:
     SCRATCH_KEEP_MARKER: str = "R-SCRATCH-KEEP-MARKER"
 
     # ------------------------------------------------------------------
+    # scratch_unowned_entry handler (Plan 00627 Task 4.5)
+    # ------------------------------------------------------------------
+
+    #: A new entry made directly in a scratch root, outside a session directory
+    #: (denied only when ``scratch.sweep.unowned_entry`` is ``block``).
+    SCRATCH_UNOWNED_ENTRY: str = "R-SCRATCH-UNOWNED-ENTRY"
+
+    # ------------------------------------------------------------------
     # subagent_context_budget / subagent_handoff_gate handlers (Plan 00471)
     # ------------------------------------------------------------------
 
