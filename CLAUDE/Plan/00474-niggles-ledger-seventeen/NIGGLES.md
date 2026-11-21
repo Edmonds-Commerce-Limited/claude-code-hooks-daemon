@@ -8099,3 +8099,11 @@ smaller than the add's, but at a load average near 70 they time out too.
 **Evidence**: `hooks-daemon docs-qa --project-root . --lint CLAUDE/Plan/README.md` raises `ValueError: '<abs path>' is not in the subpath of '.'` from `path_relative_to` in `cmd_docs_qa` (`daemon/cli.py`, the `lint_rel_path` line): the lint target is resolved to an absolute path but the project root is not. `plan-qa` given the same arguments does not crash but refuses with "Lint target is not a plan document". Both work with an absolute `--project-root`.
 
 **Status**: ⬜ Open. Resolve `--project-root` to an absolute path once at argument parsing for every QA verb, with a test that runs `--lint` under a relative root.
+
+### N690 — the branch-tip moved-ref report omits the commit count DESIGN specified
+
+**Source**: post-merge archival check of Plan 00594 Task 5.1 against DESIGN §3 and §7.1 (`CLAUDE/Plan/Completed/00594-branch-lifecycle-and-branch-tip-channel/`).
+
+**Evidence**: DESIGN §3 specifies "tracked ref moved <old>..<new> (N commits)" and §7.1 asks the fixture proof to show "the moved-ref report with the commit count". `version_check._tracked_ref_lines` prints `tracked ref <ref> moved <old>..<new>; re-run the guarded install ...` with no count, and the fixture proof (`subagent-reports/261121-task-5-1-fixture-proof.md`, step 3) quotes exactly that. A client is told that the ref moved and where to, but not how far. The count needs the new commits locally (a fetch), which the one-listing design avoids, so it may have been dropped on purpose; nothing records that.
+
+**Status**: ⬜ Open. Either add the count when the new tip is already local (and say "count unknown" otherwise), or amend DESIGN §3 to drop it and record why.

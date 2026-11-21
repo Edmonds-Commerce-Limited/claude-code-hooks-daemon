@@ -311,6 +311,9 @@ names, people or hashes appear here.
   Evidence and limits (the move check lists a fixed GitHub URL, rewritten to
   the bare for the proof; the tip cache was emptied per report):
   [subagent-reports/261121-task-5-1-fixture-proof.md](subagent-reports/261121-task-5-1-fixture-proof.md).
+  Deviation from DESIGN §3/§7.1: the moved-ref report gives the sha range
+  (`moved 13e9c60..fd86a69`) but not the commit count §3 specifies
+  (`version_check._tracked_ref_lines`); niggle N690.
 - [x] ✅ **Task 5.2**: (RC feedback; done on the release branch, release note
   034\) A guarded unreleased install no longer exits 141 when the ref's
   `pyproject.toml` is larger than one pipe write. Layer 1 reads the blob
