@@ -107,7 +107,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [x] ✅ **Task 5.3**: Add the cap evaluation (warn, block, incomplete can only raise). `core/scratch_caps.py` `evaluate_caps`; pure, not yet wired to an inventory (5.1) or a report (5.2).
 - [x] ✅ **Task 5.4**: Add `R-SCRATCH-CAP`: deny directory-creating commands into scratch at block; never a file write; the never-stranded downgrade. PreToolUse `scratch_cap_guard` (priority 19) reads the cached inventory only; advises in `caps.mode: advise` (this repository, until Task 8.3) and when only LIVE/KEPT/PROTECTED entries keep scratch over the block cap. `utils/scratch_dir_creation.scratch_roots` adds the configured sweep root, which the refresher now watches too.
 - [ ] ⬜ **Task 5.5**: Add pressure mode to `--apply`.
-- [ ] ⬜ **Task 5.6**: Add the must-do item through `session_actions_directive`.
+- [x] ✅ **Task 5.6**: Add the must-do item through `session_actions_directive`. `ScratchSweepHandler` is now `SessionStartVerifiable` (declared INFO); its read-only `verify_still_needed` (`sweep_action_required`) is true while an entry is due or a cap is at warn, which puts it on the must-do list. A missing inventory adds no item.
 - [ ] ⬜ **Task 5.7**: Add the housekeeping steps `scratch-sweep` and `scratch-sweep-apply` (unconfirmed, DESIGN.md R13) and update the Decision 6 text.
 - [ ] ⬜ **Task 5.8**: Declare the sweep as a routine in this repository so a sweep that stops running is reported.
 

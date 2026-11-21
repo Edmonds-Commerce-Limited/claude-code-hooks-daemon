@@ -41,6 +41,10 @@ from claude_code_hooks_daemon.core.scratch_session import (
     check_session_id,
     ensure_session_dir,
 )
+from claude_code_hooks_daemon.core.session_start_tiers import (
+    SessionStartVerifiable,
+    SessionTier,
+)
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 from claude_code_hooks_daemon.utils.git_sync import current_branch
@@ -139,11 +143,30 @@ def render_inventory_report(
     return lines
 
 
-class ScratchSweepHandler(SessionStartHandlerBase):
+def sweep_action_required(reading: InventoryReading, caps: ScratchCapsConfig) -> bool:
+    """Whether the must-do list should carry "run ``scratch-sweep --apply``".
+
+    True when an entry is due or any cap is at warn or worse (DESIGN section
+    10). An inventory that cannot be read says nothing either way, so it adds
+    no must-do item; the SessionStart report already says it is missing.
+    """
+    inventory = reading.inventory
+    if inventory is None:
+        return False
+    if any(entry.due for entry in inventory.entries):
+        return True
+    return bool(inventory_caps(inventory, caps).at_or_above(CapLevel.WARN))
+
+
+class ScratchSweepHandler(SessionStartVerifiable, SessionStartHandlerBase):
     """Create and announce this session's scratch directory."""
 
     def __init__(self) -> None:
-        super().__init__(
+        # INFO is the floor: the verifier raises the handler to ACTION_REQUIRED
+        # while the sweep has work, which puts it on the must-do list.
+        SessionStartVerifiable.__init__(self, declared_tier=SessionTier.INFO)
+        SessionStartHandlerBase.__init__(
+            self,
             handler_id=HandlerID.SCRATCH_SWEEP,
             priority=Priority.SCRATCH_SWEEP,
             terminal=False,
@@ -170,6 +193,12 @@ class ScratchSweepHandler(SessionStartHandlerBase):
         if found.main_worktree_root().resolve() != project.main_worktree_root().resolve():
             return project_root
         return found.root
+
+    def verify_still_needed(self) -> bool:
+        """True while an entry is due or a cap is at warn; reads the cached inventory only."""
+        project_root = self._get_project_root()
+        reading = read_inventory(project_root / DaemonPath.UNTRACKED_DIR / INVENTORY_FILE)
+        return sweep_action_required(reading, _caps_config(project_root))
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Every source: compact drops the earlier announcement."""
