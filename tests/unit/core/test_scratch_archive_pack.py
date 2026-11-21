@@ -9,6 +9,7 @@ listed, files with more than one hard link refused; then ``tar --compare``
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import os
 import subprocess
@@ -24,6 +25,7 @@ from claude_code_hooks_daemon.core import scratch_archive_pack as pack_mod
 from claude_code_hooks_daemon.core.scratch_archive import ArchiveStore, new_archive_id
 from claude_code_hooks_daemon.core.scratch_archive_claim import (
     Claimed,
+    TreeListing,
     claim,
     fingerprint_at,
     open_dir,
@@ -84,6 +86,36 @@ def _archive_names(store: ArchiveStore, archive_id: str) -> list[str]:
     fd = store.open_archive(archive_id)
     with os.fdopen(fd, "rb") as handle, tarfile.open(fileobj=handle, mode="r|") as archive:
         return [m.name for m in archive]
+
+
+def _walk_reporting_owner(
+    monkeypatch: pytest.MonkeyPatch, rel: str, *, uid: int | None = None, gid: int | None = None
+) -> None:
+    """Make pack's walk report ``rel`` with a foreign uid or gid.
+
+    Injected rather than made with ``chown``, which needs root: the refusal
+    is then exercised under every euid.
+    """
+    real_walk = pack_mod.walk_tree
+
+    def walk(*args: Any, **kwargs: Any) -> TreeListing:
+        listing = real_walk(*args, **kwargs)
+        nodes = tuple(
+            (
+                dataclasses.replace(
+                    node,
+                    uid=node.uid if uid is None else uid,
+                    gid=node.gid if gid is None else gid,
+                )
+                if node.rel == rel
+                else node
+            )
+            for node in listing.nodes
+        )
+        assert nodes != listing.nodes, f"the walk never reached {rel!r}"
+        return TreeListing(nodes=nodes)
+
+    monkeypatch.setattr(pack_mod, "walk_tree", walk)
 
 
 def _store_files(store: ArchiveStore) -> list[str]:
@@ -230,27 +262,33 @@ class TestPack:
             pack(claimed, store, new_archive_id(), tar=tar, max_inodes=100)
         claimed.close()
 
-    def test_a_file_of_another_owner_is_refused_as_root(
-        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    def test_a_file_of_another_owner_is_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Fix B: restore cannot prove foreign ownership, so pack never takes it."""
-        if os.geteuid() != 0:
-            pytest.skip("chown to another user needs root")
-        entry = _entry(root)
-        os.chown(entry / "sub" / "b.bin", 65534, os.getegid())
+        _entry(root)
+        _walk_reporting_owner(monkeypatch, "sub/b.bin", uid=65534)
         claimed = _claim(root_fd, "e1")
         with pytest.raises(PackRefused, match="owned by uid 65534"):
             pack(claimed, store, new_archive_id(), tar=tar, max_inodes=100)
         assert _store_files(store) == []
         claimed.close()
 
-    def test_a_group_of_another_gid_is_refused_as_root(
-        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    def test_a_group_of_another_gid_is_refused(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        if os.geteuid() != 0:
-            pytest.skip("chgrp to another group needs root")
-        entry = _entry(root)
-        os.chown(entry, os.geteuid(), 65534)
+        _entry(root)
+        _walk_reporting_owner(monkeypatch, "", gid=65534)
         claimed = _claim(root_fd, "e1")
         with pytest.raises(PackRefused, match="gid 65534"):
             pack(claimed, store, new_archive_id(), tar=tar, max_inodes=100)
