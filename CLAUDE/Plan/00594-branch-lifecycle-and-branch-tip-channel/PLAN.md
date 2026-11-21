@@ -302,13 +302,13 @@ names, people or hashes appear here.
   remote: track, move, moved-ref report, re-track, one-step return; a sha pin
   and a failed listing covered. A seat's report is added when one comes and
   is not a gate. The stop/build/start handover is Plan 00535's, not this
-  task's. Not yet built (checked 21 November): the fixture cannot run it as
-  it stands, because its `.claude/hooks-daemon` is a `git worktree` of this
-  repository, so it shares this repository's `.git/config` and `origin`, and
-  `upgrade.sh` fetches the tracked ref from that `origin`. The proof first
-  needs a fixture mode whose daemon dir is a real clone of a local bare
-  remote (seeded from HEAD, with a release tag), so no fetch or push reaches
-  the real origin.
+  task's. Built and run on `plan-00594-finish` (awaiting review, gate and
+  merge): `dummy-client-repo.sh create --bare-remote` clones the daemon dir
+  from a local bare remote seeded from HEAD, and
+  `scripts/dummy-client-branch-channel-proof.sh` passed every step offline.
+  Evidence and limits (the move check lists a fixed GitHub URL, rewritten to
+  the bare for the proof; the tip cache was emptied per report):
+  [subagent-reports/261121-task-5-1-fixture-proof.md](subagent-reports/261121-task-5-1-fixture-proof.md).
 - [x] ✅ **Task 5.2**: (RC feedback; done on the release branch, release note
   034\) A guarded unreleased install no longer exits 141 when the ref's
   `pyproject.toml` is larger than one pipe write. Layer 1 reads the blob
@@ -339,14 +339,19 @@ names, people or hashes appear here.
   caused it and to the change that closes it.
 - [ ] Each class has a regression test that failed before its fix. Audit
   `subagent-reports/261121-success-criterion-red-evidence.md`: RED evidence
-  for classes 2, 4, 5, 7, 8 and for 3 via Task 3.8 only; none recorded for
-  classes 1, 6, 9 or Tasks 3.1, 3.2, 3.7. Closing needs a revert-and-see run
-  per gap, or an owner ruling that a recorded test without RED evidence
-  suffices.
+  for classes 2, 4, 5, 7, 8 and for 3 via Task 3.8 only. The gaps were then
+  closed by revert-and-see runs (each fix's tests as of the fix, run at its
+  parent against that parent's source):
+  [subagent-reports/261121-red-evidence-revert-runs.md](subagent-reports/261121-red-evidence-revert-runs.md).
+  Classes 1, 6 and 9 (Tasks 6.1, 6.2 and 6.3) and Tasks 3.1/3.2 (`fa14065d6`)
+  and 3.7 (`64a74a1f1`, `0949616e2`) went red, then green at the fix.
+  `e1b0b5b73` is red only at import, and `7df818c71` is a test-only pin. Ready
+  to tick at review.
 - [ ] A client-mode install runs a branch tip, observes a move, and returns to
-  the last tag in one step: to be proven end to end in the client-mode
-  fixture, not yet run (delegated ruling, DESIGN §7.1); a client seat's report is recorded when
-  one comes.
+  the last tag in one step: proven end to end in the offline client-mode
+  fixture on 21 November ([report](subagent-reports/261121-task-5-1-fixture-proof.md));
+  ticked when that branch is merged. A client seat's report is recorded when
+  one comes (delegated ruling, DESIGN §7.1).
 - [ ] Release-bound consequences (config keys, truth changes, release notes)
   are recorded in `CLAUDE/UPGRADES/UNRELEASED/`.
 
@@ -356,4 +361,5 @@ names, people or hashes appear here.
 - Seat and release questions settled by delegated ruling (DESIGN §7); the
   plan is no longer blocked. Task 3.8 is on main. Open: Task 4.6 (built,
   on `plan-00594-finish`, awaiting review, gate and merge) and Task 5.1 (the
-  fixture proof, not built).
+  fixture proof, built and passing on the same branch, awaiting review, gate
+  and merge).
