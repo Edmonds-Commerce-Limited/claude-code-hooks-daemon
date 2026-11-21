@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 from claude_code_hooks_daemon.core.agent_ownership import (
@@ -58,6 +59,17 @@ class TestOwnershipRefusal:
         reason = ownership_refusal("b", Path("/r/.claude/worktrees/b"), locked=False, holds=holds)
         assert reason is not None
         assert "worktree-reap --reap --only b" in reason
+
+    def test_reap_hint_quotes_a_name_the_shell_would_split_or_run(self) -> None:
+        """Plan 00627 D-EXEC L1: the printed command is pasted into a shell."""
+        holds = RunningHolds(frozenset(), frozenset())
+        name = "my wt $(touch pwned)"
+        reason = ownership_refusal(
+            "b", Path("/r/.claude/worktrees") / name, locked=False, holds=holds
+        )
+        assert reason is not None
+        command = reason.split("`")[1]
+        assert shlex.split(command)[-3:] == ["--reap", "--only", name]
 
     def test_reap_hint_names_the_directory_not_the_branch(self) -> None:
         """`worktree-reap --only` matches the worktree directory name, which git keeps

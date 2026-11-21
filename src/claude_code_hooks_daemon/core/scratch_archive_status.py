@@ -70,13 +70,19 @@ def read_status(path: Path, retention_hours: Mapping[str, float]) -> StoreStatus
                 note=note,
                 keeps=len(keeps),
                 restore_command=records[0].restore_command,
+                checkouts=tuple(sorted({r.checkout for r in records})),
             )
         )
     return StoreStatus(archives=tuple(rows), torn=index.torn_tail or events.torn_tail)
 
 
-def render_status(status: StoreStatus, *, now: datetime) -> list[str]:
-    """The human table: one block per archive, expiry with keeps applied."""
+def render_status(status: StoreStatus, *, now: datetime, main: str = "") -> list[str]:
+    """The human table: one block per archive, expiry with keeps applied.
+
+    An archive packed from a checkout other than ``main`` (a worktree evacuated
+    by ``worktree-reap --reap``) names it: it restores into ``main``'s scratch
+    root, not back into a worktree that may no longer exist.
+    """
     lines: list[str] = []
     if status.torn:
         lines.append(
@@ -97,5 +103,8 @@ def render_status(status: StoreStatus, *, now: datetime) -> list[str]:
         kept = f", {row.keeps} keep(s)" if row.keeps else ""
         lines.append(f"  {row.archive_id}  {row.verdict}  {when}{kept}")
         lines.extend(f"      {path}" for path in row.original_paths)
+        lines.extend(
+            f"      from checkout: {checkout}" for checkout in row.checkouts if checkout != main
+        )
         lines.append(f"      restore: {row.restore_command}")
     return lines

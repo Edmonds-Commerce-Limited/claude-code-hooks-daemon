@@ -17,7 +17,13 @@ import claude_code_hooks_daemon
 _PACKAGE = Path(claude_code_hooks_daemon.__file__).parent
 
 #: Every module outside ``core/scratch_archive*`` allowed to import or name them.
-ALLOWED = ["daemon/cli.py"]
+#: The two evacuation modules (Plan 00627 Task 6.2) are reached only from the
+#: CLI's ``worktree-reap --reap``; ``test_only_the_cli_reaches_evacuation`` pins that.
+ALLOWED = ["core/worktree_scratch_evacuation.py", "daemon/cli.py", "daemon/worktree_evacuate.py"]
+
+#: The evacuation modules, and the only modules allowed to name them.
+_EVACUATION = ("worktree_scratch_evacuation", "worktree_evacuate")
+EVACUATION_CALLERS = ["daemon/cli.py", "daemon/worktree_evacuate.py"]
 
 
 def _is_archive_module(path: Path) -> bool:
@@ -49,6 +55,19 @@ def _naming_modules() -> list[str]:
 
 def test_only_the_cli_imports_or_names_archive_modules() -> None:
     assert _naming_modules() == ALLOWED
+
+
+def test_only_the_cli_reaches_evacuation() -> None:
+    """No handler, hook or housekeeping module may reach the evacuating path."""
+    found = []
+    for path in sorted(_PACKAGE.rglob("*.py")):
+        relative = path.relative_to(_PACKAGE).as_posix()
+        if relative == "core/worktree_scratch_evacuation.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        if any(name in text for name in _EVACUATION):
+            found.append(relative)
+    assert found == EVACUATION_CALLERS
 
 
 def test_the_cli_reaches_the_apply_module() -> None:

@@ -14,6 +14,7 @@ Three signals say it is not the sweep's to remove:
 from __future__ import annotations
 
 import logging
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -101,10 +102,14 @@ def ownership_refusal(
     if locked:
         return f"the worktree {worktree} is locked by git; left alone"
     if harness_directory and in_harness_directory(worktree):
+        # Pasted into a shell, and the builder quotes nothing: quote the outside name.
+        reap = daemon_cli_command_for_docs(
+            "worktree-reap", "--reap", "--only", shlex.quote(worktree.name)
+        )
         return (
             f"the worktree {worktree} is under {ProjectPath.CLAUDE_WORKTREES_DIR}/, "
             "which Claude Code owns; left alone. "
-            f"`{daemon_cli_command_for_docs('worktree-reap', '--reap', '--only', worktree.name)}` "
+            f"`{reap}` "
             "removes it behind its own safety checks; then run this command again"
         )
     return None

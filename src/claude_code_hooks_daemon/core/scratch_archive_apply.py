@@ -268,6 +268,10 @@ class ApplySettings:
     expected_identity: tuple[int, int] | None = None
     #: Set only while a cap is at block (Task 5.5); None: due entries only.
     pressure: Pressure | None = None
+    #: False only for a worktree evacuation (Task 6.2): its ``original_prefix`` is
+    #: the main checkout's too, so expiry would judge the main checkout's archives
+    #: by the worktree's claims and references. Reclaim and resume still run.
+    expire: bool = True
 
 
 @dataclass(frozen=True)
@@ -352,7 +356,7 @@ def apply_sweep(
                 f"{len(adoptions)} unfinished adoption(s) reported, not finished: "
                 "finishing needs a verdict only a fresh row supplies"
             )
-        expired = _expire(root_fd, store, facts, settings, notes)
+        expired = _expire(root_fd, store, facts, settings, notes) if settings.expire else ()
         audit = store.audit()
         if audit.unrecorded_archives:
             notes.append(

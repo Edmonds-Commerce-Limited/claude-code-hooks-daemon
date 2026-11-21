@@ -224,6 +224,7 @@ from claude_code_hooks_daemon.utils.settings_repair import repair_settings_regis
 from .init_config import generate_config
 
 if TYPE_CHECKING:
+    from claude_code_hooks_daemon.core.branch_cleanup import WorktreeBlockersFn
     from claude_code_hooks_daemon.core.branch_reject import Digest, IssuedRequest, RejectRoute
     from claude_code_hooks_daemon.core.release_slate import (
         CiRunState,
@@ -237,6 +238,7 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.daemon.project_handler_health import (
         ProjectHandlerHealthState,
     )
+    from claude_code_hooks_daemon.daemon.worktree_evacuate import EvacuateSeams
     from claude_code_hooks_daemon.rule_explain.checks import CheckEntry
 
 # Test-runner module ``test-project-handlers`` shells out to. It is a dev-only
@@ -7132,6 +7134,8 @@ class _ScratchSources:
     git_runner: Callable[..., Any] | None
     #: The main checkout, which alone holds the archive store; ``None`` means ``repo``.
     store_checkout: Path | None = None
+    #: Other checkouts' background records that may name this root (an evacuation).
+    extra_background: tuple[Path, ...] = ()
 
     @property
     def store_path(self) -> Path:
@@ -7140,6 +7144,21 @@ class _ScratchSources:
     @property
     def background_file(self) -> Path:
         return _daemon_untracked_dir(self.repo) / "background-processes.jsonl"
+
+    def background(self) -> Any:
+        """Every background record file merged; an error in any one is an error of all."""
+        from claude_code_hooks_daemon.core.scratch_liveness import (
+            BackgroundRecords,
+            read_background_records,
+        )
+
+        readings = [
+            read_background_records(path) for path in (self.background_file, *self.extra_background)
+        ]
+        return BackgroundRecords(
+            commands=tuple(command for reading in readings for command in reading.commands),
+            error="; ".join(reading.error for reading in readings if reading.error),
+        )
 
     def now(self) -> datetime.datetime:
         return datetime.datetime.fromtimestamp(self.wall_clock(), datetime.UTC)
@@ -7176,17 +7195,14 @@ class _ScratchSources:
     def classify(self, sweep_root: Any) -> Any:
         """One fresh classification: clock, process cwds, background records and git."""
         from claude_code_hooks_daemon.core import scratch_sweep
-        from claude_code_hooks_daemon.core.scratch_liveness import (
-            LivenessInputs,
-            read_background_records,
-        )
+        from claude_code_hooks_daemon.core.scratch_liveness import LivenessInputs
         from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
 
         now = self.wall_clock()
         reading = self.cwds()
         inputs = LivenessInputs(
             cwds=reading.cwds,
-            background=read_background_records(self.background_file),
+            background=self.background(),
             min_age_minutes=self.config.scratch.min_age_minutes,
             now=now,
             unreadable_pids=reading.unreadable,
@@ -7298,7 +7314,6 @@ def _scratch_apply(
         entry_in_use,
     )
     from claude_code_hooks_daemon.core.scratch_archive_pack import PackRefused, find_gnu_tar
-    from claude_code_hooks_daemon.core.scratch_liveness import read_background_records
     from claude_code_hooks_daemon.core.scratch_references import build_references
 
     try:
@@ -7315,7 +7330,7 @@ def _scratch_apply(
                 root=root,
                 relative_root=relative_root,
                 reading=sources.cwds(),
-                background=read_background_records(sources.background_file),
+                background=sources.background(),
             )
 
         return entry_live
@@ -7497,13 +7512,14 @@ def _scratch_status(args: argparse.Namespace, sources: _ScratchSources) -> int:
                     "note": row.note,
                     "keeps": row.keeps,
                     "restore_command": row.restore_command,
+                    "checkouts": list(row.checkouts),
                 }
                 for row in status.archives
             ],
         }
         print(json.dumps(document, indent=2))
         return 0
-    for line in render_status(status, now=sources.now()):
+    for line in render_status(status, now=sources.now(), main=str(Path(main).resolve())):
         print(line)
     return 0
 
@@ -10968,6 +10984,8 @@ def cmd_worktree_reap(
     run_fn: "RunGit | None" = None,
     age_fn: "WorktreeAgeFn | None" = None,
     process_cwds_fn: "ProcessCwdsFn | None" = None,
+    blockers_fn: "WorktreeBlockersFn | None" = None,
+    evacuate_seams: "EvacuateSeams | None" = None,
 ) -> int:
     """Report stale agent worktrees, and remove them only when asked.
 
@@ -10983,6 +11001,13 @@ def cmd_worktree_reap(
     A refused worktree is printed WITH its reason rather than omitted — one
     that silently vanishes from the report looks handled.
 
+    A worktree whose removal would lose a path (``worktree_blockers``: ignored
+    content such as scratch, which ``git status`` does not list and a plain
+    ``git worktree remove`` deletes) is kept, in the dry run too.
+    ``blockers_fn`` is the seam for that check. When every blocker is under
+    ``untracked/scratch/``, ``--reap`` offers to evacuate the scratch first
+    (:mod:`worktree_evacuate`); ``evacuate_seams`` are its test seams.
+
     Returns:
         0 when every worktree was reapable (or there are none), 1 when at least
         one needs a human. The refusals are the actionable output.
@@ -10990,16 +11015,17 @@ def cmd_worktree_reap(
     from claude_code_hooks_daemon.core import agent_ownership, branch_cleanup
     from claude_code_hooks_daemon.core.worktree_reaping import (
         PruneOutcome,
+        WorktreeState,
         collect_orphaned_branches,
         collect_skipped_merged_branches,
         collect_worktree_states,
         default_process_cwds,
         default_worktree_age,
-        is_reapable,
         prune_branch,
         reap_refusal_reason,
         reap_worktree,
     )
+    from claude_code_hooks_daemon.daemon import worktree_evacuate
 
     repo_root = Path(getattr(args, "project_root", None) or get_project_path(None))
     reap_config = _branches_config(repo_root)
@@ -11037,13 +11063,20 @@ def cmd_worktree_reap(
     # typed values and still `**`-unpack against three differently typed
     # parameters, and passing either to a branch command would raise a
     # TypeError at runtime regardless.
-    states = collect_worktree_states(
-        repo_root,
-        base_branch,
-        run_fn=run_fn if run_fn is not None else run_git,
-        age_fn=age_fn if age_fn is not None else default_worktree_age,
-        process_cwds_fn=process_cwds_fn if process_cwds_fn is not None else default_process_cwds,
-    )
+    git = run_fn if run_fn is not None else run_git
+
+    def collect() -> tuple[WorktreeState, ...]:
+        return collect_worktree_states(
+            repo_root,
+            base_branch,
+            run_fn=git,
+            age_fn=age_fn if age_fn is not None else default_worktree_age,
+            process_cwds_fn=(
+                process_cwds_fn if process_cwds_fn is not None else default_process_cwds
+            ),
+        )
+
+    states = collect()
     # Plan 00352: a branch whose worktree has already gone is invisible to the
     # worktree collector, so it is reported here — the moment a human needs to
     # know is the moment they finish reaping its siblings. `--only` names a
@@ -11085,16 +11118,24 @@ def cmd_worktree_reap(
 
     # A live agent's worktree and branch are never reaped: a `running` work-queue
     # record or a git lock marks them, whatever the predicate below says.
-    holds = agent_ownership.running_holds(_daemon_untracked_dir(repo_root), repo_root)
-    listing = (run_fn if run_fn is not None else run_git)(
-        repo_root, "worktree", "list", "--porcelain"
-    )
-    locked_paths = {
-        record.path for record in parse_worktree_porcelain(listing.stdout) if record.locked
-    }
+    def read_holds() -> tuple[agent_ownership.RunningHolds, frozenset[Path] | None]:
+        """The running holds and git-locked paths; None for the locks when git cannot list."""
+        read = agent_ownership.running_holds(_daemon_untracked_dir(repo_root), repo_root)
+        listing = git(repo_root, "worktree", "list", "--porcelain")
+        if listing.returncode != 0:
+            return read, None
+        return read, frozenset(
+            record.path for record in parse_worktree_porcelain(listing.stdout) if record.locked
+        )
 
-    refused = 0
-    for state in states:
+    def keep_reason(
+        state: WorktreeState,
+        holds: agent_ownership.RunningHolds,
+        locked_paths: frozenset[Path] | None,
+    ) -> str | None:
+        """Why ``state`` is kept, name first, or None when nothing but blockers can keep it."""
+        if locked_paths is None:
+            return f"{state.name}: git worktree list failed, so a lock cannot be ruled out"
         owned = agent_ownership.ownership_refusal(
             state.branch or "",
             state.path,
@@ -11103,12 +11144,70 @@ def cmd_worktree_reap(
             harness_directory=False,
         )
         if owned is not None:
+            return f"{state.name}: {owned}"
+        return reap_refusal_reason(state)
+
+    def reread(state: WorktreeState) -> tuple[WorktreeState | None, str | None]:
+        """``state`` read afresh with every keep predicate; the reason when one keeps it."""
+        fresh = next((found for found in collect() if found.path == state.path), None)
+        if fresh is None:
+            return None, f"{state.name}: no longer listed as an agent worktree"
+        return fresh, keep_reason(fresh, *read_holds())
+
+    def recheck_of(asked_state: WorktreeState) -> Callable[[], str | None]:
+        """The keep reason for ``asked_state`` read again, bound to that state."""
+
+        def recheck() -> str | None:
+            return reread(asked_state)[1]
+
+        return recheck
+
+    def blockers_of(path: Path) -> Sequence[str]:
+        # `is_reapable` reads `git status`, which lists no ignored file, and git
+        # deletes ignored files on a plain remove: scratch would go with it.
+        return (blockers_fn or branch_cleanup.worktree_blockers)(
+            path, reap_config.cleanup_after_merge.regenerable
+        )
+
+    holds, locked_paths = read_holds()
+    refused = 0
+    # F-BYPS L1: the typed question waits as long as the human takes, so after
+    # one, nothing read before it is trusted: each later worktree is read again.
+    asked = False
+    for state in states:
+        reason = keep_reason(state, holds, locked_paths)
+        if reason is None and asked:
+            fresh, reason = reread(state)
+            state = fresh or state
+        if reason is not None:
             refused += 1
-            print(f"KEEP    {state.name}: {owned}")
+            print(f"KEEP    {reason}")
             continue
-        if not is_reapable(state):
+        blockers = blockers_of(state.path)
+        if worktree_evacuate.only_scratch(blockers):
+            # Plan 00627 Task 6.2: scratch alone may be evacuated, on a typed phrase.
+            evacuation = worktree_evacuate.evacuate_scratch(
+                repo_root,
+                state,
+                reap=reap,
+                seams=evacuate_seams,
+                recheck=recheck_of(state),
+            )
+            asked = asked or reap
+            for line in evacuation.lines:
+                print(line)
+            if evacuation.evacuated:
+                # Packing took time too: every predicate again, then the blockers.
+                fresh, reason = reread(state)
+                if reason is not None or fresh is None:
+                    refused += 1
+                    print(f"KEEP    {reason}")
+                    continue
+                state = fresh
+                blockers = blockers_of(state.path)
+        if blockers:
             refused += 1
-            print(f"KEEP    {reap_refusal_reason(state)}")
+            print(f"KEEP    {state.name}: {branch_cleanup.blockers_line(state.path, blockers)}")
             continue
         # The state carries the path git reported. Rebuilding it here picked
         # `.claude/worktrees/` unconditionally, which named a path that does
@@ -11119,6 +11218,9 @@ def cmd_worktree_reap(
         label = "REAPED " if outcome.removed else ("FAILED " if reap else "DRY-RUN")
         print(f"{label} {outcome.detail}")
 
+    if asked:
+        # A hold put on during the question must stop a branch prune too.
+        holds, _locked = read_holds()
     unmerged = 0
     for branch in orphans:
         if branch.name in holds.branches:
@@ -14201,7 +14303,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser_worktree_reap.add_argument(
         "--reap",
         action="store_true",
-        help="Actually remove the worktrees the predicate cleared, and their branches",
+        help=(
+            "Actually remove the worktrees the predicate cleared, and their branches. "
+            "A worktree holding ignored content a removal would lose (scratch notes, "
+            "anything outside branches.cleanup_after_merge.regenerable) is kept"
+        ),
     )
     parser_worktree_reap.add_argument(
         "--only",

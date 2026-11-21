@@ -107,9 +107,17 @@ def _reap(args: argparse.Namespace, *, run_fn: RunGit) -> int:
 
     This file's subject is CLI wiring and report formatting, not that axis —
     held old/empty by default so it stays silent and every assertion here
-    keeps isolating what it always meant to.
+    keeps isolating what it always meant to. The fake worktrees hold no ignored
+    content either (the real-git cases are in
+    ``test_cli_worktree_reap_ignored_content``).
     """
-    return cmd_worktree_reap(args, run_fn=run_fn, age_fn=_old_enough, process_cwds_fn=_nobody_home)
+    return cmd_worktree_reap(
+        args,
+        run_fn=run_fn,
+        age_fn=_old_enough,
+        process_cwds_fn=_nobody_home,
+        blockers_fn=lambda _path, _regenerable: (),
+    )
 
 
 @pytest.fixture

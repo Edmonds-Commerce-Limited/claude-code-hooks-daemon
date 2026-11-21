@@ -23,6 +23,8 @@ class ArchiveStatus:
     note: str
     keeps: int
     restore_command: str
+    #: The checkout(s) each record was packed from: a reaped worktree's for an evacuation.
+    checkouts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
