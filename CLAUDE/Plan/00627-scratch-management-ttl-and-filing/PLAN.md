@@ -104,7 +104,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 
 - [ ] ⬜ **Task 5.1**: Add the cached inventory file and its background refresh (SessionStart, after a directory-creating command, after a sweep).
 - [ ] ⬜ **Task 5.2**: Add the SessionStart handler `scratch_sweep`, printed directly after `branch_sweep`: counts by verdict, overdue-to-file list, expiring archives, caps. Silent when clean; never silent when incomplete.
-- [ ] ⬜ **Task 5.3**: Add the cap evaluation (warn, block, incomplete can only raise).
+- [x] ✅ **Task 5.3**: Add the cap evaluation (warn, block, incomplete can only raise). `core/scratch_caps.py` `evaluate_caps`; pure, not yet wired to an inventory (5.1) or a report (5.2).
 - [ ] ⬜ **Task 5.4**: Add `R-SCRATCH-CAP`: deny directory-creating commands into scratch at block; never a file write; the never-stranded downgrade.
 - [ ] ⬜ **Task 5.5**: Add pressure mode to `--apply`.
 - [ ] ⬜ **Task 5.6**: Add the must-do item through `session_actions_directive`.
