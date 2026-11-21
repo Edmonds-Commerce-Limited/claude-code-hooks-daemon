@@ -38,6 +38,7 @@ from claude_code_hooks_daemon.core.scratch_inventory import (
 )
 from claude_code_hooks_daemon.core.scratch_verdict import Verdict
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.scratch_dir_creation import (
     creates_directory_under,
     scratch_roots,
@@ -50,7 +51,15 @@ _UNSWEEPABLE: Final[frozenset[str]] = frozenset(
     {Verdict.LIVE.value, Verdict.KEPT.value, Verdict.PROTECTED.value}
 )
 _LARGEST: Final[int] = 5
-_SWEEP: Final[str] = "bin/hooks-daemon scratch-sweep --apply"
+#: The sweep command, named by program in the module-level Rule; runtime
+#: strings resolve it with :func:`_sweep_command` for this install.
+_SWEEP_ARGS: Final[tuple[str, ...]] = ("scratch-sweep", "--apply")
+
+
+def _sweep_command() -> str:
+    """The sweep command as this install runs it, safe for tracked docs."""
+    return daemon_cli_command_for_docs(*_SWEEP_ARGS)
+
 
 _RULE = Rule(
     rule_id=RuleID.SCRATCH_CAP,
@@ -60,7 +69,8 @@ _RULE = Rule(
         "wait until the sweep has brought scratch back under the cap"
     ),
     fix=(
-        f"Run `{_SWEEP}` (packs due entries, and at block also idle ones), then retry; "
+        "Run `hooks-daemon scratch-sweep --apply` (packs due entries, and at block "
+        "also idle ones), then retry; "
         "writing a file is never denied"
     ),
     verbose=(
@@ -162,7 +172,7 @@ class ScratchCapGuardHandler(PreToolUseHandlerBase):
                 decision=Decision.ALLOW,
                 context=[
                     f"{RuleID.SCRATCH_CAP} (advisory, caps.mode advise): scratch is at its "
-                    f"block cap ({over}). Run `{_SWEEP}`. Largest entries:\n{largest}"
+                    f"block cap ({over}). Run `{_sweep_command()}`. Largest entries:\n{largest}"
                 ],
             )
         return GatingResult(
@@ -170,7 +180,7 @@ class ScratchCapGuardHandler(PreToolUseHandlerBase):
             reason=(
                 f"{RuleFormatter().verbose(_RULE)}\n\n"
                 f"Over the block cap: {over}.\nLargest entries:\n{largest}\n\n"
-                f"Run `{_SWEEP}`, then retry."
+                f"Run `{_sweep_command()}`, then retry."
             ),
         )
 
@@ -181,7 +191,7 @@ class ScratchCapGuardHandler(PreToolUseHandlerBase):
             "command that creates a directory tree under a scratch root (`mkdir`, `git clone`, "
             "`git init`, `git worktree add`, `cp -r`, `tar -x`, `mktemp -d`) is denied "
             "(R-SCRATCH-CAP). A `Write` and a redirect into a file are never denied.\n\n"
-            "**Instead**: run `bin/hooks-daemon scratch-sweep --apply`, then retry. If only "
+            f"**Instead**: run `{_sweep_command()}`, then retry. If only "
             "LIVE, KEPT or PROTECTED entries keep scratch over the cap, the deny is an "
             "advisory naming them."
         )
