@@ -87,6 +87,7 @@ from claude_code_hooks_daemon.core.scratch_session import (
 )
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport, pending_verdict
 from claude_code_hooks_daemon.core.scratch_verdict import KEEP_MARKER, Verdict
+from claude_code_hooks_daemon.utils.birth_time import BirthStamp, birth_stamp
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 _LOG = logging.getLogger(__name__)
@@ -136,6 +137,9 @@ class Pressure:
     #: a not-due entry outside it is never packed. None: not bound, so no not-due
     #: entry is packed at all (an unbound Pressure restricts to nothing).
     consented: frozenset[str] | None = None
+    #: ``(path, birth stamp)`` of each consented entry: the run packs a not-due
+    #: entry only while its name still holds that very inode (device, inode, birth).
+    identities: frozenset[tuple[str, BirthStamp]] = frozenset()
 
 
 def pressure_for(
@@ -178,11 +182,66 @@ def consent_to(report: SweepReport, pressure: Pressure | None) -> Pressure | Non
 
     The ``--apply`` question names :func:`pressured_count` of the same report;
     an entry that turns idle, or appears, while the question waits is not in
-    the set, so the run can only pack fewer than the human agreed to.
+    the set, so the run can only pack fewer than the human agreed to. Each
+    entry is bound by its birth stamp as read now; one whose stamp cannot be
+    read (no birth time, an error, a session directory that is no longer the
+    one listed) is left out, so it is never packed early (fail closed).
     """
     if pressure is None:
         return None
-    return dataclasses.replace(pressure, consented=_pressured_paths(report, pressure))
+    candidates = _pressured_paths(report, pressure)
+    identities = frozenset(
+        pair for part in (report, *report.sessions) for pair in _stamps(part, candidates)
+    )
+    return dataclasses.replace(
+        pressure,
+        consented=frozenset(key for key, _ in identities),
+        identities=identities,
+    )
+
+
+def _stamps(part: SweepReport, candidates: frozenset[str]) -> list[tuple[str, BirthStamp]]:
+    """``(key, birth stamp)`` of each of ``part``'s rows in ``candidates`` whose stamp is readable."""
+    wanted = [row.name for row in part.rows if _entry_key(part.root, row.name) in candidates]
+    if not wanted:
+        return []
+    try:
+        fd = open_dir(Path(part.root))
+    except OSError as exc:
+        log_and_continue(_LOG, exc, reason=f"{part.root}: not opened, nothing in it consented")
+        return []
+    try:
+        if part.identity is not None:
+            info = os.fstat(fd)
+            if (info.st_dev, info.st_ino) != part.identity:
+                return []
+        found: list[tuple[str, BirthStamp]] = []
+        for name in wanted:
+            try:
+                stamp = birth_stamp(fd, name)
+            except OSError as exc:
+                log_and_continue(
+                    _LOG, exc, reason=f"{name!r}: birth stamp unreadable, not consented"
+                )
+                continue
+            if stamp is not None:
+                found.append((_entry_key(part.root, name), stamp))
+        return found
+    finally:
+        os.close(fd)
+
+
+def _consent_holds(root_fd: int, settings: ApplySettings, name: str) -> bool:
+    """``name`` still holds the inode the human consented to: device, inode and birth."""
+    pressure = settings.pressure
+    if pressure is None:
+        return False
+    try:
+        stamp = birth_stamp(root_fd, name)
+    except OSError as exc:
+        log_and_continue(_LOG, exc, reason=f"{name!r}: birth stamp unreadable, not packed early")
+        return False
+    return stamp is not None and (_entry_key(settings.root, name), stamp) in pressure.identities
 
 
 def _entry_key(root: str | Path, name: str) -> str:
@@ -620,6 +679,9 @@ def _apply_row(
     expected = fingerprints.get(name)
     if expected is None:
         return EntryOutcome(name, "not-fingerprinted", "no fingerprint taken before classification")
+    if not row.due and not _consent_holds(root_fd, settings, name):
+        # record_claim then ties this inode to the fingerprint, so the chain holds to the claim.
+        return EntryOutcome(name, "refused", "not the entry consented to (replaced or unproven)")
     archive_id = new_archive_id()
     try:
         # Recorded before the rename, so a leftover claim with no record is not ours.

@@ -12,6 +12,7 @@ import ast
 import dataclasses
 import errno
 import os
+import shutil
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -1103,15 +1104,26 @@ class TestPressuredCount:
         assert pressured_count(report, PRESSURE) == 2
         assert pressured_count(report, None) == 0
 
-    def test_consent_binds_exactly_the_counted_entries(self) -> None:
-        session = SweepReport("root/s", (not_due("child", age_hours=10.0),), True, (), ())
+    def test_consent_binds_exactly_the_counted_entries(self, root: Path) -> None:
+        for name in ("due", "idle", "fresh", "s/child"):
+            (root / name).mkdir(parents=True)
+        session = SweepReport(str(root / "s"), (not_due("child", age_hours=10.0),), True, (), ())
         rows = (row("due"), not_due("idle", age_hours=10.0), not_due("fresh", age_hours=0.1))
-        report = SweepReport("root", rows, True, (), (), sessions=(session,))
+        report = SweepReport(str(root), rows, True, (), (), sessions=(session,))
         bound = consent_to(report, PRESSURE)
         assert bound is not None
-        assert bound.consented == frozenset({"root/idle", "root/s/child"})
+        assert bound.consented == frozenset({str(root / "idle"), str(root / "s" / "child")})
+        assert {key for key, _ in bound.identities} == bound.consented
         assert pressured_count(report, bound) == 2
         assert consent_to(report, None) is None
+
+    def test_an_entry_whose_identity_cannot_be_read_is_not_consented_or_counted(self) -> None:
+        """No such directory: no birth stamp, so it is left out and the question omits it."""
+        report = SweepReport("/nonexistent-root", (not_due("idle"),), True, (), ())
+        bound = consent_to(report, PRESSURE)
+        assert bound is not None
+        assert bound.consented == frozenset()
+        assert pressured_count(report, bound) == 0
 
 
 class TestPressureIsBoundToConsent:
@@ -1122,7 +1134,8 @@ class TestPressureIsBoundToConsent:
     ) -> None:
         entry(root, "counted")
         entry(root, "late")
-        bound = dataclasses.replace(PRESSURE, consented=frozenset({str(root / "counted")}))
+        counted = SweepReport(str(root), (not_due("counted"),), True, (), ())
+        bound = consent_to(counted, PRESSURE)
         fake = FakeFacts([not_due("counted"), not_due("late")])
         result = apply_sweep(store, fake.facts(), pressed(root, tar, bound))
         assert outcome_of(result, "counted").outcome == "archived"
@@ -1136,6 +1149,49 @@ class TestPressureIsBoundToConsent:
         bound = dataclasses.replace(PRESSURE, consented=frozenset())
         result = apply_sweep(store, FakeFacts([row("due")]).facts(), pressed(root, tar, bound))
         assert outcome_of(result, "due").outcome == "archived"
+
+    def test_an_entry_replaced_under_the_same_name_after_consent_is_not_packed(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """Consent is to the entry the prompt counted, not to whatever holds its name later."""
+        entry(root, "e1")
+        bound = pressed(root, tar)
+        entry(root, "replacement")
+        shutil.rmtree(root / "e1")
+        (root / "replacement").rename(root / "e1")
+        result = apply_sweep(store, FakeFacts([not_due("e1")]).facts(), bound)
+        assert outcome_of(result, "e1").outcome != "archived"
+        assert (root / "e1" / "a.txt").read_text() == "alpha replacement"
+        assert store.read_index().records == ()
+
+    def test_the_same_entry_is_still_packed(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """The positive control for the replacement test above."""
+        entry(root, "e1")
+        bound = pressed(root, tar)
+        result = apply_sweep(store, FakeFacts([not_due("e1")]).facts(), bound)
+        assert outcome_of(result, "e1").outcome == "archived"
+
+    @pytest.mark.parametrize("when", ["consent", "apply"])
+    def test_no_birth_time_packs_nothing_not_due(
+        self,
+        root: Path,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+        when: str,
+    ) -> None:
+        """Identity unproven, at the prompt or at the run, consents to nothing (fail closed)."""
+        entry(root, "e1")
+        if when == "consent":
+            monkeypatch.setattr(apply_mod, "birth_stamp", lambda fd, name: None)
+        bound = pressed(root, tar)
+        if when == "apply":
+            monkeypatch.setattr(apply_mod, "birth_stamp", lambda fd, name: None)
+        result = apply_sweep(store, FakeFacts([not_due("e1")]).facts(), bound)
+        assert outcome_of(result, "e1").outcome != "archived"
+        assert (root / "e1").is_dir()
 
     def test_pressure_passed_straight_through_without_consent_packs_nothing_not_due(
         self, root: Path, store: ArchiveStore, tar: TarTool
