@@ -120,7 +120,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 ### Phase 7: Instructions and retirement of the old report
 
 - [ ] ⬜ **Task 7.1**: Rewrite the scratch guidance at every place DESIGN.md section 12 lists, at the `src/` originals, coordinated with Plan 00560 Task 2.1 and 2.3.
-- [ ] ⬜ **Task 7.2**: Replace `stale_litter.collect_scratch_report` and retire `stale_scratch_days` with a config-changes entry.
+- [x] ✅ **Task 7.2**: Replace `stale_litter.collect_scratch_report` and retire `stale_scratch_days` with a config-changes entry. The idle advisory's `scratch_sweep_report` reads the cached inventory only (due entries by verdict, the `scratch-sweep` dry run; never a walk, never a delete); the age walk is gone from `stale_litter`; `removed` entry in the v3.77.0 manifest; the example config drops the key.
 - [ ] ⬜ **Task 7.3**: Add the docs/plan QA check that flags a tracked line citing an `untracked/` path as evidence (advisory).
 - [ ] ⬜ **Task 7.4**: Write the handler guidance, the docs and the entries in `CLAUDE/UPGRADES/UNRELEASED/` (release notes, config-changes).
 

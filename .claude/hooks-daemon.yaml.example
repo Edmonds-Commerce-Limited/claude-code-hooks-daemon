@@ -950,8 +950,7 @@ handlers:
         stale_worktree_days: 7        # a worktree whose branch has no commit for this many days is stale
         # Plan 00470 Task 4.1 follow-ups: report-only, nothing is ever deleted. Each
         # finding prints the command a human may choose to run.
-        report_stale_scratch: true    # false drops the old untracked/scratch/ files section
-        stale_scratch_days: 14        # a scratch file not modified for this many days is old (integer >= 1)
+        report_stale_scratch: true    # false drops the scratch-sweep due-entries section (read from its inventory)
         report_gone_branch_refs: true # false drops the refs/integration/changed-green/* of deleted branches
 
     focus_mode_trigger:  # `hooks-daemon focus <task>` / `focus off` at the start of a prompt turns the session's focus mode on or off (Plan 00501)
