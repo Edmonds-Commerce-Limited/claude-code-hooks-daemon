@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.docs_qa.checks import (
     source_tree_markdown,
     unenforced_approval_gate,
     unlisted_fake_value,
+    untracked_evidence_citation,
 )
 from claude_code_hooks_daemon.docs_qa.types import CheckSpec
 
@@ -38,4 +39,5 @@ def all_checks() -> tuple[CheckSpec, ...]:
         *source_tree_markdown.CHECKS,
         *unenforced_approval_gate.CHECKS,
         *unlisted_fake_value.CHECKS,
+        *untracked_evidence_citation.CHECKS,
     )
