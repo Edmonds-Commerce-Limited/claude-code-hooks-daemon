@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.core.scratch_archive_apply import (
 from claude_code_hooks_daemon.core.scratch_archive_claim import CLAIM_PREFIX, open_dir
 from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu_tar
 from claude_code_hooks_daemon.core.scratch_archive_restore import restore
+from claude_code_hooks_daemon.core.scratch_session import ensure_session_dir, new_entry
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport
 from claude_code_hooks_daemon.core.scratch_verdict import Proof, RepositoryMarker, Verdict
 from claude_code_hooks_daemon.core.scratch_walk import NodeKind
@@ -576,21 +577,28 @@ class SessionWorld:
     container_referenced: bool = False
     child_live: set[str] = field(default_factory=set)
 
+    session_name: str = SESSION
+
     def classify(self) -> SweepReport:
         self.classified += 1
-        info = os.lstat(self.root / SESSION)
+        info = os.lstat(self.root / self.session_name)
         identity = self.identity or (info.st_dev, info.st_ino)
         sub = SweepReport(
-            str(self.root / SESSION), tuple(self.children), True, (), (), identity=identity
+            str(self.root / self.session_name),
+            tuple(self.children),
+            True,
+            (),
+            (),
+            identity=identity,
         )
-        parent_rows = (row(SESSION, Verdict.STUCK),)
+        parent_rows = (row(self.session_name, Verdict.STUCK),)
         sessions = (sub,) if self.classified <= self.present_for else ()
         return SweepReport(str(self.root), parent_rows, True, (), (), sessions=sessions)
 
     def parent(self) -> ApplyFacts:
         return ApplyFacts(
             classify=self.classify,
-            entry_live=lambda name: name == SESSION and self.container_live,
+            entry_live=lambda name: name == self.session_name and self.container_live,
             referenced=lambda name: False,
         )
 
@@ -708,3 +716,38 @@ class TestSessionChildrenAreArchivedOneByOne:
         assert not result.complete
         assert result.entries == ()
         assert (root / SESSION / "old").is_dir()
+
+
+class TestEmptySessionDirectoryRemoval:
+    """Task 4.3 step 4: after its pass, an empty old session directory is removed."""
+
+    def _session(self, root: Path) -> Path:
+        born = NOW - timedelta(days=5)
+        return ensure_session_dir(root, "abcdefgh-run", now=born, checkout="c", branch=None).path
+
+    def _sessions(self, root: Path, store: ArchiveStore, tar: TarTool, session: Path) -> str:
+        world = SessionWorld(root, [], session_name=session.name)
+        hours = dataclasses.replace(settings(root, tar), empty_session_hours=24.0)
+        ((_, result),) = apply_sessions(store, world.parent(), hours, world.for_session)
+        return " ".join(result.notes)
+
+    def test_an_empty_old_session_directory_is_removed(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        session = self._session(root)
+        notes = self._sessions(root, store, tar, session)
+        assert not session.exists(), notes
+
+    def test_a_record_inside_it_keeps_it(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        session = self._session(root)
+        born = datetime.fromtimestamp((NOW - timedelta(days=5)).timestamp(), UTC)
+        new_entry(session, "old", now=born, purpose=None, plan=None, ttl_hours=None)
+        (session / "old" / "a.txt").write_text("alpha")
+        world = SessionWorld(root, [row("old")], session_name=session.name)
+        apply_sessions(store, world.parent(), settings(root, tar), world.for_session)
+        assert not (session / "old").exists()
+        notes = self._sessions(root, store, tar, session)
+        assert session.is_dir(), notes
+        assert "held" in notes

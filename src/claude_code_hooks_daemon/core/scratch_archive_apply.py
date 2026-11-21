@@ -78,7 +78,10 @@ from claude_code_hooks_daemon.core.scratch_archive_remove import (
     resume_claimed,
 )
 from claude_code_hooks_daemon.core.scratch_archive_restore import Reclaimed, reclaim_staging
-from claude_code_hooks_daemon.core.scratch_session import is_session_dir_name
+from claude_code_hooks_daemon.core.scratch_session import (
+    is_session_dir_name,
+    remove_empty_session_dir,
+)
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport
 from claude_code_hooks_daemon.core.scratch_verdict import Verdict
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -126,6 +129,8 @@ class ApplySettings:
     retention_hours: Mapping[str, float]
     clock: Callable[[], datetime]
     max_depth: int = DEFAULT_MAX_DEPTH
+    #: A session directory empty this long after its last recorded birth is removed; None: never.
+    empty_session_hours: float | None = None
 
 
 @dataclass(frozen=True)
@@ -298,10 +303,52 @@ def apply_sessions(
             root=settings.root / name,
             original_prefix=f"{settings.original_prefix}/{name}",
         )
-        results.append(
-            (name, apply_sweep(store, for_session(name), sub_settings, after_step=after_step))
-        )
+        result = apply_sweep(store, for_session(name), sub_settings, after_step=after_step)
+        removal = _remove_if_empty(store, facts, settings, name)
+        if removal:
+            result = dataclasses.replace(result, notes=(*result.notes, removal))
+        results.append((name, result))
     return tuple(results)
+
+
+def _remove_if_empty(
+    store: ArchiveStore, facts: ApplyFacts, settings: ApplySettings, name: str
+) -> str:
+    """Step 4: remove session directory ``name`` when it is empty and old; a note, or "".
+
+    Held while the directory is live in the root, or while any archive record
+    names a path inside it (its restore needs the directory to exist).
+    """
+    if settings.empty_session_hours is None:
+        return ""
+    inside = f"{settings.original_prefix}/{name}/"
+    born_before = settings.clock().timestamp() - settings.empty_session_hours * 3600
+
+    def held() -> bool:
+        if facts.entry_live(name):
+            return True
+        records = store.read_index().records
+        return any(record.original_path.startswith(inside) for record in records)
+
+    try:
+        root_fd = open_dir(settings.root)
+    except OSError as exc:
+        return f"session directory {name} kept: root could not be opened ({type(exc).__name__})"
+    try:
+        reason = remove_empty_session_dir(root_fd, name, born_before=born_before, held=held)
+    except (OSError, StoreRefused) as exc:
+        reason = f"removal failed: {type(exc).__name__}"
+    finally:
+        os.close(root_fd)
+    if not reason:
+        return f"session directory {name} removed: empty and old"
+    if reason in _ROUTINE_KEEPS:
+        return ""
+    return f"session directory {name} kept: {reason}"
+
+
+#: Why a session directory normally stays; not worth a note on every run.
+_ROUTINE_KEEPS = frozenset({"not empty", "a recent session or child birth"})
 
 
 def _resume(

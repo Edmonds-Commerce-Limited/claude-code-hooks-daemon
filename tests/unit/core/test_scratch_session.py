@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from claude_code_hooks_daemon.core.scratch_session import (
     is_session_dir_name,
     new_entry,
     read_manifest,
+    remove_empty_session_dir,
     resolve_session_dir,
     session_dir_name,
 )
@@ -250,3 +252,62 @@ class TestNewEntry:
         new_entry(session, "a", now=NOW, purpose=None, plan=None, ttl_hours=None)
         new_entry(session, "b", now=NOW, purpose=None, plan=None, ttl_hours=None)
         assert sorted(item.name for item in session.iterdir()) == [MANIFEST_NAME, "a", "b"]
+
+
+class TestRemoveEmptySessionDir:
+    """Task 4.3 step 4: an empty, old session directory goes; anything else stays."""
+
+    BORN = datetime(2026, 11, 1, tzinfo=UTC)
+    LATER = BORN.timestamp() + 3600
+
+    def _session(self, root: Path) -> Path:
+        return ensure_session_dir(
+            root, "abcdefgh-session", now=self.BORN, checkout="c", branch=None
+        ).path
+
+    def _remove(self, root: Path, name: str, *, cutoff: float = LATER, held: bool = False) -> str:
+        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            return remove_empty_session_dir(fd, name, born_before=cutoff, held=lambda: held)
+        finally:
+            os.close(fd)
+
+    def test_an_empty_old_session_directory_is_removed(self, tmp_path: Path) -> None:
+        session = self._session(tmp_path)
+        assert self._remove(tmp_path, session.name) == ""
+        assert not session.exists()
+
+    def test_a_directory_with_a_child_stays(self, tmp_path: Path) -> None:
+        session = self._session(tmp_path)
+        new_entry(session, "work", now=self.BORN, purpose=None, plan=None, ttl_hours=None)
+        assert "not empty" in self._remove(tmp_path, session.name)
+        assert (session / "work").is_dir()
+        assert read_manifest(session) is not None
+
+    def test_a_recent_child_birth_keeps_it(self, tmp_path: Path) -> None:
+        session = self._session(tmp_path)
+        later = datetime.fromtimestamp(self.LATER + 60, UTC)
+        new_entry(session, "work", now=later, purpose=None, plan=None, ttl_hours=None)
+        (session / "work").rmdir()
+        assert "recent" in self._remove(tmp_path, session.name)
+        assert read_manifest(session) is not None
+
+    def test_a_held_directory_stays_with_its_manifest(self, tmp_path: Path) -> None:
+        session = self._session(tmp_path)
+        assert "held" in self._remove(tmp_path, session.name, held=True)
+        assert read_manifest(session) is not None
+
+    def test_a_missing_manifest_or_a_link_is_never_removed(self, tmp_path: Path) -> None:
+        session = self._session(tmp_path)
+        (session / ".scratch-session.json").unlink()
+        assert self._remove(tmp_path, session.name) != ""
+        assert session.is_dir()
+        link = tmp_path / "s-20261101T000000Z-zzzzzzzz"
+        link.symlink_to(session)
+        assert self._remove(tmp_path, link.name) != ""
+        assert link.is_symlink()
+
+    def test_a_name_that_is_not_a_session_directory_is_refused(self, tmp_path: Path) -> None:
+        (tmp_path / "plain").mkdir()
+        assert self._remove(tmp_path, "plain") != ""
+        assert (tmp_path / "plain").is_dir()

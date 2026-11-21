@@ -23,7 +23,7 @@ import os
 import re
 import secrets
 import stat
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -414,3 +414,57 @@ def new_entry(
             os.rmdir(name, dir_fd=dir_fd)
             raise SessionError(f"could not record {name!r}: {type(exc).__name__}") from exc
     return session_dir / name
+
+
+def remove_empty_session_dir(
+    root_fd: int, name: str, *, born_before: float, held: Callable[[], bool]
+) -> str:
+    """Remove the session directory ``name`` under ``root_fd`` when it is empty and old.
+
+    Returns "" when removed, else why it stays. Empty means the manifest is its
+    only file; old means the session and every child the manifest records were
+    born before ``born_before``. ``held()`` (asked under the lock, last) keeps
+    it, e.g. while an archive record still names a path inside it. Taken under
+    the same ``flock`` as :func:`new_entry`; the manifest is unlinked first and
+    rewritten when the ``rmdir`` fails, so a directory is never left without one.
+    """
+    if not is_session_dir_name(name):
+        return "not a session directory name"
+    try:
+        dir_fd = os.open(name, _DIR_FLAGS, dir_fd=root_fd)
+    except OSError as exc:
+        return f"could not open: {type(exc).__name__}"
+    try:
+        fcntl.flock(dir_fd, fcntl.LOCK_EX)
+        return _remove_locked(root_fd, name, dir_fd, born_before, held)
+    finally:
+        os.close(dir_fd)
+
+
+def _remove_locked(
+    root_fd: int, name: str, dir_fd: int, born_before: float, held: Callable[[], bool]
+) -> str:
+    manifest = _read_manifest_at(dir_fd)
+    if manifest is None:
+        return "the manifest is missing or invalid"
+    births = [manifest.born, *(record.born for record in manifest.entries.values())]
+    if max(births) >= born_before:
+        return "a recent session or child birth"
+    if os.listdir(dir_fd) != [MANIFEST_NAME]:
+        return "not empty"
+    if held():
+        return "held: something still names a path inside it"
+    opened = os.fstat(dir_fd)
+    try:
+        named = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+    except OSError as exc:
+        return f"the name could not be read again: {type(exc).__name__}"
+    if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+        return "the name no longer holds the directory that was checked"
+    os.unlink(MANIFEST_NAME, dir_fd=dir_fd)
+    try:
+        os.rmdir(name, dir_fd=root_fd)
+    except OSError as exc:
+        _replace_file(dir_fd, MANIFEST_NAME, _encode(manifest))
+        return f"not removed ({type(exc).__name__}): manifest rewritten"
+    return ""

@@ -7144,6 +7144,7 @@ def _scratch_apply(args: argparse.Namespace, sources: _ScratchSources, sweep_roo
         max_inodes=sources.max_inodes,
         retention_hours=sources.retention_hours(),
         clock=sources.now,
+        empty_session_hours=sweep_root.ttl_hours,
     )
     try:
         with ArchiveStore.open(sources.store_path) as store, store.lock():
