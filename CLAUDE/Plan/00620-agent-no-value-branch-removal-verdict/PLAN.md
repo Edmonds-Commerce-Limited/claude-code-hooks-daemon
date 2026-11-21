@@ -54,7 +54,7 @@ The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in 
 
 ### Phase 3: Follow-up
 
-- [ ] ⬜ **Task 3.1**: After the merge, file a follow-up plan to point `recovery_copy_advisory` at the reject route instead of `refs/archive/` (RULINGS.md Q6). Plan 00619 is not reopened.
+- [x] ✅ **Task 3.1**: After the merge, file a follow-up plan to point `recovery_copy_advisory` at the reject route instead of `refs/archive/` (RULINGS.md Q6). Plan 00619 is not reopened. Filed as [Plan 00629](../00629-recovery-copy-advisory-reject-route/PLAN.md).
 
 ## Known gaps
 

@@ -112,6 +112,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ### Later
 
+- [00629: recovery copy advisory reject route](00629-recovery-copy-advisory-reject-route/PLAN.md) - Not Started (follow-up of 00620 Task 3.1, RULINGS Q6: `recovery_copy_advisory` stops advising `refs/archive/<name>` and points at the no-value reject route, whose verified bundle is the recovery copy; advice and docs only, no guard change)
+
 - [00129: Wire llm-friendly-qa-wrappers in as a Major Dependency](00129-llm-qa-wrappers-integration/PLAN.md) - Not Started
 
   - GitHub Issue [#33](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues/33)
@@ -319,11 +321,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 628 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 629 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 523 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 81 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 82 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
