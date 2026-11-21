@@ -835,6 +835,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - routine_qa_sweep — recurring work that has stopped recurring
 
+<!-- handler: scratch-sweep -->
+
+- scratch_sweep — your session's scratch directory
+
 <!-- handler: secret-file-hygiene-checker -->
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths

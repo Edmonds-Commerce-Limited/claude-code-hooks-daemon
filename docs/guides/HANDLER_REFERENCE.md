@@ -4548,6 +4548,17 @@ handlers:
 
 **Description:** Prints a short summary of the branches that need attention at session start: commits contained nowhere, merged but undeleted, dormant (advisory and noisy stages), and open work against `branches.wip.cap`. The full report is `bin/hooks-daemon branch-sweep`. Never blocks. Thresholds come from the top-level `branches:` block; see [CONFIGURATION.md](CONFIGURATION.md).
 
+#### scratch_sweep
+
+| Property       | Value           |
+| -------------- | --------------- |
+| **Config key** | `scratch_sweep` |
+| **Priority**   | 56              |
+| **Type**       | Advisory        |
+| **Event**      | SessionStart    |
+
+**Description:** Creates this session's scratch directory, `untracked/scratch/s-<UTC>-<first 8 of the session id>/`, in the checkout the session starts in, with a daemon-written `.scratch-session.json` manifest (session id, birth, checkout, branch, entries), and announces it as "your scratch directory" with the `bin/hooks-daemon scratch new` command. Idempotent per session id and runs on every source, since compaction drops the earlier announcement. A failure to create it is one advisory line; it never blocks.
+
 #### plan_qa_sweep
 
 | Property       | Value           |

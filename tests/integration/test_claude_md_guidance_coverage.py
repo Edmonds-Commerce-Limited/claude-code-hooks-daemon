@@ -268,6 +268,11 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "every later decision to start or remove a branch, long after the one "
         "session-start summary"
     ),
+    "ScratchSweepHandler": (
+        "T3 standing policy: where throwaway work goes (the session directory, "
+        "`scratch new`) governs every later write, long after the one "
+        "session-start announcement"
+    ),
     "BudgetExhaustionDetectorHandler": (
         "T3 standing policy: every future detection must lead with the same "
         "bold banner and never silently retry/degrade -- the fire-time line "

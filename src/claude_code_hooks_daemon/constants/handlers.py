@@ -1019,6 +1019,14 @@ class HandlerID:
         display_name="branch-sweep",
     )
 
+    # Scratch sweep (SessionStart handler) — Plan 00627: creates and announces
+    # the session's scratch directory (DESIGN.md section 7).
+    SCRATCH_SWEEP = HandlerIDMeta(
+        class_name="ScratchSweepHandler",
+        config_key="scratch_sweep",
+        display_name="scratch-sweep",
+    )
+
     # Reference-repo freshness sweep (SessionStart handler) — Plan 00401: fetch
     # every governed reference clone under the configured roots, fast-forward
     # the ones that are provably safe, cache the readings for the PreToolUse

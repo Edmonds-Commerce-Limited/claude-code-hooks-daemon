@@ -120,7 +120,7 @@
 | 40 | branch_touch_recorder | ADVISORY | Write the creator and touch records of the branches a call created or changed |
 | 41 | evacuation_recorder | ADVISORY | Keep the evacuations of this turn for destructive_git's same-turn check |
 
-### SessionStart (36 handlers)
+### SessionStart (37 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -137,6 +137,7 @@
 | 55 | suggest_status_line | ADVISORY | Suggest setting up daemon-based statusline on session start |
 | 56 | branch_sweep | ADVISORY | Summarise branches that need attention: unpushed, merged, dormant, over the cap |
 | 56 | git_upstream_checker | ADVISORY | Full-fetch + configurable pull policy when a branch is behind upstream |
+| 56 | scratch_sweep | ADVISORY | Create and announce this session's scratch directory |
 | 56 | version_check | ADVISORY | Check daemon version against latest GitHub release on new sessions |
 | 57 | plan_qa_sweep | ADVISORY | Advisory SessionStart sweep over the plan tree (silent when clean) |
 | 58 | ccy_supervisor_integrity | ADVISORY | Advisory: warn when the ccy supervisor is armed but its files are unsafe |

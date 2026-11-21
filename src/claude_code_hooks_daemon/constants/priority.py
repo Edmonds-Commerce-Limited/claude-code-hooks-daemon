@@ -583,6 +583,8 @@ class Priority:
     GIT_UPSTREAM_CHECKER = 56
     # Same slot as git_upstream_checker: both read the repository's branches.
     BRANCH_SWEEP = 56
+    # Plan 00627 DESIGN.md section 10: printed directly after the branch sweep.
+    SCRATCH_SWEEP = 56
     PLAN_QA_SWEEP = 57
     CCY_SUPERVISOR_INTEGRITY = 58
     PLAN_WORKFLOW_ASSET_CHECKER = 59

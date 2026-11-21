@@ -473,6 +473,7 @@ class ConfigTemplate:
             "    gitignore_safety_checker: {enabled: true, priority: 54}  # Warn when required .claude/ paths are not gitignored\n"
             "    git_upstream_checker: {enabled: true, priority: 56, options: {mode: warn, auto_fetch: true}}  # Full fetch + advise pull when behind upstream\n"
             "    branch_sweep: {enabled: true, priority: 56}  # Summarise branches contained nowhere, merged, dormant or over branches.wip.cap (non-blocking)\n"
+            "    scratch_sweep: {enabled: true, priority: 56}  # Create and announce this session's scratch directory (non-blocking)\n"
             "    reference_repo_sweep: {enabled: true, priority: 71}  # Fetch governed reference clones; silent when all are current\n"
             "    routine_qa_sweep: {enabled: false, priority: 72}  # Report recurring work that has stopped recurring; silent when the Routine tree is clean (opt-in)\n"
             "    session_actions_directive: {enabled: false, priority: 73}  # Write <session>.session-actions so the ccy supervisor types one directive when a SessionStart verifier is failing (opt-in)\n"

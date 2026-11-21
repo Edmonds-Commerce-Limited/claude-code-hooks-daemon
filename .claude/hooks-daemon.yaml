@@ -1156,6 +1156,10 @@ handlers:
       enabled: true        # Contained-nowhere on every source, the rest on new sessions; silent when clean
       priority: 56
 
+    scratch_sweep:         # Creates and announces this session's scratch directory (Plan 00627)
+      enabled: true        # Every source; idempotent per session id
+      priority: 56
+
     reference_repo_sweep:  # Freshness of reference clones under untracked/repos (Plan 00401)
       enabled: true        # New sessions only; silent when every governed repo is current
       priority: 71         # Last: the only SessionStart handler that fetches for SEVERAL repos
