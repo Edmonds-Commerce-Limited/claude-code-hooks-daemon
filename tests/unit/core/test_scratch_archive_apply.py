@@ -503,6 +503,17 @@ class TestResumeReclaimExpireOrder:
         result = apply_sweep(store, FakeFacts([]).facts(), settings(root, tar, later(13)))
         assert [(o.archive_id, o.outcome) for o in result.expired] == [(archive_id, "expired")]
 
+    def test_a_run_with_expiry_off_expires_nothing(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """Evacuation (Task 6.2): a worktree's prefix is the main checkout's, so it never expires."""
+        archive_id = archive_e1(root, store, tar)
+        quiet = dataclasses.replace(settings(root, tar, later(13)), expire=False)
+        result = apply_sweep(store, FakeFacts([]).facts(), quiet)
+        assert result.expired == ()
+        assert archive_id in {record.archive_id for record in store.read_index().records}
+        assert archive_id not in apply_mod.expired_ids(store.read_events())
+
     def test_an_archive_whose_claim_is_still_present_never_expires(
         self, root: Path, store: ArchiveStore, tar: TarTool
     ) -> None:
