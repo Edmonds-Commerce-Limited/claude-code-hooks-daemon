@@ -42,8 +42,9 @@ A task that cannot stop anything belongs in `post-upgrade-tasks/`.
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-| File | Type | Severity | Applies to | One-line summary |
-| ---- | ---- | -------- | ---------- | ---------------- |
+| File                                              | Type             | Severity    | Applies to                              | One-line summary                                                                    |
+| ------------------------------------------------- | ---------------- | ----------- | --------------------------------------- | ----------------------------------------------------------------------------------- |
+| `01-remove-copy-mode-seeds-of-protected-files.md` | config-migration | recommended | projects seeding worktrees in copy mode | A copy-mode seed of a protected file now aborts worktree creation: remove the entry |
 
 <!-- END TASK INDEX -->
 

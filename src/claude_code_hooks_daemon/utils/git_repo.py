@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final
@@ -70,12 +70,46 @@ _REAL_OBJECTS_ENV: Final[Mapping[str, str]] = {
     "GIT_GRAFT_FILE": "/dev/null/no-grafts",
 }
 
+#: Every ``git diff`` or ``git status`` that decides whether work would be lost
+#: passes this. Without it git drops a submodule's row when the TRACKED
+#: ``.gitmodules`` says ``ignore = all`` or any config level sets
+#: ``diff.ignoreSubmodules = all``, so a pointer change reads as no change. The
+#: flag outranks both. ``git cherry`` takes no such flag: its patch-ids stay blind.
+SEE_SUBMODULES: Final[str] = "--ignore-submodules=none"
+
 #: Each of these points git at a repository, work tree or index other than the
 #: one ``-C <cwd>`` names. Shared with ``git_invocation_directory``, which denies
 #: an agent's git command that sets one.
 RELOCATING_VARIABLES: Final[frozenset[str]] = frozenset(
     {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"}
 )
+
+
+class IsolatedGitEnv(Mapping[str, str]):
+    """Variables for a git run that must inherit NO ``GIT_*`` from the caller.
+
+    A plain mapping is laid over the inherited environment. This type marks the
+    variables as the whole git part of it instead: :func:`_child_environment`
+    drops every inherited ``GIT_*`` (``GIT_CONFIG_PARAMETERS``, ``GIT_EXEC_PATH``,
+    ``GIT_ALTERNATE_OBJECT_DIRECTORIES``...) before applying them. Used for git run
+    inside an untrusted nested repository, where an inherited command-valued
+    setting would bypass the config allowlist (Plan 00627 D-EXEC 1). The marker is
+    a type, so a test runner forwarding ``env=env`` keeps it; a ``dict`` copy
+    loses it.
+    """
+
+    def __init__(self, values: Mapping[str, str]) -> None:
+        self._values: dict[str, str] = dict(values)
+
+    def __getitem__(self, key: str) -> str:
+        return self._values[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
 
 #: Reported when git could not be run at all (absent binary). Mirrors the
 #: shell's "command not found" so callers branching on ``returncode`` need no
@@ -203,8 +237,13 @@ def _child_environment(env: Mapping[str, str] | None) -> dict[str, str]:
     ``os.environ`` copy cannot reinstate an inherited ``GIT_OPTIONAL_LOCKS`` and
     undo the one property this runner exists to guarantee. The real-objects pin
     (:data:`_REAL_OBJECTS_ENV`) is applied last for the same reason.
+
+    An :class:`IsolatedGitEnv` drops EVERY inherited ``GIT_*`` variable instead.
     """
-    inherited = {k: v for k, v in os.environ.items() if k not in RELOCATING_VARIABLES}
+    if isinstance(env, IsolatedGitEnv):
+        inherited = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    else:
+        inherited = {k: v for k, v in os.environ.items() if k not in RELOCATING_VARIABLES}
     return {
         **inherited,
         **(env or {}),

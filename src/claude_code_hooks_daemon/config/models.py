@@ -5,6 +5,7 @@ validation, serialisation, and sensible defaults.
 """
 
 import logging
+import re
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Final, Literal, Self
@@ -2485,6 +2486,50 @@ class BranchSweepConfig(BaseModel):
     )
 
 
+class BranchRejectConfig(BaseModel):
+    """``branches.reject``: the no-value removal route (Plan 00620, DESIGN.md section 1).
+
+    With ``n`` removals already in the window, the next needs two reviewers when
+    ``n >= two_reviewer_after`` and is refused when ``n >= refuse_after``.
+    ``ledger_path`` (the human-readable record) is relative to the checkout the
+    delete runs in; ``bundle_dir`` and ``state_dir`` are relative to the MAIN
+    checkout, so a removed linked worktree never takes a bundle or a verdict with
+    it, and single use and the rate (kept in ``state_dir``) hold across worktrees.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdict_lifetime_hours: Annotated[int, Field(ge=1)] = Field(
+        default=24, description="How long a verdict is valid from its issue time"
+    )
+    window_days: Annotated[int, Field(ge=1)] = Field(
+        default=7, description="Rolling window the removal rate is counted over"
+    )
+    two_reviewer_after: Annotated[int, Field(ge=0)] = Field(
+        default=3, description="Removals in the window after which two reviewers are required"
+    )
+    refuse_after: Annotated[int, Field(ge=1)] = Field(
+        default=10, description="Removals in the window after which the route refuses"
+    )
+    ledger_path: str = Field(default=".claude/branch-removals.jsonl")
+    bundle_dir: str = Field(default="untracked/branch-rejects")
+    state_dir: str = Field(default="untracked/branch-reject-state")
+
+    @field_validator("ledger_path", "bundle_dir", "state_dir")
+    @classmethod
+    def _relative_inside_repo(cls, value: str) -> str:
+        normalised = _normalise_repo_relative_path(value, "branches.reject path")
+        if normalised == ".":
+            raise ValueError("branches.reject paths must name a file or directory, not the root")
+        return normalised
+
+    @model_validator(mode="after")
+    def _refuse_not_before_two_reviewers(self) -> Self:
+        if self.refuse_after < self.two_reviewer_after:
+            raise ValueError("branches.reject.refuse_after must be >= two_reviewer_after")
+        return self
+
+
 class BranchesConfig(BaseModel):
     """Branch WIP limit and hygiene policy (Plan 00558, DESIGN.md section 1).
 
@@ -2544,6 +2589,7 @@ class BranchesConfig(BaseModel):
         default_factory=BranchCleanupAfterMergeConfig
     )
     sweep: BranchSweepConfig = Field(default_factory=BranchSweepConfig)
+    reject: BranchRejectConfig = Field(default_factory=BranchRejectConfig)
 
     #: The retired ``branch_sweep`` option ``max_open_branches``, set by ``Config``.
     _legacy_wip_cap: int | None = PrivateAttr(default=None)
@@ -2628,6 +2674,231 @@ class BranchesConfig(BaseModel):
         if "behind_threshold" in self.sweep.model_fields_set:
             return self.sweep.behind_threshold
         return None
+
+
+class ScratchThresholdConfig(BaseModel):
+    """One scratch cap: a ``warn`` figure and a higher ``block`` figure."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    warn: Annotated[int, Field(ge=1)]
+    block: Annotated[int, Field(ge=1)]
+
+    @model_validator(mode="after")
+    def validate_order(self) -> Self:
+        """Require ``warn < block`` so the warning comes before the block."""
+        if self.warn >= self.block:
+            raise ValueError(f"cap: warn must be below block; got {self.warn}/{self.block}")
+        return self
+
+
+class ScratchProjectDirectoriesCapConfig(BaseModel):
+    """``scratch.caps.project_directories``: percentages of the link index's directory cap."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    warn_percent: Annotated[int, Field(ge=1, le=100)] = Field(default=50)
+    block_percent: Annotated[int, Field(ge=1, le=100)] = Field(default=75)
+
+    @model_validator(mode="after")
+    def validate_order(self) -> Self:
+        """Require ``warn_percent < block_percent``."""
+        if self.warn_percent >= self.block_percent:
+            raise ValueError(
+                "project_directories: warn_percent must be below block_percent; got "
+                f"{self.warn_percent}/{self.block_percent}"
+            )
+        return self
+
+
+class ScratchCapsConfig(BaseModel):
+    """``scratch.caps``: size limits that warn, then block, before the link index overflows."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    directories: ScratchThresholdConfig = Field(
+        default_factory=lambda: ScratchThresholdConfig(warn=10_000, block=25_000)
+    )
+    bytes: ScratchThresholdConfig = Field(
+        default_factory=lambda: ScratchThresholdConfig(warn=1 << 30, block=4 << 30)
+    )
+    entries: ScratchThresholdConfig = Field(
+        default_factory=lambda: ScratchThresholdConfig(warn=500, block=2_000)
+    )
+    project_directories: ScratchProjectDirectoriesCapConfig = Field(
+        default_factory=ScratchProjectDirectoriesCapConfig
+    )
+    pressure_idle_minutes: Annotated[int, Field(ge=1)] = Field(default=30)
+    mode: Literal["block", "advise", "off"] = Field(default="block")
+
+
+class ScratchSweepConfig(BaseModel):
+    """``scratch.sweep``: what the sweep judges and how much it lists."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_listed: Annotated[int, Field(ge=1)] = Field(default=50)
+    unowned_entry: Literal["advise", "block", "off"] = Field(default="advise")
+
+
+class ScratchArchiveConfig(BaseModel):
+    """``scratch.archive``: how long a packed entry is held, by verdict."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    disposable_hours: Annotated[int, Field(ge=1)] = Field(default=12)
+    uncertain_hours: Annotated[int, Field(ge=1)] = Field(default=168)
+
+
+class ScratchKeepConfig(BaseModel):
+    """``scratch.keep``: the longest an agent's pause may last, and how many one archive may carry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_hours: Annotated[int, Field(ge=1)] = Field(default=168)
+    max_keeps: Annotated[int, Field(ge=1)] = Field(default=4)
+
+
+class ScratchFilingConfig(BaseModel):
+    """``scratch.filing``: the largest file the sweep proposes tracking."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_bytes: Annotated[int, Field(ge=1)] = Field(default=262_144)
+
+
+#: ``scratch.untracked_ttl`` value meaning "never cleared" (Plan 00627 DESIGN.md section 4.1).
+UNTRACKED_TTL_NEVER: Final[str] = "*"
+
+#: The built-in per-directory TTLs; a config map is merged over these.
+UNTRACKED_TTL_DEFAULTS: Final[dict[str, str]] = {"repos": UNTRACKED_TTL_NEVER, "scratch": "24h"}
+
+_TTL_PATTERN: Final[re.Pattern[str]] = re.compile(r"([1-9][0-9]*)([hd])")
+_HOURS_PER_UNIT: Final[dict[str, int]] = {"h": 1, "d": 24}
+
+
+def untracked_ttl_hours(value: str) -> int | None:
+    """Hours for a valid TTL value, None for ``"*"``; raises ValueError for anything else."""
+    if value == UNTRACKED_TTL_NEVER:
+        return None
+    match = _TTL_PATTERN.fullmatch(value)
+    if match is None:
+        raise ValueError(f'{value!r} is not <N>h, <N>d or "*"')
+    return int(match.group(1)) * _HOURS_PER_UNIT[match.group(2)]
+
+
+def _is_ttl(value: object) -> bool:
+    return isinstance(value, str) and (
+        value == UNTRACKED_TTL_NEVER or _TTL_PATTERN.fullmatch(value) is not None
+    )
+
+
+def _malformed(value: object) -> str:
+    """``value`` as text that can never parse as a TTL, so reading it raises later."""
+    text = value if isinstance(value, str) else repr(value)
+    return repr(text) if _is_ttl(text) else text
+
+
+def _is_directory_name(key: object) -> bool:
+    return isinstance(key, str) and key not in ("", ".", "..") and "/" not in key
+
+
+class ScratchConfig(BaseModel):
+    """``scratch``: the TTL, sweep, archive and caps of agent scratch (Plan 00627).
+
+    The full design is Plan 00627 DESIGN.md section 10. A malformed TTL never
+    stops the config loading, and is never replaced by a default or by ``"*"``:
+    it is kept, logged, and :meth:`ttl_hours_for` raises for every directory it
+    governs, so the sweep refuses that root naming the bad value (section 4.1).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    untracked_ttl: dict[str, str] = Field(
+        default_factory=lambda: dict(UNTRACKED_TTL_DEFAULTS),
+        description='TTL per directory directly under untracked/: <N>h, <N>d or "*" (never)',
+    )
+    untracked_default_ttl: str = Field(
+        default=UNTRACKED_TTL_NEVER,
+        description="TTL of an untracked/ directory the map does not name",
+    )
+    max_ttl_hours: Annotated[int, Field(ge=1)] = Field(default=72)
+    max_lifetime_hours: Annotated[int, Field(ge=1)] = Field(default=168)
+    min_age_minutes: Annotated[int, Field(ge=0)] = Field(default=30)
+    sweep: ScratchSweepConfig = Field(default_factory=ScratchSweepConfig)
+    archive: ScratchArchiveConfig = Field(default_factory=ScratchArchiveConfig)
+    keep: ScratchKeepConfig = Field(default_factory=ScratchKeepConfig)
+    filing: ScratchFilingConfig = Field(default_factory=ScratchFilingConfig)
+    caps: ScratchCapsConfig = Field(default_factory=ScratchCapsConfig)
+
+    @field_validator("untracked_default_ttl", mode="before")
+    @classmethod
+    def _keep_malformed_default(cls, value: object) -> str:
+        if _is_ttl(value):
+            return str(value)
+        logger.warning(
+            'scratch.untracked_default_ttl: %r is not <N>h, <N>d or "*";'
+            " every directory it governs is refused by the sweep",
+            value,
+        )
+        return _malformed(value)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _merge_untracked_ttl(cls, data: object) -> object:
+        """Merge the map over the built-ins; a bad value is kept (and logged) so it refuses."""
+        if not isinstance(data, dict) or "untracked_ttl" not in data:
+            return data
+        raw = data["untracked_ttl"]
+        merged = dict(UNTRACKED_TTL_DEFAULTS)
+        if not isinstance(raw, dict):
+            logger.warning("scratch.untracked_ttl: not a mapping; every sweep is refused")
+            marker = _malformed(f"scratch.untracked_ttl is not a mapping: {raw!r}")
+            return {
+                **data,
+                "untracked_ttl": dict.fromkeys(merged, marker),
+                "untracked_default_ttl": marker,
+            }
+        for key, value in raw.items():
+            if not _is_directory_name(key):
+                logger.warning(
+                    "scratch.untracked_ttl: key %r is not one directory name; dropped", key
+                )
+                continue
+            if _is_ttl(value):
+                merged[key] = value
+                continue
+            logger.warning(
+                'scratch.untracked_ttl: %s: %r is not <N>h, <N>d or "*"; its sweep is refused',
+                key,
+                value,
+            )
+            merged[key] = _malformed(value)
+        return {**data, "untracked_ttl": merged}
+
+    def ttl_hours_for(self, directory: str) -> int | None:
+        """The TTL in hours of ``untracked/<directory>``, or None when it is never cleared.
+
+        Raises ValueError, naming the config key and the value, when that TTL is malformed.
+        """
+        if directory in self.untracked_ttl:
+            source, value = f"scratch.untracked_ttl.{directory}", self.untracked_ttl[directory]
+        else:
+            source, value = "scratch.untracked_default_ttl", self.untracked_default_ttl
+        try:
+            return untracked_ttl_hours(value)
+        except ValueError as exc:
+            raise ValueError(f"{source}: {exc}; fix it in .claude/hooks-daemon.yaml") from exc
+
+    @model_validator(mode="after")
+    def validate_lifetimes(self) -> Self:
+        """Require ``max_ttl_hours <= max_lifetime_hours``."""
+        if self.max_lifetime_hours < self.max_ttl_hours:
+            raise ValueError(
+                f"max_lifetime_hours ({self.max_lifetime_hours}) must be at least "
+                f"max_ttl_hours ({self.max_ttl_hours})"
+            )
+        return self
 
 
 class CcyConfig(BaseModel):
@@ -3221,6 +3492,7 @@ class Config(BaseModel):
         ccy: ccy container-workflow configuration (Plan 00147)
         worktree: Worktree-workflow policy, the merge-to-main gate (Plan 00367)
         branches: Branch WIP limit and hygiene policy (Plan 00558)
+        scratch: Scratch TTL, sweep, archive and caps (Plan 00627)
         layout: Project directory-layout truths with no other config home
             (Plan 00288); composed with other homes by the ``ProjectLayout``
             facade (``core/project_layout.py``)
@@ -3249,6 +3521,7 @@ class Config(BaseModel):
     ccy: CcyConfig = Field(default_factory=CcyConfig)
     worktree: WorktreeConfig = Field(default_factory=WorktreeConfig)
     branches: BranchesConfig = Field(default_factory=BranchesConfig)
+    scratch: ScratchConfig = Field(default_factory=ScratchConfig)
     tool_policy: ToolPolicyConfig = Field(default_factory=ToolPolicyConfig)
     persistent_crons: PersistentCronsConfig = Field(default_factory=PersistentCronsConfig)
     autonomy: AutonomyConfig = Field(default_factory=AutonomyConfig)

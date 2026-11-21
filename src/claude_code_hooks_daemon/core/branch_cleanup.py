@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,11 +37,13 @@ from claude_code_hooks_daemon.core.agent_ownership import (
 )
 from claude_code_hooks_daemon.core.branch_inventory import BranchRecord, BranchState
 from claude_code_hooks_daemon.core.branch_park import (
+    BranchParkError,
     ParkRecord,
     clear_park_record,
     read_park_records,
 )
 from claude_code_hooks_daemon.core.remote_branch_proof import (
+    branch_name,
     named_ref_problem,
     prove_remote_merged,
 )
@@ -61,6 +64,7 @@ from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     GIT_COMMAND_ERRORS,
     HEADS_PREFIX,
+    SEE_SUBMODULES,
     WorktreeRecord,
     branch_ref,
     parse_worktree_porcelain,
@@ -86,12 +90,15 @@ MERGED_TIERS = frozenset({TIER_MERGED, TIER_MERGED_UNPUSHED, TIER_MERGED_NOT_IN_
 #: Inventory states ``branch-sweep --clean`` considers, a park marker over work the
 #: default holds included: ``classify_branch`` proves its local delete and
 #: :func:`prove_remote_merged` its remote one (``park-carried``, Plan 00617).
+#: ``content-preserved`` comes only from the ``prove_content`` inventory ``--clean``
+#: builds, and is re-proved by ``classify_branch``'s content tier before any delete.
 CLEAN_STATES = frozenset(
     {
         BranchState.MERGED_DEFAULT,
         BranchState.MERGED_LINE,
         BranchState.PATCH_EQUIVALENT,
         BranchState.PARK_CARRIED,
+        BranchState.CONTENT_PRESERVED,
     }
 )
 
@@ -442,7 +449,7 @@ def worktree_blocker_groups(
     agent may delete itself; ``dirty`` also carries a git failure, which no
     delete can clear.
     """
-    status = run_git(path, "status", "--porcelain")
+    status = run_git(path, "status", "--porcelain", SEE_SUBMODULES)
     if status.returncode != 0:
         return ((f"<git status failed: {status.stderr.strip()}>",), ())
     dirty = [line[_STATUS_PREFIX:] for line in status.stdout.splitlines() if line]
@@ -569,9 +576,10 @@ def remote_delete_advice(
 ) -> str | None:
     """What to tell a person about the remote copy of ``name``, when the remote holds one.
 
-    The runnable delete line only when the remote-delete guard's own proof
-    (:func:`prove_remote_merged`) accepts the branch, so a printed command is one the
-    guard allows. Otherwise owner-only wording, which is advice and not a command.
+    The runnable line is the leased route (``delete-branch --remote-only``, which holds
+    a lease on the proven tip and prints the restore line), and only when the
+    remote-delete guard's own proof (:func:`prove_remote_merged`) accepts the branch.
+    Otherwise owner-only wording, which is advice and not a command.
 
     ``prove=False`` is for a hook path, where the proof's ``ls-remote`` and history
     walks are too slow and need the network: the line is then owner-only wording that
@@ -587,7 +595,7 @@ def remote_delete_advice(
         proof = prove_remote_merged(repo, remote, [name], default, config)
         problem = proof.problems.get(name)
         if problem is None and name in proof.tips:
-            return f"git push {remote} --delete {name}"
+            return daemon_cli_command_for_docs("delete-branch", "--remote-only", shlex.quote(name))
         problem = problem or "the proof did not accept it"
     return f"remote delete of {remote}/{name} is for the owner: {problem}"
 
@@ -601,14 +609,16 @@ def _classify(
     lines: Sequence[str] = (),
     line_targets: Sequence[str] | None = None,
     ignore_worktree: bool = False,
+    content_tier: bool = False,
 ) -> BranchClassification:
+    """``classify_branch`` for cleanup; ``content_tier`` is True only from ``--clean``."""
     return classify_branch(
         repo,
         name,
         protected_names=never_work,
         targets=targets,
         ignore_worktree=ignore_worktree,
-        content_tier=False,
+        content_tier=content_tier,
         line_names=lines,
         line_targets=line_targets,
     )
@@ -671,9 +681,12 @@ def cleanup_after_merge(
     skipped: list[str] = []
     commands: list[str] = []
     park_cleared: list[str] = []
-    delete_command = (
-        daemon_cli_command_for_docs("delete-branch") + " {name} --protected-ref " + target
-    )
+
+    def delete_command(name: str) -> str:
+        return daemon_cli_command_for_docs(
+            "delete-branch", shlex.quote(name), "--protected-ref", shlex.quote(target)
+        )
+
     for name in names:
         refusal = policy_refusal(name, config, protected_default, refuse_lines=refuse_lines)
         if refusal is not None:
@@ -702,10 +715,13 @@ def cleanup_after_merge(
         if held_by is not None:
             park_cleared += _clear_parks(repo, [name])
             skipped.append(f"{name}: checked out in the worktree {held_by}")
-            commands += [f"git worktree remove {held_by}", delete_command.format(name=name)]
+            commands += [
+                f"git worktree remove {shlex.quote(str(held_by))}",
+                delete_command(name),
+            ]
         elif mode == "advise":
             park_cleared += _clear_parks(repo, [name])
-            commands.append(delete_command.format(name=name))
+            commands.append(delete_command(name))
         else:
             before = _park_snapshot(repo, [name])
             report = delete_branches(
@@ -722,7 +738,7 @@ def cleanup_after_merge(
                 continue
             park_cleared += _clear_parks(repo, [name], before)
             deleted.append(name)
-            commands.append(f"git branch {name} {verdict.tip}")
+            commands.append(f"git branch {shlex.quote(name)} {verdict.tip}")
         remote = remote_delete_advice(repo, config, protected_default, name, prove=False)
         if remote is not None:
             commands.append(remote)
@@ -796,7 +812,7 @@ def delete_if_merged(
     if name not in report.deleted:
         return CleanupReport(skipped=tuple(f"{name}: {b}" for b in report.blockers))
     park_cleared = _clear_parks(repo, [name], before)
-    commands = [f"git branch {name} {verdict.tip}"]
+    commands = [f"git branch {shlex.quote(name)} {verdict.tip}"]
     remote = remote_delete_advice(repo, config, default, name, prove=False)
     if remote is not None:
         commands.append(remote)
@@ -847,7 +863,11 @@ def clean_sweep(
 
     Each candidate is classified on its own first, because ``delete_branches`` is
     all-or-nothing: only the proven ones are batched. A linked worktree is removed
-    first, and only when :func:`worktree_blockers` finds nothing it would lose.
+    first, and only when :func:`worktree_blockers` finds nothing it would lose and a
+    fresh worktree listing at apply time shows it still holds the planned branch.
+
+    A parked branch that is only content-preserved (never merged) is skipped on
+    both sides with its park reason; a merged tier ends a park instead.
 
     A branch and worktree a live agent owns (:mod:`agent_ownership`: a ``running``
     work-queue record in ``untracked``, the harness's ``.claude/worktrees/``
@@ -869,7 +889,7 @@ def clean_sweep(
     unhurried = config.model_copy(
         update={"sweep": config.sweep.model_copy(update={"budget_ms": BULK_SWEEP_BUDGET_MS})}
     )
-    inventory = branch_inventory.build_inventory(repo, unhurried)
+    inventory = branch_inventory.build_inventory(repo, unhurried, prove_content=True)
     default = inventory.default_branch
     if default is None:
         raise ValueError("cannot determine the default branch; set branches.default")
@@ -887,7 +907,7 @@ def clean_sweep(
         for name in {*inventory.records, *worktree_records}
         if (why := _agent_owned(name, worktree_records, holds)) is not None
     }
-    spared = _spared(config, inventory.records)
+    spared = _spared(config, inventory.records, repo)
     candidates = sorted(
         name
         for name, record in inventory.records.items()
@@ -919,6 +939,7 @@ def clean_sweep(
             lines=config.integration_lines,
             line_targets=line_targets,
             ignore_worktree=held_by is not None,
+            content_tier=True,
         )
         if not verdict.is_safe:
             skipped.append(f"{name}: {verdict.detail}")
@@ -945,7 +966,7 @@ def clean_sweep(
             f"{config.remote}/{name}: {spared[name]}"
             for name in sorted(spared)
             if inventory.records[name].remote_tip is not None
-            and inventory.records[name].state in CLEAN_STATES
+            and inventory.records[name].cleanup_state in REMOTE_CLEAN_STATES
         ]
     apply_command = sweep_clean_command(remote=remote)
     if dry_run:
@@ -1062,6 +1083,21 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
     """
     repo, config = plan.repo, plan.config
     local: list[str] = []
+    # The plan's worktree map is as old as its proofs: re-read it once per batch, so
+    # a worktree switched to another branch (or claimed afresh) is never removed.
+    now_held: Mapping[str, Path] | None = {}
+    if any(name in plan.worktrees for name in batch):
+        try:
+            now_held = {name: rec.path for name, rec in linked_worktree_records(repo).items()}
+        except RuntimeError as exc:
+            # Fail closed: an unread listing cannot show the worktree still holds it.
+            log_and_continue(
+                logger,
+                exc,
+                reason="branch cleanup: worktree list unreadable at apply, so every "
+                "worktree-held branch in this batch is kept (fail closed)",
+            )
+            now_held = None
     for name in batch:
         if name not in plan.proven:
             continue
@@ -1070,6 +1106,14 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             continue
         held_by = plan.worktrees.get(name)
         if held_by is not None:
+            if now_held is None:
+                outcome.skipped.append(
+                    f"{name}: the worktree list could not be re-read, so {held_by} was kept"
+                )
+                continue
+            if now_held.get(name) != held_by:
+                outcome.skipped.append(_worktree_changed_line(name, held_by, now_held))
+                continue
             # The proof ran long ago; work may have landed in the worktree since.
             blockers = worktree_blockers(held_by, config.cleanup_after_merge.regenerable)
             if blockers:
@@ -1085,12 +1129,14 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
     deleted: tuple[str, ...] = ()
     if local:
         before = _park_snapshot(repo, local)
+        # The content tier, as in the plan: a content-preserved branch is re-proved
+        # here, so the delete never rests on the inventory's (or a cache's) word.
         report = delete_branches(
             repo,
             local,
             protected_names=plan.never_work,
             targets=plan.targets,
-            content_tier=False,
+            content_tier=True,
             line_names=config.integration_lines,
             line_targets=plan.line_targets,
         )
@@ -1106,7 +1152,8 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
         outcome.deleted_remote += [f"{config.remote}/{name}" for name in gone]
         outcome.remaining += [name for name in tips if name not in gone]
         outcome.commands += [
-            f"git push {config.remote} {tips[name]}:{branch_ref(name)}" for name in gone
+            f"git push {shlex.quote(config.remote)} {shlex.quote(f'{tips[name]}:{branch_ref(name)}')}"
+            for name in gone
         ]
     for name in deleted:
         advice = remote_delete_advice(repo, config, plan.default, name)
@@ -1114,19 +1161,67 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             outcome.commands.append(advice)
 
 
-def _spared(config: BranchesConfig, records: Mapping[str, BranchRecord]) -> dict[str, str]:
+def _worktree_changed_line(name: str, planned: Path, now_held: Mapping[str, Path]) -> str:
+    """Why a planned worktree removal was dropped: the worktree no longer holds ``name``."""
+    holder = next((branch for branch, path in now_held.items() if path == planned), None)
+    now = f"now holds {holder}" if holder is not None else "no longer holds it"
+    return f"{name}: the worktree {planned} {now} (changed since the plan); rerun the sweep"
+
+
+def _spared(
+    config: BranchesConfig, records: Mapping[str, BranchRecord], repo: Path
+) -> dict[str, str]:
     """``name -> reason`` for every branch ``--clean`` must leave alone on both sides.
 
-    A keep inside its age, and any ``bot_owned`` name (defence in depth: the
-    inventory already gives those a state outside CLEAN_STATES).
+    A keep inside its age, any ``bot_owned`` name (defence in depth: the inventory
+    already gives those a state outside CLEAN_STATES), and a parked content-preserved
+    branch: it was never merged, so its park is a standing decision the sweep must
+    not erase. A merged tier still ends a park, as a merge does.
     """
+    parks: Mapping[str, ParkRecord] | None
+    try:
+        parks = read_park_records(repo)
+    except BranchParkError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="branch cleanup: park records unreadable, so every content-preserved "
+            "branch counts as parked and is spared (fail closed)",
+        )
+        parks = None
     spared: dict[str, str] = {}
     for name, record in records.items():
         if matches_any_glob(name, config.bot_owned):
             spared[name] = "bot-owned (branches.bot_owned)"
         elif record.kept_reason is not None and not record.stale:
             spared[name] = f"kept: {record.kept_reason}"
+        elif record.cleanup_state == BranchState.CONTENT_PRESERVED:
+            why = _park_reason(name, record, parks)
+            if why is not None:
+                spared[name] = (
+                    f"parked ({why}), only content-preserved; clear the park with "
+                    f"{daemon_cli_command_for_docs('branch-park', shlex.quote(name), '--clear')} "
+                    "to clean it"
+                )
     return spared
+
+
+def _park_reason(
+    name: str, record: BranchRecord, parks: Mapping[str, ParkRecord] | None
+) -> str | None:
+    """Why a branch is parked: its tip's trailer, or a record on that tip; else None.
+
+    Unreadable park records (``parks`` None) count as parked: the sweep cannot rule
+    a park out, so it keeps the branch.
+    """
+    if record.parked_reason is not None:
+        return record.parked_reason
+    if parks is None:
+        return "park records unreadable"
+    standing = parks.get(name)
+    if standing is not None and standing.sha in (record.local_tip, record.remote_tip):
+        return standing.reason
+    return None
 
 
 def _proven_remote(
@@ -1187,6 +1282,51 @@ def proven_remote_only(
         return frozenset()
     tips, _problems, _evidence = _proven_remote(repo, config, default, remote_only)
     return frozenset(tips)
+
+
+def delete_remote_branches(
+    repo: Path, config: BranchesConfig, default: str, names: Sequence[str]
+) -> CleanupReport:
+    """The agent's leased route to delete remote branches, each only when the proof accepts it.
+
+    Every name is judged by the remote-delete guard's own proof
+    (:func:`prove_remote_merged`, including the surviving-content tier), with the whole
+    batch as ``also_deleting`` so no branch vouches for another. An accepted branch is
+    deleted under a lease on its proven tip (:func:`_push_deletes`) and reported with
+    the ``git push <remote> <sha>:refs/heads/<name>`` line that restores it. A refused
+    name is reported in ``skipped`` with the reason and nothing is pushed for it.
+    """
+    unique = list(dict.fromkeys(branch_name(name) for name in names))
+    refused: list[str] = []
+    judged: list[str] = []
+    for name in unique:
+        problem = named_ref_problem(config.remote, name, default, config)
+        if problem is None:
+            judged.append(name)
+        else:
+            refused.append(f"{config.remote}/{name}: {problem}")
+    tips: dict[str, str] = {}
+    if judged:
+        proof = prove_remote_merged(
+            repo, config.remote, judged, default, config, also_deleting=unique
+        )
+        tips = proof.tips
+        refused += [
+            f"{config.remote}/{name}: {proof.problems.get(name, 'the proof did not accept it')}"
+            for name in judged
+            if name not in tips
+        ]
+    gone: list[str] = []
+    if tips:
+        gone, push_refusals = _push_deletes(repo, config.remote, tips)
+        refused += push_refusals
+    return CleanupReport(
+        skipped=tuple(refused),
+        commands=tuple(
+            f"git push {config.remote} {tips[name]}:{branch_ref(name)}" for name in gone
+        ),
+        deleted_remote=tuple(f"{config.remote}/{name}" for name in gone),
+    )
 
 
 def _push_deletes(repo: Path, remote: str, tips: Mapping[str, str]) -> tuple[list[str], list[str]]:
@@ -1265,6 +1405,7 @@ __all__ = [
     "cleanup_after_merge",
     "cleanup_targets",
     "delete_if_merged",
+    "delete_remote_branches",
     "linked_worktrees",
     "merge_target_qualifies",
     "policy_refusal",

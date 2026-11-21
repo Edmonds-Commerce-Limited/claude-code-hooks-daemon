@@ -123,6 +123,43 @@ class TestMatching:
         assert handler.matches(hook_input) is False
 
 
+class TestBranchRejectReviewerDispatch:
+    """Plan 00620: the review prompt is daemon-composed and declares no plan folder.
+
+    Strict mode would deny the canonical prompt, so a reviewer dispatch is left to
+    branch_reject_dispatch_gate, which denies any such dispatch whose prompt is not
+    byte-equal to an outstanding request's (tests/unit/handlers/pre_tool_use/
+    test_branch_reject_dispatch_gate.py). Neither mode may touch it: an advisory that
+    rewrote the prompt would break that byte equality.
+    """
+
+    @pytest.mark.parametrize("fixture_name", ["handler", "strict_handler"])
+    def test_the_reviewer_type_is_not_matched(
+        self, fixture_name: str, request: pytest.FixtureRequest
+    ) -> None:
+        from claude_code_hooks_daemon.core.branch_reject import REVIEWER_AGENT_TYPE
+
+        instance = request.getfixturevalue(fixture_name)
+        payload = _task_input("refactor the config loader", subagent_type=REVIEWER_AGENT_TYPE)
+        assert instance.matches(payload) is False
+
+    @pytest.mark.parametrize("fixture_name", ["handler", "strict_handler"])
+    def test_a_review_prompt_is_not_matched(
+        self, fixture_name: str, request: pytest.FixtureRequest
+    ) -> None:
+        from claude_code_hooks_daemon.core.branch_reject import PROMPT_MARKER
+
+        instance = request.getfixturevalue(fixture_name)
+        assert instance.matches(_task_input(f"{PROMPT_MARKER}{'a' * 32}\n\nbody")) is False
+
+    def test_the_marker_quoted_mid_prompt_is_still_matched(
+        self, strict_handler: DispatchDeclarationHandler
+    ) -> None:
+        from claude_code_hooks_daemon.core.branch_reject import PROMPT_MARKER
+
+        assert strict_handler.matches(_task_input(f"see {PROMPT_MARKER}{'a' * 32}")) is True
+
+
 class TestAdvisoryMode:
     def test_silent_when_plan_folder_declared(self, handler: DispatchDeclarationHandler) -> None:
         prompt = (

@@ -334,6 +334,7 @@ def run_check_worktree_seed(
         "configured": [asdict(entry) for entry in report.configured],
         "unconfigured": [asdict(entry) for entry in report.unconfigured],
         "missing": [asdict(entry) for entry in report.missing],
+        "refused_copies": list(report.refused_copies),
         "suggested_yaml": suggested_yaml_block(
             report.unconfigured, seed_key_configured=report.seed_key_configured
         ),

@@ -29,7 +29,13 @@ from tests.load_scaling import scaled_seconds
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 TESTS_DIR: Final[Path] = REPO_ROOT / "tests"
-UNRELEASED_DIR: Final[str] = "CLAUDE/UPGRADES/UNRELEASED"
+UPGRADES_DIR: Final[str] = "CLAUDE/UPGRADES"
+UNRELEASED_DIR: Final[str] = f"{UPGRADES_DIR}/UNRELEASED"
+#: Staged manifest kinds release prep MOVES into the flat live directory rather
+#: than into the versioned guide, so the released copy must carry them there.
+PROMOTED_MANIFEST_KINDS: Final[frozenset[str]] = frozenset({"config-changes", "truth-changes"})
+SIMULATED_RELEASE_DATE: Final[str] = "2000-01-01"
+_PLACEHOLDER_DATE: Final[re.Pattern[str]] = re.compile(r'^date:\s*"?UNRELEASED"?\s*$', re.MULTILINE)
 SCAFFOLDING_NAME: Final[str] = "README.md"
 FIXTURE_DIRNAME: Final[str] = "cyber-flag"
 #: Idle-host budget for EACH nested run (one per reader group, all at once). It
@@ -74,6 +80,27 @@ def holding_area_readers(tests_dir: Path, *, exclude: Path) -> list[Path]:
     return readers
 
 
+def promoted_manifest(relative: str) -> str | None:
+    """Where release prep moves a staged manifest, or ``None`` for any other path.
+
+    RELEASING.md moves each ``v*.yaml`` in ``UNRELEASED/config-changes`` and
+    ``UNRELEASED/truth-changes`` into the flat directory of the same name.
+    """
+    path = Path(relative)
+    if (
+        path.parent.parent.as_posix() == UNRELEASED_DIR
+        and path.parent.name in PROMOTED_MANIFEST_KINDS
+        and path.match("v*.yaml")
+    ):
+        return f"{UPGRADES_DIR}/{path.parent.name}/{path.name}"
+    return None
+
+
+def release_dated(text: str) -> str:
+    """Set a staged manifest's placeholder ``date:`` to a date, as release prep does."""
+    return _PLACEHOLDER_DATE.sub(f'date: "{SIMULATED_RELEASE_DATE}"', text)
+
+
 def is_staged_content(relative: str) -> bool:
     """True for a tracked file inside ``UNRELEASED/`` that is not README scaffolding."""
     return relative.startswith(f"{UNRELEASED_DIR}/") and Path(relative).name != SCAFFOLDING_NAME
@@ -103,6 +130,11 @@ def empty_task_indexes(root: Path) -> None:
 def copy_released_tree(destination: Path, source: Path) -> None:
     """Clone ``source`` (keeping its tags), overlay its working tree, empty ``UNRELEASED/``.
 
+    Staged config-changes and truth-changes manifests are moved into their flat
+    live directories with a release date, as RELEASING.md does, rather than
+    dropped: a release never deletes them, so a test pinning that a manifest
+    documents a key must still find it in the released state.
+
     The clone keeps the release tags the upgrade tests install from. The overlay
     carries uncommitted work, so a test being written is run before it is
     committed. The interpreter's venv is linked in where the QA resolver scans.
@@ -117,7 +149,14 @@ def copy_released_tree(destination: Path, source: Path) -> None:
     ).stdout
     for relative in filter(None, listing.split("\0")):
         origin = source / relative
-        if is_staged_content(relative) or not origin.is_file() or origin.is_symlink():
+        if not origin.is_file() or origin.is_symlink():
+            continue
+        promoted = promoted_manifest(relative)
+        if promoted is not None:
+            (destination / promoted).write_text(
+                release_dated(origin.read_text(encoding="utf-8")), encoding="utf-8"
+            )
+        if is_staged_content(relative):
             continue
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -157,6 +196,19 @@ class TestTheCopyIsTheReleasedState:
         assert is_staged_content(f"{UNRELEASED_DIR}/config-changes/v9.9.9.yaml")
         assert not is_staged_content(f"{UNRELEASED_DIR}/release-notes/README.md")
         assert not is_staged_content("CLAUDE/UPGRADES/v3/v3.60.0-to-v3.61.0/x.md")
+
+    def test_staged_manifests_are_promoted_to_their_flat_directory(self) -> None:
+        for kind in ("config-changes", "truth-changes"):
+            assert promoted_manifest(f"{UNRELEASED_DIR}/{kind}/v9.9.9.yaml") == (
+                f"{UPGRADES_DIR}/{kind}/v9.9.9.yaml"
+            )
+        assert promoted_manifest(f"{UNRELEASED_DIR}/config-changes/README.md") is None
+        assert promoted_manifest(f"{UNRELEASED_DIR}/release-notes/v9.9.9.yaml") is None
+        assert promoted_manifest(f"{UPGRADES_DIR}/config-changes/v9.9.9.yaml") is None
+
+    def test_a_promoted_manifest_gets_a_release_date(self) -> None:
+        dated = release_dated('version: "9.9.9"\ndate: "UNRELEASED"\nbreaking: false\n')
+        assert dated == f'version: "9.9.9"\ndate: "{SIMULATED_RELEASE_DATE}"\nbreaking: false\n'
 
     def test_readers_are_found_by_scanning(self, tmp_path: Path) -> None:
         tests_dir = tmp_path / "tests"

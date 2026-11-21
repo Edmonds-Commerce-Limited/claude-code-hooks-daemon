@@ -29,17 +29,28 @@ chooses per entry; this module only enforces the choice.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
-from claude_code_hooks_daemon.core.worktree_seed import SEED_MODE_SYMLINK, SeedEntry
+from claude_code_hooks_daemon.core.worktree_seed import SEED_MODE_COPY, SEED_MODE_SYMLINK, SeedEntry
+from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 
 logger = logging.getLogger(__name__)
+
+#: Returns the secret guard's effective protected globs, or raises
+#: ``secret_file_matching.ProtectedSetUnreadable``.
+ProtectedPatternsLoader = Callable[[], tuple[str, ...]]
 
 _PARENT_TRAVERSAL = ".."
 
@@ -55,6 +66,23 @@ class WorktreeSeedError(RuntimeError):
     cannot fulfil, and proceeding would hand back a worktree quietly missing
     the files its agent needs.
     """
+
+
+class SeedPlacementError(WorktreeSeedError):
+    """Placement stopped part-way; ``placed`` holds the destinations already created.
+
+    The message names entries by position, never by path (a path may be a
+    protected name), and lists which were placed and which were not.
+    """
+
+    def __init__(self, message: str, placed: list[Path]) -> None:
+        super().__init__(message)
+        self.placed = placed
+
+
+def _entry_numbers(numbers: Iterable[int]) -> str:
+    listed = ", ".join(f"#{number}" for number in numbers)
+    return listed or "none"
 
 
 def _describe_problem(root: Path, entry: SeedEntry) -> str | None:
@@ -88,20 +116,182 @@ def _describe_problem(root: Path, entry: SeedEntry) -> str | None:
     return None
 
 
-def validate_seed_sources(root: Path, entries: list[SeedEntry]) -> None:
+#: Most paths one copy-mode directory may hold before it is refused unjudged.
+PROTECTED_COPY_WALK_MAX_PATHS = 10_000
+
+#: How a refusal names a seed: by position among the VALID entries (a malformed
+#: entry is dropped at parse time), never by its path, which may be protected.
+_SEED_ROLE = "seed entry #{number} of the valid entries (mode: copy)"
+
+_COPY_REFUSAL = _SEED_ROLE + ": refused by the secret_file_guard protected-set check"
+
+
+def _paths_a_copy_would_read(source: Path) -> list[str] | None:
+    """``source`` and every path ``shutil.copytree`` would copy from it, by name only.
+
+    ``copytree`` follows symlinks (to files and to directories), so the walk
+    does too. ``None`` when the walk cannot be completed: an unreadable
+    directory, a directory reached twice (a symlink loop, on which copytree
+    itself would never end), or more than :data:`PROTECTED_COPY_WALK_MAX_PATHS`.
+    """
+    paths = [str(source)]
+    if not source.is_dir():
+        return paths
+    errors: list[OSError] = []
+    visited: set[str] = set()
+    for current, dirs, names in os.walk(source, followlinks=True, onerror=errors.append):
+        real = os.path.realpath(current)
+        if real in visited:
+            return None
+        visited.add(real)
+        paths.extend(str(Path(current, name)) for name in (*dirs, *names))
+        if len(paths) > PROTECTED_COPY_WALK_MAX_PATHS:
+            return None
+    return None if errors else paths
+
+
+_UNWALKABLE = (
+    "its directory could not be walked in full (unreadable, a symlink loop, or more "
+    "than {cap} paths)"
+)
+
+
+class _Unwalkable:
+    """A source whose reachable paths could not all be listed, so it cannot be judged."""
+
+
+#: The verdict on a source: the first protecting glob, ``None`` (protects
+#: nothing), or :data:`_UNWALKED` (could not be judged).
+_UNWALKED = _Unwalkable()
+
+
+def _protecting_pattern_for_source(
+    root: Path, relative: str, patterns: tuple[str, ...]
+) -> str | _Unwalkable | None:
+    """The first glob protecting ``relative`` or any path reachable through it.
+
+    Paths only: no file is opened. Anchored globs are tried at the seeding
+    root (as given and resolved) and at the daemon's own project root.
+    """
+    paths = _paths_a_copy_would_read(root / relative)
+    if paths is None:
+        return _UNWALKED
+    anchors = tuple(dict.fromkeys((str(root), str(root.resolve()), resolve_project_root())))
+    for path in paths:
+        for anchor in anchors:
+            pattern = sfm.protecting_pattern_under(path, patterns, anchor)
+            if pattern is not None:
+                return pattern
+    return None
+
+
+def protecting_pattern_for_source(
+    root: Path, relative: str, patterns: tuple[str, ...]
+) -> str | _Unwalkable | None:
+    """The verdict of :func:`_protecting_pattern_for_source` for a caller outside this module.
+
+    ``None`` only when the source provably protects nothing; anything else (a
+    glob, or the could-not-be-walked marker) is to be treated as protected.
+    """
+    return _protecting_pattern_for_source(root, relative, patterns)
+
+
+def _describe_copy_refusal(
+    root: Path, entry: SeedEntry, number: int, patterns: tuple[str, ...]
+) -> str | None:
+    """Why a copy of ``entry`` is refused for protected content, or ``None``.
+
+    The reason names the seed by its position, never its path, because that
+    path may itself be a protected name and the reason is logged.
+    """
+    verdict = _protecting_pattern_for_source(root, entry.path, patterns)
+    refused = _COPY_REFUSAL.format(number=number)
+    if isinstance(verdict, _Unwalkable):
+        return (
+            f"{refused}: {_UNWALKABLE.format(cap=PROTECTED_COPY_WALK_MAX_PATHS)}, so it "
+            "cannot be shown to hold no protected path"
+        )
+    if verdict is not None:
+        return (
+            f"{refused}: its source is, holds or links to a path the secret guard protects. "
+            "A protected file may not be seeded with mode: copy; seed it with "
+            "mode: symlink, which makes no second copy of it"
+        )
+    return None
+
+
+def _copy_refusals(
+    root: Path,
+    numbered: list[tuple[int, SeedEntry]],
+    protected_patterns: ProtectedPatternsLoader,
+) -> list[str]:
+    """One refusal per copy-mode entry that cannot be shown free of protected paths.
+
+    ``numbered`` pairs each entry with its 1-based position among the parsed
+    (valid) entries. The protected set is read once, and only when a
+    copy-mode entry exists, so a link-only config behaves the same whatever
+    state the guard config is in. An unreadable set refuses EVERY copy entry
+    rather than falling back.
+    """
+    copies = [(number, entry) for number, entry in numbered if entry.mode == SEED_MODE_COPY]
+    if not copies:
+        return []
+    try:
+        patterns = protected_patterns()
+    except sfm.ProtectedSetUnreadable as exc:
+        return [
+            _SEED_ROLE.format(number=number)
+            + ": refused because the secret_file_guard protected set could not be read "
+            f"({exc}), so no copy can be shown safe; fix the config"
+            for number, _entry in copies
+        ]
+    return [
+        refusal
+        for number, entry in copies
+        if (refusal := _describe_copy_refusal(root, entry, number, patterns))
+    ]
+
+
+def protected_copy_refusals(
+    root: Path, entries: list[SeedEntry], *, protected_patterns: ProtectedPatternsLoader
+) -> list[str]:
+    """The copy-mode refusals :func:`validate_seed_sources` would raise, one per entry.
+
+    Public so ``check-worktree-seed`` reports exactly what creation refuses,
+    in the same words. An entry with a shape problem (absolute, ``..``, absent,
+    outside the root) aborts creation anyway, so it is not walked here; entries
+    keep their 1-based position among ``entries``.
+    """
+    judged = [
+        (number, entry)
+        for number, entry in enumerate(entries, start=1)
+        if _describe_problem(root, entry) is None
+    ]
+    return _copy_refusals(root, judged, protected_patterns)
+
+
+def validate_seed_sources(
+    root: Path, entries: list[SeedEntry], *, protected_patterns: ProtectedPatternsLoader
+) -> None:
     """Check every entry can be seeded, raising before any worktree exists.
 
     Args:
         root: The main checkout's repository root, where sources live.
         entries: Validated-by-shape entries from the project's config.
+        protected_patterns: Returns the secret guard's effective globs, or
+            raises ``ProtectedSetUnreadable``. Required, so no caller can skip
+            the protected-set check; called only when a ``mode: copy`` entry
+            exists (Plan 00613 ruling Q3).
 
     Raises:
-        WorktreeSeedError: if any entry is unsafe, absent, or of an
-            unsupported type. EVERY offending entry is named in one message —
-            reporting only the first would make fixing a misconfigured list an
-            iterative guessing game.
+        WorktreeSeedError: if any entry is unsafe, absent, of an unsupported
+            type, or a copy that cannot be shown free of protected paths.
+            EVERY offending entry is named in one message — reporting only
+            the first would make fixing a misconfigured list an iterative
+            guessing game.
     """
     problems = [problem for entry in entries if (problem := _describe_problem(root, entry))]
+    problems.extend(protected_copy_refusals(root, entries, protected_patterns=protected_patterns))
     if problems:
         raise WorktreeSeedError(
             "Cannot seed worktree — "
@@ -122,6 +312,115 @@ def _place(source: Path, dest: Path, mode: str) -> None:
         shutil.copytree(source, dest)
     else:
         shutil.copy2(source, dest)
+
+
+#: The audit log of protected links, under the MAIN checkout's daemon untracked dir.
+SEED_LINK_AUDIT_FILENAME = "worktree-seed-protected-links.jsonl"
+
+#: The audit verb of a link placed when Claude Code creates the worktree.
+SEED_AUDIT_VERB = "worktree-seed"
+_AUDIT_CHECK = "secret_file_guard"
+_OUTCOME_LINKED = "linked"
+_OUTCOME_UNCLASSIFIED = "linked-unclassified"
+
+_LINK_ROLE = "seed entry #{number} of the valid entries (mode: symlink)"
+
+
+def seed_link_audit_path(root: Path) -> Path:
+    """The protected-link audit log of the main checkout at ``root``."""
+    return get_untracked_dir(root) / SEED_LINK_AUDIT_FILENAME
+
+
+@dataclass(frozen=True)
+class LinkAudit:
+    """How :func:`seed_worktree` records each protected source it links (Plan 00613 Task 2.2).
+
+    Attributes:
+        log_path: The JSON-lines log, normally :func:`seed_link_audit_path`.
+        protected_patterns: Returns the secret guard's effective globs, or
+            raises ``ProtectedSetUnreadable``; read once, and only when a link
+            is about to be placed.
+        session_id: The session that triggered the creation, when known.
+        verb: The route that placed the link, recorded on each line: the
+            creation hook, or the ``seed-worktree`` command for a hand-made
+            worktree.
+    """
+
+    log_path: Path
+    protected_patterns: ProtectedPatternsLoader
+    session_id: str | None
+    verb: str = SEED_AUDIT_VERB
+
+
+class _LinkAuditor:
+    """Classifies each link before it is placed and appends its audit line.
+
+    A link to a protected source, or one that cannot be classified (the
+    protected set is unreadable, or a linked directory cannot be walked), gets
+    one line BEFORE the link is created. Paths only: no seeded file is opened.
+    """
+
+    def __init__(self, root: Path, worktree: Path, audit: LinkAudit) -> None:
+        self._root = root
+        self._worktree = worktree
+        self._audit = audit
+        self._patterns: tuple[str, ...] | None = None
+        self._unreadable: str | None = None
+        self._loaded = False
+
+    def _load(self) -> None:
+        """Read the protected set once; remember why it could not be read."""
+        if self._loaded:
+            return
+        self._loaded = True
+        try:
+            self._patterns = self._audit.protected_patterns()
+        except sfm.ProtectedSetUnreadable as exc:
+            self._unreadable = f"the secret_file_guard protected set could not be read ({exc})"
+            logger.warning(
+                "worktree seed: %s; every link placed into %s is audited as unclassified",
+                self._unreadable,
+                self._worktree,
+            )
+
+    def before_link(self, entry: SeedEntry, number: int) -> None:
+        """Append the audit line for ``entry`` if it needs one.
+
+        Raises:
+            WorktreeSeedError: the line could not be written, so the caller must
+                not create the link.
+        """
+        self._load()
+        pattern: str | None = None
+        reason: str | None = self._unreadable
+        if self._patterns is not None:
+            verdict = _protecting_pattern_for_source(self._root, entry.path, self._patterns)
+            if isinstance(verdict, _Unwalkable):
+                reason = _UNWALKABLE.format(cap=PROTECTED_COPY_WALK_MAX_PATHS)
+            elif verdict is None:
+                return
+            else:
+                pattern = verdict
+        record = {
+            "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "verb": self._audit.verb,
+            "outcome": _OUTCOME_UNCLASSIFIED if reason else _OUTCOME_LINKED,
+            "check": _AUDIT_CHECK,
+            "worktree": str(self._worktree),
+            "path": entry.path,
+            "pattern": pattern,
+            "unclassified_reason": reason,
+            "session_id": self._audit.session_id,
+        }
+        try:
+            make_private_dir(self._audit.log_path.parent)
+            with open_private_append(self._audit.log_path) as handle:
+                handle.write(json.dumps(record) + "\n")
+        except OSError as exc:
+            raise WorktreeSeedError(
+                f"Cannot seed worktree — {_LINK_ROLE.format(number=number)}: its audit line "
+                f"could not be written ({type(exc).__name__}), so the link was not created"
+            ) from exc
 
 
 #: Bytes read per step when comparing two files, so a huge seed is never held whole.
@@ -229,7 +528,33 @@ def seed_copy_is_identical(
     )
 
 
-def seed_worktree(root: Path, worktree: Path, entries: list[SeedEntry]) -> list[Path]:
+def _place_one(
+    root: Path, worktree: Path, entry: SeedEntry, number: int, auditor: _LinkAuditor
+) -> Path | None:
+    """Place one entry; its destination, or ``None`` when it was skipped."""
+    source = root / entry.path
+    dest = worktree / entry.path
+
+    if dest.is_symlink() or dest.exists():
+        logger.debug("worktree seed: %s already exists in the worktree; left untouched", entry.path)
+        return None
+
+    if entry.optional and not source.exists():
+        logger.debug(
+            "worktree seed: optional entry %s is absent from the main checkout; skipped",
+            entry.path,
+        )
+        return None
+
+    if entry.mode == SEED_MODE_SYMLINK:
+        auditor.before_link(entry, number)
+    _place(source, dest, entry.mode)
+    return dest
+
+
+def seed_worktree(
+    root: Path, worktree: Path, entries: list[SeedEntry], *, audit: LinkAudit
+) -> list[Path]:
     """Place each entry into ``worktree``, skipping destinations already present.
 
     Call :func:`validate_seed_sources` first — this function assumes its
@@ -248,31 +573,41 @@ def seed_worktree(root: Path, worktree: Path, entries: list[SeedEntry]) -> list[
         root: The main checkout's repository root.
         worktree: The freshly-created worktree directory.
         entries: The entries to place, in configured order.
+        audit: How each link to a protected source is recorded. Required, so
+            no caller can place a protected link unaudited (Plan 00613 Task 2.2).
 
     Returns:
         The destinations actually created, in the order placed. A skipped
         destination is absent from this list.
+
+    Raises:
+        SeedPlacementError: a link's audit line could not be written, or the
+            filesystem refused a placement (a parent that is a regular file, a
+            name too long, ...). That entry and every later one are not
+            placed; entries placed before it stay placed and are listed on the
+            error's ``placed``.
     """
+    auditor = _LinkAuditor(root, worktree, audit)
     placed: list[Path] = []
-    for entry in entries:
-        source = root / entry.path
-        dest = worktree / entry.path
-
-        if dest.is_symlink() or dest.exists():
-            logger.debug(
-                "worktree seed: %s already exists in the worktree; left untouched", entry.path
+    placed_numbers: list[int] = []
+    for number, entry in enumerate(entries, start=1):
+        try:
+            dest = _place_one(root, worktree, entry, number, auditor)
+        except (OSError, WorktreeSeedError) as exc:
+            cause = (
+                f"{type(exc).__name__}: {exc.strerror or 'error'}"
+                if isinstance(exc, OSError)
+                else str(exc)
             )
-            continue
-
-        if entry.optional and not source.exists():
-            logger.debug(
-                "worktree seed: optional entry %s is absent from the main checkout; skipped",
-                entry.path,
-            )
-            continue
-
-        _place(source, dest, entry.mode)
-        placed.append(dest)
+            raise SeedPlacementError(
+                f"seed entry #{number} could not be placed ({cause}). "
+                f"Placed before it: {_entry_numbers(placed_numbers)}. "
+                f"Not placed: {_entry_numbers(range(number, len(entries) + 1))}",
+                placed,
+            ) from exc
+        if dest is not None:
+            placed.append(dest)
+            placed_numbers.append(number)
 
     if placed:
         logger.info(

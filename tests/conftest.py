@@ -547,7 +547,7 @@ _TRACKED_FILES_NO_TEST_MAY_WRITE = doc_write_jail.PROTECTED_RELATIVE_PATHS
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _arm_doc_write_jail() -> Path:
+def _arm_doc_write_jail() -> tuple[Path, frozenset[str]]:
     """Refuse writes to the generated docs of EVERY checkout, for this run and its children.
 
     Plan 00474 N280: the guard below restores after the fact and only for this
@@ -557,7 +557,9 @@ def _arm_doc_write_jail() -> Path:
     Armed at import so collection-time code is covered too.
 
     Returns:
-        The refusal log the autouse fixture below reads.
+        The refusal log the autouse fixture below reads, and the paths armed.
+        The checkouts are read once, here: one added or removed later in the
+        run is not seen, so a wiring check compares against this set.
     """
     log_dir = Path(tempfile.mkdtemp(prefix="doc-write-jail-"))
     atexit.register(shutil.rmtree, log_dir, ignore_errors=True)
@@ -565,10 +567,10 @@ def _arm_doc_write_jail() -> Path:
     protected = doc_write_jail.protected_paths(doc_write_jail.checkout_roots(_REPO_ROOT))
     doc_write_jail.install(protected, log)
     os.environ.update(doc_write_jail.environment_for_children(protected, log))
-    return log
+    return log, protected
 
 
-_DOC_WRITE_JAIL_LOG = _arm_doc_write_jail()
+_DOC_WRITE_JAIL_LOG, _DOC_WRITE_JAIL_PROTECTED = _arm_doc_write_jail()
 
 
 @pytest.fixture(autouse=True)

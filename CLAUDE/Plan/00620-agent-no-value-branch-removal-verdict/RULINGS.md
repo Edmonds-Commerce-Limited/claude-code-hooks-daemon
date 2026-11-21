@@ -123,6 +123,12 @@ against a loss that the bundle already prevents. Two consequences:
 - The keep history is keyed on the work, not only on the name. A request whose inventory
   shares any unique commit with the inventory of an earlier `keep` verdict is a re-review of
   that verdict whatever the branch is called, so renaming a branch earns no fresh start.
+- A review that ends with no verdict (an unparseable reply, a damaged transcript, a killed
+  or still-running reviewer, a withdrawn verdict) is an unresolved attempt on that work,
+  keyed like the keep history. Each one adds a required reviewer, and a second one closes
+  the route for that work until a human decides (`MAX_UNRESOLVED_REVIEWS = 2`, a constant,
+  not config). Garbling or killing an unwelcome review is otherwise a free second opinion
+  (review finding F-BYPS F2; DESIGN.md section 6).
 - A verdict is valid for 24 hours from issue (`branches.reject.verdict_lifetime_hours`).
 - Rate, per repository, counted from the ledger over a rolling 7 days
   (`branches.reject.window_days`): above 3 removals (`two_reviewer_after`) every further

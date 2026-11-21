@@ -201,7 +201,9 @@ class TestAgentsCannotAbandonWork:
 
         assert exit_code == _EXIT_REFUSED
         assert "doomed" in _git(repo_with_abandoned_branch, "branch", "--list")
-        assert "never deleted by this command" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "only through the no-value route" in err
+        assert "no-value route refused" in err
 
     def test_the_refusal_names_no_route_around_the_proof(
         self,
@@ -391,7 +393,7 @@ class TestAPartialBatchIsReportedHonestly:
 
         err = capsys.readouterr().err
         assert "--allow-unproven" not in err
-        assert "never deleted by this command" in err
+        assert "only through the no-value route" in err
         assert "nothing was deleted" in err
 
     def test_the_exit_code_stays_non_zero(

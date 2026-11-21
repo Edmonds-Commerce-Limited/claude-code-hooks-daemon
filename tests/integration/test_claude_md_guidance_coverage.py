@@ -80,6 +80,9 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "ProjectContainmentHandler": "T1 denies a write named outside the repo root",
     "PlanJournalGuardHandler": "T1 denies a journal entry written by hand",
     "SubagentCronDeleteBlockerHandler": "T1 denies CronDelete inside a subagent",
+    "BranchRejectDispatchGateHandler": (
+        "T1 denies a branch-reject reviewer dispatch not made on the daemon's exact prompt"
+    ),
     "LongRunningCommandGuardHandler": "T1 denies a long foreground Bash call in the main thread",
     "GithubIssueAssignmentGuardHandler": "T1 denies issue-tied work on an unclaimed or foreign issue",
     "WriteProtectedPathsHandler": "T1 denies a write, move onto or deletion of a read-only path",
@@ -521,6 +524,8 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "limit and the sub-agent scope; a second section would bill the same fact twice"
     ),
     "DispatchModelRecorderHandler": "observe-only sensor, no agent-facing action",
+    "BranchRejectAgentBinderHandler": "observe-only sensor, no agent-facing action",
+    "BranchRejectVerdictRecorderHandler": "observe-only sensor, no agent-facing action",
     "SubagentTierAdvisorHandler": (
         "T2: the advice arrives with the dispatch it is about and governs the NEXT one; "
         "it never denies, and the tier: token it names is in the message itself"
