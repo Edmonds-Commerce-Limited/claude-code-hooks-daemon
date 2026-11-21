@@ -38,6 +38,7 @@ from claude_code_hooks_daemon.core.scratch_archive_apply import (
 )
 from claude_code_hooks_daemon.core.scratch_archive_claim import CLAIM_PREFIX, open_dir
 from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu_tar
+from claude_code_hooks_daemon.core.scratch_archive_remove import RemoveRefused
 from claude_code_hooks_daemon.core.scratch_archive_restore import restore
 from claude_code_hooks_daemon.core.scratch_session import ensure_session_dir, new_entry
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport
@@ -476,7 +477,7 @@ class TestResumeReclaimExpireOrder:
         entry(root, "e1")
 
         def refuse(*args: object, **kwargs: object) -> object:
-            raise apply_mod.RemoveRefused("index unreadable")
+            raise RemoveRefused("index unreadable")
 
         monkeypatch.setattr(apply_mod, "resume_claimed", refuse)
         result = apply_sweep(store, FakeFacts([row("e1")]).facts(), settings(root, tar))
