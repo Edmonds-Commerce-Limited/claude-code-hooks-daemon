@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.core.session_start_tiers import (
     SessionTier,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 from claude_code_hooks_daemon.utils.git_sync import current_branch
 from claude_code_hooks_daemon.utils.scratch_dir import ensure_scratch_dir
@@ -67,8 +68,14 @@ def _start_refresh(project_root: Path) -> None:
 
     try:
         start_scratch_inventory_refresh(project_root)
-    except Exception:
-        logger.exception("scratch inventory refresh not started")
+    except Exception as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="scratch inventory refresh not started; the session-start report "
+            "uses the cached file",
+            level=logging.ERROR,
+        )
 
 
 def _linked_component(checkout: Path) -> str | None:

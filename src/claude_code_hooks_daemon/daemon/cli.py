@@ -6918,9 +6918,13 @@ def _record_scratch_inventory(sources: "_ScratchSources", report: Any) -> None:
             store=lambda: _scratch_store_status(sources),
         )
     except (OSError, ValueError) as exc:
-        logger.warning("scratch inventory not written: %s: %s", type(exc).__name__, exc)
-        return
-    logger.debug("scratch inventory written: %d entries", len(refreshed.entries))
+        log_and_continue(
+            logger,
+            exc,
+            reason="scratch inventory not written; the sweep report itself still prints",
+        )
+    else:
+        logger.debug("scratch inventory written: %d entries", len(refreshed.entries))
 
 
 def _scratch_pressure(sources: "_ScratchSources", report: Any, ttl_hours: float | None) -> Any:

@@ -360,7 +360,11 @@ def _session_kept(session_dir: Path) -> bool:
     except FileNotFoundError:
         return False
     except OSError as exc:
-        _LOG.warning("%s: keep marker unreadable (%s), read as kept", session_dir, exc)
+        log_and_continue(
+            _LOG,
+            exc,
+            reason=f"{session_dir}: keep marker unreadable, read as kept (fail closed)",
+        )
     return True
 
 
@@ -439,6 +443,9 @@ def _remove_if_empty(
         reason = remove_empty_session_dir(root_fd, name, born_before=born_before, held=held)
     except (OSError, StoreRefused) as exc:
         reason = f"removal failed: {type(exc).__name__}"
+        log_and_continue(
+            _LOG, exc, reason=f"session directory {name} kept: empty-directory removal failed"
+        )
     finally:
         os.close(root_fd)
     if not reason:
@@ -495,6 +502,12 @@ def _fingerprint_all(
             prints[name] = fingerprint_of(listing)
         except PackRefused as exc:
             foreign[name] = EntryOutcome(name, "refused", str(exc))
+            log_and_continue(
+                _LOG,
+                exc,
+                reason=f"{name}: owned by another user, refused and reported as an outcome",
+                level=logging.INFO,
+            )
         except (WalkRefused, OSError) as exc:
             log_and_continue(
                 _LOG,

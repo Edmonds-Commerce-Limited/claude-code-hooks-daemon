@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.scratch_dir_creation import (
     creates_directory_under,
     scratch_roots,
@@ -39,8 +40,14 @@ def _start_refresh(project_root: Path) -> None:
 
     try:
         start_scratch_inventory_refresh(project_root)
-    except Exception:
-        logger.exception("scratch inventory refresh not started")
+    except Exception as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="scratch inventory refresh not started; an advisory refresh must "
+            "never fail the hook",
+            level=logging.ERROR,
+        )
 
 
 class ScratchInventoryRefresherHandler(PostToolUseHandlerBase):

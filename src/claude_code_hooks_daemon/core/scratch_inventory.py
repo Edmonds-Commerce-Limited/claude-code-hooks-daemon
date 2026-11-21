@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.config.models import ScratchCapsConfig
 from claude_code_hooks_daemon.core.scratch_caps import CapCounts, CapLevel, CapReport, evaluate_caps
 from claude_code_hooks_daemon.core.scratch_store_view import StoreStatus
 from claude_code_hooks_daemon.core.scratch_sweep import SweepReport
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -241,8 +242,14 @@ def refresh_in_background(
     def run() -> None:
         try:
             refresh_inventory(path, classify, now=clock(), caps=caps, store=store)
-        except Exception:
-            logger.exception("scratch inventory refresh failed; the cached file is unchanged")
+        except Exception as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="scratch inventory refresh failed in its background thread; "
+                "the cached file is unchanged",
+                level=logging.ERROR,
+            )
         finally:
             _REFRESH_LOCK.release()
 
