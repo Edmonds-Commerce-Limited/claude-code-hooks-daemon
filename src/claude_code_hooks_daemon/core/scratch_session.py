@@ -142,7 +142,7 @@ def _parse_instant(value: object, field: str) -> float:
     try:
         parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
     except ValueError as exc:
-        raise ValueError(f"{field} {value!r} is not a YYYY-MM-DDTHH:MM:SSZ instant") from exc
+        raise ValueError(f"{field} is not a YYYY-MM-DDTHH:MM:SSZ instant") from exc
     return parsed.replace(tzinfo=UTC).timestamp()
 
 
@@ -187,7 +187,7 @@ def parse_manifest(data: object) -> Manifest:
     entries: dict[str, EntryRecord] = {}
     for name, value in raw_entries.items():
         if not isinstance(name, str) or _ENTRY_NAME.fullmatch(name) is None:
-            raise ValueError(f"entry name {name!r} is not a safe path segment")
+            raise ValueError("an entry name is not a safe path segment")
         entries[name] = _entry_record(name, value)
     return Manifest(session_id, born, checkout, branch, entries)
 
