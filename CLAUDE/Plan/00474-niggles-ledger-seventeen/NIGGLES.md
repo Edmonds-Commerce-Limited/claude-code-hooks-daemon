@@ -8017,7 +8017,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 ### N680 — two remote-branch delete routes carry no proof at all: `gh pr close N --delete-branch` and `gh api -X DELETE .../git/refs/heads/<name>`
 
-**Source**: Plan 00594 F-BYPS review (`CLAUDE/Plan/00594-branch-lifecycle-and-branch-tip-channel/subagent-reports/f-byps-remote-delete-surviving-content-review.md`), on branch `agent-a20c91c23eca4e56e-43e33957`.
+**Source**: Plan 00594 F-BYPS review (`CLAUDE/Plan/Completed/00594-branch-lifecycle-and-branch-tip-channel/subagent-reports/f-byps-remote-delete-surviving-content-review.md`), on branch `agent-a20c91c23eca4e56e-43e33957`.
 
 **Evidence**: both commands delete a remote branch. No handler reads them and the loosening corpus has no row for them, so the remote-delete proof of Plan 00626 (remote default only, cherry route) is never asked. The gap is on main, not introduced by Plan 00594.
 
@@ -8070,8 +8070,40 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 ### N686 — owner decision: should a raw `git push --delete` of a surviving-content branch be denied in favour of the leased `delete-branch --remote-only`?
 
-**Source**: Plan 00594 Task 3.8, F-BYPS review Finding 4 (`CLAUDE/Plan/00594-branch-lifecycle-and-branch-tip-channel/subagent-reports/f-byps-remote-delete-surviving-content-review.md`), recorded as an owner decision in `subagent-reports/261120-task-3-8-merge-ready.md`.
+**Source**: Plan 00594 Task 3.8, F-BYPS review Finding 4 (`CLAUDE/Plan/Completed/00594-branch-lifecycle-and-branch-tip-channel/subagent-reports/f-byps-remote-delete-surviving-content-review.md`), recorded as an owner decision in `subagent-reports/261120-task-3-8-merge-ready.md`.
 
 **Evidence**: the surviving-content tier (on main since `69e375788`) lets an agent's raw `git push --delete` of a branch whose tip content every holder already has go through. The hook can allow or deny that command but cannot add a lease to it, so a holder or the branch can move between the proof and the push. `delete-branch --remote-only` deletes with a per-ref `--force-with-lease` and closes that race for the deleted ref. Denying the raw form would change the contract of a command allowed today. Holder leases are not possible in git (a lease only constrains a ref the push updates), so that part stays residue whatever is chosen.
 
 **Status**: ⬜ Open, owner decision. Options: keep the raw route allowed (today), or deny it for the surviving-content tier only and point at `delete-branch --remote-only`, with corpus rows for both.
+
+### N687 — a branch cut from a work branch joins that branch's stack, so the open cap can stretch up to `stack_max_depth` times
+
+**Source**: Plan 00594 Task 4.6, F-BYPS review F1 (`CLAUDE/Plan/Completed/00594-branch-lifecycle-and-branch-tip-channel/subagent-reports/261121-task-4-6-f-byps-review.md`). Low, design limit; the review said safe to merge.
+
+**Evidence**: `branch_stacks.py:113-121` treats "tip is a strict ancestor of" as "depends on". An agent that runs `git checkout -b new` while on a work branch (the default) makes unrelated new work a link of that branch's stack, so up to `branches.wip.stack_max_depth` (default 5) links count as 1 against `branches.wip.cap`. The tests build stacks only from intended dependencies, so they do not show it.
+
+**Status**: ⬜ Open. Candidate remedies: lower the default `stack_max_depth` to 2 or 3; or a detector for a link whose commits touch files the link below did not (expected to be noisy).
+
+### N688 — the no-value delete route: a non-UTF-8 rebase/bisect state file leaves a removal ledger line with no refusal line; `is_dir` on EACCES under Python 3.14 is unverified
+
+**Source**: Plan 00620, F-BYPS review of 8260463ff and 09e744603 (`CLAUDE/Plan/Completed/00620-agent-no-value-branch-removal-verdict/subagent-reports/261121-f-byps-review-8260463ff-09e744603.md`), items 1 and 2; the D-EXEC review noted item 1 too. Both fail closed: no branch is deleted.
+
+**Evidence**: `_read_state_file` in `daemon/branch_safety.py` catches `OSError` only. A state file that is not valid UTF-8 raises `UnicodeDecodeError` (a `ValueError`), which escapes `_operation_holding_branch` after `record_removal` has written the ledger's removal line, so the ledger shows a removal with no matching git-refused line and the refusal surfaces as an exception rather than a reason. Separately, `_operation_holding_branch` relies on `Path.is_dir` raising on EACCES (true on 3.13.5); on 3.14, which `>=3.11` allows, it may return False and skip a linked worktree's admin dir. Only 3.13 is installed here.
+
+**Status**: ⬜ Open. Treat `UnicodeDecodeError` as a refusal reason in `_read_state_file`, with a test that the ledger then records a git-refused line; pin the EACCES behaviour with a test that fails if `is_dir` stops raising.
+
+### N689 — `docs-qa --lint` crashes with a traceback when `--project-root` is relative
+
+**Source**: post-merge housekeeping of gate-261121, running targeted docs QA from a linked worktree.
+
+**Evidence**: `hooks-daemon docs-qa --project-root . --lint CLAUDE/Plan/README.md` raises `ValueError: '<abs path>' is not in the subpath of '.'` from `path_relative_to` in `cmd_docs_qa` (`daemon/cli.py`, the `lint_rel_path` line): the lint target is resolved to an absolute path but the project root is not. `plan-qa` given the same arguments does not crash but refuses with "Lint target is not a plan document". Both work with an absolute `--project-root`.
+
+**Status**: ⬜ Open. Resolve `--project-root` to an absolute path once at argument parsing for every QA verb, with a test that runs `--lint` under a relative root.
+
+### N690 — the branch-tip moved-ref report omits the commit count DESIGN specified
+
+**Source**: post-merge archival check of Plan 00594 Task 5.1 against DESIGN §3 and §7.1 (`CLAUDE/Plan/Completed/00594-branch-lifecycle-and-branch-tip-channel/`).
+
+**Evidence**: DESIGN §3 specifies "tracked ref moved <old>..<new> (N commits)" and §7.1 asks the fixture proof to show "the moved-ref report with the commit count". `version_check._tracked_ref_lines` prints `tracked ref <ref> moved <old>..<new>; re-run the guarded install ...` with no count, and the fixture proof (`subagent-reports/261121-task-5-1-fixture-proof.md`, step 3) quotes exactly that. A client is told that the ref moved and where to, but not how far. The count needs the new commits locally (a fetch), which the one-listing design avoids, so it may have been dropped on purpose; nothing records that.
+
+**Status**: ⬜ Open. Either add the count when the new tip is already local (and say "count unknown" otherwise), or amend DESIGN §3 to drop it and record why.

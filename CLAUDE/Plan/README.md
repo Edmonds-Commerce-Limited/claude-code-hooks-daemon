@@ -8,13 +8,11 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - In Progress (owner request: every scratch entry has a 24-hour TTL and past it is filed, archived or kept only on a machine proof of unpushed or human work; a `scratch-sweep` command, caps, a per-session directory; Phase 1 read-only core under way; takes over Plan 00560's sweep)
+- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - In Progress (owner request: a 24-hour TTL per scratch entry, then filed, archived or kept only on machine proof; `scratch-sweep`, caps, per-session directories; Phases 1-5, 6.1 and 7 on main at `662750cf4`; open: Tasks 0.2, 0.3, 3.9, 6.2, 6.3, Phase 8, owner call on the keep-marker guard and unparseable commands; takes over Plan 00560's sweep)
 
 - [00625: automatic upgrade standing approval and upgrade lock](00625-automatic-upgrade-standing-approval-and-upgrade-lock/PLAN.md) - Not Started on main (owner request: a default-on `daemon-auto-upgrade` standing authorisation, `upgrade.sh --unattended`, and one cross-namespace-safe upgrade lock shared by upgrade and provision; the in-progress work is parked unmerged on `origin/agent-a5947fd1e83f03452-ba288018`)
 
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - In Progress (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
-
-- [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - In Progress (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work; open questions ruled under the owner's delegation in RULINGS.md: the verdict never unlocks alone, the guard must also verify a recovery bundle; local delete only; merged to main (69e375788), success criteria met; open: review sign-off of 8260463ff/09e744603 and CI green on main)
 
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
 
@@ -29,8 +27,6 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 - [00600: user prompt quality scan](00600-user-prompt-quality-scan/PLAN.md) - Not Started (research done; narrow GO in RESEARCH.md: one advisory handler for three deterministic facts, a gated bare approval, a pasted credential with an opt-in block, and a command a guard will refuse; no model-backed quality judge; Phase 1 measures on recorded transcripts before anything ships)
 
 - [00560: scratch directory unrecorded assets](00560-scratch-directory-unrecorded-assets/PLAN.md) - In Progress (GitHub #155: scratch holds only files consumed in the same session; stop the steering, a scratch file-name whitelist, consume-then-remove for body files and a SessionStart sweep; ledger and stop gate dropped by the owner; Phase 1 design written, Q5 open for the owner)
-
-- [00594: branch lifecycle and branch tip channel](00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - In Progress (unblocked by delegated ruling in DESIGN §7; open: Task 3.8 surviving-content remote delete, Task 4.6 stacks count as one stream, Task 5.1 fixture proof of the branch tip channel; owner request via a client team: redesign the whole branch lifecycle from nine failure classes seen in multi-agent client use, plus a branch tip channel for clients)
 
 ### Next (ordered; work top to bottom)
 
@@ -206,6 +202,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 ## Completed Plans
 
+- [00620: agent no value branch removal verdict](Completed/00620-agent-no-value-branch-removal-verdict/PLAN.md) - Complete at merge `69e375788` + `662750cf4` + the archiving commit (owner proposal: an Opus sub-agent verdict, bound to the tip, plus a recovery bundle the guard verifies, lets an agent remove unproven work; local delete only; reviews of 8260463ff/09e744603 signed off, main CI green at `61a916143`; release note 014; follow-up Plan 00629, niggle N688)
+
 - [00613: worktree link secret verb](Completed/00613-worktree-link-secret-verb/PLAN.md) - Complete at merge `69e375788` + `2f1c14e80` (live-daemon check) + the archiving commit (a protected file is seeded into a worktree as a link from the committed seed list, by the creation hook or `seed-worktree`; copy refused; reads through the link denied on a live daemon, N683 to N685 open; release notes 009, 019; peer reply drafted, owner to send)
 
 - [00621: actions qa ci advisory and workflow lint on edit](Completed/00621-actions-qa-ci-advisory-and-workflow-lint-on-edit/PLAN.md) - Complete at merge `4f97728de` + the archiving commit, shipping in v3.76.0 (a `.github/workflows/` file is run through the optional `actions-qa` linter on edit and at commit, and a session-start advisory suggests the linter; release note 013 and a truth-change entry recorded)
@@ -250,6 +248,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 
 - [00595: secret guard search string option value bold colon](Completed/00595-secret-guard-search-string-option-value-bold-colon/PLAN.md) - Complete at `eae5878e9` (main CI run 42912436475 green) + the archiving commit (GitHub #200, closed: a git search string, a grep/rg filter value and a colon-split bold are no longer judged as protected paths; release note 045)
 
+- [00594: branch lifecycle and branch tip channel](Completed/00594-branch-lifecycle-and-branch-tip-channel/PLAN.md) - Complete at merge `662750cf4` (gate-261121, full gate green) + the archiving commit (owner request via a client team: the branch lifecycle redesigned from nine failure classes seen in multi-agent client use, each with red-then-green evidence, plus a branch tip channel proven in the client-mode fixture; release notes 031 to 075 shipped, 020 unreleased; niggles N686, N687 open)
+
 - [00593: dependabot security lock bumps](Completed/00593-dependabot-security-lock-bumps/PLAN.md) - Complete at `d1d248e1d` + `cc6ace282` (main CI run 42769393325 green) + the archiving commit (open Dependabot alerts 77 to 18: nltk, anyio, virtualenv, urllib3, cryptography, idna bumped; filelock, mcp, opentelemetry-api held by the latest `safety`/`semgrep` pins; anyio's new `--anyio-mode` added to the full-QA blocker's option table; PR #193 closed)
 
 - [00592: worktree create undo releases initializing lock](Completed/00592-worktree-create-undo-releases-initializing-lock/PLAN.md) - Complete at `fd7e894fa` (merge `c5c9deb82`) + `37d8d31e0` (main CI run 42739985119 success) + the archiving commit (GitHub #173, closed: the failed-add undo releases git's own `initializing` lock and removes the worktree and new branch; another lock is never overridden; leftovers are named in the error; release note 026)
@@ -261,10 +261,6 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 - [00589: explain rule covers plugin handlers](Completed/00589-explain-rule-covers-plugin-handlers/PLAN.md) - Complete at `bb6dbcb58` (merge `5ba1d98a2`; main CI run 42718913878 success) + the archiving commit (GitHub #171, closed: `explain-rule`/`explain-handler` also load the `plugins:` section through the daemon's own loader; a broken plugin is logged and contributes nothing; release note 023)
 
 - [00588: lsp_enforcement leaves stdin greps and git grep alone](Completed/00588-lsp-enforcement-stdin-and-git-grep/PLAN.md) - Complete at `a0ac71f37` (main CI run 42706023447 success) + the archiving commit (GitHub #169, closed: a grep fed by a pipe, `<` or `<<<` with no file target, and any `git grep`, are not judged as symbol lookups; real lookups stay enforced; release note 021)
-
-- [00587: containment follows a cd into compound command bodies](Completed/00587-containment-cd-into-compound-bodies/PLAN.md) - Complete at `f05530f35` (main CI run 42697064932 success) + the archiving commit (GitHub #195, closed: a `../` redirect in a loop, `if` or `( )` body after a `cd` is resolved from the `cd` target; a `cd` that may have failed still denies; release note 020)
-
-- [00583: branch guard notices state intent and action](Completed/00583-branch-guard-notices-state-intent-and-action/PLAN.md) - Complete at `d60da0fda` (merged via `7d954f213`; main CI run 42682133539, full suite, success) + the archiving commit (GitHub #192, closed: the dormancy Stop line, `branch-sweep`'s Dormant section and the `wip.cap` deny each carry `BRANCH_LIMIT_PRINCIPLE` and a next action per branch, and the session is told to take that work on first; release note 018)
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
@@ -321,9 +317,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 629 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 524 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 526 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 81 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 79 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
