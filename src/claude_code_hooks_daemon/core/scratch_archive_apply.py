@@ -25,6 +25,7 @@ is not archived diverges from DESIGN 5.2 (recorded in DESIGN section 13).
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 from collections.abc import Callable, Mapping
@@ -77,6 +78,7 @@ from claude_code_hooks_daemon.core.scratch_archive_remove import (
     resume_claimed,
 )
 from claude_code_hooks_daemon.core.scratch_archive_restore import Reclaimed, reclaim_staging
+from claude_code_hooks_daemon.core.scratch_session import is_session_dir_name
 from claude_code_hooks_daemon.core.scratch_sweep import EntryRow, SweepReport
 from claude_code_hooks_daemon.core.scratch_verdict import Verdict
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
@@ -181,7 +183,7 @@ def apply_sweep(
         # Listed again: a claim renamed back above is an entry to judge this run.
         names = bounded_names(root_fd, settings.max_inodes)
         fingerprints, foreign = _fingerprint_all(root_fd, names, settings)
-        report = facts.classify()
+        report = _same_directory(root_fd, facts.classify())
         entries = [
             (
                 foreign[row.name]
@@ -218,6 +220,88 @@ def apply_sweep(
         audit=audit,
         notes=tuple(notes),
     )
+
+
+def _same_directory(root_fd: int, report: SweepReport) -> SweepReport:
+    """``report`` made incomplete when it listed a directory other than the one ``root_fd`` holds.
+
+    A session sub-report records the identity it listed; the root opened here by
+    path may have been swapped since, so nothing acts unless the two agree.
+    """
+    if report.identity is None:
+        return report
+    info = os.fstat(root_fd)
+    if (info.st_dev, info.st_ino) == report.identity:
+        return report
+    reason = f"{Path(report.root).name} is not the directory that was listed: nothing acted on"
+    return dataclasses.replace(
+        report, complete=False, incomplete_reasons=(*report.incomplete_reasons, reason)
+    )
+
+
+def session_facts(
+    parent: ApplyFacts,
+    session: str,
+    *,
+    child_live: Callable[[str], bool],
+    child_referenced: Callable[[str], bool],
+    container_referenced: Callable[[], bool],
+) -> ApplyFacts:
+    """Fresh facts for one session directory's children, read through the parent's.
+
+    The classification is the parent's fresh one, narrowed to ``session``'s
+    sub-report; a session no longer listed gives an incomplete empty report, so
+    nothing acts. A child is live when it, or the session directory in the
+    parent root, is; referenced when it is, or when anything names the
+    container (``container_referenced``: the parent's root sites or an unknown
+    reference set).
+    """
+
+    def classify() -> SweepReport:
+        report = parent.classify()
+        found = [sub for sub in report.sessions if Path(sub.root).name == session]
+        if len(found) == 1 and report.complete:
+            return found[0]
+        reason = f"session directory {session} is not listed by a complete fresh classification"
+        return SweepReport(session, (), False, (reason,), ())
+
+    return ApplyFacts(
+        classify=classify,
+        entry_live=lambda name: child_live(name) or parent.entry_live(session),
+        referenced=lambda name: container_referenced() or child_referenced(name),
+    )
+
+
+def apply_sessions(
+    store: ArchiveStore,
+    facts: ApplyFacts,
+    settings: ApplySettings,
+    for_session: Callable[[str], ApplyFacts],
+    *,
+    after_step: Callable[[str, str], None] = _no_step,
+) -> tuple[tuple[str, ApplyResult], ...]:
+    """One apply pass per session directory a fresh ``facts`` classification lists.
+
+    Run after the root's own pass with the same lock held. Each session
+    directory is a root of its own whose entries are its children; the
+    directory itself is never an entry here. ``for_session(name)`` supplies
+    the facts (normally :func:`session_facts`).
+    """
+    store.require_lock("apply")
+    names = [Path(sub.root).name for sub in facts.classify().sessions]
+    results: list[tuple[str, ApplyResult]] = []
+    for name in names:
+        if not is_session_dir_name(name):
+            continue
+        sub_settings = dataclasses.replace(
+            settings,
+            root=settings.root / name,
+            original_prefix=f"{settings.original_prefix}/{name}",
+        )
+        results.append(
+            (name, apply_sweep(store, for_session(name), sub_settings, after_step=after_step))
+        )
+    return tuple(results)
 
 
 def _resume(

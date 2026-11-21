@@ -30,7 +30,9 @@ from claude_code_hooks_daemon.core.scratch_archive import (
 from claude_code_hooks_daemon.core.scratch_archive_apply import (
     ApplyFacts,
     ApplySettings,
+    apply_sessions,
     apply_sweep,
+    session_facts,
 )
 from claude_code_hooks_daemon.core.scratch_archive_claim import CLAIM_PREFIX, open_dir
 from claude_code_hooks_daemon.core.scratch_archive_pack import TarTool, find_gnu_tar
@@ -555,3 +557,154 @@ class TestResumeReclaimExpireOrder:
         assert [r.outcome for r in again.resumed] == ["renamed-back"]
         assert snapshot(root / "e1") == before
         assert again.audit.unrecorded_archives
+
+
+SESSION = "s-20261101T000000Z-abcdefgh"
+
+
+@dataclass
+class SessionWorld:
+    """A parent report holding one session sub-report, with facts a test controls."""
+
+    root: Path
+    children: list[EntryRow]
+    #: How many parent classifications still list the session.
+    present_for: int = 1_000
+    classified: int = 0
+    identity: tuple[int, int] | None = None
+    container_live: bool = False
+    container_referenced: bool = False
+    child_live: set[str] = field(default_factory=set)
+
+    def classify(self) -> SweepReport:
+        self.classified += 1
+        info = os.lstat(self.root / SESSION)
+        identity = self.identity or (info.st_dev, info.st_ino)
+        sub = SweepReport(
+            str(self.root / SESSION), tuple(self.children), True, (), (), identity=identity
+        )
+        parent_rows = (row(SESSION, Verdict.STUCK),)
+        sessions = (sub,) if self.classified <= self.present_for else ()
+        return SweepReport(str(self.root), parent_rows, True, (), (), sessions=sessions)
+
+    def parent(self) -> ApplyFacts:
+        return ApplyFacts(
+            classify=self.classify,
+            entry_live=lambda name: name == SESSION and self.container_live,
+            referenced=lambda name: False,
+        )
+
+    def for_session(self, name: str) -> ApplyFacts:
+        return session_facts(
+            self.parent(),
+            name,
+            child_live=lambda child: child in self.child_live,
+            child_referenced=lambda child: False,
+            container_referenced=lambda: self.container_referenced,
+        )
+
+
+def run_sessions(world: SessionWorld, store: ArchiveStore, tar: TarTool) -> apply_mod.ApplyResult:
+    results = apply_sessions(store, world.parent(), settings(world.root, tar), world.for_session)
+    assert [name for name, _ in results] == [SESSION]
+    return results[0][1]
+
+
+class TestSessionChildrenAreArchivedOneByOne:
+    """Task 4.3 step 3: --apply packs each due child of a session directory, never the directory."""
+
+    def _world(
+        self,
+        root: Path,
+        *,
+        identity: tuple[int, int] | None = None,
+        container_live: bool = False,
+        container_referenced: bool = False,
+    ) -> SessionWorld:
+        entry(root / SESSION, "old")
+        entry(root / SESSION, "kept")
+        entry(root / SESSION, "guarded")
+        children = [
+            row("old"),
+            row("kept", Verdict.KEPT),
+            row("guarded", Verdict.PROTECTED),
+        ]
+        return SessionWorld(
+            root,
+            children,
+            identity=identity,
+            container_live=container_live,
+            container_referenced=container_referenced,
+        )
+
+    def test_a_due_child_is_archived_alone_and_restores_into_its_session(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        world = self._world(root)
+        before = snapshot(root / SESSION / "old")
+        result = run_sessions(world, store, tar)
+        assert outcome_of(result, "old").outcome == "archived"
+        assert outcome_of(result, "kept").outcome == "not-actionable"
+        assert outcome_of(result, "guarded").outcome == "not-actionable"
+        assert (root / SESSION / "kept").is_dir()
+        assert (root / SESSION / "guarded").is_dir()
+        assert not (root / SESSION / "old").exists()
+        (record,) = store.read_index().records
+        assert record.original_path == f"untracked/scratch/{SESSION}/old"
+        fd = open_dir(root)
+        try:
+            restore(
+                store, record.archive_id, fd, root_path="untracked/scratch", tar=tar, max_inodes=MAX
+            )
+        finally:
+            os.close(fd)
+        assert snapshot(root / SESSION / "old") == before
+
+    def test_the_session_directory_itself_is_never_packed(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        world = self._world(root)
+        apply_sweep(store, world.parent(), settings(root, tar))
+        assert (root / SESSION / "old").is_dir()
+        assert store.read_index().records == ()
+
+    def test_a_live_container_holds_every_child(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        result = run_sessions(self._world(root, container_live=True), store, tar)
+        assert outcome_of(result, "old").outcome != "archived"
+        assert (root / SESSION / "old").is_dir()
+
+    def test_a_referenced_container_holds_every_child(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        result = run_sessions(self._world(root, container_referenced=True), store, tar)
+        assert outcome_of(result, "old").outcome != "archived"
+        assert (root / SESSION / "old").is_dir()
+
+    def test_a_live_child_is_not_packed(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        world = self._world(root)
+        world.child_live = {"old"}
+        run_sessions(world, store, tar)
+        assert (root / SESSION / "old").is_dir()
+
+    def test_a_directory_not_the_one_listed_is_never_acted_in(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        result = run_sessions(self._world(root, identity=(0, 0)), store, tar)
+        assert not result.complete
+        assert outcome_of(result, "old").outcome == "not-actionable"
+        assert (root / SESSION / "old").is_dir()
+
+    def test_a_session_gone_from_the_fresh_listing_acts_on_nothing(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        world = self._world(root)
+        # Listed when the loop picks its sessions, gone for the session's own pass.
+        world.present_for = 1
+        result = run_sessions(world, store, tar)
+        assert not result.complete
+        assert result.entries == ()
+        assert (root / SESSION / "old").is_dir()
