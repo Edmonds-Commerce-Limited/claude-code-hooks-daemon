@@ -998,7 +998,11 @@ class TestPressureMode:
     ) -> None:
         entry(root / SESSION, "old")
         world = SessionWorld(root, [not_due("old")])
-        world.after_first = lambda: (root / SESSION / KEEP_MARKER).write_text("hold")
+
+        def keep() -> None:
+            (root / SESSION / KEEP_MARKER).write_text("hold")
+
+        world.after_first = keep
         results = apply_sessions(store, world.parent(), pressed(root, tar), world.for_session)
         ((_, result),) = results
         assert outcome_of(result, "old").outcome == "renamed-back"
@@ -1081,7 +1085,7 @@ class TestPressuredCount:
         bound = consent_to(report, PRESSURE)
         assert bound is not None
         assert bound.consented == frozenset({"root/idle", "root/s/child"})
-        assert pressured_count(report, bound) == len(bound.consented)
+        assert pressured_count(report, bound) == 2
         assert consent_to(report, None) is None
 
 
