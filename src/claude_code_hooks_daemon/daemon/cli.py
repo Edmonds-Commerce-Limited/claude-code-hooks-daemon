@@ -11210,6 +11210,9 @@ def cmd_worktree_reap(
         label = "REAPED " if outcome.removed else ("FAILED " if reap else "DRY-RUN")
         print(f"{label} {outcome.detail}")
 
+    if asked:
+        # A hold put on during the question must stop a branch prune too.
+        holds, _locked = read_holds()
     unmerged = 0
     for branch in orphans:
         if branch.name in holds.branches:

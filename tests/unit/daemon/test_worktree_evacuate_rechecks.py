@@ -9,6 +9,7 @@ against readings taken before the wait.
 from __future__ import annotations
 
 import argparse
+import json
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -31,7 +32,7 @@ from tests.unit.daemon.test_worktree_evacuate import (
 from claude_code_hooks_daemon.core import agent_ownership, worktree_reaping
 from claude_code_hooks_daemon.core.agent_ownership import RunningHolds
 from claude_code_hooks_daemon.core.worktree_scratch_evacuation import EvacuationGate
-from claude_code_hooks_daemon.daemon.cli import cmd_worktree_reap
+from claude_code_hooks_daemon.daemon.cli import _daemon_untracked_dir, cmd_worktree_reap
 from claude_code_hooks_daemon.daemon.worktree_evacuate import EvacuateSeams
 
 __all__ = ["_git_identity"]
@@ -81,6 +82,7 @@ def _run(
     cwds: dict[int, Path],
     only: str | None = _NAME,
     after_step: Callable[[str, str], None] | None = None,
+    reap_branches: bool = False,
 ) -> tuple[int, str]:
     now = time.time() + _DAY + 60
     args = argparse.Namespace(
@@ -88,7 +90,7 @@ def _run(
         base_branch="main",
         reap=True,
         only=only,
-        reap_branches=False,
+        reap_branches=reap_branches,
     )
     rc = cmd_worktree_reap(
         args,
@@ -174,6 +176,45 @@ class TestTheAskedWorktree:
         assert _worktree(tree).is_dir(), out
         assert "ARCHIVED" in out, out
         assert "pid 4343" in _keep_text(out), out
+
+    def test_a_background_record_added_while_asked_keeps_it_and_packs_nothing(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A record in the MAIN checkout naming an entry, written during the question."""
+        record = _daemon_untracked_dir(_main(tree)) / "background-processes.jsonl"
+
+        def record_then_yes(_relative: str, _gate: EvacuationGate) -> bool:
+            record.parent.mkdir(parents=True, exist_ok=True)
+            command = f"tail -f {_scratch(tree).resolve()}/two.txt"
+            record.write_text(json.dumps({"command": command}) + "\n", encoding="utf-8")
+            return True
+
+        rc, out = _run(tree, capsys, confirm=record_then_yes, cwds={})
+
+        assert rc == 1, out
+        assert _worktree(tree).is_dir(), out
+        assert (_scratch(tree) / "two.txt").read_bytes() == b"second", out
+        assert "two.txt" in _keep_text(out), out
+
+
+class TestOrphanBranches:
+    def test_a_hold_added_while_asked_keeps_a_worktreeless_branch(
+        self,
+        tree: ScratchTree,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``--reap-branches`` prunes merged branches with no worktree after the loop."""
+        git(_main(tree), "branch", "agent-orphan")
+        branches = _holds(monkeypatch)
+
+        def hold_then_no(_relative: str, _gate: EvacuationGate) -> bool:
+            branches.add("agent-orphan")
+            return False
+
+        _run(tree, capsys, confirm=hold_then_no, cwds={}, only=None, reap_branches=True)
+
+        assert "agent-orphan" in git(_main(tree), "branch", "--list", "agent-orphan")
 
 
 class TestLaterWorktrees:
