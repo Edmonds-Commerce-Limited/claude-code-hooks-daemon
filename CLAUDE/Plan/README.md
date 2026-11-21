@@ -8,7 +8,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 ### Now (in flight)
 
-- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - In Progress (owner request: every scratch entry has a 24-hour TTL and past it is filed, archived or kept only on a machine proof of unpushed or human work; a `scratch-sweep` command, caps, a per-session directory; Phases 1 to 5, Task 6.1 and Phase 7 on main at `662750cf4`; open: Tasks 0.2, 0.3 and 3.9, Tasks 6.2 and 6.3, Phase 8, and the owner's call on the keep-marker guard and an unparseable command; takes over Plan 00560's sweep)
+- [00627: scratch management ttl and filing](00627-scratch-management-ttl-and-filing/PLAN.md) - In Progress (owner request: a 24-hour TTL per scratch entry, then filed, archived or kept only on machine proof; `scratch-sweep`, caps, per-session directories; Phases 1-5, 6.1 and 7 on main at `662750cf4`; open: Tasks 0.2, 0.3, 3.9, 6.2, 6.3, Phase 8, owner call on the keep-marker guard and unparseable commands; takes over Plan 00560's sweep)
 
 - [00625: automatic upgrade standing approval and upgrade lock](00625-automatic-upgrade-standing-approval-and-upgrade-lock/PLAN.md) - Not Started on main (owner request: a default-on `daemon-auto-upgrade` standing authorisation, `upgrade.sh --unattended`, and one cross-namespace-safe upgrade lock shared by upgrade and provision; the in-progress work is parked unmerged on `origin/agent-a5947fd1e83f03452-ba288018`)
 
