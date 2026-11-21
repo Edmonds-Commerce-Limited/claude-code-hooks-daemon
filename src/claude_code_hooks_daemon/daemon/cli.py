@@ -7512,13 +7512,14 @@ def _scratch_status(args: argparse.Namespace, sources: _ScratchSources) -> int:
                     "note": row.note,
                     "keeps": row.keeps,
                     "restore_command": row.restore_command,
+                    "checkouts": list(row.checkouts),
                 }
                 for row in status.archives
             ],
         }
         print(json.dumps(document, indent=2))
         return 0
-    for line in render_status(status, now=sources.now()):
+    for line in render_status(status, now=sources.now(), main=str(Path(main).resolve())):
         print(line)
     return 0
 
