@@ -30,6 +30,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.utils.bounded_walk import Bounded, finished, stopped
+
 MANIFEST_NAME = ".scratch-session.json"
 SCHEMA_VERSION = 1
 SESSION_PREFIX = "s-"
@@ -72,6 +74,14 @@ class Manifest:
     checkout: str
     branch: str | None
     entries: dict[str, EntryRecord]
+
+
+@dataclass(frozen=True)
+class ManifestReading:
+    """A manifest, or why there is none; ``problem`` is empty exactly when it was read."""
+
+    manifest: Manifest | None
+    problem: str
 
 
 @dataclass(frozen=True)
@@ -125,60 +135,60 @@ def _instant(value: float) -> str:
     return datetime.fromtimestamp(value, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _parse_instant(value: object) -> float | None:
+def _parse_instant(value: object, field: str) -> float:
+    """``value`` as a UTC instant; raises ValueError naming ``field`` when it is not one."""
     if not isinstance(value, str):
-        return None
+        raise ValueError(f"{field} is not a timestamp string")
     try:
-        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
-    except ValueError:
-        return None
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise ValueError(f"{field} {value!r} is not a YYYY-MM-DDTHH:MM:SSZ instant") from exc
+    return parsed.replace(tzinfo=UTC).timestamp()
 
 
-def _optional_str(value: object) -> tuple[bool, str | None]:
-    if value is None:
-        return True, None
-    return isinstance(value, str), value if isinstance(value, str) else None
+def _optional_str(value: object, field: str) -> str | None:
+    """``value`` when it is a string or None; raises ValueError naming ``field`` otherwise."""
+    if value is None or isinstance(value, str):
+        return value
+    raise ValueError(f"{field} is neither a string nor null")
 
 
-def _entry_record(value: object) -> EntryRecord | None:
+def _entry_record(name: str, value: object) -> EntryRecord:
+    """The record of entry ``name``; raises ValueError naming the entry and field."""
+    field = f"entries[{name!r}]"
     if not isinstance(value, dict):
-        return None
-    born = _parse_instant(value.get("born"))
-    ok_purpose, purpose = _optional_str(value.get("purpose"))
-    ok_plan, plan = _optional_str(value.get("plan"))
+        raise ValueError(f"{field} is not an object")
+    born = _parse_instant(value.get("born"), f"{field}.born")
+    purpose = _optional_str(value.get("purpose"), f"{field}.purpose")
+    plan = _optional_str(value.get("plan"), f"{field}.plan")
     ttl = value.get("ttl_hours")
-    ttl_ok = ttl is None or (isinstance(ttl, int) and not isinstance(ttl, bool) and ttl >= 1)
-    if born is None or not (ok_purpose and ok_plan and ttl_ok):
-        return None
+    if not (ttl is None or (isinstance(ttl, int) and not isinstance(ttl, bool) and ttl >= 1)):
+        raise ValueError(f"{field}.ttl_hours is not a positive integer or null")
     if plan is not None and _PLAN.fullmatch(plan) is None:
-        return None
+        raise ValueError(f"{field}.plan is not a plan number")
     return EntryRecord(born, purpose, plan, ttl if isinstance(ttl, int) else None)
 
 
-def parse_manifest(data: object) -> Manifest | None:
-    """A Manifest from decoded JSON, or None when any field does not validate."""
+def parse_manifest(data: object) -> Manifest:
+    """A Manifest from decoded JSON; raises ValueError naming the first field that does not validate."""
     if not isinstance(data, dict) or data.get("schema") != SCHEMA_VERSION:
-        return None
+        raise ValueError(f"not a schema {SCHEMA_VERSION} manifest object")
     session_id = data.get("session_id")
-    born = _parse_instant(data.get("born"))
+    if not isinstance(session_id, str) or _SESSION_ID.fullmatch(session_id) is None:
+        raise ValueError("session_id is missing or outside [A-Za-z0-9_-]")
+    born = _parse_instant(data.get("born"), "born")
     checkout = data.get("checkout")
-    ok_branch, branch = _optional_str(data.get("branch"))
+    if not isinstance(checkout, str):
+        raise ValueError("checkout is not a string")
+    branch = _optional_str(data.get("branch"), "branch")
     raw_entries = data.get("entries")
-    if (
-        not isinstance(session_id, str)
-        or _SESSION_ID.fullmatch(session_id) is None
-        or born is None
-        or not isinstance(checkout, str)
-        or not ok_branch
-        or not isinstance(raw_entries, dict)
-    ):
-        return None
+    if not isinstance(raw_entries, dict):
+        raise ValueError("entries is not an object")
     entries: dict[str, EntryRecord] = {}
     for name, value in raw_entries.items():
-        record = _entry_record(value)
-        if not isinstance(name, str) or _ENTRY_NAME.fullmatch(name) is None or record is None:
-            return None
-        entries[name] = record
+        if not isinstance(name, str) or _ENTRY_NAME.fullmatch(name) is None:
+            raise ValueError(f"entry name {name!r} is not a safe path segment")
+        entries[name] = _entry_record(name, value)
     return Manifest(session_id, born, checkout, branch, entries)
 
 
@@ -201,50 +211,70 @@ def _manifest_json(manifest: Manifest) -> dict[str, Any]:
     }
 
 
-def _read_manifest_at(dir_fd: int) -> Manifest | None:
+def _manifest_problem(exc: Exception) -> ManifestReading:
+    return ManifestReading(None, f"{type(exc).__name__}: {exc}")
+
+
+def _read_manifest_at(dir_fd: int) -> ManifestReading:
     try:
         fd = os.open(MANIFEST_NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
-    except OSError:
-        return None
+    except OSError as exc:
+        return _manifest_problem(exc)
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_MANIFEST_BYTES:
-            return None
+        if not stat.S_ISREG(info.st_mode):
+            return ManifestReading(None, "the manifest is not a regular file")
+        if info.st_size > _MAX_MANIFEST_BYTES:
+            return ManifestReading(None, f"the manifest is over {_MAX_MANIFEST_BYTES} bytes")
         raw = os.read(fd, _MAX_MANIFEST_BYTES + 1)
-    except OSError:
-        return None
+    except OSError as exc:
+        return _manifest_problem(exc)
     finally:
         os.close(fd)
     try:
-        return parse_manifest(json.loads(raw.decode("utf-8")))
-    except (UnicodeDecodeError, ValueError):
-        return None
+        return ManifestReading(parse_manifest(json.loads(raw.decode("utf-8"))), "")
+    except (UnicodeDecodeError, ValueError) as exc:
+        return _manifest_problem(exc)
 
 
-def read_manifest(session_dir: Path) -> Manifest | None:
-    """The validated manifest of ``session_dir``, or None (absent, a link, unreadable, invalid)."""
+def read_manifest_reading(session_dir: Path) -> ManifestReading:
+    """The validated manifest of ``session_dir``, or why there is none (absent, a link, unreadable, invalid)."""
     try:
         dir_fd = os.open(session_dir, _DIR_FLAGS)
-    except OSError:
-        return None
+    except OSError as exc:
+        return _manifest_problem(exc)
     try:
         return _read_manifest_at(dir_fd)
     finally:
         os.close(dir_fd)
 
 
-def find_session_dir(root: Path, session_id: str) -> Path | None:
-    """The newest directory in ``root`` named for ``session_id`` whose manifest carries that id."""
-    short = check_session_id(session_id)
+def read_manifest(session_dir: Path) -> Manifest | None:
+    """The validated manifest of ``session_dir``, or None; :func:`read_manifest_reading` says why."""
+    return read_manifest_reading(session_dir).manifest
+
+
+def _list_session_names(root: Path) -> Bounded[tuple[str, ...]]:
+    """Every real directory name in ``root``, newest-named first; a listing failure is carried."""
     try:
         with os.scandir(root) as listing:
             names = sorted(
                 (item.name for item in listing if item.is_dir(follow_symlinks=False)),
                 reverse=True,
             )
-    except OSError:
-        return None
-    for name in names:
+    except OSError as exc:
+        return stopped((), f"{root} could not be listed: {type(exc).__name__}")
+    return finished(tuple(names))
+
+
+def find_session_dir(root: Path, session_id: str) -> Path | None:
+    """The newest directory in ``root`` named for ``session_id`` whose manifest carries that id.
+
+    None when there is none, including when ``root`` is absent or cannot be
+    listed: the callers then make a directory, or report that nothing was found.
+    """
+    short = check_session_id(session_id)
+    for name in _list_session_names(root).value:
         match = _DIR_NAME.fullmatch(name)
         if match is None or match.group(1) != short:
             continue
@@ -391,9 +421,13 @@ def new_entry(
     if purpose is not None:
         purpose = purpose[:_MAX_PURPOSE_CHARS]
     with _locked(session_dir) as dir_fd:
-        manifest = _read_manifest_at(dir_fd)
+        reading = _read_manifest_at(dir_fd)
+        manifest = reading.manifest
         if manifest is None:
-            raise SessionError(f"{session_dir / MANIFEST_NAME}: the manifest is missing or invalid")
+            raise SessionError(
+                f"{session_dir / MANIFEST_NAME}: the manifest is missing or invalid "
+                f"({reading.problem})"
+            )
         if name in manifest.entries:
             raise SessionError(f"entry {name!r} already exists in {session_dir}")
         try:
@@ -444,9 +478,10 @@ def remove_empty_session_dir(
 def _remove_locked(
     root_fd: int, name: str, dir_fd: int, born_before: float, held: Callable[[], bool]
 ) -> str:
-    manifest = _read_manifest_at(dir_fd)
+    reading = _read_manifest_at(dir_fd)
+    manifest = reading.manifest
     if manifest is None:
-        return "the manifest is missing or invalid"
+        return f"the manifest is missing or invalid ({reading.problem})"
     births = [manifest.born, *(record.born for record in manifest.entries.values())]
     if max(births) >= born_before:
         return "a recent session or child birth"

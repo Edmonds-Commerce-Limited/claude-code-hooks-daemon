@@ -20,7 +20,9 @@ from claude_code_hooks_daemon.core.scratch_session import (
     find_session_dir,
     is_session_dir_name,
     new_entry,
+    parse_manifest,
     read_manifest,
+    read_manifest_reading,
     remove_empty_session_dir,
     resolve_session_dir,
     session_dir_name,
@@ -154,6 +156,95 @@ class TestFind:
         (made / MANIFEST_NAME).unlink()
         (made / MANIFEST_NAME).symlink_to(other / MANIFEST_NAME)
         assert read_manifest(made) is None
+
+    def test_unlistable_root_is_not_found(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _ensure(tmp_path)
+
+        def denied(*_args: object, **_kwargs: object) -> None:
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(scratch_session.os, "scandir", denied)
+        assert find_session_dir(tmp_path, SID) is None
+
+
+class TestManifestReading:
+    """Why a manifest could not be read is carried, not collapsed to None."""
+
+    def test_a_valid_manifest_has_no_problem(self, tmp_path: Path) -> None:
+        reading = read_manifest_reading(_ensure(tmp_path))
+        assert reading.manifest is not None
+        assert reading.problem == ""
+
+    def test_a_missing_manifest_says_missing(self, tmp_path: Path) -> None:
+        made = _ensure(tmp_path)
+        (made / MANIFEST_NAME).unlink()
+        reading = read_manifest_reading(made)
+        assert reading.manifest is None
+        assert "FileNotFoundError" in reading.problem
+
+    def test_an_absent_directory_says_so(self, tmp_path: Path) -> None:
+        reading = read_manifest_reading(tmp_path / "nope")
+        assert reading.manifest is None
+        assert "FileNotFoundError" in reading.problem
+
+    def test_a_link_manifest_is_a_problem(self, tmp_path: Path) -> None:
+        made = _ensure(tmp_path)
+        other = _ensure(tmp_path / "o")
+        (made / MANIFEST_NAME).unlink()
+        (made / MANIFEST_NAME).symlink_to(other / MANIFEST_NAME)
+        reading = read_manifest_reading(made)
+        assert reading.manifest is None
+        assert reading.problem
+
+    def test_garbage_names_the_decode_failure(self, tmp_path: Path) -> None:
+        made = _ensure(tmp_path)
+        (made / MANIFEST_NAME).write_text("{not json", encoding="utf-8")
+        reading = read_manifest_reading(made)
+        assert reading.manifest is None
+        assert "JSONDecodeError" in reading.problem
+
+    def test_a_bad_birth_names_the_field(self, tmp_path: Path) -> None:
+        made = _ensure(tmp_path)
+        raw = json.loads((made / MANIFEST_NAME).read_text(encoding="utf-8"))
+        raw["born"] = "2026-13-40T99:99:99Z"
+        (made / MANIFEST_NAME).write_text(json.dumps(raw), encoding="utf-8")
+        reading = read_manifest_reading(made)
+        assert reading.manifest is None
+        assert "born" in reading.problem
+
+    def test_parse_manifest_raises_naming_the_field(self) -> None:
+        with pytest.raises(ValueError, match="checkout"):
+            parse_manifest(
+                {
+                    "schema": scratch_session.SCHEMA_VERSION,
+                    "session_id": SID,
+                    "born": "2026-11-21T09:30:05Z",
+                    "checkout": 7,
+                    "branch": None,
+                    "entries": {},
+                }
+            )
+
+    def test_an_entry_with_a_bad_birth_names_the_entry(self) -> None:
+        with pytest.raises(ValueError, match="probe"):
+            parse_manifest(
+                {
+                    "schema": scratch_session.SCHEMA_VERSION,
+                    "session_id": SID,
+                    "born": "2026-11-21T09:30:05Z",
+                    "checkout": "/r",
+                    "branch": None,
+                    "entries": {"probe": {"born": "yesterday"}},
+                }
+            )
+
+    def test_new_entry_names_why_the_manifest_was_refused(self, tmp_path: Path) -> None:
+        session = _ensure(tmp_path)
+        (session / MANIFEST_NAME).write_text("[]", encoding="utf-8")
+        with pytest.raises(SessionError, match="missing or invalid.*schema"):
+            new_entry(session, "probe", now=NOW, purpose=None, plan=None, ttl_hours=None)
 
 
 class TestResolve:
