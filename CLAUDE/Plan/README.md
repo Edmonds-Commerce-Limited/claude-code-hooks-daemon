@@ -14,7 +14,7 @@ Ordered as the roadmap: tiers run top to bottom in the order the work will be do
 
 - [00623: secret guard structural fail closed walks and link index](00623-secret-guard-structural-fail-closed-walks-and-link-index/PLAN.md) - In Progress (one shared finished-or-not result and fail-closed handler for every bounded walk in the secret and flaggable guards, plus an off-hot-path link index so the 512 directory cap stops over-denying; then merge Plan 00614's branch; no loosening)
 
-- [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - In Progress (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; open questions ruled under the owner's delegation in RULINGS.md: the verdict never unlocks alone, the guard must also verify a recovery bundle; local delete only; slice 1 built: core module green, delete-path tests committed red for slice 2)
+- [00620: agent no value branch removal verdict](00620-agent-no-value-branch-removal-verdict/PLAN.md) - In Progress (owner proposal: an Opus sub-agent verdict, bound to the tip, lets an agent remove unproven work with no human; open questions ruled under the owner's delegation in RULINGS.md: the verdict never unlocks alone, the guard must also verify a recovery bundle; local delete only; merged to main (69e375788), success criteria met; open: review sign-off of 8260463ff/09e744603 and CI green on main)
 
 - [00615: secret guard find exec and xargs reads](00615-secret-guard-find-exec-and-xargs-reads/PLAN.md) - Not Started (found by the 00614 review: `find ... -exec <reader> {} +` and `find ... | xargs <reader>` read protected files without a deny, on main today; fix test-first and fail closed, add the forms to the dangerous-invocation corpus)
 
@@ -109,6 +109,8 @@ Triage GitHub #169-#173 first (issue triage, not a plan). Then these plans, in t
 - [00453: supervisor modal overlay](00453-supervisor-modal-overlay/PLAN.md) - Not Started (the status-line banner from Plan 00173/00318 is a one-line TTL notification and structurally cannot hold history; this adds a hotkey-summoned inspection surface costing no model turn, no transcript entry and no status-line space — gated on the owner choosing a hotkey, F12 and F3 already rejected) **Blocked on: the owner must choose a hotkey (F12 and F3 already rejected).**
 
 ### Later
+
+- [00629: recovery copy advisory reject route](00629-recovery-copy-advisory-reject-route/PLAN.md) - Not Started (follow-up of 00620 Task 3.1, RULINGS Q6: `recovery_copy_advisory` stops advising `refs/archive/<name>` and points at the no-value reject route, whose verified bundle is the recovery copy; advice and docs only, no guard change)
 
 - [00129: Wire llm-friendly-qa-wrappers in as a Major Dependency](00129-llm-qa-wrappers-integration/PLAN.md) - Not Started
 
@@ -317,11 +319,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 628 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 629 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 524 (includes 1 reduced-scope plan and 7 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 80 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 81 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

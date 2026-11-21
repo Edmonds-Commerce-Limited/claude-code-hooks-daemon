@@ -48,17 +48,19 @@ The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in 
   - [x] ✅ Adversarial forge tests (`tests/unit/core/test_branch_reject_forge.py`) and the verdict-reuse fixes.
   - [x] ✅ Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/014-agent-no-value-branch-removal-verdict.md`.
   - [x] ✅ Known gaps recorded (section below).
-  - [ ] ⬜ Independent loosening review.
-  - [ ] ⬜ CI green.
+  - [ ] 🔄 Independent loosening review. Done and signed off for everything up to 09e1512e3: first pass F-BYPS, D-PATH, D-EXEC (security-reviewer) and a correctness review (code-reviewer), all findings fixed; re-checks of `5bbd4ab9a..09e1512e3` were F-BYPS "no bypass found, fit to merge" and D-EXEC "no findings" (reports in `/workspace/untracked/agent-reports/auto/261120-1{41755,41800,42011,42545,45725,45751}-*.md`). NOT yet reviewed: the two delete-path commits merged after that range, 8260463ff (`_operation_holding_branch`, refuse a branch a rebase or bisect holds) and 09e744603 (`_read_state_file` logging). Both only add refusals, but the sign-off must cover the merged head; the reviewer briefs are in `subagent-reports/261121-finish-handoff.md`.
+  - [ ] 🔄 CI green. The QA and CodeQL runs on main for the merge commit 69e375788 and its follow-ups were still in progress at close-out (QA run 44854305236); the previous main QA runs (bcc88e01a, 3abec620a) failed, before the merge.
   - [x] ✅ Merge (to main via integration/gate-261120, merge commit 69e375788).
 
 ### Phase 3: Follow-up
 
-- [ ] ⬜ **Task 3.1**: After the merge, file a follow-up plan to point `recovery_copy_advisory` at the reject route instead of `refs/archive/` (RULINGS.md Q6). Plan 00619 is not reopened.
+- [x] ✅ **Task 3.1**: After the merge, file a follow-up plan to point `recovery_copy_advisory` at the reject route instead of `refs/archive/` (RULINGS.md Q6). Plan 00619 is not reopened. Filed as [Plan 00629](../00629-recovery-copy-advisory-reject-route/PLAN.md).
 
 ## Known gaps
 
 - A forger who also writes a NEW agent id into a copied dispatch and verdict is not caught. Accepted under RULINGS Q1 (the recovery bundle bounds the harm); DESIGN section 5 item 09.
+
+- The same Q1 class: a forger who edits a keep verdict to no-value AND deletes its keep record is not caught, because the guard does not re-read the reviewer's transcript at delete time. Pinned as accepted residue by `test_accepted_residue_a_keep_flipped_with_its_keep_record_removed_is_not_caught` (`tests/unit/core/test_branch_reject_forge.py`); the bundle and the ledger line bound it. The F-BYPS review dismissed it under Q1.
 
 - **Resolved (RULINGS Q8): single use and the rate are shared.** Each used verdict and reviewer agent gets a marker in the main checkout's `state_dir`, created exclusively when the ledger line is written. A git-refused removal gets a cancel marker. The used-verdict check, the 2-reviewer step and the refuse-after cap read the per-checkout tracked ledger together with these markers, and fail closed on damage. The ledger remains the human-readable record. `TestSingleUseAcrossCheckouts` in the forge tests pins three refusals: reuse from a second worktree, reuse after switching to an older commit, and the cap counting removals made in other worktrees.
 
@@ -70,10 +72,10 @@ The open questions Q1 to Q8 of [FEASIBILITY.md](FEASIBILITY.md) are answered in 
 
 ## Success Criteria
 
-- [ ] No delete of unproven work succeeds without a valid verdict and a recovery bundle the guard verified at delete time. Tests show the verdict cannot be reused (in any checkout or worktree), self-written, or forged by any route except the accepted RULINGS Q1 gap above, which the bundle bounds.
-- [ ] A verdict alone, and a bundle alone, are each shown by a test to unlock nothing.
-- [ ] Every removal appears in the ledger and the digest.
-- [ ] A release note records the change in the pending-release holding area (CLAUDE/UPGRADES/UNRELEASED/release-notes/).
+- [x] No delete of unproven work succeeds without a valid verdict and a recovery bundle the guard verified at delete time. Tests show the verdict cannot be reused (in any checkout or worktree), self-written, or forged by any route except the accepted RULINGS Q1 gaps above, which the bundle bounds. Evidence: `tests/unit/core/test_branch_reject_delete.py` `TestRefusals` (no, forged, reused, stale, wrong-tip, self-written, keep verdicts), `TestVerdictIdentity`, `TestRecordRemoval`, `TestCompareAndDelete`; `tests/unit/core/test_branch_reject_forge.py` `TestTamperedVerdictFiles`, `TestSymlinks`, `TestBoundToItsRequest`, `TestSingleUseAcrossCheckouts`.
+- [x] A verdict alone, and a bundle alone, are each shown by a test to unlock nothing. Evidence: `test_a_valid_verdict_with_no_verified_bundle_refuses`, `test_a_bundle_alone_unlocks_nothing`, `test_a_bundle_changed_after_approval_refuses_before_the_append` (`tests/unit/core/test_branch_reject_delete.py`).
+- [x] Every removal appears in the ledger and the digest. Evidence: the ledger line is written before the delete (`test_a_valid_verdict_and_bundle_delete_and_record`, `test_a_git_refusal_after_the_append_is_recorded`); the digest lists every ledger entry (`test_it_lists_removals_refusals_and_keeps`, `test_a_line_merged_in_after_a_digest_is_undigested` in `tests/unit/core/test_branch_reject_digest.py`; `test_a_removal_is_listed_with_its_restore_lines` in `tests/unit/daemon/test_cli_branch_reject_digest.py`). Run on main 2026-11-21: these files plus `test_cli_delete_branch_reject_route.py` and `test_branch_reject_unresolved.py`, 163 passed.
+- [x] A release note records the change in the pending-release holding area (CLAUDE/UPGRADES/UNRELEASED/release-notes/): `014-agent-no-value-branch-removal-verdict.md`.
 
 ## Delivery & Milestones
 
