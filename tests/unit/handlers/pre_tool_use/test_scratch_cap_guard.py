@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -50,7 +50,9 @@ def _write(root: Path, *entries: InventoryEntry) -> None:
     )
 
 
-def _handler(root: Path, mode: str = "block") -> ScratchCapGuardHandler:
+def _handler(
+    root: Path, mode: Literal["block", "advise", "off"] = "block"
+) -> ScratchCapGuardHandler:
     handler = ScratchCapGuardHandler()
     handler.project_root_override = root
     handler.caps_override = ScratchCapsConfig(
@@ -77,6 +79,7 @@ def test_denies_directory_creation_at_block(tmp_path: Path) -> None:
     assert handler.matches(_bash(MKDIR, tmp_path))
     result = handler.handle(_bash(MKDIR, tmp_path))
     assert result.decision == Decision.DENY
+    assert result.reason is not None
     assert f"[{RuleID.SCRATCH_CAP}]" in result.reason
     assert "big-clone" in result.reason
     assert "scratch-sweep --apply" in result.reason

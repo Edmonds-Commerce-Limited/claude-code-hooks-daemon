@@ -8,7 +8,7 @@ session directory, gets an advisory naming ``scratch new`` (or a deny when
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -30,7 +30,9 @@ def root(tmp_path: Path) -> Path:
     return scratch
 
 
-def _handler(mode: str | None = None) -> ScratchUnownedEntryHandler:
+def _handler(
+    mode: Literal["advise", "block", "off"] | None = None,
+) -> ScratchUnownedEntryHandler:
     handler = ScratchUnownedEntryHandler()
     if mode is not None:
         handler._scratch = ScratchConfig(sweep=ScratchSweepConfig(unowned_entry=mode))

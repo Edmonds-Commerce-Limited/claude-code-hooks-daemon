@@ -11,6 +11,8 @@ import ast
 import dataclasses
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.core import scratch_store_view
 from claude_code_hooks_daemon.core.scratch_store_view import ArchiveStatus, StoreStatus
 
@@ -28,8 +30,9 @@ def test_the_types_are_frozen_values() -> None:
     status = StoreStatus(archives=(row,), torn=False)
     assert status.archives[0] is row
     assert dataclasses.fields(StoreStatus)
-    assert StoreStatus.__dataclass_params__.frozen
-    assert ArchiveStatus.__dataclass_params__.frozen
+    for instance, field_name in ((status, "torn"), (row, "note")):
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            setattr(instance, field_name, None)
 
 
 def test_the_status_reader_reuses_the_same_types() -> None:
