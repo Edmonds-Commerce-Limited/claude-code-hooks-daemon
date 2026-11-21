@@ -1337,7 +1337,7 @@ handlers:
 **Example trigger:**
 
 ```
-touch untracked/scratch/<session>/probe/.scratch-keep
+touch untracked/scratch/my-session/probe/.scratch-keep
 ```
 
 **Config example:**
