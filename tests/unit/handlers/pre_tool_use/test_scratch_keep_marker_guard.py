@@ -87,6 +87,8 @@ class TestDenied:
         [
             'echo x > "$DIR/.scratch-keep"',
             "touch $ENTRY/.scratch-keep",
+            # Unreadable text naming the marker: where it writes is unknown.
+            "echo \"it's\" > .scratch-keep 'unbalanced",
         ],
     )
     def test_unresolved_destination_naming_the_marker_fails_closed(
@@ -109,7 +111,8 @@ class TestAllowed:
             _bash("git commit -m 'document .scratch-keep'"),
             _bash(f"echo x > {_ENTRY}/notes.txt"),
             _bash('echo x > "$DIR/notes.txt"'),
-            {"tool_name": "Read", "tool_input": {"file_path": f"{_ENTRY}/.scratch-keep"}},
+            _bash("git commit -q -F - <<'EOF'\nGuard `.scratch-keep` writes; it's a human's mark\nEOF"),
+            _bash(f"cat > {_ENTRY}/notes.md <<'EOF'\nDon't touch .scratch-keep, it's the owner's\nEOF"),            {"tool_name": "Read", "tool_input": {"file_path": f"{_ENTRY}/.scratch-keep"}},
         ],
     )
     def test_reads_and_other_files_pass(
