@@ -49,10 +49,19 @@ On two clean verdicts: tick "Independent loosening review" in PLAN.md citing the
 
 ## CI
 
-`gh run list --branch main` at close-out: QA run 44854305236 and CodeQL 44854305519 for merge
-commit 69e375788, and the runs for 8309b2d5c and b3ac2c7b7, were in progress. The two previous
-main QA runs (bcc88e01a, 3abec620a, before the merge) failed. Tick "CI green" only on a
-`success` QA conclusion for a main commit that contains 69e375788.
+QA run 44854305236 on merge commit 69e375788 FAILED; CodeQL passed. The failures are not in
+Plan 00620 code:
+
+- three Plan 00627 tests in the unit-core shard (py3.11, 3.12 and 3.13):
+  `test_scratch_archive_apply.py::TestResumeReclaimExpireOrder::test_an_archive_whose_claim_is_still_present_never_expires`,
+  `test_scratch_archive_remove.py::TestResume::test_a_claim_record_for_another_inode_does_not_cover_the_name`,
+  `test_scratch_archive_restore.py::TestRoundTrip::test_one_entry_of_a_batch_comes_back`;
+- `tests/acceptance/test_playbook_harness.py`: INCONCLUSIVE because the Kotlin linter timed out
+  after 15s (#226).
+
+These are for whoever owns Plan 00627 and the harness. Tick "CI green" only on a `success` QA
+conclusion for a main commit that contains 69e375788. The runs for 8309b2d5c and b3ac2c7b7
+were still in progress; they contain the same code, so expect the same failures.
 
 ## To archive once both are ticked
 
