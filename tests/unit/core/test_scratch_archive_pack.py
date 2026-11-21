@@ -267,7 +267,8 @@ class TestPack:
         """Any runner, root included: an owner other than the effective user refuses."""
         _entry(root)
         claimed = _claim(root_fd, "e1")
-        monkeypatch.setattr(pack_mod.os, "geteuid", lambda: os.getuid() + 4242)
+        real = os.geteuid
+        monkeypatch.setattr(os, "geteuid", lambda: real() + 4242)
         with pytest.raises(PackRefused, match="owned by uid"):
             pack(claimed, store, new_archive_id(), tar=tar, max_inodes=100)
         assert _store_files(store) == []
@@ -283,7 +284,8 @@ class TestPack:
     ) -> None:
         _entry(root)
         claimed = _claim(root_fd, "e1")
-        monkeypatch.setattr(pack_mod.os, "getegid", lambda: os.getgid() + 4242)
+        real = os.getegid
+        monkeypatch.setattr(os, "getegid", lambda: real() + 4242)
         with pytest.raises(PackRefused, match="gid"):
             pack(claimed, store, new_archive_id(), tar=tar, max_inodes=100)
         claimed.close()

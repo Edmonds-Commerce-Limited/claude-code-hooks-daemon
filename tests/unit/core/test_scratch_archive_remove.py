@@ -254,6 +254,25 @@ class TestRemoveClaimed:
         assert result.partial is False
         assert list(root.iterdir()) == []
 
+    def test_refuses_a_tree_another_user_owns(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Fix B: ownership changed after the pack; the claimed tree stays whole."""
+        _entry(root)
+        _handle, record = _archived(root_fd, store, tar)
+        real_geteuid = os.geteuid
+        monkeypatch.setattr(os, "geteuid", lambda: real_geteuid() + 4242)
+        with pytest.raises(RemoveRefused, match="owned by uid"):
+            _remove(root_fd, store, tar, record)
+        monkeypatch.setattr(os, "geteuid", real_geteuid)
+        assert _claimed_exists(root)
+        assert (root / (CLAIM_PREFIX + "e1") / "a.txt").read_text() == "alpha"
+
     def test_removes_a_file_root(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
     ) -> None:
@@ -901,6 +920,24 @@ class TestResume:
         resumed = _resume(root_fd, store, tar)
         assert resumed.outcome == "removed"
         assert list(root.iterdir()) == []
+
+    def test_a_foreign_owner_after_the_pack_is_never_removed_on_resume(
+        self,
+        root: Path,
+        root_fd: int,
+        store: ArchiveStore,
+        tar: TarTool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Fix B: the remover's proof refuses a tree another user owns, resume included."""
+        _entry(root)
+        _archived(root_fd, store, tar)
+        real_geteuid = os.geteuid
+        monkeypatch.setattr(os, "geteuid", lambda: real_geteuid() + 4242)
+        resumed = _resume(root_fd, store, tar)
+        monkeypatch.setattr(os, "geteuid", real_geteuid)
+        assert resumed.outcome == "renamed-back"
+        assert (root / "e1" / "a.txt").read_text() == "alpha"
 
     def test_content_the_archive_lacks_is_renamed_back(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool

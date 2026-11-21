@@ -215,11 +215,26 @@ class TestArchivesWhatIsActionable:
         result = apply_sweep(store, fake.facts(), settings_)
         monkeypatch.setattr(os, "geteuid", real_geteuid)
         outcome = outcome_of(result, "e1")
-        assert outcome.outcome == "renamed-back"
+        assert outcome.outcome == "refused"
         assert "owned by uid" in outcome.reason
         assert snapshot(root / "e1") == before
         assert not (root / (CLAIM_PREFIX + "e1")).exists()
         assert store.read_index().records == ()
+        # Refused before the claim: no claim event, no rename, so a second run
+        # neither piles up events nor touches the entry's ctime.
+        assert store.read_events().events == ()
+
+    def test_a_foreign_entry_that_is_not_actionable_keeps_its_verdict_outcome(
+        self, root: Path, store: ArchiveStore, tar: TarTool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        entry(root, "e1")
+        real_geteuid = os.geteuid
+        fake = FakeFacts([row("e1", Verdict.LIVE)])
+        settings_ = settings(root, tar)
+        monkeypatch.setattr(os, "geteuid", lambda: real_geteuid() + 4242)
+        result = apply_sweep(store, fake.facts(), settings_)
+        monkeypatch.setattr(os, "geteuid", real_geteuid)
+        assert outcome_of(result, "e1").outcome == "not-actionable"
 
     @pytest.mark.parametrize(
         "verdict",

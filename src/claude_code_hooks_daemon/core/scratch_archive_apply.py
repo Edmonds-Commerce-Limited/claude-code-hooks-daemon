@@ -52,9 +52,10 @@ from claude_code_hooks_daemon.core.scratch_archive_claim import (
     WalkRefused,
     bounded_names,
     claim,
-    fingerprint_at,
+    fingerprint_of,
     open_dir,
     release,
+    walk_tree,
 )
 from claude_code_hooks_daemon.core.scratch_archive_expire import (
     ExpiryOutcome,
@@ -66,6 +67,7 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import (
     PackResult,
     TarTool,
     pack,
+    refuse_foreign_owner,
 )
 from claude_code_hooks_daemon.core.scratch_archive_remove import (
     RemoveRefused,
@@ -178,10 +180,16 @@ def apply_sweep(
         )
         # Listed again: a claim renamed back above is an entry to judge this run.
         names = bounded_names(root_fd, settings.max_inodes)
-        fingerprints = _fingerprint_all(root_fd, names, settings)
+        fingerprints, foreign = _fingerprint_all(root_fd, names, settings)
         report = facts.classify()
         entries = [
-            _apply_row(root_fd, row, report, fingerprints, store, facts, settings, after_step)
+            (
+                foreign[row.name]
+                if row.name in foreign and report.complete and _actionable(row)
+                else _apply_row(
+                    root_fd, row, report, fingerprints, store, facts, settings, after_step
+                )
+            )
             for row in report.rows
         ]
         adoptions = unfinished_adoptions(store)
@@ -235,23 +243,33 @@ def _resume(
 
 def _fingerprint_all(
     root_fd: int, names: list[str], settings: ApplySettings
-) -> dict[str, Fingerprint]:
-    """Each unclaimed entry's fingerprint; an entry that cannot be walked is left out."""
+) -> tuple[dict[str, Fingerprint], dict[str, EntryOutcome]]:
+    """Each unclaimed entry's fingerprint, and the entries refused before any claim.
+
+    An entry that cannot be walked is left out. One holding an inode another
+    user owns is refused here, so no claim is recorded and no rename is made
+    for it run after run; pack refuses it again in case ownership changes later.
+    """
     prints: dict[str, Fingerprint] = {}
+    foreign: dict[str, EntryOutcome] = {}
     for name in names:
         if name.startswith(CLAIM_PREFIX):
             continue
         try:
-            prints[name] = fingerprint_at(
+            listing = walk_tree(
                 root_fd, name, max_inodes=settings.max_inodes, max_depth=settings.max_depth
             )
+            refuse_foreign_owner(listing, name)
+            prints[name] = fingerprint_of(listing)
+        except PackRefused as exc:
+            foreign[name] = EntryOutcome(name, "refused", str(exc))
         except (WalkRefused, OSError) as exc:
             log_and_continue(
                 _LOG,
                 exc,
                 reason=f"{name!r} cannot be walked, so it is left out and never claimed",
             )
-    return prints
+    return prints, foreign
 
 
 def _actionable(row: EntryRow) -> bool:
