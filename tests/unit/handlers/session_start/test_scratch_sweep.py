@@ -86,6 +86,57 @@ class TestFailure:
         assert "not created" in text
         assert "PermissionError" in text
 
+    @pytest.mark.parametrize(
+        "cwd", ["bad\x00cwd", 7, ["a"], "", "relative/dir", "/no/such/dir/at/all"]
+    )
+    def test_odd_cwd_never_raises(
+        self, handler: ScratchSweepHandler, tmp_path: Path, cwd: object
+    ) -> None:
+        result = handler.handle(_input(tmp_path, cwd=cwd))
+        assert find_session_dir(tmp_path / "untracked" / "scratch", SID) is not None
+        assert "your scratch directory" in "\n".join(result.context).lower()
+
+    @pytest.mark.parametrize("link", ["untracked", "untracked/scratch"])
+    def test_a_symlinked_root_is_never_followed_outside(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, link: str
+    ) -> None:
+        project = tmp_path / "project"
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (project / link).parent.mkdir(parents=True, exist_ok=True)
+        (project / link).symlink_to(outside, target_is_directory=True)
+        instance = ScratchSweepHandler()
+        monkeypatch.setattr(instance, "_get_project_root", lambda: project)
+        result = instance.handle(_input(project))
+        assert list(outside.rglob("s-*")) == []
+        assert "not created" in "\n".join(result.context)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            '{"schema": 1, "archives": [{"expires_at": "soon"}]}',
+            '{"schema": 1, "entries": [null]}',
+            "[]",
+            "\xff\xfe",
+        ],
+    )
+    def test_a_malformed_inventory_is_reported_not_raised(
+        self, handler: ScratchSweepHandler, tmp_path: Path, payload: str
+    ) -> None:
+        (tmp_path / "untracked").mkdir()
+        (tmp_path / "untracked" / "scratch-inventory.json").write_text(payload, encoding="utf-8")
+        result = handler.handle(_input(tmp_path))
+        assert "inventory" in "\n".join(result.context).lower()
+        assert handler.verify_still_needed() is False
+
+    def test_an_unparseable_config_falls_back_to_default_caps(
+        self, handler: ScratchSweepHandler, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text("scratch: [:\n", encoding="utf-8")
+        result = handler.handle(_input(tmp_path))
+        assert "your scratch directory" in "\n".join(result.context).lower()
+
     def test_ignore_file_failure_is_an_advisory(
         self, handler: ScratchSweepHandler, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

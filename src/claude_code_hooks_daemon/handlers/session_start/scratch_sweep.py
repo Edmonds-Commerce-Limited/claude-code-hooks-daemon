@@ -71,6 +71,19 @@ def _start_refresh(project_root: Path) -> None:
         logger.exception("scratch inventory refresh not started")
 
 
+def _linked_component(checkout: Path) -> str | None:
+    """The first of ``untracked/`` and ``untracked/scratch/`` that is a symlink, else None.
+
+    The sweep refuses a root that leaves ``untracked/`` once links resolve, so
+    a session directory made through a link would sit where nothing ever
+    sweeps it. It is not created, and the reason is said instead.
+    """
+    for relative in (DaemonPath.UNTRACKED_DIR, ProjectPath.SCRATCH_DIR):
+        if (checkout / relative).is_symlink():
+            return str(relative)
+    return None
+
+
 def _caps_config(project_root: Path) -> ScratchCapsConfig:
     """The project's ``scratch.caps``; the defaults when the config cannot be read."""
     try:
@@ -215,6 +228,9 @@ class ScratchSweepHandler(SessionStartVerifiable, SessionStartHandlerBase):
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
         checkout = self._checkout(hook_input)
         try:
+            linked = _linked_component(checkout)
+            if linked is not None:
+                raise SessionError(f"{linked} is a symlink, which the sweep never follows")
             ensure_scratch_dir(checkout)
             made = ensure_session_dir(
                 checkout / ProjectPath.SCRATCH_DIR,
