@@ -178,7 +178,7 @@ class ScratchUnownedEntryHandler(PreToolUseHandlerBase):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """Acceptance test: a Write straight into the scratch root is advised, not denied."""
+        """A Write straight into the scratch root is advised by default; denied under ``block``."""
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             RecommendedModel,
@@ -204,5 +204,23 @@ class ScratchUnownedEntryHandler(PreToolUseHandlerBase):
                 cleanup_commands=[f"rm -f {target}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="Write a new file directly in the scratch root under block mode",
+                command=probe.as_instruction(),
+                description=(
+                    "With `scratch.sweep.unowned_entry: block`, the same write is denied "
+                    "under R-SCRATCH-UNOWNED-ENTRY, naming `scratch new`"
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"R-SCRATCH-UNOWNED-ENTRY", r"scratch new"],
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                harness_cannot_produce=(
+                    "The deny needs `scratch.sweep.unowned_entry: block`, and the shipped "
+                    "default (this project's too) is `advise`, so a probe against the "
+                    "running daemon can only reach the advisory. Covered by "
+                    "tests/unit/handlers/pre_tool_use/test_scratch_unowned_entry.py."
+                ),
             ),
         ]

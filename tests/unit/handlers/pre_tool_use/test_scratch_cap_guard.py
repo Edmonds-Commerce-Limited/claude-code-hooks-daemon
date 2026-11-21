@@ -177,3 +177,16 @@ def test_rule_and_guidance(tmp_path: Path) -> None:
     assert [rule.rule_id for rule in handler.get_rules()] == [RuleID.SCRATCH_CAP]
     assert "R-SCRATCH-CAP" in (handler.get_claude_md() or "")
     assert handler.get_acceptance_tests()
+
+
+def test_acceptance_tests_declare_the_deny(tmp_path: Path) -> None:
+    """The playbook must record that this handler denies, even though the
+    harness cannot put the inventory at the block cap to show it."""
+    denies = [
+        test
+        for test in _handler(tmp_path).get_acceptance_tests()
+        if test.expected_decision == Decision.DENY
+    ]
+    assert len(denies) == 1
+    assert denies[0].harness_cannot_produce
+    assert any("scratch-sweep" in pattern for pattern in denies[0].expected_message_patterns)

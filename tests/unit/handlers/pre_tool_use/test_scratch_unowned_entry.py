@@ -141,6 +141,18 @@ class TestHandle:
         assert result.decision == Decision.DENY
         assert "R-SCRATCH-UNOWNED-ENTRY" in (result.reason or "")
 
+    def test_acceptance_tests_declare_both_answers(self) -> None:
+        """The default advisory is probed live; the block-mode deny is declared
+        but cannot be produced under the shipped ``advise`` default."""
+        tests = _handler().get_acceptance_tests()
+        allows = [t for t in tests if t.expected_decision == Decision.ALLOW]
+        denies = [t for t in tests if t.expected_decision == Decision.DENY]
+        assert len(allows) == 1 and allows[0].tool_payload is not None
+        assert len(denies) == 1
+        assert denies[0].harness_cannot_produce
+        assert "block" in denies[0].harness_cannot_produce
+        assert any("R-SCRATCH-UNOWNED-ENTRY" in p for p in denies[0].expected_message_patterns)
+
     def test_no_match_allows_silently(self, root: Path) -> None:
         result = _handler("block").handle(_write(root / "existing" / "a.txt"))
         assert result.decision == Decision.ALLOW

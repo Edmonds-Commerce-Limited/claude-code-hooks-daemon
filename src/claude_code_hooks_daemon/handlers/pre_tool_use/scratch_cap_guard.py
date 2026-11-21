@@ -197,10 +197,29 @@ class ScratchCapGuardHandler(PreToolUseHandlerBase):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """One test: the harness cannot put the inventory at the block cap."""
+        """The deny and the allow; the harness cannot put the inventory at the block cap."""
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
+            AcceptanceTest(
+                title="scratch-cap-guard - mkdir under scratch at the block cap is denied",
+                command="mkdir -p untracked/scratch/acceptance-cap-probe",
+                harness_cannot_produce=(
+                    "The deny needs untracked/scratch-inventory.json at the block cap "
+                    "(25,000 directories by default) under `scratch.caps.mode: block`; no "
+                    "acceptance setup should create that inventory, and a probe cannot "
+                    "fake it without overwriting the real cache the sweep reads. Covered "
+                    "by tests/unit/handlers/pre_tool_use/test_scratch_cap_guard.py."
+                ),
+                description=(
+                    "At the block cap a directory-creating command under scratch is "
+                    "denied, naming the sweep command and the largest entries."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"R-SCRATCH-CAP", r"scratch-sweep --apply"],
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+            ),
             AcceptanceTest(
                 title="scratch-cap-guard - mkdir under scratch below the cap is allowed",
                 command="mkdir -p untracked/scratch/acceptance-cap-probe",
@@ -215,5 +234,5 @@ class ScratchCapGuardHandler(PreToolUseHandlerBase):
                 expected_message_patterns=[],
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,
-            )
+            ),
         ]
