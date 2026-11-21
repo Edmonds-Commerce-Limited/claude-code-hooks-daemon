@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.core.utils import (
     scan_bash_write_targets,
 )
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.scratch_dir_creation import (
     UnparseableCommand,
@@ -90,7 +91,8 @@ def _copies_marker_into_directory(words: list[str], cwd: str | None) -> bool:
         return False
     if into_directory or "$" in destination or "`" in destination:
         return True
-    return (Path(cwd or "/") / destination).is_dir()
+    # An unreadable destination may be a directory: fail closed.
+    return path_is_dir(Path(cwd or "/") / destination, unreadable_means=True)
 
 
 def _interpreter_names_marker(words: list[str]) -> bool:

@@ -96,6 +96,20 @@ class TestDenied:
         assert handler.matches(hook_input)
         assert handler.handle(hook_input).decision == Decision.DENY
 
+    def test_copy_into_an_unreadable_destination_fails_closed(
+        self, handler: ScratchKeepMarkerGuardHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A destination whose kind cannot be read (EACCES) is treated as a
+        directory, so the copy that would name the marker is denied, not crashed."""
+
+        def _unreadable(self: Path) -> bool:
+            raise PermissionError(13, "Permission denied", str(self))
+
+        monkeypatch.setattr(Path, "is_dir", _unreadable)
+        hook_input = _bash("cp other/.scratch-keep somewhere")
+        assert handler.matches(hook_input)
+        assert handler.handle(hook_input).decision == Decision.DENY
+
     @pytest.mark.parametrize(
         "command",
         [
