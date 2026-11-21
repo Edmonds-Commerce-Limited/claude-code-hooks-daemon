@@ -337,7 +337,12 @@ names, people or hashes appear here.
 
 - [ ] `DESIGN.md` maps each of failure classes 1–9 to the lifecycle gap that
   caused it and to the change that closes it.
-- [ ] Each class has a regression test that failed before its fix.
+- [ ] Each class has a regression test that failed before its fix. Audit
+  `subagent-reports/261121-success-criterion-red-evidence.md`: RED evidence
+  for classes 2, 4, 5, 7, 8 and for 3 via Task 3.8 only; none recorded for
+  classes 1, 6, 9 or Tasks 3.1, 3.2, 3.7. Closing needs a revert-and-see run
+  per gap, or an owner ruling that a recorded test without RED evidence
+  suffices.
 - [ ] A client-mode install runs a branch tip, observes a move, and returns to
   the last tag in one step: to be proven end to end in the client-mode
   fixture, not yet run (delegated ruling, DESIGN §7.1); a client seat's report is recorded when
