@@ -208,6 +208,10 @@ handlers:
       enabled: true
       priority: 19
 
+    scratch_keep_marker_guard: # `.scratch-keep` pins a scratch entry for ever: only a human writes it
+      enabled: true
+      priority: 18
+
     pip_break_system:      # Blocks pip commands that break system packages
       enabled: true
       priority: 20

@@ -95,7 +95,7 @@ Every build task is test-first: the failing test is written and seen to fail bef
 - [ ] ⬜ **Task 4.1**: Create and announce the per-session directory and its manifest at SessionStart. First step: confirm on a live payload what SessionStart can export to the shell.
 - [ ] ⬜ **Task 4.2**: Add `hooks-daemon scratch new` (entry, birth, purpose, plan, bounded TTL).
 - [ ] ⬜ **Task 4.3**: Make the session directory the TTL container: its children are the entries, and it is removed when empty and old.
-- [ ] ⬜ **Task 4.4**: Add `R-SCRATCH-KEEP-MARKER` (an agent may not create `.scratch-keep`) and the KEPT verdict for it.
+- [x] ✅ **Task 4.4**: Add `R-SCRATCH-KEEP-MARKER` (an agent may not create `.scratch-keep`) and the KEPT verdict for it.
 - [ ] ⬜ **Task 4.5**: Add the unowned-entry advisory for a new entry made directly in a scratch root.
 
 ### Phase 5: Reporting and enforcement

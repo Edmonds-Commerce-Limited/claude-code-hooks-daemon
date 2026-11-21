@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (85 handlers)
+### PreToolUse (86 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -32,6 +32,7 @@
 | 17 | self_matching_process_probe | BLOCKING | Block a liveness probe whose pattern matches the shell running it |
 | 18 | dangerous_permissions | BLOCKING | Block chmod 777 and dangerous permission commands |
 | 18 | github_auto_close_keywords | BLOCKING | Deny git messages carrying GitHub auto-closing keyword references |
+| 18 | scratch_keep_marker_guard | BLOCKING | Block every agent write route onto a file named `.scratch-keep` |
 | 18 | write_protected_paths | BLOCKING | Deny any agent write to a configured path; reading is never denied |
 | 19 | ancestry_preserving_merge | BLOCKING | Block (or, in warn mode, advise against) ancestry-severing merges |
 | 19 | git_stash | BLOCKING | Block or warn about git stash based on mode configuration |

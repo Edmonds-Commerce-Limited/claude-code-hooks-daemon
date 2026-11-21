@@ -149,7 +149,7 @@ To stop new references, a docs/plan QA check flags a tracked line that cites an 
 
 "Anything the owner or a human wrote" cannot be recognised from file content, and there is no ledger of who wrote what (00560, owner ruling). Two mechanisms stand in:
 
-- **`.scratch-keep`**: a file at the top of an entry, holding one line of reason. An entry with it is KEPT for ever. A guard denies an agent creating it (`Write`, `Edit`, or a Bash-authored path), so it is a human's mark (R15).
+- **`.scratch-keep`**: a file at the top of an entry, holding one line of reason. An entry with it is KEPT for ever. A guard denies an agent creating it (`Write`, `Edit`, or a Bash-authored path), so it is a human's mark (R15). As built (`scratch_keep_marker_guard`, Task 4.4) the guard also denies an agent changing or removing it (`touch`, `ln`, `rm`, the source of `mv`), because an agent's removal would undo a human's keep; it reads the shared write scan with mutations, and fails closed on an unresolved destination or unreadable text that names the marker. A recursive copy of a directory already holding a marker is not seen.
 - **`scratch-sweep keep <entry> --reason "..." [--hours N]`**: an agent's pause, recorded in the store index, bounded by `scratch.keep.max_hours`, refused when the reason repeats the last one for that entry (the `branch-park` rule).
 
 Legacy content has neither mark. For it, the long retention of UNCERTAIN is the protection, and that limit is stated plainly in the first dogfood report (Phase 8).

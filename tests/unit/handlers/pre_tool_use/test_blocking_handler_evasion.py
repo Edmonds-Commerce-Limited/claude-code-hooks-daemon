@@ -580,6 +580,11 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
         "name; its Bash rule is an ALLOWLIST (a respelling is denied, never let through), "
         "covered in test_subagent_context_budget.py"
     ),
+    "ScratchKeepMarkerGuardHandler": (
+        "matches on the FILE NAME a file tool or a shell write names, read by the shared "
+        "write scan with mutations (redirects, tee, cp/mv/install, ln, touch, rm), not on "
+        "a command name; its respellings are covered in test_scratch_keep_marker_guard.py"
+    ),
     "WriteProtectedPathsHandler": (
         "matches on the PATH a file tool or a shell write names, read by the shared write "
         "scan (redirects, tee, cp/mv/install/ln, sed -i, rm, truncate), not on a command name; "

@@ -569,6 +569,13 @@ class RuleID:
     LOCK_FILE_EDIT: str = "R-LOCK-FILE-EDIT"
 
     # ------------------------------------------------------------------
+    # scratch_keep_marker_guard handler (Plan 00627)
+    # ------------------------------------------------------------------
+
+    #: An agent creating, changing or removing a `.scratch-keep` marker.
+    SCRATCH_KEEP_MARKER: str = "R-SCRATCH-KEEP-MARKER"
+
+    # ------------------------------------------------------------------
     # subagent_context_budget / subagent_handoff_gate handlers (Plan 00471)
     # ------------------------------------------------------------------
 

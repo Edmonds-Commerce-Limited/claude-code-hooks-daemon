@@ -94,6 +94,12 @@ class HandlerID:
         config_key="lock_file_edit_blocker",
         display_name="lock-file-edit-blocker",
     )
+    # Plan 00627: `.scratch-keep` pins a scratch entry for ever, so only a human sets it.
+    SCRATCH_KEEP_MARKER_GUARD = HandlerIDMeta(
+        class_name="ScratchKeepMarkerGuardHandler",
+        config_key="scratch_keep_marker_guard",
+        display_name="scratch-keep-marker-guard",
+    )
     # Plan 00499: paths agents may read but never create, change, move onto or delete.
     WRITE_PROTECTED_PATHS = HandlerIDMeta(
         class_name="WriteProtectedPathsHandler",

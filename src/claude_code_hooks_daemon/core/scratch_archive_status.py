@@ -13,6 +13,7 @@ expiry, because expiry holds it too.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -27,6 +28,9 @@ from claude_code_hooks_daemon.core.scratch_archive_expire import (
     keeps_of,
     records_of,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -67,6 +71,12 @@ def read_status(path: Path, retention_hours: Mapping[str, float]) -> StoreStatus
         try:
             complete_records(index, events, archive_id)
         except Incomplete as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="an incomplete archive is listed with its reason and no expiry; expiry holds it too",
+                level=logging.INFO,
+            )
             expires, note = None, str(exc)
         else:
             expires, note = expiry_or_hold(records, keeps, retention_hours)
