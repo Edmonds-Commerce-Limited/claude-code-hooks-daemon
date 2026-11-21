@@ -65,6 +65,10 @@ def test_non_markdown_file_is_skipped(tmp_path: Path) -> None:
     assert _run(tmp_path, _CITING, name="src/x.py") == []
 
 
+def test_a_doc_that_is_itself_untracked_is_skipped(tmp_path: Path) -> None:
+    assert _run(tmp_path, _CITING, name="untracked/scratch/notes.md") == []
+
+
 def test_untracked_inside_another_word_is_not_a_path(tmp_path: Path) -> None:
     assert _run(tmp_path, "Evidence: notuntracked/foo.txt\n") == []
 

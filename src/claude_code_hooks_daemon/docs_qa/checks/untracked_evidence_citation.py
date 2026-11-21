@@ -32,6 +32,7 @@ STATEMENT: Final[str] = (
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _FENCE: Final[str] = "```"
+_UNTRACKED_PREFIX: Final[str] = "untracked/"
 
 _UNTRACKED_FILE: Final[re.Pattern[str]] = re.compile(
     r"(?<![\w./-])untracked/[\w./-]*?[\w-]\.[A-Za-z0-9]+\b"
@@ -42,7 +43,7 @@ _EVIDENCE_WORD: Final[re.Pattern[str]] = re.compile(
 )
 
 _REMEDY: Final[str] = (
-    "Untracked files expire (scratch is swept after 24 hours) and are never reviewed, so the "
+    "Untracked files expire (scratch is swept after 24 hours by default) and are never reviewed, so the "
     "citation will resolve to nothing. Copy the figures the claim rests on into this document, "
     "or file the artefact into the plan folder (`subagent-reports/`) and cite that path."
 )
@@ -68,6 +69,8 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     if context.file_path.suffix != _MARKDOWN_SUFFIX:
         return []
     rel_path = path_relative_to(context.file_path, context.project_root).as_posix()
+    if rel_path.startswith(_UNTRACKED_PREFIX):
+        return []
     findings: list[Finding] = []
     for number, line in _new_lines(context.file_content, context.file_content_before):
         if not _EVIDENCE_WORD.search(line):
