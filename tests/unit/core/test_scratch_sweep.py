@@ -836,3 +836,130 @@ class TestSessionDirectoryIsNeverActedOnWhole:
         verdicts = _verdicts(_git_sweep(gp, now))
         assert verdicts[_SESSION] not in {"DISPOSABLE", "UNCERTAIN"}
         assert verdicts["lender"] not in {"DISPOSABLE", "UNCERTAIN"}
+
+
+def _children(report: SweepReport, session: str = _SESSION) -> dict[str, str]:
+    """The verdicts of one session directory's children (its sub-report)."""
+    found = [sub for sub in report.sessions if Path(sub.root).name == session]
+    assert len(found) == 1, [sub.root for sub in report.sessions]
+    return _verdicts(found[0])
+
+
+_ACTIONABLE_VALUES = {"DISPOSABLE", "UNCERTAIN"}
+
+
+class TestSessionChildrenAreTheEntries:
+    """Task 4.3 step 2: a session directory's children are judged as entries of their own."""
+
+    def _session(self, tree: ScratchTree) -> None:
+        tree.file(f"{_SESSION}/.scratch-session.json", b"{}")
+        # scratch_session writes the manifest through ``.<name>.tmp-<hex>``.
+        tree.file(f"{_SESSION}/..scratch-session.json.tmp-0123456789ab", b"{}")
+        tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+
+    def test_children_are_judged_and_container_files_are_never_rows(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        assert _verdicts(report) == {_SESSION: "STUCK"}
+        assert _children(report) == {"cache": "DISPOSABLE"}
+        document = report_json(report)
+        assert document["sessions"][0]["entries"][0]["name"] == "cache"
+        assert any("cache" in line for line in render_table(report, max_listed=50))
+
+    def test_a_session_keep_marker_keeps_every_child(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        tree.file(f"{_SESSION}/.scratch-keep", b"hold the session\n")
+        _old(tree, now)
+        assert _children(_sweep(tree, now=now)) == {"cache": "KEPT"}
+
+    def test_a_working_directory_at_the_session_holds_every_child(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        _old(tree, now)
+        report = _sweep(tree, now=now, cwds={7: (tree.root / _SESSION).resolve()})
+        assert _children(report) == {"cache": "LIVE"}
+
+    def test_a_working_directory_in_one_child_does_not_hold_another(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        tree.file(f"{_SESSION}/work/notes.txt", b"n")
+        _old(tree, now)
+        cwd = (tree.root / _SESSION / "work").resolve()
+        children = _children(_sweep(tree, now=now, cwds={7: cwd}))
+        assert children["work"] == "LIVE"
+        assert children["cache"] == "DISPOSABLE"
+
+    def test_a_not_due_session_does_not_block_a_due_child(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        tree.file(f"{_SESSION}/fresh/notes.txt", b"n")
+        _old(tree, now)
+        tree.set_tree_mtime(f"{_SESSION}/fresh", now - 60)
+        report = _sweep(tree, now=now)
+        assert _verdicts(report)[_SESSION] == "LIVE"
+        children = _children(report)
+        assert children["cache"] == "DISPOSABLE"
+        assert children["fresh"] == "LIVE"
+
+    def test_a_dependency_on_the_session_holds_every_child(self, tmp_path: Path) -> None:
+        gp = build_git_project(tmp_path)
+        gp.tree.file(f"{_SESSION}/.scratch-session.json", b"{}")
+        gp.tree.file(f"{_SESSION}/cache/__pycache__/m.pyc", b"pyc")
+        gp.tree.file(f"{_SESSION}/lender/.git/objects/pack/x", b"x")
+        alternates = gp.tree.root / "clone/.git/objects/info/alternates"
+        alternates.parent.mkdir(parents=True)
+        alternates.write_text(f"{gp.tree.root / _SESSION / 'lender/.git/objects'}\n")
+        now = _now()
+        _old(gp.tree, now)
+        children = _children(_git_sweep(gp, now))
+        assert children["cache"] not in _ACTIONABLE_VALUES
+        assert children["lender"] not in _ACTIONABLE_VALUES
+
+    def test_a_session_that_is_a_repository_is_judged_whole(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        tree.file(f"{_SESSION}/.git/HEAD", b"ref: refs/heads/main\n")
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        assert report.sessions == ()
+        assert _verdicts(report)[_SESSION] not in _ACTIONABLE_VALUES
+
+    def test_a_session_named_child_is_an_ordinary_entry(self, tmp_path: Path) -> None:
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        self._session(tree)
+        inner = "s-20261102T000000Z-ijklmnop"
+        tree.file(f"{_SESSION}/{inner}/__pycache__/m.pyc", b"pyc")
+        _old(tree, now)
+        report = _sweep(tree, now=now)
+        assert _children(report)[inner] == "DISPOSABLE"
+        assert all(Path(sub.root).name != inner for sub in report.sessions)
+
+    def test_a_recorded_longer_ttl_holds_a_child(self, tmp_path: Path) -> None:
+        from datetime import UTC, datetime
+
+        from claude_code_hooks_daemon.core.scratch_session import ensure_session_dir, new_entry
+
+        tree = build_scratch_tree(tmp_path)
+        now = _now()
+        born = datetime.fromtimestamp(now - 3 * _DAY, UTC)
+        session = ensure_session_dir(
+            tree.root, "abcdefgh-session", now=born, checkout="c", branch=None
+        ).path
+        new_entry(session, "long", now=born, purpose=None, plan=None, ttl_hours=70)
+        new_entry(session, "short", now=born, purpose=None, plan=None, ttl_hours=None)
+        (session / "long" / "a.log").write_bytes(b"x")
+        (session / "short" / "a.log").write_bytes(b"x")
+        _old(tree, now)
+        children = _children(_sweep(tree, now=now), session.name)
+        assert children["long"] == "LIVE"
+        assert children["short"] in _ACTIONABLE_VALUES
