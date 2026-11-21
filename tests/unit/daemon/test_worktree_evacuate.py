@@ -51,6 +51,7 @@ def tree(tmp_path: Path) -> ScratchTree:
     commit_file(project, ".gitignore", "untracked/\n.claude/worktrees/\n", "ignore worktrees")
     git(project, "push", "-q", "origin", "main")
     git(project, "worktree", "add", "-q", "-b", _NAME, str(project / _RELATIVE))
+    (project / ".claude" / "hooks-daemon").mkdir(parents=True, exist_ok=True)
     return built.tree
 
 
@@ -70,6 +71,14 @@ def _store(tree: ScratchTree) -> Path:
     return _main(tree) / "untracked" / "scratch-archive"
 
 
+_YOUNG_AHEAD = 3.0
+
+
+def _wait_for_young_mtime(now: float) -> None:
+    """Restore's tar refuses an mtime in the real future; wait until ``young.txt``'s is past."""
+    time.sleep(max(0.0, now - _DAY - 1 + _YOUNG_AHEAD + 1 - time.time()))
+
+
 def _write(path: Path, content: bytes, mtime: float) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
@@ -83,13 +92,20 @@ def _set_mtime(path: Path, mtime: float) -> None:
     os.utime(path, (mtime, mtime))
 
 
-def _due_and_young(tree: ScratchTree, now: float) -> None:
-    """``old/`` is past the 24h TTL; ``young.txt`` is idle past the minimum age but not due."""
+def _due_and_young(tree: ScratchTree) -> float:
+    """``old/`` is past the 24h TTL; ``young.txt`` is not due. Returns the clock to run at.
+
+    An entry's activity is the later of its mtime and its ctime, and a ctime cannot
+    be set, so the only not-due entry beside a due one has an mtime a few seconds
+    ahead; the clock is one second past the TTL from the ctimes.
+    """
+    base = time.time()
     scratch = _scratch(tree)
-    _write(scratch / "old" / "a.txt", b"alpha", now - 5 * _DAY)
-    _write(scratch / "old" / "sub" / "b.txt", b"beta", now - 5 * _DAY)
-    _set_mtime(scratch / "old", now - 5 * _DAY)
-    _write(scratch / "young.txt", b"not yet due", now - 2 * _HOUR)
+    _write(scratch / "old" / "a.txt", b"alpha", base - 5 * _DAY)
+    _write(scratch / "old" / "sub" / "b.txt", b"beta", base - 5 * _DAY)
+    _set_mtime(scratch / "old", base - 5 * _DAY)
+    _write(scratch / "young.txt", b"not yet due", base + _YOUNG_AHEAD)
+    return base + _DAY + 1
 
 
 def _reap(
@@ -156,8 +172,7 @@ class TestMinimum:
     def test_the_happy_path_archives_reaps_and_restores_byte_for_byte(
         self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        now = time.time() + 3 * _DAY
-        _due_and_young(tree, now)
+        now = _due_and_young(tree)
         asked: list[tuple[str, EvacuationGate]] = []
 
         def yes(relative: str, gate: EvacuationGate) -> bool:
@@ -175,6 +190,7 @@ class TestMinimum:
         assert len(ids) == 2, out
         main_scratch = _main(tree) / "untracked" / "scratch"
         main_scratch.mkdir(parents=True, exist_ok=True)
+        _wait_for_young_mtime(now)
         for archive_id in ids:
             args = build_parser().parse_args(["scratch-sweep", "restore", archive_id])
             args.project_root = _main(tree)
@@ -189,8 +205,7 @@ class TestMinimum:
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        now = time.time() + 3 * _DAY
-        _due_and_young(tree, now)
+        now = _due_and_young(tree)
         monkeypatch.setattr("sys.stdin", _Stream(f"evacuate {_RELATIVE}\n", tty=False))
 
         rc = _reap(tree, reap=True, now=now)
@@ -205,8 +220,7 @@ class TestMinimum:
     def test_session_children_keep_the_worktree_without_asking(
         self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        now = time.time() + 3 * _DAY
-        _due_and_young(tree, now)
+        now = _due_and_young(tree)
         _write(_scratch(tree) / _SESSION / "child.txt", b"session work", now - 5 * _DAY)
 
         rc = _reap(tree, reap=True, now=now, confirm=_never_asked)
@@ -222,8 +236,7 @@ class TestMinimum:
     def test_a_dry_run_changes_no_inode_and_never_asks(
         self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        now = time.time() + 3 * _DAY
-        _due_and_young(tree, now)
+        now = _due_and_young(tree)
         before = _inodes(_worktree(tree), _main(tree) / "untracked")
 
         _reap(tree, reap=False, now=now, confirm=_never_asked)

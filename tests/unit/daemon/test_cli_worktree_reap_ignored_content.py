@@ -66,7 +66,8 @@ def _reap(repo: Path, *, reap: bool) -> int:
 
 
 def _line_for(out: str) -> str:
-    return next(line for line in out.splitlines() if _NAME in line)
+    """The worktree's verdict line: the last naming it, after any evacuation detail."""
+    return [line for line in out.splitlines() if _NAME in line][-1]
 
 
 def test_the_fixture_worktree_is_otherwise_reapable(

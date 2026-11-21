@@ -238,6 +238,7 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.daemon.project_handler_health import (
         ProjectHandlerHealthState,
     )
+    from claude_code_hooks_daemon.daemon.worktree_evacuate import EvacuateSeams
     from claude_code_hooks_daemon.rule_explain.checks import CheckEntry
 
 # Test-runner module ``test-project-handlers`` shells out to. It is a dev-only
@@ -7133,6 +7134,8 @@ class _ScratchSources:
     git_runner: Callable[..., Any] | None
     #: The main checkout, which alone holds the archive store; ``None`` means ``repo``.
     store_checkout: Path | None = None
+    #: Other checkouts' background records that may name this root (an evacuation).
+    extra_background: tuple[Path, ...] = ()
 
     @property
     def store_path(self) -> Path:
@@ -7141,6 +7144,21 @@ class _ScratchSources:
     @property
     def background_file(self) -> Path:
         return _daemon_untracked_dir(self.repo) / "background-processes.jsonl"
+
+    def background(self) -> Any:
+        """Every background record file merged; an error in any one is an error of all."""
+        from claude_code_hooks_daemon.core.scratch_liveness import (
+            BackgroundRecords,
+            read_background_records,
+        )
+
+        readings = [
+            read_background_records(path) for path in (self.background_file, *self.extra_background)
+        ]
+        return BackgroundRecords(
+            commands=tuple(command for reading in readings for command in reading.commands),
+            error="; ".join(reading.error for reading in readings if reading.error),
+        )
 
     def now(self) -> datetime.datetime:
         return datetime.datetime.fromtimestamp(self.wall_clock(), datetime.UTC)
@@ -7177,17 +7195,14 @@ class _ScratchSources:
     def classify(self, sweep_root: Any) -> Any:
         """One fresh classification: clock, process cwds, background records and git."""
         from claude_code_hooks_daemon.core import scratch_sweep
-        from claude_code_hooks_daemon.core.scratch_liveness import (
-            LivenessInputs,
-            read_background_records,
-        )
+        from claude_code_hooks_daemon.core.scratch_liveness import LivenessInputs
         from claude_code_hooks_daemon.core.scratch_walk import WalkBudget
 
         now = self.wall_clock()
         reading = self.cwds()
         inputs = LivenessInputs(
             cwds=reading.cwds,
-            background=read_background_records(self.background_file),
+            background=self.background(),
             min_age_minutes=self.config.scratch.min_age_minutes,
             now=now,
             unreadable_pids=reading.unreadable,
@@ -7299,7 +7314,6 @@ def _scratch_apply(
         entry_in_use,
     )
     from claude_code_hooks_daemon.core.scratch_archive_pack import PackRefused, find_gnu_tar
-    from claude_code_hooks_daemon.core.scratch_liveness import read_background_records
     from claude_code_hooks_daemon.core.scratch_references import build_references
 
     try:
@@ -7316,7 +7330,7 @@ def _scratch_apply(
                 root=root,
                 relative_root=relative_root,
                 reading=sources.cwds(),
-                background=read_background_records(sources.background_file),
+                background=sources.background(),
             )
 
         return entry_live
@@ -10970,6 +10984,7 @@ def cmd_worktree_reap(
     age_fn: "WorktreeAgeFn | None" = None,
     process_cwds_fn: "ProcessCwdsFn | None" = None,
     blockers_fn: "WorktreeBlockersFn | None" = None,
+    evacuate_seams: "EvacuateSeams | None" = None,
 ) -> int:
     """Report stale agent worktrees, and remove them only when asked.
 
@@ -10988,7 +11003,9 @@ def cmd_worktree_reap(
     A worktree whose removal would lose a path (``worktree_blockers``: ignored
     content such as scratch, which ``git status`` does not list and a plain
     ``git worktree remove`` deletes) is kept, in the dry run too.
-    ``blockers_fn`` is the seam for that check.
+    ``blockers_fn`` is the seam for that check. When every blocker is under
+    ``untracked/scratch/``, ``--reap`` offers to evacuate the scratch first
+    (:mod:`worktree_evacuate`); ``evacuate_seams`` are its test seams.
 
     Returns:
         0 when every worktree was reapable (or there are none), 1 when at least
@@ -11007,6 +11024,7 @@ def cmd_worktree_reap(
         reap_refusal_reason,
         reap_worktree,
     )
+    from claude_code_hooks_daemon.daemon import worktree_evacuate
 
     repo_root = Path(getattr(args, "project_root", None) or get_project_path(None))
     reap_config = _branches_config(repo_root)
@@ -11122,6 +11140,17 @@ def cmd_worktree_reap(
         blockers = (blockers_fn or branch_cleanup.worktree_blockers)(
             state.path, reap_config.cleanup_after_merge.regenerable
         )
+        if worktree_evacuate.only_scratch(blockers):
+            # Plan 00627 Task 6.2: scratch alone may be evacuated, on a typed phrase.
+            evacuation = worktree_evacuate.evacuate_scratch(
+                repo_root, state, reap=reap, seams=evacuate_seams
+            )
+            for line in evacuation.lines:
+                print(line)
+            if evacuation.evacuated:
+                blockers = (blockers_fn or branch_cleanup.worktree_blockers)(
+                    state.path, reap_config.cleanup_after_merge.regenerable
+                )
         if blockers:
             refused += 1
             print(f"KEEP    {state.name}: {branch_cleanup.blockers_line(state.path, blockers)}")
