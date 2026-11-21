@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import shlex
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, Literal
@@ -429,6 +429,10 @@ def _subdirectories(directory: Path) -> list[str]:
         return []
 
 
+#: The shape of :func:`worktree_blockers`, for a caller that takes it as a seam.
+WorktreeBlockersFn = Callable[[Path, Sequence[str]], tuple[str, ...]]
+
+
 def worktree_blockers(path: Path, regenerable: Sequence[str]) -> tuple[str, ...]:
     """Paths a removal of the worktree at ``path`` would lose.
 
@@ -826,7 +830,7 @@ def _proof_words(tier: str | None, default: str) -> str:
     return f"proven {tier} against {default}"
 
 
-def _blockers_line(held_by: Path, blockers: Sequence[str]) -> str:
+def blockers_line(held_by: Path, blockers: Sequence[str]) -> str:
     """Why a worktree is not removed: the paths a removal would lose."""
     return (
         f"the worktree {held_by} holds {len(blockers)} path(s) a removal "
@@ -929,7 +933,7 @@ def clean_sweep(
         if held_by is not None:
             blockers = worktree_blockers(held_by, config.cleanup_after_merge.regenerable)
             if blockers:
-                skipped.append(f"{name}: {_blockers_line(held_by, blockers)}")
+                skipped.append(f"{name}: {blockers_line(held_by, blockers)}")
                 continue
         verdict = _classify(
             repo,
@@ -1117,7 +1121,7 @@ def _run_batch(plan: _BulkPlan, batch: Sequence[str], outcome: _Outcome) -> None
             # The proof ran long ago; work may have landed in the worktree since.
             blockers = worktree_blockers(held_by, config.cleanup_after_merge.regenerable)
             if blockers:
-                outcome.skipped.append(f"{name}: {_blockers_line(held_by, blockers)}")
+                outcome.skipped.append(f"{name}: {blockers_line(held_by, blockers)}")
                 continue
             refused = _remove_worktree(repo, held_by)
             if refused is not None:
@@ -1401,6 +1405,8 @@ __all__ = [
     "REMOTE_CLEAN_STATES",
     "CleanupMode",
     "CleanupReport",
+    "WorktreeBlockersFn",
+    "blockers_line",
     "clean_sweep",
     "cleanup_after_merge",
     "cleanup_targets",

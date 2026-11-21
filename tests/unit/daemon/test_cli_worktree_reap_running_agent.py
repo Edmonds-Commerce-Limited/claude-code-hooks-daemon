@@ -63,6 +63,7 @@ def _run(**overrides: object) -> int:
         run_fn=_fake,
         age_fn=lambda _p: 999_999.0,
         process_cwds_fn=lambda: {},
+        blockers_fn=lambda _path, _regenerable: (),
     )
 
 

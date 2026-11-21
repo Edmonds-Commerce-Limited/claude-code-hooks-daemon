@@ -93,9 +93,15 @@ def _reap(args: argparse.Namespace, *, run_fn: RunGit) -> int:
     """`cmd_worktree_reap` with Plan 00372's age/process axis held old/empty.
 
     This file's subject is the orphaned-branch report, not that axis — held
-    old/empty by default so it stays silent here.
+    old/empty by default so it stays silent here, as is the ignored-content check.
     """
-    return cmd_worktree_reap(args, run_fn=run_fn, age_fn=_old_enough, process_cwds_fn=_nobody_home)
+    return cmd_worktree_reap(
+        args,
+        run_fn=run_fn,
+        age_fn=_old_enough,
+        process_cwds_fn=_nobody_home,
+        blockers_fn=lambda _path, _regenerable: (),
+    )
 
 
 @pytest.fixture

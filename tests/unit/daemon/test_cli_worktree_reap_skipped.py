@@ -74,7 +74,11 @@ def _delete_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _reap(args: argparse.Namespace) -> int:
     return cmd_worktree_reap(
-        args, run_fn=_fake, age_fn=lambda _p: 999_999.0, process_cwds_fn=lambda: {}
+        args,
+        run_fn=_fake,
+        age_fn=lambda _p: 999_999.0,
+        process_cwds_fn=lambda: {},
+        blockers_fn=lambda _path, _regenerable: (),
     )
 
 

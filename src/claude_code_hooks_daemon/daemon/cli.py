@@ -224,6 +224,7 @@ from claude_code_hooks_daemon.utils.settings_repair import repair_settings_regis
 from .init_config import generate_config
 
 if TYPE_CHECKING:
+    from claude_code_hooks_daemon.core.branch_cleanup import WorktreeBlockersFn
     from claude_code_hooks_daemon.core.branch_reject import Digest, IssuedRequest, RejectRoute
     from claude_code_hooks_daemon.core.release_slate import (
         CiRunState,
@@ -10968,6 +10969,7 @@ def cmd_worktree_reap(
     run_fn: "RunGit | None" = None,
     age_fn: "WorktreeAgeFn | None" = None,
     process_cwds_fn: "ProcessCwdsFn | None" = None,
+    blockers_fn: "WorktreeBlockersFn | None" = None,
 ) -> int:
     """Report stale agent worktrees, and remove them only when asked.
 
@@ -10982,6 +10984,11 @@ def cmd_worktree_reap(
 
     A refused worktree is printed WITH its reason rather than omitted — one
     that silently vanishes from the report looks handled.
+
+    A worktree whose removal would lose a path (``worktree_blockers``: ignored
+    content such as scratch, which ``git status`` does not list and a plain
+    ``git worktree remove`` deletes) is kept, in the dry run too.
+    ``blockers_fn`` is the seam for that check.
 
     Returns:
         0 when every worktree was reapable (or there are none), 1 when at least
@@ -11109,6 +11116,15 @@ def cmd_worktree_reap(
         if not is_reapable(state):
             refused += 1
             print(f"KEEP    {reap_refusal_reason(state)}")
+            continue
+        # `is_reapable` reads `git status`, which lists no ignored file, and git
+        # deletes ignored files on a plain remove: scratch would go with it.
+        blockers = (blockers_fn or branch_cleanup.worktree_blockers)(
+            state.path, reap_config.cleanup_after_merge.regenerable
+        )
+        if blockers:
+            refused += 1
+            print(f"KEEP    {state.name}: {branch_cleanup.blockers_line(state.path, blockers)}")
             continue
         # The state carries the path git reported. Rebuilding it here picked
         # `.claude/worktrees/` unconditionally, which named a path that does
@@ -14201,7 +14217,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser_worktree_reap.add_argument(
         "--reap",
         action="store_true",
-        help="Actually remove the worktrees the predicate cleared, and their branches",
+        help=(
+            "Actually remove the worktrees the predicate cleared, and their branches. "
+            "A worktree holding ignored content a removal would lose (scratch notes, "
+            "anything outside branches.cleanup_after_merge.regenerable) is kept"
+        ),
     )
     parser_worktree_reap.add_argument(
         "--only",
