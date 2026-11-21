@@ -114,3 +114,20 @@ rows:
       next deploy, which is the asymmetric-sibling shape this plan's class 1
       Detector exists for -- here caught by a different check, in a file
       neither of them was pointed at.
+
+  # ------------------------------------------------- test fixtures
+  - path: scripts/dummy-client-branch-channel-proof.sh
+    rule: security-downgrade-flag
+    occurrences: 1
+    verdict: accepted
+    note: >-
+      Plan 00594 Task 5.1 offline proof script; a developer runs it against
+      the local dummy-client fixture. Clients never run it, and it is not on
+      the install or upgrade path. `GIT_ALLOW_PROTOCOL=file` is a NET
+      NARROWING: every other transport (https, ssh, git) is denied, so a
+      stray network fetch fails instead of silently going out, which is the
+      offline guarantee the proof depends on. The weakening it carries is
+      that `file` is treated as `always`, so the CVE-2022-39253 submodule
+      guard is lifted. It cannot be reached here: every remote is this
+      fixture's own local bare repository, built from this repository, and
+      no submodules are cloned.

@@ -118,7 +118,7 @@ upgrade() {
     fi
     digest="$(grep -o -- '--skip-reading-confirmation=[0-9a-f]\+' "$log" | tail -n 1)" \
         || fail "upgrade exited $rc without a reading-confirmation digest"
-    printf 'NOTE pre-deploy gate asked for the reading confirmation; re-running with %s\n' "$digest"
+    printf 'NOTE pre-deploy gate asked for the reading confirmation; re-running with %s\n' "$digest" >&2
     HOOKS_DAEMON_UPGRADE_BASE_URL="file:///nonexistent-upgrade-base" \
         bash "$UPGRADE_SH" --project-root "$DUMMY_ROOT" --skip-config-optimisation "$digest" "$@"
 }
