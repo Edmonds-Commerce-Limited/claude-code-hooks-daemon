@@ -137,10 +137,22 @@ class Pressure:
 def pressure_for(
     level: CapLevel, caps: ScratchCapsConfig, ttl_hours: float | None
 ) -> Pressure | None:
-    """Pressure mode for a run: only at block, and only for a root with a finite TTL."""
-    if level < CapLevel.BLOCK or ttl_hours is None:
+    """Pressure mode for a run: only at block, only when the caps enforce, only with a finite TTL.
+
+    ``mode: advise`` reports a level of block but never enforces it, so it never
+    widens what a run packs either.
+    """
+    if caps.mode != "block" or level < CapLevel.BLOCK or ttl_hours is None:
         return None
     return Pressure(idle_hours=caps.pressure_idle_minutes / 60, ttl_hours=ttl_hours)
+
+
+def pressured_count(report: SweepReport, pressure: Pressure | None) -> int:
+    """How many entries, root and session children, ``pressure`` adds beyond the due ones."""
+    reports = (report, *report.sessions)
+    return sum(
+        1 for part in reports for row in part.rows if not row.due and _actionable(row, pressure)
+    )
 
 
 @dataclass(frozen=True)

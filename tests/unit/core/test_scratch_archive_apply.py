@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.core.scratch_archive_apply import (
     apply_sessions,
     apply_sweep,
     pressure_for,
+    pressured_count,
     session_facts,
 )
 from claude_code_hooks_daemon.core.scratch_archive_claim import CLAIM_PREFIX, open_dir
@@ -957,3 +958,24 @@ class TestPressureFor:
 
     def test_a_root_with_no_ttl_gets_no_pressure(self) -> None:
         assert pressure_for(CapLevel.BLOCK, ScratchCapsConfig(), None) is None
+
+    @pytest.mark.parametrize("mode", ["advise", "off"])
+    def test_a_cap_that_does_not_enforce_gets_no_pressure(self, mode: str) -> None:
+        caps = ScratchCapsConfig.model_validate({"mode": mode})
+        assert pressure_for(CapLevel.BLOCK, caps, TTL) is None
+
+
+class TestPressuredCount:
+    """How many entries pressure would add, for the ``--apply`` confirmation (F-BYPS F1)."""
+
+    def test_counts_only_idle_actionable_entries_not_yet_due(self) -> None:
+        session = SweepReport("root/s", (not_due("child", age_hours=10.0),), True, (), ())
+        rows = (
+            row("due"),
+            not_due("idle", age_hours=10.0),
+            not_due("fresh", age_hours=0.1),
+            not_due("kept", Verdict.KEPT),
+        )
+        report = SweepReport("root", rows, True, (), (), sessions=(session,))
+        assert pressured_count(report, PRESSURE) == 2
+        assert pressured_count(report, None) == 0
