@@ -50,8 +50,8 @@ from typing import Final
 
 #: Where a synthetic reproduction's fixtures live. Gitignored and inside the
 #: working tree, so a fixture survives a container restart without ever
-#: reaching review — the same directory `project_containment` already directs
-#: scratch work to.
+#: reaching review, but the scratch sweep removes it after 24 hours by
+#: default: build it in a `scratch new` entry and file the issue before then.
 SCRATCH_PREFIX: Final[str] = "untracked/scratch/"
 
 #: Declares that no synthetic reproduction exists. Must be the FIRST thing in
