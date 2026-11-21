@@ -574,6 +574,13 @@ def _pressure_order(rows: tuple[EntryRow, ...]) -> list[EntryRow]:
     return due + rest
 
 
+def _skip_reason(row: EntryRow) -> str:
+    """Why a skipped row was skipped: a TTL-held row names its held verdict, not the bare LIVE."""
+    if row.ttl_hold is None:
+        return row.verdict.value
+    return f"{pending_verdict(row).value} (not yet due: within its TTL)"
+
+
 def _safe(facts: ApplyFacts, name: str) -> bool:
     """A fresh liveness and reference reading both say the entry may go."""
     return not facts.entry_live(name) and not facts.referenced(name)
@@ -591,7 +598,7 @@ def _apply_row(
 ) -> EntryOutcome:
     name = row.name
     if not report.complete or not _actionable(row, settings.pressure, settings.root):
-        return EntryOutcome(name, "not-actionable", row.verdict.value)
+        return EntryOutcome(name, "not-actionable", _skip_reason(row))
     expected = fingerprints.get(name)
     if expected is None:
         return EntryOutcome(name, "not-fingerprinted", "no fingerprint taken before classification")

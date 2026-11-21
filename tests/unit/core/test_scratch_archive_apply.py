@@ -878,6 +878,33 @@ class TestPressureMode:
         assert outcome_of(result, "e1").outcome == "not-actionable"
         assert (root / "e1").is_dir()
 
+    @pytest.mark.parametrize("pressure", [None, PRESSURE])
+    @pytest.mark.parametrize("held", [Verdict.DISPOSABLE, Verdict.KEPT, Verdict.REFERENCED])
+    def test_a_skipped_ttl_held_entry_reports_its_held_verdict(
+        self,
+        root: Path,
+        store: ArchiveStore,
+        tar: TarTool,
+        pressure: Pressure | None,
+        held: Verdict,
+    ) -> None:
+        """The outcome names what holds it back underneath, not the TTL's bare LIVE."""
+        entry(root, "e1")
+        fake = FakeFacts([not_due("e1", held, age_hours=0.1)])
+        result = apply_sweep(store, fake.facts(), pressed(root, tar, pressure))
+        outcome = outcome_of(result, "e1")
+        assert outcome.outcome == "not-actionable"
+        assert outcome.reason == f"{held.value} (not yet due: within its TTL)"
+
+    def test_a_liveness_live_entry_still_reports_live(
+        self, root: Path, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        entry(root, "e1")
+        result = apply_sweep(
+            store, FakeFacts([row("e1", Verdict.LIVE, due=False)]).facts(), pressed(root, tar)
+        )
+        assert outcome_of(result, "e1").reason == "LIVE"
+
     def test_its_archive_expires_no_sooner_than_ttl_plus_retention(
         self, root: Path, store: ArchiveStore, tar: TarTool
     ) -> None:
