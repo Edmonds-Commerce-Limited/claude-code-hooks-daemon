@@ -8120,7 +8120,7 @@ smaller than the add's, but at a load average near 70 they time out too.
 
 **Source**: Plan 00627 F-BYPS delta review of `4739172a4..82df55ae6` (`untracked/agent-reports/auto/261121-153421-security-reviewer-a699536dcae6abf23.md`), low finding 1.
 
-**Evidence**: `running_holds` in `core/agent_ownership.py` returns empty holds on a `WorkQueueError`, so the post-answer re-check, the later-worktree re-read and the branch-prune check in `worktree-reap` all miss a hold when the queue is corrupt or on a schema mismatch. Inherited, not introduced by the delta; a concurrent write cannot tear the file (atomic write), and the lock, live-pid and age checks still apply. No test corrupts a queue.
+**Evidence**: `running_holds` in `core/agent_ownership.py` returns empty holds on a `WorkQueueError`, so the post-answer re-check, the later-worktree re-read and the branch-prune check in `worktree-reap` all miss a hold when the queue is corrupt or on a schema mismatch. Inherited, not introduced by the delta; a concurrent write cannot tear the file (atomic write), and the lock, live-pid and age checks still apply. No test corrupts a queue through `worktree-reap` or the evacuation re-check; `test_unreadable_queue_holds_nothing` in `tests/unit/core/test_agent_ownership.py` pins the "no holds" behaviour, so the fix flips that test.
 
 **Status**: ⬜ Open. Make the keep predicate fail closed (keep the worktree, name the unreadable queue) with a test that corrupts the queue.
 
