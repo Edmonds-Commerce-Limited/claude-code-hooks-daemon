@@ -13,6 +13,7 @@ import dataclasses
 import io
 import json
 import os
+import random
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -24,10 +25,15 @@ from tests.support.scratch_tree import ScratchTree, build_git_project, commit_fi
 
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.core.scratch_archive import ArchiveRecord, ArchiveStore, StoreBusy
+from claude_code_hooks_daemon.core.scratch_sweep import report_json
+from claude_code_hooks_daemon.core.untracked_roots import resolve_sweep_root
 from claude_code_hooks_daemon.core.worktree_reaping import WorktreeState
 from claude_code_hooks_daemon.core.worktree_scratch_evacuation import EvacuationGate
 from claude_code_hooks_daemon.daemon.cli import (
+    SCRATCH_SWEEP_DEFAULT_MAX_INODES,
+    SCRATCH_SWEEP_DEFAULT_SECONDS,
     _daemon_untracked_dir,
+    _ScratchSources,
     build_parser,
     cmd_scratch_sweep,
     cmd_worktree_reap,
@@ -59,8 +65,12 @@ def _git_identity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 @pytest.fixture
 def tree(tmp_path: Path) -> ScratchTree:
+    return _build(tmp_path)
+
+
+def _build(base: Path) -> ScratchTree:
     """The main checkout (``project``, pushed to ``origin``) and a linked agent worktree."""
-    built = build_git_project(tmp_path)
+    built = build_git_project(base)
     project = built.project
     commit_file(project, ".gitignore", "untracked/\n.claude/worktrees/\n", "ignore worktrees")
     git(project, "push", "-q", "origin", "main")
@@ -550,8 +560,13 @@ class TestChangedWhileAsked:
         assert "new.txt" in _keep_text(out), out
 
 
+def _expiry(record: ArchiveRecord) -> datetime:
+    assert record.expires_at is not None
+    return datetime.fromisoformat(record.expires_at)
+
+
 def _hours_held(record: ArchiveRecord) -> float:
-    held = datetime.fromisoformat(record.expires_at) - datetime.fromisoformat(record.packed_at)
+    held = _expiry(record) - datetime.fromisoformat(record.packed_at)
     return held.total_seconds() / _HOUR
 
 
@@ -743,10 +758,7 @@ class TestEvacuationExpiresNothing:
             config.scratch.archive.disposable_hours, config.scratch.archive.uncertain_hours
         )
         later = first + (longest + 1) * _HOUR
-        assert all(
-            datetime.fromisoformat(record.expires_at).timestamp() < later
-            for record in earlier.values()
-        )
+        assert all(_expiry(record).timestamp() < later for record in earlier.values())
 
         rc = _reap(tree, reap=True, now=later, confirm=_yes, only=_OTHER)
 
@@ -763,3 +775,102 @@ class TestEvacuationExpiresNothing:
         listed = capsys.readouterr().out
         for record in earlier.values():
             assert record.archive_id in listed, listed
+
+
+_BLOCKING = frozenset({"KEPT", "PROTECTED", "REFERENCED", "STUCK"})
+_KINDS = ("due_file", "due_dir", "young", "due_file", "kept", "live", "session", "fresh")
+
+
+def _generate(tree: ScratchTree, rng: random.Random, now: float) -> dict[int, Path]:
+    """Root entries of random kinds; returns the process working directories to report."""
+    scratch = _scratch(tree)
+    base = time.time()
+    cwds: dict[int, Path] = {1: Path("/elsewhere")}
+    for index in range(rng.randint(1, 4)):
+        kind = rng.choice(_KINDS)
+        name = f"e{index}-{kind}"
+        if kind == "due_file":
+            _write(scratch / name, f"{name}".encode(), base - 5 * _DAY)
+        elif kind == "young":
+            _write(scratch / name, b"young", base + rng.randint(1, 10) * _HOUR)
+        elif kind == "fresh":
+            _write(scratch / name, b"fresh", now - 30)
+        elif kind == "session":
+            name = f"s-20261121T00000{index}Z-abcdefgh"
+            _write(scratch / name / "child.txt", b"child", base - 5 * _DAY)
+        else:
+            _write(scratch / name / "a.txt", b"a", base - 5 * _DAY)
+            if kind == "kept":
+                _write(scratch / name / ".scratch-keep", b"", base - 5 * _DAY)
+            if kind == "live":
+                cwds[100 + index] = (scratch / name).resolve()
+            _set_mtime(scratch / name, base - 5 * _DAY)
+    return cwds
+
+
+def _oracle(tree: ScratchTree, now: float, cwds: dict[int, Path]) -> list[str]:
+    """A fresh, independent classification: every row a reap must never remove."""
+    config = Config.load_or_default(_main(tree) / ".claude" / "hooks-daemon.yaml")
+    sources = _ScratchSources(
+        repo=_worktree(tree),
+        config=config,
+        budget_seconds=SCRATCH_SWEEP_DEFAULT_SECONDS,
+        max_inodes=SCRATCH_SWEEP_DEFAULT_MAX_INODES,
+        scandir=os.scandir,
+        wall_clock=lambda: now,
+        budget_clock=time.monotonic,
+        process_cwds=lambda: cwds,
+        git_runner=None,
+        store_checkout=_main(tree),
+    )
+    root = resolve_sweep_root(
+        _scratch(tree),
+        project_root=_worktree(tree),
+        config=config.scratch,
+        reference_roots=tuple(config.reference_repos.roots),
+    )
+    document = report_json(sources.classify(root))
+    if not document["complete"]:
+        return ["incomplete"]
+    rows = [row for report in (document, *document["sessions"]) for row in report["entries"]]
+    return [
+        f"{row['name']}: {row['verdict']}"
+        for row in rows
+        if row["verdict"] in _BLOCKING or (row["verdict"] == "LIVE" and row["ttl_hold"] is None)
+    ]
+
+
+class TestProperty:
+    def test_a_reap_never_removes_a_worktree_holding_what_a_fresh_classification_holds(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        reaped = 0
+        for seed in range(12):
+            rng = random.Random(seed)
+            tree = _build(tmp_path / f"seed-{seed}")
+            now = time.time() + _DAY + 60
+            cwds = _generate(tree, rng, now)
+            holding = _oracle(tree, now, cwds)
+            args = argparse.Namespace(
+                project_root=str(_main(tree)),
+                base_branch="main",
+                reap=True,
+                only=_NAME,
+                reap_branches=False,
+            )
+
+            cmd_worktree_reap(
+                args,
+                age_fn=lambda _p: 999_999.0,
+                process_cwds_fn=lambda: {},
+                evacuate_seams=EvacuateSeams(
+                    confirm=_yes, wall_clock=lambda now=now: now, process_cwds=lambda c=cwds: c
+                ),
+            )
+
+            out = capsys.readouterr().out
+            gone = not _worktree(tree).exists()
+            assert not (gone and holding), (seed, holding, out)
+            assert gone or holding, (seed, out)
+            reaped += gone
+        assert reaped >= 1
