@@ -73,6 +73,7 @@ from claude_code_hooks_daemon.core.scratch_archive_pack import (
     verify,
     verify_remaining,
 )
+from claude_code_hooks_daemon.utils.birth_time import BirthStamp, birth_stamp
 from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 _LOG = logging.getLogger(__name__)
@@ -168,6 +169,8 @@ def record_claim(
     store: ArchiveStore,
     expected: Fingerprint,
     *,
+    parent_fd: int,
+    name: str,
     archive_id: str,
     original_path: str,
     checkout: str,
@@ -176,8 +179,21 @@ def record_claim(
     """Record, durably, that a sweep is about to claim the entry ``expected`` describes.
 
     Call it under the store lock BEFORE the rename: a crash between the two
-    leaves a record and no claim, never a claim with no record.
+    leaves a record and no claim, never a claim with no record. ``name`` under
+    ``parent_fd`` is where the entry is now; its birth time is recorded beside
+    its device and inode. Raises ``ValueError`` (nothing recorded, so nothing
+    may be claimed) when the filesystem reports no birth time or the name is no
+    longer the fingerprinted inode: without a birth, a leftover claim could not
+    be told from a new folder that reused the inode number.
     """
+    stamp = birth_stamp(parent_fd, name)
+    if stamp is None:
+        raise ValueError(
+            f"{name!r}: the filesystem reports no birth time, so a leftover claim could "
+            "not be told from a new folder on a reused inode; not claimed"
+        )
+    if (stamp.ino, stamp.dev) != (expected.root_ino, expected.root_dev):
+        raise ValueError(f"{name!r} is no longer the fingerprinted inode; not claimed")
     store.append_event(
         ClaimEvent(
             archive_id=archive_id,
@@ -186,20 +202,46 @@ def record_claim(
             root_dev=str(expected.root_dev),
             root_ino=str(expected.root_ino),
             at=at.isoformat(),
+            root_birth_ns=str(stamp.birth_ns),
         )
     )
 
 
-def _claim_recorded(store: ArchiveStore, checkout: str, name: str, info: os.stat_result) -> bool:
+def claim_event_covers(
+    event: ClaimEvent, *, checkout: str, name: str, info: os.stat_result, birth: BirthStamp | None
+) -> bool:
+    """True only when ``event`` describes this very inode: device, inode AND birth.
+
+    ``info`` is the leftover claim's ``lstat`` and ``birth`` its birth stamp. A
+    missing birth on either side covers nothing (fail closed): device and inode
+    alone are reused by a new folder on ext4.
+    """
+    if birth is None or not event.root_birth_ns:
+        return False
+    if (birth.ino, birth.dev) != (info.st_ino, info.st_dev):
+        return False
+    return (
+        event.checkout == checkout
+        and PurePosixPath(event.original_path).name == name
+        and (event.root_dev, event.root_ino) == (str(info.st_dev), str(info.st_ino))
+        and event.root_birth_ns == str(birth.birth_ns)
+    )
+
+
+def _claim_recorded(
+    store: ArchiveStore,
+    checkout: str,
+    name: str,
+    info: os.stat_result,
+    birth: BirthStamp | None,
+) -> bool:
     try:
         events = store.read_events().events
     except StoreRefused as exc:
         raise RemoveRefused(str(exc)) from exc
     return any(
         isinstance(event, ClaimEvent)
-        and event.checkout == checkout
-        and PurePosixPath(event.original_path).name == name
-        and (event.root_dev, event.root_ino) == (str(info.st_dev), str(info.st_ino))
+        and claim_event_covers(event, checkout=checkout, name=name, info=info, birth=birth)
         for event in events
     )
 
@@ -484,7 +526,7 @@ def resume_claimed(
     renamed back for want of a check. Nothing is removed without a record.
 
     A claim name no claim event of this checkout covers (same entry name, same
-    device and inode) was not made by a sweep: it is reported ``foreign`` and
+    device, inode and birth time) was not made by a sweep: it is reported ``foreign`` and
     neither removed nor renamed (D-PATH F1).
     """
     name = entry_name_of(claimed_name)
@@ -495,7 +537,11 @@ def resume_claimed(
         return Resumed(name, "absent", "no leftover claim")
     except OSError as exc:
         raise RemoveRefused(f"cannot lstat {claimed_name!r}: {exc}") from exc
-    if not _claim_recorded(store, checkout, name, info):
+    try:
+        birth = birth_stamp(parent_fd, claimed_name)
+    except OSError as exc:
+        raise RemoveRefused(f"cannot read the birth of {claimed_name!r}: {exc}") from exc
+    if not _claim_recorded(store, checkout, name, info, birth):
         return Resumed(
             name, "foreign", f"no claim record covers {claimed_name!r}: not a sweep's; left alone"
         )

@@ -285,6 +285,8 @@ def _apply_row(
         record_claim(
             store,
             expected,
+            parent_fd=root_fd,
+            name=name,
             archive_id=archive_id,
             original_path=str(PurePosixPath(settings.original_prefix) / name),
             checkout=settings.checkout,

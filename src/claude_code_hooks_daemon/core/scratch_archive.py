@@ -203,6 +203,8 @@ _KEEP_KEYS = ("archive_id", "original_path", "reason", "kept_at", "until")
 _EXPIRED_KEYS = ("archive_id", "at")
 _ADOPT_KEYS = ("archive_id", "original_path", "tarball", "at")
 _CLAIM_KEYS = ("archive_id", "original_path", "checkout", "root_dev", "root_ino", "at")
+#: Added after the first claim events were written, so an event may lack it.
+_CLAIM_BIRTH_KEY = "root_birth_ns"
 
 
 @dataclass(frozen=True)
@@ -254,9 +256,12 @@ class AdoptEvent:
 class ClaimEvent:
     """An entry about to be renamed to its claim name; written BEFORE the rename.
 
-    ``root_dev``/``root_ino`` are the entry's own (a rename keeps both). A
-    leftover claim name no such event covers was not made by a sweep, so a
-    resume leaves it alone (D-PATH F1). ``archive_id`` is the id the pack uses.
+    ``root_dev``/``root_ino``/``root_birth_ns`` are the entry's own (a rename
+    keeps all three). A leftover claim name no such event covers was not made by
+    a sweep, so a resume leaves it alone (D-PATH F1). The birth is what tells a
+    NEW folder that reused the inode number apart: ext4 hands a freed inode
+    straight back. An event with no birth (``""``, written before it was
+    recorded) covers nothing. ``archive_id`` is the id the pack uses.
     """
 
     archive_id: str
@@ -265,10 +270,12 @@ class ClaimEvent:
     root_dev: str
     root_ino: str
     at: str
+    root_birth_ns: str = ""
 
     def to_json(self) -> dict[str, Any]:
         """Return the event as a JSON-ready mapping."""
-        return {"kind": "claim", **{key: getattr(self, key) for key in _CLAIM_KEYS}}
+        keys = (*_CLAIM_KEYS, _CLAIM_BIRTH_KEY) if self.root_birth_ns else _CLAIM_KEYS
+        return {"kind": "claim", **{key: getattr(self, key) for key in keys}}
 
 
 ArchiveEvent = KeepEvent | ExpiredEvent | AdoptEvent | ClaimEvent
@@ -296,10 +303,13 @@ def parse_event(data: object) -> ArchiveEvent:
         parse_instant(fields["at"])
         return AdoptEvent(**fields)
     if kind == "claim":
-        fields = _event_strings(data, _CLAIM_KEYS)
+        keys = (*_CLAIM_KEYS, _CLAIM_BIRTH_KEY) if _CLAIM_BIRTH_KEY in data else _CLAIM_KEYS
+        fields = _event_strings(data, keys)
         parse_instant(fields["at"])
         if not (fields["root_dev"].isdigit() and fields["root_ino"].isdigit()):
             raise ValueError("claim root_dev/root_ino are not decimal numbers")
+        if not fields.get(_CLAIM_BIRTH_KEY, "0").isdigit():
+            raise ValueError("claim root_birth_ns is not a decimal number")
         return ClaimEvent(**fields)
     raise ValueError(f"unknown event kind {kind!r}")
 

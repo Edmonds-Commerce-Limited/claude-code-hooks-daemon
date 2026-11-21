@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.core.scratch_archive import (
     EVENTS_NAME,
     ArchiveRecord,
     ArchiveStore,
+    ClaimEvent,
     ExpiredEvent,
     KeepEvent,
     new_archive_id,
@@ -116,6 +117,8 @@ def _claim(
         record_claim(
             store,
             expected,
+            parent_fd=root_fd,
+            name=name,
             archive_id=new_archive_id(),
             original_path=f"untracked/scratch/{name}",
             checkout=checkout,
@@ -806,6 +809,72 @@ class TestResume:
         assert resumed.outcome == "foreign"
         assert (claimed / "mine.txt").read_text() == "an agent's own"
 
+    def test_a_new_folder_on_the_recorded_inode_is_foreign(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        """ext4 reuses a freed inode at once: device and inode alone would match."""
+        _entry(root)
+        _claim(root_fd, "e1", store)
+        claimed = root / (CLAIM_PREFIX + "e1")
+        shutil.rmtree(claimed)
+        claimed.mkdir()
+        (claimed / "mine.txt").write_text("an agent's own")
+        info = claimed.lstat()
+        # Simulate the reuse: a claim event naming this folder's real device and
+        # inode, but the birth of the folder that was claimed and deleted.
+        store.append_event(
+            ClaimEvent(
+                archive_id=new_archive_id(),
+                original_path="untracked/scratch/e1",
+                checkout=CHECKOUT,
+                root_dev=str(info.st_dev),
+                root_ino=str(info.st_ino),
+                at=NOW.isoformat(),
+                root_birth_ns="1",
+            )
+        )
+        resumed = _resume(root_fd, store, tar)
+        assert resumed.outcome == "foreign"
+        assert (claimed / "mine.txt").read_text() == "an agent's own"
+
+    def test_a_claim_event_with_no_birth_covers_nothing(
+        self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
+    ) -> None:
+        _entry(root)
+        _claim(root_fd, "e1")
+        info = (root / (CLAIM_PREFIX + "e1")).lstat()
+        store.append_event(
+            ClaimEvent(
+                archive_id=new_archive_id(),
+                original_path="untracked/scratch/e1",
+                checkout=CHECKOUT,
+                root_dev=str(info.st_dev),
+                root_ino=str(info.st_ino),
+                at=NOW.isoformat(),
+            )
+        )
+        assert _resume(root_fd, store, tar).outcome == "foreign"
+        assert _claimed_exists(root)
+
+    def test_no_birth_time_on_the_filesystem_records_no_claim(
+        self, root: Path, root_fd: int, store: ArchiveStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _entry(root)
+        monkeypatch.setattr(remove_mod, "birth_stamp", lambda fd, name: None)
+        expected = fingerprint_at(root_fd, "e1", max_inodes=MAX)
+        with pytest.raises(ValueError, match="no birth time"):
+            record_claim(
+                store,
+                expected,
+                parent_fd=root_fd,
+                name="e1",
+                archive_id=new_archive_id(),
+                original_path="untracked/scratch/e1",
+                checkout=CHECKOUT,
+                at=NOW,
+            )
+        assert store.read_events().events == ()
+
     def test_another_checkouts_claim_record_does_not_cover_the_name(
         self, root: Path, root_fd: int, store: ArchiveStore, tar: TarTool
     ) -> None:
@@ -852,6 +921,8 @@ class TestResume:
         record_claim(
             store,
             handle.fingerprint,
+            parent_fd=root_fd,
+            name=CLAIM_PREFIX + "e1",
             archive_id=new_archive_id(),
             original_path="untracked/scratch/e1",
             checkout="other",

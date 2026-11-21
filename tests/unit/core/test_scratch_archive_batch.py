@@ -86,6 +86,8 @@ def _claim(parent_fd: int, name: str, store: ArchiveStore | None = None) -> Clai
         record_claim(
             store,
             expected,
+            parent_fd=parent_fd,
+            name=name,
             archive_id=new_archive_id(),
             original_path=f"untracked/scratch/{name}",
             checkout=CHECKOUT,
