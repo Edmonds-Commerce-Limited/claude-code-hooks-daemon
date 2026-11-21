@@ -32,7 +32,7 @@ from claude_code_hooks_daemon.core.branch_creation import (
     LABELS_RELATIVE_PATH,
     WorkGroup,
     read_labels,
-    work_pools,
+    read_pools,
     work_rank,
 )
 from claude_code_hooks_daemon.core.branch_inventory import Pool
@@ -157,17 +157,19 @@ def try_pool_pressures(repo: Path, config: BranchesConfig, labels: Labels) -> Po
     whose ``mode`` is ``off`` is not counted, as in the creation guard.
     """
     try:
-        pools = work_pools(repo, config, labels=labels)
+        reading = read_pools(repo, config, labels=labels)
         found: list[PoolPressure] = []
-        for pool, work in pools.items():
+        for pool, work in reading.groups.items():
             mode, thresholds = _pool_section_mode_and_ladder(config, pool)
             if mode == "off":
                 continue
             base = pool_base(config, pool)
-            level = ladder_level(len(work), base, thresholds)
+            # The guard's own count: a stack of dependent branches counts once.
+            count = reading.counts[pool]
+            level = ladder_level(count, base, thresholds)
             if level != LadderLevel.NONE:
                 found.append(
-                    PoolPressure(pool, len(work), base, level, tuple(work), refuses=mode == "block")
+                    PoolPressure(pool, count, base, level, tuple(work), refuses=mode == "block")
                 )
     except Exception as exc:  # advisory only: no failure of the read may become a deny
         log_and_continue(

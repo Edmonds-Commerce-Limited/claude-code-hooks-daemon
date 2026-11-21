@@ -242,8 +242,10 @@ names, people or hashes appear here.
   before the stale mark was cleared. In the lifecycle model, a keep, a park
   and a proof are all facts about a COMMIT. Every per-name cache of them
   must be keyed or invalidated by tip, never by the name typed.
-- [ ] ⬜ **Task 4.6**: (second client seat; decided by delegated ruling,
-  build rules in [DESIGN.md §7.1](DESIGN.md)) A stack of dependent
+- [ ] 🔄 **Task 4.6**: (second client seat; decided by delegated ruling,
+  build rules in [DESIGN.md §7.1](DESIGN.md); built on branch
+  `agent-ab8590f82ee261d91-c14c8267`, release note 007, awaiting the
+  coordinator's gate and merge) A stack of dependent
   pull-request branches counts once per link against the open cap, so a
   five-deep stack alone uses half of a cap of 10. Build, test-first: a stack
   counts as one stream up to `branches.wip.stack_max_depth` (default 5), each

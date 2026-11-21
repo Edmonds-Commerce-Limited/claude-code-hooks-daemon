@@ -223,7 +223,7 @@ class TestLadderAtStop:
         def boom(*_args: object, **_kwargs: object) -> object:
             raise BranchParkError("git config --get-regexp failed: timed out")
 
-        monkeypatch.setattr(branch_ladder, "work_pools", boom)
+        monkeypatch.setattr(branch_ladder, "read_pools", boom)
         _pushed_branch(repo, "work-a", message="a")
         _pushed_branch(repo, "work-b", message="b")
         decision = _decide(repo, untracked, _config(wip={"cap": 1, "mode": "block"}))
