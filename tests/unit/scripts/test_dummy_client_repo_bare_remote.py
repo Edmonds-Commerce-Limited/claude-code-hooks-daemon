@@ -113,6 +113,26 @@ class TestSeedBareRemote:
         assert _REAL_ORIGIN not in (bare / "config").read_text()
         assert _git(bare, "remote") == ""
 
+    def test_a_signing_tag_default_in_the_callers_config_does_not_stop_seeding(
+        self, source: Path, tmp_path: Path
+    ) -> None:
+        """The caller's ``tag.gpgSign`` made ``git tag`` demand a message and abort."""
+        global_config = tmp_path / "gitconfig"
+        global_config.write_text("[tag]\n\tgpgSign = true\n")
+        bare = tmp_path / "remote.git"
+        result = subprocess.run(
+            ["bash", "-c", _HARNESS + f'seed_bare_remote "{source}" "{bare}"'],
+            capture_output=True,
+            text=True,
+            env={
+                "SCRIPT": str(_FIXTURE_SCRIPT),
+                "PATH": "/usr/bin:/bin:/usr/local/bin",
+                "GIT_CONFIG_GLOBAL": str(global_config),
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert _git(bare, "tag", "--list") == f"v{_VERSION}"
+
     def test_an_existing_remote_directory_is_refused(self, source: Path, tmp_path: Path) -> None:
         bare = tmp_path / "remote.git"
         bare.mkdir()

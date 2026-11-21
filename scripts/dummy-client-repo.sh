@@ -191,7 +191,9 @@ seed_bare_remote() {
     tag="$(release_tag_of "$source")"
     git init -q --bare "$bare"
     git -C "$bare" fetch -q --no-tags "$source" "+HEAD:refs/heads/main"
-    git -C "$bare" tag "$tag" refs/heads/main
+    # update-ref, not `git tag`: a lightweight tag that the caller's tag.*
+    # config (a signing or annotation default) cannot turn into a prompt.
+    git -C "$bare" update-ref "refs/tags/$tag" refs/heads/main
     git -C "$bare" symbolic-ref HEAD refs/heads/main
     info "bare remote at $bare (main + $tag)"
 }
