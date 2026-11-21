@@ -9,21 +9,31 @@ defects this guards against live in what git and the filesystem do.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import io
+import json
 import os
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 from tests.support.scratch_tree import ScratchTree, build_git_project, commit_file, git
 
 from claude_code_hooks_daemon.core.scratch_archive import ArchiveRecord, ArchiveStore
+from claude_code_hooks_daemon.core.worktree_reaping import WorktreeState
 from claude_code_hooks_daemon.core.worktree_scratch_evacuation import EvacuationGate
-from claude_code_hooks_daemon.daemon.cli import build_parser, cmd_scratch_sweep, cmd_worktree_reap
+from claude_code_hooks_daemon.daemon.cli import (
+    _daemon_untracked_dir,
+    build_parser,
+    cmd_scratch_sweep,
+    cmd_worktree_reap,
+)
 from claude_code_hooks_daemon.daemon.worktree_evacuate import (
     EvacuateSeams,
     confirm_evacuate_interactively,
+    evacuate_scratch,
 )
 
 _DAY = 86400.0
@@ -403,3 +413,134 @@ def _store_records(tree: ScratchTree) -> dict[str, ArchiveRecord]:
 
 def _store_ids(tree: ScratchTree) -> list[str]:
     return sorted(record.archive_id for record in _store_records(tree).values())
+
+
+class TestThroughTheRealPrompt:
+    @pytest.mark.parametrize(
+        "typed",
+        [f"evacuate {_RELATIVE}x\n", "evacuate\n", "\n", ""],
+        ids=["wrong-phrase", "bare-word", "empty-line", "end-of-input"],
+    )
+    def test_anything_but_the_phrase_keeps_everything(
+        self, tree: ScratchTree, monkeypatch: pytest.MonkeyPatch, typed: str
+    ) -> None:
+        now = _due_and_young(tree)
+        before = _inodes(_worktree(tree))
+        prompt = io.StringIO()
+        out = _Stream(tty=True)
+        monkeypatch.setattr("sys.stdin", _Stream(typed, tty=True))
+        monkeypatch.setattr("sys.stdout", out)
+        monkeypatch.setattr("sys.stderr", prompt)
+
+        rc = _reap(tree, reap=True, now=now)
+
+        assert f"Type 'evacuate {_RELATIVE}'" in prompt.getvalue()
+        assert rc == 1
+        assert _inodes(_worktree(tree)) == before
+        assert not _store(tree).exists()
+        assert f"worktree-reap --reap --only {_NAME}" in out.getvalue()
+
+    def test_the_phrase_itself_reaps(
+        self, tree: ScratchTree, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = _due_and_young(tree)
+        monkeypatch.setattr("sys.stdin", _Stream(f"evacuate {_RELATIVE}\n", tty=True))
+        monkeypatch.setattr("sys.stdout", _Stream(tty=True))
+        monkeypatch.setattr("sys.stderr", io.StringIO())
+
+        assert _reap(tree, reap=True, now=now) == 0
+        assert not _worktree(tree).exists()
+
+
+def _state(tree: ScratchTree) -> WorktreeState:
+    return WorktreeState(
+        name=_NAME,
+        path=_worktree(tree),
+        branch=_NAME,
+        uncommitted_paths=(),
+        commits_ahead_of_base=0,
+        unlanded_patches=0,
+        live_process_pids=(),
+        age_seconds=999_999.0,
+    )
+
+
+def _seams(now: float, *, confirm: Confirm | None = None, **overrides: Any) -> EvacuateSeams:
+    base = EvacuateSeams(
+        confirm=confirm, wall_clock=lambda: now, process_cwds=lambda: {1: Path("/elsewhere")}
+    )
+    return dataclasses.replace(base, **overrides)
+
+
+def _keep_text(out: str) -> str:
+    return "\n".join(line for line in out.splitlines() if line.startswith("KEEP"))
+
+
+def _background_file(checkout: Path) -> Path:
+    return _daemon_untracked_dir(checkout) / "background-processes.jsonl"
+
+
+class TestBackgroundRecords:
+    @pytest.mark.parametrize("checkout", ["main", "worktree"])
+    def test_a_record_in_either_checkout_naming_an_entry_blocks(
+        self, tree: ScratchTree, checkout: str
+    ) -> None:
+        """Called directly: through the CLI the worktree's own record file sits
+        under its ``.claude/``, itself a blocker that keeps the worktree first."""
+        now = _due_and_young(tree)
+        record = _background_file(_main(tree) if checkout == "main" else _worktree(tree))
+        record.parent.mkdir(parents=True, exist_ok=True)
+        command = f"tail -f {_scratch(tree).resolve()}/old/a.txt"
+        record.write_text(json.dumps({"command": command}) + "\n", encoding="utf-8")
+
+        result = evacuate_scratch(
+            _main(tree), _state(tree), reap=True, seams=_seams(now, confirm=_never_asked)
+        )
+
+        assert not result.evacuated
+        assert (_scratch(tree) / "old" / "a.txt").read_bytes() == b"alpha"
+        assert not _store(tree).exists()
+        assert any("old: LIVE" in line for line in result.lines), result.lines
+
+
+class TestChangedWhileAsked:
+    def test_a_not_due_entry_replaced_while_asked_is_not_packed(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = _due_and_young(tree)
+        young = _scratch(tree) / "young.txt"
+        mtime = young.stat().st_mtime
+
+        def replace_then_yes(_relative: str, _gate: EvacuationGate) -> bool:
+            swap = _scratch(tree) / "young.swap"
+            _write(swap, b"replaced", mtime)
+            swap.replace(young)
+            return True
+
+        rc = _reap(tree, reap=True, now=now, confirm=replace_then_yes)
+
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert _worktree(tree).is_dir()
+        assert young.read_bytes() == b"replaced"
+        assert "untracked/scratch/young.txt" not in _store_records(tree)
+        assert "young.txt" in _keep_text(out), out
+
+    def test_an_entry_created_while_asked_is_not_packed(
+        self, tree: ScratchTree, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        now = _due_and_young(tree)
+        mtime = (_scratch(tree) / "young.txt").stat().st_mtime
+
+        def create_then_yes(_relative: str, _gate: EvacuationGate) -> bool:
+            _write(_scratch(tree) / "new.txt", b"appeared", mtime)
+            return True
+
+        rc = _reap(tree, reap=True, now=now, confirm=create_then_yes)
+
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert _worktree(tree).is_dir()
+        assert (_scratch(tree) / "new.txt").read_bytes() == b"appeared"
+        assert "untracked/scratch/new.txt" not in _store_records(tree)
+        assert "new.txt" in _keep_text(out), out
