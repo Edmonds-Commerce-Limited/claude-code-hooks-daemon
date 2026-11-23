@@ -1,6 +1,6 @@
 # Plan 00634: HUMAN-approval check with a cited questions id
 
-**Status**: 🔄 In Progress
+**Status**: In Progress
 **Created**: 2026-11-23
 **Owner**: joseph
 **Priority**: High
