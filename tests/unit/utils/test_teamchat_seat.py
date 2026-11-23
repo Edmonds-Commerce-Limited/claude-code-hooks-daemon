@@ -175,6 +175,13 @@ class TestNoAnswer:
         [
             SessionSignals(runtime="relative/run", kit=KIT),
             SessionSignals(runtime=RUNTIME, kit="kit"),
+            # Review F6: traversal, non-normal and control-character paths.
+            SessionSignals(runtime=RUNTIME, kit="/opt/../etc/kit"),
+            SessionSignals(runtime=RUNTIME, kit="/opt//kit"),
+            SessionSignals(runtime=RUNTIME, kit="/opt/./kit"),
+            SessionSignals(runtime=RUNTIME, kit="/opt/kit\nx"),
+            SessionSignals(runtime=RUNTIME, kit="/opt/kit\x00"),
+            SessionSignals(runtime="/tmp/../run", kit=KIT),
         ],
     )
     def test_relative_signal_is_unknown(self, signals: SessionSignals) -> None:
@@ -214,6 +221,17 @@ class TestNoAnswer:
             (fx.ROW_WITHOUT_TEAM, ProbeReason.SHAPE_MISMATCH),
             ('{"v": 1, "seats": []}', ProbeReason.SHAPE_MISMATCH),
             ('"a string"', ProbeReason.SHAPE_MISMATCH),
+            # Review F4: a duplicated key must never become "no team".
+            (
+                '{"v": 1, "teams": [{"team": "a", "role": "probe"}], "teams": []}',
+                ProbeReason.SHAPE_MISMATCH,
+            ),
+            ('{"v": 1, "v": 1, "teams": []}', ProbeReason.SHAPE_MISMATCH),
+            (
+                '{"v": 1, "teams": [{"team": "a", "role": "worker", "role": "coordinator"}]}',
+                ProbeReason.SHAPE_MISMATCH,
+            ),
+            ('{"v": 1.0, "teams": []}', ProbeReason.VERSION_MISMATCH),
         ],
     )
     def test_bad_document_is_unknown(self, stdout: str, reason: ProbeReason) -> None:
