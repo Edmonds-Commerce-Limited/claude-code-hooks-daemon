@@ -267,6 +267,10 @@ class Priority:
     # dangerous_permissions 15) and the merge approval gate (20), so a
     # coordinator seat's act reaches it only when nothing denied it first.
     HUMAN_APPROVAL_CHECK = 21
+    # Plan 00635: in the Safety band and well before long_running_command_guard
+    # (40), so a host seat's test run is told its lane, not to background it.
+    # Shares 21 with human_approval_check: the command sets are disjoint.
+    HOST_SEAT_LANE_GUARD = 21
 
     # Plan 00275: safety-band guard on git messages, beside git_message_backtick
     # (20) and the git-workflow opinions at 19-20. Matches a disjoint hazard

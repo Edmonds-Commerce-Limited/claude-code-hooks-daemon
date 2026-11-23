@@ -227,6 +227,10 @@ class RuleID:
     #: into main with no cited questions-room line a declared human sent.
     HUMAN_APPROVAL_MISSING: str = "R-HUMAN-APPROVAL-MISSING"
 
+    #: A test, build, lint or QA command in a session holding a teamchat seat
+    #: with duty host (or whose duty cannot be read).
+    HOST_SEAT_LANE: str = "R-HOST-SEAT-LANE"
+
     # ------------------------------------------------------------------
     # docs_qa_edit / docs_qa_commit_gate handlers (gate-level granularity)
     # ------------------------------------------------------------------
