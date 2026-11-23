@@ -8854,8 +8854,9 @@ def _rate_limit_session_start(child_pid: int) -> float:
 
 
 def _load_rate_limit_state(path: Path, now: float, child_pid: int) -> dict[str, object]:
-    """The stored state, or ``{}`` when absent, unreadable, a day past its window,
-    or opened before this child started
+    """The stored state, or ``{}`` when absent, unreadable, a day past its window
+    (unless its dialog is still on screen and it holds no other family), or
+    opened before this child started
     (a pid and start ticks repeated by a fresh pid namespace)."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -8871,12 +8872,16 @@ def _load_rate_limit_state(path: Path, now: float, child_pid: int) -> dict[str, 
         _rate_limit_session_start(child_pid) - _RATE_LIMIT_START_SLACK_SECONDS
     ):
         return {}
-    # Delta review D6: the expiry holds even while the dialog counts as on
-    # screen, since dumps that stop after the Enter leave the occurrence open
-    # for ever. A dialog still shown a day past its reset is read afresh as a
-    # new window, and the human-keys latch still keeps a taken-over one theirs.
+    # Delta review D6: a state that holds the other families (`answered`,
+    # `cleared`) expires even while the dialog counts as on screen, since
+    # dumps that stop after the Enter leave the occurrence open for ever. Any
+    # other open state (taken over, key-capped) holds while its dialog shows,
+    # so it is never answered afresh.
     anchor = _rate_limit_window_anchor(data) or opened
-    if now > anchor + _RATE_LIMIT_STATE_TTL_SECONDS:
+    holds_families = data.get("phase") in (_PHASE_ANSWERED, _PHASE_CLEARED)
+    if now > anchor + _RATE_LIMIT_STATE_TTL_SECONDS and (
+        holds_families or not data.get("occurrence_open")
+    ):
         return {}
     return data
 

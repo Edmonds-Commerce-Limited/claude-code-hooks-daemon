@@ -505,10 +505,11 @@ nothing else is typed into it.
 **The host re-checks at apply time** (`_rate_limit_host_veto`). Pending
 stdin or pending child output vetoes every rate-limit send. An Enter is also
 vetoed unless the dump the host shipped shows the pointer on the target row. A
-vetoed arrow, clear or continue is not retried, so the veto fails closed. A
-vetoed Enter takes back the `answered` phase the worker recorded, so a dialog
-still shown is answered again within the caps and one closed some other way
-leaves no pending resume.
+veto takes back the phase the worker recorded for an Enter, a clear or the
+continue, so the next tick decides afresh: a dialog still shown is answered
+again within the caps, one closed some other way leaves no pending resume, and
+a vetoed continue is sent on a later tick. A vetoed arrow only spends its
+key-cap slot.
 
 **The resume.** Once the dialog is answered, Claude Code leaves `continue`
 pre-filled in the box. After `reset + 120 s` the supervisor clears it with
@@ -553,8 +554,10 @@ restore therefore waits until after the continue.
 directory. The start ticks are field 22 of `/proc/<pid>/stat`, so a reused pid
 does not inherit another session's state. An unreadable start time turns the
 feature off for the tick. A state older than the child is ignored. One left a
-day past its window (its stored reset, else when it opened) is ignored too,
-even while its dialog still counts as open. A state file is swept once its
+day past its window (its stored reset, else when it opened) is ignored too.
+A state in `answered` or `cleared` expires then even while its dialog still
+counts as open; any other open state (taken over, key-capped) holds while its
+dialog shows. A state file is swept once its
 stored window is more than 48 h past, never on its mtime, because an answered
 state waiting for a weekly reset is not rewritten; only a file with no
 readable window falls back to its mtime.
@@ -577,8 +580,10 @@ nice -n 19 bash screen/build.sh
   reconstructed from Claude Code 2.1.330 strings, not captured live. Nothing
   has been verified against a real dialog. A near miss is logged only by its
   hash, so a real capture (Plan 00523 Task 1.1) must be taken by hand.
-- A dialog left on screen for more than a day past its reset is read as a new
-  window. Only the human-keys latch keeps one the human took over theirs.
+- An answered dialog still counted as on screen a day past its reset (dumps
+  stopped after the Enter) is read as a new window if it shows again.
+- An Enter held by the host's focus model never reaches the veto, so it keeps
+  `answered` even if the dialog then closes some other way.
 - Claude Code has its own auto-continue. Whether choosing Stop leaves it armed
   is unknown. If it does, the supervisor's `continue` could duplicate Claude
   Code's own.

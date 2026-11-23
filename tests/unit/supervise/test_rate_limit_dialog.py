@@ -1237,12 +1237,15 @@ class TestTakenOverDialogStaysTaken:
         ]
         assert all(outcome.payload is None for outcome in outcomes)
 
-    def test_key_cap_holds_past_the_reset(self, sidecar_dir: Path, machine: Any) -> None:
+    @pytest.mark.parametrize("after", [3600.0, 25 * 3600.0])
+    def test_key_cap_holds_past_the_reset(
+        self, sidecar_dir: Path, machine: Any, after: float
+    ) -> None:
         stuck = _dialog(["Upgrade your plan", _TARGET], pointer=0)
         for offset in range(8):
             _tick(sidecar_dir, machine, _dialog_facts(stuck, now=_NOW + offset))
         late = [
-            _tick(sidecar_dir, machine, _dialog_facts(stuck, now=_RESET + 3600.0 + offset))
+            _tick(sidecar_dir, machine, _dialog_facts(stuck, now=_RESET + after + offset))
             for offset in range(3)
         ]
         assert all(outcome.payload is None for outcome in late)
