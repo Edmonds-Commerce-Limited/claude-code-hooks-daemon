@@ -534,7 +534,7 @@ class TestDefaultRunner:
 
     def test_ok_and_env_overlay(self) -> None:
         outcome = default_command_runner(
-            ("sh", "-c", f'printf %s "${RUNTIME_ENV_VAR}"'), {RUNTIME_ENV_VAR: "/m"}, 5.0
+            ("/bin/sh", "-c", f'printf %s "${RUNTIME_ENV_VAR}"'), {RUNTIME_ENV_VAR: "/m"}, 5.0
         )
         assert outcome.status is CommandStatus.OK
         assert outcome.stdout == "/m"
@@ -566,12 +566,12 @@ class TestDefaultRunner:
         }
 
     def test_nonzero_exit_carries_the_code(self) -> None:
-        outcome = default_command_runner(("sh", "-c", "exit 69"), {}, 5.0)
+        outcome = default_command_runner(("/bin/sh", "-c", "exit 69"), {}, 5.0)
         assert outcome.status is CommandStatus.EXITED
         assert outcome.exit_code == 69
 
     def test_timeout(self) -> None:
-        assert default_command_runner(("sleep", "5"), {}, 0.1).status is CommandStatus.TIMEOUT
+        assert default_command_runner(("/bin/sleep", "5"), {}, 0.1).status is CommandStatus.TIMEOUT
 
     def test_timeout_kills_the_whole_process_group(self, tmp_path: Path) -> None:
         """Review F5: a grandchild must not outlive a timed-out probe."""
@@ -611,6 +611,50 @@ class TestDefaultRunner:
         context = probe_seat_context(SIGNALS, runner=runner)
         assert context.state is SeatState.UNRESOLVED
         assert context.reason is ProbeReason.OUTPUT_TOO_LARGE
+
+    def test_relative_binary_is_untrusted(self) -> None:
+        """Review F6: the real runner never resolves a bare name through PATH."""
+        outcome = default_command_runner(("sh", "-c", "echo hi"), {}, 5.0)
+        assert outcome.status is CommandStatus.UNTRUSTED
+
+    def test_binary_symlinked_out_of_its_kit_is_untrusted(self, tmp_path: Path) -> None:
+        kit_bin = tmp_path / "kit" / "bin"
+        kit_bin.mkdir(parents=True)
+        (kit_bin / "teamchat").symlink_to("/bin/sh")
+        outcome = default_command_runner((str(kit_bin / "teamchat"), "-c", "echo hi"), {}, 5.0)
+        assert outcome.status is CommandStatus.UNTRUSTED
+
+    def test_binary_symlinked_inside_its_kit_runs(self, tmp_path: Path) -> None:
+        kit = tmp_path / "kit"
+        (kit / "bin").mkdir(parents=True)
+        (kit / "libexec").mkdir()
+        real = kit / "libexec" / "teamchat"
+        real.write_text("#!/bin/sh\necho inside\n")
+        real.chmod(0o700)
+        (kit / "bin" / "teamchat").symlink_to(real)
+        outcome = default_command_runner((str(kit / "bin" / "teamchat"),), {}, 5.0)
+        assert outcome.status is CommandStatus.OK
+        assert outcome.stdout == "inside\n"
+
+    @pytest.mark.parametrize("writable", ["binary", "bin", "kit"])
+    def test_world_writable_kit_is_untrusted(self, tmp_path: Path, writable: str) -> None:
+        kit = tmp_path / "kit"
+        (kit / "bin").mkdir(parents=True)
+        binary = kit / "bin" / "teamchat"
+        binary.write_text("#!/bin/sh\necho ran\n")
+        binary.chmod(0o700)
+        kit.chmod(0o755)
+        (kit / "bin").chmod(0o755)
+        target = {"binary": binary, "bin": kit / "bin", "kit": kit}[writable]
+        target.chmod(target.stat().st_mode | 0o002)
+        outcome = default_command_runner((str(binary),), {}, 5.0)
+        assert outcome.status is CommandStatus.UNTRUSTED
+
+    def test_untrusted_outcome_is_unknown(self) -> None:
+        runner = FakeRunner(CommandOutcome(CommandStatus.UNTRUSTED))
+        context = probe_seat_context(SIGNALS, runner=runner)
+        assert context.state is SeatState.UNRESOLVED
+        assert context.reason is ProbeReason.KIT_UNTRUSTED
 
     def test_permission_denied_is_not_found(self, tmp_path: Path) -> None:
         binary = tmp_path / "teamchat"
