@@ -1,6 +1,6 @@
 # Plan 00634: HUMAN-approval check with a cited questions id
 
-**Status**: Not Started
+**Status**: 🔄 In Progress
 **Created**: 2026-11-23
 **Owner**: joseph
 **Priority**: High
@@ -43,18 +43,41 @@ class it did not authorise.
 
 ### Phase 1: RED
 
-- [ ] ⬜ **Task 1.1**: Fixtures shaped on the issue 369 answer: valid human id
-  in the questions room passes; peer sender, main-room line, unknown id,
-  binary missing, timeout, each documented non-zero exit all deny; another
+- [x] ✅ **Task 1.1**: Fixtures shaped on the issue 369 answer (provisional):
+  valid human id in the questions room passes; peer sender, main-room line,
+  unknown id, binary missing, timeout, each non-zero exit all deny; another
   team's id denies; a seat not coordinator in T denies; a verified GO covers
   only its authorised classes and only inside its window; absent team
-  unchanged. Settle Q4 (cite passing) and Q5 (workers).
+  unchanged.
+- [ ] 🔄 **Task 1.2**: Q4 (cite passing) and Q5 (who is armed): proposed
+  defaults implemented behind switches, **owner ruling pending** (see Open
+  design points).
 
 ### Phase 2: Verifier and guard
 
-- [ ] ⬜ **Task 2.1**: Verifier module. Targeted QA green.
-- [ ] ⬜ **Task 2.2**: Guard, advisory then block as the owner rules. Live
-  verification once issue 369 lands. Targeted QA green.
+- [x] ✅ **Task 2.1**: Verifier module `utils/human_approval.py`. Targeted QA
+  green.
+- [ ] ⬜ **Task 2.2**: Guard `human_approval_check`, mode off | advise | block
+  (advise by default). Targeted QA green.
+- [ ] ⬜ **Task 2.3**: Live verification once issue 369 lands; then swap the
+  default verifier for `TeamchatVerifyCli` and confirm its argv and answer
+  shape against the real contract.
+
+## Open design points (owner ruling pending)
+
+- **Q4, proposed**: the cite is a trailing shell comment
+  `# human-approval team=<T> id=<$id>` on the Bash command.
+- **Q5, proposed**: `coordinator_seats_only` (default on) arms coordinator
+  seats and unreadable roles on the main thread; off arms every main-thread
+  seat.
+- **Gap, sub-agents**: under the Q5 default a coordinator's sub-agent is not
+  armed, so a sub-agent's push, delete or merge is unguarded. Arming it would
+  deny every such act, because no sub-agent can pass.
+- **Gap, replay**: one verified human line authorises any act of the cited
+  classes until its in-memory approval record lapses (TTL 300s). Nothing
+  binds the line's text to the specific act.
+- **Unverified here**: the `verify --json` flag, the answer shape, and the
+  event id grammar (no `:` accepted; fails closed if real ids carry one).
 
 ## Dependencies
 
