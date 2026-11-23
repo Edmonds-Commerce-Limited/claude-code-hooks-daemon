@@ -97,7 +97,15 @@ session-level switches) and is absent-safe. v2 `teamchat` only.
   unreadable notify flag counts as non-notifying; worker and unknown role
   untouched; unreadable bus fails open with a loud log. Deterministic: ids,
   timestamps, notify flag; no LLM judgement. Acceptance tests are the
-  20.1 list.
+  20.1 list. Also (peer note from the coordinator): an owner-started thread
+  (top-level HUMAN message in the questions room) is OPEN until a notifying
+  reply from this seat lands in THAT thread (`thread --re <id>`); a notifying
+  reply in another thread, a non-notifying reply, or an unreadable flag does
+  not close it (tests in 20.1). "In that thread" means the m.thread relation,
+  not m.in_reply_to (coordinator's account: v1 `thread --re` is only a quoted
+  reply; unverified here whether v1 history exposes m.thread; fail closed). Conduct advisory for a human-message reply
+  posted outside its thread: only if the bus data exposes thread id and author
+  kind (open, confirm with fedora-desktop.1 in Task 1.2).
 - [ ] ⬜ **Task 2.2**: s3 directives register.
 - [ ] ⬜ **Task 2.3**: s5 ci-state reading.
 - [ ] ⬜ **Task 2.4**: s8 wind-down mode.

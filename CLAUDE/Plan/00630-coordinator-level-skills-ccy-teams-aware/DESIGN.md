@@ -641,6 +641,39 @@ Additional test-first criteria (each red first):
 - N is read from config; an invalid N falls back to the default and logs.
 - Unreadable bus: stop passes, loud log line.
 
+Owner-started threads (peer note relayed from the coordinator, who answered
+three such messages in other threads and the owner saw no response): a
+top-level HUMAN message in the questions room (no question id) starts its own
+thread and is an OPEN question for this check until a NOTIFYING reply from
+this seat lands in THAT thread (`thread --re <that message id>`). Additional
+red tests:
+
+- An open owner-started thread with no reply from this seat is denied, with
+  the bump command naming its message id.
+- A notifying reply in a DIFFERENT thread does not close it.
+- A non-notifying reply in the right thread does not close it.
+- A reply whose notify flag is unreadable counts as non-notifying.
+- A notifying reply in that thread from this seat closes it.
+
+"In that thread" is read from the m.thread relation to the owner's message,
+NOT from m.in_reply_to (coordinator's account, unverified here: pingbus v1
+`thread --re` posts only a quoted reply in the room, not into the owner's
+thread, and a fix is requested from fedora-desktop.1). Unverified here:
+whether pingbus v1 `history` exposes m.thread at all; fail closed meanwhile.
+Further red tests:
+
+- A reply carrying only m.in_reply_to to the owner's message does not close
+  the thread.
+- A reply with an m.thread relation to the owner's message (and notifying)
+  closes it.
+- An unreadable relation counts as not in the thread (does not close it).
+
+Conduct advisory (00636): a reply to a human message posted outside that
+message's thread. OPEN: it is deterministic only if `history` entries expose
+the thread/parent id and the author kind; not shown for v1 or v2 here, so
+confirm with fedora-desktop.1 (with Task 1.2's notify-flag question) and ship
+the advisory only if both are readable; otherwise record it as guidance only.
+
 ## 21. Coordinator no-value remote branch retire (Q17, settled)
 
 Owner ruling (lts-infra Q66 (a), bus id
