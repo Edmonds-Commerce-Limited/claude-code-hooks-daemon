@@ -8871,20 +8871,43 @@ def _load_rate_limit_state(path: Path, now: float, child_pid: int) -> dict[str, 
         _rate_limit_session_start(child_pid) - _RATE_LIMIT_START_SLACK_SECONDS
     ):
         return {}
-    anchor = data.get("window_reset")
-    if not isinstance(anchor, (int, float)):
-        anchor = opened
+    anchor = _rate_limit_window_anchor(data) or opened
     if now > anchor + _RATE_LIMIT_STATE_TTL_SECONDS and not data.get("occurrence_open"):
         return {}
     return data
 
 
+def _rate_limit_window_anchor(data: dict[str, object]) -> float | None:
+    """When a stored window ends: its reset time, else when it opened, else None."""
+    for key in ("window_reset", "window_opened"):
+        value = data.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return None
+
+
 def _sweep_rate_limit_states(status_dir: Path, now: float) -> None:
-    """Delete state files of any child untouched for longer than the state TTL."""
+    """Delete state files whose window ended more than twice the state TTL ago.
+
+    Delta review D1: judged on the STORED window, not the mtime. An answered
+    state is not rewritten while it waits for its reset, which may be 8 days
+    ahead, so an old mtime does not mean an expired state; a window still
+    pending is never swept. Only a file with no readable window falls back
+    to its mtime.
+    """
     for stale in status_dir.glob(f"{_RATE_LIMIT_STATE_PREFIX}.*.json"):
         try:
-            if now - stale.stat().st_mtime > 2 * _RATE_LIMIT_STATE_TTL_SECONDS:
+            try:
+                data = json.loads(stale.read_text(encoding="utf-8"))
+            except ValueError:
+                data = None
+            anchor = _rate_limit_window_anchor(data) if isinstance(data, dict) else None
+            if anchor is None:
+                anchor = stale.stat().st_mtime
+            if now - anchor > 2 * _RATE_LIMIT_STATE_TTL_SECONDS:
                 stale.unlink()
+        except FileNotFoundError:
+            continue
         except OSError as exc:
             append_worker_error(f"could not sweep {stale.name}: {exc}")
 

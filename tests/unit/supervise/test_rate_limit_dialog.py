@@ -1129,6 +1129,36 @@ class TestStateScopedToTheChild:
         assert not stale.exists()
         assert fresh.exists()
 
+    def test_a_second_session_opening_a_dialog_days_later_keeps_a_pending_weekly_state(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        # Delta review D1: session A answered a weekly limit three days ago and
+        # its state, waiting six more days for the reset, is never rewritten.
+        # Session B (child 7) now opens a new window, which runs the sweep.
+        import os
+
+        answered_at = _NOW - 3 * 86400.0
+        state = _mod._new_rate_limit_window(_NOW + 3 * 86400.0, answered_at)
+        state.update(phase="answered", answered_at=answered_at)
+        path = _state_path(sidecar_dir)
+        _mod._save_rate_limit_state(path, state)
+        os.utime(path, (answered_at, answered_at))
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, child_pid=7))
+        assert _state_path(sidecar_dir, 7).exists()
+        assert path.exists()
+        facts = _resume_facts("continue", now=_NOW)
+        assert _mod._rate_limit_prefill_blocks(facts, sidecar_dir.parent)
+
+    def test_a_state_whose_window_ended_long_ago_is_swept_whatever_its_mtime(
+        self, sidecar_dir: Path, machine: Any
+    ) -> None:
+        state = _mod._new_rate_limit_window(_NOW - 3 * 86400.0, _NOW - 4 * 86400.0)
+        state.update(phase="done")
+        path = _state_path(sidecar_dir)
+        _mod._save_rate_limit_state(path, state)
+        _tick(sidecar_dir, machine, _dialog_facts(_ON_TARGET, child_pid=7))
+        assert not path.exists()
+
 
 class TestReadChildStart:
     def _proc(self, tmp_path: Path, stat_line: str, btime: int = 1_700_000_000) -> Path:
